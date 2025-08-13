@@ -8,13 +8,13 @@ This project provides headless Python control of DiSPIM microscopes using pymmco
 
 ## Features
 
-- ** Headless DiSPIM Control**: Direct hardware control using pymmcore-plus without GUI dependencies
-- ** Advanced Calibration**: Two-point light sheet alignment with multiple autofocus algorithms
-- ** Device Abstraction**: Ophyd integration for standardized device interfaces
-- ** Experiment Orchestration**: Bluesky plans for multi-dimensional acquisition protocols
-- ** VLM Integration**: Real-time image analysis with HuggingFace and OpenAI models
-- ** Adaptive Control**: Intelligent experiment modification based on VLM feedback
-- ** Safety Systems**: Position limits, error recovery, and timeout handling
+- **Headless DiSPIM Control**: Direct hardware control using pymmcore-plus without GUI dependencies
+- **Advanced Calibration**: Two-point light sheet alignment with multiple autofocus algorithms
+- **Device Abstraction**: Ophyd integration for standardized device interfaces
+- **Experiment Orchestration**: Bluesky plans for multi-dimensional acquisition protocols
+- **VLM Integration**: Real-time image analysis with HuggingFace and OpenAI models
+- **Adaptive Control**: Intelligent experiment modification based on VLM feedback
+- **Safety Systems**: Position limits, error recovery, and timeout handling
 
 ## Architecture
 
