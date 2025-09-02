@@ -10,56 +10,64 @@ This script tests basic DiSPIM functionality:
 """
 
 import pymmcore
-import yaml
 import numpy as np
 import os
+import os.path
+import matplotlib.pyplot as plt
 
-# Read configuration from config.yml
-with open('config.yml', 'r') as f:
-    config = yaml.safe_load(f)
+mm_dir = "C:/Program Files/Micro-Manager-1.4"
+config_path = "C:\\Users\\dispim\\Documents\\GitHub\\gently\\MMConfig_tracking_screening.cfg"
 
-# Initialize Micro-Manager core
+
 mmc = pymmcore.CMMCore()
+mmc.enableStderrLog(True)
 
-# Load configuration file
-config_path = config['mmconfig']
-if os.path.exists(config_path):
-    print(f"Loading Micro-Manager configuration: {config_path}")
-    mmc.loadSystemConfiguration(config_path)
-    print("Configuration loaded successfully")
-else:
-    print(f"Configuration file not found: {config_path}")
+os.environ["PATH"] += os.pathsep.join(["", mm_dir]) # adviseable on Windows
+mmc.setDeviceAdapterSearchPaths([mm_dir])
+mmc.loadSystemConfiguration(config_path)
 
-# Apply startup configuration
-try:
-    mmc.setConfig('System', 'Startup')
-    print("Startup configuration applied")
-except Exception as e:
-    print(f"Could not apply startup configuration: {e}")
+mmc.setCameraDevice("Bottom PCO")
+mmc.snapImage()
+img = mmc.getImage()
 
-# Read piezo positions
-try:
-    piezo_p_position = mmc.getPosition('PiezoStage:P:34')
-    piezo_q_position = mmc.getPosition('PiezoStage:Q:35')
-    print(f"Piezo P position: {piezo_p_position}")
-    print(f"Piezo Q position: {piezo_q_position}")
-except Exception as e:
-    print(f"Could not read piezo positions: {e}")
+plt.imshow(img)
+plt.show()
 
-# Snap an image and print numpy array info
-try:
-    mmc.snapImage()
-    img = mmc.getImage()
-    print(f"Image captured - Shape: {img.shape}, Type: {img.dtype}")
-    print(f"Image stats - Min: {np.min(img)}, Max: {np.max(img)}, Mean: {np.mean(img):.2f}")
-except Exception as e:
-    print(f"Could not capture image: {e}")
+def startup():
+    # Apply startup configuration
+    try:
+        mmc.setConfig('System', 'Startup')
+        print("Startup configuration applied")
+    except Exception as e:
+        print(f"Could not apply startup configuration: {e}")
 
-# Apply shutdown configuration
-try:
-    mmc.setConfig('System', 'Shutdown')
-    print("Shutdown configuration applied")
-except Exception as e:
-    print(f"Could not apply shutdown configuration: {e}")
+
+def read_piezo():
+    # Read piezo positions
+    try:
+        piezo_p_position = mmc.getPosition('PiezoStage:P:34')
+        piezo_q_position = mmc.getPosition('PiezoStage:Q:35')
+        print(f"Piezo P position: {piezo_p_position}")
+        print(f"Piezo Q position: {piezo_q_position}")
+    except Exception as e:
+        print(f"Could not read piezo positions: {e}")
+
+def image_stuff():
+    # Snap an image and print numpy array info
+    try:
+        mmc.snapImage()
+        img = mmc.getImage()
+        print(f"Image captured - Shape: {img.shape}, Type: {img.dtype}")
+        print(f"Image stats - Min: {np.min(img)}, Max: {np.max(img)}, Mean: {np.mean(img):.2f}")
+    except Exception as e:
+        print(f"Could not capture image: {e}")
+
+def shutdown():
+    # Apply shutdown configuration
+    try:
+        mmc.setConfig('System', 'Shutdown')
+        print("Shutdown configuration applied")
+    except Exception as e:
+        print(f"Could not apply shutdown configuration: {e}")
 
 print("Test complete")
