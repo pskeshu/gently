@@ -15,7 +15,7 @@ A simple test script for controlling a DiSPIM microscope using Micro-Manager and
 
 ### 2. Install Python
 
-1. Download and install Python 3.8 or newer from [python.org](https://www.python.org/downloads/)
+1. Download and install Python 3.11 [python.org](https://www.python.org/ftp/python/3.13.7/python-3.13.7-amd64.exe)
 2. Ensure Python is added to your system PATH during installation
 
 ### 3. Set Up Virtual Environment and Install Libraries
@@ -31,14 +31,8 @@ venv\Scripts\activate
 source venv/bin/activate
 
 # Install required libraries
-pip install pymmcore pyyaml numpy
+pip install pymmcore==10.1.1.70.6 numpy==1.24.4
 ```
-
-### 4. Configure Micro-Manager
-
-1. Edit `config.yml` to point to your Micro-Manager installation directory
-2. Ensure the `MMConfig_tracking_screening.cfg` file is present in the project directory
-3. Update device names and settings in the configuration file as needed for your setup
 
 ## Usage
 
@@ -57,14 +51,12 @@ The script will:
 
 ## Requirements
 
-- Python 3.8+
+- Python 3.11
 - Micro-Manager installation
 - Required Python packages (installed via pip above):
-  - pymmcore
-  - pyyaml  
-  - numpy
+  - pymmcore==10.1.1.70.6
+  - numpy==1.24.4
 
 ## Configuration Files
 
-- `config.yml` - Main configuration pointing to Micro-Manager files
 - `MMConfig_tracking_screening.cfg` - Micro-Manager device configuration
