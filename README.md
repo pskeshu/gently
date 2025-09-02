@@ -9,7 +9,7 @@ A simple test script for controlling a DiSPIM microscope using Micro-Manager and
 1. Install [GitHub Desktop](https://desktop.github.com/)
 2. Clone this repository using GitHub Desktop or git command line:
    ```bash
-   git clone <repository-url>
+   git clone https://github.com/pskeshu/gently.git
    cd gently
    ```
 
