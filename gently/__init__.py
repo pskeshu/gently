@@ -89,6 +89,23 @@ from .coordinates import (
     ReferenceMap
 )
 
+# Visualization utilities - optional napari integration
+try:
+    from .visualization import (
+        setup_napari_callback,
+        create_napari_viewer,
+        enable_focus_sweep_visualization,
+        enable_embryo_detection_visualization,
+        enable_full_visualization,
+        NapariCallback,
+        NAPARI_AVAILABLE
+    )
+    _VISUALIZATION_AVAILABLE = True
+except ImportError:
+    # Napari not available - visualization features disabled
+    _VISUALIZATION_AVAILABLE = False
+    NAPARI_AVAILABLE = False
+
 __version__ = "0.2.0"
 __all__ = [
     # Device classes
@@ -146,3 +163,16 @@ __all__ = [
     "CalibrationPoint",
     "ReferenceMap"
 ]
+
+# Add visualization functions if available
+if _VISUALIZATION_AVAILABLE:
+    __all__.extend([
+        # Visualization functions
+        "setup_napari_callback",
+        "create_napari_viewer",
+        "enable_focus_sweep_visualization",
+        "enable_embryo_detection_visualization", 
+        "enable_full_visualization",
+        "NapariCallback",
+        "NAPARI_AVAILABLE"
+    ])
