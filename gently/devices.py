@@ -120,8 +120,9 @@ class DiSPIMGalvo(Device):
         return self._limits
         
     def move(self, position, **kwargs):
-        """Move galvo to position - called by bps.mv()"""
-	self.log.info(f"Moving {self.device_name} to {pos_array}")
+        """Move galvo to position [x, y] - called by bps.mv(galvo, [x, y])"""
+        x, y = position  # Unpack [x, y] coordinates
+        self.log.info(f"Moving galvo {self.device_name} to ({x}, {y})")
         
         # Direct MM core implementation using galvo APIs
         status = DeviceStatus(obj=self, timeout=10)
