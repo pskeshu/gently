@@ -113,12 +113,6 @@ class DiSPIMGalvo(Device):
         self._limits = limits
         self.tolerance = 0.01  # degrees
         
-        # Set this as the active galvo device in MM
-        try:
-            self.core.setGalvoDevice(self.device_name)
-        except Exception as e:
-            self.log.warning(f"Could not set galvo device {self.device_name}: {e}")
-        
         super().__init__(**kwargs)
     
     @property
@@ -140,7 +134,7 @@ class DiSPIMGalvo(Device):
 
         def wait():
             try:
-                self.core.setGalvoPosition(position)
+                self.core.setGalvoPosition(self.device_name, position)
                 self.core.waitForDevice(self.device_name)
             except Exception as exc:
                 status.set_exception(exc)
@@ -155,8 +149,8 @@ class DiSPIMGalvo(Device):
     def read(self):
         """Read current galvo position - required for Bluesky"""
         try:
-            # Use proper MM galvo API
-            value = self.core.getGalvoPosition()
+            # Use proper MM galvo API with device name
+            value = self.core.getGalvoPosition(self.device_name)
         except Exception as e:
             self.log.warning(f"Failed to read galvo position from {self.device_name}: {e}")
             value = 0.0
