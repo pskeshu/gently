@@ -311,24 +311,14 @@ class DiSPIMCamera(Device):
     def read(self):
         """Read acquired image data - called by bps.read()"""
         if self._last_image is not None:
-            return {
-                f'{self.name}_image': {
-                    'value': self._last_image,
-                    'timestamp': self._last_image_time or time.time()
-                },
-                f'{self.name}_stats': {
-                    'value': {
-                        'shape': self._last_image.shape,
-                        'dtype': str(self._last_image.dtype),
-                        'mean': float(np.mean(self._last_image)),
-                        'max': int(np.max(self._last_image)),
-                        'min': int(np.min(self._last_image))
-                    },
-                    'timestamp': self._last_image_time or time.time()
-                }
+            data = OrderedDict()
+            data[self.device_name] = {
+                'value': self._last_image,
+                'timestamp': self._last_image_time or time.time()
             }
+            return data
         else:
-            return {}
+            return OrderedDict()
     
     def describe(self):
         """Describe detector data format"""
