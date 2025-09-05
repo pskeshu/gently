@@ -14,75 +14,16 @@ for use with device-agnostic plans like:
 
 import time
 import logging
-from typing import Dict, Optional, List, Any, Union, Tuple
+from collections import OrderedDict
+from typing import Dict, Tuple
 import numpy as np
 
 
-from ophyd import Device, Component as Cpt, Signal, DeviceStatus
-from ophyd import EpicsMotor, DetectorBase
-from ophyd.signal import SignalRO, EpicsSignal
-from ophyd.status import SubscriptionStatus, AndStatus
+from ophyd import Device, DeviceStatus
+from ophyd.status import AndStatus
 
 import pymmcore
 
-
-class MMCoreSignal(Signal):
-    """Signal that interfaces directly with pymmcore for DiSPIM devices"""
-    
-    def __init__(self, device_name: str, property_name: str = "Position", 
-                 core: pymmcore.CMMCore = None, **kwargs):
-        super().__init__(**kwargs)
-        self.device_name = device_name
-        self.property_name = property_name
-        self.core = core
-        self._last_value = 0.0
-    
-    def get(self):
-        """Get current value from MM core"""
-        if not self.core:
-            return self._last_value
-            
-        try:
-            if self.property_name == "Position":
-                value = float(self.core.getPosition(self.device_name))
-            else:
-                value = self.core.getProperty(self.device_name, self.property_name)
-                # Try to convert to float if possible
-                try:
-                    value = float(value)
-                except (ValueError, TypeError):
-                    pass
-            
-            self._last_value = value
-            return value
-        except Exception as e:
-            self.log.warning(f"Failed to read {self.device_name}.{self.property_name}: {e}")
-            return self._last_value
-    
-    def put(self, value, **kwargs):
-        """Set value in MM core"""
-        if not self.core:
-            status = DeviceStatus(self)
-            status.set_finished()
-            return status
-            
-        try:
-            if self.property_name == "Position":
-                self.core.setPosition(self.device_name, float(value))
-                self.core.waitForDevice(self.device_name)
-            else:
-                self.core.setProperty(self.device_name, self.property_name, str(value))
-            
-            self._last_value = value
-            status = DeviceStatus(self)
-            status.set_finished()
-            return status
-            
-        except Exception as e:
-            self.log.error(f"Failed to set {self.device_name}.{self.property_name}: {e}")
-            status = DeviceStatus(self)
-            status.set_exception(e)
-            return status
 
 
 class DiSPIMPiezo(Device):
@@ -96,12 +37,8 @@ class DiSPIMPiezo(Device):
                  limits: Tuple[float, float] = (-50.0, 150.0), **kwargs):
         self.device_name = device_name
         self.core = core
-        self._limits = limits  # Use private attribute to avoid conflict with Ophyd
+        self._limits = limits
         self.tolerance = 0.1  # µm
-        
-        # Create signals directly as attributes
-        self.position = MMCoreSignal(device_name, "Position", core, name='position')
-        self.user_readback = MMCoreSignal(device_name, "Position", core, name='user_readback')
         
         super().__init__(**kwargs)
     
@@ -119,37 +56,50 @@ class DiSPIMPiezo(Device):
         
         self.log.info(f"Moving {self.device_name} to {position} µm")
         
-        # Start move
-        status = self.position.put(position, **kwargs)
-        
-        def check_done():
-            current = self.user_readback.get()
-            return abs(current - position) < self.tolerance
-        
-        # Create subscription status that waits for move completion
-        move_status = SubscriptionStatus(self.user_readback, check_done, timeout=10.0)
-        
-        return move_status
+        # Direct MM core implementation like deepthought
+        status = DeviceStatus(obj=self, timeout=10)
+
+        def wait():
+            try:
+                self.core.setPosition(self.device_name, position)
+                self.core.waitForDevice(self.device_name)
+            except Exception as exc:
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+        threading.Thread(target=wait).start()
+
+        return status
     
     def read(self):
         """Read current piezo position - required for Bluesky"""
+        if not self.core:
+            value = 0.0
+        else:
+            try:
+                value = self.core.getPosition(self.device_name)
+            except Exception as e:
+                self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+                value = 0.0
+                
         return {
             f'{self.name}_user_readback': {
-                'value': self.user_readback.get(),
+                'value': float(value),
                 'timestamp': time.time()
             }
         }
     
     def describe(self):
         """Describe piezo device - required for Bluesky"""
-        return {
-            f'{self.name}_user_readback': {
-                'source': f'DiSPIM Piezo {self.device_name}',
-                'dtype': 'number',
-                'shape': [],
-                'units': 'um'
-            }
+        data = OrderedDict()
+        data[self.device_name] = {
+            'source': self.device_name,
+            'dtype': 'number',
+            'shape': []
         }
+        return data
 
 
 class DiSPIMGalvo(Device):
@@ -163,12 +113,8 @@ class DiSPIMGalvo(Device):
                  limits: Tuple[float, float] = (-5.0, 5.0), **kwargs):
         self.device_name = device_name
         self.core = core
-        self._limits = limits  # Use private attribute to avoid conflict with Ophyd
+        self._limits = limits
         self.tolerance = 0.01  # degrees
-        
-        # Create signals directly as attributes
-        self.position = MMCoreSignal(device_name, "Position", core, name='position')
-        self.user_readback = MMCoreSignal(device_name, "Position", core, name='user_readback')
         
         super().__init__(**kwargs)
     
@@ -186,43 +132,58 @@ class DiSPIMGalvo(Device):
         
         self.log.info(f"Moving {self.device_name} to {position}°")
         
-        # Start move
-        status = self.position.put(position, **kwargs)
-        
-        def check_done():
-            current = self.user_readback.get()
-            return abs(current - position) < self.tolerance
-        
-        move_status = SubscriptionStatus(self.user_readback, check_done, timeout=5.0)
-        
-        return move_status
+        # Direct MM core implementation like deepthought
+        status = DeviceStatus(obj=self, timeout=10)
+
+        def wait():
+            try:
+                self.core.setPosition(self.device_name, position)
+                self.core.waitForDevice(self.device_name)
+            except Exception as exc:
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+        threading.Thread(target=wait).start()
+
+        return status
     
     def read(self):
         """Read current galvo position - required for Bluesky"""
+        if not self.core:
+            value = 0.0
+        else:
+            try:
+                value = self.core.getPosition(self.device_name)
+            except Exception as e:
+                self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+                value = 0.0
+                
         return {
             f'{self.name}_user_readback': {
-                'value': self.user_readback.get(),
+                'value': float(value),
                 'timestamp': time.time()
             }
         }
     
     def describe(self):
         """Describe galvo device - required for Bluesky"""
-        return {
-            f'{self.name}_user_readback': {
-                'source': f'DiSPIM Galvo {self.device_name}',
-                'dtype': 'number',
-                'shape': [],
-                'units': 'deg'
-            }
+        data = OrderedDict()
+        data[self.device_name] = {
+            'source': self.device_name,
+            'dtype': 'number',
+            'shape': []
         }
+        return data
 
 
 class DiSPIMXYStage(Device):
     """
-    DiSPIM XY stage - works with bps.mv(xy_stage.x, x, xy_stage.y, y)
+    DiSPIM XY stage - works with bps.mv(xy_stage, [x, y])
     
     Device-agnostic: any plan that moves XY positions will work with this device
+    Based on deepthought XYStage implementation
     """
     
     def __init__(self, xy_device_name: str, core: pymmcore.CMMCore, **kwargs):
@@ -230,28 +191,70 @@ class DiSPIMXYStage(Device):
         self.core = core
         
         super().__init__(**kwargs)
-        
-        # Create X and Y components
-        self.x = DiSPIMPiezo(xy_device_name + "-X", core, name='x')
-        self.y = DiSPIMPiezo(xy_device_name + "-Y", core, name='y')
     
-    def move_xy(self, x: float, y: float):
-        """Convenience method for moving both axes"""
-        return AndStatus(self.x.move(x), self.y.move(y))
+    def move(self, position):
+        """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
+        if not self.core:
+            status = DeviceStatus(self)
+            status.set_finished()
+            return status
+            
+        try:
+            x, y = position  # Unpack [x, y] coordinates
+            self.log.info(f"Moving XY stage to ({x}, {y})")
+            
+            # Set XY position using MM core
+            self.core.setXYPosition(x, y)
+            self.core.waitForDevice(self.xy_device_name)
+            
+            status = DeviceStatus(self)
+            status.set_finished()
+            return status
+            
+        except Exception as e:
+            self.log.error(f"Failed to move XY stage: {e}")
+            status = DeviceStatus(self)
+            status.set_exception(e)
+            return status
     
     def read(self):
         """Read current XY stage positions - required for Bluesky"""
-        result = {}
-        result.update(self.x.read())
-        result.update(self.y.read())
-        return result
+        if not self.core:
+            return {
+                f'{self.name}_xy': {
+                    'value': np.array([0.0, 0.0]), 
+                    'timestamp': time.time()
+                }
+            }
+        
+        try:
+            xy_pos = np.array(self.core.getXYPosition())
+            timestamp = time.time()
+            
+            return {
+                f'{self.name}_xy': {
+                    'value': xy_pos, 
+                    'timestamp': timestamp
+                }
+            }
+        except Exception as e:
+            self.log.warning(f"Failed to read XY positions: {e}")
+            return {
+                f'{self.name}_xy': {
+                    'value': np.array([0.0, 0.0]), 
+                    'timestamp': time.time()
+                }
+            }
     
     def describe(self):
         """Describe XY stage device - required for Bluesky"""
-        result = {}
-        result.update(self.x.describe())
-        result.update(self.y.describe())
-        return result
+        data = OrderedDict()
+        data[self.xy_device_name] = {
+            'source': self.xy_device_name,
+            'dtype': 'array',
+            'shape': [2]
+        }
+        return data
 
 
 class DiSPIMCamera(Device):
@@ -329,19 +332,13 @@ class DiSPIMCamera(Device):
     
     def describe(self):
         """Describe detector data format"""
-        return {
-            f'{self.name}_image': {
-                'source': f'DiSPIM Camera {self.device_name}',
-                'dtype': 'array',
-                'shape': getattr(self._last_image, 'shape', []),
-                'external': 'FILESTORE:TIFF'
-            },
-            f'{self.name}_stats': {
-                'source': f'DiSPIM Camera {self.device_name} Statistics',
-                'dtype': 'object',
-                'shape': []
-            }
+        data = OrderedDict()
+        data[self.device_name] = {
+            'source': self.device_name,
+            'dtype': 'array',
+            'shape': getattr(self._last_image, 'shape', [])
         }
+        return data
     
     @property
     def exposure_time(self):
@@ -372,9 +369,6 @@ class DiSPIMLaserControl(Device):
         self.group_name = "Laser"
         
         super().__init__(**kwargs)
-        
-        # Configure config signal
-        self.config = MMCoreSignal("Laser", "Config", core, name='config')
         
         # Cache available configs
         self._available_configs = self._get_available_configs()
@@ -419,14 +413,13 @@ class DiSPIMLaserControl(Device):
     
     def describe(self):
         """Describe laser control device - required for Bluesky"""
-        return {
-            f'{self.name}_config': {
-                'source': f'DiSPIM Laser Control {self.group_name}',
-                'dtype': 'string',
-                'shape': [],
-                'choices': self._available_configs
-            }
+        data = OrderedDict()
+        data[self.group_name] = {
+            'source': self.group_name,
+            'dtype': 'string',
+            'shape': []
         }
+        return data
 
 
 class DiSPIMLightSheet(Device):
