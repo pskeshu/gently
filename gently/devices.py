@@ -1,583 +1,647 @@
 """
-DiSPIM Device Control Module
+Gently DiSPIM Devices
+====================
 
-Ophyd-style device classes for DiSPIM microscope control based on ASI DiSPIM plugin architecture.
-Provides signal-based interfaces with timestamps and metadata.
+Ophyd device classes for DiSPIM microscope control with proper Bluesky integration.
+Creates device-agnostic interfaces that work with standard Bluesky plan stubs.
+
+Based on ASI DiSPIM plugin architecture but structured as proper Ophyd devices
+for use with device-agnostic plans like:
+    - bps.mv(piezo, position)
+    - bps.trigger_and_read([camera])
+    - focus_sweep(positioner, positions, detector)
 """
 
-import os
 import time
 import logging
-from typing import Dict, Optional, List, Any, Union
-from abc import ABC, abstractmethod
+from typing import Dict, Optional, List, Any, Union, Tuple
 import numpy as np
+
+
+from ophyd import Device, Component as Cpt, Signal, DeviceStatus
+from ophyd import EpicsMotor, DetectorBase
+from ophyd.signal import SignalRO, EpicsSignal
+from ophyd.status import SubscriptionStatus, AndStatus
+
 import pymmcore
 
 
-class DeviceKeys:
-    """Device key mappings based on ASI DiSPIM plugin architecture"""
-    # Cameras
-    CAMERA_A = "HamCam1"              # Side A camera  
-    CAMERA_B = "HamCam2"              # Side B camera
-    CAMERA_BOTTOM = "Bottom PCO"       # Bottom camera
-    MULTI_CAMERA = "Multi Camera"      # Multi-camera device
+class MMCoreSignal(Signal):
+    """Signal that interfaces directly with pymmcore for DiSPIM devices"""
     
-    # Piezo stages
-    PIEZO_A = "PiezoStage:P:34"       # Side A imaging piezo
-    PIEZO_B = "PiezoStage:Q:35"       # Side B imaging piezo
-    
-    # Galvo/Scanner devices  
-    GALVO_A = "Scanner:AB:33"         # Side A scanner
-    GALVO_B = "Scanner:CD:33"         # Side B scanner
-    
-    # Stage devices
-    XY_STAGE = "XYStage:XY:31"        # XY positioning stage
-    LOWER_Z = "ZStage:Z:32"           # Lower Z drive
-    UPPER_Z = "ZStage:V:37"           # Upper Z drive
-    
-    # Control devices
-    PLOGIC = "PLogic:E:36"            # Programmable logic for shutters/lasers
-    LED = "LED:X:31"                  # LED illumination
-    TIGER_COMM = "TigerCommHub"       # ASI Tiger controller hub
-    
-    # Laser control
-    COHERENT_REMOTE = "Coherent-Scientific Remote"  # Laser controller
-
-
-class MMSignal:
-    """Micro-Manager signal that provides Ophyd-like interface with timestamps"""
-    
-    def __init__(self, name: str, device_name: str = None, property_name: str = None, 
-                 units: str = "", dtype: str = "number", shape: List = None):
-        self.name = name
+    def __init__(self, device_name: str, property_name: str = "Position", 
+                 core: pymmcore.CMMCore = None, **kwargs):
+        super().__init__(**kwargs)
         self.device_name = device_name
         self.property_name = property_name
-        self.units = units
-        self.dtype = dtype
-        self.shape = shape or []
-        self._last_value = None
-        self._last_timestamp = None
+        self.core = core
+        self._last_value = 0.0
     
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read signal value with timestamp"""
-        # Subclasses should override this to get actual values
+    def get(self):
+        """Get current value from MM core"""
+        if not self.core:
+            return self._last_value
+            
+        try:
+            if self.property_name == "Position":
+                value = float(self.core.getPosition(self.device_name))
+            else:
+                value = self.core.getProperty(self.device_name, self.property_name)
+                # Try to convert to float if possible
+                try:
+                    value = float(value)
+                except (ValueError, TypeError):
+                    pass
+            
+            self._last_value = value
+            return value
+        except Exception as e:
+            self.log.warning(f"Failed to read {self.device_name}.{self.property_name}: {e}")
+            return self._last_value
+    
+    def put(self, value, **kwargs):
+        """Set value in MM core"""
+        if not self.core:
+            status = DeviceStatus(self)
+            status.set_finished()
+            return status
+            
+        try:
+            if self.property_name == "Position":
+                self.core.setPosition(self.device_name, float(value))
+                self.core.waitForDevice(self.device_name)
+            else:
+                self.core.setProperty(self.device_name, self.property_name, str(value))
+            
+            self._last_value = value
+            status = DeviceStatus(self)
+            status.set_finished()
+            return status
+            
+        except Exception as e:
+            self.log.error(f"Failed to set {self.device_name}.{self.property_name}: {e}")
+            status = DeviceStatus(self)
+            status.set_exception(e)
+            return status
+
+
+class DiSPIMPiezo(Device):
+    """
+    DiSPIM piezo positioner - works with bps.mv(piezo, position)
+    
+    Device-agnostic: any plan that moves a positioner will work with this device
+    """
+    
+    def __init__(self, device_name: str, core: pymmcore.CMMCore, 
+                 limits: Tuple[float, float] = (-50.0, 150.0), **kwargs):
+        self.device_name = device_name
+        self.core = core
+        self._limits = limits  # Use private attribute to avoid conflict with Ophyd
+        self.tolerance = 0.1  # µm
+        
+        # Create signals directly as attributes
+        self.position = MMCoreSignal(device_name, "Position", core, name='position')
+        self.user_readback = MMCoreSignal(device_name, "Position", core, name='user_readback')
+        
+        super().__init__(**kwargs)
+    
+    @property
+    def limits(self):
+        return self._limits
+        
+    def move(self, position, **kwargs):
+        """Move piezo to position - called by bps.mv()"""
+        position = float(position)
+        
+        # Safety check
+        if not (self._limits[0] <= position <= self._limits[1]):
+            raise ValueError(f"Position {position} outside limits {self._limits}")
+        
+        self.log.info(f"Moving {self.device_name} to {position} µm")
+        
+        # Start move
+        status = self.position.put(position, **kwargs)
+        
+        def check_done():
+            current = self.user_readback.get()
+            return abs(current - position) < self.tolerance
+        
+        # Create subscription status that waits for move completion
+        move_status = SubscriptionStatus(self.user_readback, check_done, timeout=10.0)
+        
+        return move_status
+    
+    def read(self):
+        """Read current piezo position - required for Bluesky"""
         return {
-            self.name: {
-                'value': self._last_value,
-                'timestamp': self._last_timestamp or time.time()
+            f'{self.name}_user_readback': {
+                'value': self.user_readback.get(),
+                'timestamp': time.time()
             }
         }
     
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe signal metadata"""
-        desc = {
-            self.name: {
-                'dtype': self.dtype,
-                'shape': self.shape,
-                'source': f'MM:{self.device_name}' if self.device_name else 'MM:core'
+    def describe(self):
+        """Describe piezo device - required for Bluesky"""
+        return {
+            f'{self.name}_user_readback': {
+                'source': f'DiSPIM Piezo {self.device_name}',
+                'dtype': 'number',
+                'shape': [],
+                'units': 'um'
             }
         }
-        if self.units:
-            desc[self.name]['units'] = self.units
-        return desc
-    
-    def update_value(self, value: Any):
-        """Update cached value with timestamp"""
-        self._last_value = value
-        self._last_timestamp = time.time()
 
 
-class MMPositionSignal(MMSignal):
-    """Signal for stage position values"""
+class DiSPIMGalvo(Device):
+    """
+    DiSPIM galvanometer positioner - works with bps.mv(galvo, angle)
     
-    def __init__(self, name: str, device_name: str, core: 'DiSPIMCore'):
-        super().__init__(name, device_name, units="um", dtype="number")
+    Device-agnostic: any plan that moves a positioner will work with this device
+    """
+    
+    def __init__(self, device_name: str, core: pymmcore.CMMCore,
+                 limits: Tuple[float, float] = (-5.0, 5.0), **kwargs):
+        self.device_name = device_name
         self.core = core
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read current position from MM"""
-        try:
-            value = self.core.get_position(self.device_name)
-            self.update_value(value)
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Error reading {self.name}: {e}")
+        self._limits = limits  # Use private attribute to avoid conflict with Ophyd
+        self.tolerance = 0.01  # degrees
         
-        return super().read()
-
-
-class MMPropertySignal(MMSignal):
-    """Signal for reading actual device properties"""
+        # Create signals directly as attributes
+        self.position = MMCoreSignal(device_name, "Position", core, name='position')
+        self.user_readback = MMCoreSignal(device_name, "Position", core, name='user_readback')
+        
+        super().__init__(**kwargs)
     
-    def __init__(self, name: str, device_name: str, property_name: str, core: 'DiSPIMCore', **kwargs):
-        super().__init__(name, device_name, property_name, **kwargs)
+    @property
+    def limits(self):
+        return self._limits
+        
+    def move(self, position, **kwargs):
+        """Move galvo to position - called by bps.mv()"""
+        position = float(position)
+        
+        # Safety check
+        if not (self._limits[0] <= position <= self._limits[1]):
+            raise ValueError(f"Position {position} outside limits {self._limits}")
+        
+        self.log.info(f"Moving {self.device_name} to {position}°")
+        
+        # Start move
+        status = self.position.put(position, **kwargs)
+        
+        def check_done():
+            current = self.user_readback.get()
+            return abs(current - position) < self.tolerance
+        
+        move_status = SubscriptionStatus(self.user_readback, check_done, timeout=5.0)
+        
+        return move_status
+    
+    def read(self):
+        """Read current galvo position - required for Bluesky"""
+        return {
+            f'{self.name}_user_readback': {
+                'value': self.user_readback.get(),
+                'timestamp': time.time()
+            }
+        }
+    
+    def describe(self):
+        """Describe galvo device - required for Bluesky"""
+        return {
+            f'{self.name}_user_readback': {
+                'source': f'DiSPIM Galvo {self.device_name}',
+                'dtype': 'number',
+                'shape': [],
+                'units': 'deg'
+            }
+        }
+
+
+class DiSPIMXYStage(Device):
+    """
+    DiSPIM XY stage - works with bps.mv(xy_stage.x, x, xy_stage.y, y)
+    
+    Device-agnostic: any plan that moves XY positions will work with this device
+    """
+    
+    def __init__(self, xy_device_name: str, core: pymmcore.CMMCore, **kwargs):
+        self.xy_device_name = xy_device_name
         self.core = core
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read current property value from MM device"""
-        try:
-            value = self.core.mmc.getProperty(self.device_name, self.property_name)
-            self.update_value(value)
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Error reading {self.name}: {e}")
-            # Keep last known value if read fails
         
-        return super().read()
+        super().__init__(**kwargs)
+        
+        # Create X and Y components
+        self.x = DiSPIMPiezo(xy_device_name + "-X", core, name='x')
+        self.y = DiSPIMPiezo(xy_device_name + "-Y", core, name='y')
+    
+    def move_xy(self, x: float, y: float):
+        """Convenience method for moving both axes"""
+        return AndStatus(self.x.move(x), self.y.move(y))
+    
+    def read(self):
+        """Read current XY stage positions - required for Bluesky"""
+        result = {}
+        result.update(self.x.read())
+        result.update(self.y.read())
+        return result
+    
+    def describe(self):
+        """Describe XY stage device - required for Bluesky"""
+        result = {}
+        result.update(self.x.describe())
+        result.update(self.y.describe())
+        return result
 
 
-class DiSPIMCore:
-    """Core DiSPIM control class - wrapper around pymmcore with device management"""
+class DiSPIMCamera(Device):
+    """
+    DiSPIM camera detector - works with bps.trigger_and_read([camera])
     
-    def __init__(self, mm_dir: str, config_path: str, enable_logging: bool = True):
-        """
-        Initialize DiSPIM core with Micro-Manager setup
-        
-        Args:
-            mm_dir: Path to Micro-Manager installation directory
-            config_path: Path to Micro-Manager configuration file
-            enable_logging: Enable MM stderr logging
-        """
-        self.mm_dir = mm_dir
-        self.config_path = config_path
-        self.logger = logging.getLogger(__name__)
-        
-        # Initialize pymmcore
-        self.mmc = pymmcore.CMMCore()
-        if enable_logging:
-            self.mmc.enableStderrLog(True)
-        
-        # Setup MM environment and load configuration
-        self._setup_micromanager()
-        self._load_configuration()
-        
-        # Device mapping based on loaded devices
-        self.devices = self._discover_devices()
-        
-        self.logger.info(f"DiSPIM Core initialized with {len(self.devices)} devices")
+    Device-agnostic: any plan that acquires from a detector will work with this device
+    """
     
-    def _setup_micromanager(self):
-        """Setup Micro-Manager paths and environment"""
-        # Add MM directory to PATH (needed on Windows)
-        os.environ["PATH"] += os.pathsep.join(["", self.mm_dir])
+    def __init__(self, device_name: str, core: pymmcore.CMMCore, **kwargs):
+        super().__init__(**kwargs)
+        self.device_name = device_name
+        self.core = core
+        self._acquiring = False
+        self._last_image = None
+        self._last_image_time = None
         
-        # Set device adapter search paths
-        self.mmc.setDeviceAdapterSearchPaths([self.mm_dir])
+    def trigger(self):
+        """Trigger image acquisition - called by bps.trigger()"""
+        if not self.core:
+            status = DeviceStatus(self)
+            status.set_finished()
+            return status
         
-        self.logger.info(f"MM directory set to: {self.mm_dir}")
+        self.log.debug(f"Triggering {self.device_name}")
+        
+        def acquire_image():
+            try:
+                # Set camera and snap
+                self.core.setCameraDevice(self.device_name)
+                self.core.snapImage()
+                self._last_image = self.core.getImage()
+                self._last_image_time = time.time()
+                self._acquiring = False
+                return True
+            except Exception as e:
+                self.log.error(f"Image acquisition failed: {e}")
+                self._acquiring = False
+                return False
+        
+        self._acquiring = True
+        
+        # Run acquisition
+        success = acquire_image()
+        
+        status = DeviceStatus(self)
+        if success:
+            status.set_finished()
+        else:
+            status.set_exception(RuntimeError("Image acquisition failed"))
+        
+        return status
     
-    def _load_configuration(self):
-        """Load Micro-Manager system configuration"""
-        if not os.path.exists(self.config_path):
-            raise FileNotFoundError(f"Configuration file not found: {self.config_path}")
-        
+    def read(self):
+        """Read acquired image data - called by bps.read()"""
+        if self._last_image is not None:
+            return {
+                f'{self.name}_image': {
+                    'value': self._last_image,
+                    'timestamp': self._last_image_time or time.time()
+                },
+                f'{self.name}_stats': {
+                    'value': {
+                        'shape': self._last_image.shape,
+                        'dtype': str(self._last_image.dtype),
+                        'mean': float(np.mean(self._last_image)),
+                        'max': int(np.max(self._last_image)),
+                        'min': int(np.min(self._last_image))
+                    },
+                    'timestamp': self._last_image_time or time.time()
+                }
+            }
+        else:
+            return {}
+    
+    def describe(self):
+        """Describe detector data format"""
+        return {
+            f'{self.name}_image': {
+                'source': f'DiSPIM Camera {self.device_name}',
+                'dtype': 'array',
+                'shape': getattr(self._last_image, 'shape', []),
+                'external': 'FILESTORE:TIFF'
+            },
+            f'{self.name}_stats': {
+                'source': f'DiSPIM Camera {self.device_name} Statistics',
+                'dtype': 'object',
+                'shape': []
+            }
+        }
+    
+    @property
+    def exposure_time(self):
+        """Get current exposure time"""
         try:
-            self.mmc.loadSystemConfiguration(self.config_path)
-            self.logger.info(f"Loaded configuration: {self.config_path}")
-        except Exception as e:
-            raise RuntimeError(f"Failed to load MM configuration: {e}")
+            return self.core.getExposure() / 1000.0  # Convert ms to s
+        except:
+            return 0.01  # Default 10ms
     
-    def _discover_devices(self) -> Dict[str, str]:
-        """Discover and map loaded MM devices"""
-        loaded_devices = list(self.mmc.getLoadedDevices())
-        device_map = {}
-        
-        # Map known device keys to actual loaded devices
-        for key, device_name in vars(DeviceKeys).items():
-            if not key.startswith('_') and device_name in loaded_devices:
-                device_map[key] = device_name
-        
-        self.logger.info(f"Discovered devices: {list(device_map.keys())}")
-        return device_map
-    
-    def get_device(self, device_key: str) -> Optional[str]:
-        """Get actual MM device name for a device key"""
-        return self.devices.get(device_key)
-    
-    def get_available_config_groups(self) -> List[str]:
-        """Get list of available configuration groups"""
-        return list(self.mmc.getAvailableConfigGroups())
-    
-    def get_available_configs(self, group_name: str) -> List[str]:
-        """Get available configurations for a group"""
-        return list(self.mmc.getAvailableConfigs(group_name))
-    
-    def set_config(self, group_name: str, config_name: str):
-        """Set configuration for a group"""
+    @exposure_time.setter 
+    def exposure_time(self, value_s):
+        """Set exposure time in seconds"""
         try:
-            self.mmc.setConfig(group_name, config_name)
-            self.logger.debug(f"Set config {group_name}:{config_name}")
+            self.core.setExposure(value_s * 1000.0)  # Convert s to ms
         except Exception as e:
-            self.logger.error(f"Failed to set config {group_name}:{config_name}: {e}")
-            raise
-    
-    def snap_image(self) -> np.ndarray:
-        """Capture a single image from current camera"""
-        try:
-            self.mmc.snapImage()
-            return self.mmc.getImage()
-        except Exception as e:
-            self.logger.error(f"Failed to snap image: {e}")
-            raise
-    
-    def get_position(self, device_name: str) -> float:
-        """Get position of a stage device"""
-        try:
-            return self.mmc.getPosition(device_name)
-        except Exception as e:
-            self.logger.error(f"Failed to get position for {device_name}: {e}")
-            raise
-    
-    def set_position(self, device_name: str, position: float):
-        """Set position of a stage device"""
-        try:
-            self.mmc.setPosition(device_name, position)
-            self.mmc.waitForDevice(device_name)
-            self.logger.debug(f"Set {device_name} to position {position}")
-        except Exception as e:
-            self.logger.error(f"Failed to set {device_name} position: {e}")
-            raise
+            self.log.error(f"Failed to set exposure: {e}")
 
 
-class LaserControl:
-    """Control class for laser devices with Ophyd-like interface"""
+class DiSPIMLaserControl(Device):
+    """
+    DiSPIM laser control - works with bps.mv(laser, 'config_name')
     
-    def __init__(self, core: DiSPIMCore):
+    Device-agnostic: any plan that sets configurations will work with this device
+    """
+    
+    def __init__(self, core: pymmcore.CMMCore, **kwargs):
         self.core = core
         self.group_name = "Laser"
-        self.logger = logging.getLogger(__name__)
         
-        # Get PLogic device that controls lasers (from MM config)
-        self.plogic_device = core.get_device("PLOGIC")
+        super().__init__(**kwargs)
         
-        # Create signal for reading actual laser output channel state
-        self.signals = {}
-        if self.plogic_device:
-            self.signals['laser_output'] = MMPropertySignal(
-                "laser_output", self.plogic_device, "OutputChannel", core, dtype="string")
+        # Configure config signal
+        self.config = MMCoreSignal("Laser", "Config", core, name='config')
         
-        # Also read individual laser states from coherent controller if available
-        self.coherent_device = core.get_device("COHERENT_REMOTE")
-        if self.coherent_device:
-            # Add signals for individual laser states
-            laser_names = ["405-100C", "488-100C", "637-140C", "OBIS LS 561-100"]
-            for laser in laser_names:
-                signal_name = f"laser_{laser.split('-')[0].split()[0].lower()}_state"
-                property_name = f"Laser {laser} - State"
-                try:
-                    self.signals[signal_name] = MMPropertySignal(
-                        signal_name, self.coherent_device, property_name, core, dtype="string")
-                except:
-                    # Skip if property doesn't exist
-                    pass
-        
-        if not self.signals:
-            self.logger.warning("No laser control devices found")
-        
-        # Verify laser config group exists for control actions
-        if self.group_name not in self.core.get_available_config_groups():
-            self.logger.warning(f"Laser config group not found")
+        # Cache available configs
+        self._available_configs = self._get_available_configs()
     
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read current laser states from actual devices"""
-        result = {}
-        for signal in self.signals.values():
-            try:
-                result.update(signal.read())
-            except Exception as e:
-                self.logger.debug(f"Could not read laser signal {signal.name}: {e}")
-        return result
-    
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe laser control signals"""
-        result = {}
-        for signal in self.signals.values():
-            result.update(signal.describe())
-        return result
-    
-    def set_405_only(self):
-        """Set laser to 405nm only"""
-        self.core.set_config(self.group_name, "405 only ")
-    
-    def set_488_only(self):
-        """Set laser to 488nm only"""
-        self.core.set_config(self.group_name, "488 only")
-    
-    def set_561_only(self):
-        """Set laser to 561nm only"""  
-        self.core.set_config(self.group_name, "561 only")
-    
-    def set_637_only(self):
-        """Set laser to 637nm only"""
-        self.core.set_config(self.group_name, "637 only")
-    
-    def set_488_and_561(self):
-        """Set laser to 488nm and 561nm"""
-        self.core.set_config(self.group_name, "488 and 561")
-    
-    def all_on(self):
-        """Turn on all lasers"""
-        self.core.set_config(self.group_name, "ALL ON")
-    
-    def all_off(self):
-        """Turn off all lasers"""
-        self.core.set_config(self.group_name, "ALL OFF")
-    
-    def get_available_configs(self) -> List[str]:
+    def _get_available_configs(self):
         """Get available laser configurations"""
-        return self.core.get_available_configs(self.group_name)
-
-
-class LEDControl:
-    """Control class for LED device with Ophyd-like interface"""
-    
-    def __init__(self, core: DiSPIMCore):
-        self.core = core
-        self.group_name = "LED"
-        self.logger = logging.getLogger(__name__)
-        
-        # Get actual LED device name
-        self.led_device = core.get_device("LED")
-        
-        # Create signal for reading actual LED state
-        if self.led_device:
-            self.led_state = MMPropertySignal("led_state", self.led_device, "State", core, dtype="string")
-        else:
-            self.led_state = None
-            self.logger.warning("LED device not found")
-        
-        # Verify LED config group exists for control actions
-        if self.group_name not in self.core.get_available_config_groups():
-            self.logger.warning(f"LED config group not found")
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read current LED state from actual device"""
-        if self.led_state:
-            return self.led_state.read()
-        else:
-            return {}
-    
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe LED control signals"""
-        if self.led_state:
-            return self.led_state.describe()
-        else:
-            return {}
-    
-    def open(self):
-        """Open LED shutter using config group"""
-        self.core.set_config(self.group_name, "Open")
-    
-    def close(self):
-        """Close LED shutter using config group"""
-        self.core.set_config(self.group_name, "Closed")
-    
-    def get_available_configs(self) -> List[str]:
-        """Get available LED configurations"""
-        return self.core.get_available_configs(self.group_name)
-
-
-class SystemControl:
-    """Control class for system configuration - action-only interface"""
-    
-    def __init__(self, core: DiSPIMCore):
-        self.core = core
-        self.group_name = "System"
-        self.logger = logging.getLogger(__name__)
-        
-        # System configs are action-only, but we can track key device states
-        self.signals = {}
-        
-        # Read piezo motor states (from system config)
-        piezo_a = core.get_device("PIEZO_A")
-        piezo_b = core.get_device("PIEZO_B")
-        
-        if piezo_a:
-            self.signals['piezo_a_motor'] = MMPropertySignal(
-                "piezo_a_motor", piezo_a, "MotorOnOff", core, dtype="string")
-        if piezo_b:
-            self.signals['piezo_b_motor'] = MMPropertySignal(
-                "piezo_b_motor", piezo_b, "MotorOnOff", core, dtype="string")
-        
-        # Verify system config group exists
-        if self.group_name not in self.core.get_available_config_groups():
-            self.logger.warning(f"System config group not found")
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read system device states"""
-        result = {}
-        for signal in self.signals.values():
-            try:
-                result.update(signal.read())
-            except Exception as e:
-                self.logger.debug(f"Could not read system signal {signal.name}: {e}")
-        return result
-    
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe system control signals"""
-        result = {}
-        for signal in self.signals.values():
-            result.update(signal.describe())
-        return result
-    
-    def startup(self):
-        """Apply startup configuration"""
         try:
-            self.core.set_config(self.group_name, "Startup")
-            self.logger.info("Startup configuration applied")
-        except Exception as e:
-            self.logger.error(f"Could not apply startup configuration: {e}")
-            raise
-    
-    def shutdown(self):
-        """Apply shutdown configuration"""
-        try:
-            self.core.set_config(self.group_name, "Shutdown")
-            self.logger.info("Shutdown configuration applied")
-        except Exception as e:
-            self.logger.error(f"Could not apply shutdown configuration: {e}")
-            raise
-    
-    def get_available_configs(self) -> List[str]:
-        """Get available system configurations"""
-        return self.core.get_available_configs(self.group_name)
-
-
-class PiezoControl:
-    """Control class for piezo stage devices with Ophyd-like interface"""
-    
-    def __init__(self, core: DiSPIMCore):
-        self.core = core
-        self.logger = logging.getLogger(__name__)
-        
-        # Get piezo device names
-        self.piezo_a_device = core.get_device("PIEZO_A")
-        self.piezo_b_device = core.get_device("PIEZO_B")
-        
-        # Create position signals
-        self.signals = {}
-        if self.piezo_a_device:
-            self.signals['piezo_a_position'] = MMPositionSignal(
-                "piezo_a_position", self.piezo_a_device, core)
-        if self.piezo_b_device:
-            self.signals['piezo_b_position'] = MMPositionSignal(
-                "piezo_b_position", self.piezo_b_device, core)
-        
-        if not self.signals:
-            self.logger.warning("No piezo devices found")
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read all piezo positions with timestamps"""
-        result = {}
-        for signal in self.signals.values():
-            result.update(signal.read())
-        return result
-    
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe piezo control signals"""
-        result = {}
-        for signal in self.signals.values():
-            result.update(signal.describe())
-        return result
-    
-    def set_position_a(self, position: float):
-        """Set position of piezo A (P:34)"""
-        if self.piezo_a_device:
-            self.core.set_position(self.piezo_a_device, position)
-            self.signals['piezo_a_position'].update_value(position)
-        else:
-            raise RuntimeError("Piezo A device not available")
-    
-    def set_position_b(self, position: float):
-        """Set position of piezo B (Q:35)"""
-        if self.piezo_b_device:
-            self.core.set_position(self.piezo_b_device, position)
-            self.signals['piezo_b_position'].update_value(position)
-        else:
-            raise RuntimeError("Piezo B device not available")
-    
-    def get_position_a(self) -> float:
-        """Get position of piezo A"""
-        if 'piezo_a_position' in self.signals:
-            data = self.signals['piezo_a_position'].read()
-            return data['piezo_a_position']['value']
-        else:
-            raise RuntimeError("Piezo A device not available")
-    
-    def get_position_b(self) -> float:
-        """Get position of piezo B"""
-        if 'piezo_b_position' in self.signals:
-            data = self.signals['piezo_b_position'].read()
-            return data['piezo_b_position']['value']
-        else:
-            raise RuntimeError("Piezo B device not available")
-
-
-class CameraControl:
-    """Control class for camera devices with Ophyd-like interface"""
-    
-    def __init__(self, core: DiSPIMCore):
-        self.core = core
-        self.logger = logging.getLogger(__name__)
-        
-        # Get camera device names
-        self.camera_a = core.get_device("CAMERA_A")
-        self.camera_b = core.get_device("CAMERA_B") 
-        self.camera_bottom = core.get_device("CAMERA_BOTTOM")
-        
-        # Signals for image data and metadata
-        self.image_signal = MMSignal("image", dtype="array", shape=[])
-        self.exposure_signal = MMSignal("exposure", units="ms", dtype="number")
-        
-        if not (self.camera_a or self.camera_b or self.camera_bottom):
-            self.logger.warning("No camera devices found")
-    
-    def read(self) -> Dict[str, Dict[str, Any]]:
-        """Read image data and camera settings with timestamps"""
-        result = {}
-        result.update(self.image_signal.read())
-        result.update(self.exposure_signal.read())
-        return result
-    
-    def describe(self) -> Dict[str, Dict[str, Any]]:
-        """Describe camera signals"""
-        result = {}
-        result.update(self.image_signal.describe())
-        result.update(self.exposure_signal.describe())
-        return result
-    
-    def set_camera(self, camera_name: str):
-        """Set active camera device"""
-        try:
-            self.core.mmc.setCameraDevice(camera_name)
-            self.logger.info(f"Set active camera to: {camera_name}")
-        except Exception as e:
-            self.logger.error(f"Failed to set camera {camera_name}: {e}")
-            raise
-    
-    def snap_image(self, camera_name: Optional[str] = None) -> np.ndarray:
-        """Snap image with specified camera and update signals"""
-        if camera_name:
-            self.set_camera(camera_name)
-        
-        image = self.core.snap_image()
-        
-        # Update signals
-        self.image_signal.update_value(image)
-        
-        # Try to get exposure time
-        try:
-            exposure = self.core.mmc.getExposure()
-            self.exposure_signal.update_value(exposure)
+            return list(self.core.getAvailableConfigs(self.group_name))
         except:
-            pass
-        
-        return image
+            return []
     
-    def get_image_info(self, image: np.ndarray) -> Dict[str, Any]:
-        """Get information about captured image"""
+    def set_config(self, config_name: str):
+        """Set laser configuration"""
+        if config_name not in self._available_configs:
+            raise ValueError(f"Config '{config_name}' not available. "
+                           f"Available: {self._available_configs}")
+        
+        try:
+            self.core.setConfig(self.group_name, config_name)
+            self.log.info(f"Set laser config to: {config_name}")
+        except Exception as e:
+            self.log.error(f"Failed to set laser config: {e}")
+            raise
+    
+    def read(self):
+        """Read current laser configuration - required for Bluesky"""
+        try:
+            current_config = self.core.getCurrentConfig(self.group_name)
+            return {
+                f'{self.name}_config': {
+                    'value': current_config,
+                    'timestamp': time.time()
+                }
+            }
+        except:
+            return {
+                f'{self.name}_config': {
+                    'value': 'unknown',
+                    'timestamp': time.time()
+                }
+            }
+    
+    def describe(self):
+        """Describe laser control device - required for Bluesky"""
         return {
-            "shape": image.shape,
-            "dtype": str(image.dtype),
-            "min": np.min(image),
-            "max": np.max(image),
-            "mean": np.mean(image)
+            f'{self.name}_config': {
+                'source': f'DiSPIM Laser Control {self.group_name}',
+                'dtype': 'string',
+                'shape': [],
+                'choices': self._available_configs
+            }
         }
+
+
+class DiSPIMLightSheet(Device):
+    """
+    Single-sided DiSPIM light sheet device
+    
+    Composite device containing all components needed for one side of DiSPIM imaging.
+    Works with device-agnostic plans through individual component access.
+    """
+    
+    def __init__(self, side: str, core: pymmcore.CMMCore, 
+                 device_mapping: Dict[str, str], **kwargs):
+        """
+        Initialize single-sided light sheet
+        
+        Parameters
+        ----------
+        side : str
+            'A' or 'B' for the two DiSPIM sides
+        core : pymmcore.CMMCore
+            MM core instance
+        device_mapping : Dict[str, str]
+            Mapping of logical names to actual MM device names
+            e.g. {'piezo_a': 'PiezoStage:P:34', 'galvo_a': 'Scanner:AB:33', ...}
+        """
+        self.side = side
+        self.core = core
+        self.device_mapping = device_mapping
+        
+        # Map device names based on side
+        piezo_key = f'piezo_{side.lower()}'
+        galvo_key = f'galvo_{side.lower()}'
+        camera_key = f'camera_{side.lower()}'
+        
+        super().__init__(**kwargs)
+        
+        # Create components with actual device names
+        self.piezo = DiSPIMPiezo(
+            device_mapping[piezo_key], core, name=f'piezo_{side}'
+        )
+        self.galvo = DiSPIMGalvo(
+            device_mapping[galvo_key], core, name=f'galvo_{side}'
+        )
+        self.camera = DiSPIMCamera(
+            device_mapping[camera_key], core, name=f'camera_{side}'
+        )
+        
+        # Calibration parameters (will be set by calibration procedures)
+        self.calibration_slope = 1.0
+        self.calibration_offset = 0.0
+        self.calibration_valid = False
+    
+    def synchronized_move(self, piezo_position: float):
+        """
+        Move piezo and galvo in synchronization based on calibration
+        
+        This is a DiSPIM-specific operation that can be used in plans:
+        yield from light_sheet.synchronized_move(z_pos)
+        """
+        # Calculate galvo position from calibration
+        galvo_position = (piezo_position - self.calibration_offset) / self.calibration_slope
+        
+        # Move both devices
+        return AndStatus(
+            self.piezo.move(piezo_position),
+            self.galvo.move(galvo_position)
+        )
+    
+    def stage(self):
+        """Prepare device for use - saves current positions"""
+        self._staged_piezo_pos = self.piezo.user_readback.get()
+        self._staged_galvo_pos = self.galvo.user_readback.get()
+        return super().stage()
+    
+    def unstage(self):
+        """Return device to staged positions"""
+        if hasattr(self, '_staged_piezo_pos') and hasattr(self, '_staged_galvo_pos'):
+            # Return to staged positions
+            return AndStatus(
+                self.piezo.move(self._staged_piezo_pos),
+                self.galvo.move(self._staged_galvo_pos)
+            )
+        return super().unstage()
+    
+    def read(self):
+        """Read all light sheet device positions - required for Bluesky"""
+        result = {}
+        result.update(self.piezo.read())
+        result.update(self.galvo.read())
+        result.update(self.camera.read())
+        return result
+    
+    def describe(self):
+        """Describe light sheet device - required for Bluesky"""
+        result = {}
+        result.update(self.piezo.describe())
+        result.update(self.galvo.describe())
+        result.update(self.camera.describe())
+        return result
+
+
+class DiSPIMSystem(Device):
+    """
+    Complete dual-sided DiSPIM system
+    
+    Top-level device containing both light sheet sides and bottom camera.
+    Foundation for complete DiSPIM workflows including embryo detection and acquisition.
+    """
+    
+    def __init__(self, core: pymmcore.CMMCore, **kwargs):
+        """
+        Initialize complete DiSPIM system
+        
+        Parameters
+        ----------
+        core : pymmcore.CMMCore
+            MM core instance
+        """
+        self.core = core
+        
+        # Device mapping based on ASI DiSPIM standard names
+        device_mapping = {
+            'piezo_a': 'PiezoStage:P:34',
+            'galvo_a': 'Scanner:AB:33', 
+            'camera_a': 'HamCam1',
+            'piezo_b': 'PiezoStage:Q:35',
+            'galvo_b': 'Scanner:CD:33',
+            'camera_b': 'HamCam2'
+        }
+        
+        super().__init__(**kwargs)
+        
+        # Create components
+        self.side_a = DiSPIMLightSheet('A', core, device_mapping, name='side_a')
+        self.side_b = DiSPIMLightSheet('B', core, device_mapping, name='side_b')
+        self.xy_stage = DiSPIMXYStage('XYStage:XY:31', core, name='xy_stage')
+        self.bottom_camera = DiSPIMCamera('Bottom PCO', core, name='bottom_camera')
+        self.laser = DiSPIMLaserControl(core, name='laser')
+    
+    def center_all_devices(self):
+        """Center all positioning devices - useful for initialization"""
+        # Default center positions (can be overridden)
+        piezo_center = 75.0  # µm
+        galvo_center = 0.0   # degrees
+        xy_center = 0.0      # µm
+        
+        return AndStatus(
+            self.side_a.piezo.move(piezo_center),
+            self.side_a.galvo.move(galvo_center),
+            self.side_b.piezo.move(piezo_center), 
+            self.side_b.galvo.move(galvo_center),
+            self.xy_stage.move_xy(xy_center, xy_center)
+        )
+    
+    def read(self):
+        """Read all DiSPIM system devices - required for Bluesky"""
+        result = {}
+        result.update(self.side_a.read())
+        result.update(self.side_b.read())
+        result.update(self.xy_stage.read())
+        result.update(self.bottom_camera.read())
+        result.update(self.laser.read())
+        return result
+    
+    def describe(self):
+        """Describe complete DiSPIM system - required for Bluesky"""
+        result = {}
+        result.update(self.side_a.describe())
+        result.update(self.side_b.describe())
+        result.update(self.xy_stage.describe())
+        result.update(self.bottom_camera.describe())
+        result.update(self.laser.describe())
+        return result
+
+
+def create_dispim_system(mm_dir: str, config_file: str) -> DiSPIMSystem:
+    """
+    Factory function to create a configured DiSPIM system
+    
+    Parameters
+    ----------
+    mm_dir : str
+        Path to Micro-Manager installation
+    config_file : str
+        Path to MM configuration file
+        
+    Returns
+    -------
+    DiSPIMSystem
+        Fully configured DiSPIM system ready for Bluesky plans
+    """
+    import os
+    
+    # Initialize MM core
+    core = pymmcore.CMMCore()
+    core.enableStderrLog(True)
+    
+    # Setup MM environment
+    os.environ["PATH"] += os.pathsep.join(["", mm_dir])
+    core.setDeviceAdapterSearchPaths([mm_dir])
+    
+    # Load configuration
+    if not os.path.exists(config_file):
+        raise FileNotFoundError(f"Configuration file not found: {config_file}")
+    
+    core.loadSystemConfiguration(config_file)
+    
+    # Create system
+    system = DiSPIMSystem(core, name='dispim_system')
+    
+    logging.getLogger(__name__).info("DiSPIM system created successfully")
+    return system
+
+
+if __name__ == "__main__":
+    # Example usage - would normally use actual MM paths
+    logging.basicConfig(level=logging.INFO)
+   
