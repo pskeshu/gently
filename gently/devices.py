@@ -121,13 +121,7 @@ class DiSPIMGalvo(Device):
         
     def move(self, position, **kwargs):
         """Move galvo to position - called by bps.mv()"""
-        position = float(position)
-        
-        # Safety check
-        if not (self._limits[0] <= position <= self._limits[1]):
-            raise ValueError(f"Position {position} outside limits {self._limits}")
-        
-        self.log.info(f"Moving {self.device_name} to {position}°")
+	self.log.info(f"Moving {self.device_name} to {pos_array}")
         
         # Direct MM core implementation using galvo APIs
         status = DeviceStatus(obj=self, timeout=10)
@@ -147,17 +141,11 @@ class DiSPIMGalvo(Device):
         return status
     
     def read(self):
-        """Read current galvo position - required for Bluesky"""
-        try:
-            # Use proper MM galvo API with device name
-            value = self.core.getGalvoPosition(self.device_name)
-        except Exception as e:
-            self.log.warning(f"Failed to read galvo position from {self.device_name}: {e}")
-            value = 0.0
-                
+        """Read current galvo positions - required for Bluesky"""
+	galvo_pos = np.array(self.core.getGalvoPosition(self.device_name))      
         data = OrderedDict()
         data[self.device_name] = {
-            'value': float(value),
+            'value': galvo_pos,
             'timestamp': time.time()
         }
         return data
@@ -167,8 +155,8 @@ class DiSPIMGalvo(Device):
         data = OrderedDict()
         data[self.device_name] = {
             'source': self.device_name,
-            'dtype': 'number',
-            'shape': []
+            'dtype': 'array',
+            'shape': [2]
         }
         return data
 
