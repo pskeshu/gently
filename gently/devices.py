@@ -75,21 +75,18 @@ class DiSPIMPiezo(Device):
     
     def read(self):
         """Read current piezo position - required for Bluesky"""
-        if not self.core:
+        try:
+            value = self.core.getPosition(self.device_name)
+        except Exception as e:
+            self.log.warning(f"Failed to read position from {self.device_name}: {e}")
             value = 0.0
-        else:
-            try:
-                value = self.core.getPosition(self.device_name)
-            except Exception as e:
-                self.log.warning(f"Failed to read position from {self.device_name}: {e}")
-                value = 0.0
                 
-        return {
-            f'{self.name}_user_readback': {
-                'value': float(value),
-                'timestamp': time.time()
-            }
+        data = OrderedDict()
+        data[self.device_name] = {
+            'value': float(value),
+            'timestamp': time.time()
         }
+        return data
     
     def describe(self):
         """Describe piezo device - required for Bluesky"""
@@ -151,21 +148,23 @@ class DiSPIMGalvo(Device):
     
     def read(self):
         """Read current galvo position - required for Bluesky"""
-        if not self.core:
-            value = 0.0
-        else:
+        try:
+            # Try getPosition first, fall back to property if needed
+            value = self.core.getPosition(self.device_name)
+        except Exception:
             try:
-                value = self.core.getPosition(self.device_name)
+                # Scanner devices might need property access
+                value = float(self.core.getProperty(self.device_name, "Position"))
             except Exception as e:
-                self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+                self.log.warning(f"Failed to read from {self.device_name}: {e}")
                 value = 0.0
                 
-        return {
-            f'{self.name}_user_readback': {
-                'value': float(value),
-                'timestamp': time.time()
-            }
+        data = OrderedDict()
+        data[self.device_name] = {
+            'value': float(value),
+            'timestamp': time.time()
         }
+        return data
     
     def describe(self):
         """Describe galvo device - required for Bluesky"""
@@ -194,11 +193,6 @@ class DiSPIMXYStage(Device):
     
     def move(self, position):
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
-        if not self.core:
-            status = DeviceStatus(self)
-            status.set_finished()
-            return status
-            
         try:
             x, y = position  # Unpack [x, y] coordinates
             self.log.info(f"Moving XY stage to ({x}, {y})")
@@ -219,32 +213,18 @@ class DiSPIMXYStage(Device):
     
     def read(self):
         """Read current XY stage positions - required for Bluesky"""
-        if not self.core:
-            return {
-                f'{self.name}_xy': {
-                    'value': np.array([0.0, 0.0]), 
-                    'timestamp': time.time()
-                }
-            }
-        
         try:
             xy_pos = np.array(self.core.getXYPosition())
-            timestamp = time.time()
-            
-            return {
-                f'{self.name}_xy': {
-                    'value': xy_pos, 
-                    'timestamp': timestamp
-                }
-            }
         except Exception as e:
             self.log.warning(f"Failed to read XY positions: {e}")
-            return {
-                f'{self.name}_xy': {
-                    'value': np.array([0.0, 0.0]), 
-                    'timestamp': time.time()
-                }
-            }
+            xy_pos = np.array([0.0, 0.0])
+        
+        data = OrderedDict()
+        data[self.xy_device_name] = {
+            'value': xy_pos,
+            'timestamp': time.time()
+        }
+        return data
     
     def describe(self):
         """Describe XY stage device - required for Bluesky"""
@@ -274,11 +254,6 @@ class DiSPIMCamera(Device):
         
     def trigger(self):
         """Trigger image acquisition - called by bps.trigger()"""
-        if not self.core:
-            status = DeviceStatus(self)
-            status.set_finished()
-            return status
-        
         self.log.debug(f"Triggering {self.device_name}")
         
         def acquire_image():
@@ -387,19 +362,15 @@ class DiSPIMLaserControl(Device):
         """Read current laser configuration - required for Bluesky"""
         try:
             current_config = self.core.getCurrentConfig(self.group_name)
-            return {
-                f'{self.name}_config': {
-                    'value': current_config,
-                    'timestamp': time.time()
-                }
-            }
         except:
-            return {
-                f'{self.name}_config': {
-                    'value': 'unknown',
-                    'timestamp': time.time()
-                }
-            }
+            current_config = 'unknown'
+            
+        data = OrderedDict()
+        data[self.group_name] = {
+            'value': current_config,
+            'timestamp': time.time()
+        }
+        return data
     
     def describe(self):
         """Describe laser control device - required for Bluesky"""
