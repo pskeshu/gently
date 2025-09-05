@@ -150,21 +150,18 @@ def create_dispim_devices(core):
         if not galvo_found:
             print("⚠ No galvo/scanner devices found - skipping galvo creation")
         
-        # Try cameras - they might have different names
-        camera_found = False
-        for device_name in loaded_devices:
-            if "Camera" in device_name or "PCO" in device_name:
-                print(f"  Found potential camera device: {device_name}")
-                # Try to create camera with actual device name
-                try:
-                    devices[f'camera_{device_name.lower()}'] = DiSPIMCamera(device_name, core, name=f"camera_{device_name}")
-                    print(f"✓ Camera created ({device_name})")
-                    camera_found = True
-                except Exception as e:
-                    print(f"⚠ Could not create camera {device_name}: {e}")
-        
-        if not camera_found:
-            print("⚠ No camera devices found")
+        # Create cameras with correct DiSPIM assignments
+        if "HamCam1" in loaded_devices:
+            devices['camera_a'] = DiSPIMCamera("HamCam1", core, name="camera_A")
+            print("✓ Camera A created (HamCam1)")
+            
+        if "HamCam2" in loaded_devices:
+            devices['camera_b'] = DiSPIMCamera("HamCam2", core, name="camera_B")
+            print("✓ Camera B created (HamCam2)")
+            
+        if "Bottom PCO" in loaded_devices:
+            devices['bottom_camera'] = DiSPIMCamera("Bottom PCO", core, name="bottom_camera")
+            print("✓ Bottom camera created (Bottom PCO)")
         
         # Skip XY stage for now since names don't match
         print("⚠ XY stage devices not found with expected names - skipping")
@@ -173,16 +170,44 @@ def create_dispim_devices(core):
         devices['laser'] = DiSPIMLaserControl(core, name="laser_control")
         print("✓ Laser control device created")
         
-        # Only create composite devices if we have the required components
-        if 'piezo_a' in devices:
-            print("✓ Creating minimal light sheet with available devices")
-            device_mapping = {
-                'piezo_a': 'PiezoStage:P:34'
-                # Skip galvo and camera since they're not working
+        # Create individual scanners/galvos based on actual device names
+        if "Scanner:AB:33" in loaded_devices:
+            print("✓ Creating galvo A with Scanner:AB:33")
+            devices['galvo_a'] = DiSPIMGalvo("Scanner:AB:33", core, name="galvo_A") 
+        if "Scanner:CD:33" in loaded_devices:
+            print("✓ Creating galvo B with Scanner:CD:33")
+            devices['galvo_b'] = DiSPIMGalvo("Scanner:CD:33", core, name="galvo_B")
+        
+        # Create XY stage with correct name
+        if "XYStage:XY:31" in loaded_devices:
+            print("✓ Creating XY stage with XYStage:XY:31")
+            devices['xy_stage'] = DiSPIMXYStage("XYStage:XY:31", core, name="xy_stage")
+        
+        # Create Piezo B with correct name 
+        if "PiezoStage:Q:35" in loaded_devices:
+            print("✓ Creating Piezo B with PiezoStage:Q:35")
+            devices['piezo_b'] = DiSPIMPiezo("PiezoStage:Q:35", core, name="piezo_B")
+        
+        # Create composite light sheet devices
+        if 'piezo_a' in devices and 'galvo_a' in devices and 'camera_a' in devices:
+            print("✓ Creating light sheet A with available devices")
+            device_mapping_a = {
+                'piezo_a': 'PiezoStage:P:34',
+                'galvo_a': 'Scanner:AB:33', 
+                'camera_a': 'HamCam1'
             }
-            
-            devices['light_sheet_a'] = DiSPIMLightSheet('A', core, device_mapping, name="light_sheet_A")
-            print("✓ Minimal light sheet A device created")
+            devices['light_sheet_a'] = DiSPIMLightSheet('A', core, device_mapping_a, name="light_sheet_A")
+            print("✓ Light sheet A device created")
+        
+        if 'piezo_b' in devices and 'galvo_b' in devices and 'camera_b' in devices:
+            print("✓ Creating light sheet B with available devices")
+            device_mapping_b = {
+                'piezo_b': 'PiezoStage:Q:35',
+                'galvo_b': 'Scanner:CD:33',
+                'camera_b': 'HamCam2'
+            }
+            devices['light_sheet_b'] = DiSPIMLightSheet('B', core, device_mapping_b, name="light_sheet_B") 
+            print("✓ Light sheet B device created")
         
         print(f"\n✓ Successfully created {len(devices)} device objects")
         return devices
