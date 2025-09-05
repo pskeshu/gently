@@ -70,6 +70,11 @@ def setup_logging():
 def initialize_micromanager(mm_dir: str, config_file: str):
     """Initialize Micro-Manager core with real hardware"""
     print(f"Initializing Micro-Manager...")
+    
+    # Convert paths to absolute, normalized paths
+    mm_dir = str(Path(mm_dir).resolve())
+    config_file = str(Path(config_file).resolve())
+    
     print(f"  MM Directory: {mm_dir}")
     print(f"  Config File: {config_file}")
     
@@ -83,8 +88,20 @@ def initialize_micromanager(mm_dir: str, config_file: str):
     try:
         core = pymmcore.CMMCore()
         
-        # Set MM path and load configuration
+        # Enable logging
+        core.enableStderrLog(True)
+        
+        # Add MM directory to PATH
+        import os
+        print(f"  Adding MM directory to PATH: {mm_dir}")
+        os.environ["PATH"] += os.pathsep + mm_dir
+        
+        # Set device adapter search path
+        print(f"  Setting device adapter search path: {mm_dir}")
         core.setDeviceAdapterSearchPaths([mm_dir])
+        
+        # Load system configuration
+        print(f"  Loading system configuration: {config_file}")
         core.loadSystemConfiguration(config_file)
         
         print(f"✓ Micro-Manager initialized successfully")
@@ -290,8 +307,8 @@ def main():
     print()
     
     # Configure your MicroManager paths here
-    mm_dir = "/opt/micromanager"  # Path to your MicroManager installation
-    config_file = "config.cfg"    # Path to your MM configuration file
+    mm_dir = "C:/Program Files/Micro-Manager-1.4"
+    config_file = "C:\\Users\\dispim\\Documents\\GitHub\\gently\\MMConfig_tracking_screening.cfg"
     
     print(f"Using MicroManager directory: {mm_dir}")
     print(f"Using configuration file: {config_file}")
