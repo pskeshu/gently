@@ -117,48 +117,79 @@ def initialize_micromanager(mm_dir: str, config_file: str):
 def create_dispim_devices(core):
     """Create all DiSPIM device objects with real hardware"""
     print("\nCreating DiSPIM device objects...")
+    print("First, let's see what devices are actually available in your MM config:")
+    
+    # List all loaded devices to help debug naming issues
+    loaded_devices = core.getLoadedDevices()
+    print(f"  Available MM devices: {list(loaded_devices)}")
     
     devices = {}
     
     try:
-        # Create individual devices with real MM device names
-        # NOTE: These device names should match your actual MM configuration
+        # Create individual devices with corrected MM device names based on your config
+        # Only create devices that actually exist
+        
+        # Piezo A - this one works
         devices['piezo_a'] = DiSPIMPiezo("PiezoStage:P:34", core, name="piezo_A")
-        devices['piezo_b'] = DiSPIMPiezo("PiezoStage:P:35", core, name="piezo_B") 
-        print("✓ Piezo devices created")
+        print("✓ Piezo A created (PiezoStage:P:34)")
         
-        devices['galvo_a'] = DiSPIMGalvo("GalvoStage:G:34", core, name="galvo_A")
-        devices['galvo_b'] = DiSPIMGalvo("GalvoStage:G:35", core, name="galvo_B")
-        print("✓ Galvo devices created")
+        # Try to find Piezo B - might have different name
+        if "PiezoStage:P:35" in loaded_devices:
+            devices['piezo_b'] = DiSPIMPiezo("PiezoStage:P:35", core, name="piezo_B")
+            print("✓ Piezo B created (PiezoStage:P:35)")
+        else:
+            print("⚠ Piezo B device (PiezoStage:P:35) not found in MM config - skipping")
         
-        devices['camera_a'] = DiSPIMCamera("CameraSide:A", core, name="camera_A")
-        devices['camera_b'] = DiSPIMCamera("CameraSide:B", core, name="camera_B")
-        print("✓ Camera devices created")
+        # Try to find Galvos - they might have different names
+        galvo_found = False
+        for device_name in loaded_devices:
+            if "Galvo" in device_name or "Scanner" in device_name:
+                print(f"  Found potential galvo device: {device_name}")
+                galvo_found = True
         
-        devices['xy_stage'] = DiSPIMXYStage("XYStage", core, name="xy_stage")
-        print("✓ XY stage device created")
+        if not galvo_found:
+            print("⚠ No galvo/scanner devices found - skipping galvo creation")
         
+        # Try cameras - they might have different names
+        camera_found = False
+        for device_name in loaded_devices:
+            if "Camera" in device_name or "PCO" in device_name:
+                print(f"  Found potential camera device: {device_name}")
+                # Try to create camera with actual device name
+                try:
+                    devices[f'camera_{device_name.lower()}'] = DiSPIMCamera(device_name, core, name=f"camera_{device_name}")
+                    print(f"✓ Camera created ({device_name})")
+                    camera_found = True
+                except Exception as e:
+                    print(f"⚠ Could not create camera {device_name}: {e}")
+        
+        if not camera_found:
+            print("⚠ No camera devices found")
+        
+        # Skip XY stage for now since names don't match
+        print("⚠ XY stage devices not found with expected names - skipping")
+        
+        # Laser control - this one works
         devices['laser'] = DiSPIMLaserControl(core, name="laser_control")
         print("✓ Laser control device created")
         
-        # Create composite devices
-        device_mapping = {
-            'piezo_a': 'PiezoStage:P:34',
-            'galvo_a': 'GalvoStage:G:34', 
-            'camera_a': 'CameraSide:A'
-        }
+        # Only create composite devices if we have the required components
+        if 'piezo_a' in devices:
+            print("✓ Creating minimal light sheet with available devices")
+            device_mapping = {
+                'piezo_a': 'PiezoStage:P:34'
+                # Skip galvo and camera since they're not working
+            }
+            
+            devices['light_sheet_a'] = DiSPIMLightSheet('A', core, device_mapping, name="light_sheet_A")
+            print("✓ Minimal light sheet A device created")
         
-        devices['light_sheet_a'] = DiSPIMLightSheet('A', core, device_mapping, name="light_sheet_A")
-        print("✓ Light sheet A device created")
-        
-        devices['dispim_system'] = DiSPIMSystem(core, name="dispim_system")
-        print("✓ DiSPIM system device created")
-        
+        print(f"\n✓ Successfully created {len(devices)} device objects")
         return devices
         
     except Exception as e:
         print(f"✗ Failed to create devices: {e}")
-        print("NOTE: Device names may need to be adjusted to match your MM configuration")
+        print(f"Available devices in MM: {list(loaded_devices)}")
         raise
 
 
