@@ -113,6 +113,12 @@ class DiSPIMGalvo(Device):
         self._limits = limits
         self.tolerance = 0.01  # degrees
         
+        # Set this as the active galvo device in MM
+        try:
+            self.core.setGalvoDevice(self.device_name)
+        except Exception as e:
+            self.log.warning(f"Could not set galvo device {self.device_name}: {e}")
+        
         super().__init__(**kwargs)
     
     @property
@@ -129,12 +135,12 @@ class DiSPIMGalvo(Device):
         
         self.log.info(f"Moving {self.device_name} to {position}°")
         
-        # Direct MM core implementation like deepthought
+        # Direct MM core implementation using galvo APIs
         status = DeviceStatus(obj=self, timeout=10)
 
         def wait():
             try:
-                self.core.setPosition(self.device_name, position)
+                self.core.setGalvoPosition(position)
                 self.core.waitForDevice(self.device_name)
             except Exception as exc:
                 status.set_exception(exc)
@@ -149,15 +155,11 @@ class DiSPIMGalvo(Device):
     def read(self):
         """Read current galvo position - required for Bluesky"""
         try:
-            # Try getPosition first, fall back to property if needed
-            value = self.core.getPosition(self.device_name)
-        except Exception:
-            try:
-                # Scanner devices might need property access
-                value = float(self.core.getProperty(self.device_name, "Position"))
-            except Exception as e:
-                self.log.warning(f"Failed to read from {self.device_name}: {e}")
-                value = 0.0
+            # Use proper MM galvo API
+            value = self.core.getGalvoPosition()
+        except Exception as e:
+            self.log.warning(f"Failed to read galvo position from {self.device_name}: {e}")
+            value = 0.0
                 
         data = OrderedDict()
         data[self.device_name] = {
