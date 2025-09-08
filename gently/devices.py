@@ -143,7 +143,7 @@ class DiSPIMGalvo(Device):
     
     def read(self):
         """Read current galvo positions - required for Bluesky"""
-	galvo_pos = np.array(self.core.getGalvoPosition(self.device_name))      
+        galvo_pos = np.array(self.core.getGalvoPosition(self.device_name))      
         data = OrderedDict()
         data[self.device_name] = {
             'value': galvo_pos,
