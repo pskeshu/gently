@@ -10,6 +10,8 @@ for use with device-agnostic plans like:
     - bps.mv(piezo, position)
     - bps.trigger_and_read([camera])
     - focus_sweep(positioner, positions, detector)
+
+ # to do: add unit to the data. it is micrometer here
 """
 
 import time
@@ -23,6 +25,79 @@ from ophyd import Device, DeviceStatus
 from ophyd.status import AndStatus
 
 import pymmcore
+
+
+class DiSPIMZstage(Device):
+    """
+    DiSPIM Z Stage positioner - works with bps.mv(z_stage, position)
+    
+    Device-agnostic: any plan that moves a positioner will work with this device
+    """
+    
+    def __init__(self, device_name: str, core: pymmcore.CMMCore, 
+                 limits: Tuple[float, float] = (-50.0, 150.0), **kwargs):
+        self.device_name = device_name
+        self.core = core
+        self._limits = limits
+        self.tolerance = 0.1  # µm
+        
+        super().__init__(**kwargs)
+    
+    @property
+    def limits(self):
+        return self._limits
+        
+    def move(self, position, **kwargs):
+        """Move piezo to position - called by bps.mv()"""
+        position = float(position)
+        
+        # Safety check
+        if not (self._limits[0] <= position <= self._limits[1]):
+            raise ValueError(f"Position {position} outside limits {self._limits}")
+        
+        self.log.info(f"Moving {self.device_name} to {position} µm")
+        
+        # Direct MM core implementation like deepthought
+        status = DeviceStatus(obj=self, timeout=10)
+
+        def wait():
+            try:
+                self.core.setPosition(self.device_name, position)
+                self.core.waitForDevice(self.device_name)
+            except Exception as exc:
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+        threading.Thread(target=wait).start()
+
+        return status
+    
+    def read(self):
+        """Read current Z stage position - required for Bluesky"""
+        try:
+            value = self.core.getPosition(self.device_name)
+        except Exception as e:
+            self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+            value = 0.0
+                
+        data = OrderedDict()
+        data[self.device_name] = {
+            'value': float(value),
+            'timestamp': time.time()
+        }
+        return data
+    
+    def describe(self):
+        """Describe Z stage device - required for Bluesky"""
+        data = OrderedDict()
+        data[self.device_name] = {
+            'source': self.device_name,
+            'dtype': 'number',
+            'shape': [],
+        }
+        return data
 
 
 

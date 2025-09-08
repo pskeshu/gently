@@ -25,7 +25,7 @@ core.loadSystemConfiguration(config_file)
 
 # Create devices
 bottom_camera = DiSPIMCamera("Bottom PCO", core, name="bottom_camera")
-focus_piezo = DiSPIMPiezo("PiezoStage:P:34", core, name="focus_piezo")  # or whichever controls focus
+focus_bottom_z = DiSPIMZ("ZStage:Z:32", core, name="focus_botoom_z")  # or whichever controls focus
 
 # Setup RunEngine with napari visualization
 RE = RunEngine()
@@ -55,7 +55,7 @@ def embryo_focus_test():
     num_steps = 20     # number of focus steps
     
     # Run the focus sweep
-    plan = simple_focus_sweep(bottom_camera, focus_piezo, start_pos, end_pos, num_steps)
+    plan = simple_focus_sweep(bottom_camera, focus_bottom_z, start_pos, end_pos, num_steps)
     RE(plan)
     
     print("Focus test completed!")
