@@ -198,6 +198,13 @@ class NapariCallback(CallbackBase):
         if not self.enabled:
             return
             
+        # Debug: print what signals we're getting
+        data = doc.get('data', {})
+        print(f"DEBUG: Got signals: {list(data.keys())}")
+        for name, value in data.items():
+            if hasattr(value, 'shape'):
+                print(f"DEBUG: {name} has shape {value.shape}")
+            
         # Throttle updates to avoid overwhelming napari
         current_time = time.time()
         if current_time - self.last_update_time < self.update_interval:
