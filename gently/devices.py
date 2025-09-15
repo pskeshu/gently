@@ -21,13 +21,12 @@ from typing import Dict, Tuple
 import numpy as np
 
 
-from ophyd import Device, DeviceStatus
-from ophyd.status import AndStatus
+from ophyd.status import Status
 
 import pymmcore
 
 
-class DiSPIMZstage(Device):
+class DiSPIMZstage:
     """
     DiSPIM Z Stage positioner - works with bps.mv(z_stage, position)
     
@@ -40,25 +39,23 @@ class DiSPIMZstage(Device):
         self.core = core
         self._limits = limits
         self.tolerance = 0.1  # µm
-        
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
     
     @property
     def limits(self):
         return self._limits
         
-    def move(self, position, **kwargs):
-        """Move piezo to position - called by bps.mv()"""
+    def set(self, position, **kwargs):
+        """Move Z stage to position - called by bps.mv()"""
         position = float(position)
         
         # Safety check
         if not (self._limits[0] <= position <= self._limits[1]):
             raise ValueError(f"Position {position} outside limits {self._limits}")
         
-        self.log.info(f"Moving {self.device_name} to {position} µm")
-        
         # Direct MM core implementation like deepthought
-        status = DeviceStatus(obj=self, timeout=10)
+        status = Status(obj=self, timeout=10)
 
         def wait():
             try:
@@ -98,6 +95,14 @@ class DiSPIMZstage(Device):
             'shape': [],
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
 
