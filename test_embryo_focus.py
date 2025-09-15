@@ -9,23 +9,15 @@ import numpy as np
 from bluesky import RunEngine
 import bluesky.plan_stubs as bps
 
-from gently.devices import DiSPIMCamera, DiSPIMPiezo
+from gently.devices import DiSPIMCamera, DiSPIMZstage
 from gently.visualization import NapariCallback
+from client import get_mmc
 
-# MM setup
-mm_dir = "C:/Program Files/Micro-Manager-1.4"
-config_file = "C:\\Users\\dispim\\Documents\\GitHub\\gently\\MMConfig_tracking_screening.cfg"
-
-# Initialize MM
-core = pymmcore.CMMCore()
-core.enableStderrLog(True)
-os.environ["PATH"] += os.pathsep + mm_dir
-core.setDeviceAdapterSearchPaths([mm_dir])
-core.loadSystemConfiguration(config_file)
+core = get_mmc()
 
 # Create devices
 bottom_camera = DiSPIMCamera("Bottom PCO", core, name="bottom_camera")
-focus_bottom_z = DiSPIMZ("ZStage:Z:32", core, name="focus_botoom_z")  # or whichever controls focus
+focus_bottom_z = DiSPIMZstage("ZStage:Z:32", core, name="focus_bottom_z")  # or whichever controls focus
 
 # Setup RunEngine with napari visualization
 RE = RunEngine()
@@ -35,7 +27,11 @@ RE.subscribe(napari_callback)
 def simple_focus_sweep(detector, motor, start, stop, num_points):
     """Simple focus sweep plan for embryo detection"""
     positions = np.linspace(start, stop, num_points)
-    
+
+    starting_pos = yield from bps.rd(motor)
+
+    uid = yield from bps.open_run()
+
     for pos in positions:
         # Move to position
         yield from bps.mv(motor, pos)
@@ -45,14 +41,18 @@ def simple_focus_sweep(detector, motor, start, stop, num_points):
         
         print(f"Focus position: {pos:.2f} μm")
 
+    yield from bps.mv(motor, starting_pos)
+    yield from bps.close_run()
+
+
 def embryo_focus_test():
     """Test embryo focusing with bottom camera"""
     print("Starting embryo focus test...")
     
     # Focus sweep parameters
-    start_pos = 0.0    # starting focus position
-    end_pos = 50.0     # ending focus position  
-    num_steps = 20     # number of focus steps
+    start_pos = 50    # starting focus position
+    end_pos = 150    # ending focus position  
+    num_steps = 2     # number of focus steps
     
     # Run the focus sweep
     plan = simple_focus_sweep(bottom_camera, focus_bottom_z, start_pos, end_pos, num_steps)
