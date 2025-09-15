@@ -27,43 +27,30 @@ RE = RunEngine()
 bec = BestEffortCallback()
 RE.subscribe(bec)
 
-# Simple napari visualization that avoids threading issues
+# Create napari viewer first, then just update image data
 try:
     import napari
+    import numpy as np
+    
+    # Create viewer and add initial empty image layer
     viewer = napari.Viewer(title="DiSPIM Focus Test")
+    dummy_image = np.zeros((2048, 2048), dtype=np.uint16)  # Initial empty image
+    image_layer = viewer.add_image(dummy_image, name='Live Image', colormap='gray')
     
-    def safe_napari_callback(name, doc):
-        """Thread-safe napari callback with minimal operations"""
-        print(f"DEBUG: Callback called with name='{name}'")
+    def simple_image_updater(name, doc):
+        """Just update the image data directly"""
         if name == 'event':
-            print(f"DEBUG: Processing event document")
-            try:
-                data = doc.get('data', {})
-                print(f"DEBUG: Event data keys: {list(data.keys())}")
-                if 'bottom_camera' in data:
-                    image = data['bottom_camera']
-                    focus_pos = data.get('focus_bottom_z', 0)
-                    print(f"DEBUG: Got image shape {image.shape}, focus = {focus_pos}")
-                    
-                    # Update existing layer or create new one
-                    layer_name = 'focus_images'
-                    if layer_name in viewer.layers:
-                        print(f"DEBUG: Updating existing layer")
-                        viewer.layers[layer_name].data = image
-                    else:
-                        print(f"DEBUG: Creating new layer")
-                        viewer.add_image(image, name=layer_name, colormap='gray')
-                    
-                    print(f"Napari updated: focus = {focus_pos:.1f} μm")
-                else:
-                    print(f"DEBUG: No bottom_camera in data")
-            except Exception as e:
-                print(f"DEBUG: Napari callback error: {e}")
-                import traceback
-                traceback.print_exc()
+            data = doc.get('data', {})
+            if 'bottom_camera' in data:
+                image = data['bottom_camera']
+                focus_pos = data.get('focus_bottom_z', 0)
+                
+                # Simply update the data property of the existing layer
+                image_layer.data = image
+                print(f"Updated napari: focus = {focus_pos:.1f} μm")
     
-    RE.subscribe(safe_napari_callback)
-    print("Napari viewer created successfully")
+    RE.subscribe(simple_image_updater)
+    print("Napari viewer created with live image layer")
     
 except ImportError:
     print("Napari not available - install with: pip install napari[all]")
