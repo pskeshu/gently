@@ -44,7 +44,13 @@ def start_server(mm_dir: str, config_file: str, port: int = 18861, hostname: str
     
     print(f"Starting server on {hostname}:{port}")
     service = MMService(core)
-    server = ThreadedServer(service, hostname=hostname, port=port)
+    
+    # Configure rpyc to allow all attributes
+    from rpyc.core import DEFAULT_CONFIG
+    config = DEFAULT_CONFIG.copy()
+    config['allow_all_attrs'] = True
+    
+    server = ThreadedServer(service, hostname=hostname, port=port, protocol_config=config)
     
     try:
         server.start()
