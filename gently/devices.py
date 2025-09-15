@@ -76,7 +76,7 @@ class DiSPIMZstage:
         try:
             value = self.core.getPosition(self.device_name)
         except Exception as e:
-            self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+            print(f"Failed to read position from {self.device_name}: {e}")
             value = 0.0
                 
         data = OrderedDict()
@@ -135,7 +135,7 @@ class DiSPIMPiezo:
         if not (self._limits[0] <= position <= self._limits[1]):
             raise ValueError(f"Position {position} outside limits {self._limits}")
         
-        self.log.info(f"Moving {self.device_name} to {position} µm")
+        print(f"Moving {self.device_name} to {position} µm")
         
         # Direct MM core implementation like deepthought
         status = Status(obj=self, timeout=10)
@@ -159,7 +159,7 @@ class DiSPIMPiezo:
         try:
             value = self.core.getPosition(self.device_name)
         except Exception as e:
-            self.log.warning(f"Failed to read position from {self.device_name}: {e}")
+            print(f"Failed to read position from {self.device_name}: {e}")
             value = 0.0
                 
         data = OrderedDict()
@@ -212,7 +212,7 @@ class DiSPIMGalvo:
     def move(self, position, **kwargs):
         """Move galvo to position [x, y] - called by bps.mv(galvo, [x, y])"""
         x, y = position  # Unpack [x, y] coordinates
-        self.log.info(f"Moving galvo {self.device_name} to ({x}, {y})")
+        print(f"Moving galvo {self.device_name} to ({x}, {y})")
         
         # Direct MM core implementation using galvo APIs
         status = Status(obj=self, timeout=10)
@@ -279,7 +279,7 @@ class DiSPIMXYStage:
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
         try:
             x, y = position  # Unpack [x, y] coordinates
-            self.log.info(f"Moving XY stage to ({x}, {y})")
+            print(f"Moving XY stage to ({x}, {y})")
             
             # Set XY position using MM core
             self.core.setXYPosition(x, y)
@@ -290,7 +290,7 @@ class DiSPIMXYStage:
             return status
             
         except Exception as e:
-            self.log.error(f"Failed to move XY stage: {e}")
+            print(f"Failed to move XY stage: {e}")
             status = Status(self)
             status.set_exception(e)
             return status
@@ -300,7 +300,7 @@ class DiSPIMXYStage:
         try:
             xy_pos = np.array(self.core.getXYPosition())
         except Exception as e:
-            self.log.warning(f"Failed to read XY positions: {e}")
+            print(f"Failed to read XY positions: {e}")
             xy_pos = np.array([0.0, 0.0])
         
         data = OrderedDict()
@@ -346,9 +346,7 @@ class DiSPIMCamera:
         self._last_image_time = None
         
     def trigger(self):
-        """Trigger image acquisition - called by bps.trigger()"""
-        self.log.debug(f"Triggering {self.device_name}")
-        
+        """Trigger image acquisition - called by bps.trigger()"""        
         def acquire_image():
             try:
                 # Set camera and snap
@@ -359,7 +357,7 @@ class DiSPIMCamera:
                 self._acquiring = False
                 return True
             except Exception as e:
-                self.log.error(f"Image acquisition failed: {e}")
+                print(f"Image acquisition failed: {e}")
                 self._acquiring = False
                 return False
         
@@ -420,7 +418,7 @@ class DiSPIMCamera:
         try:
             self.core.setExposure(value_s * 1000.0)  # Convert s to ms
         except Exception as e:
-            self.log.error(f"Failed to set exposure: {e}")
+            print(f"Failed to set exposure: {e}")
 
 
 class DiSPIMLaserControl:
@@ -455,9 +453,9 @@ class DiSPIMLaserControl:
         
         try:
             self.core.setConfig(self.group_name, config_name)
-            self.log.info(f"Set laser config to: {config_name}")
+            print(f"Set laser config to: {config_name}")
         except Exception as e:
-            self.log.error(f"Failed to set laser config: {e}")
+            print(f"Failed to set laser config: {e}")
             raise
     
     def read(self):
