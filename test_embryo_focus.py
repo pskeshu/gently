@@ -8,6 +8,7 @@ import os
 import numpy as np
 from bluesky import RunEngine
 import bluesky.plan_stubs as bps
+from bluesky.callbacks.best_effort import BestEffortCallback
 
 from gently.devices import DiSPIMCamera, DiSPIMZstage
 from gently.visualization import NapariCallback
@@ -21,6 +22,11 @@ focus_bottom_z = DiSPIMZstage("ZStage:Z:32", core, name="focus_bottom_z")  # or 
 
 # Setup RunEngine with napari visualization
 RE = RunEngine()
+
+# Add BestEffortCallback for terminal output
+bec = BestEffortCallback()
+RE.subscribe(bec)
+
 napari_callback = NapariCallback()
 RE.subscribe(napari_callback)
 
