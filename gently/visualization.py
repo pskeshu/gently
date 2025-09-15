@@ -298,7 +298,13 @@ class NapariCallback(CallbackBase):
             # Add to appropriate stack
             for stack_name in self.active_stacks:
                 stack_manager = self.stack_managers[stack_name]
-                position = position_data.get('z_position', position_data.get('focus_position'))
+                # Get position from any of the common z/focus signal names
+                position = None
+                for key in position_data:
+                    if any(keyword in key.lower() for keyword in ['focus', '_z', 'stage']):
+                        position = position_data[key]
+                        break
+                print(f"DEBUG: Using position {position} from position_data: {position_data}")
                 print(f"DEBUG: Adding image to stack {stack_name}, position: {position}")
                 stack_manager.add_image(image_data, position, timestamp, metadata)
                 
@@ -318,11 +324,13 @@ class NapariCallback(CallbackBase):
         data = event_doc.get('data', {})
         positions = {}
         
-        # Look for position signals
+        # Look for position signals - include z-stage and focus devices
         for signal_name, value in data.items():
-            if 'position' in signal_name or 'readback' in signal_name:
+            signal_lower = signal_name.lower()
+            if any(keyword in signal_lower for keyword in ['position', 'readback', '_z', 'focus', 'stage']):
                 try:
                     positions[signal_name] = float(value)
+                    print(f"DEBUG: Found position signal {signal_name} = {value}")
                 except (ValueError, TypeError):
                     pass
         
