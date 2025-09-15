@@ -27,37 +27,37 @@ RE = RunEngine()
 bec = BestEffortCallback()
 RE.subscribe(bec)
 
-# Disable complex napari callback due to threading issues
-# napari_callback = NapariCallback()
-# RE.subscribe(napari_callback)
-
-# Simple napari callback that works with threading
+# Simple napari visualization that avoids threading issues
 try:
     import napari
     viewer = napari.Viewer(title="DiSPIM Focus Test")
     
-    def simple_napari_callback(name, doc):
+    def safe_napari_callback(name, doc):
+        """Thread-safe napari callback with minimal operations"""
         if name == 'event':
-            data = doc.get('data', {})
-            if 'bottom_camera' in data:
-                image = data['bottom_camera']
-                focus_pos = data.get('focus_bottom_z', 0)
-                
-                # Simple layer update without complex threading
-                try:
-                    if 'focus_images' in viewer.layers:
-                        viewer.layers['focus_images'].data = image
+            try:
+                data = doc.get('data', {})
+                if 'bottom_camera' in data:
+                    image = data['bottom_camera']
+                    focus_pos = data.get('focus_bottom_z', 0)
+                    
+                    # Update existing layer or create new one
+                    layer_name = 'focus_images'
+                    if layer_name in viewer.layers:
+                        viewer.layers[layer_name].data = image
                     else:
-                        viewer.add_image(image, name='focus_images', colormap='gray')
-                    print(f"Updated napari with focus position: {focus_pos:.1f}")
-                except:
-                    pass  # Ignore napari errors
+                        viewer.add_image(image, name=layer_name, colormap='gray')
+                    
+                    print(f"Napari updated: focus = {focus_pos:.1f} μm")
+            except Exception as e:
+                # Silently handle any Qt/threading errors
+                pass
     
-    RE.subscribe(simple_napari_callback)
-    print("Simple napari viewer created")
+    RE.subscribe(safe_napari_callback)
+    print("Napari viewer created successfully")
     
 except ImportError:
-    print("Napari not available")
+    print("Napari not available - install with: pip install napari[all]")
 
 def simple_focus_sweep(detector, motor, start, stop, num_points):
     """Simple focus sweep plan for embryo detection"""
@@ -71,8 +71,8 @@ def simple_focus_sweep(detector, motor, start, stop, num_points):
         # Move to position
         yield from bps.mv(motor, pos)
         
-        # Acquire image
-        yield from bps.trigger_and_read([detector])
+        # Acquire image and read motor position
+        yield from bps.trigger_and_read([detector, motor])
         
         print(f"Focus position: {pos:.2f} μm")
 
