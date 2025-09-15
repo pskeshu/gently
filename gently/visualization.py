@@ -365,15 +365,18 @@ class NapariCallback(CallbackBase):
         
         try:
             layer_name = f"{metadata['name']} ({channel.title()})"
+            print(f"DEBUG: Trying to display layer '{layer_name}' with stack shape: {stack.shape}")
             
             # Choose colors for dual-sided DiSPIM
             colormap = 'green' if channel == 'side_a' else 'magenta'
             
             # Update or create napari layer
             if layer_name in self.viewer.layers:
+                print(f"DEBUG: Updating existing layer")
                 # Update existing layer
                 self.viewer.layers[layer_name].data = stack
             else:
+                print(f"DEBUG: Creating new layer")
                 # Create new layer
                 self.viewer.add_image(
                     stack,
@@ -383,10 +386,14 @@ class NapariCallback(CallbackBase):
                     metadata=metadata
                 )
             
+            print(f"DEBUG: Resetting view")
             # Update display
             self.viewer.reset_view()
+            print(f"DEBUG: Napari update completed successfully")
         except Exception as e:
-            logger.warning(f"Failed to update napari: {e}")
+            print(f"DEBUG: Napari update failed: {e}")
+            import traceback
+            traceback.print_exc()
             # Continue without disabling
     
     def _display_single_image(self, signal_name: str, image_data: np.ndarray, 
