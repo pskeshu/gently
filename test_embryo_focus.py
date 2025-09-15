@@ -34,24 +34,33 @@ try:
     
     def safe_napari_callback(name, doc):
         """Thread-safe napari callback with minimal operations"""
+        print(f"DEBUG: Callback called with name='{name}'")
         if name == 'event':
+            print(f"DEBUG: Processing event document")
             try:
                 data = doc.get('data', {})
+                print(f"DEBUG: Event data keys: {list(data.keys())}")
                 if 'bottom_camera' in data:
                     image = data['bottom_camera']
                     focus_pos = data.get('focus_bottom_z', 0)
+                    print(f"DEBUG: Got image shape {image.shape}, focus = {focus_pos}")
                     
                     # Update existing layer or create new one
                     layer_name = 'focus_images'
                     if layer_name in viewer.layers:
+                        print(f"DEBUG: Updating existing layer")
                         viewer.layers[layer_name].data = image
                     else:
+                        print(f"DEBUG: Creating new layer")
                         viewer.add_image(image, name=layer_name, colormap='gray')
                     
                     print(f"Napari updated: focus = {focus_pos:.1f} μm")
+                else:
+                    print(f"DEBUG: No bottom_camera in data")
             except Exception as e:
-                # Silently handle any Qt/threading errors
-                pass
+                print(f"DEBUG: Napari callback error: {e}")
+                import traceback
+                traceback.print_exc()
     
     RE.subscribe(safe_napari_callback)
     print("Napari viewer created successfully")
