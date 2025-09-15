@@ -240,8 +240,11 @@ class NapariCallback(CallbackBase):
     def _is_image_signal(self, signal_name: str, signal_data: Any) -> bool:
         """Check if signal contains image data"""
         # Look for camera image signals
-        if '_image' in signal_name and isinstance(signal_data, np.ndarray):
-            return signal_data.ndim >= 2  # 2D or higher dimensional
+        if isinstance(signal_data, np.ndarray) and signal_data.ndim >= 2:
+            # Check if signal name indicates camera/image data
+            signal_lower = signal_name.lower()
+            if any(keyword in signal_lower for keyword in ['camera', 'image', 'detector']):
+                return True
         return False
     
     def _handle_image_data(self, signal_name: str, image_data: np.ndarray, 
