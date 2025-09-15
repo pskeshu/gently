@@ -32,14 +32,16 @@ image_layer = viewer.add_image(dummy_image, name='Live Image', colormap='gray')
 
 # Enable continuous autocontrast for optimal viewing
 image_layer.contrast_limits_range = (0, 65535)
-image_layer.auto_contrast = True
 
 def napari_live_update(name, doc):
     """Update napari with live images during acquisition"""
     if name == 'event':
         data = doc.get('data', {})
         if 'bottom_camera' in data:
-            image_layer.data = data['bottom_camera']
+            image = data['bottom_camera']
+            image_layer.data = image
+            # Force contrast adjustment for each new image
+            image_layer.reset_contrast_limits()
 
 RE.subscribe(napari_live_update)
 print("Napari live visualization enabled")
@@ -80,5 +82,15 @@ def embryo_focus_test():
     
     print("Focus test completed!")
 
+def cleanup_napari():
+    """Clean up napari viewer to prevent thread warnings"""
+    try:
+        viewer.close()
+    except:
+        pass
+
 if __name__ == "__main__":
-    embryo_focus_test()
+    try:
+        embryo_focus_test()
+    finally:
+        cleanup_napari()
