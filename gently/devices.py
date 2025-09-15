@@ -106,7 +106,7 @@ class DiSPIMZstage:
 
 
 
-class DiSPIMPiezo(Device):
+class DiSPIMPiezo:
     """
     DiSPIM piezo positioner - works with bps.mv(piezo, position)
     
@@ -120,7 +120,8 @@ class DiSPIMPiezo(Device):
         self._limits = limits
         self.tolerance = 0.1  # µm
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
     
     @property
     def limits(self):
@@ -137,7 +138,7 @@ class DiSPIMPiezo(Device):
         self.log.info(f"Moving {self.device_name} to {position} µm")
         
         # Direct MM core implementation like deepthought
-        status = DeviceStatus(obj=self, timeout=10)
+        status = Status(obj=self, timeout=10)
 
         def wait():
             try:
@@ -162,7 +163,7 @@ class DiSPIMPiezo(Device):
             value = 0.0
                 
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'value': float(value),
             'timestamp': time.time()
         }
@@ -171,15 +172,23 @@ class DiSPIMPiezo(Device):
     def describe(self):
         """Describe piezo device - required for Bluesky"""
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'source': self.device_name,
             'dtype': 'number',
             'shape': []
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
-class DiSPIMGalvo(Device):
+class DiSPIMGalvo:
     """
     DiSPIM galvanometer positioner - works with bps.mv(galvo, angle)
     
@@ -193,7 +202,8 @@ class DiSPIMGalvo(Device):
         self._limits = limits
         self.tolerance = 0.01  # degrees
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
     
     @property
     def limits(self):
@@ -205,7 +215,7 @@ class DiSPIMGalvo(Device):
         self.log.info(f"Moving galvo {self.device_name} to ({x}, {y})")
         
         # Direct MM core implementation using galvo APIs
-        status = DeviceStatus(obj=self, timeout=10)
+        status = Status(obj=self, timeout=10)
 
         def wait():
             try:
@@ -225,7 +235,7 @@ class DiSPIMGalvo(Device):
         """Read current galvo positions - required for Bluesky"""
         galvo_pos = np.array(self.core.getGalvoPosition(self.device_name))      
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'value': galvo_pos,
             'timestamp': time.time()
         }
@@ -234,15 +244,23 @@ class DiSPIMGalvo(Device):
     def describe(self):
         """Describe galvo device - required for Bluesky"""
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'source': self.device_name,
             'dtype': 'array',
             'shape': [2]
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
-class DiSPIMXYStage(Device):
+class DiSPIMXYStage:
     """
     DiSPIM XY stage - works with bps.mv(xy_stage, [x, y])
     
@@ -254,7 +272,8 @@ class DiSPIMXYStage(Device):
         self.xy_device_name = xy_device_name
         self.core = core
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
     
     def move(self, position):
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
@@ -266,13 +285,13 @@ class DiSPIMXYStage(Device):
             self.core.setXYPosition(x, y)
             self.core.waitForDevice(self.xy_device_name)
             
-            status = DeviceStatus(self)
+            status = Status(self)
             status.set_finished()
             return status
             
         except Exception as e:
             self.log.error(f"Failed to move XY stage: {e}")
-            status = DeviceStatus(self)
+            status = Status(self)
             status.set_exception(e)
             return status
     
@@ -300,9 +319,17 @@ class DiSPIMXYStage(Device):
             'shape': [2]
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
-class DiSPIMCamera(Device):
+class DiSPIMCamera:
     """
     DiSPIM camera detector - works with bps.trigger_and_read([camera])
     
@@ -310,7 +337,8 @@ class DiSPIMCamera(Device):
     """
     
     def __init__(self, device_name: str, core: pymmcore.CMMCore, **kwargs):
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
         self.device_name = device_name
         self.core = core
         self._acquiring = False
@@ -340,7 +368,7 @@ class DiSPIMCamera(Device):
         # Run acquisition
         success = acquire_image()
         
-        status = DeviceStatus(self)
+        status = Status(self)
         if success:
             status.set_finished()
         else:
@@ -352,7 +380,7 @@ class DiSPIMCamera(Device):
         """Read acquired image data - called by bps.read()"""
         if self._last_image is not None:
             data = OrderedDict()
-            data[self.device_name] = {
+            data[self.name] = {
                 'value': self._last_image,
                 'timestamp': self._last_image_time or time.time()
             }
@@ -363,12 +391,20 @@ class DiSPIMCamera(Device):
     def describe(self):
         """Describe detector data format"""
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'source': self.device_name,
             'dtype': 'array',
             'shape': getattr(self._last_image, 'shape', [])
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
     
     @property
     def exposure_time(self):
@@ -387,7 +423,7 @@ class DiSPIMCamera(Device):
             self.log.error(f"Failed to set exposure: {e}")
 
 
-class DiSPIMLaserControl(Device):
+class DiSPIMLaserControl:
     """
     DiSPIM laser control - works with bps.mv(laser, 'config_name')
     
@@ -398,7 +434,8 @@ class DiSPIMLaserControl(Device):
         self.core = core
         self.group_name = "Laser"
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
         
         # Cache available configs
         self._available_configs = self._get_available_configs()
@@ -446,9 +483,17 @@ class DiSPIMLaserControl(Device):
             'shape': []
         }
         return data
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
-class DiSPIMLightSheet(Device):
+class DiSPIMLightSheet:
     """
     Single-sided DiSPIM light sheet device
     
@@ -480,7 +525,8 @@ class DiSPIMLightSheet(Device):
         galvo_key = f'galvo_{side.lower()}'
         camera_key = f'camera_{side.lower()}'
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
         
         # Create components with actual device names
         self.piezo = DiSPIMPiezo(
@@ -545,9 +591,17 @@ class DiSPIMLightSheet(Device):
         result.update(self.galvo.describe())
         result.update(self.camera.describe())
         return result
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
-class DiSPIMSystem(Device):
+class DiSPIMSystem:
     """
     Complete dual-sided DiSPIM system
     
@@ -576,7 +630,8 @@ class DiSPIMSystem(Device):
             'camera_b': 'HamCam2'
         }
         
-        super().__init__(**kwargs)
+        self.name = kwargs.get('name', device_name)
+        self.parent = None
         
         # Create components
         self.side_a = DiSPIMLightSheet('A', core, device_mapping, name='side_a')
@@ -619,6 +674,14 @@ class DiSPIMSystem(Device):
         result.update(self.bottom_camera.describe())
         result.update(self.laser.describe())
         return result
+    
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+    
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
 
 
 def create_dispim_system(mm_dir: str, config_file: str) -> DiSPIMSystem:
