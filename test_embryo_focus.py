@@ -3,15 +3,13 @@
 Simple Embryo Focus Test with Bottom Camera and Napari Visualization
 """
 
-import pymmcore
-import os
 import numpy as np
+import napari
 from bluesky import RunEngine
 import bluesky.plan_stubs as bps
 from bluesky.callbacks.best_effort import BestEffortCallback
 
 from gently.devices import DiSPIMCamera, DiSPIMZstage
-from gently.visualization import NapariCallback
 from client import get_mmc
 
 core = get_mmc()
@@ -27,33 +25,24 @@ RE = RunEngine()
 bec = BestEffortCallback()
 RE.subscribe(bec)
 
-# Create napari viewer first, then just update image data
-try:
-    import napari
-    import numpy as np
-    
-    # Create viewer and add initial empty image layer
-    viewer = napari.Viewer(title="DiSPIM Focus Test")
-    dummy_image = np.zeros((2048, 2048), dtype=np.uint16)  # Initial empty image
-    image_layer = viewer.add_image(dummy_image, name='Live Image', colormap='gray')
-    
-    def simple_image_updater(name, doc):
-        """Just update the image data directly"""
-        if name == 'event':
-            data = doc.get('data', {})
-            if 'bottom_camera' in data:
-                image = data['bottom_camera']
-                focus_pos = data.get('focus_bottom_z', 0)
-                
-                # Simply update the data property of the existing layer
-                image_layer.data = image
-                print(f"Updated napari: focus = {focus_pos:.1f} μm")
-    
-    RE.subscribe(simple_image_updater)
-    print("Napari viewer created with live image layer")
-    
-except ImportError:
-    print("Napari not available - install with: pip install napari[all]")
+# Add Napari live visualization
+viewer = napari.Viewer(title="DiSPIM Focus Test")
+dummy_image = np.zeros((2048, 2048), dtype=np.uint16)
+image_layer = viewer.add_image(dummy_image, name='Live Image', colormap='gray')
+
+# Enable continuous autocontrast for optimal viewing
+image_layer.contrast_limits_range = (0, 65535)
+image_layer.auto_contrast = True
+
+def napari_live_update(name, doc):
+    """Update napari with live images during acquisition"""
+    if name == 'event':
+        data = doc.get('data', {})
+        if 'bottom_camera' in data:
+            image_layer.data = data['bottom_camera']
+
+RE.subscribe(napari_live_update)
+print("Napari live visualization enabled")
 
 def simple_focus_sweep(detector, motor, start, stop, num_points):
     """Simple focus sweep plan for embryo detection"""
