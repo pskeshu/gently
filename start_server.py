@@ -1,5 +1,6 @@
 """Simple MMCore server for gently DiSPIM"""
 import os
+import yaml
 import pymmcore
 import rpyc
 from rpyc.utils.server import ThreadedServer
@@ -61,8 +62,29 @@ def start_server(mm_dir: str, config_file: str, port: int = 18861, hostname: str
         server.close()
         core.reset()
 
+def load_config(config_path="config.yml"):
+    """Load configuration from YAML file"""
+    try:
+        with open(config_path, 'r') as f:
+            config = yaml.safe_load(f)
+        
+        mm_dir = config['mmdirectory']
+        config_file = config['mmconfig']
+        
+        print(f"Loaded config from {config_path}")
+        print(f"MM Directory: {mm_dir}")
+        print(f"MM Config: {config_file}")
+        
+        return mm_dir, config_file
+        
+    except FileNotFoundError:
+        print(f"Config file {config_path} not found, using defaults")
+        return "C:/Program Files/Micro-Manager-1.4", "MMConfig_tracking_screening.cfg"
+    except Exception as e:
+        print(f"Error loading config: {e}, using defaults")
+        return "C:/Program Files/Micro-Manager-1.4", "MMConfig_tracking_screening.cfg"
+
 if __name__ == "__main__":
-    # Default config from gently
-    mm_dir = "C:/Program Files/Micro-Manager-1.4"
-    config_file = "MMConfig_tracking_screening.cfg"
+    # Load config from file
+    mm_dir, config_file = load_config()
     start_server(mm_dir, config_file)
