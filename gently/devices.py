@@ -83,7 +83,7 @@ class DiSPIMZstage(Device):
             value = 0.0
                 
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'value': float(value),
             'timestamp': time.time()
         }
@@ -92,7 +92,7 @@ class DiSPIMZstage(Device):
     def describe(self):
         """Describe Z stage device - required for Bluesky"""
         data = OrderedDict()
-        data[self.device_name] = {
+        data[self.name] = {
             'source': self.device_name,
             'dtype': 'number',
             'shape': [],
