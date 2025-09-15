@@ -352,7 +352,9 @@ class DiSPIMCamera:
                 # Set camera and snap
                 self.core.setCameraDevice(self.device_name)
                 self.core.snapImage()
-                self._last_image = self.core.getImage()
+                # Use rpyc.classic.obtain to transfer numpy array properly
+                import rpyc.classic
+                self._last_image = rpyc.classic.obtain(self.core.getImage())
                 self._last_image_time = time.time()
                 self._acquiring = False
                 return True
