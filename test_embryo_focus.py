@@ -27,8 +27,37 @@ RE = RunEngine()
 bec = BestEffortCallback()
 RE.subscribe(bec)
 
-napari_callback = NapariCallback()
-RE.subscribe(napari_callback)
+# Disable complex napari callback due to threading issues
+# napari_callback = NapariCallback()
+# RE.subscribe(napari_callback)
+
+# Simple napari callback that works with threading
+try:
+    import napari
+    viewer = napari.Viewer(title="DiSPIM Focus Test")
+    
+    def simple_napari_callback(name, doc):
+        if name == 'event':
+            data = doc.get('data', {})
+            if 'bottom_camera' in data:
+                image = data['bottom_camera']
+                focus_pos = data.get('focus_bottom_z', 0)
+                
+                # Simple layer update without complex threading
+                try:
+                    if 'focus_images' in viewer.layers:
+                        viewer.layers['focus_images'].data = image
+                    else:
+                        viewer.add_image(image, name='focus_images', colormap='gray')
+                    print(f"Updated napari with focus position: {focus_pos:.1f}")
+                except:
+                    pass  # Ignore napari errors
+    
+    RE.subscribe(simple_napari_callback)
+    print("Simple napari viewer created")
+    
+except ImportError:
+    print("Napari not available")
 
 def simple_focus_sweep(detector, motor, start, stop, num_points):
     """Simple focus sweep plan for embryo detection"""
