@@ -267,13 +267,17 @@ class NapariCallback(CallbackBase):
         if isinstance(signal_data, np.ndarray) and signal_data.ndim >= 2:
             # Check if signal name indicates camera/image data
             signal_lower = signal_name.lower()
-            if any(keyword in signal_lower for keyword in ['camera', 'image', 'detector']):
+            is_image = any(keyword in signal_lower for keyword in ['camera', 'image', 'detector'])
+            print(f"DEBUG: {signal_name} is_image_signal: {is_image}")
+            if is_image:
                 return True
         return False
     
     def _handle_image_data(self, signal_name: str, image_data: np.ndarray, 
                           timestamp: float, event_doc: Dict):
         """Handle image data based on current experiment context"""
+        
+        print(f"DEBUG: Handling image data for {signal_name}, shape: {image_data.shape}")
         
         # Extract metadata
         position_data = self._extract_position_data(event_doc)
