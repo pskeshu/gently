@@ -289,20 +289,29 @@ class NapariCallback(CallbackBase):
         
         # Determine channel (side A or B)
         channel = self._determine_channel(signal_name)
+        print(f"DEBUG: Channel: {channel}")
+        print(f"DEBUG: active_stacks: {self.active_stacks}")
+        print(f"DEBUG: show_single_images: {self.show_single_images}")
         
         if self.active_stacks:
+            print(f"DEBUG: Using stack display mode")
             # Add to appropriate stack
             for stack_name in self.active_stacks:
                 stack_manager = self.stack_managers[stack_name]
                 position = position_data.get('z_position', position_data.get('focus_position'))
+                print(f"DEBUG: Adding image to stack {stack_name}, position: {position}")
                 stack_manager.add_image(image_data, position, timestamp, metadata)
                 
                 # Update napari display
+                print(f"DEBUG: Updating stack display")
                 self._update_stack_display(stack_name, stack_manager, channel)
         
         elif self.show_single_images:
+            print(f"DEBUG: Using single image display mode")
             # Display single image immediately
             self._display_single_image(signal_name, image_data, metadata, channel)
+        else:
+            print(f"DEBUG: No display mode active!")
     
     def _extract_position_data(self, event_doc: Dict) -> Dict[str, float]:
         """Extract position information from event document"""
