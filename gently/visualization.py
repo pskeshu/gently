@@ -146,8 +146,11 @@ class NapariCallback(CallbackBase):
         self.dual_channel_mode = dual_channel_mode
         self.update_interval = update_interval
         
-        # Create or use existing viewer
-        self.viewer = viewer or napari.Viewer(title="DiSPIM Live View")
+        # Create or use existing viewer - defer to main thread
+        self.viewer = viewer
+        self.viewer_created = False
+        if self.viewer is None:
+            self._create_viewer_safe()
         
         # Track experiment state
         self.current_plan = None
@@ -162,6 +165,20 @@ class NapariCallback(CallbackBase):
         self.channels = {'side_a': {}, 'side_b': {}}
         
         logger.info("NapariCallback initialized - real-time visualization enabled")
+    
+    def _create_viewer_safe(self):
+        """Create napari viewer safely"""
+        try:
+            import threading
+            if threading.current_thread() is threading.main_thread():
+                self.viewer = napari.Viewer(title="DiSPIM Live View")
+                self.viewer_created = True
+            else:
+                # Defer viewer creation to when actually needed
+                self.viewer_created = False
+        except Exception as e:
+            logger.warning(f"Could not create napari viewer: {e}")
+            self.enabled = False
     
     def start(self, doc):
         """Called at start of Bluesky run"""
@@ -309,45 +326,70 @@ class NapariCallback(CallbackBase):
         if stack is None:
             return
         
-        layer_name = f"{metadata['name']} ({channel.title()})"
+        # Ensure viewer exists
+        if not self.viewer:
+            try:
+                self.viewer = napari.Viewer(title="DiSPIM Live View")
+                self.viewer_created = True
+            except Exception as e:
+                logger.warning(f"Cannot create napari viewer: {e}")
+                return
         
-        # Choose colors for dual-sided DiSPIM
-        colormap = 'green' if channel == 'side_a' else 'magenta'
-        
-        # Update or create napari layer
-        if layer_name in self.viewer.layers:
-            # Update existing layer
-            self.viewer.layers[layer_name].data = stack
-        else:
-            # Create new layer
-            self.viewer.add_image(
-                stack,
-                name=layer_name,
-                colormap=colormap,
-                blending='additive' if self.dual_channel_mode else 'translucent',
-                metadata=metadata
-            )
-        
-        # Update display
-        self.viewer.reset_view()
+        try:
+            layer_name = f"{metadata['name']} ({channel.title()})"
+            
+            # Choose colors for dual-sided DiSPIM
+            colormap = 'green' if channel == 'side_a' else 'magenta'
+            
+            # Update or create napari layer
+            if layer_name in self.viewer.layers:
+                # Update existing layer
+                self.viewer.layers[layer_name].data = stack
+            else:
+                # Create new layer
+                self.viewer.add_image(
+                    stack,
+                    name=layer_name,
+                    colormap=colormap,
+                    blending='additive' if self.dual_channel_mode else 'translucent',
+                    metadata=metadata
+                )
+            
+            # Update display
+            self.viewer.reset_view()
+        except Exception as e:
+            logger.warning(f"Failed to update napari: {e}")
+            # Continue without disabling
     
     def _display_single_image(self, signal_name: str, image_data: np.ndarray, 
                              metadata: Dict, channel: str):
         """Display a single 2D image in napari"""
-        layer_name = f"{signal_name} ({channel.title()})"
-        colormap = 'green' if channel == 'side_a' else 'magenta'
+        # Ensure viewer exists
+        if not self.viewer:
+            try:
+                self.viewer = napari.Viewer(title="DiSPIM Live View")
+                self.viewer_created = True
+            except Exception as e:
+                logger.warning(f"Cannot create napari viewer: {e}")
+                return
         
-        # Update or create napari layer
-        if layer_name in self.viewer.layers:
-            self.viewer.layers[layer_name].data = image_data
-        else:
-            self.viewer.add_image(
-                image_data,
-                name=layer_name,
-                colormap=colormap,
-                blending='additive' if self.dual_channel_mode else 'translucent',
-                metadata=metadata
-            )
+        try:
+            layer_name = f"{signal_name} ({channel.title()})"
+            colormap = 'green' if channel == 'side_a' else 'magenta'
+            
+            # Update or create napari layer
+            if layer_name in self.viewer.layers:
+                self.viewer.layers[layer_name].data = image_data
+            else:
+                self.viewer.add_image(
+                    image_data,
+                    name=layer_name,
+                    colormap=colormap,
+                    blending='additive' if self.dual_channel_mode else 'translucent',
+                    metadata=metadata
+                )
+        except Exception as e:
+            logger.warning(f"Failed to display image in napari: {e}")
     
     def _finalize_stacks(self):
         """Finalize any remaining image stacks at end of run"""
