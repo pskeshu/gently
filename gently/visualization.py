@@ -1,562 +1,241 @@
 """
-Gently DiSPIM Napari Integration
-===============================
-
-Real-time image visualization for DiSPIM experiments using napari and Bluesky callbacks.
-Provides optional, non-intrusive visualization that works with any image-generating plan.
-
-Key Features:
-- Real-time streaming of images from Bluesky plans
-- Handles 2D images, 3D stacks, and multi-channel data
-- Works with focus sweeps, embryo detection, Z-stacks
-- Completely optional - graceful fallback if napari not available
-- Standard Bluesky callback pattern
-
-Usage:
-    from gently.visualization import setup_napari_callback
-    
-    RE = RunEngine({})
-    napari_callback = setup_napari_callback()
-    RE.subscribe(napari_callback)
-    
-    # Now any plan with images will display in napari
-    RE(dispim_piezo_autofocus(light_sheet, config))
+Supports the visual aspects of the gently library
 """
 
-import time
-import logging
-import warnings
-from typing import Dict, List, Optional, Any, Tuple, Union
-from collections import defaultdict
 import numpy as np
-
-# Handle optional napari dependency
-try:
-    import napari
-    NAPARI_AVAILABLE = True
-except ImportError:
-    NAPARI_AVAILABLE = False
-    napari = None
-
-# Bluesky imports
-from bluesky.callbacks.core import CallbackBase
-
-logger = logging.getLogger(__name__)
+import matplotlib.pyplot as plt
+import napari
 
 
-class ImageStackManager:
-    """Manages accumulation of 2D images into 3D/4D stacks for napari display"""
-    
-    def __init__(self, name: str):
-        self.name = name
-        self.images = []
-        self.positions = []
-        self.timestamps = []
-        self.metadata = {}
-        self.current_stack = None
-        
-    def add_image(self, image: np.ndarray, position: float = None, 
-                  timestamp: float = None, metadata: Dict = None):
-        """Add a 2D image to the stack"""
-        self.images.append(image.copy())
-        self.positions.append(position)
-        self.timestamps.append(timestamp or time.time())
-        
-        if metadata:
-            for key, value in metadata.items():
-                if key not in self.metadata:
-                    self.metadata[key] = []
-                self.metadata[key].append(value)
-    
-    def get_stack(self) -> Tuple[np.ndarray, Dict]:
-        """Get current image stack as 3D array with metadata"""
-        if not self.images:
-            return None, {}
-            
-        # Stack images along new axis (z-dimension for focus sweeps)
-        stack = np.stack(self.images, axis=0)
-        
-        # Prepare metadata for napari
-        napari_metadata = {
-            'name': self.name,
-            'positions': self.positions,
-            'timestamps': self.timestamps,
-            'shape': stack.shape,
-            'dtype': stack.dtype
-        }
-        napari_metadata.update(self.metadata)
-        
-        return stack, napari_metadata
-    
-    def clear(self):
-        """Clear accumulated data for new stack"""
-        self.images.clear()
-        self.positions.clear()
-        self.timestamps.clear()
-        self.metadata.clear()
-        self.current_stack = None
-
-
-class NapariCallback(CallbackBase):
+def setup_napari_live_view(title: str = "DiSPIM Live View"):
     """
-    Bluesky callback for real-time napari visualization of DiSPIM images
-    
-    Subscribes to Bluesky document stream and displays images in napari viewer.
-    Handles different data types and experiment patterns automatically.
-    """
-    
-    def __init__(self, 
-                 show_focus_sweeps: bool = True,
-                 show_embryo_detection: bool = True,
-                 show_single_images: bool = True,
-                 dual_channel_mode: bool = True,
-                 update_interval: float = 0.1,
-                 viewer: 'napari.Viewer' = None,
-                 **kwargs):
-        """
-        Initialize napari callback
-        
-        Parameters
-        ----------
-        show_focus_sweeps : bool
-            Display focus sweep image stacks
-        show_embryo_detection : bool  
-            Display embryo detection scan images
-        show_single_images : bool
-            Display individual camera acquisitions
-        dual_channel_mode : bool
-            Handle dual-sided DiSPIM with separate channels
-        update_interval : float
-            Minimum time between napari updates (seconds)
-        viewer : napari.Viewer, optional
-            Existing napari viewer to use
-        """
-        super().__init__()
-        
-        if not NAPARI_AVAILABLE:
-            warnings.warn("Napari not available. Image visualization disabled. "
-                         "Install with: pip install napari[all]", UserWarning)
-            self.enabled = False
-            return
-        
-        self.enabled = True
-        self.show_focus_sweeps = show_focus_sweeps
-        self.show_embryo_detection = show_embryo_detection
-        self.show_single_images = show_single_images
-        self.dual_channel_mode = dual_channel_mode
-        self.update_interval = update_interval
-        
-        # Create or use existing viewer - defer to main thread
-        self.viewer = viewer
-        self.viewer_created = False
-        if self.viewer is None:
-            self._create_viewer_safe()
-        
-        # Track experiment state
-        self.current_plan = None
-        self.plan_metadata = {}
-        self.last_update_time = 0
-        
-        # Manage image stacks for different experiment types
-        self.stack_managers = {}
-        self.active_stacks = set()
-        
-        # Track channels for dual-sided DiSPIM
-        self.channels = {'side_a': {}, 'side_b': {}}
-        
-        logger.info("NapariCallback initialized - real-time visualization enabled")
-    
-    def _create_viewer_safe(self):
-        """Create napari viewer safely"""
-        try:
-            import threading
-            if threading.current_thread() is threading.main_thread():
-                self.viewer = napari.Viewer(title="DiSPIM Live View")
-                self.viewer_created = True
-            else:
-                # Defer viewer creation to when actually needed
-                self.viewer_created = False
-        except Exception as e:
-            logger.warning(f"Could not create napari viewer: {e}")
-            self.enabled = False
-    
-    def start(self, doc):
-        """Called at start of Bluesky run"""
-        if not self.enabled:
-            return
-            
-        self.current_plan = doc.get('plan_name', 'unknown_plan')
-        self.plan_metadata = doc.get('plan_args', {})
-        
-        # Determine experiment type and setup appropriate visualization
-        self._setup_for_plan_type()
-        
-        logger.info(f"Started visualization for plan: {self.current_plan}")
-    
-    def event(self, doc):
-        """Called for each Bluesky event (data point)"""
-        if not self.enabled:
-            return
-            
-        # Debug: print what signals we're getting
-        data = doc.get('data', {})
-        print(f"DEBUG: Got signals: {list(data.keys())}")
-        for name, value in data.items():
-            if hasattr(value, 'shape'):
-                print(f"DEBUG: {name} has shape {value.shape}")
-            
-        # Throttle updates to avoid overwhelming napari
-        current_time = time.time()
-        if current_time - self.last_update_time < self.update_interval:
-            return
-        
-        # Process image data from event
-        self._process_event_data(doc)
-        
-        self.last_update_time = current_time
-    
-    def stop(self, doc):
-        """Called at end of Bluesky run"""
-        if not self.enabled:
-            return
-            
-        # Finalize any remaining image stacks
-        self._finalize_stacks()
-        
-        logger.info(f"Completed visualization for plan: {self.current_plan}")
-        
-        # Clear state for next run
-        self.current_plan = None
-        self.plan_metadata = {}
-        self.active_stacks.clear()
-    
-    def _setup_for_plan_type(self):
-        """Setup visualization based on detected plan type"""
-        plan_name = self.current_plan.lower()
-        
-        if 'focus' in plan_name and self.show_focus_sweeps:
-            # Focus sweep - prepare for 3D stack visualization
-            self.stack_managers['focus_sweep'] = ImageStackManager('Focus Sweep')
-            self.active_stacks.add('focus_sweep')
-            logger.debug("Setup focus sweep visualization")
-            
-        elif 'embryo' in plan_name and self.show_embryo_detection:
-            # Embryo detection - prepare for XY scan visualization
-            self.stack_managers['embryo_scan'] = ImageStackManager('Embryo Detection')
-            self.active_stacks.add('embryo_scan')
-            logger.debug("Setup embryo detection visualization")
-            
-        elif self.show_single_images:
-            # General image acquisition
-            logger.debug("Setup single image visualization")
-    
-    def _process_event_data(self, doc):
-        """Process image data from Bluesky event document"""
-        data = doc.get('data', {})
-        timestamps = doc.get('timestamps', {})
-        
-        # Look for image data in the event
-        for signal_name, signal_data in data.items():
-            if self._is_image_signal(signal_name, signal_data):
-                self._handle_image_data(signal_name, signal_data, 
-                                      timestamps.get(signal_name), doc)
-    
-    def _is_image_signal(self, signal_name: str, signal_data: Any) -> bool:
-        """Check if signal contains image data"""
-        # Look for camera image signals
-        if isinstance(signal_data, np.ndarray) and signal_data.ndim >= 2:
-            # Check if signal name indicates camera/image data
-            signal_lower = signal_name.lower()
-            is_image = any(keyword in signal_lower for keyword in ['camera', 'image', 'detector'])
-            print(f"DEBUG: {signal_name} is_image_signal: {is_image}")
-            if is_image:
-                return True
-        return False
-    
-    def _handle_image_data(self, signal_name: str, image_data: np.ndarray, 
-                          timestamp: float, event_doc: Dict):
-        """Handle image data based on current experiment context"""
-        
-        print(f"DEBUG: Handling image data for {signal_name}, shape: {image_data.shape}")
-        
-        # Extract metadata
-        position_data = self._extract_position_data(event_doc)
-        metadata = {
-            'signal_name': signal_name,
-            'timestamp': timestamp,
-            'positions': position_data
-        }
-        
-        # Determine channel (side A or B)
-        channel = self._determine_channel(signal_name)
-        print(f"DEBUG: Channel: {channel}")
-        print(f"DEBUG: active_stacks: {self.active_stacks}")
-        print(f"DEBUG: show_single_images: {self.show_single_images}")
-        
-        if self.active_stacks:
-            print(f"DEBUG: Using stack display mode")
-            # Add to appropriate stack
-            for stack_name in self.active_stacks:
-                stack_manager = self.stack_managers[stack_name]
-                # Get position from any of the common z/focus signal names
-                position = None
-                for key in position_data:
-                    if any(keyword in key.lower() for keyword in ['focus', '_z', 'stage']):
-                        position = position_data[key]
-                        break
-                print(f"DEBUG: Using position {position} from position_data: {position_data}")
-                print(f"DEBUG: Adding image to stack {stack_name}, position: {position}")
-                stack_manager.add_image(image_data, position, timestamp, metadata)
-                
-                # Update napari display
-                print(f"DEBUG: Updating stack display")
-                self._update_stack_display(stack_name, stack_manager, channel)
-        
-        elif self.show_single_images:
-            print(f"DEBUG: Using single image display mode")
-            # Display single image immediately
-            self._display_single_image(signal_name, image_data, metadata, channel)
-        else:
-            print(f"DEBUG: No display mode active!")
-    
-    def _extract_position_data(self, event_doc: Dict) -> Dict[str, float]:
-        """Extract position information from event document"""
-        data = event_doc.get('data', {})
-        positions = {}
-        
-        # Look for position signals - include z-stage and focus devices
-        for signal_name, value in data.items():
-            signal_lower = signal_name.lower()
-            if any(keyword in signal_lower for keyword in ['position', 'readback', '_z', 'focus', 'stage']):
-                try:
-                    positions[signal_name] = float(value)
-                    print(f"DEBUG: Found position signal {signal_name} = {value}")
-                except (ValueError, TypeError):
-                    pass
-        
-        return positions
-    
-    def _determine_channel(self, signal_name: str) -> str:
-        """Determine which DiSPIM channel (side) this image is from"""
-        signal_lower = signal_name.lower()
-        
-        if '_a' in signal_lower or 'side_a' in signal_lower:
-            return 'side_a'
-        elif '_b' in signal_lower or 'side_b' in signal_lower:
-            return 'side_b'
-        else:
-            return 'side_a'  # Default to side A
-    
-    def _update_stack_display(self, stack_name: str, stack_manager: ImageStackManager, 
-                             channel: str):
-        """Update napari display with current image stack"""
-        stack, metadata = stack_manager.get_stack()
-        if stack is None:
-            return
-        
-        # Ensure viewer exists
-        if not self.viewer:
-            try:
-                self.viewer = napari.Viewer(title="DiSPIM Live View")
-                self.viewer_created = True
-            except Exception as e:
-                logger.warning(f"Cannot create napari viewer: {e}")
-                return
-        
-        try:
-            layer_name = f"{metadata['name']} ({channel.title()})"
-            print(f"DEBUG: Trying to display layer '{layer_name}' with stack shape: {stack.shape}")
-            
-            # Choose colors for dual-sided DiSPIM
-            colormap = 'green' if channel == 'side_a' else 'magenta'
-            
-            # Update or create napari layer
-            if layer_name in self.viewer.layers:
-                print(f"DEBUG: Updating existing layer")
-                # Update existing layer
-                self.viewer.layers[layer_name].data = stack
-            else:
-                print(f"DEBUG: Creating new layer")
-                # Create new layer
-                self.viewer.add_image(
-                    stack,
-                    name=layer_name,
-                    colormap=colormap,
-                    blending='additive' if self.dual_channel_mode else 'translucent',
-                    metadata=metadata
-                )
-            
-            print(f"DEBUG: Resetting view")
-            # Update display
-            self.viewer.reset_view()
-            print(f"DEBUG: Napari update completed successfully")
-        except Exception as e:
-            print(f"DEBUG: Napari update failed: {e}")
-            import traceback
-            traceback.print_exc()
-            # Continue without disabling
-    
-    def _display_single_image(self, signal_name: str, image_data: np.ndarray, 
-                             metadata: Dict, channel: str):
-        """Display a single 2D image in napari"""
-        # Ensure viewer exists
-        if not self.viewer:
-            try:
-                self.viewer = napari.Viewer(title="DiSPIM Live View")
-                self.viewer_created = True
-            except Exception as e:
-                logger.warning(f"Cannot create napari viewer: {e}")
-                return
-        
-        try:
-            layer_name = f"{signal_name} ({channel.title()})"
-            colormap = 'green' if channel == 'side_a' else 'magenta'
-            
-            # Update or create napari layer
-            if layer_name in self.viewer.layers:
-                self.viewer.layers[layer_name].data = image_data
-            else:
-                self.viewer.add_image(
-                    image_data,
-                    name=layer_name,
-                    colormap=colormap,
-                    blending='additive' if self.dual_channel_mode else 'translucent',
-                    metadata=metadata
-                )
-        except Exception as e:
-            logger.warning(f"Failed to display image in napari: {e}")
-    
-    def _finalize_stacks(self):
-        """Finalize any remaining image stacks at end of run"""
-        for stack_name, stack_manager in self.stack_managers.items():
-            if stack_manager.images:
-                # Final update of stack display
-                for channel in ['side_a', 'side_b']:
-                    self._update_stack_display(stack_name, stack_manager, channel)
-        
-        # Clear stack managers for next run
-        self.stack_managers.clear()
+    Simple napari setup for live imaging - returns viewer and image layer
 
+    This matches the pattern in test_embryo_focus.py where you update image_layer.data directly.
 
-def setup_napari_callback(config: Optional[Dict] = None, 
-                         viewer: 'napari.Viewer' = None) -> NapariCallback:
-    """
-    Convenience function to setup napari callback with sensible defaults
-    
-    Parameters
-    ----------
-    config : Dict, optional
-        Configuration options for NapariCallback
-    viewer : napari.Viewer, optional
-        Existing napari viewer to use
-        
-    Returns
-    -------
-    NapariCallback
-        Configured callback ready for RunEngine.subscribe()
-        
-    Examples
-    --------
-    Basic usage:
-    >>> RE = RunEngine({})
-    >>> napari_callback = setup_napari_callback()
-    >>> RE.subscribe(napari_callback)
-    
-    Custom configuration:
-    >>> config = {'show_focus_sweeps': True, 'update_interval': 0.5}
-    >>> napari_callback = setup_napari_callback(config)
-    >>> RE.subscribe(napari_callback)
-    """
-    if not NAPARI_AVAILABLE:
-        logger.warning("Napari not available - returning disabled callback")
-        callback = NapariCallback()  # Will be disabled automatically
-        return callback
-    
-    # Default configuration
-    default_config = {
-        'show_focus_sweeps': True,
-        'show_embryo_detection': True,
-        'show_single_images': True,
-        'dual_channel_mode': True,
-        'update_interval': 0.1
-    }
-    
-    # Merge user config
-    if config:
-        default_config.update(config)
-    
-    callback = NapariCallback(viewer=viewer, **default_config)
-    
-    if callback.enabled:
-        logger.info("Napari visualization enabled - images will display in real-time")
-    
-    return callback
-
-
-def create_napari_viewer(title: str = "DiSPIM Live View") -> 'napari.Viewer':
-    """
-    Create a new napari viewer optimized for DiSPIM visualization
-    
     Parameters
     ----------
     title : str
-        Window title for the viewer
-        
+        Window title for napari viewer
+
     Returns
     -------
-    napari.Viewer
-        Configured napari viewer
+    tuple
+        (viewer, image_layer) - viewer for manual control, image_layer for direct data updates
     """
-    if not NAPARI_AVAILABLE:
-        raise ImportError("Napari not available. Install with: pip install napari[all]")
-    
+    # Create viewer with live image layer
     viewer = napari.Viewer(title=title)
-    
-    # Configure viewer for microscopy data
-    viewer.theme = 'dark'
-    
-    return viewer
+    dummy_image = np.zeros((2048, 2048), dtype=np.uint16)
+    image_layer = viewer.add_image(dummy_image, name='Live Image', colormap='gray')
+
+    # Enable continuous autocontrast for optimal viewing
+    image_layer.contrast_limits_range = (0, 65535)
+
+    return viewer, image_layer
 
 
-# Convenience functions for common usage patterns
+def create_napari_callback(image_layer, camera_name: str = 'bottom_camera'):
+    """
+    Create a callback function for Bluesky RunEngine that updates napari image layer
 
-def enable_focus_sweep_visualization(RE, viewer: 'napari.Viewer' = None):
-    """Enable napari visualization for focus sweep experiments"""
-    config = {
-        'show_focus_sweeps': True,
-        'show_embryo_detection': False,
-        'show_single_images': False,
-        'dual_channel_mode': True
-    }
-    
-    callback = setup_napari_callback(config, viewer)
-    RE.subscribe(callback)
-    return callback
+    Parameters
+    ----------
+    image_layer : napari.layers.Image
+        Napari image layer to update
+    camera_name : str
+        Name of camera device in RunEngine documents
+
+    Returns
+    -------
+    callable
+        Callback function for RE.subscribe()
+
+    TODO: move this function to a callbacks module. The rationale is that this has mostly document
+    processing code, which is shared by all callback layer objects.
+    """
+    def napari_live_update(name, doc):
+        """Update napari with live images during acquisition"""
+        if name == 'event':
+            data = doc.get('data', {})
+            if camera_name in data:
+                image = data[camera_name]
+                image_layer.data = image
+                # Force contrast adjustment for each new image
+                image_layer.reset_contrast_limits()
+
+    return napari_live_update
 
 
-def enable_embryo_detection_visualization(RE, viewer: 'napari.Viewer' = None):
-    """Enable napari visualization for embryo detection experiments"""  
-    config = {
-        'show_focus_sweeps': False,
-        'show_embryo_detection': True,
-        'show_single_images': False,
-        'dual_channel_mode': False  # Usually single camera for detection
-    }
-    
-    callback = setup_napari_callback(config, viewer)
-    RE.subscribe(callback)
-    return callback
+def setup_napari_camera_feed(title: str = "DiSPIM Live View", camera_name: str = 'bottom_camera'):
+    """
+    Single function to setup napari viewer and return camera feed callback
+
+    Combines setup_napari_live_view() + create_napari_callback() into one call.
+
+    Parameters
+    ----------
+    title : str
+        Window title for napari viewer
+    camera_name : str
+        Name of camera device in RunEngine documents
+
+    Returns
+    -------
+    tuple
+        (viewer, camera_feed_callback) - viewer for manual control, callback for RE.subscribe()
+    """
+    viewer, image_layer = setup_napari_live_view(title)
+    camera_feed_callback = create_napari_callback(image_layer, camera_name)
+    return viewer, camera_feed_callback
 
 
-def enable_full_visualization(RE, viewer: 'napari.Viewer' = None):
-    """Enable napari visualization for all DiSPIM experiments"""
-    config = {
-        'show_focus_sweeps': True,
-        'show_embryo_detection': True, 
-        'show_single_images': True,
-        'dual_channel_mode': True
-    }
-    
-    callback = setup_napari_callback(config, viewer)
-    RE.subscribe(callback)
-    return callback
+def create_simple_focus_plotter(title: str = "Focus Analysis"):
+    """
+    Simple matplotlib plotter for focus curves - no complex threading
+
+    Parameters
+    ----------
+    title : str
+        Plot window title
+
+    Returns
+    -------
+    callable
+        Update function that can be used as callback: update(scan_type, position, score, image, roi)
+    """
+    # Create figure with focus curve and current image
+    fig, (ax_curve, ax_image) = plt.subplots(1, 2, figsize=(12, 5))
+    fig.suptitle(title, fontsize=14, fontweight='bold')
+
+    # Setup focus curve plot
+    ax_curve.set_xlabel('Position (μm)')
+    ax_curve.set_ylabel('Focus Score')
+    ax_curve.set_title('Focus Score vs Position')
+    ax_curve.grid(True, alpha=0.3)
+
+    # Setup image display
+    ax_image.set_title('Current Image')
+    ax_image.set_xticks([])
+    ax_image.set_yticks([])
+
+    # Data storage
+    coarse_positions, coarse_scores = [], []
+    fine_positions, fine_scores = [], []
+
+    # Turn on interactive mode for live updates
+    plt.ion()
+    plt.show(block=False)
+
+    def update_plot(scan_type: str, position: float, score: float, image: np.ndarray, roi=None):
+        """Update the plot with new focus data"""
+        try:
+            # Store data points
+            if scan_type == 'coarse':
+                coarse_positions.append(position)
+                coarse_scores.append(score)
+            elif scan_type == 'fine':
+                fine_positions.append(position)
+                fine_scores.append(score)
+
+            # Clear and redraw focus curve
+            ax_curve.clear()
+            ax_curve.set_xlabel('Position (μm)')
+            ax_curve.set_ylabel('Focus Score')
+            ax_curve.set_title('Focus Score vs Position')
+            ax_curve.grid(True, alpha=0.3)
+
+            # Plot data
+            if coarse_positions:
+                ax_curve.plot(coarse_positions, coarse_scores, 'bo-',
+                             label='Coarse Scan', markersize=6, linewidth=2, alpha=0.7)
+            if fine_positions:
+                ax_curve.plot(fine_positions, fine_scores, 'ro-',
+                             label='Fine Scan', markersize=6, linewidth=2, alpha=0.7)
+
+            if coarse_positions or fine_positions:
+                ax_curve.legend()
+
+            # Update current image
+            if image is not None:
+                ax_image.clear()
+                ax_image.imshow(image, cmap='gray', aspect='auto')
+                ax_image.set_title('Current Image')
+                ax_image.set_xticks([])
+                ax_image.set_yticks([])
+
+                # Overlay ROI if provided
+                if roi is not None:
+                    x, y, w, h = roi
+                    rect = plt.Rectangle((x, y), w, h, linewidth=2,
+                                       edgecolor='red', facecolor='none', alpha=0.8)
+                    ax_image.add_patch(rect)
+                    ax_image.text(x, y-5, 'Embryo ROI', color='red', fontsize=8)
+
+            # Refresh display
+            plt.tight_layout()
+            plt.draw()
+            plt.pause(0.001)  # Small pause to allow GUI update
+
+        except Exception as e:
+            print(f"Error updating focus plot: {e}")
+
+    # Add helper methods to the function
+    update_plot.save_plot = lambda filename: fig.savefig(filename, dpi=150, bbox_inches='tight')
+    update_plot.close = lambda: plt.close(fig)
+    update_plot.clear_data = lambda: (coarse_positions.clear(), coarse_scores.clear(),
+                                     fine_positions.clear(), fine_scores.clear())
+
+    return update_plot
+
+
+def create_live_focus_plotter(title: str = "DiSPIM Live Focus Analysis"):
+    """
+    Convenience function to create a live focus plotter
+
+    Maintains backward compatibility with existing code while using the simple implementation.
+
+    Parameters
+    ----------
+    title : str
+        Plot window title
+
+    Returns
+    -------
+    callable
+        Focus plotter function
+    """
+    return create_simple_focus_plotter(title)
+
+
+def add_focus_analysis_markers(plotter, coarse_best: float = None, fine_best: float = None):
+    """
+    Add vertical lines to mark best focus positions
+
+    Parameters
+    ----------
+    plotter : callable
+        Plotter function returned by create_simple_focus_plotter()
+    coarse_best : float, optional
+        Best coarse focus position
+    fine_best : float, optional
+        Best fine focus position
+    """
+    try:
+        # Get the current figure
+        fig = plt.gcf()
+        ax_curve = fig.axes[0]  # First axis is the curve plot
+
+        if coarse_best is not None:
+            ax_curve.axvline(coarse_best, color='blue', linestyle='--', alpha=0.7,
+                           label=f'Coarse Best: {coarse_best:.1f}μm')
+
+        if fine_best is not None:
+            ax_curve.axvline(fine_best, color='red', linestyle='--', alpha=0.7,
+                           label=f'Fine Best: {fine_best:.1f}μm')
+
+        ax_curve.legend()
+        plt.draw()
+
+    except Exception as e:
+        print(f"Error adding analysis markers: {e}")
+
