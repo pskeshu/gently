@@ -63,3 +63,9 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Config files with sensitive data
+config.yml
+
+# Napari/Qt
+*.qss

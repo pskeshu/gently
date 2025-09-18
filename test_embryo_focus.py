@@ -13,7 +13,7 @@ from gently.devices import DiSPIMCamera, DiSPIMZstage
 from gently.plans import focus_sweep_with_analysis
 from gently.analysis.focus import create_focus_positions
 from gently.visualization import create_live_focus_plotter, setup_napari_camera_feed
-from gently.analysis import FocusAnalysisConfig
+from gently.analysis.core import FocusAnalysisConfig
 from client import get_mmc
 
 # Access DiSPIM with micromanager

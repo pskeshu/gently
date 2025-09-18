@@ -13,10 +13,10 @@ import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
 
-# Import from parent analysis module
-from ..analysis import (
+# Import from core analysis module
+from .core import (
     calculate_focus_score, analyze_focus_stack, fit_focus_curve,
-    find_curve_maximum, FocusAnalysisConfig, FocusResult
+    FocusAnalysisConfig, FocusResult
 )
 from ..detection import get_embryo_focus_roi
 

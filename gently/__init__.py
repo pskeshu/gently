@@ -17,57 +17,27 @@ to embryo detection and multi-embryo acquisition workflows.
 
 # Core device classes - proper Ophyd devices for Bluesky
 from .devices import (
-    DiSPIMPiezo,
-    DiSPIMGalvo, 
+    DiSPIMZstage,
     DiSPIMCamera,
     DiSPIMXYStage,
-    DiSPIMLaserControl,
-    DiSPIMLightSheet,
-    DiSPIMSystem,
-    create_dispim_system
+    DiSPIMLaserControl
 )
 
 # Plan functions - device-agnostic Bluesky plans
 from .plans import (
-    # Atomic plans
-    focus_sweep,
-    move_and_acquire,
-    synchronized_move,
-    
-    # Autofocus plans
-    dispim_piezo_autofocus,
-    dispim_galvo_autofocus, 
-    dual_sided_autofocus,
-    
-    # Calibration plans
-    dispim_two_point_calibration,
-    dispim_full_calibration,
-    
-    # Embryo workflow plans
-    find_embryos_with_bottom_camera,
-    acquire_embryo_lightsheet,
-    full_dispim_workflow,
-    
-    # Convenience functions
-    quick_autofocus,
-    quick_calibration,
-    
-    # Configuration classes
-    AutofocusConfig,
-    CalibrationConfig
+    focus_sweep_with_analysis,
+    focus_sweep
 )
 
 # Analysis utilities - device-agnostic focus analysis
-from .analysis import (
-    calculate_focus_score,
-    fit_focus_curve,
-    find_curve_maximum,
-    validate_autofocus_result,
-    analyze_focus_stack,
+from .analysis.core import (
     FocusAnalysisConfig,
     FocusResult,
     FocusAlgorithm,
-    FitFunction
+    FitFunction,
+    calculate_focus_score,
+    analyze_focus_stack,
+    fit_focus_curve
 )
 
 # Coordinate utilities - transformations and reference mapping
