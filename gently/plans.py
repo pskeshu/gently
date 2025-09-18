@@ -27,7 +27,7 @@ from bluesky import Msg
 from bluesky.utils import short_uid
 
 
-from .analysis import FocusAnalysisConfig
+from .analysis.core import FocusAnalysisConfig
 from .analysis.focus import (
     score_single_image, find_best_focus_position, analyze_focus_sweep,
     create_focus_positions, print_focus_summary, FocusDataPoint, FocusSweepResult
