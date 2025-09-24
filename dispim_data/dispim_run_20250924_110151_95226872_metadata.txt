@@ -1,0 +1,5 @@
+Run UID: 95226872-7a20-4034-be43-a14a8522408c
+Plan: simple_focus_sweep
+Time: 2025-09-24 11:01:51.974077
+Metadata: {'uid': '95226872-7a20-4034-be43-a14a8522408c', 'time': 1758726111.9740772, 'versions': {'ophyd': '1.11.0', 'bluesky': '1.14.4'}, 'scan_id': 1, 'plan_type': 'generator', 'plan_name': 'simple_focus_sweep'}
+
