@@ -32,7 +32,9 @@ class ClaudeFocusController:
         """Initialize Claude Code client with microscope tools"""
         # Configure Claude Code client
         try:
-            options = ClaudeCodeOptions()
+            options = ClaudeCodeOptions(
+                allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history", "TodoWrite"]
+            )
             self.client = ClaudeSDKClient(options=options)
 
             # Register microscope tools
