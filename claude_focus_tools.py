@@ -223,59 +223,75 @@ async def clear_focus_history(args: Dict[str, Any]) -> Dict[str, Any]:
         "content": [{"type": "text", "text": f"Cleared {count} entries from focus history"}]
     }
 
-# Tool definitions for MCP server
+# Tool definitions for Claude Code SDK
 MICROSCOPE_TOOLS = [
     {
         "name": "move_z_stage",
         "description": "Move the microscope Z stage to a specific position in micrometers",
-        "inputSchema": {
+        "input_schema": {
             "type": "object",
             "properties": {
-                "position": {"type": "number", "description": "Z position in micrometers (50-250 μm range)"}
+                "position": {
+                    "type": "number",
+                    "description": "Z position in micrometers (50-250 μm range)",
+                    "minimum": 50,
+                    "maximum": 250
+                }
             },
-            "required": ["position"]
+            "required": ["position"],
+            "additionalProperties": False
         },
         "handler": move_z_stage
     },
     {
         "name": "capture_image",
         "description": "Capture an image from the microscope camera at current Z position",
-        "inputSchema": {
+        "input_schema": {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False
         },
         "handler": capture_image
     },
     {
         "name": "get_microscope_status",
         "description": "Get current status of the microscope including position and settings",
-        "inputSchema": {
+        "input_schema": {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False
         },
         "handler": get_microscope_status
     },
     {
         "name": "get_focus_history",
         "description": "Get recent focus sweep history with images",
-        "inputSchema": {
+        "input_schema": {
             "type": "object",
             "properties": {
-                "limit": {"type": "number", "description": "Number of recent entries to return (default: 5)"}
+                "limit": {
+                    "type": "integer",
+                    "description": "Number of recent entries to return (default: 5)",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "default": 5
+                }
             },
-            "required": []
+            "required": [],
+            "additionalProperties": False
         },
         "handler": get_focus_history
     },
     {
         "name": "clear_focus_history",
         "description": "Clear the focus history buffer",
-        "inputSchema": {
+        "input_schema": {
             "type": "object",
             "properties": {},
-            "required": []
+            "required": [],
+            "additionalProperties": False
         },
         "handler": clear_focus_history
     }

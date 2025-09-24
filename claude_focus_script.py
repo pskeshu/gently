@@ -13,41 +13,43 @@ import json
 from typing import List, Dict, Any
 from claude_focus_tools import connect_microscope, MICROSCOPE_TOOLS
 
-# Import Claude Code SDK (would need to be installed)
-try:
-    from claude_code_sdk import ClaudeCodeClient, ClaudeCodeOptions
-    SDK_AVAILABLE = True
-except ImportError:
-    print("Claude Code SDK not available - this is a demonstration script")
-    SDK_AVAILABLE = False
+# Import Claude Code SDK - required for operation
+from claude_code_sdk import ClaudeCodeClient
 
 class ClaudeFocusController:
     """Claude-powered focus controller using Claude Code SDK"""
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, config: Dict[str, Any] = None):
         self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
         self.client = None
         self.focus_session_active = False
+        self.config = config or {}
+
+        # Set default configuration
+        self.config.setdefault('max_retries', 3)
+        self.config.setdefault('timeout', 30)
+        self.config.setdefault('model', 'claude-3-sonnet-20240229')
+        self.config.setdefault('max_tokens', 4000)
 
         if not self.api_key:
             raise ValueError("ANTHROPIC_API_KEY environment variable required")
 
     async def initialize_claude(self):
         """Initialize Claude Code client with microscope tools"""
-        if not SDK_AVAILABLE:
-            print("Claude Code SDK not available - simulating responses")
-            return
-
-        # Configure Claude Code with microscope tools
-        options = ClaudeCodeOptions(
-            tools=MICROSCOPE_TOOLS,
-            allow_tool_execution=True
-        )
-
-        self.client = ClaudeCodeClient(
-            api_key=self.api_key,
-            options=options
-        )
+        # Configure Claude Code client with proper tool registration
+        try:
+            self.client = ClaudeCodeClient(
+                api_key=self.api_key,
+                model=self.config['model'],
+                max_tokens=self.config['max_tokens'],
+                tools=MICROSCOPE_TOOLS,
+                allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history"],
+                permission_mode="explicit",
+                timeout=self.config['timeout']
+            )
+        except Exception as e:
+            print(f"Failed to initialize Claude Code client: {e}")
+            raise
 
     async def start_focus_session(self, focus_range: tuple = (100, 200), num_steps: int = 10):
         """Start a Claude-guided focus session"""
@@ -96,87 +98,30 @@ Please start by checking the microscope status, then begin the focus sweep.
 Remember to focus on analyzing the sharpness of the embryo's outer boundary, not internal details or optical artifacts.
 """
 
-        if SDK_AVAILABLE:
+        if not self.client:
+            raise RuntimeError("Claude client not initialized. Call initialize_claude() first.")
+
+        # Retry logic for robustness
+        for attempt in range(self.config['max_retries']):
             try:
-                response = await self.client.query(focus_prompt)
-                print("Claude response:", response)
+                response = await self.client.send_message(focus_prompt)
+                if hasattr(response, 'error') and response.error:
+                    print(f"Claude error: {response.error}")
+                    if attempt < self.config['max_retries'] - 1:
+                        print(f"Retrying... (attempt {attempt + 2}/{self.config['max_retries']})")
+                        continue
+                    return False
+
+                content = response.content if hasattr(response, 'content') else str(response)
+                print("Claude response:", content)
                 return True
             except Exception as e:
-                print(f"Error communicating with Claude: {e}")
+                print(f"Error communicating with Claude (attempt {attempt + 1}/{self.config['max_retries']}): {e}")
+                if attempt < self.config['max_retries'] - 1:
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
                 return False
-        else:
-            print("Would send to Claude:", focus_prompt)
-            return await self.simulate_focus_session(focus_range, num_steps)
 
-    async def simulate_focus_session(self, focus_range: tuple, num_steps: int):
-        """Simulate Claude-guided focusing when SDK not available"""
-        print("\n=== Simulating Claude Focus Session ===")
-
-        from claude_focus_tools import _microscope_state
-
-        # Simulate Claude checking status
-        print("\nClaude: Let me check the microscope status first...")
-        await asyncio.sleep(1)
-
-        if _microscope_state['connected']:
-            z_stage = _microscope_state['z_stage']
-            current_z = z_stage.read()[z_stage.name]['value']
-            print(f"Claude: I can see the microscope is connected. Current Z position is {current_z:.2f} μm.")
-            print(f"Claude: I'll now perform a focus sweep from {focus_range[0]} to {focus_range[1]} μm to find the sharpest embryo boundary.")
-
-        # Simulate focus sweep
-        import numpy as np
-        positions = np.linspace(focus_range[0], focus_range[1], num_steps)
-
-        focus_scores = []
-        for i, pos in enumerate(positions):
-            print(f"\nClaude: Moving to position {pos:.2f} μm ({i+1}/{num_steps})...")
-
-            # Move stage (this would be real)
-            z_stage = _microscope_state['z_stage']
-            status = z_stage.set(pos)
-            while not status.done:
-                await asyncio.sleep(0.1)
-
-            # Capture image (this would be real)
-            camera = _microscope_state['camera']
-            img_status = camera.trigger()
-            while not img_status.done:
-                await asyncio.sleep(0.1)
-
-            # Simulate Claude's visual analysis
-            await asyncio.sleep(0.5)  # Simulate analysis time
-
-            # Generate simulated focus score (peak around middle of range)
-            optimal_pos = (focus_range[0] + focus_range[1]) / 2
-            score = 100 - abs(pos - optimal_pos) * 2 + np.random.normal(0, 5)
-            focus_scores.append((pos, score))
-
-            print(f"Claude: Analyzing embryo boundary sharpness at {pos:.2f} μm...")
-            if score > 85:
-                print("Claude: Excellent focus! The embryo boundary is very sharp and well-defined.")
-            elif score > 70:
-                print("Claude: Good focus. The embryo outline is clear with minor softness.")
-            elif score > 50:
-                print("Claude: Moderate focus. The embryo boundary shows some blur.")
-            else:
-                print("Claude: Poor focus. The embryo appears very blurry with soft edges.")
-
-        # Find best position
-        best_pos, best_score = max(focus_scores, key=lambda x: x[1])
-
-        print(f"\nClaude: Analysis complete! Best focus found at {best_pos:.2f} μm (score: {best_score:.1f})")
-        print("Claude: The embryo boundary appears sharpest at this position.")
-        print("Claude: Moving to optimal focus position...")
-
-        # Move to best position
-        status = z_stage.set(best_pos)
-        while not status.done:
-            await asyncio.sleep(0.1)
-
-        print(f"Claude: Focus complete! Microscope positioned at {best_pos:.2f} μm for optimal embryo boundary sharpness.")
-
-        return True
 
     async def interactive_focus_session(self):
         """Interactive session where user can chat with Claude about focusing"""
@@ -202,14 +147,19 @@ Remember to focus on analyzing the sharpness of the embryo's outer boundary, not
             if not user_input:
                 continue
 
-            if SDK_AVAILABLE:
-                try:
-                    response = await self.client.query(user_input)
-                    print(f"Claude: {response}")
-                except Exception as e:
-                    print(f"Error: {e}")
-            else:
-                print("Claude: [SDK not available - would respond to:", user_input, "]")
+            if not self.client:
+                print("Error: Claude client not initialized")
+                break
+
+            try:
+                response = await self.client.send_message(user_input)
+                if hasattr(response, 'error') and response.error:
+                    print(f"Error: {response.error}")
+                else:
+                    content = response.content if hasattr(response, 'content') else str(response)
+                    print(f"Claude: {content}")
+            except Exception as e:
+                print(f"Error: {e}")
 
 async def main():
     """Main function to run Claude focus demonstration"""
@@ -220,8 +170,9 @@ async def main():
 
     # Check if API key is available
     api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key and SDK_AVAILABLE:
-        print("Warning: ANTHROPIC_API_KEY not found. Some features may not work.")
+    if not api_key:
+        print("Error: ANTHROPIC_API_KEY environment variable is required.")
+        return
 
     try:
         controller = ClaudeFocusController(api_key)
