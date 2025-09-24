@@ -36,11 +36,6 @@ class ClaudeFocusController:
                 allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history", "TodoWrite"]
             )
             self.client = ClaudeSDKClient(options=options)
-
-            # Register microscope tools
-            for tool in MICROSCOPE_TOOLS:
-                self.client.register_tool(tool["name"], tool["handler"], tool["input_schema"], tool["description"])
-
             await self.client.connect()
         except Exception as e:
             print(f"Failed to initialize Claude Code client: {e}")
