@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 from claude_focus_tools import connect_microscope, MICROSCOPE_TOOLS
 
 # Import Claude Code SDK - required for operation
-from claude_code_sdk import ClaudeSDKClient
+from claude_code_sdk import ClaudeSDKClient, ClaudeCodeOptions
 
 class ClaudeFocusController:
     """Claude-powered focus controller using Claude Code SDK"""
@@ -32,11 +32,12 @@ class ClaudeFocusController:
         """Initialize Claude Code client with microscope tools"""
         # Configure Claude Code client with proper tool registration
         try:
-            self.client = ClaudeSDKClient(
+            options = ClaudeCodeOptions(
                 tools=MICROSCOPE_TOOLS,
-                allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history"],
-                permission_mode="explicit"
+                allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history"]
             )
+            self.client = ClaudeSDKClient(options=options)
+            await self.client.connect()
         except Exception as e:
             print(f"Failed to initialize Claude Code client: {e}")
             raise
@@ -91,26 +92,21 @@ Remember to focus on analyzing the sharpness of the embryo's outer boundary, not
         if not self.client:
             raise RuntimeError("Claude client not initialized. Call initialize_claude() first.")
 
-        # Retry logic for robustness
-        for attempt in range(self.config['max_retries']):
-            try:
-                response = await self.client.send_message(focus_prompt)
-                if hasattr(response, 'error') and response.error:
-                    print(f"Claude error: {response.error}")
-                    if attempt < self.config['max_retries'] - 1:
-                        print(f"Retrying... (attempt {attempt + 2}/{self.config['max_retries']})")
-                        continue
-                    return False
+        # Send query and receive response
+        try:
+            await self.client.query(focus_prompt)
 
-                content = response.content if hasattr(response, 'content') else str(response)
-                print("Claude response:", content)
-                return True
-            except Exception as e:
-                print(f"Error communicating with Claude (attempt {attempt + 1}/{self.config['max_retries']}): {e}")
-                if attempt < self.config['max_retries'] - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                return False
+            print("Claude response:")
+            async for message in self.client.receive_response():
+                print(message)
+
+            return True
+        except Exception as e:
+            print(f"Error communicating with Claude: {e}")
+            return False
+        finally:
+            if self.client:
+                await self.client.disconnect()
 
 
     async def interactive_focus_session(self):
@@ -128,28 +124,31 @@ Remember to focus on analyzing the sharpness of the embryo's outer boundary, not
         print("Remember: This is a bottom camera view showing the entire embryo outline.")
         print("Type 'quit' to exit.\n")
 
-        while True:
-            user_input = input("You: ").strip()
+        try:
+            while True:
+                user_input = input("You: ").strip()
 
-            if user_input.lower() in ['quit', 'exit', 'q']:
-                break
+                if user_input.lower() in ['quit', 'exit', 'q']:
+                    break
 
-            if not user_input:
-                continue
+                if not user_input:
+                    continue
 
-            if not self.client:
-                print("Error: Claude client not initialized")
-                break
+                if not self.client:
+                    print("Error: Claude client not initialized")
+                    break
 
-            try:
-                response = await self.client.send_message(user_input)
-                if hasattr(response, 'error') and response.error:
-                    print(f"Error: {response.error}")
-                else:
-                    content = response.content if hasattr(response, 'content') else str(response)
-                    print(f"Claude: {content}")
-            except Exception as e:
-                print(f"Error: {e}")
+                try:
+                    await self.client.query(user_input)
+
+                    print("Claude:")
+                    async for message in self.client.receive_response():
+                        print(message)
+                except Exception as e:
+                    print(f"Error: {e}")
+        finally:
+            if self.client:
+                await self.client.disconnect()
 
 async def main():
     """Main function to run Claude focus demonstration"""
