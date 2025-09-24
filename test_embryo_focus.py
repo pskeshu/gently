@@ -8,6 +8,10 @@ import napari
 from bluesky import RunEngine
 import bluesky.plan_stubs as bps
 from bluesky.callbacks.best_effort import BestEffortCallback
+from databroker import Broker
+import databroker.v0 as db
+from datetime import datetime
+import os
 
 from gently.devices import DiSPIMCamera, DiSPIMZstage
 from gently.plans import focus_sweep_with_analysis
@@ -29,6 +33,89 @@ RE = RunEngine()
 # Add BestEffortCallback for terminal output
 bec = BestEffortCallback()
 RE.subscribe(bec)
+
+# Create data directory for saving files
+data_dir = "dispim_data"
+os.makedirs(data_dir, exist_ok=True)
+
+# Setup data broker for saving to disk (using SQLite instead of MongoDB)
+db_config = {
+    'name': 'dispim_db',
+    'metadatastore': {
+        'module': 'databroker.headersource.sqlite',
+        'config': {'directory': data_dir}
+    },
+    'assets': {
+        'module': 'databroker.assets.sqlite',
+        'config': {'directory': data_dir}
+    }
+}
+
+try:
+    db = Broker.from_config(db_config)
+    RE.subscribe(db.insert)
+    print(f"Databroker configured to save to: {data_dir}")
+except Exception as e:
+    print(f"Warning: Could not setup databroker: {e}")
+    print("Continuing with file-based saving only...")
+
+# Simple file-based callback for saving data
+class DataSaver:
+    def __init__(self, save_dir):
+        self.save_dir = save_dir
+        self.current_run_data = []
+
+    def __call__(self, name, doc):
+        if name == 'start':
+            self.current_run_data = []
+            self.start_doc = doc
+            timestamp = datetime.fromtimestamp(doc['time']).strftime('%Y%m%d_%H%M%S')
+            self.filename = f"{self.save_dir}/dispim_run_{timestamp}_{doc['uid'][:8]}"
+
+        elif name == 'event':
+            self.current_run_data.append(doc)
+
+        elif name == 'stop':
+            # Save data to files
+            self._save_run_data()
+
+    def _save_run_data(self):
+        # Save metadata
+        with open(f"{self.filename}_metadata.txt", 'w') as f:
+            f.write(f"Run UID: {self.start_doc['uid']}\n")
+            f.write(f"Plan: {self.start_doc.get('plan_name', 'unknown')}\n")
+            f.write(f"Time: {datetime.fromtimestamp(self.start_doc['time'])}\n")
+            f.write(f"Metadata: {self.start_doc}\n\n")
+
+        # Save position and focus data
+        positions = []
+        focus_scores = []
+        images = []
+
+        for i, event in enumerate(self.current_run_data):
+            data = event['data']
+
+            # Extract position if available
+            if 'focus_bottom_z' in data:
+                positions.append(data['focus_bottom_z'])
+
+            # Extract image if available
+            if 'bottom_camera' in data:
+                images.append(data['bottom_camera'])
+
+        # Save positions to CSV
+        if positions:
+            np.savetxt(f"{self.filename}_positions.csv", positions,
+                      delimiter=',', header='z_position_um')
+
+        # Save images as numpy archive
+        if images:
+            np.savez_compressed(f"{self.filename}_images.npz", images=np.array(images))
+
+        print(f"Data saved to: {self.filename}_*")
+
+data_saver = DataSaver(data_dir)
+RE.subscribe(data_saver)
 
 # Add Napari camera feed visualization for our individual camera(s) for some human feedback
 viewer, camera_feed = setup_napari_camera_feed("DiSPIM Focus Test", 'bottom_camera')
@@ -101,7 +188,7 @@ def embryo_autofocus():
 
 def run_embryo_autofocus():
     """Run embryo autofocus test"""
-    RE(embryo_autofocus())
+    RE(embryo_focus_test())
 
 def cleanup_napari():
     """Clean up napari viewer to prevent thread warnings"""
