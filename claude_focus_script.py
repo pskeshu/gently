@@ -14,13 +14,12 @@ from typing import List, Dict, Any
 from claude_focus_tools import connect_microscope, MICROSCOPE_TOOLS
 
 # Import Claude Code SDK - required for operation
-from claude_code_sdk import ClaudeCodeClient
+from claude_code_sdk import ClaudeSDKClient
 
 class ClaudeFocusController:
     """Claude-powered focus controller using Claude Code SDK"""
 
-    def __init__(self, api_key: str = None, config: Dict[str, Any] = None):
-        self.api_key = api_key or os.getenv('ANTHROPIC_API_KEY')
+    def __init__(self, config: Dict[str, Any] = None):
         self.client = None
         self.focus_session_active = False
         self.config = config or {}
@@ -28,24 +27,15 @@ class ClaudeFocusController:
         # Set default configuration
         self.config.setdefault('max_retries', 3)
         self.config.setdefault('timeout', 30)
-        self.config.setdefault('model', 'claude-3-sonnet-20240229')
-        self.config.setdefault('max_tokens', 4000)
-
-        if not self.api_key:
-            raise ValueError("ANTHROPIC_API_KEY environment variable required")
 
     async def initialize_claude(self):
         """Initialize Claude Code client with microscope tools"""
         # Configure Claude Code client with proper tool registration
         try:
-            self.client = ClaudeCodeClient(
-                api_key=self.api_key,
-                model=self.config['model'],
-                max_tokens=self.config['max_tokens'],
+            self.client = ClaudeSDKClient(
                 tools=MICROSCOPE_TOOLS,
                 allowed_tools=["move_z_stage", "capture_image", "get_microscope_status", "get_focus_history", "clear_focus_history"],
-                permission_mode="explicit",
-                timeout=self.config['timeout']
+                permission_mode="explicit"
             )
         except Exception as e:
             print(f"Failed to initialize Claude Code client: {e}")
@@ -168,14 +158,8 @@ async def main():
     print("Bottom Camera View - Embryo Boundary Focus")
     print("=" * 50)
 
-    # Check if API key is available
-    api_key = os.getenv('ANTHROPIC_API_KEY')
-    if not api_key:
-        print("Error: ANTHROPIC_API_KEY environment variable is required.")
-        return
-
     try:
-        controller = ClaudeFocusController(api_key)
+        controller = ClaudeFocusController()
 
         print("\nChoose a mode:")
         print("1. Automatic focus session (Claude performs full focus sweep)")
