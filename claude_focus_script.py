@@ -72,6 +72,13 @@ IMPORTANT CONTEXT:
 - When in focus: the embryo boundary will be crisp and well-defined
 - When out of focus: the boundary will appear soft, blurry, or have a halo effect
 
+VISUAL ARTIFACTS TO EXPECT:
+- You will see lens flare-like artifacts due to stray light from room illumination
+- This same room light is what illuminates the sample, so these artifacts are normal
+- The lens flares may appear as bright spots, halos, or light streaks in the image
+- Focus on the embryo boundary sharpness despite these optical artifacts
+- Do not mistake lens flares for focus quality - they are separate phenomena
+
 Your task is to:
 1. Check the current microscope status
 2. Perform a focus sweep from {focus_range[0]} to {focus_range[1]} μm in {num_steps} steps
@@ -80,13 +87,13 @@ Your task is to:
 5. Move to the optimal focus position
 
 Focus evaluation criteria for this bottom camera view:
-- Sharp, well-defined embryo boundary/outline
+- Sharp, well-defined embryo boundary/outline (ignore lens flares)
 - Good contrast between embryo and background
 - Minimal blur or soft edges around the embryo perimeter
 - Clear distinction of the embryo shape
 
 Please start by checking the microscope status, then begin the focus sweep.
-Remember to focus on analyzing the sharpness of the embryo's outer boundary, not internal details.
+Remember to focus on analyzing the sharpness of the embryo's outer boundary, not internal details or optical artifacts.
 """
 
         if SDK_AVAILABLE:
