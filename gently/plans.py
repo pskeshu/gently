@@ -194,6 +194,65 @@ def focus_sweep(positioner, positions: List[float], detector,
 
 
 
+def test_lightsheet(lightsheet_snap,
+                   sheet_width_deg: float = 2.0,
+                   y_position_deg: float = 0.0,
+                   metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    """
+    Test light sheet acquisition - simple plan for testing SPIM mode
+
+    Configures light sheet, triggers acquisition, and returns image.
+    Device-agnostic: works with any light sheet snap device.
+
+    Parameters
+    ----------
+    lightsheet_snap : DiSPIMLightSheetSnap
+        Light sheet snap device (scanner + camera)
+    sheet_width_deg : float
+        Light sheet width in degrees
+    y_position_deg : float
+        Y-axis position in degrees (Z-plane selection)
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    Msg
+        Bluesky messages
+
+    Example
+    -------
+    >>> from gently.devices import DiSPIMLightSheetSnap
+    >>> ls_snap = DiSPIMLightSheetSnap("Scanner:AB:33", "HamCam1", core)
+    >>> RE(test_lightsheet(ls_snap, sheet_width_deg=2.0, y_position_deg=0.0))
+    """
+
+    md = {
+        'plan_name': 'test_lightsheet',
+        'sheet_width_deg': sheet_width_deg,
+        'y_position_deg': y_position_deg
+    }
+    if metadata:
+        md.update(metadata)
+
+    @bpp.run_decorator(md=md)
+    def inner():
+        # Configure light sheet
+        lightsheet_snap.configure(
+            sheet_width_deg=sheet_width_deg,
+            y_position_deg=y_position_deg
+        )
+
+        print(f"Acquiring light sheet image: width={sheet_width_deg}°, Y={y_position_deg}°")
+
+        # Trigger and read (standard Bluesky pattern!)
+        yield from bps.trigger_and_read([lightsheet_snap], name='lightsheet_image')
+
+        print("Light sheet image acquired")
+
+    yield from inner()
+
+
 if __name__ == "__main__":
     # Example usage
     logging.basicConfig(level=logging.INFO)

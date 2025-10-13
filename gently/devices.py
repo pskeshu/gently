@@ -398,7 +398,7 @@ class DiSPIMFDrive:
     """
 
     def __init__(self, device_name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (0.0, 25000.0), **kwargs):
+                 limits: Tuple[float, float] = (800, 25000.0), **kwargs):
         self.device_name = device_name
         self.core = core
         self._limits = limits
@@ -781,6 +781,184 @@ class DiSPIMLaserControl:
             'source': self.group_name,
             'dtype': 'string',
             'shape': []
+        }
+        return data
+
+    def read_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        return OrderedDict()
+
+
+class DiSPIMLightSheetSnap:
+    """
+    Single light sheet image trigger - works with bps.trigger()
+
+    Simplest SPIM device: creates light sheet (X-axis scanning) at a single
+    Y position and triggers one image acquisition. No Z-scanning.
+
+    This uses SPIM mode with num_slices=1 for hardware-synchronized
+    light sheet generation and camera triggering. Acquires image using
+    camera sequence mode and popNextTaggedImage().
+
+    Usage:
+        # Configure light sheet
+        ls_snap.configure(sheet_width_deg=2.0, y_position_deg=0.0)
+
+        # Trigger single light sheet image
+        yield from bps.trigger(ls_snap)
+
+        # Read image
+        data = yield from bps.read(ls_snap)
+        image = data['lightsheet_snap']['value']
+    """
+
+    def __init__(self, scanner_device_name: str, camera_device_name: str,
+                 core: pymmcore.CMMCore, **kwargs):
+        self.scanner_name = scanner_device_name
+        self.camera_name = camera_device_name
+        self.core = core
+        self.name = kwargs.get('name', 'lightsheet_snap')
+        self.parent = None
+
+        self._configured = False
+        self._last_image = None
+        self._last_image_time = None
+
+    def configure(self,
+                  sheet_width_deg: float = 2.0,     # Light sheet width
+                  sheet_offset_deg: float = 0.0,     # Light sheet center (X)
+                  y_position_deg: float = 0.0,       # Y-axis position (Z-plane)
+                  scan_duration_ms: float = 10.0,
+                  camera_delay_ms: float = 0.5,
+                  camera_duration_ms: float = 9.0):
+        """
+        Configure light sheet for single image acquisition
+
+        Parameters
+        ----------
+        sheet_width_deg : float
+            Light sheet width in degrees (X-axis scan range)
+        sheet_offset_deg : float
+            Light sheet center position in degrees (X-axis)
+        y_position_deg : float
+            Y-axis position in degrees (selects Z-plane)
+        scan_duration_ms : float
+            Scan duration in milliseconds
+        camera_delay_ms : float
+            Delay before camera trigger in milliseconds
+        camera_duration_ms : float
+            Camera exposure duration in milliseconds
+        """
+        try:
+            # Light sheet generation (X-axis continuous scanning)
+            self.core.setProperty(self.scanner_name, "SAAmplitudeX(deg)", sheet_width_deg)
+            self.core.setProperty(self.scanner_name, "SAOffsetX(deg)", sheet_offset_deg)
+
+            # Y-axis position (single Z-plane, no scanning)
+            self.core.setProperty(self.scanner_name, "SAAmplitudeY(deg)", 0.0)  # No Y-scan
+            self.core.setProperty(self.scanner_name, "SAOffsetY(deg)", y_position_deg)
+
+            # SPIM parameters for single slice
+            self.core.setProperty(self.scanner_name, "SPIMNumSlices", 1)
+            self.core.setProperty(self.scanner_name, "SPIMScanDuration", scan_duration_ms)
+            self.core.setProperty(self.scanner_name, "SPIMCameraDelay", camera_delay_ms)
+            self.core.setProperty(self.scanner_name, "SPIMCameraDuration", camera_duration_ms)
+
+            self._configured = True
+
+            print(f"Light sheet configured: width={sheet_width_deg}°, "
+                  f"Y-position={y_position_deg}°")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to configure light sheet: {e}")
+
+    def trigger(self):
+        """
+        Trigger single light sheet image acquisition - called by bps.trigger()
+
+        This starts camera sequence acquisition, triggers SPIM, and collects
+        the image from the circular buffer using popNextTaggedImage().
+
+        Returns
+        -------
+        Status
+            Ophyd Status object that completes when image is acquired
+        """
+        if not self._configured:
+            raise RuntimeError("Must call configure() before trigger()")
+
+        status = Status(obj=self, timeout=10)
+
+        def run_acquisition():
+            try:
+                # Start camera sequence acquisition (1 image)
+                self.core.startSequenceAcquisition(self.camera_name, 1, 0, True)
+
+                # Arm SPIM state machine
+                self.core.setProperty(self.scanner_name, "SPIMState", "Armed")
+                self.core.waitForDevice(self.scanner_name)
+
+                # Trigger SPIM to run (this will trigger camera via hardware)
+                self.core.setProperty(self.scanner_name, "SPIMState", "Running")
+
+                # Wait for image to arrive in circular buffer
+                timeout_start = time.time()
+                while self.core.getRemainingImageCount() == 0:
+                    if time.time() - timeout_start > 5.0:
+                        raise TimeoutError("Camera did not send image within 5s")
+                    time.sleep(0.005)
+
+                # Pop image from circular buffer
+                tagged_img = self.core.popNextTaggedImage()
+
+                # Extract pixel data using rpyc to transfer numpy array properly
+                self._last_image = rpyc.classic.obtain(tagged_img.pix)
+                self._last_image_time = time.time()
+
+                # Wait for SPIM to complete
+                timeout_start = time.time()
+                while True:
+                    state = self.core.getProperty(self.scanner_name, "SPIMState")
+                    if state == "Idle":
+                        break
+
+                    time.sleep(0.01)
+
+                    if time.time() - timeout_start > 10:
+                        raise TimeoutError("SPIM did not complete in 10s")
+
+                status.set_finished()
+
+            except Exception as e:
+                status.set_exception(e)
+
+        import threading
+        threading.Thread(target=run_acquisition).start()
+        return status
+
+    def read(self):
+        """Read acquired image - required for Bluesky"""
+        if self._last_image is not None:
+            data = OrderedDict()
+            data[self.name] = {
+                'value': self._last_image,
+                'timestamp': self._last_image_time or time.time()
+            }
+            return data
+        else:
+            return OrderedDict()
+
+    def describe(self):
+        """Describe light sheet image data - required for Bluesky"""
+        data = OrderedDict()
+        data[self.name] = {
+            'source': f'{self.scanner_name}+{self.camera_name}',
+            'dtype': 'array',
+            'shape': getattr(self._last_image, 'shape', [])
         }
         return data
 
