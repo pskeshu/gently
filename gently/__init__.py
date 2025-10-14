@@ -20,13 +20,18 @@ from .devices import (
     DiSPIMZstage,
     DiSPIMCamera,
     DiSPIMXYStage,
-    DiSPIMLaserControl
+    DiSPIMLaserControl,
+    DiSPIMVolumeScanner
 )
 
 # Plan functions - device-agnostic Bluesky plans
 from .plans import (
     focus_sweep_with_analysis,
-    focus_sweep
+    focus_sweep,
+    acquire_spim_volume,
+    multi_position_volume,
+    volume_timelapse,
+    multi_position_volume_timelapse
 )
 
 # Analysis utilities - device-agnostic focus analysis
@@ -80,23 +85,24 @@ __version__ = "0.2.0"
 __all__ = [
     # Device classes
     "DiSPIMPiezo",
-    "DiSPIMGalvo", 
+    "DiSPIMGalvo",
     "DiSPIMCamera",
-    "DiSPIMXYStage", 
+    "DiSPIMXYStage",
     "DiSPIMLaserControl",
     "DiSPIMLightSheet",
     "DiSPIMSystem",
+    "DiSPIMVolumeScanner",
     "create_dispim_system",
-    
+
     # Plan functions
     "focus_sweep",
-    "move_and_acquire", 
+    "move_and_acquire",
     "synchronized_move",
     "dispim_piezo_autofocus",
     "dispim_galvo_autofocus",
     "dual_sided_autofocus",
     "dispim_two_point_calibration",
-    "dispim_full_calibration", 
+    "dispim_full_calibration",
     "find_embryos_with_bottom_camera",
     "acquire_embryo_lightsheet",
     "full_dispim_workflow",
@@ -104,6 +110,12 @@ __all__ = [
     "quick_calibration",
     "AutofocusConfig",
     "CalibrationConfig",
+
+    # Volume acquisition plans
+    "acquire_spim_volume",
+    "multi_position_volume",
+    "volume_timelapse",
+    "multi_position_volume_timelapse",
     
     # Analysis functions
     "calculate_focus_score",

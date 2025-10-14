@@ -854,24 +854,37 @@ class DiSPIMLightSheetSnap:
             Camera exposure duration in milliseconds
         """
         try:
+            # Stop any running sequence acquisition first
+            if self.core.isSequenceRunning():
+                self.core.stopSequenceAcquisition()
+                time.sleep(0.1)  # Brief pause for cleanup
+
+            # Configure camera for external hardware triggering
+            self.core.setCameraDevice(self.camera_name)
+            self.core.setProperty(self.camera_name, "TRIGGER SOURCE", "EXTERNAL")
+
             # Light sheet generation (X-axis continuous scanning)
-            self.core.setProperty(self.scanner_name, "SAAmplitudeX(deg)", sheet_width_deg)
-            self.core.setProperty(self.scanner_name, "SAOffsetX(deg)", sheet_offset_deg)
+            self.core.setProperty(self.scanner_name, "SingleAxisXAmplitude(deg)", sheet_width_deg)
+            self.core.setProperty(self.scanner_name, "SingleAxisXOffset(deg)", sheet_offset_deg)
+            self.core.setProperty(self.scanner_name, "SingleAxisXPattern", "1 - Triangle")  # Triangle wave for scanning
+            self.core.setProperty(self.scanner_name, "SingleAxisXMode", "3 - Enabled with axes synced")  # Sync with SPIM
 
             # Y-axis position (single Z-plane, no scanning)
-            self.core.setProperty(self.scanner_name, "SAAmplitudeY(deg)", 0.0)  # No Y-scan
-            self.core.setProperty(self.scanner_name, "SAOffsetY(deg)", y_position_deg)
+            self.core.setProperty(self.scanner_name, "SingleAxisYAmplitude(deg)", 0.0)  # No Y-scan
+            self.core.setProperty(self.scanner_name, "SingleAxisYOffset(deg)", y_position_deg)
+            self.core.setProperty(self.scanner_name, "SingleAxisYMode", "0 - Disabled")
 
             # SPIM parameters for single slice
             self.core.setProperty(self.scanner_name, "SPIMNumSlices", 1)
-            self.core.setProperty(self.scanner_name, "SPIMScanDuration", scan_duration_ms)
-            self.core.setProperty(self.scanner_name, "SPIMCameraDelay", camera_delay_ms)
-            self.core.setProperty(self.scanner_name, "SPIMCameraDuration", camera_duration_ms)
+            self.core.setProperty(self.scanner_name, "SPIMNumSides", 1)  # Single side acquisition
+            self.core.setProperty(self.scanner_name, "SPIMScanDuration(ms)", scan_duration_ms)
+            self.core.setProperty(self.scanner_name, "SPIMDelayBeforeCamera(ms)", camera_delay_ms)
+            self.core.setProperty(self.scanner_name, "SPIMCameraDuration(ms)", camera_duration_ms)
 
             self._configured = True
 
             print(f"Light sheet configured: width={sheet_width_deg}°, "
-                  f"Y-position={y_position_deg}°")
+                  f"Y-position={y_position_deg}°, camera trigger=EXTERNAL")
 
         except Exception as e:
             raise RuntimeError(f"Failed to configure light sheet: {e}")
@@ -898,19 +911,26 @@ class DiSPIMLightSheetSnap:
                 # Start camera sequence acquisition (1 image)
                 self.core.startSequenceAcquisition(self.camera_name, 1, 0, True)
 
-                # Arm SPIM state machine
-                self.core.setProperty(self.scanner_name, "SPIMState", "Armed")
-                self.core.waitForDevice(self.scanner_name)
-
-                # Trigger SPIM to run (this will trigger camera via hardware)
+                # Trigger SPIM to run (directly to Running, not Armed first)
+                # This matches ASI diSPIM plugin behavior for SLICE_SCAN_ONLY mode
                 self.core.setProperty(self.scanner_name, "SPIMState", "Running")
 
-                # Wait for image to arrive in circular buffer
-                timeout_start = time.time()
+                # Wait for first image to arrive in circular buffer
+                # Match ASI plugin pattern: wait for image OR sequence to complete
+                timeout_ms = max(3000, int(10 * 10.0 + 2 * 0.5))  # Based on scan_duration_ms
+                start_time = time.time()
+
                 while self.core.getRemainingImageCount() == 0:
-                    if time.time() - timeout_start > 5.0:
-                        raise TimeoutError("Camera did not send image within 5s")
+                    elapsed_ms = (time.time() - start_time) * 1000
+                    if elapsed_ms >= timeout_ms:
+                        msg = "Camera did not send first image within timeout.\n"
+                        msg += "Make sure camera trigger cables are connected properly."
+                        raise TimeoutError(msg)
                     time.sleep(0.005)
+
+                # Check if sequence stopped prematurely (indicates error)
+                if not self.core.isSequenceRunning(self.camera_name) and self.core.getRemainingImageCount() == 0:
+                    raise RuntimeError("Camera sequence stopped without sending image")
 
                 # Pop image from circular buffer
                 tagged_img = self.core.popNextTaggedImage()
@@ -935,6 +955,13 @@ class DiSPIMLightSheetSnap:
 
             except Exception as e:
                 status.set_exception(e)
+            finally:
+                # Make sure to stop sequence if it's still running
+                try:
+                    if self.core.isSequenceRunning(self.camera_name):
+                        self.core.stopSequenceAcquisition(self.camera_name)
+                except:
+                    pass
 
         import threading
         threading.Thread(target=run_acquisition).start()
@@ -969,6 +996,368 @@ class DiSPIMLightSheetSnap:
     def describe_configuration(self):
         """Required for Bluesky"""
         return OrderedDict()
+
+
+class DiSPIMVolumeScanner:
+    """
+    Hardware-triggered SPIM volume acquisition device - works with bps.trigger()
+
+    Encapsulates complete volume acquisition workflow using hardware-triggered
+    SPIM mode. Single trigger acquires entire 3D volume (100 slices @ 59fps).
+
+    Based on proven test_volume_acq.py implementation with all critical fixes:
+    - PROGRESSIVE sensor mode (required for hardware triggering)
+    - Explicit SPIM timing property configuration
+    - Proper circular buffer management
+    - Galvo Y-axis slice stepping (no piezo needed)
+
+    Usage:
+        # Create device
+        vol_scanner = DiSPIMVolumeScanner("Scanner:AB:33", "HamCam1", core)
+
+        # Configure acquisition
+        vol_scanner.configure(num_slices=100, exposure_ms=5.0, slice_step_um=1.0)
+
+        # Acquire volume in Bluesky plan
+        yield from bps.trigger_and_read([vol_scanner])
+
+        # Read volume
+        data = yield from bps.read(vol_scanner)
+        volume = data['volume_scanner']['value']  # 3D numpy array (Z, Y, X)
+
+    Reference:
+        Full documentation in doc/asidispim_camera_triggering.md
+        Standalone script: test_volume_acq.py
+    """
+
+    def __init__(self, scanner_device_name: str, camera_device_name: str,
+                 core: pymmcore.CMMCore, **kwargs):
+        self.scanner_name = scanner_device_name
+        self.camera_name = camera_device_name
+        self.core = core
+        self.name = kwargs.get('name', 'volume_scanner')
+        self.parent = None
+
+        # Acquisition configuration
+        self._configured = False
+        self._num_slices = None
+        self._exposure_ms = None
+        self._slice_step_um = None
+        self._timing = None
+
+        # Acquired data
+        self._last_volume = None
+        self._last_volume_time = None
+
+        # Camera timing parameters (Hamamatsu Flash4 typical values)
+        self.camera_reset_ms = 3.0
+        self.camera_readout_ms = 10.0
+        self.scan_laser_buffer_ms = 0.25
+        self.scan_filter_freq_khz = 0.2
+        self.has_plogic = True
+
+    def configure(self, num_slices: int = 100, exposure_ms: float = 5.0,
+                  slice_step_um: float = 1.0):
+        """
+        Configure volume acquisition parameters
+
+        Parameters
+        ----------
+        num_slices : int
+            Number of Z slices to acquire
+        exposure_ms : float
+            Light exposure time in milliseconds (max ~10-12ms for PROGRESSIVE mode)
+        slice_step_um : float
+            Distance between slices in micrometers
+        """
+        self._num_slices = num_slices
+        self._exposure_ms = exposure_ms
+        self._slice_step_um = slice_step_um
+
+        # Calculate SPIM timing parameters
+        self._timing = self._calculate_spim_timing(exposure_ms)
+
+        self._configured = True
+
+        print(f"Volume acquisition configured:")
+        print(f"  Slices: {num_slices}")
+        print(f"  Exposure: {exposure_ms} ms")
+        print(f"  Step size: {slice_step_um} µm")
+        print(f"  Expected time: {num_slices * self._timing['sliceDuration'] / 1000.0:.1f}s")
+
+    def _calculate_spim_timing(self, camera_exposure_ms: float) -> Dict:
+        """
+        Calculate SPIM timing parameters following ASI diSPIM plugin logic
+
+        Based on AcquisitionPanel.java:1105-1240 and test_volume_acq.py
+        """
+        import math
+
+        # Round to 0.25ms (Tiger controller resolution)
+        def round_quarter_ms(val):
+            return round(val * 4) / 4.0
+
+        def ceil_quarter_ms(val):
+            return math.ceil(val * 4) / 4.0
+
+        camera_readout_max = ceil_quarter_ms(self.camera_readout_ms)
+        camera_reset_max = ceil_quarter_ms(self.camera_reset_ms)
+        global_exposure_delay_max = camera_readout_max + camera_reset_max
+
+        laser_duration = round_quarter_ms(camera_exposure_ms)
+        scan_duration = laser_duration + 2 * self.scan_laser_buffer_ms
+
+        # Account for Bessel filter delay and PLogic delay
+        scan_delay_filter = 0.39 / self.scan_filter_freq_khz
+        if self.has_plogic:
+            scan_delay_filter -= 0.25
+
+        timing = {
+            'scanDelay': round_quarter_ms(global_exposure_delay_max - self.scan_laser_buffer_ms - scan_delay_filter),
+            'scanPeriod': round_quarter_ms(scan_duration),
+            'laserDelay': round_quarter_ms(global_exposure_delay_max),
+            'laserDuration': laser_duration,
+            'cameraDelay': camera_readout_max,
+            'cameraDuration': 1.0,  # Short pulse for EDGE mode
+            'cameraExposure': camera_exposure_ms + 0.1,
+            'sliceDuration': max(scan_duration, laser_duration,
+                                camera_readout_max + camera_exposure_ms)
+        }
+
+        return timing
+
+    def trigger(self):
+        """
+        Trigger hardware-triggered volume acquisition - called by bps.trigger()
+
+        Executes complete volume acquisition workflow:
+        1. Configure camera (PROGRESSIVE mode, EXTERNAL trigger)
+        2. Configure SPIM timing properties
+        3. Start camera sequence acquisition
+        4. Trigger SPIM state machine
+        5. Wait for images
+        6. Retrieve volume from buffer
+
+        Returns
+        -------
+        Status
+            Ophyd Status object that completes when volume is acquired
+        """
+        if not self._configured:
+            raise RuntimeError("Must call configure() before trigger()")
+
+        status = Status(obj=self, timeout=60)
+
+        def run_acquisition():
+            try:
+                # Apply system configuration
+                try:
+                    self.core.setConfig("System", "Startup")
+                    self.core.waitForConfig("System", "Startup")
+                except:
+                    pass  # Config may not exist
+
+                # Turn on lasers
+                try:
+                    self.core.setConfig("Laser", "488 and 561")
+                    self.core.waitForConfig("Laser", "488 and 561")
+                except:
+                    pass  # Config may not exist
+
+                # Configure camera for hardware trigger
+                self.core.setCameraDevice(self.camera_name)
+                self.core.setProperty(self.camera_name, "TRIGGER SOURCE", "EXTERNAL")
+                self.core.setProperty(self.camera_name, "SENSOR MODE", "PROGRESSIVE")  # CRITICAL!
+                self.core.setProperty(self.camera_name, "TRIGGER ACTIVE", "EDGE")
+                self.core.setExposure(self.camera_name, self._exposure_ms)
+                time.sleep(0.1)
+
+                # Configure Tiger controller
+                self.core.setProperty(self.scanner_name, "SPIMState", "Idle")
+                time.sleep(0.2)
+
+                # CRITICAL: Set laser output mode
+                self.core.setProperty(self.scanner_name, "LaserOutputMode", "shutter + side")
+
+                # Disable beam scanning (controlled by SPIM)
+                self.core.setProperty(self.scanner_name, "BeamEnabled", "No")
+
+                # Configure galvo X-axis (light sheet)
+                self.core.setProperty(self.scanner_name, "SingleAxisXAmplitude(deg)", 2.0)
+                self.core.setProperty(self.scanner_name, "SingleAxisXOffset(deg)", 0.0)
+                self.core.setProperty(self.scanner_name, "SingleAxisXPattern", "1 - Triangle")
+                self.core.setProperty(self.scanner_name, "SingleAxisXMode", "3 - Enabled with axes synced")
+
+                # Configure galvo Y-axis (slice stepping)
+                # Y amplitude depends on number of slices and step size
+                # Typical calibration: 100 deg/mm, 1um step -> 0.0001 deg per slice
+                y_amplitude = (self._num_slices - 1) * self._slice_step_um / 1000.0 / 2.0  # Half range
+                self.core.setProperty(self.scanner_name, "SingleAxisYAmplitude(deg)", y_amplitude)
+                self.core.setProperty(self.scanner_name, "SingleAxisYOffset(deg)", 0.0)
+                self.core.setProperty(self.scanner_name, "SingleAxisYPattern", "1 - Triangle")
+                self.core.setProperty(self.scanner_name, "SingleAxisYMode", "3 - Enabled with axes synced")
+
+                # Set SPIM state machine parameters
+                self.core.setProperty(self.scanner_name, "SPIMNumSlices", self._num_slices)
+                self.core.setProperty(self.scanner_name, "SPIMNumSides", 1)
+                self.core.setProperty(self.scanner_name, "SPIMAlternateDirectionsEnable", "No")
+                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeSide(ms)", 0.0)
+                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeRepeat(ms)", 0.0)
+
+                # CRITICAL: Set all SPIM timing properties explicitly
+                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeScan(ms)", self._timing['scanDelay'])
+                self.core.setProperty(self.scanner_name, "SPIMScanDuration(ms)", self._timing['scanPeriod'])
+                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeLaser(ms)", self._timing['laserDelay'])
+                self.core.setProperty(self.scanner_name, "SPIMLaserDuration(ms)", self._timing['laserDuration'])
+                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeCamera(ms)", self._timing['cameraDelay'])
+                self.core.setProperty(self.scanner_name, "SPIMCameraDuration(ms)", self._timing['cameraDuration'])
+
+                # Configure circular buffer
+                if self.core.isSequenceRunning():
+                    self.core.stopSequenceAcquisition()
+                    time.sleep(0.5)
+
+                self.core.clearCircularBuffer()
+
+                buffer_capacity = self.core.getBufferTotalCapacity()
+                if buffer_capacity < self._num_slices:
+                    self.core.setCircularBufferMemoryFootprint(1200)  # MB
+                    time.sleep(0.1)
+
+                # Start camera sequence acquisition
+                self.core.prepareSequenceAcquisition(self.camera_name)
+                time.sleep(0.1)
+                self.core.startSequenceAcquisition(self.camera_name, self._num_slices, 0, True)
+                time.sleep(0.1)
+
+                # Verify sequence started
+                if not self.core.isSequenceRunning(self.camera_name):
+                    raise RuntimeError("Camera sequence failed to start! Check SENSOR MODE = PROGRESSIVE")
+
+                # Trigger SPIM state machine
+                self.core.setProperty(self.scanner_name, "SPIMState", "Running")
+
+                # Wait for images
+                expected_time = self._num_slices * self._timing['sliceDuration'] / 1000.0
+                timeout_sec = expected_time * 2 + 10.0
+
+                start_time = time.time()
+                while self.core.getRemainingImageCount() < self._num_slices:
+                    elapsed = time.time() - start_time
+                    if elapsed > timeout_sec:
+                        count = self.core.getRemainingImageCount()
+                        raise TimeoutError(f"Timeout: got {count}/{self._num_slices} images")
+                    time.sleep(0.01)
+
+                # Retrieve images
+                images = []
+                for i in range(self._num_slices):
+                    img = self.core.popNextImage()
+                    # Handle rpyc transfer
+                    try:
+                        img = rpyc.classic.obtain(img)
+                    except (ImportError, AttributeError):
+                        pass
+                    images.append(img)
+
+                # Create volume array
+                self._last_volume = np.array(images)
+                self._last_volume_time = time.time()
+
+                elapsed = time.time() - start_time
+                fps = self._num_slices / elapsed
+                print(f"Volume acquired: {self._last_volume.shape}, {elapsed:.1f}s, {fps:.1f} fps")
+
+                status.set_finished()
+
+            except Exception as e:
+                status.set_exception(e)
+            finally:
+                # Cleanup
+                try:
+                    if self.core.isSequenceRunning(self.camera_name):
+                        self.core.stopSequenceAcquisition(self.camera_name)
+                except:
+                    pass
+
+                try:
+                    self.core.setProperty(self.scanner_name, "SPIMState", "Idle")
+                except:
+                    pass
+
+                try:
+                    self.core.setConfig("Laser", "ALL OFF")
+                except:
+                    pass
+
+        import threading
+        threading.Thread(target=run_acquisition).start()
+        return status
+
+    def read(self):
+        """Read acquired volume - required for Bluesky"""
+        if self._last_volume is not None:
+            data = OrderedDict()
+            data[self.name] = {
+                'value': self._last_volume,
+                'timestamp': self._last_volume_time or time.time(),
+                'units': 'counts'
+            }
+            return data
+        else:
+            return OrderedDict()
+
+    def describe(self):
+        """Describe volume data - required for Bluesky"""
+        data = OrderedDict()
+        data[self.name] = {
+            'source': f'{self.scanner_name}+{self.camera_name}',
+            'dtype': 'array',
+            'shape': getattr(self._last_volume, 'shape', []),
+            'units': 'counts'
+        }
+        return data
+
+    def read_configuration(self):
+        """Required for Bluesky"""
+        config = OrderedDict()
+        if self._configured:
+            config[f'{self.name}_num_slices'] = {
+                'value': self._num_slices,
+                'timestamp': time.time()
+            }
+            config[f'{self.name}_exposure_ms'] = {
+                'value': self._exposure_ms,
+                'timestamp': time.time()
+            }
+            config[f'{self.name}_slice_step_um'] = {
+                'value': self._slice_step_um,
+                'timestamp': time.time()
+            }
+        return config
+
+    def describe_configuration(self):
+        """Required for Bluesky"""
+        desc = OrderedDict()
+        if self._configured:
+            desc[f'{self.name}_num_slices'] = {
+                'source': 'configuration',
+                'dtype': 'number',
+                'shape': []
+            }
+            desc[f'{self.name}_exposure_ms'] = {
+                'source': 'configuration',
+                'dtype': 'number',
+                'shape': [],
+                'units': 'milliseconds'
+            }
+            desc[f'{self.name}_slice_step_um'] = {
+                'source': 'configuration',
+                'dtype': 'number',
+                'shape': [],
+                'units': 'micrometers'
+            }
+        return desc
 
 
 if __name__ == "__main__":

@@ -253,6 +253,375 @@ def test_lightsheet(lightsheet_snap,
     yield from inner()
 
 
+# =============================================================================
+# VOLUME ACQUISITION PLANS - Hardware-Triggered SPIM
+# =============================================================================
+
+def acquire_spim_volume(volume_scanner,
+                       num_slices: int = 100,
+                       exposure_ms: float = 5.0,
+                       slice_step_um: float = 1.0,
+                       metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    """
+    Acquire a hardware-triggered SPIM volume - atomic plan
+
+    Single volume acquisition using Tiger controller hardware triggering.
+    Device-agnostic: works with any DiSPIMVolumeScanner device.
+
+    This plan encapsulates the complete SPIM volume acquisition workflow:
+    - Camera configuration (PROGRESSIVE mode, EXTERNAL trigger)
+    - SPIM timing calculation
+    - Hardware-triggered acquisition
+    - 3D volume retrieval
+
+    Typical acquisition: 100 slices @ 59 fps (1.7 seconds total)
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner device (scanner + camera)
+    num_slices : int
+        Number of Z slices to acquire (default: 100)
+    exposure_ms : float
+        Camera exposure time in milliseconds (default: 5.0)
+    slice_step_um : float
+        Step size between slices in microns (default: 1.0)
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    Msg
+        Bluesky messages
+
+    Returns
+    -------
+    Volume data is stored in the Bluesky databroker with key 'volume_scanner'
+    Access via: run.primary.read()['volume_scanner']['value']
+
+    Example
+    -------
+    >>> from gently.devices import DiSPIMVolumeScanner
+    >>> vol_scanner = DiSPIMVolumeScanner("Scanner:AB:33", "HamCam1", core)
+    >>> RE(acquire_spim_volume(vol_scanner, num_slices=100, exposure_ms=5.0))
+    """
+
+    md = {
+        'plan_name': 'acquire_spim_volume',
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'slice_step_um': slice_step_um,
+        'expected_volume_shape': f'({num_slices}, 2304, 2304)',
+    }
+    if metadata:
+        md.update(metadata)
+
+    @bpp.run_decorator(md=md)
+    def inner():
+        # Configure volume scanner
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            slice_step_um=slice_step_um
+        )
+
+        print(f"Acquiring SPIM volume: {num_slices} slices, {exposure_ms}ms exposure, {slice_step_um}μm step")
+
+        # Trigger and read (standard Bluesky pattern!)
+        yield from bps.trigger_and_read([volume_scanner], name='spim_volume')
+
+        print(f"Volume acquired: {num_slices} slices")
+
+    yield from inner()
+
+
+def multi_position_volume(volume_scanner,
+                         xy_stage,
+                         positions: List[Tuple[float, float]],
+                         num_slices: int = 100,
+                         exposure_ms: float = 5.0,
+                         slice_step_um: float = 1.0,
+                         metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    """
+    Acquire SPIM volumes at multiple XY positions
+
+    Device-agnostic plan for multi-position volume acquisition.
+    Works with any XY stage and volume scanner combination.
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner device
+    xy_stage : Ophyd XY stage device
+        XY positioning stage (must have .x and .y attributes)
+    positions : List[Tuple[float, float]]
+        List of (x, y) positions in microns
+    num_slices : int
+        Number of Z slices per volume (default: 100)
+    exposure_ms : float
+        Camera exposure time in milliseconds (default: 5.0)
+    slice_step_um : float
+        Step size between slices in microns (default: 1.0)
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    Msg
+        Bluesky messages
+
+    Example
+    -------
+    >>> positions = [(0, 0), (100, 0), (0, 100), (100, 100)]
+    >>> RE(multi_position_volume(vol_scanner, xy_stage, positions))
+    """
+
+    md = {
+        'plan_name': 'multi_position_volume',
+        'num_positions': len(positions),
+        'positions': positions,
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'slice_step_um': slice_step_um,
+    }
+    if metadata:
+        md.update(metadata)
+
+    @bpp.run_decorator(md=md)
+    def inner():
+        # Configure volume scanner once
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            slice_step_um=slice_step_um
+        )
+
+        print(f"Multi-position volume acquisition: {len(positions)} positions, {num_slices} slices each")
+
+        for i, (x, y) in enumerate(positions):
+            print(f"\nPosition {i+1}/{len(positions)}: ({x:.1f}, {y:.1f}) μm")
+
+            # Move to position
+            yield from bps.mv(xy_stage.x, x, xy_stage.y, y)
+
+            # Acquire volume at this position
+            yield from bps.trigger_and_read([volume_scanner, xy_stage],
+                                          name=f'volume_pos_{i:03d}')
+
+            print(f"  Volume {i+1} acquired")
+
+        print(f"\nCompleted {len(positions)} volumes")
+
+    yield from inner()
+
+
+def volume_timelapse(volume_scanner,
+                    num_timepoints: int,
+                    interval_s: float,
+                    num_slices: int = 100,
+                    exposure_ms: float = 5.0,
+                    slice_step_um: float = 1.0,
+                    metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    """
+    Acquire time-lapse SPIM volumes
+
+    Device-agnostic plan for time-lapse volume acquisition.
+    Captures volumes at regular intervals.
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner device
+    num_timepoints : int
+        Number of time points to acquire
+    interval_s : float
+        Time interval between acquisitions in seconds
+    num_slices : int
+        Number of Z slices per volume (default: 100)
+    exposure_ms : float
+        Camera exposure time in milliseconds (default: 5.0)
+    slice_step_um : float
+        Step size between slices in microns (default: 1.0)
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    Msg
+        Bluesky messages
+
+    Example
+    -------
+    >>> # Acquire 10 volumes, one every 30 seconds
+    >>> RE(volume_timelapse(vol_scanner, num_timepoints=10, interval_s=30.0))
+    """
+
+    md = {
+        'plan_name': 'volume_timelapse',
+        'num_timepoints': num_timepoints,
+        'interval_s': interval_s,
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'slice_step_um': slice_step_um,
+        'total_duration_s': num_timepoints * interval_s,
+    }
+    if metadata:
+        md.update(metadata)
+
+    @bpp.run_decorator(md=md)
+    def inner():
+        # Configure volume scanner once
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            slice_step_um=slice_step_um
+        )
+
+        print(f"Time-lapse acquisition: {num_timepoints} volumes, {interval_s}s interval")
+        print(f"Total duration: {num_timepoints * interval_s / 60:.1f} minutes")
+
+        start_time = time.time()
+
+        for t in range(num_timepoints):
+            # Calculate when this acquisition should happen
+            target_time = start_time + t * interval_s
+            current_time = time.time()
+
+            # Wait if we're ahead of schedule
+            if current_time < target_time:
+                wait_time = target_time - current_time
+                print(f"\nTimepoint {t+1}/{num_timepoints}: waiting {wait_time:.1f}s...")
+                time.sleep(wait_time)
+            else:
+                print(f"\nTimepoint {t+1}/{num_timepoints}:")
+
+            # Acquire volume
+            yield from bps.trigger_and_read([volume_scanner],
+                                          name=f'volume_t_{t:03d}')
+
+            elapsed = time.time() - start_time
+            print(f"  Volume {t+1} acquired (elapsed: {elapsed:.1f}s)")
+
+        print(f"\nCompleted {num_timepoints} time-lapse volumes")
+
+    yield from inner()
+
+
+def multi_position_volume_timelapse(volume_scanner,
+                                   xy_stage,
+                                   positions: List[Tuple[float, float]],
+                                   num_timepoints: int,
+                                   interval_s: float,
+                                   num_slices: int = 100,
+                                   exposure_ms: float = 5.0,
+                                   slice_step_um: float = 1.0,
+                                   metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    """
+    Acquire time-lapse SPIM volumes at multiple positions
+
+    Device-agnostic plan combining multi-position and time-lapse acquisition.
+    At each timepoint, visits all positions and acquires a volume.
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner device
+    xy_stage : Ophyd XY stage device
+        XY positioning stage (must have .x and .y attributes)
+    positions : List[Tuple[float, float]]
+        List of (x, y) positions in microns
+    num_timepoints : int
+        Number of time points to acquire
+    interval_s : float
+        Time interval between timepoint rounds in seconds
+    num_slices : int
+        Number of Z slices per volume (default: 100)
+    exposure_ms : float
+        Camera exposure time in milliseconds (default: 5.0)
+    slice_step_um : float
+        Step size between slices in microns (default: 1.0)
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    Msg
+        Bluesky messages
+
+    Example
+    -------
+    >>> positions = [(0, 0), (100, 0), (0, 100)]
+    >>> # Acquire 3 positions every 60 seconds, 10 times
+    >>> RE(multi_position_volume_timelapse(vol_scanner, xy_stage, positions,
+    ...                                   num_timepoints=10, interval_s=60.0))
+    """
+
+    md = {
+        'plan_name': 'multi_position_volume_timelapse',
+        'num_positions': len(positions),
+        'positions': positions,
+        'num_timepoints': num_timepoints,
+        'interval_s': interval_s,
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'slice_step_um': slice_step_um,
+        'total_volumes': len(positions) * num_timepoints,
+    }
+    if metadata:
+        md.update(metadata)
+
+    @bpp.run_decorator(md=md)
+    def inner():
+        # Configure volume scanner once
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            slice_step_um=slice_step_um
+        )
+
+        print(f"Multi-position time-lapse: {len(positions)} positions, {num_timepoints} timepoints")
+        print(f"Total volumes: {len(positions) * num_timepoints}")
+
+        start_time = time.time()
+
+        for t in range(num_timepoints):
+            # Calculate when this timepoint should start
+            target_time = start_time + t * interval_s
+            current_time = time.time()
+
+            # Wait if we're ahead of schedule
+            if current_time < target_time:
+                wait_time = target_time - current_time
+                print(f"\n{'='*60}")
+                print(f"Timepoint {t+1}/{num_timepoints}: waiting {wait_time:.1f}s...")
+                print(f"{'='*60}")
+                time.sleep(wait_time)
+            else:
+                print(f"\n{'='*60}")
+                print(f"Timepoint {t+1}/{num_timepoints}:")
+                print(f"{'='*60}")
+
+            # Visit all positions
+            for i, (x, y) in enumerate(positions):
+                print(f"  Position {i+1}/{len(positions)}: ({x:.1f}, {y:.1f}) μm")
+
+                # Move to position
+                yield from bps.mv(xy_stage.x, x, xy_stage.y, y)
+
+                # Acquire volume
+                yield from bps.trigger_and_read([volume_scanner, xy_stage],
+                                              name=f'volume_t{t:03d}_p{i:03d}')
+
+                print(f"    Volume acquired")
+
+            elapsed = time.time() - start_time
+            print(f"  Timepoint {t+1} complete (elapsed: {elapsed/60:.1f} min)")
+
+        print(f"\nCompleted {len(positions) * num_timepoints} total volumes")
+
+    yield from inner()
+
+
 if __name__ == "__main__":
     # Example usage
     logging.basicConfig(level=logging.INFO)
