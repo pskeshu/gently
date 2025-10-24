@@ -30,18 +30,19 @@ PIEZO_DEVICE = "PiezoStage:P:34"
 # Load calibration
 CALIBRATION_FILE = Path("piezo_galvo_calibration.json")
 
-# Scan parameters
-# CRITICAL: Galvo Y offset gets reset to 0° during SPIM, so we must center piezo
-# at the position that corresponds to galvo 0° according to calibration
-# From calibration: piezo_position = slope * galvo_angle + offset
-# At galvo 0°: piezo = 100.833 * 0 + 4.25 = 4.25 µm
-PIEZO_CENTER_UM = 4.25        # Piezo center (µm) - matches galvo 0°
-PIEZO_AMPLITUDE_UM = 32.3     # Piezo half-range (µm) - total scan = 64.6 µm
+# Scan parameters - UPDATED to match ASI diSPIM plugin settings (2025-10-24)
+# These values are extracted from the running plugin's device properties
+# to ensure perfect synchronization between manual Python control and plugin
+PIEZO_CENTER_UM = -3.854      # Piezo center (µm) - matches plugin setting
+PIEZO_AMPLITUDE_UM = 49.0     # Piezo half-range (µm) - total scan = 98 µm
 
 # Galvo parameters will be calculated from piezo using calibration formula:
 # galvo_angle (°) = (piezo_position (µm) - offset) / slope
+# With updated calibration:
+#   galvo_center = (-3.854 - 5.07) / 99.11 = -0.0900°
+#   galvo_amplitude = 49.0 / 99.11 = 0.4944°
 
-NUM_SLICES = 30               # Number of Z slices
+NUM_SLICES = 50               # Number of Z slices (matches plugin)
 SLICE_PERIOD_MS = 50.0        # Time per slice (ms) - camera exposure + overhead
 
 # Camera exposure
@@ -152,20 +153,19 @@ def configure_galvo_for_spim(galvo_center, galvo_amplitude):
     # Configure X-axis for light sheet width (scanning)
     # Set amplitude/offset once - SPIM state machine will use these values internally
     # Larger amplitude = wider light sheet coverage
-    # Typical range: 1.0° to 4.0°
-    LIGHTSHEET_WIDTH_DEG = 4.0  # Sheet width
-    LIGHTSHEET_OFFSET_DEG = 0.0  # Sheet center (was -0.5)
+    # UPDATED to match plugin setting: 8.0° (was 4.0°)
+    LIGHTSHEET_WIDTH_DEG = 8.0  # Sheet width - matches plugin
+    LIGHTSHEET_OFFSET_DEG = 0.0005  # Sheet center - matches plugin
 
     core.setProperty(GALVO_DEVICE, "SingleAxisXAmplitude(deg)", LIGHTSHEET_WIDTH_DEG)
     core.setProperty(GALVO_DEVICE, "SingleAxisXOffset(deg)", LIGHTSHEET_OFFSET_DEG)
     core.setProperty(GALVO_DEVICE, "SingleAxisXPattern", "1 - Triangle")
 
-    # CRITICAL: Disable SingleAxisXMode - SPIM state machine will control scanning
-    # (from ASI plugin ControllerUtils.java lines 108-115)
-    core.setProperty(GALVO_DEVICE, "SingleAxisXMode", "0 - Disabled")
+    # NOTE: Don't set SingleAxisXMode - SPIM state machine controls X-axis scanning
+    # The mode was an experimental change that didn't fix the issue
 
     print(f"  Light sheet width: {LIGHTSHEET_WIDTH_DEG}° amplitude, offset: {LIGHTSHEET_OFFSET_DEG}°")
-    print(f"  SingleAxisXMode: Disabled (SPIM state machine will control)")
+    print(f"  SingleAxisXMode: Controlled by SPIM state machine")
 
     # Configure Y-axis for light sheet positioning (synchronized with piezo via calibration)
     print(f"  Setting galvo Y amplitude: {galvo_amplitude:.4f}°")
@@ -177,14 +177,26 @@ def configure_galvo_for_spim(galvo_center, galvo_amplitude):
     # NOTE: Don't enable SingleAxisYMode - let SPIM state machine control it
     # core.setProperty(GALVO_DEVICE, "SingleAxisYMode", "3 - Enabled with axes synced")
 
-    # SPIM timing parameters
-    print(f"  Setting SPIM timing parameters...")
-    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeScan(ms)", 6.75)  # Delay before scan (from ASI plugin defaults)
-    core.setProperty(GALVO_DEVICE, "SPIMScanDuration(ms)", float(SLICE_PERIOD_MS))
-    core.setProperty(GALVO_DEVICE, "SPIMCameraDuration(ms)", float(CAMERA_EXPOSURE_MS))
-    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeCamera(ms)", 0.5)  # Short delay before camera trigger
-    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeLaser(ms)", 0.0)   # Laser on immediately
-    core.setProperty(GALVO_DEVICE, "SPIMLaserDuration(ms)", float(CAMERA_EXPOSURE_MS + 1.0))
+    # SPIM timing parameters - CRITICAL: These MUST match the ASI diSPIM plugin UI!
+    # Values extracted from working plugin configuration (settings_asidispim.png)
+    print(f"  Setting SPIM timing parameters (from ASI plugin UI)...")
+
+    # From UI Advanced Timing Settings:
+    # - Delay before scan: 6.75 ms
+    # - Line scan duration: 5.5 ms
+    # - Delay before laser: 8 ms
+    # - Laser trig duration: 5 ms
+    # - Delay before camera: 8 ms
+    # - Camera trig duration: 1 ms
+    # - Lines scans per slice: 1
+
+    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeScan(ms)", 6.75)
+    core.setProperty(GALVO_DEVICE, "SPIMNumScansPerSlice", 1)
+    core.setProperty(GALVO_DEVICE, "SPIMScanDuration(ms)", 5.5)
+    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeLaser(ms)", 8.0)
+    core.setProperty(GALVO_DEVICE, "SPIMLaserDuration(ms)", 5.0)
+    core.setProperty(GALVO_DEVICE, "SPIMDelayBeforeCamera(ms)", 8.0)
+    core.setProperty(GALVO_DEVICE, "SPIMCameraDuration(ms)", 1.0)
 
     # SPIM parameters for galvo
     print(f"  Setting SPIM scan parameters...")
@@ -193,12 +205,26 @@ def configure_galvo_for_spim(galvo_center, galvo_amplitude):
     core.setProperty(GALVO_DEVICE, "SPIMNumSides", 1)            # Single side acquisition
     core.setProperty(GALVO_DEVICE, "SPIMFirstSide", "A")         # Path A
 
-    # Verify critical property
+    # Verify critical properties
     camera_duration_check = float(core.getProperty(GALVO_DEVICE, 'SPIMCameraDuration(ms)'))
     if camera_duration_check <= 0:
         raise Exception("SPIMCameraDuration(ms) is 0 - triggers will NOT be generated!")
 
-    print(f"  ✓ All timing properties configured correctly")
+    scan_duration_check = float(core.getProperty(GALVO_DEVICE, 'SPIMScanDuration(ms)'))
+    delay_scan_check = float(core.getProperty(GALVO_DEVICE, 'SPIMDelayBeforeScan(ms)'))
+    delay_camera_check = float(core.getProperty(GALVO_DEVICE, 'SPIMDelayBeforeCamera(ms)'))
+    delay_laser_check = float(core.getProperty(GALVO_DEVICE, 'SPIMDelayBeforeLaser(ms)'))
+    laser_duration_check = float(core.getProperty(GALVO_DEVICE, 'SPIMLaserDuration(ms)'))
+    num_scans_check = int(core.getProperty(GALVO_DEVICE, 'SPIMNumScansPerSlice'))
+
+    print(f"  ✓ SPIM timing verified (matches ASI plugin UI):")
+    print(f"    SPIMDelayBeforeScan: {delay_scan_check} ms")
+    print(f"    SPIMNumScansPerSlice: {num_scans_check}")
+    print(f"    SPIMScanDuration: {scan_duration_check} ms")
+    print(f"    SPIMDelayBeforeLaser: {delay_laser_check} ms")
+    print(f"    SPIMLaserDuration: {laser_duration_check} ms")
+    print(f"    SPIMDelayBeforeCamera: {delay_camera_check} ms")
+    print(f"    SPIMCameraDuration: {camera_duration_check} ms")
 
 
 def configure_piezo_for_spim():
@@ -226,7 +252,6 @@ def configure_piezo_for_spim():
     # CRITICAL: ARM the piezo (enables hardware trigger response)
     print(f"  Arming piezo for hardware trigger...")
     core.setProperty(PIEZO_DEVICE, "SPIMState", "Armed")
-
     time.sleep(0.3)
 
     spim_state = core.getProperty(PIEZO_DEVICE, "SPIMState")
