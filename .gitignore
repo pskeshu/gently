@@ -69,3 +69,18 @@ config.yml
 
 # Napari/Qt
 *.qss
+
+# Node.js / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# GUI outputs
+multi_embryo_volumes/
+embryo_calibration.db
