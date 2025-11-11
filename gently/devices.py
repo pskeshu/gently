@@ -44,20 +44,19 @@ class DiSPIMZstage:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
-    def __init__(self, device_name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (50.0, 250.0), **kwargs):
-        self.device_name = device_name
+    def __init__(self, name: str, core: pymmcore.CMMCore,
+                 limits: Tuple[float, float] = (50.0, 250.0)):
+        self.name = name
         self.core = core
+        self.parent = None  # Required for Bluesky
         self._limits = limits
         self.tolerance = 0.1  # µm
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
     
     @property
     def limits(self):
         return self._limits
         
-    def set(self, position, **kwargs):
+    def set(self, position):
         """Move Z stage to position - called by bps.mv()"""
         position = float(position)
 
@@ -67,14 +66,14 @@ class DiSPIMZstage:
         # Safety check
         if not (self._limits[0] <= position <= self._limits[1]):
             raise ValueError(f"Position {position} outside limits {self._limits}")
-        
+
         # Direct MM core implementation like deepthought
         status = Status(obj=self, timeout=10)
 
         def wait():
             try:
-                self.core.setPosition(self.device_name, position)
-                self.core.waitForDevice(self.device_name)
+                self.core.setPosition(self.name, position)
+                self.core.waitForDevice(self.name)
             except Exception as exc:
                 status.set_exception(exc)
             else:
@@ -88,9 +87,9 @@ class DiSPIMZstage:
     def read(self):
         """Read current Z stage position - required for Bluesky"""
         try:
-            value = self.core.getPosition(self.device_name)
+            value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.device_name}: {e}")
+            print(f"Failed to read position from {self.name}: {e}")
             value = 0.0
 
         data = OrderedDict()
@@ -105,7 +104,7 @@ class DiSPIMZstage:
         """Describe Z stage device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'number',
             'shape': [],
             'units': 'micrometers'
@@ -129,16 +128,14 @@ class DiSPIMXYStage:
     Based on deepthought XYStage implementation
     """
 
-    def __init__(self, xy_device_name: str, core: pymmcore.CMMCore,
+    def __init__(self, name: str, core: pymmcore.CMMCore,
                  x_limits: Tuple[float, float] = (600.0, 2200.0),
-                 y_limits: Tuple[float, float] = (-700.0, 2300.0), **kwargs):
-        self.xy_device_name = xy_device_name
+                 y_limits: Tuple[float, float] = (-700.0, 2300.0)):
+        self.name = name
         self.core = core
+        self.parent = None  # Required for Bluesky
         self._x_limits = x_limits
         self._y_limits = y_limits
-
-        self.name = kwargs.get('name', xy_device_name)
-        self.parent = None
 
     @property
     def x_limits(self):
@@ -148,7 +145,7 @@ class DiSPIMXYStage:
     def y_limits(self):
         return self._y_limits
     
-    def set(self, position, **kwargs):
+    def set(self, position):
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
         try:
             x, y = position  # Unpack [x, y] coordinates
@@ -167,7 +164,7 @@ class DiSPIMXYStage:
                 try:
                     # Set XY position using MM core
                     self.core.setXYPosition(x, y)
-                    self.core.waitForDevice(self.xy_device_name)
+                    self.core.waitForDevice(self.name)
                 except Exception as exc:
                     status.set_exception(exc)
                 else:
@@ -185,14 +182,10 @@ class DiSPIMXYStage:
     
     def read(self):
         """Read current XY stage positions - required for Bluesky"""
-        try:
-            xy_pos = np.array(self.core.getXYPosition())
-        except Exception as e:
-            print(f"Failed to read XY positions: {e}")
-            xy_pos = np.array([0.0, 0.0])
-
+        xy_pos = np.array(self.core.getXYPosition())
+       
         data = OrderedDict()
-        data[self.xy_device_name] = {
+        data[self.name] = {
             'value': xy_pos,
             'timestamp': time.time(),
             'units': 'micrometers'
@@ -202,8 +195,8 @@ class DiSPIMXYStage:
     def describe(self):
         """Describe XY stage device - required for Bluesky"""
         data = OrderedDict()
-        data[self.xy_device_name] = {
-            'source': self.xy_device_name,
+        data[self.name] = {
+            'source': self.name,
             'dtype': 'array',
             'shape': [2],
             'units': 'micrometers'
@@ -218,6 +211,79 @@ class DiSPIMXYStage:
         """Required for Bluesky"""
         return OrderedDict()
 
+    # Synchronous convenience methods (usable outside RunEngine)
+    def get_position(self) -> np.ndarray:
+        """
+        Get current XY stage position as numpy array.
+
+        Returns
+        -------
+        np.ndarray
+            Current position as [x, y] in micrometers
+
+        Notes
+        -----
+        This is a synchronous convenience method that can be used outside
+        the RunEngine for interactive use, setup, and debugging. For use
+        within plans, prefer yield from bps.rd(xy_stage).
+        """
+        return self.read()[self.name]['value']
+
+    def get_x(self) -> float:
+        """
+        Get current X stage position.
+
+        Returns
+        -------
+        float
+            X position in micrometers
+        """
+        return self.get_position()[0]
+
+    def get_y(self) -> float:
+        """
+        Get current Y stage position.
+
+        Returns
+        -------
+        float
+            Y position in micrometers
+        """
+        return self.get_position()[1]
+
+    # Coordinate conversion utilities for embryo centering
+    @staticmethod
+    def pixel_to_stage_offset(pixel_offset_x: float,
+                               pixel_offset_y: float,
+                               pixel_size_um: float) -> Tuple[float, float]:
+        """
+        Convert pixel offsets to stage movement in micrometers.
+
+        IMPORTANT: X-axis is INVERTED - stage +X moves features LEFT in camera view.
+        This is a hardware characteristic of the diSPIM coordinate system.
+
+        Parameters
+        ----------
+        pixel_offset_x : float
+            Horizontal pixel displacement (positive = right in image)
+        pixel_offset_y : float
+            Vertical pixel displacement (positive = down in image)
+        pixel_size_um : float
+            Effective pixel size in micrometers (physical pixel size / magnification)
+
+        Returns
+        -------
+        Tuple[float, float]
+            Stage movement required (dx_um, dy_um)
+
+        Notes
+        -----
+        This method delegates to gently.coordinates.pixel_to_stage_offset for
+        the actual calculation. It's kept here for backward compatibility.
+        """
+        from .coordinates import pixel_to_stage_offset
+        return pixel_to_stage_offset(pixel_offset_x, pixel_offset_y, pixel_size_um, invert_x=True)
+
 
 class DiSPIMCamera:
     """
@@ -226,44 +292,38 @@ class DiSPIMCamera:
     Device-agnostic: any plan that acquires from a detector will work with this device
     """
     
-    def __init__(self, device_name: str, core: pymmcore.CMMCore, **kwargs):
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
-        self.device_name = device_name
+    def __init__(self, device_name: str, core: pymmcore.CMMCore):
+        self.name = device_name
         self.core = core
-        self._acquiring = False
+        self.parent = None  # Required for Bluesky
         self._last_image = None
         self._last_image_time = None
         
     def trigger(self):
         """Trigger image acquisition - called by bps.trigger()"""        
-        def acquire_image():
+
+        def wait():
             try:
                 # Set camera and snap
-                self.core.setCameraDevice(self.device_name)
+                self.core.setCameraDevice(self.name)
                 self.core.snapImage()
                 
                 # Use rpyc.classic.obtain to transfer numpy array properly
                 self._last_image = rpyc.classic.obtain(self.core.getImage())
                 self._last_image_time = time.time()
-                self._acquiring = False
-                return True
-            except Exception as e:
-                print(f"Image acquisition failed: {e}")
-                self._acquiring = False
-                return False
-        
-        self._acquiring = True
-        
-        # Run acquisition
-        success = acquire_image()
-        
-        status = Status(self)
-        if success:
-            status.set_finished()
-        else:
-            status.set_exception(RuntimeError("Image acquisition failed"))
-        
+
+            except Exception as exc:
+                status.set_exception(exc)
+
+            else:
+                status.set_finished()
+
+
+        status = Status(obj=self, timeout=30)
+
+        import threading
+        threading.Thread(target=wait).start()
+
         return status
     
     def read(self):
@@ -282,7 +342,7 @@ class DiSPIMCamera:
         """Describe detector data format"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'array',
             'shape': getattr(self._last_image, 'shape', [])
         }
@@ -295,90 +355,211 @@ class DiSPIMCamera:
     def describe_configuration(self):
         """Required for Bluesky"""
         return OrderedDict()
-    
+
+    # Hardware configuration methods
+    def configure_exposure(self, exposure_ms: float):
+        """
+        Configure camera exposure time.
+
+        This is a synchronous convenience method that encapsulates the common
+        pattern of setting the camera device and configuring exposure.
+
+        Parameters
+        ----------
+        exposure_ms : float
+            Camera exposure time in milliseconds
+
+        Notes
+        -----
+        This method can be used outside plans for setup and configuration.
+        It automatically selects this camera as the active device and allows
+        hardware time to settle after configuration.
+        """
+        self.core.setCameraDevice(self.name)
+        self.core.setExposure(self.name, exposure_ms)
+        time.sleep(0.1)  # Allow hardware to settle
+
+    def set_roi(self, x: int, y: int, width: int, height: int):
+        """Set camera region of interest."""
+        self.core.setROI(self.name, x, y, width, height)
+
+    def set_trigger_mode(self, mode: str):
+        """
+        Set trigger mode.
+
+        Parameters
+        ----------
+        mode : str
+            'INTERNAL' for software triggering or 'EXTERNAL' for hardware triggering
+        """
+        self.core.setProperty(self.name, "TRIGGER SOURCE", mode)
+
+    def set_sensor_mode(self, mode: str):
+        """
+        Set sensor mode.
+
+        Parameters
+        ----------
+        mode : str
+            'AREA' for full frame readout or 'PROGRESSIVE' for rolling shutter (required for SPIM)
+        """
+        self.core.setProperty(self.name, "SENSOR MODE", mode)
+
+    def set_trigger_active(self, mode: str):
+        """
+        Set trigger active mode.
+
+        Parameters
+        ----------
+        mode : str
+            'EDGE' for edge-triggered or 'LEVEL' for level-triggered
+        """
+        self.core.setProperty(self.name, "TRIGGER ACTIVE", mode)
+
+    def configure_for_calibration(self, exposure_ms: float,
+                                   roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)):
+        """
+        Configure camera for calibration imaging (single light sheet snapshots).
+
+        Uses INTERNAL trigger and AREA sensor mode for simple snapshot acquisition.
+
+        Parameters
+        ----------
+        exposure_ms : float
+            Camera exposure time in milliseconds
+        roi : Tuple[int, int, int, int], optional
+            Region of interest as (x, y, width, height). Default is diSPIM light sheet ROI.
+        """
+        self.core.setCameraDevice(self.name)
+        self.set_roi(*roi)
+        self.set_trigger_mode("INTERNAL")
+        self.set_sensor_mode("AREA")
+        self.core.setExposure(self.name, exposure_ms)
+        time.sleep(0.1)  # Allow settings to stabilize
+
+    def configure_for_volume_acquisition(self, exposure_ms: float,
+                                          roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)):
+        """
+        Configure camera for hardware-triggered volume acquisition.
+
+        Uses EXTERNAL trigger and PROGRESSIVE sensor mode for synchronized SPIM scanning.
+        PROGRESSIVE mode is CRITICAL for proper synchronization with piezo/galvo.
+
+        Parameters
+        ----------
+        exposure_ms : float
+            Camera exposure time in milliseconds
+        roi : Tuple[int, int, int, int], optional
+            Region of interest as (x, y, width, height). Default is diSPIM light sheet ROI.
+            CRITICAL: ROI must be set before hardware triggering!
+        """
+        self.core.setCameraDevice(self.name)
+        self.set_roi(*roi)  # CRITICAL: ROI must be set for hardware triggering
+        self.set_trigger_mode("EXTERNAL")
+        self.set_sensor_mode("PROGRESSIVE")  # CRITICAL for SPIM!
+        self.set_trigger_active("EDGE")
+        self.core.setExposure(self.name, exposure_ms)
+        time.sleep(0.1)  # Allow settings to stabilize
+
     @property
     def exposure_time(self):
         """Get current exposure time"""
         try:
-            return self.core.getExposure() / 1000.0  # Convert ms to s
+            return self.core.getExposure()
         except:
             return 0.01  # Default 10ms
     
     @exposure_time.setter 
-    def exposure_time(self, value_s):
-        """Set exposure time in seconds"""
+    def exposure_time(self, value_ms):
+        """Set exposure time in milliseconds"""
         try:
-            self.core.setExposure(value_s * 1000.0)  # Convert s to ms
+            self.core.setExposure(value_ms)
         except Exception as e:
             print(f"Failed to set exposure: {e}")
 
 
 class DiSPIMDualCamera:
     """
-    DiSPIM Dual Camera - synchronized access to both SPIM cameras
+    DiSPIM Dual Camera - synchronized access to both SPIM views
 
-    Manages HamCam1 and HamCam2 for dual-view SPIM imaging
-    Can trigger both cameras individually or simultaneously
+    Manages a single camera (HamCam1) that captures side-by-side stitched images
+    from both SPIM views. The image is split in the middle to provide View A and View B.
     """
 
-    def __init__(self, camera_a_name: str, camera_b_name: str,
-                 core: pymmcore.CMMCore, **kwargs):
-        self.camera_a_name = camera_a_name
-        self.camera_b_name = camera_b_name
+    def __init__(self, camera_name: str, core: pymmcore.CMMCore, name: str = "dual_camera"):
+        self.name = name
+        self.camera_name = camera_name
         self.core = core
-        self.name = kwargs.get('name', 'dual_spim_camera')
-        self.parent = None
+        self.parent = None  # Required for Bluesky
 
-        # Individual camera devices
-        self.camera_a = DiSPIMCamera(camera_a_name, core, name=f"{self.name}_a")
-        self.camera_b = DiSPIMCamera(camera_b_name, core, name=f"{self.name}_b")
-
-    def trigger_both(self):
-        """Trigger both cameras simultaneously"""
-        status_a = self.camera_a.trigger()
-        status_b = self.camera_b.trigger()
-
-        # Create combined status
-        combined_status = Status(self)
-
-        def wait_both():
-            try:
-                status_a.wait(timeout=10)
-                status_b.wait(timeout=10)
-                combined_status.set_finished()
-            except Exception as exc:
-                combined_status.set_exception(exc)
-
-        import threading
-        threading.Thread(target=wait_both).start()
-
-        return combined_status
+        # Single camera device that captures stitched image
+        self.camera = DiSPIMCamera(camera_name, core)
 
     def trigger(self):
-        """Default trigger behavior - trigger both cameras"""
-        return self.trigger_both()
+        """Trigger camera to capture stitched image"""
+        return self.camera.trigger()
 
     def read(self):
-        """Read both camera images"""
-        data_a = self.camera_a.read()
-        data_b = self.camera_b.read()
+        """Read stitched image and split into View A and View B"""
+        # Get the stitched image from single camera
+        camera_data = self.camera.read()
 
-        # Combine data
-        combined = OrderedDict()
-        combined.update(data_a)
-        combined.update(data_b)
-        return combined
+        if self.camera.name in camera_data:
+            stitched_image = camera_data[self.camera.name]['value']
+            timestamp = camera_data[self.camera.name]['timestamp']
+
+            # Split image in the middle (width dimension)
+            height, width = stitched_image.shape[:2]
+            mid_width = width // 2
+
+            image_a = stitched_image[:, :mid_width]  # Left half
+            image_b = stitched_image[:, mid_width:]  # Right half
+
+            # Return as separate data entries
+            data = OrderedDict()
+            data[f'{self.name}_image_a'] = {
+                'value': image_a,
+                'timestamp': timestamp
+            }
+            data[f'{self.name}_image_b'] = {
+                'value': image_b,
+                'timestamp': timestamp
+            }
+            return data
+        else:
+            return OrderedDict()
 
     def describe(self):
-        """Describe both cameras"""
-        desc_a = self.camera_a.describe()
-        desc_b = self.camera_b.describe()
+        """Describe both image outputs (View A and View B)"""
+        # Get camera description to determine image properties
+        camera_desc = self.camera.describe()
 
-        # Combine descriptions
-        combined = OrderedDict()
-        combined.update(desc_a)
-        combined.update(desc_b)
-        return combined
+        data = OrderedDict()
+
+        # Describe image_a and image_b outputs
+        # Shape will be half width of original stitched image
+        if self.camera.name in camera_desc:
+            original_shape = camera_desc[self.camera.name].get('shape', [])
+            if len(original_shape) >= 2:
+                # Split width dimension in half
+                split_shape = [original_shape[0], original_shape[1] // 2]
+                if len(original_shape) > 2:
+                    split_shape.extend(original_shape[2:])
+            else:
+                split_shape = original_shape
+
+            data[f'{self.name}_image_a'] = {
+                'source': f'{self.name}_image_a',
+                'dtype': 'array',
+                'shape': split_shape
+            }
+            data[f'{self.name}_image_b'] = {
+                'source': f'{self.name}_image_b',
+                'dtype': 'array',
+                'shape': split_shape
+            }
+
+        return data
 
     def read_configuration(self):
         """Required for Bluesky"""
@@ -397,20 +578,19 @@ class DiSPIMFDrive:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
-    def __init__(self, device_name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (800, 25000.0), **kwargs):
-        self.device_name = device_name
+    def __init__(self, name: str, core: pymmcore.CMMCore,
+                 limits: Tuple[float, float] = (20.0, 25000.0)):
+        self.name = name
         self.core = core
+        self.parent = None  # Required for Bluesky
         self._limits = limits
         self.tolerance = 0.1  # µm
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
 
     @property
     def limits(self):
         return self._limits
 
-    def set(self, position, **kwargs):
+    def set(self, position):
         """Move F-drive to position - called by bps.mv()"""
         position = float(position)
         position = round(position, 2)  # Round to 0.01 μm precision
@@ -423,8 +603,8 @@ class DiSPIMFDrive:
 
         def wait():
             try:
-                self.core.setPosition(self.device_name, position)
-                self.core.waitForDevice(self.device_name)
+                self.core.setPosition(self.name, position)
+                self.core.waitForDevice(self.name)
             except Exception as exc:
                 status.set_exception(exc)
             else:
@@ -438,10 +618,9 @@ class DiSPIMFDrive:
     def read(self):
         """Read current F-drive position - required for Bluesky"""
         try:
-            value = self.core.getPosition(self.device_name)
+            value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.device_name}: {e}")
-            value = 0.0
+            print(f"Failed to read position from {self.name}: {e}")
 
         data = OrderedDict()
         data[self.name] = {
@@ -455,7 +634,7 @@ class DiSPIMFDrive:
         """Describe F-drive device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'number',
             'shape': [],
             'units': 'micrometers'
@@ -479,20 +658,19 @@ class DiSPIMPiezo:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
-    def __init__(self, device_name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (0.0, 200.0), **kwargs):
-        self.device_name = device_name
+    def __init__(self, name: str, core: pymmcore.CMMCore,
+                 limits: Tuple[float, float] = (-200, 200.0)):
+        self.name = name
         self.core = core
+        self.parent = None  # Required for Bluesky
         self._limits = limits
         self.tolerance = 0.01  # µm
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
 
     @property
     def limits(self):
         return self._limits
 
-    def set(self, position, **kwargs):
+    def set(self, position):
         """Move piezo to position - called by bps.mv()"""
         position = float(position)
         position = round(position, 3)  # Round to 0.001 μm precision
@@ -505,8 +683,8 @@ class DiSPIMPiezo:
 
         def wait():
             try:
-                self.core.setPosition(self.device_name, position)
-                self.core.waitForDevice(self.device_name)
+                self.core.setPosition(self.name, position)
+                self.core.waitForDevice(self.name)
             except Exception as exc:
                 status.set_exception(exc)
             else:
@@ -520,9 +698,9 @@ class DiSPIMPiezo:
     def read(self):
         """Read current piezo position - required for Bluesky"""
         try:
-            value = self.core.getPosition(self.device_name)
+            value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.device_name}: {e}")
+            print(f"Failed to read position from {self.name}: {e}")
             value = 0.0
 
         data = OrderedDict()
@@ -537,7 +715,7 @@ class DiSPIMPiezo:
         """Describe piezo device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'number',
             'shape': [],
             'units': 'micrometers'
@@ -552,6 +730,79 @@ class DiSPIMPiezo:
         """Required for Bluesky"""
         return OrderedDict()
 
+    # Hardware configuration methods for SPIM
+    def set_as_focus_device(self):
+        """Set this piezo as the Micro-Manager focus device."""
+        self.core.setFocusDevice(self.name)
+
+    def configure_amplitude_offset(self,
+                                    amplitude_um: float,
+                                    offset_um: float,
+                                    pattern: str = "1 - Triangle"):
+        """
+        Configure piezo amplitude and offset for scanning.
+
+        Parameters
+        ----------
+        amplitude_um : float
+            Scanning amplitude in micrometers
+        offset_um : float
+            Center offset in micrometers
+        pattern : str
+            Waveform pattern (default: "1 - Triangle")
+        """
+        self.core.setProperty(self.name, "SingleAxisAmplitude(um)", float(amplitude_um))
+        self.core.setProperty(self.name, "SingleAxisOffset(um)", float(offset_um))
+        self.core.setProperty(self.name, "SingleAxisPattern", pattern)
+
+    def set_spim_state(self, state: str):
+        """
+        Set SPIM state for piezo.
+
+        Parameters
+        ----------
+        state : str
+            'Idle' to stop or 'Armed' to prepare for hardware triggering
+        """
+        self.core.setProperty(self.name, "SPIMState", state)
+        if state == "Armed":
+            time.sleep(0.3)  # Wait for piezo to be ready
+
+    def configure_for_spim(self, num_slices: int):
+        """
+        Configure piezo for SPIM acquisition.
+
+        Parameters
+        ----------
+        num_slices : int
+            Number of Z slices for the volume
+        """
+        self.core.setProperty(self.name, "SPIMNumSlices", num_slices)
+
+    def configure_for_volume_acquisition(self,
+                                          amplitude_um: float,
+                                          offset_um: float,
+                                          num_slices: int):
+        """
+        Configure piezo for hardware-triggered volume acquisition.
+
+        Combines all necessary setup steps: sets as focus device, configures
+        amplitude/offset, sets SPIM parameters, and arms the device.
+
+        Parameters
+        ----------
+        amplitude_um : float
+            Piezo scanning amplitude in micrometers
+        offset_um : float
+            Piezo center offset in micrometers
+        num_slices : int
+            Number of Z slices in volume
+        """
+        self.set_as_focus_device()
+        self.configure_amplitude_offset(amplitude_um, offset_um)
+        self.configure_for_spim(num_slices)
+        self.set_spim_state("Armed")
+
 
 class DiSPIMScanner:
     """
@@ -561,19 +812,18 @@ class DiSPIMScanner:
     Device-agnostic: any plan that moves a 2D positioner will work with this device
     """
 
-    def __init__(self, device_name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (-5.0, 5.0), **kwargs):
-        self.device_name = device_name
+    def __init__(self, name: str, core: pymmcore.CMMCore,
+                 limits: Tuple[float, float] = (-5.0, 5.0)):
+        self.name = name
         self.core = core
+        self.parent = None  # Required for Bluesky
         self._limits = limits
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
 
     @property
     def limits(self):
         return self._limits
 
-    def set(self, position, **kwargs):
+    def set(self, position):
         """Move scanner to position [a, b] - called by bps.mv()"""
         try:
             a_pos, b_pos = position
@@ -590,9 +840,9 @@ class DiSPIMScanner:
 
             def wait():
                 try:
-                    # Scanner uses XY position interface for AB axes
-                    self.core.setXYPosition(self.device_name, a_pos, b_pos)
-                    self.core.waitForDevice(self.device_name)
+                    # Scanner uses galvo position interface for AB axes
+                    self.core.setGalvoPosition(self.name, a_pos, b_pos)
+                    self.core.waitForDevice(self.name)
                 except Exception as exc:
                     status.set_exception(exc)
                 else:
@@ -611,10 +861,10 @@ class DiSPIMScanner:
     def read(self):
         """Read current scanner positions - required for Bluesky"""
         try:
-            # getXYPosition returns tuple (x, y) which maps to (a, b)
-            ab_pos = np.array(self.core.getXYPosition(self.device_name))
+            # getGalvoPosition returns tuple (a, b) voltages for galvo device
+            ab_pos = np.array(self.core.getGalvoPosition(self.name))
         except Exception as e:
-            print(f"Failed to read scanner positions from {self.device_name}: {e}")
+            print(f"Failed to read scanner positions from {self.name}: {e}")
             ab_pos = np.array([0.0, 0.0])
 
         data = OrderedDict()
@@ -629,7 +879,7 @@ class DiSPIMScanner:
         """Describe scanner device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'array',
             'shape': [2],
             'units': 'volts'
@@ -644,32 +894,249 @@ class DiSPIMScanner:
         """Required for Bluesky"""
         return OrderedDict()
 
+    # Hardware configuration methods for SPIM scanning
+    def enable_beam(self, enabled: bool = True):
+        """
+        Enable or disable the laser beam.
+
+        Parameters
+        ----------
+        enabled : bool
+            True to enable beam, False to disable
+        """
+        self.core.setProperty(self.name, "BeamEnabled", "Yes" if enabled else "No")
+
+    def set_laser_output_mode(self, mode: str):
+        """
+        Set laser output mode.
+
+        Parameters
+        ----------
+        mode : str
+            Laser output mode, e.g., "shutter + side" for side A imaging
+        """
+        self.core.setProperty(self.name, "LaserOutputMode", mode)
+
+    def set_spim_state(self, state: str):
+        """
+        Set SPIM state machine state.
+
+        Parameters
+        ----------
+        state : str
+            'Idle' to stop, 'Armed' to prepare, 'Running' to trigger acquisition
+        """
+        self.core.setProperty(self.name, "SPIMState", state)
+        if state == "Idle":
+            time.sleep(0.2)  # Wait for state machine to fully reset
+
+    def configure_x_axis(self, amplitude_deg: float, offset_deg: float,
+                         pattern: str = "1 - Triangle",
+                         mode: str = "3 - Enabled with axes synced"):
+        """
+        Configure galvo X-axis (light sheet width scanning).
+
+        Parameters
+        ----------
+        amplitude_deg : float
+            Scanning amplitude in degrees (typically 8.0 for full light sheet)
+        offset_deg : float
+            Center offset in degrees
+        pattern : str
+            Waveform pattern (default: "1 - Triangle")
+        mode : str
+            Scan mode (default: "3 - Enabled with axes synced")
+        """
+        self.core.setProperty(self.name, "SingleAxisXAmplitude(deg)", amplitude_deg)
+        self.core.setProperty(self.name, "SingleAxisXOffset(deg)", offset_deg)
+        self.core.setProperty(self.name, "SingleAxisXPattern", pattern)
+        self.core.setProperty(self.name, "SingleAxisXMode", mode)
+
+    def configure_y_axis(self, amplitude_deg: float, offset_deg: float,
+                         pattern: str = "1 - Triangle",
+                         mode: str = "3 - Enabled with axes synced"):
+        """
+        Configure galvo Y-axis (light sheet Z-plane positioning).
+
+        Parameters
+        ----------
+        amplitude_deg : float
+            Scanning amplitude in degrees (synchronized with piezo for volume scanning)
+        offset_deg : float
+            Center offset in degrees (positions the light sheet vertically)
+        pattern : str
+            Waveform pattern (default: "1 - Triangle")
+        mode : str
+            Scan mode (default: "3 - Enabled with axes synced")
+        """
+        self.core.setProperty(self.name, "SingleAxisYAmplitude(deg)", amplitude_deg)
+        self.core.setProperty(self.name, "SingleAxisYOffset(deg)", offset_deg)
+        self.core.setProperty(self.name, "SingleAxisYPattern", pattern)
+        self.core.setProperty(self.name, "SingleAxisYMode", mode)
+
+    def set_y_offset(self, angle_deg: float):
+        """
+        Set Y-axis offset for light sheet positioning.
+
+        Used during calibration to move the light sheet to different Z planes.
+
+        Parameters
+        ----------
+        angle_deg : float
+            Y-axis offset angle in degrees
+        """
+        self.core.setProperty(self.name, "SingleAxisYOffset(deg)", float(angle_deg))
+        time.sleep(0.3)  # Allow galvo to settle
+
+    def configure_spim_timing(self,
+                              scan_delay_ms: float = 6.75,
+                              num_scans_per_slice: int = 1,
+                              scan_duration_ms: float = 5.5,
+                              laser_delay_ms: float = 8.0,
+                              laser_duration_ms: float = 5.0,
+                              camera_delay_ms: float = 8.0,
+                              camera_duration_ms: float = 1.0):
+        """
+        Configure SPIM timing parameters for hardware-triggered acquisition.
+
+        Parameters
+        ----------
+        scan_delay_ms : float
+            Delay before starting galvo scan (default: 6.75ms)
+        num_scans_per_slice : int
+            Number of galvo scans per Z slice (default: 1)
+        scan_duration_ms : float
+            Duration of galvo scan (default: 5.5ms)
+        laser_delay_ms : float
+            Delay before laser pulse (default: 8.0ms)
+        laser_duration_ms : float
+            Duration of laser pulse (default: 5.0ms)
+        camera_delay_ms : float
+            Delay before camera trigger (default: 8.0ms)
+        camera_duration_ms : float
+            Duration of camera exposure (default: 1.0ms)
+        """
+        self.core.setProperty(self.name, "SPIMDelayBeforeScan(ms)", scan_delay_ms)
+        self.core.setProperty(self.name, "SPIMNumScansPerSlice", num_scans_per_slice)
+        self.core.setProperty(self.name, "SPIMScanDuration(ms)", scan_duration_ms)
+        self.core.setProperty(self.name, "SPIMDelayBeforeLaser(ms)", laser_delay_ms)
+        self.core.setProperty(self.name, "SPIMLaserDuration(ms)", laser_duration_ms)
+        self.core.setProperty(self.name, "SPIMDelayBeforeCamera(ms)", camera_delay_ms)
+        self.core.setProperty(self.name, "SPIMCameraDuration(ms)", camera_duration_ms)
+
+    def configure_spim_parameters(self,
+                                   num_slices: int,
+                                   slices_per_piezo: int = 1,
+                                   num_sides: int = 1,
+                                   first_side: str = "A"):
+        """
+        Configure SPIM acquisition parameters.
+
+        Parameters
+        ----------
+        num_slices : int
+            Total number of Z slices in volume
+        slices_per_piezo : int
+            Number of slices per piezo step (default: 1)
+        num_sides : int
+            Number of SPIM sides (1 or 2, default: 1)
+        first_side : str
+            First side to image ('A' or 'B', default: 'A')
+        """
+        self.core.setProperty(self.name, "SPIMNumSlices", num_slices)
+        self.core.setProperty(self.name, "SPIMNumSlicesPerPiezo", slices_per_piezo)
+        self.core.setProperty(self.name, "SPIMNumSides", num_sides)
+        self.core.setProperty(self.name, "SPIMFirstSide", first_side)
+
+    def configure_for_calibration(self):
+        """
+        Configure scanner for calibration (continuous light sheet for focus sweeps).
+
+        Sets up:
+        - Enabled beam
+        - X-axis scanning (8° amplitude for full light sheet width)
+        - Y-axis with minimal amplitude (will adjust offset for positioning)
+        """
+        self.enable_beam(True)
+        self.configure_x_axis(amplitude_deg=8.0, offset_deg=0.0005)
+        self.configure_y_axis(amplitude_deg=0.0001, offset_deg=0.0)
+        time.sleep(0.3)  # Allow settings to stabilize
+
+    def configure_for_volume_acquisition(self,
+                                          galvo_amplitude: float,
+                                          galvo_center: float,
+                                          num_slices: int,
+                                          timing_params: Dict = None):
+        """
+        Configure scanner for hardware-triggered volume acquisition.
+
+        Sets up the complete SPIM state machine for synchronized piezo/galvo/camera scanning.
+
+        Parameters
+        ----------
+        galvo_amplitude : float
+            Galvo Y-axis amplitude in degrees (matched to piezo amplitude)
+        galvo_center : float
+            Galvo Y-axis center offset in degrees
+        num_slices : int
+            Number of Z slices
+        timing_params : Dict, optional
+            Custom timing parameters (uses defaults if None)
+        """
+        # Reset state machine
+        self.set_spim_state("Idle")
+        self.set_laser_output_mode("shutter + side")
+        self.enable_beam(False)
+
+        # Configure scanning axes
+        self.configure_x_axis(amplitude_deg=8.0, offset_deg=0.0005)
+        self.configure_y_axis(amplitude_deg=galvo_amplitude, offset_deg=galvo_center)
+
+        # Configure timing (use defaults if not provided)
+        if timing_params is None:
+            self.configure_spim_timing()
+        else:
+            self.configure_spim_timing(**timing_params)
+
+        # Configure acquisition parameters
+        self.configure_spim_parameters(num_slices=num_slices)
 
 class DiSPIMLED:
     """
     DiSPIM LED control - works with bps.mv(led, state)
 
-    ASI Tiger LED (LED:X:31) - LED shutter control
+    ASI Tiger LED (LED:X:31) - LED shutter control via ConfigGroup
     Device-agnostic: any plan that sets device state will work
     """
 
-    def __init__(self, device_name: str, core: pymmcore.CMMCore, **kwargs):
-        self.device_name = device_name
+    def __init__(self, core: pymmcore.CMMCore, name: str = "LED", group_name: str = None):
         self.core = core
-        self.name = kwargs.get('name', device_name)
-        self.parent = None
+        self.name = name
+        self.group_name = group_name or name
+        self.parent = None  # Required for Bluesky bps.mv()
 
-    def set(self, state: str, **kwargs):
+        # Cache available configs (should be 'Open' and 'Closed')
+        self._available_configs = self._get_available_configs()
+
+    def _get_available_configs(self):
+        """Get available LED configurations"""
+        try:
+            return list(self.core.getAvailableConfigs(self.group_name))
+        except:
+            return []
+
+    def set(self, state: str):
         """Set LED state - called by bps.mv(led, 'Open') or bps.mv(led, 'Closed')"""
-        if state not in ['Open', 'Closed']:
-            raise ValueError(f"State must be 'Open' or 'Closed', got '{state}'")
+        if state not in self._available_configs:
+            raise ValueError(f"State '{state}' not available. "
+                           f"Available: {self._available_configs}")
 
         status = Status(obj=self, timeout=5)
 
         def wait():
             try:
-                self.core.setProperty(self.device_name, 'State', state)
-                self.core.waitForDevice(self.device_name)
+                self.core.setConfig(self.group_name, state)
+                self.core.waitForConfig(self.group_name, state)
             except Exception as exc:
                 status.set_exception(exc)
             else:
@@ -681,16 +1148,15 @@ class DiSPIMLED:
         return status
 
     def read(self):
-        """Read current LED state - required for Bluesky"""
+        """Read current LED configuration - required for Bluesky"""
         try:
-            state = self.core.getProperty(self.device_name, 'State')
-        except Exception as e:
-            print(f"Failed to read LED state from {self.device_name}: {e}")
-            state = 'unknown'
+            current_config = self.core.getCurrentConfig(self.group_name)
+        except:
+            current_config = 'unknown'
 
         data = OrderedDict()
         data[self.name] = {
-            'value': state,
+            'value': current_config,
             'timestamp': time.time()
         }
         return data
@@ -699,7 +1165,7 @@ class DiSPIMLED:
         """Describe LED device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.device_name,
+            'source': self.name,
             'dtype': 'string',
             'shape': []
         }
@@ -721,12 +1187,11 @@ class DiSPIMLaserControl:
     Device-agnostic: any plan that sets configurations will work with this device
     """
 
-    def __init__(self, core: pymmcore.CMMCore, group_name: str = "Laser", **kwargs):
+    def __init__(self, core: pymmcore.CMMCore, name: str = "Laser", group_name: str = None):
         self.core = core
-        self.group_name = group_name
-
-        self.name = kwargs.get('name', group_name)
-        self.parent = None
+        self.name = name
+        self.group_name = group_name or name
+        self.parent = None  # Required for Bluesky bps.mv()
 
         # Cache available configs
         self._available_configs = self._get_available_configs()
@@ -738,7 +1203,7 @@ class DiSPIMLaserControl:
         except:
             return []
 
-    def set(self, config_name: str, **kwargs):
+    def set(self, config_name: str):
         """Set laser configuration - called by bps.mv(laser, 'config_name')"""
         if config_name not in self._available_configs:
             raise ValueError(f"Config '{config_name}' not available. "
@@ -793,525 +1258,241 @@ class DiSPIMLaserControl:
         return OrderedDict()
 
 
-class DiSPIMLightSheetSnap:
-    """
-    Single light sheet image trigger - works with bps.trigger()
-
-    Simplest SPIM device: creates light sheet (X-axis scanning) at a single
-    Y position and triggers one image acquisition. No Z-scanning.
-
-    This uses SPIM mode with num_slices=1 for hardware-synchronized
-    light sheet generation and camera triggering. Acquires image using
-    camera sequence mode and popNextTaggedImage().
-
-    Usage:
-        # Configure light sheet
-        ls_snap.configure(sheet_width_deg=2.0, y_position_deg=0.0)
-
-        # Trigger single light sheet image
-        yield from bps.trigger(ls_snap)
-
-        # Read image
-        data = yield from bps.read(ls_snap)
-        image = data['lightsheet_snap']['value']
-    """
-
-    def __init__(self, scanner_device_name: str, camera_device_name: str,
-                 core: pymmcore.CMMCore, **kwargs):
-        self.scanner_name = scanner_device_name
-        self.camera_name = camera_device_name
-        self.core = core
-        self.name = kwargs.get('name', 'lightsheet_snap')
-        self.parent = None
-
-        self._configured = False
-        self._last_image = None
-        self._last_image_time = None
-
-    def configure(self,
-                  sheet_width_deg: float = 2.0,     # Light sheet width
-                  sheet_offset_deg: float = 0.0,     # Light sheet center (X)
-                  y_position_deg: float = 0.0,       # Y-axis position (Z-plane)
-                  scan_duration_ms: float = 10.0,
-                  camera_delay_ms: float = 0.5,
-                  camera_duration_ms: float = 9.0):
-        """
-        Configure light sheet for single image acquisition
-
-        Parameters
-        ----------
-        sheet_width_deg : float
-            Light sheet width in degrees (X-axis scan range)
-        sheet_offset_deg : float
-            Light sheet center position in degrees (X-axis)
-        y_position_deg : float
-            Y-axis position in degrees (selects Z-plane)
-        scan_duration_ms : float
-            Scan duration in milliseconds
-        camera_delay_ms : float
-            Delay before camera trigger in milliseconds
-        camera_duration_ms : float
-            Camera exposure duration in milliseconds
-        """
-        try:
-            # Stop any running sequence acquisition first
-            if self.core.isSequenceRunning():
-                self.core.stopSequenceAcquisition()
-                time.sleep(0.1)  # Brief pause for cleanup
-
-            # Configure camera for external hardware triggering
-            self.core.setCameraDevice(self.camera_name)
-            self.core.setProperty(self.camera_name, "TRIGGER SOURCE", "EXTERNAL")
-
-            # Light sheet generation (X-axis continuous scanning)
-            self.core.setProperty(self.scanner_name, "SingleAxisXAmplitude(deg)", sheet_width_deg)
-            self.core.setProperty(self.scanner_name, "SingleAxisXOffset(deg)", sheet_offset_deg)
-            self.core.setProperty(self.scanner_name, "SingleAxisXPattern", "1 - Triangle")  # Triangle wave for scanning
-            self.core.setProperty(self.scanner_name, "SingleAxisXMode", "3 - Enabled with axes synced")  # Sync with SPIM
-
-            # Y-axis position (single Z-plane, no scanning)
-            self.core.setProperty(self.scanner_name, "SingleAxisYAmplitude(deg)", 0.0)  # No Y-scan
-            self.core.setProperty(self.scanner_name, "SingleAxisYOffset(deg)", y_position_deg)
-            self.core.setProperty(self.scanner_name, "SingleAxisYMode", "0 - Disabled")
-
-            # SPIM parameters for single slice
-            self.core.setProperty(self.scanner_name, "SPIMNumSlices", 1)
-            self.core.setProperty(self.scanner_name, "SPIMNumSides", 1)  # Single side acquisition
-            self.core.setProperty(self.scanner_name, "SPIMScanDuration(ms)", scan_duration_ms)
-            self.core.setProperty(self.scanner_name, "SPIMDelayBeforeCamera(ms)", camera_delay_ms)
-            self.core.setProperty(self.scanner_name, "SPIMCameraDuration(ms)", camera_duration_ms)
-
-            self._configured = True
-
-            print(f"Light sheet configured: width={sheet_width_deg}°, "
-                  f"Y-position={y_position_deg}°, camera trigger=EXTERNAL")
-
-        except Exception as e:
-            raise RuntimeError(f"Failed to configure light sheet: {e}")
-
-    def trigger(self):
-        """
-        Trigger single light sheet image acquisition - called by bps.trigger()
-
-        This starts camera sequence acquisition, triggers SPIM, and collects
-        the image from the circular buffer using popNextTaggedImage().
-
-        Returns
-        -------
-        Status
-            Ophyd Status object that completes when image is acquired
-        """
-        if not self._configured:
-            raise RuntimeError("Must call configure() before trigger()")
-
-        status = Status(obj=self, timeout=10)
-
-        def run_acquisition():
-            try:
-                # Start camera sequence acquisition (1 image)
-                self.core.startSequenceAcquisition(self.camera_name, 1, 0, True)
-
-                # Trigger SPIM to run (directly to Running, not Armed first)
-                # This matches ASI diSPIM plugin behavior for SLICE_SCAN_ONLY mode
-                self.core.setProperty(self.scanner_name, "SPIMState", "Running")
-
-                # Wait for first image to arrive in circular buffer
-                # Match ASI plugin pattern: wait for image OR sequence to complete
-                timeout_ms = max(3000, int(10 * 10.0 + 2 * 0.5))  # Based on scan_duration_ms
-                start_time = time.time()
-
-                while self.core.getRemainingImageCount() == 0:
-                    elapsed_ms = (time.time() - start_time) * 1000
-                    if elapsed_ms >= timeout_ms:
-                        msg = "Camera did not send first image within timeout.\n"
-                        msg += "Make sure camera trigger cables are connected properly."
-                        raise TimeoutError(msg)
-                    time.sleep(0.005)
-
-                # Check if sequence stopped prematurely (indicates error)
-                if not self.core.isSequenceRunning(self.camera_name) and self.core.getRemainingImageCount() == 0:
-                    raise RuntimeError("Camera sequence stopped without sending image")
-
-                # Pop image from circular buffer
-                tagged_img = self.core.popNextTaggedImage()
-
-                # Extract pixel data using rpyc to transfer numpy array properly
-                self._last_image = rpyc.classic.obtain(tagged_img.pix)
-                self._last_image_time = time.time()
-
-                # Wait for SPIM to complete
-                timeout_start = time.time()
-                while True:
-                    state = self.core.getProperty(self.scanner_name, "SPIMState")
-                    if state == "Idle":
-                        break
-
-                    time.sleep(0.01)
-
-                    if time.time() - timeout_start > 10:
-                        raise TimeoutError("SPIM did not complete in 10s")
-
-                status.set_finished()
-
-            except Exception as e:
-                status.set_exception(e)
-            finally:
-                # Make sure to stop sequence if it's still running
-                try:
-                    if self.core.isSequenceRunning(self.camera_name):
-                        self.core.stopSequenceAcquisition(self.camera_name)
-                except:
-                    pass
-
-        import threading
-        threading.Thread(target=run_acquisition).start()
-        return status
-
-    def read(self):
-        """Read acquired image - required for Bluesky"""
-        if self._last_image is not None:
-            data = OrderedDict()
-            data[self.name] = {
-                'value': self._last_image,
-                'timestamp': self._last_image_time or time.time()
-            }
-            return data
-        else:
-            return OrderedDict()
-
-    def describe(self):
-        """Describe light sheet image data - required for Bluesky"""
-        data = OrderedDict()
-        data[self.name] = {
-            'source': f'{self.scanner_name}+{self.camera_name}',
-            'dtype': 'array',
-            'shape': getattr(self._last_image, 'shape', [])
-        }
-        return data
-
-    def read_configuration(self):
-        """Required for Bluesky"""
-        return OrderedDict()
-
-    def describe_configuration(self):
-        """Required for Bluesky"""
-        return OrderedDict()
-
-
 class DiSPIMVolumeScanner:
     """
-    Hardware-triggered SPIM volume acquisition device - works with bps.trigger()
+    Compound device for hardware-triggered SPIM volume acquisition.
 
-    Encapsulates complete volume acquisition workflow using hardware-triggered
-    SPIM mode. Single trigger acquires entire 3D volume (100 slices @ 59fps).
+    Orchestrates camera, scanner, piezo, and lasers for synchronized 3D volume capture.
+    Handles all the complexity of circular buffer management, rpyc transfer, state
+    machine coordination, and automatic laser enable/disable.
 
-    Based on proven test_volume_acq.py implementation with all critical fixes:
-    - PROGRESSIVE sensor mode (required for hardware triggering)
-    - Explicit SPIM timing property configuration
-    - Proper circular buffer management
-    - Galvo Y-axis slice stepping (no piezo needed)
+    Laser Management:
+    - Automatically enables configured lasers before acquisition
+    - Automatically disables lasers after acquisition (prevents photobleaching!)
+    - Always disables lasers on error (critical for sample health)
+    - Laser timing during scan controlled by scanner's LaserOutputMode property
 
-    Usage:
-        # Create device
-        vol_scanner = DiSPIMVolumeScanner("Scanner:AB:33", "HamCam1", core)
+    This device encapsulates the entire hardware-triggered acquisition workflow,
+    allowing plans to simply call trigger_and_read([volume_scanner]).
 
-        # Configure acquisition
-        vol_scanner.configure(num_slices=100, exposure_ms=5.0, slice_step_um=1.0)
-
-        # Acquire volume in Bluesky plan
-        yield from bps.trigger_and_read([vol_scanner])
-
-        # Read volume
-        data = yield from bps.read(vol_scanner)
-        volume = data['volume_scanner']['value']  # 3D numpy array (Z, Y, X)
-
-    Reference:
-        Full documentation in doc/asidispim_camera_triggering.md
-        Standalone script: test_volume_acq.py
+    Parameters
+    ----------
+    scanner : DiSPIMScanner
+        Scanner device for galvo control
+    camera : DiSPIMCamera
+        Camera device for image acquisition
+    piezo : DiSPIMPiezo
+        Piezo device for Z-axis scanning
+    laser_control : DiSPIMLaserControl
+        Laser control device for managing laser configs.
+        Required to ensure explicit laser management (no accidental photobleaching!)
+    core : pymmcore.CMMCore
+        Micro-Manager core instance
+    name : str
+        Device name (default: "volume_scanner")
     """
 
-    def __init__(self, scanner_device_name: str, camera_device_name: str,
-                 core: pymmcore.CMMCore, **kwargs):
-        self.scanner_name = scanner_device_name
-        self.camera_name = camera_device_name
+    def __init__(self,
+                 scanner: DiSPIMScanner,
+                 camera: DiSPIMCamera,
+                 piezo: DiSPIMPiezo,
+                 laser_control: 'DiSPIMLaserControl',
+                 core: pymmcore.CMMCore,
+                 name: str = "volume_scanner"):
+        """
+        Initialize volume scanner with all required devices.
+
+        Note: laser_control is required because proper SPIM operation always
+        requires explicit laser management to avoid photobleaching and ensure
+        reproducible illumination.
+        """
+        self.name = name
+        self.parent = None  # Required for Bluesky
+        self.scanner = scanner
+        self.camera = camera
+        self.piezo = piezo
+        self.laser_control = laser_control
         self.core = core
-        self.name = kwargs.get('name', 'volume_scanner')
-        self.parent = None
 
-        # Acquisition configuration
-        self._configured = False
-        self._num_slices = None
-        self._exposure_ms = None
-        self._slice_step_um = None
-        self._timing = None
-
-        # Acquired data
         self._last_volume = None
         self._last_volume_time = None
+        self._configured = False
 
-        # Camera timing parameters (Hamamatsu Flash4 typical values)
-        self.camera_reset_ms = 3.0
-        self.camera_readout_ms = 10.0
-        self.scan_laser_buffer_ms = 0.25
-        self.scan_filter_freq_khz = 0.2
-        self.has_plogic = True
+        # Configuration cache
+        self._num_slices = None
+        self._exposure_ms = None
+        self._laser_config = None
 
-    def configure(self, num_slices: int = 100, exposure_ms: float = 5.0,
-                  slice_step_um: float = 1.0):
+    def configure(self,
+                  num_slices: int,
+                  exposure_ms: float,
+                  galvo_amplitude: float,
+                  galvo_center: float,
+                  piezo_amplitude: float,
+                  piezo_center: float,
+                  laser_config: str = "488 and 561",
+                  timing_params: Dict = None):
         """
-        Configure volume acquisition parameters
+        Configure all devices for hardware-triggered volume acquisition.
 
         Parameters
         ----------
         num_slices : int
-            Number of Z slices to acquire
+            Number of Z slices in the volume
         exposure_ms : float
-            Light exposure time in milliseconds (max ~10-12ms for PROGRESSIVE mode)
-        slice_step_um : float
-            Distance between slices in micrometers
+            Camera exposure time in milliseconds
+        galvo_amplitude : float
+            Galvo Y-axis amplitude in degrees (synchronized with piezo)
+        galvo_center : float
+            Galvo Y-axis center offset in degrees
+        piezo_amplitude : float
+            Piezo scanning amplitude in micrometers
+        piezo_center : float
+            Piezo center offset in micrometers
+        laser_config : str
+            Laser configuration name (default: "488 and 561").
+            Common options: "488 and 561", "488 only", "561 only"
+        timing_params : Dict, optional
+            Custom SPIM timing parameters (uses defaults if None)
         """
+        # Configure camera for hardware triggering
+        self.camera.configure_for_volume_acquisition(exposure_ms)
+
+        # Configure scanner for volume acquisition
+        self.scanner.configure_for_volume_acquisition(
+            galvo_amplitude=galvo_amplitude,
+            galvo_center=galvo_center,
+            num_slices=num_slices,
+            timing_params=timing_params
+        )
+
+        # Configure piezo for volume acquisition
+        self.piezo.configure_for_volume_acquisition(
+            amplitude_um=piezo_amplitude,
+            offset_um=piezo_center,
+            num_slices=num_slices
+        )
+
         self._num_slices = num_slices
         self._exposure_ms = exposure_ms
-        self._slice_step_um = slice_step_um
-
-        # Calculate SPIM timing parameters
-        self._timing = self._calculate_spim_timing(exposure_ms)
-
+        self._laser_config = laser_config
         self._configured = True
-
-        print(f"Volume acquisition configured:")
-        print(f"  Slices: {num_slices}")
-        print(f"  Exposure: {exposure_ms} ms")
-        print(f"  Step size: {slice_step_um} µm")
-        print(f"  Expected time: {num_slices * self._timing['sliceDuration'] / 1000.0:.1f}s")
-
-    def _calculate_spim_timing(self, camera_exposure_ms: float) -> Dict:
-        """
-        Calculate SPIM timing parameters following ASI diSPIM plugin logic
-
-        Based on AcquisitionPanel.java:1105-1240 and test_volume_acq.py
-        """
-        import math
-
-        # Round to 0.25ms (Tiger controller resolution)
-        def round_quarter_ms(val):
-            return round(val * 4) / 4.0
-
-        def ceil_quarter_ms(val):
-            return math.ceil(val * 4) / 4.0
-
-        camera_readout_max = ceil_quarter_ms(self.camera_readout_ms)
-        camera_reset_max = ceil_quarter_ms(self.camera_reset_ms)
-        global_exposure_delay_max = camera_readout_max + camera_reset_max
-
-        laser_duration = round_quarter_ms(camera_exposure_ms)
-        scan_duration = laser_duration + 2 * self.scan_laser_buffer_ms
-
-        # Account for Bessel filter delay and PLogic delay
-        scan_delay_filter = 0.39 / self.scan_filter_freq_khz
-        if self.has_plogic:
-            scan_delay_filter -= 0.25
-
-        timing = {
-            'scanDelay': round_quarter_ms(global_exposure_delay_max - self.scan_laser_buffer_ms - scan_delay_filter),
-            'scanPeriod': round_quarter_ms(scan_duration),
-            'laserDelay': round_quarter_ms(global_exposure_delay_max),
-            'laserDuration': laser_duration,
-            'cameraDelay': camera_readout_max,
-            'cameraDuration': 1.0,  # Short pulse for EDGE mode
-            'cameraExposure': camera_exposure_ms + 0.1,
-            'sliceDuration': max(scan_duration, laser_duration,
-                                camera_readout_max + camera_exposure_ms)
-        }
-
-        return timing
 
     def trigger(self):
         """
-        Trigger hardware-triggered volume acquisition - called by bps.trigger()
-
-        Executes complete volume acquisition workflow:
-        1. Configure camera (PROGRESSIVE mode, EXTERNAL trigger)
-        2. Configure SPIM timing properties
-        3. Start camera sequence acquisition
-        4. Trigger SPIM state machine
-        5. Wait for images
-        6. Retrieve volume from buffer
+        Start hardware-triggered volume acquisition.
 
         Returns
         -------
         Status
-            Ophyd Status object that completes when volume is acquired
+            Ophyd status object that finishes when volume is acquired
         """
         if not self._configured:
-            raise RuntimeError("Must call configure() before trigger()")
+            raise RuntimeError("Device not configured. Call configure() first.")
 
-        status = Status(obj=self, timeout=60)
+        status = Status(obj=self, timeout=120)
 
-        def run_acquisition():
+        def wait():
             try:
-                # Apply system configuration
-                try:
-                    self.core.setConfig("System", "Startup")
-                    self.core.waitForConfig("System", "Startup")
-                except:
-                    pass  # Config may not exist
-
-                # Turn on lasers
-                try:
-                    self.core.setConfig("Laser", "488 and 561")
-                    self.core.waitForConfig("Laser", "488 and 561")
-                except:
-                    pass  # Config may not exist
-
-                # Configure camera for hardware trigger
-                self.core.setCameraDevice(self.camera_name)
-                self.core.setProperty(self.camera_name, "TRIGGER SOURCE", "EXTERNAL")
-                self.core.setProperty(self.camera_name, "SENSOR MODE", "PROGRESSIVE")  # CRITICAL!
-                self.core.setProperty(self.camera_name, "TRIGGER ACTIVE", "EDGE")
-                self.core.setExposure(self.camera_name, self._exposure_ms)
+                # Enable lasers
+                self.core.setConfig(self.laser_control.group_name, self._laser_config)
+                self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
                 time.sleep(0.1)
 
-                # Configure Tiger controller
-                self.core.setProperty(self.scanner_name, "SPIMState", "Idle")
-                time.sleep(0.2)
-
-                # CRITICAL: Set laser output mode
-                self.core.setProperty(self.scanner_name, "LaserOutputMode", "shutter + side")
-
-                # Disable beam scanning (controlled by SPIM)
-                self.core.setProperty(self.scanner_name, "BeamEnabled", "No")
-
-                # Configure galvo X-axis (light sheet)
-                self.core.setProperty(self.scanner_name, "SingleAxisXAmplitude(deg)", 2.0)
-                self.core.setProperty(self.scanner_name, "SingleAxisXOffset(deg)", 0.0)
-                self.core.setProperty(self.scanner_name, "SingleAxisXPattern", "1 - Triangle")
-                self.core.setProperty(self.scanner_name, "SingleAxisXMode", "3 - Enabled with axes synced")
-
-                # Configure galvo Y-axis (slice stepping)
-                # Y amplitude depends on number of slices and step size
-                # Typical calibration: 100 deg/mm, 1um step -> 0.0001 deg per slice
-                y_amplitude = (self._num_slices - 1) * self._slice_step_um / 1000.0 / 2.0  # Half range
-                self.core.setProperty(self.scanner_name, "SingleAxisYAmplitude(deg)", y_amplitude)
-                self.core.setProperty(self.scanner_name, "SingleAxisYOffset(deg)", 0.0)
-                self.core.setProperty(self.scanner_name, "SingleAxisYPattern", "1 - Triangle")
-                self.core.setProperty(self.scanner_name, "SingleAxisYMode", "3 - Enabled with axes synced")
-
-                # Set SPIM state machine parameters
-                self.core.setProperty(self.scanner_name, "SPIMNumSlices", self._num_slices)
-                self.core.setProperty(self.scanner_name, "SPIMNumSides", 1)
-                self.core.setProperty(self.scanner_name, "SPIMAlternateDirectionsEnable", "No")
-                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeSide(ms)", 0.0)
-                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeRepeat(ms)", 0.0)
-
-                # CRITICAL: Set all SPIM timing properties explicitly
-                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeScan(ms)", self._timing['scanDelay'])
-                self.core.setProperty(self.scanner_name, "SPIMScanDuration(ms)", self._timing['scanPeriod'])
-                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeLaser(ms)", self._timing['laserDelay'])
-                self.core.setProperty(self.scanner_name, "SPIMLaserDuration(ms)", self._timing['laserDuration'])
-                self.core.setProperty(self.scanner_name, "SPIMDelayBeforeCamera(ms)", self._timing['cameraDelay'])
-                self.core.setProperty(self.scanner_name, "SPIMCameraDuration(ms)", self._timing['cameraDuration'])
-
-                # Configure circular buffer
-                if self.core.isSequenceRunning():
-                    self.core.stopSequenceAcquisition()
-                    time.sleep(0.5)
-
+                # Prepare circular buffer
                 self.core.clearCircularBuffer()
-
                 buffer_capacity = self.core.getBufferTotalCapacity()
                 if buffer_capacity < self._num_slices:
-                    self.core.setCircularBufferMemoryFootprint(1200)  # MB
+                    self.core.setCircularBufferMemoryFootprint(512)
                     time.sleep(0.1)
 
-                # Start camera sequence acquisition
-                self.core.prepareSequenceAcquisition(self.camera_name)
+                # Start sequence acquisition
+                self.core.prepareSequenceAcquisition(self.camera.name)
                 time.sleep(0.1)
-                self.core.startSequenceAcquisition(self.camera_name, self._num_slices, 0, True)
+                self.core.startSequenceAcquisition(self.camera.name, self._num_slices, 0, True)
                 time.sleep(0.1)
-
-                # Verify sequence started
-                if not self.core.isSequenceRunning(self.camera_name):
-                    raise RuntimeError("Camera sequence failed to start! Check SENSOR MODE = PROGRESSIVE")
 
                 # Trigger SPIM state machine
-                self.core.setProperty(self.scanner_name, "SPIMState", "Running")
+                self.scanner.set_spim_state("Running")
 
-                # Wait for images
-                expected_time = self._num_slices * self._timing['sliceDuration'] / 1000.0
-                timeout_sec = expected_time * 2 + 10.0
-
+                # Collect images
+                images = []
+                # Timeout calculation: ~50ms per slice (includes SPIM cycle + overhead) with 2x safety margin
+                timeout_s = self._num_slices * 0.05 * 2  # Conservative timeout
                 start_time = time.time()
-                while self.core.getRemainingImageCount() < self._num_slices:
-                    elapsed = time.time() - start_time
-                    if elapsed > timeout_sec:
-                        count = self.core.getRemainingImageCount()
-                        raise TimeoutError(f"Timeout: got {count}/{self._num_slices} images")
+
+                while self.core.getRemainingImageCount() > 0 or self.core.isSequenceRunning():
+                    if self.core.getRemainingImageCount() > 0:
+                        img = self.core.popNextImage()
+
+                        # Handle rpyc transfer
+                        try:
+                            img = rpyc.classic.obtain(img)
+                        except (ImportError, AttributeError):
+                            pass
+
+                        images.append(img)
+
+                    if time.time() - start_time > timeout_s:
+                        raise TimeoutError(f"Volume acquisition timeout after {timeout_s:.1f}s")
+
                     time.sleep(0.01)
 
-                # Retrieve images
-                images = []
-                for i in range(self._num_slices):
-                    img = self.core.popNextImage()
-                    # Handle rpyc transfer
-                    try:
-                        img = rpyc.classic.obtain(img)
-                    except (ImportError, AttributeError):
-                        pass
-                    images.append(img)
+                # Stop sequence
+                if self.core.isSequenceRunning():
+                    self.core.stopSequenceAcquisition()
 
-                # Create volume array
+                # Reset hardware states
+                self.camera.set_trigger_mode("INTERNAL")
+                self.scanner.set_spim_state("Idle")
+                self.piezo.set_spim_state("Idle")
+
+                # Disable lasers (important for sample health!)
+                self.core.setConfig(self.laser_control.group_name, "ALL OFF")
+                self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
+
+                # Store volume
                 self._last_volume = np.array(images)
                 self._last_volume_time = time.time()
 
-                elapsed = time.time() - start_time
-                fps = self._num_slices / elapsed
-                print(f"Volume acquired: {self._last_volume.shape}, {elapsed:.1f}s, {fps:.1f} fps")
-
+            except Exception as exc:
+                # Cleanup on error - always turn off lasers!
+                try:
+                    self.core.stopSequenceAcquisition()
+                    self.camera.set_trigger_mode("INTERNAL")
+                    self.scanner.set_spim_state("Idle")
+                    self.piezo.set_spim_state("Idle")
+                    # Critical: disable lasers even on error
+                    self.core.setConfig(self.laser_control.group_name, "ALL OFF")
+                    self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
+                except:
+                    pass
+                status.set_exception(exc)
+            else:
                 status.set_finished()
 
-            except Exception as e:
-                status.set_exception(e)
-            finally:
-                # Cleanup
-                try:
-                    if self.core.isSequenceRunning(self.camera_name):
-                        self.core.stopSequenceAcquisition(self.camera_name)
-                except:
-                    pass
-
-                try:
-                    self.core.setProperty(self.scanner_name, "SPIMState", "Idle")
-                except:
-                    pass
-
-                try:
-                    self.core.setConfig("Laser", "ALL OFF")
-                except:
-                    pass
-
         import threading
-        threading.Thread(target=run_acquisition).start()
+        threading.Thread(target=wait).start()
+
         return status
 
     def read(self):
-        """Read acquired volume - required for Bluesky"""
+        """Read acquired volume data."""
         if self._last_volume is not None:
             data = OrderedDict()
             data[self.name] = {
                 'value': self._last_volume,
-                'timestamp': self._last_volume_time or time.time(),
-                'units': 'counts'
+                'timestamp': self._last_volume_time or time.time()
             }
             return data
         else:
             return OrderedDict()
 
     def describe(self):
-        """Describe volume data - required for Bluesky"""
+        """Describe volume data format."""
         data = OrderedDict()
         data[self.name] = {
-            'source': f'{self.scanner_name}+{self.camera_name}',
+            'source': self.name,
             'dtype': 'array',
             'shape': getattr(self._last_volume, 'shape', []),
             'units': 'counts'
@@ -1319,45 +1500,225 @@ class DiSPIMVolumeScanner:
         return data
 
     def read_configuration(self):
-        """Required for Bluesky"""
-        config = OrderedDict()
-        if self._configured:
-            config[f'{self.name}_num_slices'] = {
-                'value': self._num_slices,
-                'timestamp': time.time()
-            }
-            config[f'{self.name}_exposure_ms'] = {
-                'value': self._exposure_ms,
-                'timestamp': time.time()
-            }
-            config[f'{self.name}_slice_step_um'] = {
-                'value': self._slice_step_um,
-                'timestamp': time.time()
-            }
-        return config
+        """Required for Bluesky."""
+        return OrderedDict()
 
     def describe_configuration(self):
-        """Required for Bluesky"""
-        desc = OrderedDict()
-        if self._configured:
-            desc[f'{self.name}_num_slices'] = {
-                'source': 'configuration',
-                'dtype': 'number',
-                'shape': []
-            }
-            desc[f'{self.name}_exposure_ms'] = {
-                'source': 'configuration',
-                'dtype': 'number',
-                'shape': [],
-                'units': 'milliseconds'
-            }
-            desc[f'{self.name}_slice_step_um'] = {
-                'source': 'configuration',
-                'dtype': 'number',
-                'shape': [],
-                'units': 'micrometers'
-            }
-        return desc
+        """Required for Bluesky."""
+        return OrderedDict()
+
+
+class DiSPIMBottomCamera(DiSPIMCamera):
+    """
+    Specialized camera device for bottom-view embryo detection with transmitted light.
+
+    Extends DiSPIMCamera with:
+    - Automatic LED management (on before capture, off after)
+    - Pixel calibration for stage coordinate conversion
+    - Embryo-specific convenience methods
+
+    LED Management:
+    - Automatically turns LED on before capture
+    - Automatically turns LED off after capture (prevents heating!)
+    - Always turns LED off on error (critical for sample health)
+
+    Used for finding and centering embryos in the sample chamber.
+    """
+
+    def __init__(self,
+                 device_name: str,
+                 core: pymmcore.CMMCore,
+                 led_control: 'DiSPIMLED',
+                 pixel_size_um: float = 6.5,
+                 magnification: float = 10.0):
+        """
+        Initialize bottom camera with LED control and calibrated pixel size.
+
+        Parameters
+        ----------
+        device_name : str
+            Name of the camera device in Micro-Manager
+        core : pymmcore.CMMCore
+            Micro-Manager core instance
+        led_control : DiSPIMLED
+            LED device for transmitted light illumination.
+            Required to ensure explicit LED management (no accidental sample heating!)
+        pixel_size_um : float, optional
+            Physical pixel size in micrometers (default: 6.5 for PCO camera)
+        magnification : float, optional
+            Objective magnification (default: 10.0 for 10x objective)
+        """
+        super().__init__(device_name, core)
+        self.led_control = led_control
+        self.pixel_size_um = pixel_size_um
+        self.magnification = magnification
+        self.effective_pixel_size = pixel_size_um / magnification
+
+    def pixel_to_um(self, pixels: float) -> float:
+        """
+        Convert pixels to micrometers.
+
+        Parameters
+        ----------
+        pixels : float
+            Number of pixels
+
+        Returns
+        -------
+        float
+            Distance in micrometers
+        """
+        return pixels * self.effective_pixel_size
+
+    def trigger(self):
+        """
+        Trigger image acquisition with automatic LED management.
+
+        Overrides parent trigger() to add LED control:
+        1. Turn LED on
+        2. Capture image
+        3. Turn LED off (always, even on error)
+
+        Returns
+        -------
+        Status
+            Ophyd status object that finishes when image is acquired and LED is off
+        """
+        status = Status(obj=self, timeout=30)
+
+        def wait():
+            try:
+                # Turn LED on for transmitted light imaging
+                self.led_control.set("Open").wait(timeout=5)
+                time.sleep(0.1)  # Allow LED to stabilize
+
+                # Capture image
+                self.core.setCameraDevice(self.name)
+                self.core.snapImage()
+                self._last_image = rpyc.classic.obtain(self.core.getImage())
+                self._last_image_time = time.time()
+
+                # Turn LED off (important to prevent sample heating!)
+                self.led_control.set("Closed").wait(timeout=5)
+
+            except Exception as exc:
+                # Critical: always turn off LED even on error
+                try:
+                    self.led_control.set("Closed").wait(timeout=5)
+                except:
+                    pass
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+        threading.Thread(target=wait).start()
+
+        return status
+
+    def capture_for_marking(self, exposure_ms: float):
+        """
+        Capture image configured for embryo marking.
+
+        Convenience method that sets exposure and captures using internal trigger.
+        LED is automatically managed by trigger().
+
+        Parameters
+        ----------
+        exposure_ms : float
+            Camera exposure time in milliseconds
+
+        Returns
+        -------
+        Status
+            Ophyd status object for the capture
+        """
+        self.core.setCameraDevice(self.name)
+        self.core.setExposure(self.name, exposure_ms)
+        time.sleep(0.1)
+        return self.trigger()  # LED automatically handled
+
+
+class DiSPIMLightSheetSnap:
+    """
+    Compound device for single light sheet image acquisition during calibration.
+
+    Combines scanner and camera for synchronized single-image snapshots.
+    Used during focus sweeps and piezo-galvo calibration.
+    """
+
+    def __init__(self,
+                 scanner: DiSPIMScanner,
+                 camera: DiSPIMCamera,
+                 name: str = "lightsheet_snap"):
+        self.name = name
+        self.parent = None  # Required for Bluesky
+        self.scanner = scanner
+        self.camera = camera
+
+        self._last_image = None
+        self._last_image_time = None
+
+    def configure(self,
+                  sheet_width_deg: float = 8.0,
+                  y_position_deg: float = 0.0,
+                  exposure_ms: float = 5.0):
+        """
+        Configure light sheet parameters for single snapshot.
+
+        Parameters
+        ----------
+        sheet_width_deg : float
+            Light sheet width (X-axis amplitude) in degrees (default: 8.0)
+        y_position_deg : float
+            Light sheet Y-position offset in degrees (default: 0.0)
+        exposure_ms : float
+            Camera exposure time in milliseconds (default: 5.0)
+        """
+        # Configure scanner for continuous light sheet
+        self.scanner.configure_for_calibration()
+        self.scanner.set_y_offset(y_position_deg)
+
+        # Configure camera for single snapshot
+        self.camera.configure_for_calibration(exposure_ms)
+
+    def set_y_position(self, angle_deg: float):
+        """
+        Adjust light sheet Y-position for focus sweeps.
+
+        Parameters
+        ----------
+        angle_deg : float
+            Y-axis offset angle in degrees
+        """
+        self.scanner.set_y_offset(angle_deg)
+
+    def trigger(self):
+        """
+        Capture single light sheet image.
+
+        Returns
+        -------
+        Status
+            Ophyd status object for the capture
+        """
+        return self.camera.trigger()
+
+    def read(self):
+        """Read captured image."""
+        return self.camera.read()
+
+    def describe(self):
+        """Describe image data format."""
+        return self.camera.describe()
+
+    def read_configuration(self):
+        """Required for Bluesky."""
+        return OrderedDict()
+
+    def describe_configuration(self):
+        """Required for Bluesky."""
+        return OrderedDict()
 
 
 if __name__ == "__main__":
