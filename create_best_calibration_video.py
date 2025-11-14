@@ -66,23 +66,23 @@ PHASE_IMAGES = {
 # Phase configuration
 PHASE_CONFIG = [
     ('phase0_centering', "PHASE 0: Initial Centering Check",
-     "Verify embryo centered (automated image analysis)",
+     "Claude AI vision: 'Is embryo visible and centered?'",
      (100, 200, 255), 30),  # Blue, hold longer for centering
 
     ('phase1a_top_edge', "PHASE 1.5a: Top Edge Detection",
-     "Automated sweep - finding embryo boundaries",
+     "Claude AI: Detect when embryo disappears (top boundary)",
      (255, 200, 100), 15),  # Orange
 
     ('phase1b_bottom_edge', "PHASE 1.5b: Bottom Edge Detection",
-     "Automated sweep - detecting bottom edge",
+     "Claude AI: Detect when embryo disappears (bottom boundary)",
      (255, 150, 100), 15),  # Light orange
 
     ('phase2_top_sweep', "PHASE 2: Top Interior Calibration",
-     "FFT bandpass focus scoring (no AI/Claude needed)",
+     "FFT bandpass focus scoring + Claude AI validation",
      (150, 255, 150), 10),  # Green
 
     ('phase3_bottom_sweep', "PHASE 3: Bottom Interior Calibration",
-     "FFT bandpass + visual validation (Claude can verify)",
+     "FFT bandpass focus scoring + Claude AI validation",
      (150, 255, 150), 10),  # Green
 ]
 
@@ -143,8 +143,8 @@ def add_text_overlay(img, title, subtitle, position_info, annotation, phase_colo
         draw.text(((width - info_width) // 2, height - 55),
                  position_info, fill=(255, 255, 255), font=info_font)
 
-        # Add method note
-        method_note = "Automated: FFT focus scoring | Claude AI available for validation"
+        # Add method note (empty for now, phase-specific info in subtitle)
+        method_note = "Calibration workflow uses: Claude Vision API + FFT bandpass focus scoring"
         method_bbox = draw.textbbox((0, 0), method_note, font=method_font)
         method_width = method_bbox[2] - method_bbox[0]
         draw.text(((width - method_width) // 2, height - 25),
