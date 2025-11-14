@@ -32,11 +32,12 @@ PHASE_IMAGES = {
     ],
 
     'phase1b_bottom_edge': [
-        ('calibration_images_embryo/bottom_edge_detection_0.00um_20251111_133839.png', "Start at center", 0.00),
-        ('calibration_images_embryo/bottom_edge_detection_0.05um_20251111_133844.png', "Sweeping down", 0.05),
-        ('calibration_images_embryo/bottom_edge_detection_0.10um_20251111_133848.png', "Finding bottom edge", 0.10),
-        ('calibration_images_embryo/bottom_edge_detection_0.15um_20251111_133852.png', "Continue sweep", 0.15),
-        ('calibration_images_embryo/bottom_edge_detection_0.20um_20251111_133857.png', "Edge detected", 0.20),
+        ('calibration_images_embryo/bottom_edge_detection_0.00um_20251111_133839.png', "Start at center - embryo visible", 0.00),
+        ('calibration_images_embryo/bottom_edge_detection_0.05um_20251111_133844.png', "Sweeping down - still visible", 0.05),
+        ('calibration_images_embryo/bottom_edge_detection_0.10um_20251111_133848.png', "Embryo getting fainter", 0.10),
+        ('calibration_images_embryo/bottom_edge_detection_0.15um_20251111_133852.png', "Embryo fading...", 0.15),
+        ('calibration_images_embryo/bottom_edge_detection_0.20um_20251111_133857.png', "Embryo very faint", 0.20),
+        ('calibration_images_embryo/bottom_edge_detection_0.25um_20251111_133901.png', "EMPTY - Claude says 'no embryo' = EDGE FOUND", 0.25),
     ],
 
     'phase2_top_sweep': [
