@@ -52,12 +52,14 @@ PHASE_IMAGES = {
     ],
 
     'phase3_bottom_sweep': [
-        ('calibration_images_embryo/bottom_sweep_-4.08um_20251028_150955.png', "Far from focus", -4.08),
-        ('calibration_images_embryo/bottom_sweep_-2.08um_20251028_150956.png', "Approaching", -2.08),
-        ('calibration_images_embryo/bottom_sweep_-0.08um_20251028_150956.png', "Best focus (FFT peak)", -0.08),
-        ('calibration_images_embryo/bottom_sweep_1.92um_20251028_150957.png', "Past focus", 1.92),
-        ('calibration_images_embryo/bottom_sweep_3.92um_20251028_150957.png', "Moving away", 3.92),
-        ('calibration_images_embryo/bottom_sweep_7.92um_20251028_150958.png', "Far from focus", 7.92),
+        ('calibration_images_embryo/bottom_sweep_-4.08um_20251028_150955.png', "Far from focus (blurry)", -4.08),
+        ('calibration_images_embryo/bottom_sweep_-0.08um_20251028_150956.png', "Still out of focus", -0.08),
+        ('calibration_images_embryo/bottom_sweep_1.92um_20251028_150957.png', "Approaching focus", 1.92),
+        ('calibration_images_embryo/bottom_sweep_3.92um_20251028_150957.png', "Getting sharper", 3.92),
+        ('calibration_images_embryo/bottom_sweep_5.92um_20251028_150958.png', "Good focus", 5.92),
+        ('calibration_images_embryo/bottom_sweep_7.92um_20251028_150958.png', "Better focus", 7.92),
+        ('calibration_images_embryo/bottom_sweep_9.92um_20251028_150959.png', "Excellent focus", 9.92),
+        ('calibration_images_embryo/bottom_sweep_11.92um_20251028_150959.png', "BEST FOCUS - cells visible!", 11.92),
     ],
 }
 
