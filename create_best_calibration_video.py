@@ -182,22 +182,35 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
     volume_norm = np.clip((volume_norm - vmin) / (vmax - vmin) * 255, 0, 255).astype(np.uint8)
 
     print(f"    Creating {num_slices} slice frames (forward + backward pass)...")
-    print(f"    Center-cropping to {target_size} to match calibration frames...")
 
     frames = []
+
+    # Determine which camera view to use (left or right) based on first slice
+    # This matches how calibration images select the best view
+    first_slice = volume_norm[0]
+    h, w = first_slice.shape
+    mid_x = w // 2
+    left_intensity = np.mean(first_slice[:, :mid_x])
+    right_intensity = np.mean(first_slice[:, mid_x:])
+
+    if left_intensity >= right_intensity:
+        use_left_view = True
+        crop_x = 0
+        print(f"    Using LEFT camera view (intensity: {left_intensity:.1f} vs {right_intensity:.1f})")
+    else:
+        use_left_view = False
+        crop_x = mid_x
+        print(f"    Using RIGHT camera view (intensity: {left_intensity:.1f} vs {right_intensity:.1f})")
 
     # Forward pass
     for slice_idx in range(num_slices):
         img_array = volume_norm[slice_idx]
 
-        # Center crop to match calibration images (which are center-cropped from full frame)
+        # Crop to match calibration images (left or right camera view)
         # Volume is (512, 2048), calibration is (512, 1024)
-        # Take center 1024 pixels
         height, width = img_array.shape
         crop_width = target_size[0]  # 1024
-        left = (width - crop_width) // 2  # (2048 - 1024) // 2 = 512
-        right = left + crop_width
-        img_array_cropped = img_array[:, left:right]
+        img_array_cropped = img_array[:, crop_x:crop_x + crop_width]
 
         # Convert to PIL for overlay
         img_pil = Image.fromarray(img_array_cropped)
@@ -221,12 +234,10 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
     for slice_idx in range(num_slices - 2, 0, -1):  # Skip first and last to avoid duplicate
         img_array = volume_norm[slice_idx]
 
-        # Center crop to match calibration images
+        # Crop to same camera view
         height, width = img_array.shape
         crop_width = target_size[0]
-        left = (width - crop_width) // 2
-        right = left + crop_width
-        img_array_cropped = img_array[:, left:right]
+        img_array_cropped = img_array[:, crop_x:crop_x + crop_width]
 
         img_pil = Image.fromarray(img_array_cropped)
 
