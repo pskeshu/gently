@@ -162,7 +162,7 @@ def add_text_overlay(img, title, subtitle, position_info, annotation, phase_colo
     return img_overlay
 
 
-def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(2304, 768)):
+def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(1024, 512)):
     """
     Create frames from test volume TIFF stack.
 
