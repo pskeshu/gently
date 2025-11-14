@@ -182,7 +182,7 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
     volume_norm = np.clip((volume_norm - vmin) / (vmax - vmin) * 255, 0, 255).astype(np.uint8)
 
     print(f"    Creating {num_slices} slice frames (forward + backward pass)...")
-    print(f"    Resizing to {target_size} to match calibration frames...")
+    print(f"    Center-cropping to {target_size} to match calibration frames...")
 
     frames = []
 
@@ -190,9 +190,17 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
     for slice_idx in range(num_slices):
         img_array = volume_norm[slice_idx]
 
-        # Convert to PIL for overlay and resize to match other frames
-        img_pil = Image.fromarray(img_array)
-        img_pil = img_pil.resize(target_size, Image.Resampling.LANCZOS)
+        # Center crop to match calibration images (which are center-cropped from full frame)
+        # Volume is (512, 2048), calibration is (512, 1024)
+        # Take center 1024 pixels
+        height, width = img_array.shape
+        crop_width = target_size[0]  # 1024
+        left = (width - crop_width) // 2  # (2048 - 1024) // 2 = 512
+        right = left + crop_width
+        img_array_cropped = img_array[:, left:right]
+
+        # Convert to PIL for overlay
+        img_pil = Image.fromarray(img_array_cropped)
 
         # Create position info
         position_info = f"Slice {slice_idx + 1}/{num_slices} (Z = {slice_idx * 0.5:.1f} µm)"
@@ -212,8 +220,15 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
     # Backward pass for smooth loop
     for slice_idx in range(num_slices - 2, 0, -1):  # Skip first and last to avoid duplicate
         img_array = volume_norm[slice_idx]
-        img_pil = Image.fromarray(img_array)
-        img_pil = img_pil.resize(target_size, Image.Resampling.LANCZOS)
+
+        # Center crop to match calibration images
+        height, width = img_array.shape
+        crop_width = target_size[0]
+        left = (width - crop_width) // 2
+        right = left + crop_width
+        img_array_cropped = img_array[:, left:right]
+
+        img_pil = Image.fromarray(img_array_cropped)
 
         position_info = f"Slice {slice_idx + 1}/{num_slices} (Z = {slice_idx * 0.5:.1f} µm)"
         annotation = f"3D volume pass-through (backward)"
