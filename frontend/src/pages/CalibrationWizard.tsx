@@ -42,6 +42,7 @@ export default function CalibrationWizard() {
   const [currentEmbryoIndex, setCurrentEmbryoIndex] = useState(0);
   const [calibrationStatus, setCalibrationStatus] = useState<string>('');
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
+  const [calibrationProgress, setCalibrationProgress] = useState<string[]>([]);
   const [verificationImage, setVerificationImage] = useState<string | null>(null);
 
   // WebSocket for real-time updates
@@ -50,6 +51,11 @@ export default function CalibrationWizard() {
       if (msg.type === 'embryo_progress') {
         const progress = msg as WSEmbryoProgress;
         setCalibrationStatus(`${progress.stage}...`);
+      } else if (msg.type === 'calibration_progress') {
+        // Real-time calibration phase updates
+        const progressMsg = msg as any;
+        setCalibrationProgress(prev => [...prev, progressMsg.message]);
+        setCalibrationStatus(progressMsg.message);
       } else if (msg.type === 'calibration_complete') {
         const complete = msg as WSCalibrationComplete;
         if (complete.success) {
@@ -196,6 +202,7 @@ export default function CalibrationWizard() {
 
     setIsCalibrating(true);
     setCalibrationStatus('Running calibration...');
+    setCalibrationProgress([]); // Clear previous progress
     setError(null);
 
     try {
@@ -208,6 +215,7 @@ export default function CalibrationWizard() {
           setCurrentEmbryoIndex(currentEmbryoIndex + 1);
           setVerificationImage(null);
           setCalibrationStatus('');
+          setCalibrationProgress([]);
           setIsCalibrating(false);
         }, 1500);
       } else {
@@ -420,6 +428,20 @@ export default function CalibrationWizard() {
               {calibrationStatus && (
                 <div className="mb-6 p-4 bg-blue-900/30 border border-blue-500 rounded">
                   <p className="text-blue-200">{calibrationStatus}</p>
+                </div>
+              )}
+
+              {/* Calibration Progress Log */}
+              {isCalibrating && calibrationProgress.length > 0 && (
+                <div className="mb-6 p-4 bg-gray-800/50 border border-gray-600 rounded">
+                  <h4 className="text-sm font-semibold text-gray-300 mb-2">Calibration Progress:</h4>
+                  <div className="max-h-48 overflow-y-auto space-y-1 font-mono text-xs">
+                    {calibrationProgress.map((msg, idx) => (
+                      <div key={idx} className="text-gray-400">
+                        {msg}
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 

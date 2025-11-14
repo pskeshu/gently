@@ -168,6 +168,52 @@ def calculate_piezo_galvo_calibration(calibration_points: List[CalibrationPoint]
     return slope, offset, r_squared
 
 
+def pixel_to_stage_offset(pixel_offset_x: float,
+                          pixel_offset_y: float,
+                          pixel_size_um: float,
+                          invert_x: bool = True) -> Tuple[float, float]:
+    """
+    Convert pixel offsets to stage movement in micrometers.
+
+    This handles the coordinate system transformation from camera pixel space
+    to XY stage movement, including the common hardware characteristic where
+    X-axis movement is inverted.
+
+    Parameters
+    ----------
+    pixel_offset_x : float
+        Horizontal pixel displacement (positive = right in image)
+    pixel_offset_y : float
+        Vertical pixel displacement (positive = down in image)
+    pixel_size_um : float
+        Effective pixel size in micrometers (physical pixel size / magnification)
+    invert_x : bool, optional
+        Whether to invert X-axis (default: True for diSPIM where stage +X moves
+        features LEFT in camera view)
+
+    Returns
+    -------
+    Tuple[float, float]
+        Stage movement required (dx_um, dy_um) in micrometers
+
+    Notes
+    -----
+    The X-axis inversion is a hardware characteristic of many microscope systems
+    including the diSPIM where stage +X moves features to the LEFT in the camera
+    view. This function encapsulates that coordinate system transformation.
+
+    Examples
+    --------
+    >>> # Feature is 100 pixels to the right of center
+    >>> dx, dy = pixel_to_stage_offset(100, 0, pixel_size_um=0.65)
+    >>> # Stage must move LEFT (negative X) to center the feature
+    >>> dx  # -65.0 (negative because X is inverted)
+    """
+    dx_stage = -pixel_offset_x * pixel_size_um if invert_x else pixel_offset_x * pixel_size_um
+    dy_stage = pixel_offset_y * pixel_size_um
+    return (dx_stage, dy_stage)
+
+
 def transform_coordinates_2d(points: np.ndarray, transform_matrix: np.ndarray) -> np.ndarray:
     """
     Apply 2D coordinate transformation using homogeneous coordinates

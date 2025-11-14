@@ -62,6 +62,10 @@ class Embryo(Base):
     calibration_data = Column(JSON, nullable=True)
     calibration_status = Column(String(50), default="pending")  # pending, calibrating, completed, failed
 
+    # Bluesky integration - link to databroker runs
+    calibration_run_uid = Column(String(100), nullable=True)  # UID of Bluesky calibration run in databroker
+    queue_item_uid = Column(String(100), nullable=True)  # UID of Queue Server item
+
     created_at = Column(DateTime, default=datetime.now)
 
     # Relationships
@@ -88,6 +92,8 @@ class Embryo(Base):
                 "y": self.stage_y_centered
             } if self.stage_x_centered is not None else None,
             "calibration_status": self.calibration_status,
+            "calibration_run_uid": self.calibration_run_uid,
+            "queue_item_uid": self.queue_item_uid,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "num_images": len(self.images) if self.images else 0
         }
@@ -144,6 +150,10 @@ class VolumeRun(Base):
     # Output directory
     output_dir = Column(String(500), nullable=True)
 
+    # Bluesky integration - link to databroker runs
+    bluesky_run_uid = Column(String(100), nullable=True)  # UID of Bluesky volume acquisition run in databroker
+    queue_item_uid = Column(String(100), nullable=True)  # UID of Queue Server item
+
     # Relationships
     session = relationship("Session", back_populates="volume_runs")
     acquisitions = relationship("VolumeAcquisition", back_populates="volume_run", cascade="all, delete-orphan")
@@ -160,6 +170,8 @@ class VolumeRun(Base):
             "started_at": self.started_at.isoformat() if self.started_at else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None,
             "output_dir": self.output_dir,
+            "bluesky_run_uid": self.bluesky_run_uid,
+            "queue_item_uid": self.queue_item_uid,
             "num_acquisitions": len(self.acquisitions) if self.acquisitions else 0,
             "successful_acquisitions": sum(1 for a in self.acquisitions if a.success) if self.acquisitions else 0
         }

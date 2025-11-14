@@ -20,6 +20,75 @@ import base64
 from io import BytesIO
 from PIL import Image
 import json
+import re
+from typing import Optional, Callable
+import sys
+
+
+class RealTimeStdoutCapture:
+    """Captures stdout and immediately relays important messages via callback."""
+
+    def __init__(self, callback: Optional[Callable[[str], None]] = None):
+        self.callback = callback
+        self.original_stdout = sys.stdout
+        self.captured_lines = []
+
+        # Patterns to match important progress messages
+        self.phase_pattern = re.compile(r'\[(\d+(?:\.\d+)?)/(\d+)\]\s*(.+)')
+        self.checkmark_pattern = re.compile(r'^\s*✓\s*(.+)')
+        self.phase_header_pattern = re.compile(r'(?:PHASE|Phase)\s+\d+(?:\.\d+)?:\s*(.+)', re.IGNORECASE)
+        self.detection_pattern = re.compile(r'(EDGE DETECTION COMPLETE|SELECTING CALIBRATION POSITIONS)', re.IGNORECASE)
+
+    def write(self, text):
+        """Write method called by print statements."""
+        # Write to original stdout (for backend console)
+        self.original_stdout.write(text)
+        self.original_stdout.flush()
+
+        # Process for callback
+        if self.callback and text.strip():
+            self._process_line(text.strip())
+
+    def _process_line(self, line):
+        """Parse line and call callback if it's important."""
+        if not line or line.startswith('=') or line.startswith('─'):
+            return
+
+        # Match phase markers like "[3/8] Phase 1: ..."
+        phase_match = self.phase_pattern.search(line)
+        if phase_match:
+            current = phase_match.group(1)
+            total = phase_match.group(2)
+            description = phase_match.group(3).strip()
+            self.callback(f"[{current}/{total}] {description}")
+            return
+
+        # Match checkmarks
+        check_match = self.checkmark_pattern.match(line)
+        if check_match:
+            self.callback(f"✓ {check_match.group(1).strip()}")
+            return
+
+        # Match phase headers
+        phase_header_match = self.phase_header_pattern.search(line)
+        if phase_header_match:
+            self.callback(phase_header_match.group(1).strip())
+            return
+
+        # Match important milestones
+        detection_match = self.detection_pattern.search(line)
+        if detection_match:
+            self.callback(detection_match.group(1))
+            return
+
+        # Match lines that start with common progress indicators
+        if any(line.startswith(prefix) for prefix in ['  Moving', '  Detected', '  Calibration', '  Strategy:', '  Reason:']):
+            self.callback(line.strip())
+
+    def flush(self):
+        """Flush method (required for file-like object)."""
+        self.original_stdout.flush()
+
 
 # Device configuration
 core = get_mmc()
@@ -221,16 +290,18 @@ def move_stage_to_center_embryo(embryo_pixel_x, embryo_pixel_y, current_stage_x,
         }
 
 
-def run_calibration_for_embryo(embryo_id):
+def run_calibration_for_embryo(embryo_id: str, progress_callback: Optional[Callable[[str], None]] = None):
     """
     Run full piezo/galvo calibration workflow.
 
-    Calls the existing calibrate_embryo_piezo_galvo.py script.
+    Calls the existing calibrate_embryo_piezo_galvo.py script and captures progress.
 
     Parameters
     ----------
     embryo_id : str
         Embryo identifier
+    progress_callback : callable, optional
+        Function to call with progress messages (e.g., for WebSocket broadcast)
 
     Returns
     -------
@@ -242,12 +313,31 @@ def run_calibration_for_embryo(embryo_id):
         print(f"RUNNING CALIBRATION FOR {embryo_id}")
         print(f"{'='*70}")
 
+        # Set matplotlib to non-interactive backend (headless mode)
+        import matplotlib
+        matplotlib.use('Agg')  # Must be called before importing pyplot
+
         # Import existing calibration module
         import calibrate_embryo_piezo_galvo
 
-        # Run calibration
-        print("  Starting calibration workflow...")
-        calibrate_embryo_piezo_galvo.main()
+        # Capture stdout to relay progress in real-time
+        if progress_callback:
+            progress_callback("Starting calibration workflow...")
+
+            # Replace stdout with our real-time capture
+            real_time_capture = RealTimeStdoutCapture(callback=progress_callback)
+            old_stdout = sys.stdout
+            sys.stdout = real_time_capture
+
+            try:
+                # Run calibration (progress will be sent in real-time)
+                calibrate_embryo_piezo_galvo.main()
+            finally:
+                # Restore original stdout
+                sys.stdout = old_stdout
+        else:
+            # No callback, run normally
+            calibrate_embryo_piezo_galvo.main()
 
         # Load generated calibration file
         cal_file = Path("piezo_galvo_calibration_embryo.json")
@@ -274,24 +364,33 @@ def run_calibration_for_embryo(embryo_id):
         print(f"    Offset: {calibration['offset_um']:.2f} µm")
         print(f"{'='*70}\n")
 
+        if progress_callback:
+            progress_callback(f"✓ Calibration complete! Slope: {calibration['slope_um_per_deg']:.3f} µm/°, Offset: {calibration['offset_um']:.2f} µm")
+
         return {
             "success": True,
             "calibration": calibration
         }
 
     except ImportError as e:
+        error_msg = f"Failed to import calibration module: {str(e)}. Ensure calibrate_embryo_piezo_galvo.py is in the same directory."
+        if progress_callback:
+            progress_callback(f"✗ {error_msg}")
         return {
             "success": False,
-            "error": f"Failed to import calibration module: {str(e)}. Ensure calibrate_embryo_piezo_galvo.py is in the same directory."
+            "error": error_msg
         }
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
         print(f"  ✗ Calibration failed:")
         print(error_trace)
+        error_msg = f"Calibration failed: {str(e)}"
+        if progress_callback:
+            progress_callback(f"✗ {error_msg}")
         return {
             "success": False,
-            "error": f"Calibration failed: {str(e)}"
+            "error": error_msg
         }
 
 

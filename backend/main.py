@@ -482,8 +482,24 @@ async def calibrate_embryo(embryo_id: int):
             "stage": "calibrating"
         })
 
+        # Create progress callback that broadcasts via WebSocket
+        loop = asyncio.get_event_loop()
+
+        def sync_progress_callback(message: str):
+            """Synchronous callback that schedules async broadcast"""
+            async def async_broadcast():
+                await ws_manager.broadcast({
+                    "type": "calibration_progress",
+                    "embryo_id": embryo_id,
+                    "embryo_number": embryo.embryo_number,
+                    "message": message
+                })
+
+            # Schedule the async broadcast
+            asyncio.run_coroutine_threadsafe(async_broadcast(), loop)
+
         # Run calibration (this will take a while)
-        result = hw.run_calibration_for_embryo(embryo.embryo_id)
+        result = hw.run_calibration_for_embryo(embryo.embryo_id, progress_callback=sync_progress_callback)
 
         if not result["success"]:
             embryo.calibration_status = "failed"

@@ -550,7 +550,7 @@ def select_best_camera_view(image):
     return selected_view
 
 
-def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None):
+def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None, roi=None):
     """
     Compute FFT bandpass focus score (ASI diSPIM OughtaFocus implementation).
 
@@ -559,9 +559,10 @@ def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None):
     images, which appear blurred and lack high-frequency components.
 
     Algorithm:
-    1. Compute 2D FFT power spectrum of the image
-    2. Create bandpass mask to keep only frequencies in [lower, upper] cutoff range
-    3. Calculate mean power within that frequency band
+    1. Optionally crop image to ROI (if provided)
+    2. Compute 2D FFT power spectrum of the image
+    3. Create bandpass mask to keep only frequencies in [lower, upper] cutoff range
+    4. Calculate mean power within that frequency band
 
     The default frequency band (2.5% - 14% of maximum) was empirically determined
     by Bill Mohler (UConn) to work well for light sheet microscopy.
@@ -570,6 +571,7 @@ def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None):
         image: 2D numpy array (grayscale image)
         lower_cutoff: Lower frequency cutoff as fraction of max frequency (default: FFT_LOWER_CUTOFF)
         upper_cutoff: Upper frequency cutoff as fraction of max frequency (default: FFT_UPPER_CUTOFF)
+        roi: Optional tuple (y_min, y_max, x_min, x_max) to crop image before FFT analysis
 
     Returns:
         float: Mean power in the specified frequency band (higher = better focus)
@@ -578,6 +580,11 @@ def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None):
         lower_cutoff = FFT_LOWER_CUTOFF
     if upper_cutoff is None:
         upper_cutoff = FFT_UPPER_CUTOFF
+
+    # Apply ROI cropping if provided
+    if roi is not None:
+        y_min, y_max, x_min, x_max = roi
+        image = image[y_min:y_max, x_min:x_max]
 
     # Ensure image is float for FFT
     img_float = image.astype(np.float64)
@@ -615,6 +622,92 @@ def compute_fft_bandpass_score(image, lower_cutoff=None, upper_cutoff=None):
         mean_power = 0.0
 
     return mean_power
+
+
+def detect_embryo_roi(image, margin_fraction=0.1, min_threshold_ratio=1.15):
+    """
+    Detect embryo region and return bounding box ROI.
+
+    Uses adaptive thresholding to find the embryo boundary and creates
+    a bounding box with specified margin. This ROI is then used for
+    focus scoring to improve accuracy by excluding empty background.
+
+    Args:
+        image: 2D numpy array (single camera view, grayscale)
+        margin_fraction: Fractional margin to add around detected embryo (default: 0.1 = 10%)
+        min_threshold_ratio: Minimum brightness ratio for embryo vs background (default: 1.15)
+
+    Returns:
+        tuple: (y_min, y_max, x_min, x_max) defining ROI boundaries in pixels
+               Returns full image bounds if embryo detection fails
+    """
+    h, w = image.shape
+
+    # Calculate background level from edge regions
+    edge_margin = min(50, h // 10, w // 10)
+    edge_pixels = np.concatenate([
+        image[:edge_margin, :].flatten(),
+        image[-edge_margin:, :].flatten(),
+        image[:, :edge_margin].flatten(),
+        image[:, -edge_margin:].flatten()
+    ])
+    background_level = np.median(edge_pixels)
+
+    # Create binary mask: pixels significantly brighter than background
+    threshold = background_level * min_threshold_ratio
+    embryo_mask = image > threshold
+
+    # Find connected components (embryo should be the largest bright region)
+    from scipy import ndimage
+    labeled, num_features = ndimage.label(embryo_mask)
+
+    if num_features == 0:
+        # No embryo detected - return full image
+        print("    ⚠ No embryo detected in ROI detection, using full image")
+        return (0, h, 0, w)
+
+    # Find largest connected component (assumed to be embryo)
+    component_sizes = [(labeled == i).sum() for i in range(1, num_features + 1)]
+    largest_component = np.argmax(component_sizes) + 1
+    embryo_region = (labeled == largest_component)
+
+    # Get bounding box of embryo region
+    rows = np.any(embryo_region, axis=1)
+    cols = np.any(embryo_region, axis=0)
+
+    if not rows.any() or not cols.any():
+        # Empty mask - return full image
+        print("    ⚠ Empty embryo mask, using full image")
+        return (0, h, 0, w)
+
+    y_min, y_max = np.where(rows)[0][[0, -1]]
+    x_min, x_max = np.where(cols)[0][[0, -1]]
+
+    # Add margin around detected region
+    embryo_height = y_max - y_min
+    embryo_width = x_max - x_min
+
+    y_margin = int(embryo_height * margin_fraction)
+    x_margin = int(embryo_width * margin_fraction)
+
+    # Apply margins with boundary checks
+    y_min = max(0, y_min - y_margin)
+    y_max = min(h, y_max + y_margin)
+    x_min = max(0, x_min - x_margin)
+    x_max = min(w, x_max + x_margin)
+
+    # Ensure ROI is not too small (minimum 100x100 pixels)
+    roi_height = y_max - y_min
+    roi_width = x_max - x_min
+
+    if roi_height < 100 or roi_width < 100:
+        print(f"    ⚠ ROI too small ({roi_width}x{roi_height}), using full image")
+        return (0, h, 0, w)
+
+    print(f"    ✓ Detected embryo ROI: [{y_min}:{y_max}, {x_min}:{x_max}] "
+          f"({roi_width}x{roi_height} pixels, {roi_width*roi_height/(w*h)*100:.1f}% of frame)")
+
+    return (y_min, y_max, x_min, x_max)
 
 
 def gaussian_function(x, norm, mean, sigma, offset):
@@ -1353,17 +1446,23 @@ def perform_focus_sweep_embryo(core, fig, ax, galvo_name, galvo_angle,
 
     print(f"\n  ✓ Sweep complete. Captured {len(images)} images.")
 
+    # ===== DETECT EMBRYO ROI =====
+    # Use center image (most likely to have good embryo visibility) to detect ROI
+    print(f"\n[ROI DETECTION] Detecting embryo region for focused analysis...")
+    center_idx = len(images) // 2
+    embryo_roi = detect_embryo_roi(images[center_idx])
+
     # ===== HYBRID FOCUS DETECTION =====
-    # Primary: FFT Bandpass algorithm with Gaussian curve fitting
+    # Primary: FFT Bandpass algorithm with Gaussian curve fitting (within embryo ROI)
     # Validation: Claude vision confirmation
 
-    # Compute FFT bandpass scores for all images
-    print(f"\n[FFT ANALYSIS] Computing FFT bandpass focus scores...")
+    # Compute FFT bandpass scores for all images (within embryo ROI)
+    print(f"\n[FFT ANALYSIS] Computing FFT bandpass focus scores within embryo ROI...")
     print(f"  Frequency band: {FFT_LOWER_CUTOFF*100:.1f}% - {FFT_UPPER_CUTOFF*100:.1f}% of max frequency")
 
     fft_scores = []
     for i, img in enumerate(images):
-        score = compute_fft_bandpass_score(img)
+        score = compute_fft_bandpass_score(img, roi=embryo_roi)
         fft_scores.append(score)
         print(f"  [{i+1}/{len(images)}] Position {positions[i]:.2f} µm: FFT score = {score:.2e}")
 
@@ -1517,6 +1616,375 @@ Be specific and direct. Focus on embryo boundary sharpness."""
         'confidence': confidence,
         'selection_method': selection_method,
         'validation_status': validation_status
+    }
+
+
+# ============================================================================
+# IMPROVED TWO-STAGE FOCUS SWEEP
+# ============================================================================
+
+def compute_gradient_score_for_focus(image, roi=None, sigma=1.0):
+    """Compute gradient-based focus score for validation."""
+    from scipy.ndimage import gaussian_filter, sobel
+
+    if roi is not None:
+        y_min, y_max, x_min, x_max = roi
+        img = image[y_min:y_max, x_min:x_max]
+    else:
+        img = image
+
+    img_smooth = gaussian_filter(img.astype(np.float64), sigma=sigma)
+    grad_x = sobel(img_smooth, axis=1)
+    grad_y = sobel(img_smooth, axis=0)
+    gradient_magnitude = np.sqrt(grad_x**2 + grad_y**2)
+
+    return np.mean(gradient_magnitude)
+
+
+def update_focus_visualization(fig, ax_img, ax_plot, img, positions, fft_scores, gradient_scores,
+                               current_pos, stage_name, galvo_name, galvo_angle, progress_text):
+    """
+    Update visualization with image and real-time focus curves.
+
+    Args:
+        fig: Matplotlib figure
+        ax_img: Axis for image display
+        ax_plot: Axis for focus curve plot
+        img: Current image
+        positions: Array of tested positions
+        fft_scores: Array of FFT scores
+        gradient_scores: Array of gradient scores (or None)
+        current_pos: Current piezo position
+        stage_name: Name of current stage
+        galvo_name: TOP or BOTTOM
+        galvo_angle: Galvo Y angle
+        progress_text: Progress description
+    """
+    # Update image
+    ax_img.clear()
+    ax_img.imshow(img, cmap='gray')
+    ax_img.set_title(f'{galvo_name} @ {galvo_angle:+.3f}° | {current_pos:.2f} μm\n{stage_name}',
+                     fontsize=10, fontweight='bold')
+    ax_img.axis('off')
+
+    # Add progress text on image
+    ax_img.text(0.02, 0.98, progress_text, transform=ax_img.transAxes,
+               fontsize=9, verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+
+    # Update focus curve plot
+    ax_plot.clear()
+
+    if len(positions) > 0 and len(fft_scores) > 0:
+        # Normalize scores for better comparison
+        fft_norm = (fft_scores - np.min(fft_scores)) / (np.max(fft_scores) - np.min(fft_scores) + 1e-10)
+
+        # Plot FFT scores
+        ax_plot.plot(positions, fft_norm, 'bo-', label='FFT Bandpass', linewidth=2, markersize=6)
+
+        # Plot gradient scores if available
+        if gradient_scores is not None and len(gradient_scores) > 0:
+            grad_norm = (gradient_scores - np.min(gradient_scores)) / (np.max(gradient_scores) - np.min(gradient_scores) + 1e-10)
+            ax_plot.plot(positions, grad_norm, 'ms-', label='Gradient', linewidth=2, markersize=6, alpha=0.7)
+
+        # Mark current position
+        if current_pos is not None:
+            ax_plot.axvline(current_pos, color='red', linestyle='--', linewidth=1.5, alpha=0.5, label='Current')
+
+        ax_plot.set_xlabel('Piezo Position (μm)', fontsize=10, fontweight='bold')
+        ax_plot.set_ylabel('Normalized Focus Score', fontsize=10, fontweight='bold')
+        ax_plot.set_title('Focus Curves (Real-Time)', fontsize=10, fontweight='bold')
+        ax_plot.legend(loc='upper right', fontsize=8)
+        ax_plot.grid(True, alpha=0.3)
+    else:
+        ax_plot.text(0.5, 0.5, 'Acquiring images...', ha='center', va='center',
+                    fontsize=12, transform=ax_plot.transAxes)
+        ax_plot.set_xlim([0, 1])
+        ax_plot.set_ylim([0, 1])
+
+    plt.tight_layout()
+    plt.pause(0.01)
+
+
+def perform_focus_sweep_embryo_improved(core, fig, ax, galvo_name, galvo_angle,
+                                        center_pos, sweep_range, phase_name="PHASE 2/3"):
+    """
+    IMPROVED two-stage focus sweep with finer steps and multi-metric validation.
+
+    Key improvements over perform_focus_sweep_embryo():
+    1. Two-stage approach: coarse (1.5 μm) then fine (0.3 μm)
+    2. Increased settling time: 300ms (was 150ms)
+    3. Multi-metric validation: FFT bandpass + gradient
+    4. Relaxed R² threshold: 0.5 (was 0.75)
+
+    Args:
+        Same as perform_focus_sweep_embryo()
+
+    Returns:
+        Same structure as perform_focus_sweep_embryo()
+    """
+    # Parameters
+    COARSE_STEP_UM = 1.5
+    COARSE_SETTLING_MS = 300
+    FINE_RANGE_UM = 3.0
+    FINE_STEP_UM = 0.3
+    FINE_SETTLING_MS = 300
+    MINIMUM_R_SQUARED_IMPROVED = 0.5
+    METRIC_AGREEMENT_UM = 1.0
+
+    print(f"\n{'='*70}")
+    print(f"IMPROVED TWO-STAGE FOCUS SWEEP - {galvo_name}")
+    print(f"{'='*70}")
+    print(f"Galvo Y: {galvo_angle:+.3f}°")
+
+    # Set piezo as focus device and galvo position
+    core.setFocusDevice(PIEZO_DEVICE)
+    set_galvo_y_position(core, galvo_angle)
+
+    # Create split-screen visualization (image + focus curves)
+    fig.clear()
+    ax_img = fig.add_subplot(1, 2, 1)  # Left: image
+    ax_plot = fig.add_subplot(1, 2, 2)  # Right: focus curves
+
+    # ========== STAGE 1: COARSE SWEEP ==========
+    print(f"\n[STAGE 1: COARSE SWEEP]")
+    print(f"  Range: {center_pos:.1f} ± {sweep_range:.1f} μm")
+    print(f"  Step: {COARSE_STEP_UM} μm, Settling: {COARSE_SETTLING_MS}ms")
+
+    sweep_start = center_pos - sweep_range
+    sweep_end = center_pos + sweep_range
+    coarse_positions = np.arange(sweep_start, sweep_end + COARSE_STEP_UM/2, COARSE_STEP_UM)
+
+    print(f"  Testing {len(coarse_positions)} positions...")
+
+    coarse_images = []
+
+    for i, pos in enumerate(coarse_positions):
+        core.setPosition(float(pos))
+        core.waitForDevice(PIEZO_DEVICE)
+        time.sleep(COARSE_SETTLING_MS / 1000.0)
+
+        img_full = capture_image(core)
+        img = select_best_camera_view(img_full)
+        coarse_images.append(img)
+
+        # Simple image display during capture (no scores yet)
+        ax_img.clear()
+        ax_img.imshow(img, cmap='gray')
+        ax_img.set_title(f'{galvo_name} @ {galvo_angle:+.3f}° | {pos:.2f} μm\nStage 1: Coarse Sweep',
+                         fontsize=10, fontweight='bold')
+        ax_img.axis('off')
+        progress_text = f"STAGE 1: COARSE SWEEP\nCapturing images...\n{i+1}/{len(coarse_positions)} positions"
+        ax_img.text(0.02, 0.98, progress_text, transform=ax_img.transAxes,
+                   fontsize=9, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='yellow', alpha=0.7))
+
+        ax_plot.clear()
+        ax_plot.text(0.5, 0.5, f'Capturing images...\n{i+1}/{len(coarse_positions)}',
+                    ha='center', va='center', fontsize=12, transform=ax_plot.transAxes)
+        ax_plot.set_xlim([0, 1])
+        ax_plot.set_ylim([0, 1])
+        plt.tight_layout()
+        plt.pause(0.01)
+
+        print(f"    [{i+1}/{len(coarse_positions)}] {pos:6.2f} μm captured", end='\r')
+
+    print()
+
+    # Detect ROI from center image
+    center_idx = len(coarse_images) // 2
+    embryo_roi = detect_embryo_roi(coarse_images[center_idx])
+
+    # Compute FFT scores with ROI
+    print(f"  Computing FFT scores with embryo ROI...")
+    coarse_fft_scores = []
+    for i, img in enumerate(coarse_images):
+        score = compute_fft_bandpass_score(img, roi=embryo_roi)
+        coarse_fft_scores.append(score)
+
+        # Update visualization with ROI-based scores
+        if i % 3 == 0 or i == len(coarse_images) - 1:  # Update every 3rd image to reduce overhead
+            progress_text = f"STAGE 1: COARSE SWEEP\nRecomputing with ROI...\n{i+1}/{len(coarse_images)} scores"
+            update_focus_visualization(fig, ax_img, ax_plot, img,
+                                      coarse_positions[:i+1], np.array(coarse_fft_scores), None,
+                                      coarse_positions[i], "Stage 1: Coarse (ROI Scoring)", galvo_name, galvo_angle, progress_text)
+
+    coarse_fft_scores = np.array(coarse_fft_scores)
+
+    # Fit Gaussian to coarse data
+    coarse_fit = fit_gaussian_curve(coarse_positions, coarse_fft_scores)
+
+    if coarse_fit['success']:
+        coarse_best = coarse_fit['best_position']
+        print(f"  ✓ Coarse best: {coarse_best:.2f} μm (R²={coarse_fit['r_squared']:.3f})")
+    else:
+        max_idx = np.argmax(coarse_fft_scores)
+        coarse_best = coarse_positions[max_idx]
+        print(f"  ⚠ Using max score position: {coarse_best:.2f} μm")
+
+    # ========== STAGE 2: FINE REFINEMENT ==========
+    print(f"\n[STAGE 2: FINE REFINEMENT]")
+    print(f"  Center: {coarse_best:.2f} μm")
+    print(f"  Range: ±{FINE_RANGE_UM} μm")
+    print(f"  Step: {FINE_STEP_UM} μm, Settling: {FINE_SETTLING_MS}ms")
+
+    fine_start = coarse_best - FINE_RANGE_UM
+    fine_end = coarse_best + FINE_RANGE_UM
+    fine_positions = np.arange(fine_start, fine_end + FINE_STEP_UM/2, FINE_STEP_UM)
+
+    print(f"  Testing {len(fine_positions)} positions...")
+
+    fine_images = []
+    fine_fft_scores = []
+    fine_gradient_scores = []
+
+    for i, pos in enumerate(fine_positions):
+        core.setPosition(float(pos))
+        core.waitForDevice(PIEZO_DEVICE)
+        time.sleep(FINE_SETTLING_MS / 1000.0)
+
+        img_full = capture_image(core)
+        img = select_best_camera_view(img_full)
+        fine_images.append(img)
+
+        # Compute both metrics
+        fft_score = compute_fft_bandpass_score(img, roi=embryo_roi)
+        gradient_score = compute_gradient_score_for_focus(img, roi=embryo_roi)
+
+        fine_fft_scores.append(fft_score)
+        fine_gradient_scores.append(gradient_score)
+
+        # Update split-screen visualization with both metrics
+        progress_text = f"STAGE 2: FINE REFINEMENT\n{i+1}/{len(fine_positions)} positions\nStep: {FINE_STEP_UM} μm\nBoth metrics active!"
+        update_focus_visualization(fig, ax_img, ax_plot, img,
+                                  fine_positions[:i+1],
+                                  np.array(fine_fft_scores),
+                                  np.array(fine_gradient_scores),
+                                  pos, "Stage 2: Fine Refinement", galvo_name, galvo_angle, progress_text)
+
+        print(f"    [{i+1}/{len(fine_positions)}] {pos:6.3f} μm | FFT: {fft_score:10.2e} | Grad: {gradient_score:8.2f}", end='\r')
+
+    print()
+
+    fine_fft_scores = np.array(fine_fft_scores)
+    fine_gradient_scores = np.array(fine_gradient_scores)
+
+    # Fit Gaussian to both metrics
+    fft_fit = fit_gaussian_curve(fine_positions, fine_fft_scores)
+    gradient_fit = fit_gaussian_curve(fine_positions, fine_gradient_scores)
+
+    print(f"  FFT best:      {fft_fit['best_position']:.3f} μm (R²={fft_fit['r_squared']:.3f})")
+    print(f"  Gradient best: {gradient_fit['best_position']:.3f} μm (R²={gradient_fit['r_squared']:.3f})")
+
+    # ========== STAGE 3: MULTI-METRIC VALIDATION ==========
+    print(f"\n[STAGE 3: VALIDATION]")
+
+    fft_pos = fft_fit['best_position']
+    gradient_pos = gradient_fit['best_position']
+    position_diff = abs(fft_pos - gradient_pos)
+    metrics_agree = position_diff <= METRIC_AGREEMENT_UM
+
+    fft_good = fft_fit['r_squared'] >= MINIMUM_R_SQUARED_IMPROVED
+    gradient_good = gradient_fit['r_squared'] >= MINIMUM_R_SQUARED_IMPROVED
+
+    print(f"  FFT:      {fft_pos:.3f} μm (R²={fft_fit['r_squared']:.3f}) {'✓' if fft_good else '✗'}")
+    print(f"  Gradient: {gradient_pos:.3f} μm (R²={gradient_fit['r_squared']:.3f}) {'✓' if gradient_good else '✗'}")
+    print(f"  Difference: {position_diff:.3f} μm {'✓' if metrics_agree else '✗'}")
+
+    # Decision logic
+    if metrics_agree and fft_good and gradient_good:
+        confidence = "HIGH"
+        optimal_position = (fft_pos + gradient_pos) / 2
+        selection_method = "Average_FFT_Gradient"
+        print(f"  → Confidence: HIGH (both metrics agree)")
+    elif metrics_agree and (fft_good or gradient_good):
+        confidence = "MEDIUM"
+        optimal_position = fft_pos if fft_good else gradient_pos
+        selection_method = "FFT" if fft_good else "Gradient"
+        print(f"  → Confidence: MEDIUM (one metric reliable)")
+    elif fft_good:
+        confidence = "LOW"
+        optimal_position = fft_pos
+        selection_method = "FFT_only"
+        print(f"  → Confidence: LOW (FFT only)")
+    else:
+        confidence = "FALLBACK"
+        max_idx = np.argmax(fine_fft_scores)
+        optimal_position = fine_positions[max_idx]
+        selection_method = "Max_FFT"
+        print(f"  → Confidence: FALLBACK (max FFT score)")
+
+    # Find closest actual position
+    best_idx = np.argmin(np.abs(fine_positions - optimal_position))
+    optimal_position = fine_positions[best_idx]
+    optimal_image = fine_images[best_idx]
+
+    print(f"\n  ✓ Optimal position: {optimal_position:.3f} μm")
+
+    # Move to optimal position
+    core.setPosition(float(optimal_position))
+    core.waitForDevice(PIEZO_DEVICE)
+    time.sleep(0.3)
+
+    # Final visualization showing selection result
+    ax_plot.clear()
+
+    # Normalize scores for plotting
+    fft_norm = (fine_fft_scores - np.min(fine_fft_scores)) / (np.max(fine_fft_scores) - np.min(fine_fft_scores) + 1e-10)
+    grad_norm = (fine_gradient_scores - np.min(fine_gradient_scores)) / (np.max(fine_gradient_scores) - np.min(fine_gradient_scores) + 1e-10)
+
+    # Plot curves
+    ax_plot.plot(fine_positions, fft_norm, 'bo-', label='FFT Bandpass', linewidth=2, markersize=6)
+    ax_plot.plot(fine_positions, grad_norm, 'ms-', label='Gradient', linewidth=2, markersize=6, alpha=0.7)
+
+    # Mark best positions
+    ax_plot.axvline(fft_pos, color='blue', linestyle=':', linewidth=2, alpha=0.5, label=f'FFT best ({fft_pos:.2f} μm)')
+    ax_plot.axvline(gradient_pos, color='magenta', linestyle=':', linewidth=2, alpha=0.5, label=f'Grad best ({gradient_pos:.2f} μm)')
+    ax_plot.axvline(optimal_position, color='green', linestyle='-', linewidth=3, alpha=0.7, label=f'SELECTED ({optimal_position:.2f} μm)')
+
+    ax_plot.set_xlabel('Piezo Position (μm)', fontsize=10, fontweight='bold')
+    ax_plot.set_ylabel('Normalized Focus Score', fontsize=10, fontweight='bold')
+    ax_plot.set_title(f'Final Result: {confidence} Confidence', fontsize=10, fontweight='bold', color='green')
+    ax_plot.legend(loc='best', fontsize=8)
+    ax_plot.grid(True, alpha=0.3)
+
+    # Update image with final result
+    ax_img.clear()
+    ax_img.imshow(optimal_image, cmap='gray')
+    ax_img.set_title(f'{galvo_name} OPTIMAL @ {galvo_angle:+.3f}° | {optimal_position:.2f} μm\n✓ {confidence} CONFIDENCE',
+                     fontsize=10, fontweight='bold', color='green')
+    ax_img.axis('off')
+
+    # Add result summary on image
+    summary_text = f"✓ OPTIMAL FOCUS FOUND\nConfidence: {confidence}\nMethod: {selection_method}\nFFT: {fft_pos:.2f} μm\nGrad: {gradient_pos:.2f} μm\nΔ: {position_diff:.2f} μm"
+    ax_img.text(0.02, 0.98, summary_text, transform=ax_img.transAxes,
+               fontsize=9, verticalalignment='top', color='white',
+               bbox=dict(boxstyle='round', facecolor='green', alpha=0.7))
+
+    plt.tight_layout()
+    plt.pause(0.1)
+
+    print(f"{'='*70}")
+    print(f"✓ IMPROVED TWO-STAGE FOCUS COMPLETE: {galvo_name}")
+    print(f"  Position: {optimal_position:.3f} μm")
+    print(f"  Confidence: {confidence}")
+    print(f"{'='*70}")
+
+    return {
+        'optimal_position': optimal_position,
+        'optimal_image': optimal_image,
+        'all_positions': fine_positions.tolist(),
+        'all_images': fine_images,
+        'fft_scores': fine_fft_scores,
+        'fit_result': fft_fit,
+        'confidence': confidence,
+        'selection_method': selection_method,
+        'validation_status': {
+            'fft_position': fft_pos,
+            'gradient_position': gradient_pos,
+            'position_difference': position_diff,
+            'metrics_agree': metrics_agree
+        }
     }
 
 
@@ -1984,10 +2452,10 @@ def main():
         _core.waitForDevice(PIEZO_DEVICE)
         time.sleep(0.3)
 
-        # Perform focus sweep at interior position
-        top_result = perform_focus_sweep_embryo(
+        # Perform focus sweep at interior position (USING IMPROVED TWO-STAGE METHOD)
+        top_result = perform_focus_sweep_embryo_improved(
             _core, fig, ax, "TOP", GALVO_Y_TOP_CALIB,
-            HEURISTIC_TOP_PIEZO, SWEEP_RANGE_UM, SWEEP_STEP_UM,
+            HEURISTIC_TOP_PIEZO, SWEEP_RANGE_UM,
             phase_name="PHASE 2: TOP CALIBRATION"
         )
 
@@ -2010,10 +2478,10 @@ def main():
         _core.waitForDevice(PIEZO_DEVICE)
         time.sleep(0.3)
 
-        # Perform focus sweep at interior position
-        bottom_result = perform_focus_sweep_embryo(
+        # Perform focus sweep at interior position (USING IMPROVED TWO-STAGE METHOD)
+        bottom_result = perform_focus_sweep_embryo_improved(
             _core, fig, ax, "BOTTOM", GALVO_Y_BOTTOM_CALIB,
-            HEURISTIC_BOTTOM_PIEZO, SWEEP_RANGE_UM, SWEEP_STEP_UM,
+            HEURISTIC_BOTTOM_PIEZO, SWEEP_RANGE_UM,
             phase_name="PHASE 3: BOTTOM CALIBRATION"
         )
 
