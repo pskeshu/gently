@@ -176,31 +176,24 @@ def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(
 
     num_slices = volume.shape[0]
 
-    # Normalize volume for display
+    # Normalize volume for display - use more conservative normalization to match calibration brightness
     volume_norm = volume.astype(np.float32)
-    vmin, vmax = np.percentile(volume_norm, [1, 99.5])
+    vmin, vmax = np.percentile(volume_norm, [0.1, 99.9])
     volume_norm = np.clip((volume_norm - vmin) / (vmax - vmin) * 255, 0, 255).astype(np.uint8)
+
+    # Reduce brightness to match calibration images (which have mean ~10 vs volume ~100)
+    volume_norm = (volume_norm * 0.15).astype(np.uint8)  # Scale down to match calibration brightness
 
     print(f"    Creating {num_slices} slice frames (forward + backward pass)...")
 
     frames = []
 
-    # Determine which camera view to use (left or right) based on first slice
-    # This matches how calibration images select the best view
-    first_slice = volume_norm[0]
-    h, w = first_slice.shape
+    # Use LEFT camera view to match calibration images
+    # (The calibration images appear to be from the left view based on embryo position)
+    h, w = volume_norm[0].shape
     mid_x = w // 2
-    left_intensity = np.mean(first_slice[:, :mid_x])
-    right_intensity = np.mean(first_slice[:, mid_x:])
-
-    if left_intensity >= right_intensity:
-        use_left_view = True
-        crop_x = 0
-        print(f"    Using LEFT camera view (intensity: {left_intensity:.1f} vs {right_intensity:.1f})")
-    else:
-        use_left_view = False
-        crop_x = mid_x
-        print(f"    Using RIGHT camera view (intensity: {left_intensity:.1f} vs {right_intensity:.1f})")
+    crop_x = 0  # Use left view (pixels 0:1024)
+    print(f"    Using LEFT camera view to match calibration framing")
 
     # Forward pass
     for slice_idx in range(num_slices):
