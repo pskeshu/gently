@@ -16,6 +16,7 @@ import numpy as np
 from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
+import tifffile
 
 
 # Manually curated image selection
@@ -64,6 +65,9 @@ PHASE_IMAGES = {
     ],
 }
 
+# Test volume file
+TEST_VOLUME_PATH = Path("embryo_volume_test.tif")
+
 # Phase configuration
 PHASE_CONFIG = [
     ('phase0_centering', "PHASE 0: Initial Centering Check",
@@ -85,6 +89,10 @@ PHASE_CONFIG = [
     ('phase3_bottom_sweep', "PHASE 3: Bottom Interior Calibration",
      "FFT bandpass focus scoring + Claude AI validation",
      (150, 255, 150), 10),  # Green
+
+    ('phase4_test_volume', "PHASE 4: Test Volume Acquisition",
+     "Calibrated system in action - hardware-triggered 3D scan",
+     (255, 100, 255), 2),  # Magenta, fast playback
 ]
 
 
@@ -154,18 +162,98 @@ def add_text_overlay(img, title, subtitle, position_info, annotation, phase_colo
     return img_overlay
 
 
-def create_best_quality_video(output_path, fps=10):
+def create_test_volume_frames(title, subtitle, color, hold_frames, target_size=(2304, 768)):
+    """
+    Create frames from test volume TIFF stack.
+
+    Returns list of annotated frames ready for video.
+    """
+    print(f"    Loading TIFF stack from {TEST_VOLUME_PATH}...")
+
+    # Load volume
+    volume = tifffile.imread(str(TEST_VOLUME_PATH))
+    print(f"    Volume shape: {volume.shape}")
+
+    num_slices = volume.shape[0]
+
+    # Normalize volume for display
+    volume_norm = volume.astype(np.float32)
+    vmin, vmax = np.percentile(volume_norm, [1, 99.5])
+    volume_norm = np.clip((volume_norm - vmin) / (vmax - vmin) * 255, 0, 255).astype(np.uint8)
+
+    print(f"    Creating {num_slices} slice frames (forward + backward pass)...")
+    print(f"    Resizing to {target_size} to match calibration frames...")
+
+    frames = []
+
+    # Forward pass
+    for slice_idx in range(num_slices):
+        img_array = volume_norm[slice_idx]
+
+        # Convert to PIL for overlay and resize to match other frames
+        img_pil = Image.fromarray(img_array)
+        img_pil = img_pil.resize(target_size, Image.Resampling.LANCZOS)
+
+        # Create position info
+        position_info = f"Slice {slice_idx + 1}/{num_slices} (Z = {slice_idx * 0.5:.1f} µm)"
+        annotation = f"3D volume pass-through (forward)"
+
+        # Add overlay
+        img_annotated = add_text_overlay(img_pil, title, subtitle, position_info, annotation, color)
+
+        # Convert to OpenCV format
+        frame = np.array(img_annotated)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        # Add multiple times
+        for _ in range(hold_frames):
+            frames.append(frame)
+
+    # Backward pass for smooth loop
+    for slice_idx in range(num_slices - 2, 0, -1):  # Skip first and last to avoid duplicate
+        img_array = volume_norm[slice_idx]
+        img_pil = Image.fromarray(img_array)
+        img_pil = img_pil.resize(target_size, Image.Resampling.LANCZOS)
+
+        position_info = f"Slice {slice_idx + 1}/{num_slices} (Z = {slice_idx * 0.5:.1f} µm)"
+        annotation = f"3D volume pass-through (backward)"
+
+        img_annotated = add_text_overlay(img_pil, title, subtitle, position_info, annotation, color)
+        frame = np.array(img_annotated)
+        frame = cv2.cvtColor(frame, cv2.COLOR_RGB2BGR)
+
+        for _ in range(hold_frames):
+            frames.append(frame)
+
+    print(f"    Created {len(frames)} frames from volume")
+
+    return frames
+
+
+def create_best_quality_video(output_path, fps=10, include_test_volume=True):
     """Create video from manually curated best images."""
     print(f"\n{'='*70}")
     print("Creating Best Quality Calibration Video")
     print(f"{'='*70}")
     print(f"Using manually curated images from Nov 6/11 + Oct 28")
+    if include_test_volume:
+        print(f"Including test volume acquisition (Phase 4)")
     print(f"Output: {output_path}")
     print(f"FPS: {fps}\n")
 
     all_frames = []
 
     for phase_key, title, subtitle, color, hold_frames in PHASE_CONFIG:
+        # Special handling for test volume
+        if phase_key == 'phase4_test_volume':
+            if not include_test_volume or not TEST_VOLUME_PATH.exists():
+                print(f"  ! Skipping {phase_key} (file not found: {TEST_VOLUME_PATH})")
+                continue
+
+            print(f"\n  [{phase_key}] Loading 3D volume stack...")
+            volume_frames = create_test_volume_frames(title, subtitle, color, hold_frames)
+            all_frames.extend(volume_frames)
+            continue
         if phase_key not in PHASE_IMAGES:
             print(f"  ! Skipping {phase_key} (not in selection)")
             continue
