@@ -66,23 +66,23 @@ PHASE_IMAGES = {
 # Phase configuration
 PHASE_CONFIG = [
     ('phase0_centering', "PHASE 0: Initial Centering Check",
-     "Verify embryo is centered - Good cellular detail visible",
+     "Verify embryo centered (automated image analysis)",
      (100, 200, 255), 30),  # Blue, hold longer for centering
 
     ('phase1a_top_edge', "PHASE 1.5a: Top Edge Detection",
-     "Sweeping galvo angle upward to find top boundary",
+     "Automated sweep - finding embryo boundaries",
      (255, 200, 100), 15),  # Orange
 
     ('phase1b_bottom_edge', "PHASE 1.5b: Bottom Edge Detection",
-     "Sweeping galvo angle downward to find bottom boundary",
+     "Automated sweep - detecting bottom edge",
      (255, 150, 100), 15),  # Light orange
 
     ('phase2_top_sweep', "PHASE 2: Top Interior Calibration",
-     "FFT-based focus sweep at top interior position",
+     "FFT bandpass focus scoring (no AI/Claude needed)",
      (150, 255, 150), 10),  # Green
 
     ('phase3_bottom_sweep', "PHASE 3: Bottom Interior Calibration",
-     "FFT-based focus sweep at bottom interior position",
+     "FFT bandpass + visual validation (Claude can verify)",
      (150, 255, 150), 10),  # Green
 ]
 
@@ -103,11 +103,13 @@ def add_text_overlay(img, title, subtitle, position_info, annotation, phase_colo
         subtitle_font = ImageFont.truetype("arial.ttf", 28)
         info_font = ImageFont.truetype("arial.ttf", 24)
         annot_font = ImageFont.truetype("arial.ttf", 22)
+        method_font = ImageFont.truetype("arial.ttf", 18)
     except:
         title_font = ImageFont.load_default()
         subtitle_font = ImageFont.load_default()
         info_font = ImageFont.load_default()
         annot_font = ImageFont.load_default()
+        method_font = ImageFont.load_default()
 
     # Phase banner
     banner_height = 80
@@ -137,9 +139,16 @@ def add_text_overlay(img, title, subtitle, position_info, annotation, phase_colo
     if position_info:
         info_bbox = draw.textbbox((0, 0), position_info, font=info_font)
         info_width = info_bbox[2] - info_bbox[0]
-        draw.rectangle([(0, height - 50), (width, height)], fill=(0, 0, 0))
-        draw.text(((width - info_width) // 2, height - 40),
+        draw.rectangle([(0, height - 70), (width, height)], fill=(0, 0, 0))
+        draw.text(((width - info_width) // 2, height - 55),
                  position_info, fill=(255, 255, 255), font=info_font)
+
+        # Add method note
+        method_note = "Automated: FFT focus scoring | Claude AI available for validation"
+        method_bbox = draw.textbbox((0, 0), method_note, font=method_font)
+        method_width = method_bbox[2] - method_bbox[0]
+        draw.text(((width - method_width) // 2, height - 25),
+                 method_note, fill=(150, 150, 150), font=method_font)
 
     return img_overlay
 
