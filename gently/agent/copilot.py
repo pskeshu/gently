@@ -428,6 +428,28 @@ class MicroscopyCopilot:
         elif tool_name == "get_detection_summary":
             return self._tool_get_detection_summary()
 
+        # Device control tools
+        elif tool_name == "calibrate_embryo":
+            return await self._tool_calibrate_embryo(tool_input)
+
+        elif tool_name == "acquire_volume":
+            return await self._tool_acquire_volume(tool_input)
+
+        elif tool_name == "move_to_embryo":
+            return await self._tool_move_to_embryo(tool_input)
+
+        elif tool_name == "start_multi_embryo_timelapse":
+            return await self._tool_start_multi_embryo_timelapse(tool_input)
+
+        elif tool_name == "pause_acquisition":
+            return self._tool_pause_acquisition()
+
+        elif tool_name == "resume_acquisition":
+            return self._tool_resume_acquisition()
+
+        elif tool_name == "detect_embryos":
+            return await self._tool_detect_embryos(tool_input)
+
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
 
@@ -1059,3 +1081,378 @@ Generate the detection prompt now:"""
         results = await self.detection_queue.run_detectors(embryo, timepoint)
 
         return results
+
+    # === Device Control Tool Executors ===
+
+    async def _tool_calibrate_embryo(self, tool_input: Dict) -> str:
+        """Run calibration for single embryo"""
+        if not self.run_engine or not self.devices:
+            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+
+        embryo_id = tool_input['embryo_id']
+        piezo_positions = tool_input.get('piezo_positions', [40.0, 60.0])
+
+        # Get embryo
+        embryo = self.experiment.get_embryo_by_any_name(embryo_id)
+        if not embryo:
+            return f"Error: Embryo '{embryo_id}' not found"
+
+        try:
+            # Import plans (only when needed)
+            from gently.plans import calibrate_piezo_galvo_plan
+            import bluesky.plan_stubs as bps
+            import asyncio
+
+            # Get devices
+            xy_stage = self.devices.get('xy_stage')
+            lightsheet_snap = self.devices.get('lightsheet_snap')
+
+            if not xy_stage or not lightsheet_snap:
+                return "Error: Required devices (xy_stage, lightsheet_snap) not available"
+
+            # Create a plan that moves to embryo then calibrates
+            def calibration_plan():
+                # Move to embryo position first
+                if embryo.position:
+                    target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
+                    yield from bps.mov(xy_stage, target_pos)
+
+                # Run calibration plan
+                results = yield from calibrate_piezo_galvo_plan(
+                    lightsheet_snap=lightsheet_snap,
+                    piezo_positions=piezo_positions,
+                    metadata={'embryo_id': embryo_id}
+                )
+
+                return results
+
+            # Execute plan with RunEngine in thread pool
+            results = await asyncio.to_thread(self.run_engine, calibration_plan())
+
+            # Store calibration in embryo
+            if 'calibration' in results:
+                embryo.calibration = results['calibration']
+
+            return f"✓ Calibration complete for {embryo_id}\n" \
+                   f"Slope: {results['calibration']['slope']:.6e} deg/µm\n" \
+                   f"Offset: {results['calibration']['offset']:.6f} deg\n" \
+                   f"RMSE: {results['calibration']['rmse']:.6e} deg"
+
+        except Exception as e:
+            import traceback
+            return f"Error during calibration: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_acquire_volume(self, tool_input: Dict) -> str:
+        """Acquire single volume for embryo"""
+        if not self.run_engine or not self.devices:
+            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+
+        embryo_id = tool_input['embryo_id']
+        num_slices = tool_input.get('num_slices', 50)
+        exposure_ms = tool_input.get('exposure_ms', 10.0)
+        save = tool_input.get('save', True)
+
+        # Get embryo
+        embryo = self.experiment.get_embryo_by_any_name(embryo_id)
+        if not embryo:
+            return f"Error: Embryo '{embryo_id}' not found"
+
+        try:
+            # Import plans
+            from gently.plans import acquire_single_volume_plan
+            import bluesky.plan_stubs as bps
+            import asyncio
+
+            # Get devices
+            xy_stage = self.devices.get('xy_stage')
+            volume_scanner = self.devices.get('volume_scanner')
+
+            if not xy_stage or not volume_scanner:
+                return "Error: Required devices (xy_stage, volume_scanner) not available"
+
+            # Get calibration parameters if available
+            if embryo.calibration:
+                galvo_center = embryo.calibration.get('offset', 0.0)
+                galvo_amplitude = embryo.calibration.get('galvo_amplitude', 0.5)
+                piezo_center = embryo.calibration.get('piezo_center', 50.0)
+                piezo_amplitude = embryo.calibration.get('piezo_amplitude', 25.0)
+            else:
+                # Use defaults
+                galvo_center = 0.0
+                galvo_amplitude = 0.5
+                piezo_center = 50.0
+                piezo_amplitude = 25.0
+
+            # Create plan
+            def acquisition_plan():
+                # Move to embryo position
+                if embryo.position:
+                    target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
+                    yield from bps.mov(xy_stage, target_pos)
+
+                # Acquire volume
+                results = yield from acquire_single_volume_plan(
+                    volume_scanner=volume_scanner,
+                    num_slices=num_slices,
+                    exposure_ms=exposure_ms,
+                    galvo_amplitude=galvo_amplitude,
+                    galvo_center=galvo_center,
+                    piezo_amplitude=piezo_amplitude,
+                    piezo_center=piezo_center,
+                    metadata={'embryo_id': embryo_id}
+                )
+                return results
+
+            # Execute plan with RunEngine in thread pool
+            results = await asyncio.to_thread(self.run_engine, acquisition_plan())
+
+            volume = results.get('volume')
+            if volume is None:
+                return f"Error: Failed to acquire volume"
+
+            # Get current timepoint
+            timepoint = embryo.last_acquisition_timepoint + 1
+
+            # Store volume
+            if save:
+                self.image_manager.store_volume(embryo, timepoint, volume)
+                embryo.last_acquisition_timepoint = timepoint
+                embryo.last_acquisition_time = datetime.now()
+
+                # Run detectors
+                await self.run_detectors_on_volume(embryo_id, timepoint)
+
+            return f"✓ Volume acquired for {embryo_id}\n" \
+                   f"Shape: {volume.shape}\n" \
+                   f"Slices: {num_slices}, Exposure: {exposure_ms} ms\n" \
+                   f"Timepoint: {timepoint}" + \
+                   (f"\nSaved to storage" if save else "")
+
+        except Exception as e:
+            import traceback
+            return f"Error during acquisition: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_move_to_embryo(self, tool_input: Dict) -> str:
+        """Move stage to embryo position"""
+        if not self.run_engine or not self.devices:
+            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+
+        embryo_id = tool_input['embryo_id']
+
+        # Get embryo
+        embryo = self.experiment.get_embryo_by_any_name(embryo_id)
+        if not embryo:
+            return f"Error: Embryo '{embryo_id}' not found"
+
+        if not embryo.position:
+            return f"Error: Embryo '{embryo_id}' has no stored position. Run calibration first."
+
+        try:
+            import bluesky.plan_stubs as bps
+            import asyncio
+
+            # Get xy stage device
+            xy_stage = self.devices.get('xy_stage')
+            if not xy_stage:
+                return "Error: XY stage device not available"
+
+            target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
+
+            # Create plan
+            def move_plan():
+                yield from bps.mov(xy_stage, target_pos)
+
+            # Execute plan with RunEngine in thread pool
+            await asyncio.to_thread(self.run_engine, move_plan())
+
+            return f"✓ Moved to {embryo_id}\n" \
+                   f"Position: ({target_pos[0]:.2f}, {target_pos[1]:.2f}) µm"
+
+        except Exception as e:
+            import traceback
+            return f"Error moving to embryo: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_start_multi_embryo_timelapse(self, tool_input: Dict) -> str:
+        """Start multi-embryo time-lapse acquisition"""
+        if not self.run_engine or not self.devices:
+            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+
+        # Get parameters
+        embryo_ids = tool_input.get('embryo_ids')
+        if not embryo_ids:
+            # Use all active embryos
+            embryo_ids = [e.id for e in self.experiment.embryos.values() if not e.should_skip]
+
+        if not embryo_ids:
+            return "Error: No embryos available for acquisition"
+
+        num_timepoints = tool_input.get('num_timepoints', 500)
+        interval_seconds = tool_input.get('interval_seconds', 120)
+        num_slices = tool_input.get('num_slices', 50)
+        exposure_ms = tool_input.get('exposure_ms', 10.0)
+        enable_detectors = tool_input.get('enable_detectors', True)
+
+        # Update experiment state
+        self.experiment.acquisition_status = "running"
+        self.experiment.start_time = datetime.now()
+
+        return f"✓ Starting multi-embryo time-lapse acquisition\n" \
+               f"Embryos: {', '.join(embryo_ids)}\n" \
+               f"Timepoints: {num_timepoints}\n" \
+               f"Interval: {interval_seconds} seconds\n" \
+               f"Slices: {num_slices}, Exposure: {exposure_ms} ms\n" \
+               f"Detectors: {'enabled' if enable_detectors else 'disabled'}\n\n" \
+               f"Note: This will start acquisition in the background. " \
+               f"The actual workflow needs to be implemented in workflow_manager.py (Phase 3)."
+
+    def _tool_pause_acquisition(self) -> str:
+        """Pause acquisition"""
+        if not self.run_engine:
+            return "Error: Hardware control not available"
+
+        if self.experiment.acquisition_status != "running":
+            return f"Cannot pause: acquisition is {self.experiment.acquisition_status}"
+
+        # Request pause (via RunEngine halt)
+        try:
+            self.run_engine.request_pause()
+            self.experiment.acquisition_status = "paused"
+            return "✓ Acquisition paused. Use resume_acquisition to continue."
+        except Exception as e:
+            return f"Error pausing acquisition: {str(e)}"
+
+    def _tool_resume_acquisition(self) -> str:
+        """Resume acquisition"""
+        if not self.run_engine:
+            return "Error: Hardware control not available"
+
+        if self.experiment.acquisition_status != "paused":
+            return f"Cannot resume: acquisition is {self.experiment.acquisition_status}"
+
+        # Resume via RunEngine
+        try:
+            self.run_engine.resume()
+            self.experiment.acquisition_status = "running"
+            return "✓ Acquisition resumed"
+        except Exception as e:
+            return f"Error resuming acquisition: {str(e)}"
+
+    async def _tool_detect_embryos(self, tool_input: Dict) -> str:
+        """Detect embryos using SAM + Claude Vision"""
+        if not self.devices:
+            return "Error: Hardware control not available"
+
+        auto_calibrate = tool_input.get('auto_calibrate', False)
+        min_confidence = tool_input.get('min_confidence', 0.7)
+
+        try:
+            import asyncio
+            from .sam_detection import SAMEmbryoDetector
+
+            # Get devices
+            bottom_camera = self.devices.get('bottom_camera')
+            xy_stage = self.devices.get('xy_stage')
+
+            if not bottom_camera:
+                return "Error: Bottom camera device not available"
+            if not xy_stage:
+                return "Error: XY stage device not available"
+
+            # Initialize SAM detector (lazy load)
+            if not hasattr(self, 'sam_detector'):
+                print("\nInitializing SAM detector...")
+                self.sam_detector = SAMEmbryoDetector(
+                    sam_checkpoint="sam_vit_b_01ec64.pth",
+                    sam_model_type="vit_b"
+                )
+
+            # Get stage position
+            def get_stage_pos():
+                import bluesky.plan_stubs as bps
+                pos = yield from bps.rd(xy_stage)
+                return pos[xy_stage.name]['value']
+
+            stage_pos = await asyncio.to_thread(self.run_engine, get_stage_pos())
+
+            # Capture image from bottom camera
+            def capture_image():
+                import bluesky.plan_stubs as bps
+                yield from bps.trigger_and_read([bottom_camera])
+                return bottom_camera.read()[bottom_camera.name]['value']
+
+            image = await asyncio.to_thread(self.run_engine, capture_image())
+
+            # Run detection
+            output_dir = self.image_manager.storage_path.parent / "detection_results"
+            results = await self.sam_detector.detect_embryos(
+                image=image,
+                stage_position=tuple(stage_pos),
+                pixel_size_um=6.5,
+                objective_mag=4.0,
+                use_claude_review=True,
+                save_visualizations=True,
+                output_dir=output_dir
+            )
+
+            # Show in napari (non-blocking)
+            try:
+                self.sam_detector.show_in_napari(image, results['embryos'], block=False)
+            except Exception as e:
+                print(f"  ℹ Could not open napari: {e}")
+
+            # Load detected embryos into experiment
+            for embryo in results['embryos']:
+                embryo_id = f"embryo_{embryo['embryo_id']:03d}"
+                self.experiment.add_embryo(
+                    embryo_id=embryo_id,
+                    position={'x': embryo['stage_x_um'], 'y': embryo['stage_y_um']},
+                    calibration={}  # Empty, will be filled during calibration
+                )
+
+            # Format response
+            response = f"""✓ Detected {len(results['embryos'])} embryos using SAM + Claude Vision
+
+Detection Summary:
+  Initial (SAM): {results['initial_detections']}
+  Final (after Claude review): {results['final_detections']}
+
+Claude verification: {results['verification'].get('verification_summary', 'Verified')}
+
+"""
+
+            if results.get('changes', {}).get('round1'):
+                changes = results['changes']['round1']
+                if changes['removed']:
+                    response += f"  Removed false positives: {changes['removed']}\n"
+                if changes['added']:
+                    response += f"  Added missed embryos: {len(changes['added'])}\n"
+                response += "\n"
+
+            response += f"""👁️  Napari viewer opened (if available)
+📸 Images saved to: {output_dir}/
+
+Detected embryo positions:
+"""
+
+            for embryo in results['embryos']:
+                response += f"  {embryo['embryo_id']}: ({embryo['stage_x_um']:.1f}, {embryo['stage_y_um']:.1f}) µm"
+                response += f" [pixel: ({embryo['pixel_x']:.0f}, {embryo['pixel_y']:.0f}), "
+                response += f"area: {embryo['area_pixels']}px, conf: {embryo['confidence']:.2f}]\n"
+
+            response += f"""
+✓ Loaded {len(results['embryos'])} embryos into experiment
+
+Next steps:
+  • Review the detections (napari window or saved images)
+  • Say "looks good" to proceed
+  • Say "remove detection X" to correct false positives
+  • Say "calibrate all" to start calibration workflow"""
+
+            if auto_calibrate:
+                response += "\n\nAuto-calibration enabled - would start calibration here (not yet implemented)"
+
+            return response
+
+        except Exception as e:
+            import traceback
+            return f"Error detecting embryos: {str(e)}\n{traceback.format_exc()}"

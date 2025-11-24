@@ -428,5 +428,207 @@ Use when user asks about detection status or wants to compare embryos.""",
                 "properties": {},
                 "required": []
             }
+        },
+        {
+            "name": "calibrate_embryo",
+            "description": """Run full piezo-galvo calibration for a single embryo.
+
+This performs the complete calibration workflow:
+1. Moves stage to embryo position
+2. Runs edge detection and focus sweeps
+3. Performs 2-point linear fit
+4. Stores calibration parameters
+
+Use when:
+- User requests to calibrate an embryo
+- Setting up new embryos before volume acquisition
+- Recalibration needed after hardware changes
+
+Note: Requires hardware control (RunEngine and devices)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "embryo_id": {
+                        "type": "string",
+                        "description": "Embryo to calibrate"
+                    },
+                    "piezo_positions": {
+                        "type": "array",
+                        "items": {"type": "number"},
+                        "description": "Piezo Z positions for calibration (micrometers). Default: [40.0, 60.0] for 2-point calibration"
+                    }
+                },
+                "required": ["embryo_id"]
+            }
+        },
+        {
+            "name": "acquire_volume",
+            "description": """Acquire a single 3D volume for a specific embryo.
+
+Uses hardware-triggered SPIM acquisition with synchronized scanner, piezo, and camera.
+Applies embryo's calibration parameters if available.
+
+Use when:
+- User requests to image a specific embryo
+- Taking a high-resolution snapshot
+- Testing acquisition before starting timelapse
+
+Note: Requires hardware control (RunEngine and devices)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "embryo_id": {
+                        "type": "string",
+                        "description": "Embryo to image"
+                    },
+                    "num_slices": {
+                        "type": "integer",
+                        "description": "Number of Z slices (10-200). Default: 50"
+                    },
+                    "exposure_ms": {
+                        "type": "number",
+                        "description": "Camera exposure in milliseconds. Default: 10.0"
+                    },
+                    "save": {
+                        "type": "boolean",
+                        "description": "Whether to save volume to disk. Default: true"
+                    }
+                },
+                "required": ["embryo_id"]
+            }
+        },
+        {
+            "name": "move_to_embryo",
+            "description": """Move XY stage to center on a specific embryo.
+
+Uses embryo's stored calibrated position to move the stage.
+
+Use when:
+- User wants to view an embryo
+- Preparing for manual intervention
+- Verifying embryo positioning
+
+Note: Requires hardware control (RunEngine and devices)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "embryo_id": {
+                        "type": "string",
+                        "description": "Embryo to move to"
+                    }
+                },
+                "required": ["embryo_id"]
+            }
+        },
+        {
+            "name": "start_multi_embryo_timelapse",
+            "description": """Start multi-embryo time-lapse volume acquisition.
+
+Orchestrates acquisition of multiple embryos over time with:
+- Sequential positioning and imaging
+- Automated detector analysis
+- Adaptive parameter changes based on detections
+- Progress tracking and reporting
+
+Use when:
+- User requests to start long-term monitoring
+- Beginning the main experiment
+- Restarting after pause
+
+Note: Requires hardware control (RunEngine and devices)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "embryo_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Which embryos to include. Use all loaded embryos if not specified"
+                    },
+                    "num_timepoints": {
+                        "type": "integer",
+                        "description": "Maximum number of timepoints. Default: 500"
+                    },
+                    "interval_seconds": {
+                        "type": "number",
+                        "description": "Time between complete cycles (all embryos). Default: 120"
+                    },
+                    "num_slices": {
+                        "type": "integer",
+                        "description": "Number of Z slices per volume. Default: 50"
+                    },
+                    "exposure_ms": {
+                        "type": "number",
+                        "description": "Camera exposure per slice. Default: 10.0"
+                    },
+                    "enable_detectors": {
+                        "type": "boolean",
+                        "description": "Whether to run detectors on acquired volumes. Default: true"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "pause_acquisition",
+            "description": """Pause currently running acquisition.
+
+Stops after completing current embryo. Can be resumed later.
+
+Use when:
+- User requests to pause
+- Need to make adjustments
+- Emergency stop needed
+
+Note: Requires hardware control (RunEngine)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "resume_acquisition",
+            "description": """Resume previously paused acquisition.
+
+Continues from where it left off.
+
+Use when:
+- User requests to resume
+- Issues have been resolved
+
+Note: Requires hardware control (RunEngine)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        {
+            "name": "detect_embryos",
+            "description": """Automatically detect embryos using Segment Anything Model (SAM).
+
+Captures bottom camera image and uses computer vision to find embryos.
+Returns detected positions for user confirmation before calibration.
+
+Use when:
+- Setting up new experiment
+- User wants to find embryos automatically
+- Adding more embryos to existing experiment
+
+Note: Requires hardware control (bottom camera) and SAM model""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "auto_calibrate": {
+                        "type": "boolean",
+                        "description": "Automatically calibrate all detected embryos after detection. Default: false"
+                    },
+                    "min_confidence": {
+                        "type": "number",
+                        "description": "Minimum confidence threshold (0-1). Default: 0.7"
+                    }
+                },
+                "required": []
+            }
         }
     ]

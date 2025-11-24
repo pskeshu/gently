@@ -13,6 +13,8 @@ from .detector_registry import DetectorRegistry, get_detector_presets
 from .detection_queue import DetectionQueue
 from .rich_cli import run_rich_cli, RichCopilotCLI
 from .autocomplete import create_completer, CopilotCompleter
+from .device_factory import create_devices_from_mmcore, create_copilot_with_hardware
+from .sam_detection import SAMEmbryoDetector
 
 __all__ = [
     'MicroscopyCopilot',
@@ -35,4 +37,7 @@ __all__ = [
     'RichCopilotCLI',
     'create_completer',
     'CopilotCompleter',
+    'create_devices_from_mmcore',
+    'create_copilot_with_hardware',
+    'SAMEmbryoDetector',
 ]
