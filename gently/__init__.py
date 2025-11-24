@@ -45,60 +45,76 @@ from .plans import (
 )
 
 # Calibration plans - embryo-based piezo-galvo calibration
-from .calibration_plans import (
-    verify_embryo_centered,
-    detect_embryo_edge,
-    calibrate_focus_at_position,
-    calibrate_embryo_piezo_galvo,
-    EMBRYO_CENTERING_PROMPT,
-    EMBRYO_EDGE_PROMPT
-)
+try:
+    from .calibration_plans import (
+        verify_embryo_centered,
+        detect_embryo_edge,
+        calibrate_focus_at_position,
+        calibrate_embryo_piezo_galvo,
+        EMBRYO_CENTERING_PROMPT,
+        EMBRYO_EDGE_PROMPT
+    )
+    _CALIBRATION_PLANS_AVAILABLE = True
+except ImportError:
+    _CALIBRATION_PLANS_AVAILABLE = False
 
 # Configuration utilities - hardware profiles and calibration data
-from .config import (
-    HardwareProfile,
-    CameraMode,
-    CameraConfig,
-    ScannerPattern,
-    ScannerMode,
-    GalvoAxisConfig,
-    ScannerConfig,
-    PiezoGalvoCalibration,
-    calculate_spim_timing,
-    get_calibration_camera_config,
-    get_hardware_spim_camera_config,
-    get_standard_scanner_config
-)
+try:
+    from .config import (
+        HardwareProfile,
+        CameraMode,
+        CameraConfig,
+        ScannerPattern,
+        ScannerMode,
+        GalvoAxisConfig,
+        ScannerConfig,
+        PiezoGalvoCalibration,
+        calculate_spim_timing,
+        get_calibration_camera_config,
+        get_hardware_spim_camera_config,
+        get_standard_scanner_config
+    )
+    _CONFIG_AVAILABLE = True
+except ImportError:
+    _CONFIG_AVAILABLE = False
 
 # Analysis utilities - device-agnostic focus analysis
-from .analysis.core import (
-    FocusAnalysisConfig,
-    FocusResult,
-    FocusAlgorithm,
-    FitFunction,
-    calculate_focus_score,
-    analyze_focus_stack,
-    fit_focus_curve
-)
+try:
+    from .analysis.core import (
+        FocusAnalysisConfig,
+        FocusResult,
+        FocusAlgorithm,
+        FitFunction,
+        calculate_focus_score,
+        analyze_focus_stack,
+        fit_focus_curve
+    )
+    _ANALYSIS_AVAILABLE = True
+except ImportError:
+    _ANALYSIS_AVAILABLE = False
 
 # Coordinate utilities - transformations and reference mapping
-from .coordinates import (
-    piezo_to_galvo,
-    galvo_to_piezo,
-    calculate_piezo_galvo_calibration,
-    transform_coordinates_2d,
-    create_affine_transform_2d,
-    create_reference_map,
-    add_calibration_point,
-    add_embryo_position_stage,
-    stage_to_lightsheet_coordinates,
-    find_nearest_embryos,
-    save_reference_map,
-    load_reference_map,
-    validate_reference_map,
-    CalibrationPoint,
-    ReferenceMap
-)
+try:
+    from .coordinates import (
+        piezo_to_galvo,
+        galvo_to_piezo,
+        calculate_piezo_galvo_calibration,
+        transform_coordinates_2d,
+        create_affine_transform_2d,
+        create_reference_map,
+        add_calibration_point,
+        add_embryo_position_stage,
+        stage_to_lightsheet_coordinates,
+        find_nearest_embryos,
+        save_reference_map,
+        load_reference_map,
+        validate_reference_map,
+        CalibrationPoint,
+        ReferenceMap
+    )
+    _COORDINATES_AVAILABLE = True
+except ImportError:
+    _COORDINATES_AVAILABLE = False
 
 # Visualization utilities - optional napari integration
 try:
