@@ -75,6 +75,60 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
 
     devices = {}
 
+    # Create individual devices first
+    scanner = None
+    camera = None
+    piezo = None
+    laser_control = None
+    led = None
+
+    try:
+        # Scanner (for direct control)
+        scanner = DiSPIMScanner(
+            name=cfg['scanner_name'],
+            core=core
+        )
+        devices['scanner'] = scanner
+        print(f"  ✓ Created scanner: {cfg['scanner_name']}")
+    except Exception as e:
+        print(f"  ⚠ Could not create scanner: {e}")
+
+    try:
+        # Piezo (for direct control)
+        piezo = DiSPIMPiezo(
+            name=cfg['piezo_name'],
+            core=core
+        )
+        devices['piezo'] = piezo
+        print(f"  ✓ Created piezo: {cfg['piezo_name']}")
+    except Exception as e:
+        print(f"  ⚠ Could not create piezo: {e}")
+
+    try:
+        # Camera
+        from gently.devices import DiSPIMCamera
+        camera = DiSPIMCamera(
+            name=cfg['camera_name'],
+            core=core
+        )
+        devices['camera'] = camera
+        print(f"  ✓ Created camera: {cfg['camera_name']}")
+    except Exception as e:
+        print(f"  ⚠ Could not create camera: {e}")
+
+    try:
+        # Laser Control
+        from gently.devices import DiSPIMLaserControl
+        laser_control = DiSPIMLaserControl(
+            config_group_name="Laser",
+            core=core,
+            name='laser_control'
+        )
+        devices['laser_control'] = laser_control
+        print(f"  ✓ Created laser control")
+    except Exception as e:
+        print(f"  ⚠ Could not create laser control: {e}")
+
     try:
         # XY Stage
         devices['xy_stage'] = DiSPIMXYStage(
@@ -86,61 +140,63 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
         print(f"  ⚠ Could not create XY stage: {e}")
 
     try:
-        # Volume Scanner (combined scanner + camera + piezo for SPIM)
-        devices['volume_scanner'] = DiSPIMVolumeScanner(
-            scanner_device_name=cfg['scanner_name'],
-            camera_device_name=cfg['camera_name'],
-            core=core,
-            name='volume_scanner'
-        )
-        print(f"  ✓ Created volume scanner")
+        # LED (optional)
+        if cfg.get('led_name'):
+            from gently.devices import DiSPIMLED
+            led = DiSPIMLED(
+                name=cfg['led_name'],
+                core=core
+            )
+            devices['led'] = led
+            print(f"  ✓ Created LED: {cfg['led_name']}")
+    except Exception as e:
+        print(f"  ⚠ Could not create LED: {e}")
+
+    # Now create compound devices
+    try:
+        # Volume Scanner (requires scanner, camera, piezo, laser_control)
+        if scanner and camera and piezo and laser_control:
+            devices['volume_scanner'] = DiSPIMVolumeScanner(
+                scanner=scanner,
+                camera=camera,
+                piezo=piezo,
+                laser_control=laser_control,
+                core=core,
+                name='volume_scanner'
+            )
+            print(f"  ✓ Created volume scanner")
+        else:
+            print(f"  ⚠ Skipping volume scanner (missing required devices)")
     except Exception as e:
         print(f"  ⚠ Could not create volume scanner: {e}")
 
     try:
         # Bottom Camera (with LED control)
-        devices['bottom_camera'] = DiSPIMBottomCamera(
-            camera_device_name=cfg['bottom_camera_name'],
-            led_device_name=cfg.get('led_name'),
+        bottom_camera = DiSPIMBottomCamera(
+            name=cfg['bottom_camera_name'],
             core=core,
-            name='bottom_camera',
-            effective_pixel_size=0.65  # 6.5µm / 10x
+            led_device=led,
+            effective_pixel_size=0.65  # 6.5µm / 10x for 4x objective
         )
+        devices['bottom_camera'] = bottom_camera
         print(f"  ✓ Created bottom camera: {cfg['bottom_camera_name']}")
     except Exception as e:
         print(f"  ⚠ Could not create bottom camera: {e}")
 
     try:
-        # Light Sheet Snap (scanner + camera for calibration)
-        devices['lightsheet_snap'] = DiSPIMLightSheetSnap(
-            scanner_device_name=cfg['scanner_name'],
-            camera_device_name=cfg['camera_name'],
-            core=core,
-            name='lightsheet_snap'
-        )
-        print(f"  ✓ Created lightsheet snap device")
+        # Light Sheet Snap (requires scanner and camera)
+        if scanner and camera:
+            devices['lightsheet_snap'] = DiSPIMLightSheetSnap(
+                scanner=scanner,
+                camera=camera,
+                core=core,
+                name='lightsheet_snap'
+            )
+            print(f"  ✓ Created lightsheet snap device")
+        else:
+            print(f"  ⚠ Skipping lightsheet snap (missing required devices)")
     except Exception as e:
         print(f"  ⚠ Could not create lightsheet snap: {e}")
-
-    try:
-        # Scanner (for direct control)
-        devices['scanner'] = DiSPIMScanner(
-            name=cfg['scanner_name'],
-            core=core
-        )
-        print(f"  ✓ Created scanner: {cfg['scanner_name']}")
-    except Exception as e:
-        print(f"  ⚠ Could not create scanner: {e}")
-
-    try:
-        # Piezo (for direct control)
-        devices['piezo'] = DiSPIMPiezo(
-            name=cfg['piezo_name'],
-            core=core
-        )
-        print(f"  ✓ Created piezo: {cfg['piezo_name']}")
-    except Exception as e:
-        print(f"  ⚠ Could not create piezo: {e}")
 
     if not devices:
         raise RuntimeError("Failed to create any devices. Check your Micro-Manager configuration.")
