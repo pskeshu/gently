@@ -605,15 +605,22 @@ Note: Requires hardware control (RunEngine)""",
         },
         {
             "name": "detect_embryos",
-            "description": """Automatically detect embryos using Segment Anything Model (SAM).
+            "description": """Automatically detect embryos using brightness detection + SAM refinement.
 
-Captures bottom camera image and uses computer vision to find embryos.
+Uses a hybrid approach:
+1. Brightness thresholding finds embryo candidates (embryos are BRIGHT objects)
+2. SAM refines segmentation using bounding box prompts
+
 Returns detected positions for user confirmation before calibration.
 
 Use when:
 - Setting up new experiment
 - User wants to find embryos automatically
 - Adding more embryos to existing experiment
+
+Parameters:
+- brightness_percentile: 99.0 = fewer detections, 98.0 = more detections
+- min_area/max_area: Filter by embryo size in pixels
 
 Note: Requires hardware control (bottom camera) and SAM model""",
             "input_schema": {
@@ -626,6 +633,306 @@ Note: Requires hardware control (bottom camera) and SAM model""",
                     "min_confidence": {
                         "type": "number",
                         "description": "Minimum confidence threshold (0-1). Default: 0.7"
+                    },
+                    "use_claude_review": {
+                        "type": "boolean",
+                        "description": "Use Claude Vision to review and verify SAM detections. Slower but more accurate. Default: false"
+                    },
+                    "exposure_ms": {
+                        "type": "number",
+                        "description": "Camera exposure time in milliseconds. Higher values (e.g., 100-500ms) improve contrast for better embryo detection. Default: uses current camera setting."
+                    },
+                    "brightness_percentile": {
+                        "type": "number",
+                        "description": "Percentile threshold for brightness-based detection. Embryos are detected as brightest objects. 99.0 = fewer confident detections, 98.0 = more detections. Default: 99.0"
+                    },
+                    "min_area": {
+                        "type": "integer",
+                        "description": "Minimum embryo area in pixels. Filters out small noise. Default: 5000"
+                    },
+                    "max_area": {
+                        "type": "integer",
+                        "description": "Maximum embryo area in pixels. Filters out large artifacts. Default: 150000"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "manual_mark_embryos",
+            "description": """Manually mark embryos by clicking on an image.
+
+Captures bottom camera image and opens a matplotlib window where
+user can click on embryo centers. Close window when done marking.
+
+Use when:
+- Automatic detection (SAM) fails or gives poor results
+- User wants precise control over embryo positions
+- User explicitly asks to mark embryos manually
+
+The tool converts pixel coordinates to stage coordinates automatically.""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "exposure_ms": {
+                        "type": "number",
+                        "description": "Camera exposure time in milliseconds. Higher values (e.g., 100-500ms) improve contrast for better visibility."
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "view_image",
+            "description": """Capture and view the current bottom camera image.
+
+Opens a matplotlib window to display the image, or saves to file if save_only is true.
+
+Use when:
+- User wants to see what the camera sees
+- Checking sample position
+- Debugging or verification""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Window title. Default: 'Bottom Camera Image'"
+                    },
+                    "exposure_ms": {
+                        "type": "number",
+                        "description": "Camera exposure time in milliseconds. Higher values improve contrast."
+                    },
+                    "save_only": {
+                        "type": "boolean",
+                        "description": "If true, saves image to file and returns immediately (non-blocking). Default: false"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "capture_lightsheet",
+            "description": """Capture a single lightsheet image at the current position.
+
+Takes a single lightsheet image (not a full volume) at specified piezo/galvo positions.
+Useful for checking focus, alignment, or seeing the embryo with lightsheet illumination.
+
+Use when:
+- User wants to see a single lightsheet plane
+- Checking lightsheet alignment
+- Quick preview before full volume acquisition""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "piezo_position": {
+                        "type": "number",
+                        "description": "Piezo position in micrometers (Z position). Default: 50.0"
+                    },
+                    "galvo_position": {
+                        "type": "number",
+                        "description": "Galvo position in volts (lightsheet Y position). Default: 0.0"
+                    },
+                    "save_only": {
+                        "type": "boolean",
+                        "description": "If true, saves image to file without displaying. Default: false"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "show_detected_embryos",
+            "description": """Show the last detected embryos with bounding boxes overlaid on the image.
+
+Displays a visualization of all embryos from the most recent detection,
+with colored bounding boxes and labels showing embryo ID and confidence.
+
+Use when:
+- User asks to see the detected embryos
+- User wants to verify detection results
+- User asks "can I see the embryos with bboxes"
+- User wants to check which embryos were found
+
+Note: Must run detect_embryos first to have results to display.""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "save_to_file": {
+                        "type": "boolean",
+                        "description": "Save the visualization to a PNG file. Default: false"
+                    },
+                    "save_only": {
+                        "type": "boolean",
+                        "description": "If true, saves to file and returns immediately without showing window. Default: false"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "set_led",
+            "description": """Control the LED light source.
+
+Turn the LED on or off. The LED is used for brightfield imaging with the bottom camera.
+
+Use when:
+- User wants to turn LED on or off
+- Troubleshooting bright/dark images
+- Setting up illumination for bottom camera
+
+States:
+- 'Open' = LED ON (bright illumination)
+- 'Closed' = LED OFF (no illumination)""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "state": {
+                        "type": "string",
+                        "enum": ["Open", "Closed"],
+                        "description": "LED state: 'Open' for ON, 'Closed' for OFF"
+                    }
+                },
+                "required": ["state"]
+            }
+        },
+        {
+            "name": "get_led_status",
+            "description": """Get current LED status and available configurations.
+
+Returns current LED state and what preset configurations are available.
+Use this to check if LED is on/off and troubleshoot lighting issues.""",
+            "input_schema": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        },
+        # Databroker tools for accessing run data
+        {
+            "name": "list_runs",
+            "description": """List recent Bluesky runs from Databroker.
+
+Shows run metadata including UID, start time, plan name, and any custom metadata
+like embryo_id. Use this to find specific runs or see acquisition history.
+
+Use when:
+- User asks about recent acquisitions
+- Need to find a specific run to analyze
+- Want to see experiment history""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of runs to return. Default: 10"
+                    },
+                    "embryo_id": {
+                        "type": "string",
+                        "description": "Filter runs by embryo_id metadata (optional)"
+                    },
+                    "plan_name": {
+                        "type": "string",
+                        "description": "Filter runs by plan name (optional)"
+                    }
+                },
+                "required": []
+            }
+        },
+        {
+            "name": "get_run_data",
+            "description": """Get data from a specific Bluesky run.
+
+Retrieves the actual data (images, positions, etc.) from a run stored in Databroker.
+Can get data by UID or relative index (-1 for last run, -2 for second to last, etc.).
+
+Use when:
+- Need to analyze data from a past acquisition
+- User asks to see/compare previous images
+- Want to extract specific measurements from a run""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Run UID or relative index (e.g., '-1' for last run, '-2' for second to last)"
+                    },
+                    "data_keys": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Specific data keys to retrieve (e.g., ['bottom_camera', 'xy_stage']). If not specified, returns all available keys."
+                    },
+                    "stream": {
+                        "type": "string",
+                        "description": "Data stream to read from. Default: 'primary'"
+                    }
+                },
+                "required": ["run_id"]
+            }
+        },
+        {
+            "name": "get_run_image",
+            "description": """Get an image from a Bluesky run for analysis.
+
+Retrieves image data from a detector in a specific run. Returns image metadata
+and optionally analyzes the image with Claude Vision.
+
+Use when:
+- User wants to see an image from a past acquisition
+- Need to analyze historical images
+- Comparing images across timepoints""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "run_id": {
+                        "type": "string",
+                        "description": "Run UID or relative index (e.g., '-1' for last run)"
+                    },
+                    "detector": {
+                        "type": "string",
+                        "description": "Detector name (e.g., 'bottom_camera', 'volume_scanner'). Default: auto-detect"
+                    },
+                    "analyze": {
+                        "type": "boolean",
+                        "description": "Whether to analyze the image with Claude Vision. Default: false"
+                    },
+                    "analysis_prompt": {
+                        "type": "string",
+                        "description": "Prompt for Claude Vision analysis (required if analyze=true)"
+                    }
+                },
+                "required": ["run_id"]
+            }
+        },
+        {
+            "name": "search_runs",
+            "description": """Search Databroker runs by metadata criteria.
+
+Flexible search across run metadata. Can search by time range, custom metadata fields,
+plan type, etc.
+
+Use when:
+- Looking for runs matching specific criteria
+- Finding all runs for a particular embryo
+- Searching by time range""",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "since": {
+                        "type": "string",
+                        "description": "Start time for search (e.g., '1 hour ago', '2024-01-15', 'today')"
+                    },
+                    "until": {
+                        "type": "string",
+                        "description": "End time for search (optional)"
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Metadata key-value pairs to match (e.g., {'embryo_id': 'embryo_001'})"
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum results to return. Default: 20"
                     }
                 },
                 "required": []

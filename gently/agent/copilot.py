@@ -1,5 +1,10 @@
 """
 Main Microscopy Copilot implementation
+
+Now integrated with:
+- Event Bus for async message passing between components
+- Session Manager for persistence and resume
+- Data Store for UID-based data flow
 """
 
 import asyncio
@@ -18,6 +23,8 @@ from .prompts import build_system_prompt, build_context_message
 from .tools import get_tool_definitions
 from .detector_registry import DetectorRegistry
 from .detection_queue import DetectionQueue
+from ..session import SessionManager
+from ..core import EventType, get_event_bus, emit
 
 
 class MicroscopyCopilot:
@@ -37,8 +44,8 @@ class MicroscopyCopilot:
         api_key: Optional[str] = None,
         storage_path: Path = Path("./experiment_data"),
         model: str = "claude-sonnet-4-5-20250929",
-        run_engine=None,
-        devices: Optional[Dict] = None,
+        microscope_client=None,
+        session_id: Optional[str] = None,
     ):
         """
         Parameters
@@ -49,10 +56,10 @@ class MicroscopyCopilot:
             Where to store experiment data and images
         model : str
             Claude model to use
-        run_engine : RunEngine, optional
-            Bluesky RunEngine for executing plans
-        devices : dict, optional
-            Ophyd devices (volume_scanner, xy_stage, etc.)
+        microscope_client : MicroscopeClient, optional
+            RPC client for microscope server. Required for hardware control.
+        session_id : str, optional
+            Session ID to resume. If None, creates new session.
         """
         # API client
         self.claude = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
@@ -65,21 +72,24 @@ class MicroscopyCopilot:
         # Experiment state
         self.experiment = ExperimentState()
 
+        # Storage path
+        self.storage_path = Path(storage_path)
+
         # Image management
         self.image_manager = ImageManager(
-            storage_path=storage_path / "images",
+            storage_path=self.storage_path / "images",
             history_length=10
         )
 
         # Plan synthesis
         self.plan_synthesizer = PlanSynthesizer(
             plan_library=PlanLibrary(),
-            validator=PlanValidator(devices=devices)
+            validator=PlanValidator()
         )
 
         # Detector system
         self.detector_registry = DetectorRegistry(
-            storage_path=storage_path / "detector_registry.json"
+            storage_path=self.storage_path / "detector_registry.json"
         )
         self.detection_queue = DetectionQueue(
             registry=self.detector_registry,
@@ -89,12 +99,29 @@ class MicroscopyCopilot:
             on_detection_callback=self._on_detection_fired
         )
 
-        # Hardware interface
-        self.run_engine = run_engine
-        self.devices = devices or {}
+        # Session management
+        self.session_manager = SessionManager(
+            sessions_dir=self.storage_path / "sessions",
+            auto_save=True
+        )
+
+        # Hardware interface via RPC client
+        self.client = microscope_client
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
+
+        # Event bus for async messaging
+        self._event_bus = get_event_bus()
+
+        # Initialize or resume session
+        if session_id:
+            self.resume_session(session_id)
+        else:
+            self.session_manager.create_session()
+            self._emit_event(EventType.SESSION_STARTED, {
+                'session_id': self.session_id,
+            })
 
         # Build initial system prompt
         self._update_system_prompt()
@@ -102,6 +129,163 @@ class MicroscopyCopilot:
     def _update_system_prompt(self):
         """Rebuild system prompt with current experiment state"""
         self.system_prompt = build_system_prompt(self.experiment)
+
+    def _has_microscope(self) -> bool:
+        """Check if microscope server connection is available"""
+        return self.client is not None
+
+    # ===== Session Management Methods =====
+
+    def resume_session(self, session_id: str) -> bool:
+        """
+        Resume a previous session
+
+        Restores conversation history, experiment state, and detector configs.
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID to resume
+
+        Returns
+        -------
+        bool
+            True if resumed successfully
+        """
+        session = self.session_manager.load_session(session_id)
+        if not session:
+            return False
+
+        # Get state to restore
+        state = self.session_manager.sync_to_copilot()
+
+        # Restore conversation history
+        self.conversation_history = state.get('conversation_history', [])
+
+        # Restore experiment state
+        experiment_data = state.get('experiment_data', {})
+        embryo_states = state.get('embryo_states', {})
+
+        # Restore embryos
+        for embryo_id, embryo_data in embryo_states.items():
+            self.experiment.add_embryo(
+                embryo_id=embryo_id,
+                position=embryo_data.get('stage_position', {}),
+                calibration=embryo_data.get('calibration', {}),
+                user_label=embryo_data.get('user_label'),
+            )
+            # Restore additional embryo state
+            embryo = self.experiment.embryos[embryo_id]
+            embryo.nickname = embryo_data.get('nickname')
+            embryo.interval_seconds = embryo_data.get('interval_seconds', 120)
+            embryo.num_slices = embryo_data.get('num_slices', 50)
+            embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
+            embryo.priority = embryo_data.get('priority', 'normal')
+            embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
+            embryo.should_skip = embryo_data.get('should_skip', False)
+            embryo.skip_reason = embryo_data.get('skip_reason')
+
+        # Restore detection history
+        detection_history = state.get('detection_history', {})
+        for embryo_id, detections in detection_history.items():
+            if embryo_id in self.experiment.embryos:
+                for det in detections:
+                    detector_name = det.pop('detector', 'unknown')
+                    self.experiment.embryos[embryo_id].add_detection_result(
+                        detector_name, det
+                    )
+
+        # Restore detector configs (if detector registry supports it)
+        detector_configs = state.get('detector_configs', {})
+        # Note: detector registry already persists to its own file,
+        # so we don't need to restore from session state
+
+        # Emit session restored event
+        self._emit_event(EventType.SESSION_RESTORED, {
+            'session_id': session_id,
+            'embryo_count': len(embryo_states),
+            'message_count': len(self.conversation_history),
+        })
+
+        return True
+
+    def save_session(self) -> bool:
+        """
+        Save current session state
+
+        Returns
+        -------
+        bool
+            True if saved successfully
+        """
+        # Sync current state to session
+        self.session_manager.sync_from_copilot(
+            conversation_history=self.conversation_history,
+            experiment=self.experiment,
+            detector_registry=self.detector_registry,
+            system_prompt=self.system_prompt,
+        )
+        return self.session_manager.save_session()
+
+    def list_sessions(self) -> List[Dict]:
+        """
+        List available sessions
+
+        Returns
+        -------
+        list of dict
+            Session summaries
+        """
+        return self.session_manager.list_sessions()
+
+    def _emit_event(self, event_type: EventType, data: Optional[Dict] = None):
+        """
+        Emit an event to the event bus
+
+        Parameters
+        ----------
+        event_type : EventType
+            Type of event to emit
+        data : dict, optional
+            Event payload
+        """
+        self._event_bus.publish(
+            event_type=event_type,
+            data=data or {},
+            source="copilot",
+        )
+
+    def _mark_significant_action(self, action_type: str):
+        """
+        Mark that a significant action occurred
+
+        Triggers sync and auto-save.
+
+        Parameters
+        ----------
+        action_type : str
+            Type of action (acquisition, detection, calibration, etc.)
+        """
+        # Sync current state to session
+        self.session_manager.sync_from_copilot(
+            conversation_history=self.conversation_history,
+            experiment=self.experiment,
+            detector_registry=self.detector_registry,
+            system_prompt=self.system_prompt,
+        )
+        # Trigger auto-save
+        self.session_manager.mark_significant_action(action_type)
+
+        # Emit session saved event
+        self._emit_event(EventType.SESSION_SAVED, {
+            'session_id': self.session_id,
+            'action_type': action_type,
+        })
+
+    @property
+    def session_id(self) -> Optional[str]:
+        """Get current session ID"""
+        return self.session_manager.session_id
 
     async def handle_message(self, user_message: str) -> str:
         """
@@ -305,13 +489,27 @@ class MicroscopyCopilot:
 
         # Process tool calls if any
         if final_message.stop_reason == "tool_use":
-            # Execute tools
+            # Execute tools and collect results
+            tool_results = []
             for block in response_content:
                 if hasattr(block, 'type') and block.type == "tool_use":
                     start_time = time.time()
 
                     # Execute tool
-                    tool_result = await self._execute_single_tool(block.name, block.input)
+                    try:
+                        tool_result = await self._execute_single_tool(block.name, block.input)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": tool_result
+                        })
+                    except Exception as e:
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": f"Error: {str(e)}",
+                            "is_error": True
+                        })
 
                     # Yield tool call info
                     yield {
@@ -320,9 +518,6 @@ class MicroscopyCopilot:
                         'tool_input': block.input,
                         'duration': time.time() - start_time,
                     }
-
-            # Continue conversation with tool results
-            tool_results = await self._execute_tools(response_content)
 
             self.conversation_history.append({
                 "role": "assistant",
@@ -449,6 +644,36 @@ class MicroscopyCopilot:
 
         elif tool_name == "detect_embryos":
             return await self._tool_detect_embryos(tool_input)
+
+        elif tool_name == "manual_mark_embryos":
+            return await self._tool_manual_mark_embryos(tool_input)
+
+        elif tool_name == "view_image":
+            return await self._tool_view_image(tool_input)
+        elif tool_name == "capture_lightsheet":
+            return await self._tool_capture_lightsheet(tool_input)
+
+        elif tool_name == "show_detected_embryos":
+            return await self._tool_show_detected_embryos(tool_input)
+
+        elif tool_name == "set_led":
+            return await self._tool_set_led(tool_input)
+
+        elif tool_name == "get_led_status":
+            return await self._tool_get_led_status(tool_input)
+
+        # Databroker tools
+        elif tool_name == "list_runs":
+            return self._tool_list_runs(tool_input)
+
+        elif tool_name == "get_run_data":
+            return self._tool_get_run_data(tool_input)
+
+        elif tool_name == "get_run_image":
+            return await self._tool_get_run_image(tool_input)
+
+        elif tool_name == "search_runs":
+            return self._tool_search_runs(tool_input)
 
         else:
             raise ValueError(f"Unknown tool: {tool_name}")
@@ -741,6 +966,8 @@ class MicroscopyCopilot:
         success = self.detector_registry.add(detector)
 
         if success:
+            # Trigger session auto-save after adding detector
+            self._mark_significant_action("detector_config")
             return f"Detector '{name}' added successfully!\n\nDetails:\n- Description: {detector.description}\n- Action mode: {detector.actions.mode.value}\n- Min timepoint: {detector.conditions.min_timepoint or 'none'}\n\nThe detector is now enabled and will run on all future volumes."
         else:
             return f"Failed to add detector '{name}'"
@@ -840,6 +1067,8 @@ Generate the detection prompt now:"""
         success = self.detector_registry.remove(detector_name)
 
         if success:
+            # Trigger session auto-save after removing detector
+            self._mark_significant_action("detector_config")
             return f"Detector '{detector_name}' removed"
         else:
             return f"Detector '{detector_name}' not found"
@@ -927,7 +1156,16 @@ Generate the detection prompt now:"""
             volume = volume_data
 
         # Store image
-        self.image_manager.store_volume(embryo, timepoint, volume)
+        record = self.image_manager.store_volume(embryo, timepoint, volume)
+
+        # Emit volume acquired event
+        self._emit_event(EventType.VOLUME_ACQUIRED, {
+            'embryo_id': embryo_id,
+            'timepoint': timepoint,
+            'volume_uid': record.volume_uid,
+            'projection_uid': record.projection_uid,
+            'shape': list(volume.shape),
+        })
 
         # Run detectors on newly acquired volume
         await self.run_detectors_on_volume(embryo_id, timepoint)
@@ -1036,6 +1274,23 @@ Generate the detection prompt now:"""
         if not embryo:
             return
 
+        # Emit detection triggered event
+        self._emit_event(EventType.DETECTION_TRIGGERED, {
+            'detector_name': detector.name,
+            'embryo_id': embryo_id,
+            'detected': result.detected,
+            'confidence': result.confidence.value if result.confidence else None,
+            'timepoint': result.timepoint,
+        })
+
+        # Emit specific event for hatching detection
+        if detector.name == 'hatching' and result.detected:
+            self._emit_event(EventType.HATCHING_DETECTED, {
+                'embryo_id': embryo_id,
+                'timepoint': result.timepoint,
+                'confidence': result.confidence.value if result.confidence else None,
+            })
+
         # Handle based on action mode
         if detector.actions.mode == DetectionMode.PASSIVE:
             # Just log, no action
@@ -1085,9 +1340,9 @@ Generate the detection prompt now:"""
     # === Device Control Tool Executors ===
 
     async def _tool_calibrate_embryo(self, tool_input: Dict) -> str:
-        """Run calibration for single embryo"""
-        if not self.run_engine or not self.devices:
-            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+        """Run calibration for single embryo via microscope server"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server. Start the server and reconnect."
 
         embryo_id = tool_input['embryo_id']
         piezo_positions = tool_input.get('piezo_positions', [40.0, 60.0])
@@ -1098,40 +1353,20 @@ Generate the detection prompt now:"""
             return f"Error: Embryo '{embryo_id}' not found"
 
         try:
-            # Import plans (only when needed)
-            from gently.plans import calibrate_piezo_galvo_plan
-            import bluesky.plan_stubs as bps
-            import asyncio
+            # Move to embryo position first if we have one
+            if embryo.position:
+                x, y = embryo.position.get('x', 0), embryo.position.get('y', 0)
+                await self.client.move_to_position(x, y)
 
-            # Get devices
-            xy_stage = self.devices.get('xy_stage')
-            lightsheet_snap = self.devices.get('lightsheet_snap')
-
-            if not xy_stage or not lightsheet_snap:
-                return "Error: Required devices (xy_stage, lightsheet_snap) not available"
-
-            # Create a plan that moves to embryo then calibrates
-            def calibration_plan():
-                # Move to embryo position first
-                if embryo.position:
-                    target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
-                    yield from bps.mov(xy_stage, target_pos)
-
-                # Run calibration plan
-                results = yield from calibrate_piezo_galvo_plan(
-                    lightsheet_snap=lightsheet_snap,
-                    piezo_positions=piezo_positions,
-                    metadata={'embryo_id': embryo_id}
-                )
-
-                return results
-
-            # Execute plan with RunEngine in thread pool
-            results = await asyncio.to_thread(self.run_engine, calibration_plan())
+            # Run calibration via server
+            results = await self.client.calibrate_piezo_galvo(piezo_positions)
 
             # Store calibration in embryo
-            if 'calibration' in results:
+            if results and 'calibration' in results:
                 embryo.calibration = results['calibration']
+
+            # Trigger session auto-save after calibration
+            self._mark_significant_action("calibration")
 
             return f"✓ Calibration complete for {embryo_id}\n" \
                    f"Slope: {results['calibration']['slope']:.6e} deg/µm\n" \
@@ -1143,9 +1378,9 @@ Generate the detection prompt now:"""
             return f"Error during calibration: {str(e)}\n{traceback.format_exc()}"
 
     async def _tool_acquire_volume(self, tool_input: Dict) -> str:
-        """Acquire single volume for embryo"""
-        if not self.run_engine or not self.devices:
-            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+        """Acquire single volume for embryo via microscope server"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server. Start the server and reconnect."
 
         embryo_id = tool_input['embryo_id']
         num_slices = tool_input.get('num_slices', 50)
@@ -1158,17 +1393,10 @@ Generate the detection prompt now:"""
             return f"Error: Embryo '{embryo_id}' not found"
 
         try:
-            # Import plans
-            from gently.plans import acquire_single_volume_plan
-            import bluesky.plan_stubs as bps
-            import asyncio
-
-            # Get devices
-            xy_stage = self.devices.get('xy_stage')
-            volume_scanner = self.devices.get('volume_scanner')
-
-            if not xy_stage or not volume_scanner:
-                return "Error: Required devices (xy_stage, volume_scanner) not available"
+            # Move to embryo position first if we have one
+            if embryo.position:
+                x, y = embryo.position.get('x', 0), embryo.position.get('y', 0)
+                await self.client.move_to_position(x, y)
 
             # Get calibration parameters if available
             if embryo.calibration:
@@ -1177,34 +1405,20 @@ Generate the detection prompt now:"""
                 piezo_center = embryo.calibration.get('piezo_center', 50.0)
                 piezo_amplitude = embryo.calibration.get('piezo_amplitude', 25.0)
             else:
-                # Use defaults
                 galvo_center = 0.0
                 galvo_amplitude = 0.5
                 piezo_center = 50.0
                 piezo_amplitude = 25.0
 
-            # Create plan
-            def acquisition_plan():
-                # Move to embryo position
-                if embryo.position:
-                    target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
-                    yield from bps.mov(xy_stage, target_pos)
-
-                # Acquire volume
-                results = yield from acquire_single_volume_plan(
-                    volume_scanner=volume_scanner,
-                    num_slices=num_slices,
-                    exposure_ms=exposure_ms,
-                    galvo_amplitude=galvo_amplitude,
-                    galvo_center=galvo_center,
-                    piezo_amplitude=piezo_amplitude,
-                    piezo_center=piezo_center,
-                    metadata={'embryo_id': embryo_id}
-                )
-                return results
-
-            # Execute plan with RunEngine in thread pool
-            results = await asyncio.to_thread(self.run_engine, acquisition_plan())
+            # Acquire volume via server
+            results = await self.client.acquire_volume(
+                num_slices=num_slices,
+                exposure_ms=exposure_ms,
+                galvo_amplitude=galvo_amplitude,
+                galvo_center=galvo_center,
+                piezo_amplitude=piezo_amplitude,
+                piezo_center=piezo_center,
+            )
 
             volume = results.get('volume')
             if volume is None:
@@ -1222,6 +1436,9 @@ Generate the detection prompt now:"""
                 # Run detectors
                 await self.run_detectors_on_volume(embryo_id, timepoint)
 
+            # Trigger session auto-save after acquisition
+            self._mark_significant_action("acquisition")
+
             return f"✓ Volume acquired for {embryo_id}\n" \
                    f"Shape: {volume.shape}\n" \
                    f"Slices: {num_slices}, Exposure: {exposure_ms} ms\n" \
@@ -1233,9 +1450,9 @@ Generate the detection prompt now:"""
             return f"Error during acquisition: {str(e)}\n{traceback.format_exc()}"
 
     async def _tool_move_to_embryo(self, tool_input: Dict) -> str:
-        """Move stage to embryo position"""
-        if not self.run_engine or not self.devices:
-            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+        """Move stage to embryo position via microscope server"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server. Start the server and reconnect."
 
         embryo_id = tool_input['embryo_id']
 
@@ -1248,25 +1465,11 @@ Generate the detection prompt now:"""
             return f"Error: Embryo '{embryo_id}' has no stored position. Run calibration first."
 
         try:
-            import bluesky.plan_stubs as bps
-            import asyncio
-
-            # Get xy stage device
-            xy_stage = self.devices.get('xy_stage')
-            if not xy_stage:
-                return "Error: XY stage device not available"
-
-            target_pos = [embryo.position.get('x', 0), embryo.position.get('y', 0)]
-
-            # Create plan
-            def move_plan():
-                yield from bps.mov(xy_stage, target_pos)
-
-            # Execute plan with RunEngine in thread pool
-            await asyncio.to_thread(self.run_engine, move_plan())
+            x, y = embryo.position.get('x', 0), embryo.position.get('y', 0)
+            await self.client.move_to_position(x, y)
 
             return f"✓ Moved to {embryo_id}\n" \
-                   f"Position: ({target_pos[0]:.2f}, {target_pos[1]:.2f}) µm"
+                   f"Position: ({x:.2f}, {y:.2f}) µm"
 
         except Exception as e:
             import traceback
@@ -1274,8 +1477,8 @@ Generate the detection prompt now:"""
 
     async def _tool_start_multi_embryo_timelapse(self, tool_input: Dict) -> str:
         """Start multi-embryo time-lapse acquisition"""
-        if not self.run_engine or not self.devices:
-            return "Error: Hardware control not available. RunEngine and devices must be initialized."
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
 
         # Get parameters
         embryo_ids = tool_input.get('embryo_ids')
@@ -1305,103 +1508,86 @@ Generate the detection prompt now:"""
                f"Note: This will start acquisition in the background. " \
                f"The actual workflow needs to be implemented in workflow_manager.py (Phase 3)."
 
-    def _tool_pause_acquisition(self) -> str:
+    async def _tool_pause_acquisition(self) -> str:
         """Pause acquisition"""
-        if not self.run_engine:
-            return "Error: Hardware control not available"
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
 
         if self.experiment.acquisition_status != "running":
             return f"Cannot pause: acquisition is {self.experiment.acquisition_status}"
 
-        # Request pause (via RunEngine halt)
         try:
-            self.run_engine.request_pause()
+            await self.client.pause_acquisition()
             self.experiment.acquisition_status = "paused"
             return "✓ Acquisition paused. Use resume_acquisition to continue."
         except Exception as e:
             return f"Error pausing acquisition: {str(e)}"
 
-    def _tool_resume_acquisition(self) -> str:
+    async def _tool_resume_acquisition(self) -> str:
         """Resume acquisition"""
-        if not self.run_engine:
-            return "Error: Hardware control not available"
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
 
         if self.experiment.acquisition_status != "paused":
             return f"Cannot resume: acquisition is {self.experiment.acquisition_status}"
 
-        # Resume via RunEngine
         try:
-            self.run_engine.resume()
+            await self.client.resume_acquisition()
             self.experiment.acquisition_status = "running"
             return "✓ Acquisition resumed"
         except Exception as e:
             return f"Error resuming acquisition: {str(e)}"
 
     async def _tool_detect_embryos(self, tool_input: Dict) -> str:
-        """Detect embryos using SAM + Claude Vision"""
-        if not self.devices:
-            return "Error: Hardware control not available"
+        """Detect embryos using SAM + Claude Vision via microscope server"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
 
         auto_calibrate = tool_input.get('auto_calibrate', False)
         min_confidence = tool_input.get('min_confidence', 0.7)
+        use_claude_review = tool_input.get('use_claude_review', False)
+        exposure_ms = tool_input.get('exposure_ms', None)
+        brightness_percentile = tool_input.get('brightness_percentile', 99.0)
+        min_area = tool_input.get('min_area', 5000)
+        max_area = tool_input.get('max_area', 150000)
 
         try:
-            import asyncio
-            from .sam_detection import SAMEmbryoDetector
+            if exposure_ms:
+                print(f"\nUsing {exposure_ms} ms exposure for better contrast...")
+            print(f"\nBrightness detection: percentile={brightness_percentile}, area={min_area}-{max_area}")
+            print(f"Claude review: {'enabled' if use_claude_review else 'disabled'}")
+            print("\nDetecting embryos via brightness + SAM...")
 
-            # Get devices
-            bottom_camera = self.devices.get('bottom_camera')
-            xy_stage = self.devices.get('xy_stage')
-
-            if not bottom_camera:
-                return "Error: Bottom camera device not available"
-            if not xy_stage:
-                return "Error: XY stage device not available"
-
-            # Initialize SAM detector (lazy load)
-            if not hasattr(self, 'sam_detector'):
-                print("\nInitializing SAM detector...")
-                self.sam_detector = SAMEmbryoDetector(
-                    sam_checkpoint="sam_vit_b_01ec64.pth",
-                    sam_model_type="vit_b"
-                )
-
-            # Get stage position
-            def get_stage_pos():
-                import bluesky.plan_stubs as bps
-                pos = yield from bps.rd(xy_stage)
-                return pos[xy_stage.name]['value']
-
-            stage_pos = await asyncio.to_thread(self.run_engine, get_stage_pos())
-
-            # Capture image from bottom camera
-            def capture_image():
-                import bluesky.plan_stubs as bps
-                yield from bps.trigger_and_read([bottom_camera])
-                return bottom_camera.read()[bottom_camera.name]['value']
-
-            image = await asyncio.to_thread(self.run_engine, capture_image())
-
-            # Run detection
-            output_dir = self.image_manager.storage_path.parent / "detection_results"
-            results = await self.sam_detector.detect_embryos(
-                image=image,
-                stage_position=tuple(stage_pos),
+            # Run detection on server (brightness + SAM + image capture all happen server-side)
+            results = await self.client.detect_embryos(
                 pixel_size_um=6.5,
                 objective_mag=4.0,
-                use_claude_review=True,
-                save_visualizations=True,
-                output_dir=output_dir
+                use_claude_review=use_claude_review,
+                min_confidence=min_confidence,
+                exposure_ms=exposure_ms,
+                brightness_percentile=brightness_percentile,
+                min_area=min_area,
+                max_area=max_area
             )
 
-            # Show in napari (non-blocking)
-            try:
-                self.sam_detector.show_in_napari(image, results['embryos'], block=False)
-            except Exception as e:
-                print(f"  ℹ Could not open napari: {e}")
+            if 'error' in results:
+                error_msg = results['error']
+                traceback_info = results.get('traceback', '')
+                # Return clear error without triggering AI interpretation
+                return f"""Server error during embryo detection:
+  {error_msg}
+
+Technical details (if available):
+{traceback_info if traceback_info else '  None'}
+
+Troubleshooting:
+  • Check the server terminal for detailed error logs
+  • Ensure bottom_camera and xy_stage devices are available
+  • Verify SAM model file exists: sam_vit_b_01ec64.pth"""
 
             # Load detected embryos into experiment
-            for embryo in results['embryos']:
+            embryos = results.get('embryos', [])
+            for embryo in embryos:
                 embryo_id = f"embryo_{embryo['embryo_id']:03d}"
                 self.experiment.add_embryo(
                     embryo_id=embryo_id,
@@ -1409,41 +1595,34 @@ Generate the detection prompt now:"""
                     calibration={}  # Empty, will be filled during calibration
                 )
 
+            # Trigger session auto-save after detection
+            self._mark_significant_action("detection")
+
             # Format response
-            response = f"""✓ Detected {len(results['embryos'])} embryos using SAM + Claude Vision
+            response = f"""✓ Detected {len(embryos)} embryos using SAM + Claude Vision
 
 Detection Summary:
-  Initial (SAM): {results['initial_detections']}
-  Final (after Claude review): {results['final_detections']}
-
-Claude verification: {results['verification'].get('verification_summary', 'Verified')}
+  Initial (SAM): {results.get('initial_detections', len(embryos))}
+  Final (after Claude review): {results.get('final_detections', len(embryos))}
 
 """
+            if results.get('verification'):
+                response += f"Claude verification: {results['verification'].get('verification_summary', 'Verified')}\n\n"
 
-            if results.get('changes', {}).get('round1'):
-                changes = results['changes']['round1']
-                if changes['removed']:
-                    response += f"  Removed false positives: {changes['removed']}\n"
-                if changes['added']:
-                    response += f"  Added missed embryos: {len(changes['added'])}\n"
+            response += "Detected embryo positions:\n"
+
+            for embryo in embryos:
+                response += f"  {embryo['embryo_id']}: ({embryo['stage_x_um']:.1f}, {embryo['stage_y_um']:.1f}) µm"
+                if 'pixel_x' in embryo:
+                    response += f" [pixel: ({embryo['pixel_x']:.0f}, {embryo['pixel_y']:.0f})]"
+                if 'confidence' in embryo:
+                    response += f" conf: {embryo['confidence']:.2f}"
                 response += "\n"
 
-            response += f"""👁️  Napari viewer opened (if available)
-📸 Images saved to: {output_dir}/
-
-Detected embryo positions:
-"""
-
-            for embryo in results['embryos']:
-                response += f"  {embryo['embryo_id']}: ({embryo['stage_x_um']:.1f}, {embryo['stage_y_um']:.1f}) µm"
-                response += f" [pixel: ({embryo['pixel_x']:.0f}, {embryo['pixel_y']:.0f}), "
-                response += f"area: {embryo['area_pixels']}px, conf: {embryo['confidence']:.2f}]\n"
-
             response += f"""
-✓ Loaded {len(results['embryos'])} embryos into experiment
+✓ Loaded {len(embryos)} embryos into experiment
 
 Next steps:
-  • Review the detections (napari window or saved images)
   • Say "looks good" to proceed
   • Say "remove detection X" to correct false positives
   • Say "calibrate all" to start calibration workflow"""
@@ -1456,3 +1635,506 @@ Next steps:
         except Exception as e:
             import traceback
             return f"Error detecting embryos: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_manual_mark_embryos(self, tool_input: Dict) -> str:
+        """Manually mark embryos by clicking on image"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        exposure_ms = tool_input.get('exposure_ms', None)
+
+        try:
+            print("\nManual embryo marking...")
+            if exposure_ms:
+                print(f"  Using {exposure_ms} ms exposure for better contrast...")
+            print("  A matplotlib window will open - click on embryo centers.")
+            print("  Close the window when done.\n")
+
+            # Run manual marking
+            results = await self.client.manual_mark_embryos(
+                pixel_size_um=6.5,
+                objective_mag=4.0,
+                exposure_ms=exposure_ms
+            )
+
+            if 'error' in results:
+                return f"Error: {results['error']}"
+
+            # Load marked embryos into experiment
+            embryos = results.get('embryos', [])
+            for embryo in embryos:
+                embryo_id = f"embryo_{embryo['id']:03d}"
+                self.experiment.add_embryo(
+                    embryo_id=embryo_id,
+                    position={'x': embryo['stage_x'], 'y': embryo['stage_y']},
+                    calibration={}
+                )
+
+            # Trigger session auto-save after marking embryos
+            self._mark_significant_action("embryo_change")
+
+            # Format response
+            response = f"""✓ Manually marked {len(embryos)} embryos
+
+Marked positions:
+"""
+            for embryo in embryos:
+                response += f"  embryo_{embryo['id']:03d}: ({embryo['stage_x']:.1f}, {embryo['stage_y']:.1f}) µm\n"
+
+            response += f"""
+✓ Loaded {len(embryos)} embryos into experiment
+
+Next steps:
+  • Say "calibrate all" to start calibration workflow
+  • Say "show embryos" to see the list"""
+
+            return response
+
+        except Exception as e:
+            import traceback
+            return f"Error during manual marking: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_view_image(self, tool_input: Dict) -> str:
+        """View bottom camera image"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        title = tool_input.get('title', 'Bottom Camera Image')
+        exposure_ms = tool_input.get('exposure_ms', None)
+        save_only = tool_input.get('save_only', False)
+
+        try:
+            if exposure_ms:
+                print(f"\nUsing {exposure_ms} ms exposure for better contrast...")
+
+            # Generate save path
+            save_path = None
+            if save_only:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_path = f"bottom_camera_{timestamp}.png"
+                print(f"\nSaving image to {save_path}...")
+            else:
+                print("\nCapturing and viewing image...")
+
+            result = await self.client.view_image(
+                title=title,
+                exposure_ms=exposure_ms,
+                save_path=save_path,
+                show=not save_only
+            )
+
+            if 'error' in result:
+                return f"Error: {result['error']}"
+
+            if save_only and result.get('saved_to'):
+                return f"✓ Image saved to: {result['saved_to']}"
+            else:
+                return "✓ Image displayed in matplotlib window"
+
+        except Exception as e:
+            return f"Error viewing image: {str(e)}"
+
+    async def _tool_capture_lightsheet(self, tool_input: Dict) -> str:
+        """Capture a single lightsheet image"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        piezo_position = tool_input.get('piezo_position', 50.0)
+        galvo_position = tool_input.get('galvo_position', 0.0)
+        save_only = tool_input.get('save_only', False)
+
+        try:
+            print(f"\nCapturing lightsheet image...")
+            print(f"  Piezo: {piezo_position} µm, Galvo: {galvo_position} V")
+
+            result = await self.client.capture_lightsheet_image(
+                piezo_position=piezo_position,
+                galvo_position=galvo_position
+            )
+
+            if 'error' in result:
+                return f"Error: {result['error']}"
+
+            image = result.get('image')
+            if image is None:
+                return "Error: No image returned"
+
+            # Save image
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = f"lightsheet_{timestamp}.png"
+
+            # Normalize and save
+            import numpy as np
+            from PIL import Image as PILImage
+            img_norm = image.astype(np.float32)
+            img_norm = (img_norm - img_norm.min()) / (img_norm.max() - img_norm.min()) * 255
+            PILImage.fromarray(img_norm.astype(np.uint8)).save(save_path)
+            print(f"  Saved to: {save_path}")
+
+            if not save_only:
+                # Display with matplotlib
+                import matplotlib
+                matplotlib.use('TkAgg')
+                import matplotlib.pyplot as plt
+                fig, ax = plt.subplots(figsize=(10, 10))
+                ax.imshow(image, cmap='gray')
+                ax.set_title(f"Lightsheet: piezo={piezo_position}µm, galvo={galvo_position}V")
+                plt.show()
+
+            return f"""✓ Lightsheet image captured
+  Piezo: {piezo_position} µm
+  Galvo: {galvo_position} V
+  Image shape: {image.shape}
+  Saved to: {save_path}"""
+
+        except Exception as e:
+            import traceback
+            return f"Error capturing lightsheet: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_show_detected_embryos(self, tool_input: Dict) -> str:
+        """Show detected embryos with bounding boxes"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        save_to_file = tool_input.get('save_to_file', False)
+        save_only = tool_input.get('save_only', False)
+
+        try:
+            # Generate save path if requested
+            save_path = None
+            if save_to_file or save_only:
+                from datetime import datetime
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_path = f"detected_embryos_{timestamp}.png"
+
+            if save_only:
+                print(f"\nSaving embryo visualization to {save_path}...")
+            else:
+                print("\nShowing detected embryos with bounding boxes...")
+
+            result = await self.client.view_detected_embryos(
+                save_path=save_path,
+                show=not save_only
+            )
+
+            if 'error' in result:
+                return f"Error: {result['error']}"
+
+            num_embryos = result.get('num_embryos', '?')
+            if save_only:
+                return f"✓ Saved {num_embryos} embryos visualization to: {result.get('saved_to', save_path)}"
+            else:
+                response = f"✓ Displayed {num_embryos} embryos with bounding boxes"
+                if save_path and result.get('saved_to'):
+                    response += f"\nAlso saved to: {result['saved_to']}"
+                return response
+
+        except Exception as e:
+            import traceback
+            return f"Error showing embryos: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_set_led(self, tool_input: Dict) -> str:
+        """Set LED state"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        state = tool_input.get('state', 'Closed')
+
+        try:
+            result = await self.client.set_led(state)
+
+            if result.get('success'):
+                return f"LED set to '{state}'"
+            else:
+                return f"Error setting LED: {result.get('error', 'Unknown error')}"
+
+        except Exception as e:
+            return f"Error setting LED: {str(e)}"
+
+    async def _tool_get_led_status(self, tool_input: Dict) -> str:
+        """Get LED status"""
+        if not self._has_microscope():
+            return "Error: Not connected to microscope server."
+
+        try:
+            result = await self.client.get_led_status()
+
+            if result.get('success'):
+                current = result.get('current_state', 'unknown')
+                available = result.get('available_configs', [])
+                group = result.get('group_name', 'unknown')
+
+                return (f"LED Status:\n"
+                        f"  Current state: {current}\n"
+                        f"  ConfigGroup: {group}\n"
+                        f"  Available configs: {available}")
+            else:
+                return f"Error getting LED status: {result.get('error', 'Unknown error')}"
+
+        except Exception as e:
+            return f"Error getting LED status: {str(e)}"
+
+    # =========================================================================
+    # Databroker Tools
+    # =========================================================================
+
+    def _tool_list_runs(self, tool_input: Dict) -> str:
+        """List recent runs from Databroker"""
+        if not self.db:
+            return "Error: Databroker not configured"
+
+        limit = tool_input.get('limit', 10)
+        embryo_id = tool_input.get('embryo_id')
+        plan_name = tool_input.get('plan_name')
+
+        try:
+            # Build search criteria
+            search_kwargs = {}
+            if embryo_id:
+                search_kwargs['embryo_id'] = embryo_id
+            if plan_name:
+                search_kwargs['plan_name'] = plan_name
+
+            # Query runs
+            if search_kwargs:
+                runs = list(self.db.search(search_kwargs))[:limit]
+            else:
+                runs = list(self.db[-limit:])
+
+            if not runs:
+                return "No runs found matching criteria"
+
+            # Format output
+            response = f"Found {len(runs)} runs:\n\n"
+            for i, run in enumerate(runs):
+                start = run.metadata['start']
+                uid_short = start['uid'][:8]
+                time_str = datetime.fromtimestamp(start['time']).strftime('%Y-%m-%d %H:%M:%S')
+                plan = start.get('plan_name', 'unknown')
+
+                response += f"{i+1}. [{uid_short}...] {time_str}\n"
+                response += f"   Plan: {plan}\n"
+
+                # Include relevant metadata
+                for key in ['embryo_id', 'num_slices', 'exposure_ms']:
+                    if key in start:
+                        response += f"   {key}: {start[key]}\n"
+                response += "\n"
+
+            return response
+
+        except Exception as e:
+            return f"Error listing runs: {str(e)}"
+
+    def _tool_get_run_data(self, tool_input: Dict) -> str:
+        """Get data from a specific run"""
+        if not self.db:
+            return "Error: Databroker not configured"
+
+        run_id = tool_input['run_id']
+        data_keys = tool_input.get('data_keys')
+        stream = tool_input.get('stream', 'primary')
+
+        try:
+            # Get run by UID or index
+            if run_id.startswith('-') or run_id.isdigit():
+                run = self.db[int(run_id)]
+            else:
+                run = self.db[run_id]
+
+            # Get metadata
+            start = run.metadata['start']
+            uid_short = start['uid'][:8]
+            time_str = datetime.fromtimestamp(start['time']).strftime('%Y-%m-%d %H:%M:%S')
+
+            response = f"Run [{uid_short}...] from {time_str}\n"
+            response += f"Plan: {start.get('plan_name', 'unknown')}\n\n"
+
+            # Get available streams
+            streams = list(run)
+            response += f"Available streams: {streams}\n\n"
+
+            # Read data from requested stream
+            if stream in run:
+                data = run[stream].read()
+                available_keys = list(data.keys())
+                response += f"Data keys in '{stream}': {available_keys}\n\n"
+
+                # Filter to requested keys
+                keys_to_show = data_keys if data_keys else available_keys
+
+                for key in keys_to_show:
+                    if key in data:
+                        arr = data[key]
+                        if hasattr(arr, 'shape'):
+                            response += f"{key}: shape={arr.shape}, dtype={arr.dtype}\n"
+                        elif hasattr(arr, 'values'):
+                            vals = arr.values
+                            if hasattr(vals, 'shape') and len(vals.shape) > 1:
+                                response += f"{key}: shape={vals.shape}, dtype={vals.dtype}\n"
+                            else:
+                                response += f"{key}: {vals}\n"
+                        else:
+                            response += f"{key}: {arr}\n"
+            else:
+                response += f"Stream '{stream}' not found in run\n"
+
+            return response
+
+        except Exception as e:
+            import traceback
+            return f"Error getting run data: {str(e)}\n{traceback.format_exc()}"
+
+    async def _tool_get_run_image(self, tool_input: Dict) -> str:
+        """Get and optionally analyze an image from a run"""
+        if not self.db:
+            return "Error: Databroker not configured"
+
+        run_id = tool_input['run_id']
+        detector = tool_input.get('detector')
+        analyze = tool_input.get('analyze', False)
+        analysis_prompt = tool_input.get('analysis_prompt', '')
+
+        try:
+            # Get run
+            if run_id.startswith('-') or run_id.isdigit():
+                run = self.db[int(run_id)]
+            else:
+                run = self.db[run_id]
+
+            # Get data
+            data = run.primary.read()
+            available_keys = list(data.keys())
+
+            # Find detector (auto-detect if not specified)
+            if detector is None:
+                # Look for common detector names
+                for candidate in ['bottom_camera', 'volume_scanner', 'camera', 'HamCam1']:
+                    if candidate in available_keys:
+                        detector = candidate
+                        break
+                if detector is None:
+                    return f"No detector specified and couldn't auto-detect. Available keys: {available_keys}"
+
+            if detector not in data:
+                return f"Detector '{detector}' not found. Available: {available_keys}"
+
+            # Get image
+            image_data = data[detector].values
+            if len(image_data.shape) > 2:
+                image = image_data[0]  # First frame if multiple
+            else:
+                image = image_data
+
+            # Build response
+            start = run.metadata['start']
+            uid_short = start['uid'][:8]
+            response = f"Image from run [{uid_short}...]\n"
+            response += f"Detector: {detector}\n"
+            response += f"Shape: {image.shape}, dtype: {image.dtype}\n"
+            response += f"Min: {image.min()}, Max: {image.max()}, Mean: {image.mean():.1f}\n"
+
+            # Analyze with Claude Vision if requested
+            if analyze and analysis_prompt:
+                response += "\n--- Claude Vision Analysis ---\n"
+
+                # Convert to base64
+                import numpy as np
+                from PIL import Image as PILImage
+                import base64
+                from io import BytesIO
+
+                # Normalize to 8-bit
+                if image.dtype == np.uint16:
+                    img_8bit = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
+                else:
+                    img_8bit = image.astype(np.uint8)
+
+                pil_img = PILImage.fromarray(img_8bit)
+                buffered = BytesIO()
+                pil_img.save(buffered, format="PNG")
+                img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+
+                # Call Claude Vision
+                message = self.claude.messages.create(
+                    model=self.model,
+                    max_tokens=2000,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {"type": "image", "source": {"type": "base64", "media_type": "image/png", "data": img_base64}},
+                            {"type": "text", "text": analysis_prompt}
+                        ]
+                    }]
+                )
+
+                response += message.content[0].text
+
+            return response
+
+        except Exception as e:
+            import traceback
+            return f"Error getting run image: {str(e)}\n{traceback.format_exc()}"
+
+    def _tool_search_runs(self, tool_input: Dict) -> str:
+        """Search runs by metadata criteria"""
+        if not self.db:
+            return "Error: Databroker not configured"
+
+        since = tool_input.get('since')
+        until = tool_input.get('until')
+        metadata = tool_input.get('metadata', {})
+        limit = tool_input.get('limit', 20)
+
+        try:
+            from dateutil import parser as date_parser
+
+            # Build search
+            search_kwargs = dict(metadata) if metadata else {}
+
+            # Parse time range
+            if since:
+                try:
+                    since_time = date_parser.parse(since)
+                    search_kwargs['since'] = since_time
+                except:
+                    pass
+
+            if until:
+                try:
+                    until_time = date_parser.parse(until)
+                    search_kwargs['until'] = until_time
+                except:
+                    pass
+
+            # Execute search
+            if search_kwargs:
+                runs = list(self.db.search(search_kwargs))[:limit]
+            else:
+                runs = list(self.db[-limit:])
+
+            if not runs:
+                return "No runs found matching criteria"
+
+            # Format output
+            response = f"Found {len(runs)} runs:\n\n"
+            for i, run in enumerate(runs):
+                start = run.metadata['start']
+                uid_short = start['uid'][:8]
+                time_str = datetime.fromtimestamp(start['time']).strftime('%Y-%m-%d %H:%M:%S')
+                plan = start.get('plan_name', 'unknown')
+
+                response += f"{i+1}. [{uid_short}...] {time_str} - {plan}\n"
+
+                # Show matching metadata
+                for key, val in metadata.items():
+                    if key in start:
+                        response += f"   {key}: {start[key]}\n"
+
+            return response
+
+        except Exception as e:
+            import traceback
+            return f"Error searching runs: {str(e)}\n{traceback.format_exc()}"

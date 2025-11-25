@@ -1,0 +1,548 @@
+"""
+Gently - Main Entry Point
+
+This is the unified entry point that integrates all system components:
+- Core Infrastructure (DataStore, EventBus, Service)
+- Session Management
+- Analysis Pipelines
+- Tool Registry
+- Copilot
+
+Usage:
+    from gently import Gently
+
+    # Create system instance
+    gently = Gently()
+
+    # Access components
+    gently.data_store      # UID-based data storage
+    gently.event_bus       # Async event messaging
+    gently.services        # Service registry
+    gently.sessions        # Session management
+    gently.tools           # Tool registry
+    gently.pipelines       # Analysis pipeline builder
+
+    # Start a session
+    await gently.start_session(name="My Experiment")
+
+    # Connect to microscope
+    await gently.connect_microscope(host="localhost", port=18861)
+
+    # Run analysis pipeline
+    result = await gently.analyze(volume, pipeline="embryo_detection")
+"""
+
+import asyncio
+import logging
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+
+from .core import (
+    DatabrokerStore,
+    EventBus,
+    EventType,
+    ServiceRegistry,
+    ServiceClient,
+    ServiceInfo,
+    get_data_store,
+    get_event_bus,
+    get_service_registry,
+)
+from .session import SessionManager
+from .agent.tool_registry import ToolRegistry, get_tool_registry
+from .analysis import (
+    Pipeline,
+    PipelineBuilder,
+    create_embryo_detection_pipeline,
+    create_hatching_detection_pipeline,
+    create_morphology_analysis_pipeline,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class Gently:
+    """
+    Main entry point for the Gently microscope control system
+
+    Integrates all components into a unified interface:
+    - Data storage with UID-based lineage tracking
+    - Event-driven architecture
+    - Service discovery and communication
+    - Session persistence
+    - Composable analysis pipelines
+    - Plugin-based tool system
+    """
+
+    def __init__(
+        self,
+        storage_path: Path = Path("./gently_data"),
+        catalog_name: str = "gently",
+    ):
+        """
+        Initialize the Gently system
+
+        Parameters
+        ----------
+        storage_path : Path
+            Base path for all data storage
+        catalog_name : str
+            Databroker catalog name
+        """
+        self.storage_path = Path(storage_path)
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+
+        # Initialize core components
+        self._data_store = DatabrokerStore(catalog_name=catalog_name)
+        self._event_bus = get_event_bus()
+        self._services = get_service_registry()
+        self._client = ServiceClient(self._services)
+
+        # Initialize session manager
+        self._sessions = SessionManager(
+            sessions_dir=self.storage_path / "sessions",
+            auto_save=True,
+        )
+
+        # Initialize tool registry
+        self._tools = get_tool_registry()
+
+        # Pre-built pipelines
+        self._pipelines: Dict[str, Pipeline] = {
+            'embryo_detection': create_embryo_detection_pipeline(),
+            'hatching_detection': create_hatching_detection_pipeline(),
+            'morphology_analysis': create_morphology_analysis_pipeline(),
+        }
+
+        # Copilot instance (lazy loaded)
+        self._copilot = None
+
+        # Register standard services
+        self._register_standard_services()
+
+        logger.info(f"Gently initialized with storage at {self.storage_path}")
+
+    def _register_standard_services(self):
+        """Register info for standard services"""
+        # These are typically external services that may or may not be running
+        standard_services = [
+            ServiceInfo(
+                name="microscope_server",
+                service_type="rpc",
+                host="localhost",
+                port=18861,
+                metadata={'description': 'Main microscope control server'},
+            ),
+            ServiceInfo(
+                name="sam_server",
+                service_type="rpc",
+                host="localhost",
+                port=18862,
+                metadata={'description': 'SAM segmentation server'},
+            ),
+            ServiceInfo(
+                name="queue_server",
+                service_type="http",
+                host="localhost",
+                port=60610,
+                metadata={'description': 'Bluesky queue server'},
+            ),
+        ]
+
+        for info in standard_services:
+            self._services.register_info(info)
+
+    # =========================================================================
+    # Properties for accessing components
+    # =========================================================================
+
+    @property
+    def data_store(self) -> DatabrokerStore:
+        """Access the UID-based data store"""
+        return self._data_store
+
+    @property
+    def event_bus(self) -> EventBus:
+        """Access the event bus"""
+        return self._event_bus
+
+    @property
+    def services(self) -> ServiceRegistry:
+        """Access the service registry"""
+        return self._services
+
+    @property
+    def client(self) -> ServiceClient:
+        """Access the service client"""
+        return self._client
+
+    @property
+    def sessions(self) -> SessionManager:
+        """Access the session manager"""
+        return self._sessions
+
+    @property
+    def tools(self) -> ToolRegistry:
+        """Access the tool registry"""
+        return self._tools
+
+    @property
+    def pipelines(self) -> Dict[str, Pipeline]:
+        """Access pre-built pipelines"""
+        return self._pipelines
+
+    # =========================================================================
+    # Session Management
+    # =========================================================================
+
+    async def start_session(
+        self,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+    ) -> str:
+        """
+        Start a new session
+
+        Parameters
+        ----------
+        name : str, optional
+            Human-readable session name
+        description : str, optional
+            Session description
+
+        Returns
+        -------
+        str
+            Session ID
+        """
+        session = self._sessions.create_session(
+            name=name,
+            description=description,
+        )
+
+        self._event_bus.publish(
+            EventType.SESSION_STARTED,
+            {'session_id': session.session_id, 'name': name},
+            source="gently",
+        )
+
+        logger.info(f"Started session: {session.session_id}")
+        return session.session_id
+
+    async def resume_session(self, session_id: str) -> bool:
+        """
+        Resume an existing session
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID to resume
+
+        Returns
+        -------
+        bool
+            True if resumed successfully
+        """
+        session = self._sessions.load_session(session_id)
+        if session:
+            self._event_bus.publish(
+                EventType.SESSION_RESTORED,
+                {'session_id': session_id},
+                source="gently",
+            )
+            logger.info(f"Resumed session: {session_id}")
+            return True
+        return False
+
+    def list_sessions(self) -> List[Dict]:
+        """List available sessions"""
+        return self._sessions.list_sessions()
+
+    # =========================================================================
+    # Service Connection
+    # =========================================================================
+
+    async def connect_microscope(
+        self,
+        host: str = "localhost",
+        port: int = 18861,
+    ) -> bool:
+        """
+        Connect to the microscope server
+
+        Parameters
+        ----------
+        host : str
+            Server hostname
+        port : int
+            Server port
+
+        Returns
+        -------
+        bool
+            True if connected successfully
+        """
+        # Update service info
+        info = self._services.get_info("microscope_server")
+        if info:
+            info.host = host
+            info.port = port
+
+        try:
+            conn = await self._client.connect("microscope_server")
+            logger.info(f"Connected to microscope server at {host}:{port}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to microscope: {e}")
+            return False
+
+    async def connect_sam_server(
+        self,
+        host: str = "localhost",
+        port: int = 18862,
+    ) -> bool:
+        """
+        Connect to the SAM segmentation server
+
+        Parameters
+        ----------
+        host : str
+            Server hostname
+        port : int
+            Server port
+
+        Returns
+        -------
+        bool
+            True if connected successfully
+        """
+        info = self._services.get_info("sam_server")
+        if info:
+            info.host = host
+            info.port = port
+
+        try:
+            conn = await self._client.connect("sam_server")
+            logger.info(f"Connected to SAM server at {host}:{port}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to connect to SAM server: {e}")
+            return False
+
+    # =========================================================================
+    # Analysis
+    # =========================================================================
+
+    async def analyze(
+        self,
+        data: Any,
+        pipeline: str = "embryo_detection",
+        context: Optional[Dict] = None,
+    ) -> Any:
+        """
+        Run analysis pipeline on data
+
+        Parameters
+        ----------
+        data : any
+            Input data (volume, image, etc.)
+        pipeline : str
+            Name of pipeline to run
+        context : dict, optional
+            Additional context (embryo_id, timepoint, etc.)
+
+        Returns
+        -------
+        AnalysisResult
+            Pipeline result with lineage tracking
+        """
+        if pipeline not in self._pipelines:
+            raise ValueError(f"Unknown pipeline: {pipeline}. "
+                           f"Available: {list(self._pipelines.keys())}")
+
+        pipe = self._pipelines[pipeline]
+        pipe.set_data_store(self._data_store)
+
+        result = await pipe.execute(data, context=context)
+
+        self._event_bus.publish(
+            EventType.ANALYSIS_COMPLETED,
+            {
+                'pipeline': pipeline,
+                'result_uid': result.uid,
+                'success': result.success,
+            },
+            source="gently",
+        )
+
+        return result
+
+    def create_pipeline(self, name: str) -> PipelineBuilder:
+        """
+        Create a new analysis pipeline
+
+        Parameters
+        ----------
+        name : str
+            Pipeline name
+
+        Returns
+        -------
+        PipelineBuilder
+            Builder for constructing pipeline
+        """
+        return PipelineBuilder(name)
+
+    def register_pipeline(self, name: str, pipeline: Pipeline):
+        """Register a custom pipeline"""
+        self._pipelines[name] = pipeline
+
+    # =========================================================================
+    # Data Operations
+    # =========================================================================
+
+    def store(
+        self,
+        data: Any,
+        data_type: str,
+        metadata: Optional[Dict] = None,
+        parent_uid: Optional[str] = None,
+    ) -> str:
+        """
+        Store data with UID tracking
+
+        Parameters
+        ----------
+        data : any
+            Data to store
+        data_type : str
+            Type of data (volume, image, analysis, etc.)
+        metadata : dict, optional
+            Additional metadata
+        parent_uid : str, optional
+            Parent UID for lineage
+
+        Returns
+        -------
+        str
+            UID of stored data
+        """
+        ref = self._data_store.store(
+            data=data,
+            data_type=data_type,
+            metadata=metadata,
+            parent_uid=parent_uid,
+        )
+
+        self._event_bus.publish(
+            EventType.DATA_STORED,
+            {'uid': ref.uid, 'data_type': data_type},
+            source="gently",
+        )
+
+        return ref.uid
+
+    def retrieve(self, uid: str) -> Any:
+        """
+        Retrieve data by UID
+
+        Parameters
+        ----------
+        uid : str
+            UID of data to retrieve
+
+        Returns
+        -------
+        any
+            The stored data
+        """
+        return self._data_store.retrieve(uid)
+
+    def get_lineage(self, uid: str) -> List:
+        """Get data lineage (parent chain)"""
+        return self._data_store.get_lineage(uid)
+
+    # =========================================================================
+    # Event Handling
+    # =========================================================================
+
+    def on(self, event_type: EventType, handler):
+        """
+        Subscribe to events
+
+        Parameters
+        ----------
+        event_type : EventType
+            Event type to subscribe to
+        handler : callable
+            Handler function
+
+        Returns
+        -------
+        callable
+            Unsubscribe function
+        """
+        return self._event_bus.subscribe(event_type, handler)
+
+    def emit(self, event_type: EventType, data: Dict):
+        """Emit an event"""
+        self._event_bus.publish(event_type, data, source="gently")
+
+    # =========================================================================
+    # Copilot Access
+    # =========================================================================
+
+    def get_copilot(self, **kwargs):
+        """
+        Get or create the copilot instance
+
+        Parameters
+        ----------
+        **kwargs
+            Arguments passed to MicroscopyCopilot constructor
+
+        Returns
+        -------
+        MicroscopyCopilot
+            The copilot instance
+        """
+        if self._copilot is None:
+            from .agent.copilot import MicroscopyCopilot
+            self._copilot = MicroscopyCopilot(
+                storage_path=self.storage_path,
+                **kwargs
+            )
+            # Share components
+            self._copilot.image_manager.set_data_store(self._data_store)
+        return self._copilot
+
+    # =========================================================================
+    # Lifecycle
+    # =========================================================================
+
+    async def shutdown(self):
+        """Shutdown the system cleanly"""
+        logger.info("Shutting down Gently...")
+
+        # Save session
+        self._sessions.save_session()
+
+        # Disconnect services
+        await self._client.disconnect_all()
+
+        # Stop any running services
+        await self._services.stop_all()
+
+        self._event_bus.publish(
+            EventType.SESSION_ENDED,
+            {'session_id': self._sessions.session_id},
+            source="gently",
+        )
+
+        logger.info("Gently shutdown complete")
+
+
+# Convenience function
+def create_gently(**kwargs) -> Gently:
+    """Create a Gently instance with default settings"""
+    return Gently(**kwargs)

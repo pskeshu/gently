@@ -1553,6 +1553,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
         self.pixel_size_um = pixel_size_um
         self.magnification = magnification
         self.effective_pixel_size = pixel_size_um / magnification
+        self.use_led = True  # Set to False to disable automatic LED control
 
     def pixel_to_um(self, pixels: float) -> float:
         """
@@ -1572,25 +1573,28 @@ class DiSPIMBottomCamera(DiSPIMCamera):
 
     def trigger(self):
         """
-        Trigger image acquisition with automatic LED management.
+        Trigger image acquisition with optional LED management.
 
-        Overrides parent trigger() to add LED control:
-        1. Turn LED on
+        Overrides parent trigger() to add LED control (if use_led=True):
+        1. Turn LED on (if use_led=True)
         2. Capture image
-        3. Turn LED off (always, even on error)
+        3. Turn LED off (if use_led=True, always even on error)
+
+        Set self.use_led = False to capture without LED (ambient light only).
 
         Returns
         -------
         Status
-            Ophyd status object that finishes when image is acquired and LED is off
+            Ophyd status object that finishes when image is acquired
         """
         status = Status(obj=self, timeout=30)
 
         def wait():
             try:
-                # Turn LED on for transmitted light imaging
-                self.led_control.set("Open").wait(timeout=5)
-                time.sleep(0.1)  # Allow LED to stabilize
+                # Turn LED on for transmitted light imaging (if enabled)
+                if self.use_led:
+                    self.led_control.set("Open").wait(timeout=5)
+                    time.sleep(0.1)  # Allow LED to stabilize
 
                 # Capture image
                 self.core.setCameraDevice(self.name)
@@ -1598,15 +1602,17 @@ class DiSPIMBottomCamera(DiSPIMCamera):
                 self._last_image = rpyc.classic.obtain(self.core.getImage())
                 self._last_image_time = time.time()
 
-                # Turn LED off (important to prevent sample heating!)
-                self.led_control.set("Closed").wait(timeout=5)
+                # Turn LED off (if enabled - important to prevent sample heating!)
+                if self.use_led:
+                    self.led_control.set("Closed").wait(timeout=5)
 
             except Exception as exc:
-                # Critical: always turn off LED even on error
-                try:
-                    self.led_control.set("Closed").wait(timeout=5)
-                except:
-                    pass
+                # Critical: always turn off LED even on error (if enabled)
+                if self.use_led:
+                    try:
+                        self.led_control.set("Closed").wait(timeout=5)
+                    except:
+                        pass
                 status.set_exception(exc)
             else:
                 status.set_finished()

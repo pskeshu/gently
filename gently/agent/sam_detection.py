@@ -95,6 +95,285 @@ class SAMEmbryoDetector:
         self._predictor = SamPredictor(sam)
         print("✓ SAM model loaded")
 
+    def preprocess_image(self,
+                         image: np.ndarray,
+                         bg_kernel_size: int = 150,
+                         use_clahe: bool = True,
+                         clahe_clip_limit: float = 3.0,
+                         clahe_tile_size: int = 16,
+                         gaussian_sigma: float = 2.0) -> np.ndarray:
+        """
+        Preprocess image for better SAM detection.
+
+        Key insight: Embryos appear as BRIGHT objects against darker background.
+        This preprocessing enhances contrast and removes background variations
+        to make embryo boundaries clearly visible.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Input image (16-bit or 8-bit grayscale)
+        bg_kernel_size : int
+            Kernel size for background subtraction via morphological opening.
+            Should be larger than largest embryo. Default: 150
+        use_clahe : bool
+            Apply CLAHE (Contrast Limited Adaptive Histogram Equalization).
+            Default: True
+        clahe_clip_limit : float
+            CLAHE clip limit. Higher = more contrast. Default: 3.0
+        clahe_tile_size : int
+            CLAHE tile grid size. Smaller = more local enhancement. Default: 16
+        gaussian_sigma : float
+            Gaussian blur sigma for noise reduction. Default: 2.0
+
+        Returns
+        -------
+        np.ndarray
+            Preprocessed 8-bit image with enhanced contrast
+        """
+        print(f"  Preprocessing image (shape: {image.shape}, dtype: {image.dtype})...")
+        print(f"    Input range: {image.min()} - {image.max()}")
+
+        # Step 1: Percentile normalization (handles low dynamic range)
+        # This stretches the narrow range (e.g., 84-354) to full 0-255
+        print(f"    Percentile normalization (2-98%)...")
+        p2, p98 = np.percentile(image, (2, 98))
+        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
+        print(f"    ✓ Normalized to 0-255")
+
+        # Step 2: Background subtraction with large morphological opening
+        # Removes large-scale illumination variations
+        if bg_kernel_size > 0:
+            print(f"    Background subtraction (kernel={bg_kernel_size})...")
+            kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (bg_kernel_size, bg_kernel_size))
+            background = cv2.morphologyEx(img_norm, cv2.MORPH_OPEN, kernel_bg)
+            img_no_bg = cv2.subtract(img_norm, background)
+            img_no_bg = cv2.normalize(img_no_bg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            print(f"    ✓ Background subtracted")
+        else:
+            img_no_bg = img_norm
+
+        # Step 3: CLAHE for local contrast enhancement
+        # Makes embryo boundaries much more visible
+        if use_clahe:
+            print(f"    CLAHE (clip={clahe_clip_limit}, tile={clahe_tile_size})...")
+            clahe = cv2.createCLAHE(
+                clipLimit=clahe_clip_limit,
+                tileGridSize=(clahe_tile_size, clahe_tile_size)
+            )
+            img_enhanced = clahe.apply(img_no_bg)
+            print(f"    ✓ CLAHE applied")
+        else:
+            img_enhanced = img_no_bg
+
+        # Step 4: Light Gaussian smoothing to reduce noise
+        if gaussian_sigma > 0:
+            print(f"    Gaussian blur (sigma={gaussian_sigma})...")
+            img_smooth = cv2.GaussianBlur(img_enhanced, (5, 5), gaussian_sigma)
+            print(f"    ✓ Smoothing applied")
+        else:
+            img_smooth = img_enhanced
+
+        print(f"  ✓ Preprocessing complete (output range: {img_smooth.min()} - {img_smooth.max()})")
+        return img_smooth
+
+    def find_embryo_candidates(self,
+                               image: np.ndarray,
+                               brightness_percentile: float = 99.0,
+                               min_area: int = 5000,
+                               max_area: int = 150000,
+                               clahe_clip: float = 3.0,
+                               clahe_tile: int = 16) -> Tuple[List[Dict], np.ndarray]:
+        """
+        Find embryo candidates using brightness-based detection.
+
+        Embryos appear as BRIGHT objects against darker background.
+        This method finds them by thresholding the brightest pixels.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Input grayscale image (16-bit or 8-bit)
+        brightness_percentile : float
+            Percentile threshold for detecting bright embryos.
+            99.0 = fewer, confident detections. 98.0 = more detections.
+        min_area : int
+            Minimum embryo area in pixels (filters small noise)
+        max_area : int
+            Maximum embryo area in pixels (filters large artifacts)
+        clahe_clip : float
+            CLAHE clip limit for contrast enhancement
+        clahe_tile : int
+            CLAHE tile grid size
+
+        Returns
+        -------
+        candidates : List[Dict]
+            List of candidate embryos with keys:
+            - bbox: (x, y, w, h) bounding box
+            - centroid: (cx, cy) center point
+            - area: area in pixels
+        enhanced_image : np.ndarray
+            Contrast-enhanced 8-bit image for SAM
+        """
+        print(f"  Finding embryo candidates (brightness percentile={brightness_percentile})...")
+        print(f"    Input range: {image.min()} - {image.max()}")
+
+        # Step 1: Percentile normalization (handles low dynamic range)
+        p2, p98 = np.percentile(image, (2, 98))
+        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
+        print(f"    ✓ Normalized to 0-255")
+
+        # Step 2: CLAHE for local contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(clahe_tile, clahe_tile))
+        img_enhanced = clahe.apply(img_norm)
+        print(f"    ✓ CLAHE applied (clip={clahe_clip}, tile={clahe_tile})")
+
+        # Step 3: Light smoothing
+        img_smooth = cv2.GaussianBlur(img_enhanced, (5, 5), 2)
+
+        # Step 4: Threshold brightest pixels (embryos are BRIGHT)
+        threshold_value = np.percentile(img_smooth, brightness_percentile)
+        _, mask = cv2.threshold(img_smooth, threshold_value, 255, cv2.THRESH_BINARY)
+        print(f"    ✓ Threshold at {threshold_value:.1f} (percentile {brightness_percentile})")
+
+        # Step 5: Morphological cleanup
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+
+        # Step 6: Dilate to capture full embryo extent
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+        mask = cv2.dilate(mask, kernel_dilate, iterations=2)
+        print(f"    ✓ Morphological cleanup complete")
+
+        # Step 7: Find connected components and filter by area
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+
+        candidates = []
+        for i in range(1, num_labels):  # Skip background (label 0)
+            area = stats[i, cv2.CC_STAT_AREA]
+            if min_area < area < max_area:
+                x = stats[i, cv2.CC_STAT_LEFT]
+                y = stats[i, cv2.CC_STAT_TOP]
+                w = stats[i, cv2.CC_STAT_WIDTH]
+                h = stats[i, cv2.CC_STAT_HEIGHT]
+                cx, cy = centroids[i]
+
+                candidates.append({
+                    'bbox': (x, y, w, h),
+                    'centroid': (cx, cy),
+                    'area': area
+                })
+
+        print(f"  ✓ Found {len(candidates)} embryo candidates")
+        return candidates, img_smooth
+
+    def refine_with_sam(self,
+                        image: np.ndarray,
+                        candidates: List[Dict],
+                        padding: int = 20) -> List[Dict]:
+        """
+        Refine embryo candidates using SAM with bounding box prompts.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Enhanced 8-bit image
+        candidates : List[Dict]
+            Candidate embryos from find_embryo_candidates
+        padding : int
+            Padding to add around bounding boxes
+
+        Returns
+        -------
+        embryos : List[Dict]
+            Refined embryos with SAM masks and updated properties
+        """
+        if not candidates:
+            return []
+
+        # Load SAM if needed
+        self._load_sam()
+
+        # Convert to RGB for SAM (it expects 3-channel)
+        if len(image.shape) == 2:
+            image_rgb = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        else:
+            image_rgb = image
+
+        # Set image for SAM predictor
+        self._predictor.set_image(image_rgb)
+
+        embryos = []
+        h, w = image.shape[:2]
+
+        for i, candidate in enumerate(candidates):
+            x, y, bw, bh = candidate['bbox']
+
+            # Add padding and clip to image bounds
+            x1 = max(0, x - padding)
+            y1 = max(0, y - padding)
+            x2 = min(w, x + bw + padding)
+            y2 = min(h, y + bh + padding)
+
+            # SAM box format: [x1, y1, x2, y2]
+            input_box = np.array([x1, y1, x2, y2])
+
+            # Get SAM prediction with box prompt
+            masks, scores, _ = self._predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=input_box,
+                multimask_output=True
+            )
+
+            # Take best mask (highest score)
+            best_idx = np.argmax(scores)
+            mask = masks[best_idx]
+            score = scores[best_idx]
+
+            # Calculate properties from SAM mask
+            contours, _ = cv2.findContours(
+                mask.astype(np.uint8),
+                cv2.RETR_EXTERNAL,
+                cv2.CHAIN_APPROX_SIMPLE
+            )
+
+            if contours:
+                # Get largest contour
+                contour = max(contours, key=cv2.contourArea)
+                area = cv2.contourArea(contour)
+
+                # Calculate centroid
+                M = cv2.moments(contour)
+                if M["m00"] > 0:
+                    cx = M["m10"] / M["m00"]
+                    cy = M["m01"] / M["m00"]
+                else:
+                    cx, cy = candidate['centroid']
+
+                # Calculate circularity
+                perimeter = cv2.arcLength(contour, True)
+                circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+
+                # Get bounding box from contour
+                bx, by, bw, bh = cv2.boundingRect(contour)
+
+                embryos.append({
+                    'embryo_id': i + 1,
+                    'pixel_x': float(cx),
+                    'pixel_y': float(cy),
+                    'bbox': (bx, by, bw, bh),  # Used by visualization functions
+                    'area_pixels': int(area),
+                    'circularity': float(circularity),
+                    'confidence': float(score),
+                    'mask': mask
+                })
+
+        print(f"  ✓ SAM refined {len(embryos)} embryos")
+        return embryos
+
     async def detect_embryos(self,
                             image: np.ndarray,
                             stage_position: Tuple[float, float],
@@ -102,9 +381,17 @@ class SAMEmbryoDetector:
                             objective_mag: float = 4.0,
                             use_claude_review: bool = True,
                             save_visualizations: bool = True,
-                            output_dir: Optional[Path] = None) -> Dict:
+                            output_dir: Optional[Path] = None,
+                            brightness_percentile: float = 99.0,
+                            min_area: int = 5000,
+                            max_area: int = 150000) -> Dict:
         """
-        Detect embryos in bottom camera image
+        Detect embryos using brightness-based detection + SAM refinement.
+
+        This hybrid approach:
+        1. Uses brightness thresholding to find candidate embryo regions
+        2. Uses SAM with bounding box prompts to get precise segmentation
+        3. Optionally uses Claude Vision for verification
 
         Parameters
         ----------
@@ -122,6 +409,13 @@ class SAMEmbryoDetector:
             Whether to save annotated images (default: True)
         output_dir : Path, optional
             Where to save visualizations. If None, uses './detection_results'
+        brightness_percentile : float
+            Percentile threshold for brightness detection.
+            99.0 = fewer, confident detections. 98.0 = more detections.
+        min_area : int
+            Minimum embryo area in pixels. Default: 5000
+        max_area : int
+            Maximum embryo area in pixels. Default: 150000
 
         Returns
         -------
@@ -142,22 +436,41 @@ class SAMEmbryoDetector:
             - circularity: float
             - confidence: float
         """
-        # Load SAM if needed
-        self._load_sam()
-
         # Setup output directory
         if output_dir is None:
             output_dir = Path("./detection_results")
         output_dir.mkdir(parents=True, exist_ok=True)
 
         print("\n" + "="*70)
-        print("SAM + CLAUDE EMBRYO DETECTION")
+        print("BRIGHTNESS + SAM EMBRYO DETECTION")
         print("="*70)
 
-        # Initial SAM detection
-        print("\n[1/4] Running SAM segmentation...")
-        embryos_sam, image_8bit = self._detect_with_sam(image)
-        print(f"  ✓ SAM detected {len(embryos_sam)} candidates")
+        # Step 1: Find candidates using brightness detection
+        print("\n[1/4] Finding embryo candidates (brightness-based)...")
+        candidates, image_enhanced = self.find_embryo_candidates(
+            image,
+            brightness_percentile=brightness_percentile,
+            min_area=min_area,
+            max_area=max_area
+        )
+
+        if len(candidates) == 0:
+            print("  ⚠ No embryo candidates found!")
+            return {
+                'embryos': [],
+                'initial_detections': 0,
+                'final_detections': 0,
+                'verification': {'verified': False},
+                'images': {}
+            }
+
+        # Step 2: Refine with SAM
+        print("\n[2/4] Refining with SAM...")
+        embryos_sam = self.refine_with_sam(image_enhanced, candidates)
+        print(f"  ✓ SAM refined {len(embryos_sam)} embryos")
+
+        # Use enhanced image for visualization
+        image_8bit = image_enhanced
 
         if len(embryos_sam) == 0:
             print("  ⚠ No embryos detected by SAM!")
@@ -225,7 +538,8 @@ class SAMEmbryoDetector:
             embryos_final,
             stage_position,
             pixel_size_um,
-            objective_mag
+            objective_mag,
+            image_shape=image.shape[:2]  # (height, width)
         )
 
         # Save final visualization
@@ -602,10 +916,21 @@ Respond in JSON:
         }
 
     def _pixel_to_stage_coordinates(self, embryos: List[Dict], stage_pos: Tuple[float, float],
-                                    pixel_size_um: float, objective_mag: float) -> List[Dict]:
-        """Convert pixel coordinates to stage coordinates"""
+                                    pixel_size_um: float, objective_mag: float,
+                                    image_shape: Tuple[int, int] = (2048, 2048)) -> List[Dict]:
+        """
+        Convert pixel coordinates to stage coordinates.
+
+        Uses canonical coordinate transformation from gently/coordinates.py:
+        - X is INVERTED (stage +X moves features LEFT in camera)
+        - Y is NOT inverted
+        """
         effective_pixel_um = pixel_size_um / objective_mag
         stage_x, stage_y = stage_pos
+
+        # Image center (for offset calculation)
+        image_center_x = image_shape[1] / 2  # width
+        image_center_y = image_shape[0] / 2  # height
 
         embryo_positions = []
         for i, embryo in enumerate(embryos):
@@ -615,9 +940,20 @@ Respond in JSON:
             center_x_px = x + w / 2
             center_y_px = y + h / 2
 
-            # Stage coordinates
-            embryo_stage_x = stage_x + (center_x_px * effective_pixel_um)
-            embryo_stage_y = stage_y + (center_y_px * effective_pixel_um)
+            # Calculate offset from image center
+            dx_pixels = center_x_px - image_center_x
+            dy_pixels = center_y_px - image_center_y
+
+            # Convert to stage coordinates - match multi_embryo_calibration.py formula
+            # The formula computes the TARGET stage position to center this embryo
+            # dx_pixels = (embryo - center), so:
+            # target_x = current_x + dx_pixels * pixel_size (no inversion here!)
+            # This matches multi_embryo_calibration.py: dx_stage = -(center - embryo) = (embryo - center)
+            dx_stage = dx_pixels * effective_pixel_um
+            dy_stage = dy_pixels * effective_pixel_um
+
+            embryo_stage_x = stage_x + dx_stage
+            embryo_stage_y = stage_y + dy_stage
 
             embryo_positions.append({
                 'embryo_id': i,
@@ -626,9 +962,9 @@ Respond in JSON:
                 'stage_x_um': float(embryo_stage_x),
                 'stage_y_um': float(embryo_stage_y),
                 'bbox_pixel': tuple(bbox),
-                'area_pixels': embryo['area'],
-                'circularity': embryo['circularity'],
-                'confidence': embryo['stability_score']
+                'area_pixels': embryo.get('area_pixels', embryo.get('area', 0)),
+                'circularity': embryo.get('circularity', 0),
+                'confidence': embryo.get('confidence', embryo.get('stability_score', 0))
             })
 
         return embryo_positions
@@ -660,7 +996,7 @@ Respond in JSON:
         properties = {'detection_id': [], 'confidence': []}
 
         for embryo in embryos:
-            bbox = embryo['bbox_pixel']
+            bbox = embryo.get('bbox', embryo.get('bbox_pixel'))
             x, y, w, h = bbox
             rect = np.array([[y, x], [y, x+w], [y+h, x+w], [y+h, x]])
             shapes.append(rect)

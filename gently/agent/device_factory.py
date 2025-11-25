@@ -8,6 +8,13 @@ from typing import Dict, Optional
 from pathlib import Path
 import pymmcore
 
+from rich.console import Console
+
+from .theme import get_theme
+
+# Module-level console for styled output
+_console = Console()
+
 
 def create_devices_from_mmcore(core: pymmcore.CMMCore,
                                 config: Optional[Dict] = None) -> Dict:
@@ -82,6 +89,8 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
     laser_control = None
     led = None
 
+    theme = get_theme()
+
     try:
         # Scanner (for direct control)
         scanner = DiSPIMScanner(
@@ -89,9 +98,9 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
             core=core
         )
         devices['scanner'] = scanner
-        print(f"  ✓ Created scanner: {cfg['scanner_name']}")
+        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]scanner[/]: {cfg['scanner_name']}")
     except Exception as e:
-        print(f"  ⚠ Could not create scanner: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create scanner: {e}")
 
     try:
         # Piezo (for direct control)
@@ -100,34 +109,34 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
             core=core
         )
         devices['piezo'] = piezo
-        print(f"  ✓ Created piezo: {cfg['piezo_name']}")
+        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]piezo[/]: {cfg['piezo_name']}")
     except Exception as e:
-        print(f"  ⚠ Could not create piezo: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create piezo: {e}")
 
     try:
         # Camera
         from gently.devices import DiSPIMCamera
         camera = DiSPIMCamera(
-            name=cfg['camera_name'],
+            device_name=cfg['camera_name'],
             core=core
         )
         devices['camera'] = camera
-        print(f"  ✓ Created camera: {cfg['camera_name']}")
+        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]camera[/]: {cfg['camera_name']}")
     except Exception as e:
-        print(f"  ⚠ Could not create camera: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create camera: {e}")
 
     try:
         # Laser Control
         from gently.devices import DiSPIMLaserControl
         laser_control = DiSPIMLaserControl(
-            config_group_name="Laser",
             core=core,
-            name='laser_control'
+            name='laser_control',
+            group_name="Laser"
         )
         devices['laser_control'] = laser_control
-        print(f"  ✓ Created laser control")
+        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]laser control[/]")
     except Exception as e:
-        print(f"  ⚠ Could not create laser control: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create laser control: {e}")
 
     try:
         # XY Stage
@@ -135,22 +144,23 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
             name=cfg['xy_stage_name'],
             core=core
         )
-        print(f"  ✓ Created XY stage: {cfg['xy_stage_name']}")
+        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]XY stage[/]: {cfg['xy_stage_name']}")
     except Exception as e:
-        print(f"  ⚠ Could not create XY stage: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create XY stage: {e}")
 
     try:
         # LED (optional)
         if cfg.get('led_name'):
             from gently.devices import DiSPIMLED
             led = DiSPIMLED(
+                core=core,
                 name=cfg['led_name'],
-                core=core
+                group_name="LED"
             )
             devices['led'] = led
-            print(f"  ✓ Created LED: {cfg['led_name']}")
+            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]LED[/]: {cfg['led_name']}")
     except Exception as e:
-        print(f"  ⚠ Could not create LED: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create LED: {e}")
 
     # Now create compound devices
     try:
@@ -164,24 +174,28 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
                 core=core,
                 name='volume_scanner'
             )
-            print(f"  ✓ Created volume scanner")
+            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]volume scanner[/]")
         else:
-            print(f"  ⚠ Skipping volume scanner (missing required devices)")
+            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping volume scanner (missing required devices)")
     except Exception as e:
-        print(f"  ⚠ Could not create volume scanner: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create volume scanner: {e}")
 
     try:
         # Bottom Camera (with LED control)
-        bottom_camera = DiSPIMBottomCamera(
-            name=cfg['bottom_camera_name'],
-            core=core,
-            led_device=led,
-            effective_pixel_size=0.65  # 6.5µm / 10x for 4x objective
-        )
-        devices['bottom_camera'] = bottom_camera
-        print(f"  ✓ Created bottom camera: {cfg['bottom_camera_name']}")
+        if led:
+            bottom_camera = DiSPIMBottomCamera(
+                device_name=cfg['bottom_camera_name'],
+                core=core,
+                led_control=led,
+                pixel_size_um=6.5,
+                magnification=10.0  # 6.5µm / 10x = 0.65µm effective
+            )
+            devices['bottom_camera'] = bottom_camera
+            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]bottom camera[/]: {cfg['bottom_camera_name']}")
+        else:
+            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping bottom camera (missing LED device)")
     except Exception as e:
-        print(f"  ⚠ Could not create bottom camera: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create bottom camera: {e}")
 
     try:
         # Light Sheet Snap (requires scanner and camera)
@@ -189,14 +203,13 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
             devices['lightsheet_snap'] = DiSPIMLightSheetSnap(
                 scanner=scanner,
                 camera=camera,
-                core=core,
                 name='lightsheet_snap'
             )
-            print(f"  ✓ Created lightsheet snap device")
+            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]lightsheet snap[/] device")
         else:
-            print(f"  ⚠ Skipping lightsheet snap (missing required devices)")
+            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping lightsheet snap (missing required devices)")
     except Exception as e:
-        print(f"  ⚠ Could not create lightsheet snap: {e}")
+        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create lightsheet snap: {e}")
 
     if not devices:
         raise RuntimeError("Failed to create any devices. Check your Micro-Manager configuration.")
@@ -204,64 +217,3 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
     return devices
 
 
-def create_copilot_with_hardware(storage_path: Path,
-                                  core: Optional[pymmcore.CMMCore] = None,
-                                  device_config: Optional[Dict] = None):
-    """
-    Convenience function to create MicroscopyCopilot with full hardware control
-
-    Parameters
-    ----------
-    storage_path : Path
-        Where to store experiment data
-    core : pymmcore.CMMCore, optional
-        Micro-Manager core. If None, will try to import from client.get_mmc()
-    device_config : dict, optional
-        Device configuration to pass to create_devices_from_mmcore()
-
-    Returns
-    -------
-    MicroscopyCopilot
-        Copilot with RunEngine and devices initialized
-
-    Example
-    -------
-    >>> from pathlib import Path
-    >>> from gently.agent.device_factory import create_copilot_with_hardware
-    >>>
-    >>> copilot = create_copilot_with_hardware(
-    ...     storage_path=Path("./experiment_data")
-    ... )
-    >>>
-    >>> # Now you can use hardware control tools
-    >>> # e.g., "calibrate embryo_001", "acquire volume for embryo_002"
-    """
-    from bluesky import RunEngine
-    from gently.agent import MicroscopyCopilot
-
-    # Get or create core
-    if core is None:
-        try:
-            from client import get_mmc
-            core = get_mmc()
-        except ImportError:
-            raise ImportError("Could not import get_mmc from client. Please provide core explicitly.")
-
-    # Create devices
-    print("\nCreating devices from Micro-Manager core...")
-    devices = create_devices_from_mmcore(core, device_config)
-    print(f"✓ Created {len(devices)} devices\n")
-
-    # Create RunEngine
-    RE = RunEngine({})
-    print("✓ Created RunEngine\n")
-
-    # Create copilot
-    copilot = MicroscopyCopilot(
-        storage_path=storage_path,
-        run_engine=RE,
-        devices=devices
-    )
-    print("✓ Created MicroscopyCopilot with hardware control enabled\n")
-
-    return copilot

@@ -30,22 +30,63 @@ from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 
 from .autocomplete import create_completer
+from .theme import get_theme, set_theme, list_themes, Theme
 
 
+# Backwards compatibility - ColorScheme now wraps theme
 class ColorScheme:
-    """Semantic color scheme for copilot CLI"""
-    USER = "green"
-    USER_BOLD = "bold green"
-    COPILOT = "blue"
-    COPILOT_DIM = "dim blue"
-    SYSTEM = "yellow"
-    TOOL = "magenta"
-    ERROR = "bold red"
-    SUCCESS = "bright_green"
-    WARNING = "yellow"
-    INFO = "cyan"
-    MUTED = "dim white"
-    TIMESTAMP = "dim cyan"
+    """Semantic color scheme for copilot CLI (now wraps theme system)"""
+    @property
+    def USER(self):
+        return get_theme().user
+
+    @property
+    def USER_BOLD(self):
+        return f"bold {get_theme().user}"
+
+    @property
+    def COPILOT(self):
+        return get_theme().copilot
+
+    @property
+    def COPILOT_DIM(self):
+        return f"dim {get_theme().copilot}"
+
+    @property
+    def SYSTEM(self):
+        return get_theme().system
+
+    @property
+    def TOOL(self):
+        return get_theme().tool
+
+    @property
+    def ERROR(self):
+        return f"bold {get_theme().error}"
+
+    @property
+    def SUCCESS(self):
+        return get_theme().success
+
+    @property
+    def WARNING(self):
+        return get_theme().warning
+
+    @property
+    def INFO(self):
+        return get_theme().info
+
+    @property
+    def MUTED(self):
+        return get_theme().muted
+
+    @property
+    def TIMESTAMP(self):
+        return get_theme().muted
+
+
+# Single instance for compatibility
+_color_scheme = ColorScheme()
 
 
 class RichCopilotCLI:
@@ -97,19 +138,19 @@ class RichCopilotCLI:
 
     def print_welcome(self):
         """Print welcome banner"""
+        theme = get_theme()
         welcome = Panel(
             Text.from_markup(
-                "[bold blue]Microscopy Copilot v2.0[/]\n"
-                "[dim]AI-powered adaptive microscopy control[/]\n\n"
-                "[cyan]Commands:[/]\n"
-                "  • Type naturally to interact with copilot\n"
-                "  • Use [yellow]/detectors[/], [yellow]/status[/], [yellow]/embryos[/] for quick info\n"
-                "  • Press [yellow]Tab[/] for autocomplete\n"
-                "  • Press [yellow]↑/↓[/] for command history\n"
-                "  • Press [yellow]Ctrl+C[/] to exit\n"
+                f"[bold {theme.primary}]Microscopy Copilot v2.0[/]\n"
+                f"[{theme.muted}]AI-powered adaptive microscopy control[/]\n\n"
+                f"[{theme.secondary}]Commands:[/]\n"
+                f"  {theme.icon_info} Type naturally to interact with copilot\n"
+                f"  {theme.icon_info} Use [{theme.tool}]/detectors[/], [{theme.tool}]/status[/], [{theme.tool}]/embryos[/], [{theme.tool}]/theme[/]\n"
+                f"  {theme.icon_info} Press [{theme.tool}]Tab[/] for autocomplete\n"
+                f"  {theme.icon_info} Press [{theme.tool}]Ctrl+C[/] to exit\n"
             ),
-            title="Welcome",
-            border_style="blue",
+            title=f"[bold {theme.primary}]Welcome[/]",
+            border_style=theme.primary,
             box=box.ROUNDED,
         )
         self.console.print(welcome)
@@ -117,42 +158,46 @@ class RichCopilotCLI:
 
     def print_user_message(self, message: str):
         """Print user message with formatting"""
+        theme = get_theme()
         timestamp = datetime.now().strftime("%H:%M:%S")
         panel = Panel(
-            Text(message, style=ColorScheme.USER),
-            title=f"[{ColorScheme.TIMESTAMP}]{timestamp}[/] [bold]You[/]",
+            Text(message, style=theme.user),
+            title=f"[{theme.muted}]{timestamp}[/] [{theme.user} bold]{theme.icon_user}[/]",
             title_align="left",
-            border_style=ColorScheme.USER,
+            border_style=theme.user,
             box=box.ROUNDED,
         )
         self.console.print(panel)
 
     def print_copilot_message(self, message: str, is_markdown: bool = True):
         """Print copilot message with formatting"""
+        theme = get_theme()
         timestamp = datetime.now().strftime("%H:%M:%S")
 
         if is_markdown:
             content = Markdown(message)
         else:
-            content = Text(message, style=ColorScheme.COPILOT)
+            content = Text(message, style=theme.copilot)
 
         panel = Panel(
             content,
-            title=f"[{ColorScheme.TIMESTAMP}]{timestamp}[/] [bold blue]Copilot[/]",
+            title=f"[{theme.muted}]{timestamp}[/] [{theme.copilot} bold]{theme.icon_copilot}[/]",
             title_align="left",
-            border_style=ColorScheme.COPILOT,
+            border_style=theme.copilot,
             box=box.ROUNDED,
         )
         self.console.print(panel)
 
     def print_system_message(self, message: str):
         """Print system message"""
+        theme = get_theme()
         self.console.print(
-            Text(f"[System] {message}", style=ColorScheme.SYSTEM)
+            Text(f"[System] {message}", style=theme.system)
         )
 
     def print_tool_call(self, tool_name: str, tool_input: Dict[str, Any], duration: Optional[float] = None):
         """Print tool call information"""
+        theme = get_theme()
         # Format input
         input_lines = []
         for key, value in tool_input.items():
@@ -165,62 +210,92 @@ class RichCopilotCLI:
 
         content = f"[bold]{tool_name}[/]\n" + "\n".join(input_lines)
         if duration is not None:
-            content += f"\n\n⏱  {duration:.2f}s"
+            content += f"\n\n[{theme.muted}]{duration:.2f}s[/]"
 
         panel = Panel(
             Text.from_markup(content),
-            title="[Tool Call]",
+            title=f"[{theme.tool}]{theme.icon_tool}[/]",
             title_align="left",
-            border_style=ColorScheme.TOOL,
+            border_style=theme.tool,
             box=box.SIMPLE,
         )
         self.console.print(panel)
 
     def print_error(self, error: str):
         """Print error message"""
+        theme = get_theme()
         panel = Panel(
-            Text(error, style=ColorScheme.ERROR),
-            title="[bold red]Error[/]",
-            border_style=ColorScheme.ERROR,
+            Text(error, style=f"bold {theme.error}"),
+            title=f"[bold {theme.error}]{theme.icon_error} Error[/]",
+            border_style=theme.error,
             box=box.HEAVY,
         )
         self.console.print(panel)
 
     def print_success(self, message: str):
         """Print success message"""
+        theme = get_theme()
         self.console.print(
-            Text(f"✓ {message}", style=ColorScheme.SUCCESS)
+            Text(f"{theme.icon_success} {message}", style=theme.success)
         )
 
     def create_status_panel(self) -> Panel:
         """Create status dashboard panel"""
+        theme = get_theme()
         try:
             # Get experiment state
             experiment = self.copilot.experiment
             detector_registry = self.copilot.detector_registry
 
-            # Experiment status
             status_lines = []
+
+            # Microscope connection status
+            has_hardware = self.copilot._has_hardware() if hasattr(self.copilot, '_has_hardware') else False
+            devices = getattr(self.copilot, 'devices', {}) or {}
+
+            if has_hardware:
+                status_lines.append(
+                    Text(f"{theme.icon_success} ", style=theme.success) +
+                    Text("Microscope: ", style=theme.muted) +
+                    Text("CONNECTED", style=f"bold {theme.success}")
+                )
+                # Show device count
+                device_count = len(devices)
+                status_lines.append(Text(f"   Devices: {device_count} loaded", style=theme.muted))
+            else:
+                status_lines.append(
+                    Text(f"{theme.icon_error} ", style=theme.error) +
+                    Text("Microscope: ", style=theme.muted) +
+                    Text("NOT CONNECTED", style=f"bold {theme.error}")
+                )
+
+            status_lines.append(Text(""))  # Spacer
+
+            # Session info
+            session_id = self.copilot.session_id or "none"
+            status_lines.append(Text(f"Session: ", style=theme.muted) + Text(session_id, style=theme.info))
+
+            # Experiment status
             status = experiment.status.value if hasattr(experiment, 'status') else 'unknown'
             status_color = {
-                'running': ColorScheme.SUCCESS,
-                'idle': ColorScheme.INFO,
-                'paused': ColorScheme.WARNING,
-                'completed': ColorScheme.COPILOT,
-            }.get(status, ColorScheme.MUTED)
+                'running': theme.success,
+                'idle': theme.info,
+                'paused': theme.warning,
+                'completed': theme.copilot,
+            }.get(status, theme.muted)
 
-            status_lines.append(Text(f"Status: ", style=ColorScheme.MUTED) + Text(status.upper(), style=status_color))
+            status_lines.append(Text(f"Experiment: ", style=theme.muted) + Text(status.upper(), style=status_color))
 
             # Embryo count
             embryo_count = len(experiment.embryos)
             active_embryos = sum(1 for e in experiment.embryos.values() if not getattr(e, 'skip', False))
-            status_lines.append(Text(f"Embryos: {active_embryos}/{embryo_count}", style=ColorScheme.INFO))
+            status_lines.append(Text(f"Embryos: {active_embryos}/{embryo_count}", style=theme.info))
 
             # Detector count
             all_detectors = detector_registry.list_all()
             enabled_detectors = len([d for d in all_detectors if d.enabled])
             total_detectors = len(all_detectors)
-            status_lines.append(Text(f"Detectors: {enabled_detectors}/{total_detectors}", style=ColorScheme.INFO))
+            status_lines.append(Text(f"Detectors: {enabled_detectors}/{total_detectors}", style=theme.info))
 
             # Last imaging time
             last_imaging = "Never"
@@ -233,7 +308,14 @@ class RichCopilotCLI:
                         last_imaging = f"{int(elapsed / 60)}m ago"
                     break
 
-            status_lines.append(Text(f"Last image: {last_imaging}", style=ColorScheme.MUTED))
+            status_lines.append(Text(f"Last image: {last_imaging}", style=theme.muted))
+
+            # Show connected devices if any
+            if devices:
+                status_lines.append(Text(""))
+                status_lines.append(Text("Hardware:", style="bold"))
+                for dev_name in sorted(devices.keys()):
+                    status_lines.append(Text(f"  {theme.icon_success} {dev_name}", style=theme.muted))
 
             # Recent detections (last 5)
             recent_detections = []
@@ -257,45 +339,46 @@ class RichCopilotCLI:
                 status_lines.append(Text("Recent Detections:", style="bold"))
                 for det in recent_detections:
                     status_lines.append(
-                        Text(f"  • {det['detector']} ", style=ColorScheme.TOOL) +
-                        Text(f"({det['embryo']})", style=ColorScheme.MUTED)
+                        Text(f"  {theme.icon_info} {det['detector']} ", style=theme.tool) +
+                        Text(f"({det['embryo']})", style=theme.muted)
                     )
 
             content = Group(*status_lines)
 
             return Panel(
                 content,
-                title="[bold]Status Dashboard[/]",
-                border_style=ColorScheme.INFO,
+                title=f"[bold {theme.primary}]Status Dashboard[/]",
+                border_style=theme.info,
                 box=box.ROUNDED,
                 padding=(1, 2),
             )
 
         except Exception as e:
             return Panel(
-                Text(f"Status unavailable: {e}", style=ColorScheme.ERROR),
+                Text(f"Status unavailable: {e}", style=theme.error),
                 title="Status",
-                border_style=ColorScheme.ERROR,
+                border_style=theme.error,
             )
 
     def print_detector_table(self, detectors: list):
         """Print formatted detector table"""
+        theme = get_theme()
         table = Table(
             title="Detectors",
             box=box.ROUNDED,
             show_header=True,
-            header_style="bold cyan",
+            header_style=f"bold {theme.secondary}",
         )
 
-        table.add_column("Name", style=ColorScheme.INFO)
+        table.add_column("Name", style=theme.info)
         table.add_column("Status", justify="center")
-        table.add_column("Mode", style=ColorScheme.MUTED)
-        table.add_column("Runs", justify="right", style=ColorScheme.MUTED)
-        table.add_column("Detections", justify="right", style=ColorScheme.SUCCESS)
+        table.add_column("Mode", style=theme.muted)
+        table.add_column("Runs", justify="right", style=theme.muted)
+        table.add_column("Detections", justify="right", style=theme.success)
 
         for detector in detectors:
-            status = "✓" if detector.enabled else "✗"
-            status_style = ColorScheme.SUCCESS if detector.enabled else ColorScheme.ERROR
+            status = theme.icon_success if detector.enabled else theme.icon_error
+            status_style = theme.success if detector.enabled else theme.error
 
             # Get stats
             stats = detector.stats if hasattr(detector, 'stats') else {}
@@ -312,25 +395,90 @@ class RichCopilotCLI:
 
         self.console.print(table)
 
+    def print_sessions_table(self):
+        """Print formatted sessions table"""
+        theme = get_theme()
+        sessions = self.copilot.list_sessions()
+
+        if not sessions:
+            self.console.print(f"[{theme.muted}]No saved sessions found.[/]")
+            self.console.print(f"[{theme.muted}]Current session: {self.copilot.session_id}[/]")
+            return
+
+        table = Table(
+            title="Available Sessions",
+            box=box.ROUNDED,
+            show_header=True,
+            header_style=f"bold {theme.secondary}",
+        )
+
+        table.add_column("ID", style=theme.info)
+        table.add_column("Name", style=theme.muted)
+        table.add_column("Embryos", justify="center")
+        table.add_column("Messages", justify="center")
+        table.add_column("Last Active", style=theme.muted)
+
+        current_session_id = self.copilot.session_id
+
+        for session in sessions:
+            session_id = session.get('session_id', 'unknown')
+            is_current = session_id == current_session_id
+
+            # Format last active time
+            last_active = session.get('last_active', '')
+            if last_active:
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(last_active)
+                    elapsed = (datetime.now() - dt).total_seconds()
+                    if elapsed < 60:
+                        last_active = "just now"
+                    elif elapsed < 3600:
+                        last_active = f"{int(elapsed / 60)}m ago"
+                    elif elapsed < 86400:
+                        last_active = f"{int(elapsed / 3600)}h ago"
+                    else:
+                        last_active = f"{int(elapsed / 86400)}d ago"
+                except:
+                    pass
+
+            # Mark current session
+            id_display = f"{session_id}" + (" *" if is_current else "")
+            id_style = f"bold {theme.success}" if is_current else theme.info
+
+            table.add_row(
+                Text(id_display, style=id_style),
+                session.get('name') or '-',
+                str(session.get('embryo_count', 0)),
+                str(session.get('message_count', 0)),
+                last_active,
+            )
+
+        self.console.print(table)
+        self.console.print()
+        self.console.print(f"[{theme.muted}]* = current session[/]")
+        self.console.print(f"[{theme.muted}]Use /resume <id> to restore a session[/]")
+
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
+        theme = get_theme()
         table = Table(
             title="Embryos",
             box=box.ROUNDED,
             show_header=True,
-            header_style="bold cyan",
+            header_style=f"bold {theme.secondary}",
         )
 
-        table.add_column("ID", style=ColorScheme.INFO)
+        table.add_column("ID", style=theme.info)
         table.add_column("Status", justify="center")
-        table.add_column("Last Imaging", style=ColorScheme.MUTED)
-        table.add_column("Detections", style=ColorScheme.SUCCESS)
+        table.add_column("Last Imaging", style=theme.muted)
+        table.add_column("Detections", style=theme.success)
 
         for embryo_id, embryo in embryos.items():
             # Status
             skip = getattr(embryo, 'skip', False)
-            status = "✗ Skipped" if skip else "✓ Active"
-            status_style = ColorScheme.ERROR if skip else ColorScheme.SUCCESS
+            status = f"{theme.icon_error} Skipped" if skip else f"{theme.icon_success} Active"
+            status_style = theme.error if skip else theme.success
 
             # Last imaging
             last_time = "Never"
@@ -399,11 +547,12 @@ class RichCopilotCLI:
                     progress.start()
 
         # Print final response
+        theme = get_theme()
         panel = Panel(
             Markdown(response_text),
-            title=f"[{ColorScheme.TIMESTAMP}]{timestamp}[/] [bold blue]Copilot[/]",
+            title=f"[{theme.muted}]{timestamp}[/] [{theme.copilot} bold]{theme.icon_copilot}[/]",
             title_align="left",
-            border_style=ColorScheme.COPILOT,
+            border_style=theme.copilot,
             box=box.ROUNDED,
         )
         self.console.print(panel)
@@ -451,20 +600,77 @@ class RichCopilotCLI:
             self.print_conversation_history()
             return False  # Handled, continue loop
 
+        elif cmd.startswith('/theme'):
+            # Theme switching
+            parts = cmd.split()
+            if len(parts) > 1:
+                theme_name = parts[1]
+                try:
+                    set_theme(theme_name)
+                    theme = get_theme()
+                    self.console.print(f"[{theme.success}]+ Theme changed to: {theme.name}[/]")
+                except ValueError as e:
+                    theme = get_theme()
+                    self.console.print(f"[{theme.error}]x {e}[/]")
+            else:
+                # List available themes
+                theme = get_theme()
+                self.console.print(f"\n[bold {theme.primary}]Available themes:[/]")
+                for name, t in list_themes().items():
+                    marker = " [dim](current)[/]" if t.name == theme.name else ""
+                    self.console.print(f"  [{t.primary}]{name}[/]{marker}")
+                self.console.print(f"\n[{theme.muted}]Usage: /theme <name>[/]\n")
+            return False  # Handled, continue loop
+
+        elif cmd == '/sessions':
+            # List available sessions
+            self.print_sessions_table()
+            return False  # Handled, continue loop
+
+        elif cmd.startswith('/resume'):
+            # Resume a session
+            parts = command.strip().split()
+            if len(parts) > 1:
+                session_id = parts[1]
+                if self.copilot.resume_session(session_id):
+                    theme = get_theme()
+                    session = self.copilot.session_manager.current_session
+                    self.console.print(f"[{theme.success}]+ Session resumed: {session_id}[/]")
+                    self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                else:
+                    theme = get_theme()
+                    self.console.print(f"[{theme.error}]x Session '{session_id}' not found[/]")
+            else:
+                theme = get_theme()
+                self.console.print(f"[{theme.warning}]Usage: /resume <session_id>[/]")
+                self.console.print(f"[{theme.muted}]Use /sessions to list available sessions[/]")
+            return False  # Handled, continue loop
+
+        elif cmd == '/save':
+            # Save current session
+            if self.copilot.save_session():
+                theme = get_theme()
+                self.console.print(f"[{theme.success}]+ Session saved: {self.copilot.session_id}[/]")
+            else:
+                theme = get_theme()
+                self.console.print(f"[{theme.error}]x Failed to save session[/]")
+            return False  # Handled, continue loop
+
         return None  # Not a slash command, send to copilot
 
     def print_conversation_history(self, limit: int = 10):
         """Print recent conversation history"""
+        theme = get_theme()
         history = self.copilot.conversation_history[-limit:]
 
         if not history:
-            self.console.print("No conversation history yet.", style=ColorScheme.MUTED)
+            self.console.print("No conversation history yet.", style=theme.muted)
             return
 
         self.console.print(Panel(
-            Text(f"Showing last {len(history)} messages", style=ColorScheme.INFO),
+            Text(f"Showing last {len(history)} messages", style=theme.info),
             title="Conversation History",
-            border_style=ColorScheme.INFO,
+            border_style=theme.info,
         ))
         self.console.print()
 
@@ -478,16 +684,16 @@ class RichCopilotCLI:
 
                 if role == 'user':
                     self.console.print(Panel(
-                        Text(text, style=ColorScheme.USER),
-                        title="You",
-                        border_style=ColorScheme.USER,
+                        Text(text, style=theme.user),
+                        title=theme.icon_user,
+                        border_style=theme.user,
                         box=box.SIMPLE,
                     ))
                 elif role == 'assistant':
                     self.console.print(Panel(
-                        Text(text, style=ColorScheme.COPILOT),
-                        title="Copilot",
-                        border_style=ColorScheme.COPILOT,
+                        Text(text, style=theme.copilot),
+                        title=theme.icon_copilot,
+                        border_style=theme.copilot,
                         box=box.SIMPLE,
                     ))
 
@@ -503,9 +709,9 @@ class RichCopilotCLI:
                 text = " ".join(text_parts)[:500]
                 if role == 'assistant':
                     self.console.print(Panel(
-                        Text(text, style=ColorScheme.COPILOT),
-                        title="Copilot",
-                        border_style=ColorScheme.COPILOT,
+                        Text(text, style=theme.copilot),
+                        title=theme.icon_copilot,
+                        border_style=theme.copilot,
                         box=box.SIMPLE,
                     ))
 
@@ -529,13 +735,16 @@ Just type what you want! Examples:
 - `/embryos` - List all embryos
 - `/status` - Show experiment status
 - `/history` - Show recent conversation
+- `/sessions` - List saved sessions
+- `/resume <id>` - Resume a previous session
+- `/save` - Save current session
+- `/theme [name]` - Switch theme (vibrant, scientific, claude, monochrome)
 - `/help` - Show this help
 - `/clear` - Clear screen
 - `/quit` - Exit
 
 ## Keyboard Shortcuts
 - `Tab` - Autocomplete commands/IDs
-- `↑/↓` - Browse command history
 - `Ctrl+C` - Exit
 - `Ctrl+L` - Clear screen
 - `Ctrl+R` - Reverse search history
@@ -551,8 +760,9 @@ Just type what you want! Examples:
             while self._running:
                 try:
                     # Get user input with autocomplete
+                    theme = get_theme()
                     user_input = await self.session.prompt_async(
-                        [(ColorScheme.USER_BOLD, '> ')],
+                        [(f"bold {theme.user}", '> ')],
                     )
 
                     if not user_input.strip():
@@ -576,7 +786,7 @@ Just type what you want! Examples:
                     except Exception as e:
                         self.print_error(f"Error processing message: {e}")
                         import traceback
-                        self.console.print(traceback.format_exc(), style=ColorScheme.ERROR)
+                        self.console.print(traceback.format_exc(), style=theme.error)
 
                     self.console.print()  # Add spacing
 
@@ -595,14 +805,16 @@ Just type what you want! Examples:
                 except Exception as e:
                     self.print_error(f"Unexpected error: {e}")
                     import traceback
-                    self.console.print(traceback.format_exc(), style=ColorScheme.ERROR)
+                    theme = get_theme()
+                    self.console.print(traceback.format_exc(), style=theme.error)
                     self.console.print()
                     # Continue loop instead of breaking
 
         finally:
             self._running = False
+            theme = get_theme()
             self.console.print()
-            self.console.print(Text("Goodbye! 👋", style=ColorScheme.COPILOT))
+            self.console.print(Text("Goodbye!", style=theme.copilot))
 
 
 async def run_rich_cli(copilot, history_file: Optional[Path] = None):

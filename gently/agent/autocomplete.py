@@ -35,6 +35,9 @@ class CopilotCompleter(Completer):
         '/pause',
         '/resume',
         '/stop',
+        # Session commands
+        '/sessions',
+        '/save',
     ]
 
     # Common command patterns

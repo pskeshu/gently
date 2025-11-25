@@ -1,18 +1,29 @@
 """
 Image management for copilot analysis
 Handles storage, retrieval, and compression for Claude Vision API
+
+Now integrated with UID-based DataStore for:
+- Provenance tracking (parent-child lineage)
+- Cross-service data sharing via UIDs
+- Unified storage through Databroker
 """
 
 import numpy as np
 from pathlib import Path
 from datetime import datetime
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union, TYPE_CHECKING
 import tifffile
 import base64
 import io
+import logging
 from PIL import Image
 
 from .state import ImageRecord, EmbryoState
+
+if TYPE_CHECKING:
+    from ..core.data_store import DataStore, DataReference
+
+logger = logging.getLogger(__name__)
 
 
 def extract_view_a_and_max_project(volume: np.ndarray) -> np.ndarray:
@@ -92,9 +103,21 @@ def compress_image_for_api(image: np.ndarray, max_dimension: int = 800,
 
 
 class ImageManager:
-    """Manages image storage and retrieval for copilot analysis"""
+    """
+    Manages image storage and retrieval for copilot analysis
 
-    def __init__(self, storage_path: Path, history_length: int = 10):
+    Now integrates with UID-based DataStore for:
+    - All volumes/images stored with UIDs
+    - Lineage tracking (volume -> projection)
+    - Cross-service data sharing
+    """
+
+    def __init__(
+        self,
+        storage_path: Path,
+        history_length: int = 10,
+        data_store: Optional['DataStore'] = None,
+    ):
         """
         Parameters
         ----------
@@ -102,10 +125,28 @@ class ImageManager:
             Directory to store volume TIFFs
         history_length : int
             Number of recent images to keep per embryo for temporal context
+        data_store : DataStore, optional
+            UID-based data store for unified storage
         """
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
         self.history_length = history_length
+        self._data_store = data_store
+
+    @property
+    def data_store(self) -> Optional['DataStore']:
+        """Get data store, lazily initializing if needed"""
+        if self._data_store is None:
+            try:
+                from ..core.data_store import get_data_store
+                self._data_store = get_data_store()
+            except ImportError:
+                logger.debug("DataStore not available, using file-only storage")
+        return self._data_store
+
+    def set_data_store(self, data_store: 'DataStore'):
+        """Set the data store instance"""
+        self._data_store = data_store
 
     def store_volume(self, embryo_state: EmbryoState, timepoint: int,
                      volume: np.ndarray) -> ImageRecord:
@@ -124,7 +165,7 @@ class ImageManager:
         Returns
         -------
         ImageRecord
-            Record of stored image
+            Record of stored image (includes UIDs if DataStore available)
         """
         embryo_id = embryo_state.id
 
@@ -137,14 +178,56 @@ class ImageManager:
         max_proj = extract_view_a_and_max_project(volume)
         b64_image, size_kb = compress_image_for_api(max_proj)
 
-        # Create record
+        # Store in DataStore with lineage tracking
+        volume_uid = None
+        projection_uid = None
+
+        if self.data_store is not None:
+            try:
+                # Store volume with metadata
+                volume_ref = self.data_store.store(
+                    data=volume,
+                    data_type="volume",
+                    metadata={
+                        'embryo_id': embryo_id,
+                        'timepoint': timepoint,
+                        'shape': list(volume.shape),
+                        'dtype': str(volume.dtype),
+                        'volume_path': str(volume_path),
+                    }
+                )
+                volume_uid = volume_ref.uid
+                logger.debug(f"Stored volume with UID: {volume_uid[:8]}")
+
+                # Store max projection with parent lineage
+                projection_ref = self.data_store.store(
+                    data=max_proj,
+                    data_type="image",
+                    metadata={
+                        'embryo_id': embryo_id,
+                        'timepoint': timepoint,
+                        'projection_type': 'max_z',
+                        'shape': list(max_proj.shape),
+                        'b64_size_kb': size_kb,
+                    },
+                    parent_uid=volume_uid,  # Lineage: projection derives from volume
+                )
+                projection_uid = projection_ref.uid
+                logger.debug(f"Stored projection with UID: {projection_uid[:8]} (parent: {volume_uid[:8]})")
+
+            except Exception as e:
+                logger.warning(f"DataStore storage failed, continuing with file-only: {e}")
+
+        # Create record with UIDs
         record = ImageRecord(
             embryo_id=embryo_id,
             timepoint=timepoint,
             timestamp=datetime.now(),
             volume_path=str(volume_path),
             max_projection_b64=b64_image,
-            size_kb=size_kb
+            size_kb=size_kb,
+            volume_uid=volume_uid,
+            projection_uid=projection_uid,
         )
 
         # Add to embryo's recent images (sliding window)
@@ -200,3 +283,174 @@ class ImageManager:
     def load_volume(self, image_record: ImageRecord) -> np.ndarray:
         """Load full volume from disk"""
         return tifffile.imread(image_record.volume_path)
+
+    # ===== UID-based retrieval methods =====
+
+    def get_volume_by_uid(self, uid: str) -> Optional[np.ndarray]:
+        """
+        Retrieve volume by its UID from DataStore
+
+        Parameters
+        ----------
+        uid : str
+            Volume UID
+
+        Returns
+        -------
+        np.ndarray or None
+            The volume data, or None if not found
+        """
+        if self.data_store is None:
+            logger.warning("DataStore not available for UID lookup")
+            return None
+
+        try:
+            return self.data_store.retrieve(uid)
+        except KeyError:
+            logger.warning(f"Volume not found for UID: {uid}")
+            return None
+
+    def get_image_by_uid(self, uid: str) -> Optional[np.ndarray]:
+        """
+        Retrieve image (e.g., projection) by its UID from DataStore
+
+        Parameters
+        ----------
+        uid : str
+            Image UID
+
+        Returns
+        -------
+        np.ndarray or None
+            The image data, or None if not found
+        """
+        if self.data_store is None:
+            logger.warning("DataStore not available for UID lookup")
+            return None
+
+        try:
+            return self.data_store.retrieve(uid)
+        except KeyError:
+            logger.warning(f"Image not found for UID: {uid}")
+            return None
+
+    def get_lineage(self, uid: str) -> List['DataReference']:
+        """
+        Get the lineage (parent chain) for a data item
+
+        Parameters
+        ----------
+        uid : str
+            UID of data item
+
+        Returns
+        -------
+        list of DataReference
+            Parent chain from oldest to newest
+        """
+        if self.data_store is None:
+            return []
+
+        try:
+            return self.data_store.get_lineage(uid)
+        except Exception as e:
+            logger.warning(f"Failed to get lineage for {uid}: {e}")
+            return []
+
+    def get_children(self, uid: str) -> List['DataReference']:
+        """
+        Get all data derived from a given UID
+
+        Parameters
+        ----------
+        uid : str
+            Parent UID
+
+        Returns
+        -------
+        list of DataReference
+            Child references
+        """
+        if self.data_store is None:
+            return []
+
+        try:
+            return self.data_store.get_children(uid)
+        except Exception as e:
+            logger.warning(f"Failed to get children for {uid}: {e}")
+            return []
+
+    def query_by_embryo(self, embryo_id: str, data_type: Optional[str] = None) -> List['DataReference']:
+        """
+        Query all data for a specific embryo
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo ID to query
+        data_type : str, optional
+            Filter by data type (volume, image, analysis)
+
+        Returns
+        -------
+        list of DataReference
+            Matching references
+        """
+        if self.data_store is None:
+            return []
+
+        try:
+            return self.data_store.query(data_type=data_type, embryo_id=embryo_id)
+        except Exception as e:
+            logger.warning(f"Failed to query data for {embryo_id}: {e}")
+            return []
+
+    def store_analysis_result(
+        self,
+        result: Dict,
+        analysis_type: str,
+        embryo_id: str,
+        parent_uid: Optional[str] = None,
+        timepoint: Optional[int] = None,
+    ) -> Optional[str]:
+        """
+        Store an analysis result with lineage tracking
+
+        Parameters
+        ----------
+        result : dict
+            Analysis result to store
+        analysis_type : str
+            Type of analysis (e.g., 'hatching_detection', 'morphology')
+        embryo_id : str
+            Embryo this analysis is for
+        parent_uid : str, optional
+            UID of the source data (e.g., the image analyzed)
+        timepoint : int, optional
+            Timepoint of the analysis
+
+        Returns
+        -------
+        str or None
+            UID of stored analysis, or None if storage failed
+        """
+        if self.data_store is None:
+            logger.debug("DataStore not available, analysis result not stored with UID")
+            return None
+
+        try:
+            ref = self.data_store.store(
+                data=result,
+                data_type="analysis",
+                metadata={
+                    'embryo_id': embryo_id,
+                    'analysis_type': analysis_type,
+                    'timepoint': timepoint,
+                },
+                parent_uid=parent_uid,
+            )
+            logger.debug(f"Stored {analysis_type} analysis with UID: {ref.uid[:8]}")
+            return ref.uid
+        except Exception as e:
+            logger.warning(f"Failed to store analysis result: {e}")
+            return None

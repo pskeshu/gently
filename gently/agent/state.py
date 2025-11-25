@@ -17,6 +17,9 @@ class ImageRecord:
     volume_path: str  # Path to full TIFF volume on disk
     max_projection_b64: str  # Base64-encoded JPEG for Claude Vision
     size_kb: float
+    # UID-based data references (new data layer)
+    volume_uid: Optional[str] = None  # UID for volume in DataStore
+    projection_uid: Optional[str] = None  # UID for max projection in DataStore
 
 
 @dataclass
