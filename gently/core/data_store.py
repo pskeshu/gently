@@ -690,23 +690,24 @@ class TiledStore(DataStore):
         return ref
 
     def _store_array(self, uid: str, data: np.ndarray, data_type: str, metadata: Dict):
-        """Store numpy array efficiently"""
+        """Store numpy array as TIFF (ImageJ compatible)"""
         # Organize by data type and date
         date_str = datetime.now().strftime("%Y%m%d")
         type_dir = self.data_dir / data_type / date_str
         type_dir.mkdir(parents=True, exist_ok=True)
 
-        # Try zarr first (best for large arrays), fall back to numpy
+        # Save as TIFF (standard for microscopy, ImageJ compatible)
         try:
-            import zarr
-            array_path = type_dir / f"{uid}.zarr"
-            zarr.save(str(array_path), data)
-            logger.debug(f"Saved array as zarr: {array_path}")
-        except Exception:
-            # Fall back to numpy format (zarr may fail due to version issues)
+            import tifffile
+            array_path = type_dir / f"{uid}.tif"
+            # Use compression for efficiency
+            tifffile.imwrite(str(array_path), data, compression='zlib')
+            logger.debug(f"Saved array as TIFF: {array_path}")
+        except ImportError:
+            # Fall back to numpy format if tifffile not available
             array_path = type_dir / f"{uid}.npy"
             np.save(str(array_path), data)
-            logger.debug(f"Saved array as npy: {array_path}")
+            logger.debug(f"Saved array as npy (tifffile not available): {array_path}")
 
         # Save metadata alongside
         meta_path = type_dir / f"{uid}.json"
@@ -752,7 +753,10 @@ class TiledStore(DataStore):
 
         # Load based on extension
         suffix = data_file.suffix
-        if suffix == '.zarr':
+        if suffix in ('.tif', '.tiff'):
+            import tifffile
+            return tifffile.imread(str(data_file))
+        elif suffix == '.zarr':
             try:
                 import zarr
                 return zarr.load(str(data_file))
@@ -781,8 +785,8 @@ class TiledStore(DataStore):
             for date_dir in type_dir.iterdir():
                 if not date_dir.is_dir():
                     continue
-                # Check for any file with this UID
-                for ext in ['.zarr', '.npy', '.json', '.pkl']:
+                # Check for any file with this UID (prefer TIFF)
+                for ext in ['.tif', '.tiff', '.zarr', '.npy', '.json', '.pkl']:
                     file_path = date_dir / f"{uid}{ext}"
                     if file_path.exists():
                         return file_path

@@ -132,8 +132,8 @@ Data is stored at `D:/Gently` with the following structure:
 ```
 D:/Gently/
 ├── data/
-│   ├── volume/YYYYMMDD/*.npy
-│   └── projection/YYYYMMDD/*.npy
+│   ├── volume/YYYYMMDD/*.tif      # ImageJ compatible
+│   └── projection/YYYYMMDD/*.tif
 ├── index/index.json
 └── sessions/
 ```
