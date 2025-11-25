@@ -20,7 +20,7 @@ from .state import ExperimentState, EmbryoState, ImageRecord
 from .image_manager import ImageManager
 from .plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from .prompts import build_system_prompt, build_context_message
-from .tools import get_tool_definitions
+from .tool_registry import get_tool_registry
 from .detector_registry import DetectorRegistry
 from .detection_queue import DetectionQueue
 from ..session import SessionManager
@@ -404,7 +404,7 @@ class MicroscopyCopilot:
             model=self.model,
             system=self.system_prompt,
             messages=self.conversation_history,
-            tools=get_tool_definitions(),
+            tools=get_tool_registry().get_claude_schemas(),
             max_tokens=4096
         )
 
@@ -428,7 +428,7 @@ class MicroscopyCopilot:
                 model=self.model,
                 system=self.system_prompt,
                 messages=self.conversation_history,
-                tools=get_tool_definitions(),
+                tools=get_tool_registry().get_claude_schemas(),
                 max_tokens=4096
             )
 
@@ -467,7 +467,7 @@ class MicroscopyCopilot:
                 model=self.model,
                 system=self.system_prompt,
                 messages=self.conversation_history,
-                tools=get_tool_definitions(),
+                tools=get_tool_registry().get_claude_schemas(),
                 max_tokens=4096
             ) as stream:
                 for event in stream:

@@ -16,6 +16,10 @@ from .autocomplete import create_completer, CopilotCompleter
 from .device_factory import create_devices_from_mmcore
 from .microscope_client import MicroscopeClient
 from .queue_server_client import QueueServerClient
+from .tool_registry import ToolRegistry, get_tool_registry, tool, ToolCategory
+
+# Import tools_plugins to register all tools
+from . import tools_plugins
 
 __all__ = [
     'MicroscopyCopilot',
@@ -41,4 +45,9 @@ __all__ = [
     'create_completer',
     'CopilotCompleter',
     'create_devices_from_mmcore',
+    # Tool registry
+    'ToolRegistry',
+    'get_tool_registry',
+    'tool',
+    'ToolCategory',
 ]
