@@ -575,108 +575,18 @@ class MicroscopyCopilot:
         return results
 
     async def _execute_single_tool(self, tool_name: str, tool_input: Dict) -> str:
-        """Execute a single tool call"""
+        """Execute a single tool call using the tool registry"""
+        registry = get_tool_registry()
 
-        if tool_name == "generate_bluesky_plan":
-            return await self._tool_generate_plan(tool_input)
+        # Build execution context
+        context = {
+            'copilot': self,
+            'client': getattr(self, 'client', None),
+            'databroker': getattr(self, 'databroker', None),
+        }
 
-        elif tool_name == "query_embryo_status":
-            return self._tool_query_embryo(tool_input)
-
-        elif tool_name == "analyze_volume":
-            return await self._tool_analyze_volume(tool_input)
-
-        elif tool_name == "modify_parameters":
-            return self._tool_modify_parameters(tool_input)
-
-        elif tool_name == "get_experiment_summary":
-            return self._tool_experiment_summary()
-
-        elif tool_name == "skip_embryo":
-            return self._tool_skip_embryo(tool_input)
-
-        elif tool_name == "resume_embryo":
-            return self._tool_resume_embryo(tool_input)
-
-        elif tool_name == "assign_nickname":
-            return self._tool_assign_nickname(tool_input)
-
-        # Detector management tools
-        elif tool_name == "list_detectors":
-            return self._tool_list_detectors(tool_input)
-
-        elif tool_name == "add_detector":
-            return await self._tool_add_detector(tool_input)
-
-        elif tool_name == "generate_detector_prompt":
-            return await self._tool_generate_detector_prompt(tool_input)
-
-        elif tool_name == "test_detector":
-            return await self._tool_test_detector(tool_input)
-
-        elif tool_name == "enable_disable_detector":
-            return self._tool_enable_disable_detector(tool_input)
-
-        elif tool_name == "remove_detector":
-            return self._tool_remove_detector(tool_input)
-
-        elif tool_name == "get_detection_summary":
-            return self._tool_get_detection_summary()
-
-        # Device control tools
-        elif tool_name == "calibrate_embryo":
-            return await self._tool_calibrate_embryo(tool_input)
-
-        elif tool_name == "acquire_volume":
-            return await self._tool_acquire_volume(tool_input)
-
-        elif tool_name == "move_to_embryo":
-            return await self._tool_move_to_embryo(tool_input)
-
-        elif tool_name == "start_multi_embryo_timelapse":
-            return await self._tool_start_multi_embryo_timelapse(tool_input)
-
-        elif tool_name == "pause_acquisition":
-            return self._tool_pause_acquisition()
-
-        elif tool_name == "resume_acquisition":
-            return self._tool_resume_acquisition()
-
-        elif tool_name == "detect_embryos":
-            return await self._tool_detect_embryos(tool_input)
-
-        elif tool_name == "manual_mark_embryos":
-            return await self._tool_manual_mark_embryos(tool_input)
-
-        elif tool_name == "view_image":
-            return await self._tool_view_image(tool_input)
-        elif tool_name == "capture_lightsheet":
-            return await self._tool_capture_lightsheet(tool_input)
-
-        elif tool_name == "show_detected_embryos":
-            return await self._tool_show_detected_embryos(tool_input)
-
-        elif tool_name == "set_led":
-            return await self._tool_set_led(tool_input)
-
-        elif tool_name == "get_led_status":
-            return await self._tool_get_led_status(tool_input)
-
-        # Databroker tools
-        elif tool_name == "list_runs":
-            return self._tool_list_runs(tool_input)
-
-        elif tool_name == "get_run_data":
-            return self._tool_get_run_data(tool_input)
-
-        elif tool_name == "get_run_image":
-            return await self._tool_get_run_image(tool_input)
-
-        elif tool_name == "search_runs":
-            return self._tool_search_runs(tool_input)
-
-        else:
-            raise ValueError(f"Unknown tool: {tool_name}")
+        # Execute via registry
+        return await registry.execute(tool_name, tool_input, context)
 
     async def _tool_generate_plan(self, tool_input: Dict) -> str:
         """Generate Bluesky plan"""

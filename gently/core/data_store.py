@@ -702,8 +702,8 @@ class TiledStore(DataStore):
             array_path = type_dir / f"{uid}.zarr"
             zarr.save(str(array_path), data)
             logger.debug(f"Saved array as zarr: {array_path}")
-        except ImportError:
-            # Fall back to numpy format
+        except Exception:
+            # Fall back to numpy format (zarr may fail due to version issues)
             array_path = type_dir / f"{uid}.npy"
             np.save(str(array_path), data)
             logger.debug(f"Saved array as npy: {array_path}")
@@ -753,8 +753,11 @@ class TiledStore(DataStore):
         # Load based on extension
         suffix = data_file.suffix
         if suffix == '.zarr':
-            import zarr
-            return zarr.load(str(data_file))
+            try:
+                import zarr
+                return zarr.load(str(data_file))
+            except Exception:
+                raise ValueError(f"Cannot load zarr file (version incompatibility): {data_file}")
         elif suffix == '.npy':
             return np.load(str(data_file))
         elif suffix == '.json':
