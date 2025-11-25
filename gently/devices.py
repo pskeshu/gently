@@ -804,12 +804,77 @@ class DiSPIMPiezo:
         self.set_spim_state("Armed")
 
 
+class _ScannerAxisOffset:
+    """
+    Movable component for a single scanner axis offset.
+    Compatible with bps.mv() for use in Bluesky plans.
+    """
+
+    def __init__(self, scanner, axis: str, property_name: str):
+        self.scanner = scanner
+        self.axis = axis
+        self.property_name = property_name
+        self.name = f"{scanner.name}_{axis}_offset"
+        self.parent = scanner
+
+    def set(self, value):
+        """Move axis offset to specified position - called by bps.mv()"""
+        status = Status(obj=self, timeout=5)
+
+        def wait():
+            try:
+                self.scanner.core.setProperty(
+                    self.scanner.name, self.property_name, float(value)
+                )
+                time.sleep(0.3)  # Allow galvo to settle
+            except Exception as exc:
+                status.set_exception(exc)
+            else:
+                status.set_finished()
+
+        import threading
+        threading.Thread(target=wait).start()
+        return status
+
+    def read(self):
+        """Read current offset value"""
+        try:
+            value = float(self.scanner.core.getProperty(
+                self.scanner.name, self.property_name
+            ))
+        except Exception:
+            value = 0.0
+
+        return OrderedDict({
+            self.name: {
+                'value': value,
+                'timestamp': time.time(),
+                'units': 'degrees'
+            }
+        })
+
+    def describe(self):
+        """Describe component"""
+        return OrderedDict({
+            self.name: {
+                'source': self.name,
+                'dtype': 'number',
+                'shape': [],
+                'units': 'degrees'
+            }
+        })
+
+
 class DiSPIMScanner:
     """
     DiSPIM Scanner/Galvo control - works with bps.mv(scanner, [a_pos, b_pos])
 
     ASI Tiger Scanner (AB:33 or CD:33) - controls galvo mirrors for light sheet
     Device-agnostic: any plan that moves a 2D positioner will work with this device
+
+    Individual axis offsets can be moved with:
+        bps.mv(scanner.sa_offset_x, x_value)  # X-axis offset
+        bps.mv(scanner.sa_offset_y, y_value)  # Y-axis offset (galvo position)
     """
 
     def __init__(self, name: str, core: pymmcore.CMMCore,
@@ -818,6 +883,10 @@ class DiSPIMScanner:
         self.core = core
         self.parent = None  # Required for Bluesky
         self._limits = limits
+
+        # Create movable axis offset components for use with bps.mv()
+        self.sa_offset_x = _ScannerAxisOffset(self, 'x', 'SingleAxisXOffset(deg)')
+        self.sa_offset_y = _ScannerAxisOffset(self, 'y', 'SingleAxisYOffset(deg)')
 
     @property
     def limits(self):

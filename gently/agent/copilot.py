@@ -108,6 +108,12 @@ class MicroscopyCopilot:
         # Hardware interface via RPC client
         self.client = microscope_client
 
+        # Detection results cache (for show_detected_embryos)
+        self.last_detection_result = None
+
+        # Databroker (optional, for data catalog integration)
+        self.databroker = None
+
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
 
@@ -208,6 +214,18 @@ class MicroscopyCopilot:
         })
 
         return True
+
+    def _auto_save(self):
+        """Auto-save session (non-blocking, silent on error)"""
+        try:
+            self.session_manager.update_state(
+                conversation=self.conversation_history,
+                experiment=self.experiment.to_dict(),
+                system_prompt=self.system_prompt,
+            )
+            self.session_manager.save_session()
+        except Exception:
+            pass  # Silent fail for auto-save
 
     def save_session(self) -> bool:
         """
@@ -404,7 +422,7 @@ class MicroscopyCopilot:
             model=self.model,
             system=self.system_prompt,
             messages=self.conversation_history,
-            tools=get_tool_registry().get_claude_schemas(),
+            tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
             max_tokens=4096
         )
 
@@ -428,7 +446,7 @@ class MicroscopyCopilot:
                 model=self.model,
                 system=self.system_prompt,
                 messages=self.conversation_history,
-                tools=get_tool_registry().get_claude_schemas(),
+                tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                 max_tokens=4096
             )
 
@@ -443,6 +461,9 @@ class MicroscopyCopilot:
             "role": "assistant",
             "content": response.content
         })
+
+        # Auto-save after conversation turn
+        self._auto_save()
 
         return assistant_message
 
@@ -467,7 +488,7 @@ class MicroscopyCopilot:
                 model=self.model,
                 system=self.system_prompt,
                 messages=self.conversation_history,
-                tools=get_tool_registry().get_claude_schemas(),
+                tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                 max_tokens=4096
             ) as stream:
                 for event in stream:
@@ -528,6 +549,9 @@ class MicroscopyCopilot:
                 "content": tool_results
             })
 
+            # Auto-save after tool execution
+            self._auto_save()
+
             # Get next response (recursively stream)
             async for chunk in self._call_claude_stream():
                 yield chunk
@@ -538,6 +562,9 @@ class MicroscopyCopilot:
                 "role": "assistant",
                 "content": response_content
             })
+
+            # Auto-save after conversation turn
+            self._auto_save()
 
     async def _execute_tools(self, content_blocks) -> List[Dict]:
         """

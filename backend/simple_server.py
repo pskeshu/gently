@@ -111,6 +111,26 @@ class SimpleMicroscopeServer:
         print("\n[4/4] Initializing RunEngine...")
         self.RE = RunEngine({})
 
+        # Connect to Databroker for persistence
+        self._db = None
+        try:
+            from databroker import Broker
+            import warnings
+
+            config_path = Path(os.path.expanduser("~")) / ".config" / "databroker" / "dispim_production.yml"
+            if config_path.exists():
+                db_config = yaml.safe_load(config_path.read_text())
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    self._db = Broker.from_config(db_config)
+                # Subscribe RunEngine to databroker for persistence
+                self.RE.subscribe(self._db.insert)
+                print(f"  Databroker connected: {config_path.name}")
+            else:
+                print(f"  Databroker config not found: {config_path}")
+        except Exception as e:
+            print(f"  Databroker not available: {e}")
+
         # Simple document collector with numpy serialization
         def serialize_value(v):
             """Convert numpy arrays to lists for JSON serialization"""

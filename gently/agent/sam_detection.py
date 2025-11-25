@@ -361,7 +361,7 @@ class SAMEmbryoDetector:
                 bx, by, bw, bh = cv2.boundingRect(contour)
 
                 embryos.append({
-                    'embryo_id': i + 1,
+                    'embryo_id': f'embryo_{i + 1}',
                     'pixel_x': float(cx),
                     'pixel_y': float(cy),
                     'bbox': (bx, by, bw, bh),  # Used by visualization functions
@@ -956,7 +956,7 @@ Respond in JSON:
             embryo_stage_y = stage_y + dy_stage
 
             embryo_positions.append({
-                'embryo_id': i,
+                'embryo_id': f'embryo_{i + 1}',
                 'pixel_x': float(center_x_px),
                 'pixel_y': float(center_y_px),
                 'stage_x_um': float(embryo_stage_x),

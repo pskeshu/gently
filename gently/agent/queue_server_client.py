@@ -66,6 +66,7 @@ class QueueServerClient:
 
         self._session = None  # aiohttp session
         self._sam_conn = None  # rpyc connection
+        self._db = None  # databroker catalog
 
         # Store last detection results for visualization
         self._last_detection = None  # {image, embryos, stage_position}
@@ -120,6 +121,29 @@ class QueueServerClient:
             self._sam_conn = None
             # Don't fail completely - SAM is optional
 
+        # Connect to Databroker catalog (v1 style using sqlite)
+        try:
+            from databroker import Broker
+            from pathlib import Path
+            import os
+            import yaml
+            import warnings
+
+            # Load from v1 config file directly (bypasses intake which uses msgpack)
+            config_path = Path(os.path.expanduser("~")) / ".config" / "databroker" / f"{self.databroker_catalog}.yml"
+            if config_path.exists():
+                config = yaml.safe_load(config_path.read_text())
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")  # Suppress v0 fallback warning
+                    self._db = Broker.from_config(config)
+                print(f"Connected to Databroker catalog: {self.databroker_catalog}")
+            else:
+                print(f"Databroker config not found: {config_path}")
+                self._db = None
+        except Exception as e:
+            print(f"Failed to connect to Databroker: {e}")
+            self._db = None
+
         return success
 
     async def disconnect(self):
@@ -141,6 +165,11 @@ class QueueServerClient:
         """Check if SAM server is available"""
         return self._sam_conn is not None
 
+    @property
+    def has_databroker(self) -> bool:
+        """Check if Databroker catalog is available"""
+        return self._db is not None
+
     def _ensure_connected(self):
         """Raise error if not connected"""
         if not self.is_connected:
@@ -161,6 +190,10 @@ class QueueServerClient:
         """
         Submit a plan and wait for completion.
 
+        The simple_server runs plans synchronously - the POST request blocks
+        until the plan completes and returns the full result directly.
+        No polling needed!
+
         Parameters
         ----------
         plan_name : str
@@ -173,13 +206,13 @@ class QueueServerClient:
         Returns
         -------
         dict
-            Result with 'success', 'uid', 'documents', and any error info
+            Result with 'success', 'run_uid', 'documents', and any error info
         """
         self._ensure_connected()
         kwargs = kwargs or {}
 
         try:
-            # Submit plan via HTTP POST
+            # Submit plan via HTTP POST - server runs it synchronously and returns result
             payload = {
                 'item': {
                     'name': plan_name,
@@ -190,13 +223,29 @@ class QueueServerClient:
             async with self._session.post(
                 f"{self.http_url}/api/queue/item/add",
                 json=payload,
-                timeout=timeout
+                timeout=timeout  # Use full timeout for plan execution
             ) as resp:
                 result = await resp.json()
-                return result
+
+                if result.get('success', False):
+                    # Extract run UID from response
+                    run_uid = (
+                        result.get('uid') or
+                        result.get('documents', {}).get('start', {}).get('uid')
+                    )
+                    return {
+                        'success': True,
+                        'run_uid': run_uid,
+                        'documents': result.get('documents', {}),
+                    }
+                else:
+                    return {
+                        'success': False,
+                        'error': result.get('error', result.get('msg', 'Plan failed'))
+                    }
 
         except asyncio.TimeoutError:
-            return {'success': False, 'error': 'Request timed out'}
+            return {'success': False, 'error': f'Plan timed out after {timeout}s'}
         except Exception as e:
             import traceback
             return {
@@ -358,8 +407,26 @@ class QueueServerClient:
         )
 
         if result.get('success'):
-            # Get image from databroker
             run_uid = result.get('run_uid')
+            docs = result.get('documents', {})
+
+            # Try to get image from the response documents first
+            events = docs.get('events', [])
+            if events:
+                data = events[0].get('data', {})
+                # Look for image data under various possible keys
+                for key in ['HamCam1', 'lightsheet_snap', 'camera']:
+                    if key in data:
+                        image_data = data[key]
+                        return {
+                            'image': np.array(image_data),
+                            'piezo_position': piezo_position,
+                            'galvo_position': galvo_position,
+                            'run_uid': run_uid,
+                            'success': True
+                        }
+
+            # Fallback: try databroker if response didn't have image data
             if run_uid and self._db:
                 try:
                     run = self._db[run_uid]
@@ -370,10 +437,21 @@ class QueueServerClient:
                             'image': np.array(image),
                             'piezo_position': piezo_position,
                             'galvo_position': galvo_position,
+                            'run_uid': run_uid,
                             'success': True
                         }
                 except Exception as e:
-                    return {'error': f'Failed to read image: {e}', 'success': False}
+                    print(f"  Warning: Could not read image from databroker: {e}")
+
+            # Plan succeeded but no image data available
+            return {
+                'image': None,
+                'piezo_position': piezo_position,
+                'galvo_position': galvo_position,
+                'run_uid': run_uid,
+                'success': True,
+                'note': 'Plan completed but image not in response'
+            }
 
         return {'error': result.get('error', 'Lightsheet snap failed'), 'success': False}
 
@@ -838,6 +916,62 @@ class QueueServerClient:
                 image,
                 embryos,
                 title=f"Detected {len(embryos)} Embryos",
+                save_path=save_path,
+                show=show
+            )
+
+            return dict(result)
+
+        except Exception as e:
+            import traceback
+            return {'error': str(e), 'traceback': traceback.format_exc()}
+
+    async def view_embryos(
+        self,
+        image: np.ndarray,
+        embryos: List[Dict],
+        title: str = "Embryos",
+        save_path: Optional[str] = None,
+        show: bool = True
+    ) -> Dict:
+        """
+        View specified embryos with bounding boxes on an image.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Image to display
+        embryos : list of dict
+            Embryo data with bounding boxes
+        title : str
+            Window title
+        save_path : str, optional
+            Path to save the visualization image
+        show : bool
+            Whether to display in matplotlib window
+
+        Returns
+        -------
+        dict
+            Success status
+        """
+        if not self.has_sam:
+            return {'error': 'SAM Server not connected'}
+
+        if image is None:
+            return {'error': 'No image provided'}
+
+        if not embryos:
+            return {'error': 'No embryos to display'}
+
+        try:
+            print(f"  Showing {len(embryos)} embryos with bounding boxes...")
+
+            result = await asyncio.to_thread(
+                self._sam_conn.root.view_embryos,
+                image,
+                embryos,
+                title=title,
                 save_path=save_path,
                 show=show
             )

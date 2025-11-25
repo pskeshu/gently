@@ -306,11 +306,11 @@ class SAMService(rpyc.Service):
             embryo_y = stage_position[1] + dy_stage
 
             embryos.append({
-                'id': i + 1,
+                'embryo_id': f'manual_{i + 1}',  # Placeholder, copilot assigns final ID
                 'pixel_x': float(px),
                 'pixel_y': float(py),
-                'stage_x': float(embryo_x),
-                'stage_y': float(embryo_y),
+                'stage_x_um': float(embryo_x),
+                'stage_y_um': float(embryo_y),
                 'confidence': 1.0,  # Manual marking = 100% confidence
                 'source': 'manual'
             })

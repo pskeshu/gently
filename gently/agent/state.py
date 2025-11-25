@@ -27,13 +27,14 @@ class EmbryoState:
     """Complete state of one C. elegans embryo"""
 
     # Identity
-    id: str  # "embryo_001"
+    id: str  # "embryo_1"
     nickname: Optional[str] = None  # Agent-assigned: "the fast one"
     user_label: Optional[str] = None  # User-provided: "control_1"
 
     # Position
     stage_position: Dict[str, float] = field(default_factory=dict)  # {'x': 1234.5, 'y': 5678.9}
     calibration: Dict = field(default_factory=dict)  # Galvo/piezo parameters
+    detection_confidence: float = 0.0  # SAM/detection confidence score (0-1)
 
     # Acquisition Parameters (current)
     interval_seconds: float = 120
@@ -182,15 +183,28 @@ class ExperimentState:
         self.plan_history: List[Dict] = []
         self.metadata: Dict = {}
 
-    def add_embryo(self, embryo_id: str, position: Dict, calibration: Dict,
-                   user_label: Optional[str] = None):
+    def add_embryo(self, embryo_id: str, position: Dict = None,
+                   calibration: Dict = None, user_label: Optional[str] = None,
+                   confidence: float = 0.0):
         """Register new embryo"""
+        # Auto-start experiment when first embryo is added
+        if self.start_time is None:
+            self.start_time = datetime.now()
+
         self.embryos[embryo_id] = EmbryoState(
             id=embryo_id,
-            stage_position=position,
-            calibration=calibration,
-            user_label=user_label
+            stage_position=position or {},
+            calibration=calibration or {},
+            user_label=user_label,
+            detection_confidence=confidence
         )
+
+    def remove_embryo(self, embryo_id: str) -> bool:
+        """Remove embryo from experiment (e.g., false detection)"""
+        if embryo_id in self.embryos:
+            del self.embryos[embryo_id]
+            return True
+        return False
 
     def assign_nickname(self, embryo_id: str, nickname: str):
         """Agent assigns intuitive name"""
@@ -208,14 +222,19 @@ class ExperimentState:
             if embryo.nickname == name or embryo.user_label == name:
                 return embryo
 
-        # Try extracting number from name like "embryo 3" -> "embryo_003"
+        # Try extracting number from name like "embryo 3" -> "embryo_3"
         import re
         match = re.search(r'(\d+)', name)
         if match:
             num = int(match.group(1))
-            potential_id = f"embryo_{num:03d}"
+            # Try simple format first (embryo_3)
+            potential_id = f"embryo_{num}"
             if potential_id in self.embryos:
                 return self.embryos[potential_id]
+            # Also try padded format for backwards compatibility (embryo_003)
+            potential_id_padded = f"embryo_{num:03d}"
+            if potential_id_padded in self.embryos:
+                return self.embryos[potential_id_padded]
 
         return None
 

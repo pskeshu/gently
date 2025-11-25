@@ -28,6 +28,12 @@ from rich import box
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.application import Application
+from prompt_toolkit.layout import Layout
+from prompt_toolkit.layout.containers import Window, HSplit
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.formatted_text import HTML
 
 from .autocomplete import create_completer
 from .theme import get_theme, set_theme, list_themes, Theme
@@ -457,7 +463,143 @@ class RichCopilotCLI:
         self.console.print(table)
         self.console.print()
         self.console.print(f"[{theme.muted}]* = current session[/]")
-        self.console.print(f"[{theme.muted}]Use /resume <id> to restore a session[/]")
+        self.console.print(f"[{theme.muted}]Press Enter to select a session, or type /resume <id>[/]")
+
+    async def interactive_session_picker(self) -> Optional[str]:
+        """
+        Show interactive session picker - keyboard only (↑/↓ + Enter/Esc).
+
+        Returns
+        -------
+        str or None
+            Selected session ID, or None if cancelled
+        """
+        theme = get_theme()
+        sessions = self.copilot.list_sessions()
+
+        if not sessions:
+            self.console.print(f"[{theme.muted}]No saved sessions found.[/]")
+            return None
+
+        current_session_id = self.copilot.session_id
+
+        # Build session items
+        items = []
+        for session in sessions:
+            session_id = session.get('session_id', session.get('id', 'unknown'))
+            name = session.get('name', '')
+            embryo_count = session.get('embryo_count', 0)
+            message_count = session.get('message_count', 0)
+
+            # Format last active time
+            last_active = session.get('last_active', '')
+            time_str = ''
+            if last_active:
+                try:
+                    dt = datetime.fromisoformat(last_active)
+                    elapsed = (datetime.now() - dt).total_seconds()
+                    if elapsed < 60:
+                        time_str = "just now"
+                    elif elapsed < 3600:
+                        time_str = f"{int(elapsed / 60)}m ago"
+                    elif elapsed < 86400:
+                        time_str = f"{int(elapsed / 3600)}h ago"
+                    else:
+                        time_str = f"{int(elapsed / 86400)}d ago"
+                except:
+                    pass
+
+            is_current = session_id == current_session_id
+            items.append({
+                'id': session_id,
+                'name': name,
+                'embryos': embryo_count,
+                'messages': message_count,
+                'time': time_str,
+                'current': is_current
+            })
+
+        # State for the picker
+        selected_idx = [0]
+        result = [None]
+        cancelled = [False]
+
+        # Key bindings
+        kb = KeyBindings()
+
+        @kb.add('up')
+        @kb.add('k')
+        def move_up(event):
+            selected_idx[0] = max(0, selected_idx[0] - 1)
+
+        @kb.add('down')
+        @kb.add('j')
+        def move_down(event):
+            selected_idx[0] = min(len(items) - 1, selected_idx[0] + 1)
+
+        @kb.add('enter')
+        def select(event):
+            result[0] = items[selected_idx[0]]['id']
+            event.app.exit()
+
+        @kb.add('escape')
+        @kb.add('q')
+        def cancel(event):
+            cancelled[0] = True
+            event.app.exit()
+
+        def get_formatted_text():
+            text = '<b>Select a session:</b> (↑/↓ navigate, Enter select, Esc cancel)\n'
+            text += '─' * 70 + '\n'
+
+            for i, item in enumerate(items):
+                is_selected = (i == selected_idx[0])
+                marker = '▶ ' if is_selected else '  '
+                current = ' <style fg="green">(current)</style>' if item['current'] else ''
+
+                if is_selected:
+                    line = f'<style bg="#0066cc" fg="white"><b>{marker}{item["id"]}</b>{current}'
+                    line += f' │ {item["embryos"]} embryos │ {item["messages"]} msgs'
+                    if item['time']:
+                        line += f' │ {item["time"]}'
+                    line += '</style>\n'
+                else:
+                    line = f'{marker}<style fg="#aaaaaa">{item["id"]}</style>{current}'
+                    line += f' <style fg="#666666">│ {item["embryos"]} embryos │ {item["messages"]} msgs'
+                    if item['time']:
+                        line += f' │ {item["time"]}'
+                    line += '</style>\n'
+
+                text += line
+
+            text += '─' * 70
+            return HTML(text)
+
+        # Create the application
+        layout = Layout(
+            HSplit([
+                Window(
+                    content=FormattedTextControl(get_formatted_text),
+                    wrap_lines=False
+                )
+            ])
+        )
+
+        app = Application(
+            layout=layout,
+            key_bindings=kb,
+            full_screen=False,
+            mouse_support=False
+        )
+
+        try:
+            await app.run_async()
+            if cancelled[0]:
+                return None
+            return result[0]
+        except Exception as e:
+            self.console.print(f"[{theme.error}]Error: {e}[/]")
+            return None
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
@@ -623,27 +765,50 @@ class RichCopilotCLI:
             return False  # Handled, continue loop
 
         elif cmd == '/sessions':
-            # List available sessions
-            self.print_sessions_table()
+            # Show interactive session picker
+            theme = get_theme()
+            self.console.print(f"\n[bold {theme.primary}]Session Manager[/]\n")
+            selected_id = await self.interactive_session_picker()
+
+            if selected_id:
+                if self.copilot.resume_session(selected_id):
+                    session = self.copilot.session_manager.current_session
+                    self.console.print(f"\n[{theme.success}]✓ Session resumed: {selected_id}[/]")
+                    self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                else:
+                    self.console.print(f"\n[{theme.error}]✗ Failed to resume session '{selected_id}'[/]")
+            else:
+                self.console.print(f"\n[{theme.muted}]Session selection cancelled[/]")
             return False  # Handled, continue loop
 
         elif cmd.startswith('/resume'):
-            # Resume a session
+            # Resume a session by ID (for autocomplete/direct use)
             parts = command.strip().split()
             if len(parts) > 1:
                 session_id = parts[1]
                 if self.copilot.resume_session(session_id):
                     theme = get_theme()
                     session = self.copilot.session_manager.current_session
-                    self.console.print(f"[{theme.success}]+ Session resumed: {session_id}[/]")
+                    self.console.print(f"[{theme.success}]✓ Session resumed: {session_id}[/]")
                     self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
                 else:
                     theme = get_theme()
-                    self.console.print(f"[{theme.error}]x Session '{session_id}' not found[/]")
+                    self.console.print(f"[{theme.error}]✗ Session '{session_id}' not found[/]")
             else:
+                # No session ID provided - show picker
                 theme = get_theme()
-                self.console.print(f"[{theme.warning}]Usage: /resume <session_id>[/]")
-                self.console.print(f"[{theme.muted}]Use /sessions to list available sessions[/]")
+                self.console.print(f"\n[bold {theme.primary}]Select a session to resume:[/]\n")
+                selected_id = await self.interactive_session_picker()
+
+                if selected_id:
+                    if self.copilot.resume_session(selected_id):
+                        session = self.copilot.session_manager.current_session
+                        self.console.print(f"\n[{theme.success}]✓ Session resumed: {selected_id}[/]")
+                        self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                    else:
+                        self.console.print(f"\n[{theme.error}]✗ Failed to resume session '{selected_id}'[/]")
+                else:
+                    self.console.print(f"\n[{theme.muted}]Session selection cancelled[/]")
             return False  # Handled, continue loop
 
         elif cmd == '/save':
@@ -735,8 +900,8 @@ Just type what you want! Examples:
 - `/embryos` - List all embryos
 - `/status` - Show experiment status
 - `/history` - Show recent conversation
-- `/sessions` - List saved sessions
-- `/resume <id>` - Resume a previous session
+- `/sessions` - Browse and select saved sessions (interactive)
+- `/resume [id]` - Resume a session (interactive picker if no ID given)
 - `/save` - Save current session
 - `/theme [name]` - Switch theme (vibrant, scientific, claude, monochrome)
 - `/help` - Show this help

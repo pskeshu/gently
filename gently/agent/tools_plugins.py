@@ -115,6 +115,44 @@ def skip_embryo(embryo_id: str, reason: str, context: Dict) -> str:
 
 
 @tool(
+    name="remove_embryo",
+    description="Permanently remove an embryo from the experiment (e.g., false detection)",
+    category=ToolCategory.EMBRYO,
+)
+def remove_embryo(embryo_id: str, context: Dict) -> str:
+    """
+    Remove embryo from experiment completely
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to remove
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    # Try to find the embryo first
+    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+    if not embryo:
+        return f"Embryo '{embryo_id}' not found"
+
+    # Remove it
+    actual_id = embryo.id  # Get the actual ID in case user used nickname
+    if copilot.experiment.remove_embryo(actual_id):
+        return f"✓ Removed {actual_id} from experiment (false detection deleted)"
+    else:
+        return f"Failed to remove {embryo_id}"
+
+
+@tool(
     name="resume_embryo",
     description="Resume imaging a previously skipped embryo",
     category=ToolCategory.EMBRYO,
@@ -707,7 +745,7 @@ async def test_detector(
 
 @tool(
     name="calibrate_embryo",
-    description="Run full piezo-galvo calibration for a single embryo",
+    description="Run piezo-galvo calibration for a specific embryo. Moves to embryo position first, then calibrates.",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
@@ -716,7 +754,7 @@ async def calibrate_embryo(
     piezo_positions: List[float] = None,
     context: Dict = None
 ) -> str:
-    """Calibrate embryo piezo-galvo"""
+    """Calibrate embryo piezo-galvo - moves to embryo first, then calibrates"""
     copilot = context.get('copilot')
     client = context.get('client')
 
@@ -730,15 +768,22 @@ async def calibrate_embryo(
     positions = piezo_positions or [40.0, 60.0]
 
     try:
-        result = await client.calibrate_embryo(
-            embryo_id=embryo.embryo_id,
-            piezo_positions=positions
-        )
+        # First move to embryo position
+        pos = embryo.stage_position
+        if pos and pos.get('x') is not None and pos.get('y') is not None:
+            print(f"  Moving to {embryo.id} at ({pos['x']:.1f}, {pos['y']:.1f})...")
+            await client.move_to_position(pos['x'], pos['y'])
+        else:
+            print(f"  Warning: No position stored for {embryo.id}, calibrating at current position")
+
+        # Run calibration at current position
+        print(f"  Running piezo-galvo calibration...")
+        result = await client.calibrate_piezo_galvo(piezo_positions=positions)
 
         if result.get('success'):
             embryo.calibration = result.get('calibration', {})
             copilot._mark_significant_action("calibration")
-            return f"✓ Calibrated {embryo_id}\nCalibration: {json.dumps(result.get('calibration', {}), indent=2)}"
+            return f"✓ Calibrated {embryo.id}\nCalibration: {json.dumps(result.get('calibration', {}), indent=2)}"
         else:
             return f"Calibration failed: {result.get('error', 'Unknown error')}"
 
@@ -748,7 +793,7 @@ async def calibrate_embryo(
 
 @tool(
     name="acquire_volume",
-    description="Acquire a single 3D volume for a specific embryo",
+    description="Acquire a single 3D volume for a specific embryo. Moves to embryo position and uses calibration data.",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
@@ -756,10 +801,9 @@ async def acquire_volume(
     embryo_id: str,
     num_slices: int = 50,
     exposure_ms: float = 10.0,
-    save: bool = True,
     context: Dict = None
 ) -> str:
-    """Acquire single volume"""
+    """Acquire single volume - moves to embryo first, uses calibration"""
     copilot = context.get('copilot')
     client = context.get('client')
 
@@ -771,15 +815,40 @@ async def acquire_volume(
         return f"Embryo '{embryo_id}' not found"
 
     try:
+        # Move to embryo position first
+        pos = embryo.stage_position
+        if pos and pos.get('x') is not None and pos.get('y') is not None:
+            print(f"  Moving to {embryo.id} at ({pos['x']:.1f}, {pos['y']:.1f})...")
+            await client.move_to_position(pos['x'], pos['y'])
+        else:
+            print(f"  Warning: No position stored for {embryo.id}, acquiring at current position")
+
+        # Get calibration parameters (use defaults if not calibrated)
+        cal = embryo.calibration or {}
+        galvo_amplitude = cal.get('galvo_amplitude', 0.5)
+        galvo_center = cal.get('galvo_center', 0.0)
+        piezo_amplitude = cal.get('piezo_amplitude', 25.0)
+        piezo_center = cal.get('piezo_center', 50.0)
+
+        if not embryo.calibration:
+            print(f"  Warning: {embryo.id} not calibrated, using default parameters")
+
+        print(f"  Acquiring {num_slices}-slice volume...")
         result = await client.acquire_volume(
-            embryo_id=embryo.embryo_id,
             num_slices=num_slices,
             exposure_ms=exposure_ms,
-            save=save
+            galvo_amplitude=galvo_amplitude,
+            galvo_center=galvo_center,
+            piezo_amplitude=piezo_amplitude,
+            piezo_center=piezo_center
         )
 
         if result.get('success'):
-            return f"✓ Acquired volume for {embryo_id}\nShape: {result.get('shape', 'unknown')}"
+            # Update embryo state
+            embryo.timepoints_acquired += 1
+            from datetime import datetime
+            embryo.last_imaged = datetime.now()
+            return f"✓ Acquired volume for {embryo.id}\nShape: {result.get('shape', 'unknown')}"
         else:
             return f"Acquisition failed: {result.get('error', 'Unknown error')}"
 
@@ -789,7 +858,7 @@ async def acquire_volume(
 
 @tool(
     name="start_multi_embryo_timelapse",
-    description="Start multi-embryo time-lapse volume acquisition",
+    description="Start multi-embryo time-lapse volume acquisition (NOT YET IMPLEMENTED)",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
@@ -802,113 +871,77 @@ async def start_multi_embryo_timelapse(
     enable_detectors: bool = True,
     context: Dict = None
 ) -> str:
-    """Start multi-embryo timelapse"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot:
-        return "Error: No copilot context"
-
-    # Use all embryos if none specified
-    if not embryo_ids:
-        embryo_ids = list(copilot.experiment.embryos.keys())
-
-    try:
-        result = await client.start_timelapse(
-            embryo_ids=embryo_ids,
-            num_timepoints=num_timepoints,
-            interval_seconds=interval_seconds,
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            enable_detectors=enable_detectors
-        )
-
-        if result.get('success'):
-            copilot.experiment.status = "running"
-            return f"✓ Started timelapse for {len(embryo_ids)} embryos\nInterval: {interval_seconds}s, Timepoints: {num_timepoints}"
-        else:
-            return f"Failed to start timelapse: {result.get('error', 'Unknown error')}"
-
-    except Exception as e:
-        return f"Error starting timelapse: {str(e)}"
+    """Start multi-embryo timelapse - NOT YET IMPLEMENTED"""
+    # TODO: Implement timelapse plan in backend
+    return ("⚠ Multi-embryo timelapse is not yet implemented.\n"
+            "For now, you can:\n"
+            "  - Use acquire_volume to capture single volumes\n"
+            "  - Manually repeat acquisitions at intervals")
 
 
 @tool(
     name="pause_acquisition",
-    description="Pause currently running acquisition",
+    description="Pause currently running acquisition (NOT YET IMPLEMENTED)",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
 async def pause_acquisition(context: Dict = None) -> str:
-    """Pause acquisition"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot:
-        return "Error: No copilot context"
-
-    try:
-        result = await client.pause_acquisition()
-        if result.get('success'):
-            copilot.experiment.status = "paused"
-            return "✓ Acquisition paused"
-        else:
-            return f"Failed to pause: {result.get('error', 'Unknown error')}"
-    except Exception as e:
-        return f"Error pausing: {str(e)}"
+    """Pause acquisition - NOT YET IMPLEMENTED"""
+    # TODO: Implement pause in backend
+    return "⚠ Pause acquisition is not yet implemented."
 
 
 @tool(
     name="resume_acquisition",
-    description="Resume previously paused acquisition",
+    description="Resume previously paused acquisition (NOT YET IMPLEMENTED)",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
 async def resume_acquisition(context: Dict = None) -> str:
-    """Resume acquisition"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot:
-        return "Error: No copilot context"
-
-    try:
-        result = await client.resume_acquisition()
-        if result.get('success'):
-            copilot.experiment.status = "running"
-            return "✓ Acquisition resumed"
-        else:
-            return f"Failed to resume: {result.get('error', 'Unknown error')}"
-    except Exception as e:
-        return f"Error resuming: {str(e)}"
+    """Resume acquisition - NOT YET IMPLEMENTED"""
+    # TODO: Implement resume in backend
+    return "⚠ Resume acquisition is not yet implemented."
 
 
 @tool(
     name="view_image",
-    description="Capture and view the current bottom camera image",
+    description="Capture and display the current bottom camera image (widefield view)",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
 async def view_image(
     title: str = "Bottom Camera Image",
     exposure_ms: float = None,
-    save_only: bool = False,
+    show: bool = True,
     context: Dict = None
 ) -> str:
-    """View camera image"""
+    """Capture and display bottom camera image"""
     client = context.get('client')
 
     try:
-        result = await client.capture_image(exposure_ms=exposure_ms)
+        print(f"  Capturing bottom camera image...")
+        image = await client.capture_bottom_image(exposure_ms=exposure_ms)
 
-        if result.get('success'):
-            if save_only:
-                path = result.get('path', 'image.png')
-                return f"✓ Image saved to {path}"
-            else:
-                return f"✓ Captured image\nShape: {result.get('shape', 'unknown')}"
+        if image is None or image.shape == (100, 100):
+            return "Failed to capture image from bottom camera"
+
+        if show:
+            from datetime import datetime
+            from pathlib import Path
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = f"camera_captures/bottom_camera_{timestamp}.png"
+            Path("camera_captures").mkdir(exist_ok=True)
+
+            print(f"  Displaying image...")
+            view_result = await client.view_image(
+                image=image,
+                title=title,
+                save_path=save_path,
+                show=True
+            )
+            return f"✓ Captured bottom camera image ({image.shape[0]}x{image.shape[1]})\nSaved to: {save_path}"
         else:
-            return f"Failed to capture: {result.get('error', 'Unknown error')}"
+            return f"✓ Captured bottom camera image ({image.shape[0]}x{image.shape[1]})"
 
     except Exception as e:
         return f"Error capturing image: {str(e)}"
@@ -916,32 +949,56 @@ async def view_image(
 
 @tool(
     name="capture_lightsheet",
-    description="Capture a single lightsheet image at the current position",
+    description="Capture and display a single 2D lightsheet image (one slice only). This is a COMPLETE action - do NOT follow up with acquire_volume unless explicitly asked for a 3D volume.",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
 async def capture_lightsheet(
     piezo_position: float = 50.0,
     galvo_position: float = 0.0,
-    save_only: bool = False,
+    show: bool = True,
     context: Dict = None
 ) -> str:
-    """Capture lightsheet image"""
+    """Capture and optionally display a single lightsheet image"""
     client = context.get('client')
 
     try:
-        result = await client.capture_lightsheet(
+        print(f"  Capturing lightsheet at piezo={piezo_position}µm, galvo={galvo_position}V...")
+        result = await client.capture_lightsheet_image(
             piezo_position=piezo_position,
             galvo_position=galvo_position
         )
 
         if result.get('success'):
-            return f"✓ Captured lightsheet at piezo={piezo_position}, galvo={galvo_position}"
+            image = result.get('image')
+            run_uid = result.get('run_uid', 'unknown')
+
+            if image is not None and show:
+                # Display the image
+                from datetime import datetime
+                from pathlib import Path
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                save_path = f"lightsheet_captures/lightsheet_{timestamp}.png"
+                Path("lightsheet_captures").mkdir(exist_ok=True)
+
+                print(f"  Displaying lightsheet image...")
+                view_result = await client.view_image(
+                    image=image,
+                    title=f"Lightsheet: piezo={piezo_position}µm, galvo={galvo_position}V",
+                    save_path=save_path,
+                    show=True
+                )
+                return f"✓ Captured lightsheet image at piezo={piezo_position}µm, galvo={galvo_position}V\nSaved to: {save_path}\nRun UID: {run_uid}"
+            elif image is None:
+                # Plan succeeded but image couldn't be retrieved
+                return f"✓ Lightsheet captured at piezo={piezo_position}µm, galvo={galvo_position}V (image not displayed - databroker retrieval issue)\nRun UID: {run_uid}"
+            else:
+                return f"✓ Captured lightsheet at piezo={piezo_position}µm, galvo={galvo_position}V\nRun UID: {run_uid}"
         else:
             return f"Failed: {result.get('error', 'Unknown error')}"
 
     except Exception as e:
-        return f"Error: {str(e)}"
+        return f"Error capturing lightsheet: {str(e)}"
 
 
 # =============================================================================
@@ -984,11 +1041,19 @@ async def detect_embryos(
         if result.get('success'):
             embryos = result.get('embryos', [])
 
+            # Store result for show_detected_embryos
+            copilot.last_detection_result = result
+
             # Add to experiment
             for emb in embryos:
+                # Build position dict from stage coordinates
+                position = {
+                    'x': emb.get('stage_x_um', emb.get('stage_x', 0)),
+                    'y': emb.get('stage_y_um', emb.get('stage_y', 0))
+                }
                 copilot.experiment.add_embryo(
                     embryo_id=emb['embryo_id'],
-                    position=emb.get('position'),
+                    position=position,
                     confidence=emb.get('confidence', 0.0)
                 )
 
@@ -1005,7 +1070,7 @@ async def detect_embryos(
 
 @tool(
     name="manual_mark_embryos",
-    description="Manually mark embryos by clicking on an image",
+    description="Manually mark additional embryos by clicking on an image. New embryos get unique IDs that don't conflict with existing ones.",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
 )
@@ -1013,7 +1078,7 @@ async def manual_mark_embryos(
     exposure_ms: float = None,
     context: Dict = None
 ) -> str:
-    """Manual embryo marking"""
+    """Manual embryo marking - adds to existing embryos with unique IDs"""
     copilot = context.get('copilot')
     client = context.get('client')
 
@@ -1026,13 +1091,52 @@ async def manual_mark_embryos(
         if result.get('success'):
             embryos = result.get('embryos', [])
 
-            for emb in embryos:
-                copilot.experiment.add_embryo(
-                    embryo_id=emb['embryo_id'],
-                    position=emb.get('position')
-                )
+            if not embryos:
+                return "No embryos marked. Close the window after clicking on embryo centers."
 
-            return f"✓ Marked {len(embryos)} embryos manually"
+            # Find next available embryo ID
+            existing_ids = set(copilot.experiment.embryos.keys())
+            max_num = 0
+            for eid in existing_ids:
+                # Extract number from embryo_N format
+                if eid.startswith('embryo_'):
+                    try:
+                        num = int(eid.replace('embryo_', ''))
+                        max_num = max(max_num, num)
+                    except ValueError:
+                        pass
+            next_num = max_num + 1
+
+            # Assign new unique IDs and add to experiment
+            added_ids = []
+            for emb in embryos:
+                new_id = f'embryo_{next_num}'
+                next_num += 1
+
+                # Build position dict from stage coordinates
+                position = {
+                    'x': emb.get('stage_x_um', emb.get('stage_x', 0)),
+                    'y': emb.get('stage_y_um', emb.get('stage_y', 0))
+                }
+
+                # Update embryo dict with new ID for visualization
+                emb['embryo_id'] = new_id
+
+                copilot.experiment.add_embryo(
+                    embryo_id=new_id,
+                    position=position,
+                    confidence=emb.get('confidence', 1.0)  # Manual = high confidence
+                )
+                added_ids.append(new_id)
+
+            # Store result for show_detected_embryos (merge with existing if any)
+            if copilot.last_detection_result and copilot.last_detection_result.get('embryos'):
+                # Merge new embryos into existing detection result
+                copilot.last_detection_result['embryos'].extend(embryos)
+            else:
+                copilot.last_detection_result = result
+
+            return f"✓ Added {len(added_ids)} embryo(s): {', '.join(added_ids)}"
         else:
             return f"Marking failed: {result.get('error', 'Unknown error')}"
 
@@ -1042,36 +1146,122 @@ async def manual_mark_embryos(
 
 @tool(
     name="show_detected_embryos",
-    description="Show the last detected embryos with bounding boxes",
+    description="Show detected embryos with bounding boxes. Shows only active (non-removed) embryos. Works with resumed sessions by capturing fresh image.",
     category=ToolCategory.DETECTION,
+    requires_microscope=True,
 )
-def show_detected_embryos(
-    save_to_file: bool = False,
-    save_only: bool = False,
+async def show_detected_embryos(
+    only_active: bool = True,
+    save_to_file: bool = True,
     context: Dict = None
 ) -> str:
-    """Show detected embryos visualization"""
+    """Show detected embryos visualization, filtered to active embryos"""
     copilot = context.get('copilot')
+    client = context.get('client')
 
     if not copilot:
         return "Error: No copilot context"
 
-    if not copilot.last_detection_result:
-        return "No detection results available. Run detect_embryos first."
+    # Get active embryo IDs from experiment
+    active_ids = set(copilot.experiment.embryos.keys()) if copilot.experiment.embryos else set()
+
+    if not active_ids:
+        return "No embryos in experiment. Run detect_embryos first."
 
     try:
-        # Use visualization module
-        from ..visualization import EmbryoMarker
-
+        # Check if we have detection result with all active embryos
         result = copilot.last_detection_result
-        image = result.get('image')
-        embryos = result.get('embryos', [])
+        have_all_embryos = False
 
-        if save_to_file or save_only:
-            path = f"detected_embryos_{len(embryos)}.png"
-            return f"✓ Saved visualization to {path}"
+        if result and result.get('embryos') and result.get('image') is not None:
+            detection_ids = {e.get('embryo_id') for e in result.get('embryos', [])}
+            have_all_embryos = active_ids.issubset(detection_ids)
+
+        # If detection result is missing or incomplete, capture fresh image and calculate positions
+        if not have_all_embryos:
+            print(f"  Capturing fresh image for visualization...")
+            image = await client.capture_bottom_image()
+            if image is None or image.shape == (100, 100):
+                return "Failed to capture image for visualization."
+
+            print(f"  Reading current stage position...")
+            current_stage = await client.get_stage_position()
+
+            # Calculate pixel positions for all active embryos
+            # Formula: pixel = image_center + (embryo_stage - current_stage) / um_per_pixel
+            pixel_size_um = 6.5
+            objective_mag = 4.0
+            um_per_pixel = pixel_size_um / objective_mag  # 1.625 um/pixel
+
+            image_center_x = image.shape[1] / 2
+            image_center_y = image.shape[0] / 2
+
+            embryos = []
+            for embryo_id in active_ids:
+                embryo_state = copilot.experiment.embryos[embryo_id]
+                pos = embryo_state.stage_position or {}
+
+                stage_x = pos.get('x', current_stage[0])
+                stage_y = pos.get('y', current_stage[1])
+
+                # Convert stage position to pixel position
+                dx_stage = stage_x - current_stage[0]
+                dy_stage = stage_y - current_stage[1]
+
+                pixel_x = image_center_x + dx_stage / um_per_pixel
+                pixel_y = image_center_y + dy_stage / um_per_pixel
+
+                embryos.append({
+                    'embryo_id': embryo_id,
+                    'pixel_x': pixel_x,
+                    'pixel_y': pixel_y,
+                    'stage_x_um': stage_x,
+                    'stage_y_um': stage_y,
+                    'confidence': embryo_state.detection_confidence,
+                })
+
+            # Update detection result for future use
+            copilot.last_detection_result = {
+                'image': image,
+                'embryos': embryos,
+                'stage_position': list(current_stage),
+                'success': True
+            }
+            result = copilot.last_detection_result
+            print(f"  Calculated positions for {len(embryos)} embryos")
         else:
-            return f"✓ Showing {len(embryos)} detected embryos"
+            # Filter existing detection result to active embryos
+            embryos = [e for e in result.get('embryos', []) if e.get('embryo_id') in active_ids]
+            image = result.get('image')
+
+        if not embryos:
+            return f"No embryos to display. Active: {', '.join(active_ids)}"
+
+        # Generate save path
+        from datetime import datetime
+        from pathlib import Path
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        save_path = f"detection_results/detected_embryos_{timestamp}.png"
+        Path("detection_results").mkdir(exist_ok=True)
+
+        print(f"  Showing {len(embryos)} embryos with bounding boxes...")
+
+        # Use client to view with filtered embryos
+        view_result = await client.view_embryos(
+            image=image,
+            embryos=embryos,
+            title=f"Active Embryos ({len(embryos)})",
+            save_path=save_path,
+            show=True
+        )
+
+        if view_result.get('success'):
+            embryo_ids = [e.get('embryo_id', '?') for e in embryos]
+            return f"✓ Showing {len(embryos)} active embryos: {', '.join(embryo_ids)}\nSaved to: {save_path}"
+        elif view_result.get('error'):
+            return f"Display error: {view_result.get('error')}"
+        else:
+            return f"✓ Visualization complete. Check {save_path}"
 
     except Exception as e:
         return f"Error showing detections: {str(e)}"

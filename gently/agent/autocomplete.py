@@ -3,7 +3,7 @@ Autocomplete support for Rich CLI
 
 Provides command completion for:
 - Slash commands (/detectors, /status, /embryos, etc.)
-- Embryo IDs (embryo_001, embryo_002, etc.)
+- Embryo IDs (embryo_1, embryo_2, etc.)
 - Detector names (hatching, comma, pretzel, etc.)
 """
 
@@ -85,6 +85,16 @@ class CopilotCompleter(Completer):
             return [d.name for d in self.copilot.detector_registry.list_all()]
         return []
 
+    def get_session_ids(self) -> List[str]:
+        """Get list of session IDs from copilot"""
+        if self.copilot and hasattr(self.copilot, 'list_sessions'):
+            try:
+                sessions = self.copilot.list_sessions()
+                return [s.get('id', '') for s in sessions if s.get('id')]
+            except:
+                pass
+        return []
+
     def get_completions(self, document: Document, complete_event):
         """
         Generate completions based on current input
@@ -106,14 +116,28 @@ class CopilotCompleter(Completer):
 
         # Slash command completion
         if text.startswith('/'):
-            for cmd in self.SLASH_COMMANDS:
-                if cmd.startswith(text):
-                    yield Completion(
-                        cmd,
-                        start_position=-len(text),
-                        display=cmd,
-                        display_meta='command'
-                    )
+            # Check if completing /resume with session ID
+            if text.startswith('/resume '):
+                session_ids = self.get_session_ids()
+                partial = text[8:]  # After "/resume "
+                for session_id in session_ids:
+                    if session_id.startswith(partial) or partial == '':
+                        yield Completion(
+                            session_id,
+                            start_position=-len(partial),
+                            display=session_id,
+                            display_meta='session'
+                        )
+            else:
+                # Regular slash command completion
+                for cmd in self.SLASH_COMMANDS:
+                    if cmd.startswith(text):
+                        yield Completion(
+                            cmd,
+                            start_position=-len(text),
+                            display=cmd,
+                            display_meta='command'
+                        )
 
         # Embryo ID completion
         elif 'embryo' in text.lower():
@@ -126,7 +150,7 @@ class CopilotCompleter(Completer):
                         display=embryo_id,
                         display_meta='embryo'
                     )
-                # Also support "embryo 1" -> "embryo_001"
+                # Also support "embryo 1" -> "embryo_1"
                 elif embryo_id.startswith('embryo_') and word.isdigit():
                     embryo_num = embryo_id.split('_')[1]
                     if embryo_num.lstrip('0') == word:
