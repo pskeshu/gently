@@ -1,1 +1,0 @@
-# DiSPIM Data Directory

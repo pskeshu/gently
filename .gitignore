@@ -138,3 +138,17 @@ nul
 
 # Video environments
 venv_video/
+
+# Large binary data (don't track)
+dispim_data/
+animated_video/
+*.npz
+*.gif
+
+# Local settings
+.claude/settings.local.json
+*.local.json
+
+# Backup files
+*_backup.py
+*_backup/
