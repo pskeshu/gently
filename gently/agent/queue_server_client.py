@@ -400,6 +400,7 @@ class QueueServerClient:
                 'lightsheet_snap': 'lightsheet_snap',
                 'scanner': 'scanner',
                 'piezo': 'piezo',
+                'laser_control': 'laser_control',
                 'piezo_position': piezo_position,
                 'galvo_position': galvo_position
             },

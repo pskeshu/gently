@@ -109,11 +109,15 @@ def capture_lightsheet_image_plan(
     lightsheet_snap,
     scanner,
     piezo,
+    laser_control,
     piezo_position: float = 50.0,
-    galvo_position: float = 0.0
+    galvo_position: float = 0.0,
+    laser_config: str = "488 and 561"
 ) -> Generator[Any, Any, None]:
     """
     Capture a single lightsheet image at specified piezo/galvo positions.
+
+    Turns on lasers before capture and turns them off after to prevent photobleaching.
 
     Parameters
     ----------
@@ -123,24 +127,39 @@ def capture_lightsheet_image_plan(
         Scanner device for galvo control
     piezo : ophyd.Device
         Piezo stage device
+    laser_control : ophyd.Device
+        Laser control device for turning lasers on/off
     piezo_position : float
         Piezo position in micrometers
     galvo_position : float
         Galvo position in degrees
+    laser_config : str
+        Laser configuration to use (default: "488 and 561")
 
     Example (via queue server API)
     ------------------------------
     >>> plan = BPlan("capture_lightsheet_image_plan",
     ...              lightsheet_snap="lightsheet_snap",
     ...              scanner="scanner", piezo="piezo",
+    ...              laser_control="laser_control",
     ...              piezo_position=50.0, galvo_position=0.0)
     """
     # Move to positions
     yield from bps.mv(piezo, piezo_position)
     yield from bps.mv(scanner.sa_offset_y, galvo_position)
 
-    # Capture using bp.count which handles run wrapper
-    yield from bp.count([lightsheet_snap], num=1)
+    # Configure lightsheet snap device (sets up scanner and camera)
+    lightsheet_snap.configure(y_position_deg=galvo_position)
+
+    # Turn on lasers
+    yield from bps.mv(laser_control, laser_config)
+
+    try:
+        # Capture using bp.count which handles run wrapper
+        yield from bp.count([lightsheet_snap], num=1)
+    finally:
+        # Always turn off lasers after capture (prevents photobleaching)
+        yield from bps.mv(laser_control, "ALL OFF")
 
 
 def move_piezo_plan(piezo, position: float) -> Generator[Any, Any, dict]:

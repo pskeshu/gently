@@ -1123,10 +1123,12 @@ class DiSPIMScanner:
 
         Sets up:
         - Enabled beam
+        - Laser output mode for triggering lasers
         - X-axis scanning (8° amplitude for full light sheet width)
         - Y-axis with minimal amplitude (will adjust offset for positioning)
         """
         self.enable_beam(True)
+        self.set_laser_output_mode("shutter + side")  # Enable laser triggering
         self.configure_x_axis(amplitude_deg=8.0, offset_deg=0.0005)
         self.configure_y_axis(amplitude_deg=0.0001, offset_deg=0.0)
         time.sleep(0.3)  # Allow settings to stabilize
