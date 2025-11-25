@@ -133,8 +133,32 @@ except ImportError:
     _VISUALIZATION_AVAILABLE = False
     NAPARI_AVAILABLE = False
 
+# Main entry point
+from .gently import Gently, create_gently
+
+# Core infrastructure
+from .core import (
+    TiledStore,
+    DatabrokerStore,
+    EventBus,
+    EventType,
+    get_event_bus,
+    get_data_store,
+)
+
 __version__ = "0.3.0"
 __all__ = [
+    # Main entry point
+    "Gently",
+    "create_gently",
+
+    # Core infrastructure
+    "TiledStore",
+    "DatabrokerStore",
+    "EventBus",
+    "EventType",
+    "get_event_bus",
+    "get_data_store",
     # Device classes
     "DiSPIMPiezo",
     "DiSPIMGalvo",

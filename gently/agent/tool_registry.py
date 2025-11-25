@@ -367,7 +367,7 @@ class ToolRegistry:
             for tool in self.list_available(has_microscope)
         ]
 
-    async def execute(self, tool_name: str, tool_input: Dict) -> str:
+    async def execute(self, tool_name: str, tool_input: Dict, context: Dict = None) -> str:
         """
         Execute a tool by name
 
@@ -377,6 +377,8 @@ class ToolRegistry:
             Name of tool to execute
         tool_input : dict
             Tool input parameters
+        context : dict, optional
+            Execution context (copilot, client, etc.)
 
         Returns
         -------
@@ -387,9 +389,12 @@ class ToolRegistry:
         if not tool:
             raise ValueError(f"Unknown tool: {tool_name}")
 
+        # Use provided context or fall back to stored context
+        exec_context = context if context is not None else self._context
+
         # Check microscope requirement
         if tool.requires_microscope:
-            client = self._context.get('client')
+            client = exec_context.get('client')
             if client is None:
                 return "Error: Not connected to microscope server. Start the server and reconnect."
 
@@ -402,7 +407,7 @@ class ToolRegistry:
             # Inject context if handler expects it
             sig = inspect.signature(tool.handler)
             if 'context' in sig.parameters:
-                kwargs['context'] = self._context
+                kwargs['context'] = exec_context
 
             # Execute handler
             if tool.is_async:
