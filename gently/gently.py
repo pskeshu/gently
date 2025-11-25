@@ -39,6 +39,7 @@ from typing import Any, Dict, List, Optional
 
 from .core import (
     DatabrokerStore,
+    TiledStore,
     EventBus,
     EventType,
     ServiceRegistry,
@@ -76,8 +77,9 @@ class Gently:
 
     def __init__(
         self,
-        storage_path: Path = Path("./gently_data"),
+        storage_path: Path = Path("D:/Gently"),
         catalog_name: str = "gently",
+        use_persistent_storage: bool = True,
     ):
         """
         Initialize the Gently system
@@ -85,15 +87,25 @@ class Gently:
         Parameters
         ----------
         storage_path : Path
-            Base path for all data storage
+            Base path for all data storage (default: D:/Gently)
         catalog_name : str
-            Databroker catalog name
+            Databroker/Tiled catalog name
+        use_persistent_storage : bool
+            If True, use TiledStore for persistent storage on disk
+            If False, use in-memory DatabrokerStore
         """
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
 
-        # Initialize core components
-        self._data_store = DatabrokerStore(catalog_name=catalog_name)
+        # Initialize data store with persistent storage
+        if use_persistent_storage:
+            self._data_store = TiledStore(
+                storage_path=str(self.storage_path),
+                catalog_name=catalog_name,
+            )
+        else:
+            self._data_store = DatabrokerStore(catalog_name=catalog_name)
+
         self._event_bus = get_event_bus()
         self._services = get_service_registry()
         self._client = ServiceClient(self._services)
@@ -116,6 +128,9 @@ class Gently:
 
         # Copilot instance (lazy loaded)
         self._copilot = None
+
+        # Visualization server (lazy loaded)
+        self._viz_server = None
 
         # Register standard services
         self._register_standard_services()
@@ -517,12 +532,70 @@ class Gently:
         return self._copilot
 
     # =========================================================================
+    # Visualization Server
+    # =========================================================================
+
+    async def start_visualization_server(self, port: int = 8080):
+        """
+        Start the web-based visualization server
+
+        Parameters
+        ----------
+        port : int
+            Server port (default: 8080)
+
+        Returns
+        -------
+        VisualizationServer
+            Running server instance
+        """
+        if self._viz_server is None:
+            from .visualization.server import VisualizationServer
+            self._viz_server = VisualizationServer(
+                port=port,
+                data_store=self._data_store,
+                event_bus=self._event_bus,
+            )
+            await self._viz_server.start()
+            logger.info(f"Visualization server started on port {port}")
+        return self._viz_server
+
+    async def push_image(
+        self,
+        array,
+        uid: str,
+        data_type: str = "image",
+        metadata: Optional[Dict] = None,
+    ):
+        """
+        Push an image to the visualization server
+
+        Parameters
+        ----------
+        array : np.ndarray
+            Image array
+        uid : str
+            Unique identifier
+        data_type : str
+            Type of image
+        metadata : dict, optional
+            Additional metadata
+        """
+        if self._viz_server:
+            await self._viz_server.push_image(array, uid, data_type, metadata)
+
+    # =========================================================================
     # Lifecycle
     # =========================================================================
 
     async def shutdown(self):
         """Shutdown the system cleanly"""
         logger.info("Shutting down Gently...")
+
+        # Stop visualization server
+        if self._viz_server:
+            await self._viz_server.stop()
+            self._viz_server = None
 
         # Save session
         self._sessions.save_session()

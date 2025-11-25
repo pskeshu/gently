@@ -11,6 +11,7 @@ from .data_store import (
     DataReference,
     DataStore,
     DatabrokerStore,
+    TiledStore,
     get_data_store,
     set_data_store,
 )
@@ -43,6 +44,7 @@ __all__ = [
     'DataReference',
     'DataStore',
     'DatabrokerStore',
+    'TiledStore',
     'get_data_store',
     'set_data_store',
     # Event bus
