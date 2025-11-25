@@ -105,13 +105,11 @@ pip install -r requirements_copilot.txt
 ## Running the Copilot
 
 ```bash
-# Start the Rich CLI
-python -c "from gently.agent import run_rich_cli; import asyncio; asyncio.run(run_rich_cli())"
-```
+# Launch the Rich CLI
+python launch_copilot.py
 
-Or use the batch file:
-```bash
-start_claude_microscope.bat
+# Without microscope connection
+python launch_copilot.py --no-microscope
 ```
 
 ## Tool Categories
