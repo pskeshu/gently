@@ -8,7 +8,7 @@ LED control, calibration, and image acquisition.
 from typing import Dict, List
 import json
 
-from ..tool_registry import tool, ToolCategory
+from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import require_copilot, get_embryo_or_error
 
 
@@ -17,6 +17,11 @@ from ..tool_helpers import require_copilot, get_embryo_or_error
     description="Move the stage to a specific embryo's position",
     category=ToolCategory.MOVEMENT,
     requires_microscope=True,
+    examples=[
+        ToolExample("Go to embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Move to embryo 3", {"embryo_id": "embryo_3"}),
+        ToolExample("Navigate to embryo_2", {"embryo_id": "embryo_2"}),
+    ],
 )
 async def move_to_embryo(embryo_id: str, context: Dict) -> str:
     """Move stage to embryo position"""
@@ -50,6 +55,12 @@ async def move_to_embryo(embryo_id: str, context: Dict) -> str:
     description="Get the current XY stage position in micrometers",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
+    examples=[
+        ToolExample("Where is the stage right now?"),
+        ToolExample("What's the current position?"),
+        ToolExample("Show me the stage position"),
+        ToolExample("Current XY position?"),
+    ],
 )
 async def get_stage_position(context: Dict) -> str:
     """Get current stage position"""
@@ -231,6 +242,12 @@ async def acquire_volume(
     description="Capture and display the current bottom camera image (widefield view)",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
+    examples=[
+        ToolExample("Show me the current view"),
+        ToolExample("Take a picture"),
+        ToolExample("What does the sample look like?"),
+        ToolExample("Capture an image"),
+    ],
 )
 async def view_image(
     title: str = "Bottom Camera Image",
@@ -275,6 +292,11 @@ async def view_image(
     description="Capture and display a single 2D lightsheet image (one slice only). This is a COMPLETE action - do NOT follow up with acquire_volume unless explicitly asked for a 3D volume.",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
+    examples=[
+        ToolExample("Take a lightsheet image"),
+        ToolExample("Capture a lightsheet snap"),
+        ToolExample("Show me the lightsheet view"),
+    ],
 )
 async def capture_lightsheet(
     piezo_position: float = 0.0,

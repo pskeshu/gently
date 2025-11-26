@@ -8,7 +8,7 @@ from typing import Dict
 from datetime import datetime
 from pathlib import Path
 
-from ..tool_registry import tool, ToolCategory
+from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import require_copilot
 
 
@@ -17,6 +17,11 @@ from ..tool_helpers import require_copilot
     description="Automatically detect embryos using brightness detection + SAM refinement",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
+    examples=[
+        ToolExample("Find all embryos"),
+        ToolExample("Detect embryos automatically"),
+        ToolExample("Run embryo detection"),
+    ],
 )
 async def detect_embryos(
     auto_calibrate: bool = False,
@@ -76,6 +81,11 @@ async def detect_embryos(
     description="Manually mark additional embryos by clicking on an image. Existing embryos shown in green. New embryos get unique IDs.",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
+    examples=[
+        ToolExample("Let me mark embryos manually"),
+        ToolExample("I want to click on embryos"),
+        ToolExample("Mark embryos by hand"),
+    ],
 )
 async def manual_mark_embryos(
     exposure_ms: float = None,
@@ -155,6 +165,11 @@ async def manual_mark_embryos(
     description="Show detected embryos with bounding boxes. Captures fresh image and displays all active embryos.",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
+    examples=[
+        ToolExample("Show me the embryos"),
+        ToolExample("Display detected embryos"),
+        ToolExample("Visualize the embryos"),
+    ],
 )
 async def show_detected_embryos(
     save_to_file: bool = True,

@@ -50,6 +50,13 @@ class ToolParameter:
 
 
 @dataclass
+class ToolExample:
+    """Example of when to use a tool"""
+    user_query: str
+    tool_input: Dict = field(default_factory=dict)
+
+
+@dataclass
 class ToolDefinition:
     """
     Complete definition of a tool
@@ -68,9 +75,10 @@ class ToolDefinition:
     requires_microscope: bool = False
     is_async: bool = False
     tags: List[str] = field(default_factory=list)
+    examples: List[ToolExample] = field(default_factory=list)
 
     def to_claude_schema(self) -> Dict:
-        """Generate Claude API tool schema"""
+        """Generate Claude API tool schema with examples"""
         properties = {}
         required = []
 
@@ -89,9 +97,18 @@ class ToolDefinition:
             if param.required:
                 required.append(param.name)
 
+        # Build description with examples
+        desc = self.description
+        if self.examples:
+            desc += "\n\nWhen to use this tool:"
+            for ex in self.examples:
+                desc += f"\n- User says: \"{ex.user_query}\""
+                if ex.tool_input:
+                    desc += f" → call with {ex.tool_input}"
+
         return {
             "name": self.name,
-            "description": self.description,
+            "description": desc,
             "input_schema": {
                 "type": "object",
                 "properties": properties,
@@ -224,6 +241,7 @@ class ToolRegistry:
         requires_microscope: bool = False,
         tags: Optional[List[str]] = None,
         parameters: Optional[List[ToolParameter]] = None,
+        examples: Optional[List[ToolExample]] = None,
     ) -> Callable:
         """
         Decorator to register a function as a tool
@@ -234,6 +252,9 @@ class ToolRegistry:
                 description="Acquire a 3D volume for an embryo",
                 category=ToolCategory.ACQUISITION,
                 requires_microscope=True,
+                examples=[
+                    ToolExample("Acquire a volume of embryo 1", {"embryo_id": "embryo_1"}),
+                ],
             )
             async def acquire_volume(embryo_id: str, num_slices: int = 50) -> str:
                 ...
@@ -252,6 +273,8 @@ class ToolRegistry:
             Additional tags for filtering
         parameters : list of ToolParameter, optional
             Explicit parameter definitions (auto-extracted if not provided)
+        examples : list of ToolExample, optional
+            Usage examples showing when to call this tool
         """
         def decorator(func: Callable) -> Callable:
             tool_name = name or func.__name__
@@ -270,6 +293,7 @@ class ToolRegistry:
                 requires_microscope=requires_microscope,
                 is_async=asyncio.iscoroutinefunction(func),
                 tags=tags or [],
+                examples=examples or [],
             )
 
             self._tools[tool_name] = tool_def
@@ -457,6 +481,7 @@ def tool(
     category: ToolCategory = ToolCategory.UTILITY,
     requires_microscope: bool = False,
     tags: Optional[List[str]] = None,
+    examples: Optional[List[ToolExample]] = None,
 ) -> Callable:
     """
     Decorator to register a tool with the global registry
@@ -466,6 +491,10 @@ def tool(
             name="get_status",
             description="Get experiment status",
             category=ToolCategory.EXPERIMENT,
+            examples=[
+                ToolExample("What's the status?"),
+                ToolExample("Show me experiment info"),
+            ],
         )
         def get_status() -> str:
             return "Status: running"
@@ -476,4 +505,5 @@ def tool(
         category=category,
         requires_microscope=requires_microscope,
         tags=tags,
+        examples=examples,
     )

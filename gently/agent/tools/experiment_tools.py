@@ -7,14 +7,21 @@ Tools for managing experiments and tracking embryo states.
 from typing import Dict
 import json
 
-from ..tool_registry import tool, ToolCategory
+from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import require_copilot, get_embryo_or_error
 
 
 @tool(
     name="get_experiment_summary",
-    description="Get a summary of the current experiment status including all embryos",
+    description="Get a summary of the current experiment status including all embryos with their positions",
     category=ToolCategory.EXPERIMENT,
+    examples=[
+        ToolExample("Where are all the embryos?"),
+        ToolExample("What's the experiment status?"),
+        ToolExample("Show me the embryo positions"),
+        ToolExample("How many embryos do we have?"),
+        ToolExample("List all embryos"),
+    ],
 )
 def get_experiment_summary(context: Dict) -> str:
     """Get full experiment summary"""
@@ -28,6 +35,11 @@ def get_experiment_summary(context: Dict) -> str:
     name="query_embryo_status",
     description="Query the status of a specific embryo by ID or name",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("What's happening with embryo 1?", {"embryo_id": "embryo_1"}),
+        ToolExample("Show me embryo 3 status", {"embryo_id": "embryo_3"}),
+        ToolExample("Check on embryo_2", {"embryo_id": "embryo_2"}),
+    ],
 )
 def query_embryo_status(embryo_id: str, context: Dict) -> str:
     """Query embryo status"""
