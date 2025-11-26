@@ -24,6 +24,13 @@ class FocusAlgorithm(Enum):
     VOLATH = "volath"
     GRADIENT = "gradient"
     VARIANCE = "variance"
+    FFT_BANDPASS = "fft_bandpass"  # ASI diSPIM OughtaFocus algorithm
+
+
+# FFT Bandpass parameters (from ASI diSPIM OughtaFocus implementation)
+# These define the spatial frequency band analyzed for focus quality
+FFT_LOWER_CUTOFF = 0.025  # 2.5% of max frequency - filters DC and low spatial frequencies
+FFT_UPPER_CUTOFF = 0.14   # 14% of max frequency - filters high-frequency noise
 
 
 class FitFunction(Enum):
@@ -113,6 +120,8 @@ def calculate_focus_score(image: np.ndarray, algorithm: str = FocusAlgorithm.VOL
             return _gradient_focus_score(image, config.gaussian_sigma)
         elif algorithm == FocusAlgorithm.VARIANCE.value:
             return _variance_focus_score(image)
+        elif algorithm == FocusAlgorithm.FFT_BANDPASS.value:
+            return _fft_bandpass_focus_score(image)
         else:
             raise ValueError(f"Unknown focus algorithm: {algorithm}")
 
@@ -166,6 +175,78 @@ def _variance_focus_score(image: np.ndarray) -> float:
         return np.var(image)
     except Exception as e:
         logging.getLogger(__name__).error(f"Variance focus score failed: {e}")
+        return 0.0
+
+
+def _fft_bandpass_focus_score(image: np.ndarray,
+                               lower_cutoff: float = FFT_LOWER_CUTOFF,
+                               upper_cutoff: float = FFT_UPPER_CUTOFF) -> float:
+    """
+    FFT bandpass focus measure (ASI diSPIM OughtaFocus algorithm).
+
+    This algorithm analyzes the power spectrum of spatial frequencies in the image.
+    Well-focused images have more high-frequency content (sharp edges) than defocused
+    images, which appear blurred and lack high-frequency components.
+
+    Algorithm:
+    1. Compute 2D FFT power spectrum of the image
+    2. Create bandpass mask to keep only frequencies in [lower, upper] cutoff range
+    3. Calculate mean power within that frequency band
+
+    The default frequency band (2.5% - 14% of maximum) was empirically determined
+    by Bill Mohler (UConn) to work well for light sheet microscopy.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        2D grayscale image (already preprocessed by calculate_focus_score)
+    lower_cutoff : float
+        Lower frequency cutoff as fraction of max frequency (default: 0.025)
+    upper_cutoff : float
+        Upper frequency cutoff as fraction of max frequency (default: 0.14)
+
+    Returns
+    -------
+    float
+        Mean power in the specified frequency band (higher = better focus)
+    """
+    try:
+        # Compute 2D FFT
+        fft = np.fft.fft2(image)
+        fft_shifted = np.fft.fftshift(fft)  # Move DC component to center
+
+        # Compute power spectrum (magnitude squared)
+        power_spectrum = np.abs(fft_shifted) ** 2
+
+        # Create frequency grid for bandpass mask
+        h, w = image.shape
+        cy, cx = h // 2, w // 2  # Center coordinates
+
+        # Create distance map from center (DC component)
+        y, x = np.ogrid[:h, :w]
+        distance_from_center = np.sqrt((x - cx)**2 + (y - cy)**2)
+
+        # Maximum frequency (corner distance)
+        max_freq = np.sqrt(cx**2 + cy**2)
+
+        # Normalized distance (0 at DC, 1 at corners)
+        normalized_distance = distance_from_center / max_freq
+
+        # Create bandpass mask: keep frequencies in [lower_cutoff, upper_cutoff]
+        bandpass_mask = (normalized_distance >= lower_cutoff) & (normalized_distance <= upper_cutoff)
+
+        # Apply mask and compute mean power in band
+        masked_power = power_spectrum * bandpass_mask
+
+        if np.sum(bandpass_mask) > 0:
+            mean_power = np.sum(masked_power) / np.sum(bandpass_mask)
+        else:
+            mean_power = 0.0
+
+        return mean_power
+
+    except Exception as e:
+        logging.getLogger(__name__).error(f"FFT bandpass focus score failed: {e}")
         return 0.0
 
 

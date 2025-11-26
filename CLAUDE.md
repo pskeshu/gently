@@ -47,3 +47,32 @@ The system supports Claude-guided focusing:
 - The microscope server must be running (default: localhost:18861)
 - Focus evaluation is optimized for bottom camera view showing embryo outline
 - Image artifacts from room lighting are expected and should be ignored during focus evaluation
+
+## Accessing Copilot Session History
+
+Copilot conversations are stored as JSON files in `D:\Gently\sessions\`. Each session contains the full conversation history, experiment state, and embryo configurations.
+
+**To find and read the latest session:**
+
+1. List sessions by modification time:
+   ```bash
+   ls -la "D:/Gently/sessions/"
+   ```
+
+2. The most recent session is the one with the latest timestamp. Look for larger files (>1KB) which contain actual conversations.
+
+3. Read the session JSON file to access:
+   - `conversation` array: Full chat history with user messages, assistant responses, and tool calls
+   - `experiment_data`: Current experiment state and embryo configurations
+   - `session_id`, `created_at`, `last_active`: Session metadata
+
+**Session file structure:**
+```
+D:\Gently\
+├── sessions\
+│   ├── <session_id>.json    # Session state and conversation
+│   └── ...
+├── logs\                     # Copilot logs
+├── lightsheet_captures\      # Captured images
+└── .copilot_history          # CLI command history
+```
