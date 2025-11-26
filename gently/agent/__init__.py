@@ -18,8 +18,8 @@ from .microscope_client import MicroscopeClient
 from .queue_server_client import QueueServerClient
 from .tool_registry import ToolRegistry, get_tool_registry, tool, ToolCategory
 
-# Import tools_plugins to register all tools
-from . import tools_plugins
+# Import tools package to register all tools
+from . import tools
 
 __all__ = [
     'MicroscopyCopilot',
