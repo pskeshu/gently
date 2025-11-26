@@ -2,6 +2,7 @@
 State management for embryos and experiments
 """
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
@@ -223,7 +224,6 @@ class ExperimentState:
                 return embryo
 
         # Try extracting number from name like "embryo 3" -> "embryo_3"
-        import re
         match = re.search(r'(\d+)', name)
         if match:
             num = int(match.group(1))
