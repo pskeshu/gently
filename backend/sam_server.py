@@ -207,6 +207,7 @@ class SAMService(rpyc.Service):
         stage_position: tuple,
         pixel_size_um: float = 6.5,
         objective_mag: float = 4.0,
+        existing_embryos: list = None,
         title: str = "Click on embryo centers (close window when done)"
     ) -> dict:
         """
@@ -225,6 +226,9 @@ class SAMService(rpyc.Service):
             Camera pixel size in micrometers
         objective_mag : float
             Objective magnification
+        existing_embryos : list, optional
+            List of existing embryos to display. Each should have
+            'embryo_id', 'pixel_x', 'pixel_y' keys.
         title : str
             Window title
 
@@ -240,6 +244,8 @@ class SAMService(rpyc.Service):
         print(f"\n[SAM Server] Manual embryo marking...")
         print(f"  Image shape: {image.shape if hasattr(image, 'shape') else 'unknown'}")
         print(f"  Stage position: {stage_position}")
+        if existing_embryos:
+            print(f"  Existing embryos: {len(existing_embryos)}")
 
         # Convert image to numpy if needed
         if not isinstance(image, np.ndarray):
@@ -260,18 +266,30 @@ class SAMService(rpyc.Service):
         def onclick(event):
             if event.button == 1 and event.inaxes:  # Left click
                 clicked_points.append((event.xdata, event.ydata))
-                # Draw marker
+                # Draw marker for new embryo
                 ax.plot(event.xdata, event.ydata, 'r+', markersize=20, markeredgewidth=3)
-                ax.annotate(f'{len(clicked_points)}', (event.xdata + 30, event.ydata - 30),
+                ax.annotate(f'new_{len(clicked_points)}', (event.xdata + 30, event.ydata - 30),
                            color='red', fontsize=12, fontweight='bold')
                 fig.canvas.draw()
-                print(f"    Marked embryo {len(clicked_points)} at pixel ({event.xdata:.0f}, {event.ydata:.0f})")
+                print(f"    Marked new embryo {len(clicked_points)} at pixel ({event.xdata:.0f}, {event.ydata:.0f})")
 
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 12))
         ax.imshow(image, cmap='gray')
         ax.set_title(title, fontsize=14)
-        ax.set_xlabel('Left-click to mark embryos. Close window when done.')
+
+        # Draw existing embryos in green
+        if existing_embryos:
+            for emb in existing_embryos:
+                px = emb.get('pixel_x')
+                py = emb.get('pixel_y')
+                eid = emb.get('embryo_id', '?')
+                if px is not None and py is not None:
+                    ax.plot(px, py, 'g+', markersize=20, markeredgewidth=3)
+                    ax.annotate(eid, (px + 30, py - 30),
+                               color='lime', fontsize=11, fontweight='bold')
+
+        ax.set_xlabel('Green = existing embryos. Left-click to add new. Close when done.')
 
         # Connect click event
         cid = fig.canvas.mpl_connect('button_press_event', onclick)
