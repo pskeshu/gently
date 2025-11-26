@@ -971,17 +971,37 @@ class RichCopilotCLI:
 
     async def stream_copilot_response(self, message: str):
         """
-        Handle message with streaming response display
+        Handle message with streaming response display.
+
+        Text is printed in segments - before each tool call and after all tools complete.
+        This provides better UX than waiting for everything to finish.
 
         Parameters
         ----------
         message : str
             User message
         """
-        timestamp = datetime.now().strftime("%H:%M:%S")
+        theme = get_theme()
 
-        # Accumulated response
+        # Accumulated response for current segment
         response_text = ""
+        segment_count = 0
+
+        def flush_text_segment():
+            """Print accumulated text as a panel and reset"""
+            nonlocal response_text, segment_count
+            if response_text.strip():
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                panel = Panel(
+                    Markdown(response_text),
+                    title=f"[{theme.muted}]{timestamp}[/] [{theme.copilot} bold]{theme.icon_copilot}[/]",
+                    title_align="left",
+                    border_style=theme.copilot,
+                    box=box.ROUNDED,
+                )
+                self.console.print(panel)
+                segment_count += 1
+                response_text = ""
 
         # Create live display for streaming
         with Progress(
@@ -997,8 +1017,11 @@ class RichCopilotCLI:
                     response_text += chunk.get('text', '')
                     progress.update(task, description=f"[cyan]Copilot is responding...")
                 elif chunk.get('type') == 'tool_call':
-                    # Show tool call
+                    # Flush any accumulated text BEFORE showing tool
                     progress.stop()
+                    flush_text_segment()
+
+                    # Show tool call
                     self.print_tool_call(
                         chunk.get('tool_name', 'unknown'),
                         chunk.get('tool_input', {}),
@@ -1006,16 +1029,8 @@ class RichCopilotCLI:
                     )
                     progress.start()
 
-        # Print final response
-        theme = get_theme()
-        panel = Panel(
-            Markdown(response_text),
-            title=f"[{theme.muted}]{timestamp}[/] [{theme.copilot} bold]{theme.icon_copilot}[/]",
-            title_align="left",
-            border_style=theme.copilot,
-            box=box.ROUNDED,
-        )
-        self.console.print(panel)
+        # Flush any remaining text after all tools complete
+        flush_text_segment()
 
     async def handle_slash_command(self, command: str) -> Optional[bool]:
         """
