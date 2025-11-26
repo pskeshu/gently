@@ -863,16 +863,22 @@ class RichCopilotCLI:
                     ))
 
             # Handle content blocks (may include tool calls)
+            # Blocks can be Claude API objects (hasattr) or dicts (from JSON restore)
             elif isinstance(content, list):
                 text_parts = []
                 for block in content:
+                    # Handle both object attributes and dict keys
                     if hasattr(block, 'text'):
                         text_parts.append(block.text)
+                    elif isinstance(block, dict) and block.get('text'):
+                        text_parts.append(block['text'])
                     elif hasattr(block, 'type') and block.type == 'tool_use':
                         text_parts.append(f"[Tool: {block.name}]")
+                    elif isinstance(block, dict) and block.get('type') == 'tool_use':
+                        text_parts.append(f"[Tool: {block.get('name', '?')}]")
 
                 text = " ".join(text_parts)[:500]
-                if role == 'assistant':
+                if text and role == 'assistant':
                     self.console.print(Panel(
                         Text(text, style=theme.copilot),
                         title=theme.icon_copilot,
