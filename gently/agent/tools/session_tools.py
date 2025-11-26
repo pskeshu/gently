@@ -6,7 +6,7 @@ Tools for session statistics, interaction logging, and experiment comparison.
 
 from typing import Dict, List
 
-from ..tool_registry import tool, ToolCategory
+from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import (
     require_copilot, get_embryo_or_error,
     require_interaction_logger
@@ -337,3 +337,126 @@ def export_interaction_log(
         return "\n".join(lines)
 
     return f"Unknown format: {format}. Use 'summary', 'detailed', or 'jsonl_path'"
+
+
+@tool(
+    name="import_embryos_from_session",
+    description="""Import embryos (positions, calibration, settings) from another session into the current experiment.
+Use when user wants to start a fresh session but keep embryo positions from a previous session (e.g., "import embryos from last session", "load embryos from session X").
+This imports positions and calibration data but NOT conversation history or detection results - it's a fresh start with known embryos.
+Use list_sessions or /sessions first to find the session_id to import from.""",
+    category=ToolCategory.DATA,
+    examples=[
+        ToolExample("Import embryos from session abc123", {"session_id": "abc123"}),
+        ToolExample("Load embryos from previous session, replacing current ones", {"session_id": "abc123", "clear_existing": True}),
+    ],
+)
+def import_embryos_from_session(
+    session_id: str,
+    clear_existing: bool = False,
+    context: Dict = None
+) -> str:
+    """
+    Import embryos from another session.
+
+    Parameters
+    ----------
+    session_id : str
+        Session ID to import embryos from (use list_sessions to find IDs)
+    clear_existing : bool
+        If True, replace all current embryos. If False, add to existing (skip duplicates).
+    context : dict
+        Execution context
+    """
+    copilot, err = require_copilot(context)
+    if err:
+        return err
+
+    result = copilot.import_embryos_from_session(
+        session_id=session_id,
+        clear_existing=clear_existing
+    )
+
+    if not result.get('success'):
+        return f"Import failed: {result.get('error', 'Unknown error')}"
+
+    lines = [
+        f"✓ Imported embryos from session {session_id}",
+        f"  Imported: {len(result['imported'])} embryo(s)",
+    ]
+
+    if result['imported']:
+        lines.append(f"    {', '.join(result['imported'])}")
+
+    if result['skipped']:
+        lines.append(f"  Skipped (already exist): {len(result['skipped'])}")
+        lines.append(f"    {', '.join(result['skipped'])}")
+
+    if result.get('errors'):
+        lines.append(f"  Errors: {len(result['errors'])}")
+        for err in result['errors']:
+            lines.append(f"    - {err}")
+
+    return "\n".join(lines)
+
+
+@tool(
+    name="list_sessions",
+    description="""List available sessions with their IDs, names, embryo counts, and last active times.
+Use when user asks "show sessions", "what sessions exist", or before importing embryos from another session.
+Returns session IDs that can be used with import_embryos_from_session or to resume a session.""",
+    category=ToolCategory.DATA,
+    examples=[
+        ToolExample("Show available sessions", {}),
+        ToolExample("List recent sessions", {"limit": 5}),
+    ],
+)
+def list_sessions(
+    limit: int = 10,
+    context: Dict = None
+) -> str:
+    """
+    List available sessions.
+
+    Parameters
+    ----------
+    limit : int
+        Maximum number of sessions to show (default: 10)
+    context : dict
+        Execution context
+    """
+    copilot, err = require_copilot(context)
+    if err:
+        return err
+
+    sessions = copilot.list_sessions()
+
+    if not sessions:
+        return "No sessions found."
+
+    sessions = sessions[:limit]
+
+    lines = ["Available Sessions:", ""]
+    lines.append(f"{'ID':<40} {'Embryos':<8} {'Messages':<10} {'Last Active'}")
+    lines.append("-" * 80)
+
+    for s in sessions:
+        session_id = s.get('session_id', 'unknown')[:38]
+        embryo_count = s.get('embryo_count', 0)
+        msg_count = s.get('message_count', 0)
+        last_active = s.get('last_active', '')
+        if last_active:
+            # Format datetime string
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(last_active.replace('Z', '+00:00'))
+                last_active = dt.strftime("%Y-%m-%d %H:%M")
+            except:
+                last_active = last_active[:16]
+
+        lines.append(f"{session_id:<40} {embryo_count:<8} {msg_count:<10} {last_active}")
+
+    lines.append("")
+    lines.append("Use import_embryos_from_session(session_id) to import embryos from a session.")
+
+    return "\n".join(lines)

@@ -829,6 +829,68 @@ class RichCopilotCLI:
                 self.console.print(f"[{theme.error}]x Failed to save session[/]")
             return False  # Handled, continue loop
 
+        elif cmd.startswith('/import-embryos'):
+            # Import embryos from another session
+            theme = get_theme()
+            parts = cmd.split(maxsplit=1)
+
+            # If session ID provided directly
+            if len(parts) > 1:
+                session_id = parts[1].strip()
+                result = self.copilot.import_embryos_from_session(session_id)
+                if result.get('success'):
+                    imported = result.get('imported', [])
+                    self.console.print(f"[{theme.success}]✓ Imported {len(imported)} embryo(s) from {session_id}[/]")
+                    if imported:
+                        self.console.print(f"[{theme.info}]  {', '.join(imported)}[/]")
+                    if result.get('skipped'):
+                        self.console.print(f"[{theme.muted}]  Skipped (exist): {', '.join(result['skipped'])}[/]")
+                else:
+                    self.console.print(f"[{theme.error}]✗ {result.get('error', 'Import failed')}[/]")
+            else:
+                # Show session picker
+                sessions = self.copilot.list_sessions()
+                if not sessions:
+                    self.console.print(f"[{theme.muted}]No sessions found.[/]")
+                else:
+                    # Filter to sessions with embryos
+                    sessions_with_embryos = [s for s in sessions if s.get('embryo_count', 0) > 0]
+                    if not sessions_with_embryos:
+                        self.console.print(f"[{theme.muted}]No sessions with embryos found.[/]")
+                    else:
+                        self.console.print(f"\n[{theme.info}]Sessions with embryos:[/]")
+                        for i, s in enumerate(sessions_with_embryos[:10], 1):
+                            sid = s.get('session_id', '')[:30]
+                            embryo_count = s.get('embryo_count', 0)
+                            last_active = s.get('last_active', '')[:16]
+                            self.console.print(f"  [{theme.secondary}]{i}.[/] {sid} [{theme.info}]({embryo_count} embryos)[/] [{theme.muted}]{last_active}[/]")
+
+                        self.console.print(f"\n[{theme.muted}]Enter number to import, or session ID:[/]")
+                        choice = Prompt.ask("Import from", default="")
+
+                        if choice:
+                            # Check if it's a number
+                            try:
+                                idx = int(choice) - 1
+                                if 0 <= idx < len(sessions_with_embryos):
+                                    session_id = sessions_with_embryos[idx]['session_id']
+                                else:
+                                    self.console.print(f"[{theme.error}]Invalid selection[/]")
+                                    return False
+                            except ValueError:
+                                session_id = choice
+
+                            result = self.copilot.import_embryos_from_session(session_id)
+                            if result.get('success'):
+                                imported = result.get('imported', [])
+                                self.console.print(f"[{theme.success}]✓ Imported {len(imported)} embryo(s)[/]")
+                                if imported:
+                                    self.console.print(f"[{theme.info}]  {', '.join(imported)}[/]")
+                            else:
+                                self.console.print(f"[{theme.error}]✗ {result.get('error', 'Import failed')}[/]")
+
+            return False  # Handled, continue loop
+
         return None  # Not a slash command, send to copilot
 
     def _extract_text_from_content(self, content) -> str:

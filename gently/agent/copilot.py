@@ -783,6 +783,114 @@ class MicroscopyCopilot:
         # Update system prompt with new embryos
         self._update_system_prompt()
 
+    def import_embryos_from_session(self, session_id: str, clear_existing: bool = False) -> Dict:
+        """
+        Import embryos from another session into the current experiment.
+
+        This allows starting a fresh session while preserving embryo positions
+        and calibration data from a previous session.
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID to import embryos from
+        clear_existing : bool
+            If True, clear existing embryos before importing
+
+        Returns
+        -------
+        dict
+            Import result with 'success', 'imported', 'skipped', 'errors'
+        """
+        import json
+
+        # Find session file
+        session_file = self.session_manager.sessions_dir / f"{session_id}.json"
+        if not session_file.exists():
+            return {
+                'success': False,
+                'error': f"Session not found: {session_id}",
+                'imported': [],
+                'skipped': [],
+            }
+
+        try:
+            with open(session_file, 'r') as f:
+                session_data = json.load(f)
+        except Exception as e:
+            return {
+                'success': False,
+                'error': f"Failed to read session: {e}",
+                'imported': [],
+                'skipped': [],
+            }
+
+        # Get embryo states from session
+        embryo_states = session_data.get('embryo_states', {})
+        if not embryo_states:
+            return {
+                'success': False,
+                'error': "No embryos found in session",
+                'imported': [],
+                'skipped': [],
+            }
+
+        # Optionally clear existing embryos
+        if clear_existing:
+            self.experiment.embryos.clear()
+
+        imported = []
+        skipped = []
+        errors = []
+
+        for embryo_id, embryo_data in embryo_states.items():
+            # Skip if already exists and not clearing
+            if embryo_id in self.experiment.embryos and not clear_existing:
+                skipped.append(embryo_id)
+                continue
+
+            try:
+                # Extract position and calibration
+                position = embryo_data.get('stage_position', {})
+                calibration = embryo_data.get('calibration', {})
+
+                # Add embryo
+                self.experiment.add_embryo(
+                    embryo_id=embryo_id,
+                    position=position,
+                    calibration=calibration,
+                    user_label=embryo_data.get('user_label'),
+                )
+
+                # Restore additional state
+                embryo = self.experiment.embryos[embryo_id]
+                embryo.nickname = embryo_data.get('nickname')
+                embryo.interval_seconds = embryo_data.get('interval_seconds', 120)
+                embryo.num_slices = embryo_data.get('num_slices', 50)
+                embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
+                embryo.priority = embryo_data.get('priority', 'normal')
+                # Note: timepoints_acquired is reset to 0 for fresh session
+                # Detection results are NOT imported - this is a fresh start
+
+                imported.append(embryo_id)
+
+            except Exception as e:
+                errors.append(f"{embryo_id}: {str(e)}")
+
+        # Update system prompt with new embryos
+        self._update_system_prompt()
+
+        # Mark as significant action to trigger auto-save
+        self._mark_significant_action("embryo_import")
+
+        return {
+            'success': len(imported) > 0,
+            'imported': imported,
+            'skipped': skipped,
+            'errors': errors,
+            'source_session': session_id,
+        }
+
     async def on_volume_acquired(self, embryo_id: str, timepoint: int, volume_data):
         """
         Callback when a volume is acquired

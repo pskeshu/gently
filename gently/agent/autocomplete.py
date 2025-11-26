@@ -38,6 +38,7 @@ class CopilotCompleter(Completer):
         # Session commands
         '/sessions',
         '/save',
+        '/import-embryos',
     ]
 
     # Common command patterns
