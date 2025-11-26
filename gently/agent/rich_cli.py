@@ -823,8 +823,27 @@ class RichCopilotCLI:
 
         return None  # Not a slash command, send to copilot
 
+    def _extract_text_from_content(self, content) -> str:
+        """Extract text from message content (handles both str and list of blocks)"""
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, list):
+            text_parts = []
+            for block in content:
+                # Handle Claude API objects
+                if hasattr(block, 'text'):
+                    text_parts.append(block.text)
+                # Handle dicts (from JSON restore)
+                elif isinstance(block, dict) and block.get('text'):
+                    text_parts.append(block['text'])
+                # Skip tool_use blocks for display
+            return "\n\n".join(text_parts)
+
+        return str(content) if content else ""
+
     def print_conversation_history(self, limit: int = 10, show_header: bool = True):
-        """Print recent conversation history"""
+        """Print recent conversation history with same formatting as live session"""
         theme = get_theme()
         history = self.copilot.conversation_history[-limit:]
 
@@ -843,43 +862,32 @@ class RichCopilotCLI:
         for msg in history:
             role = msg.get('role', 'unknown')
             content = msg.get('content', '')
+            text = self._extract_text_from_content(content)
 
-            # Handle text content
-            if isinstance(content, str):
-                text = content[:500] + "..." if len(content) > 500 else content
+            if not text:
+                continue
 
-                if role == 'user':
-                    self.console.print(Panel(
-                        Text(text, style=theme.user),
-                        title=theme.icon_user,
-                        border_style=theme.user,
-                        box=box.SIMPLE,
-                    ))
-                elif role == 'assistant':
-                    self.console.print(Panel(
-                        Text(text, style=theme.copilot),
-                        title=theme.icon_copilot,
-                        border_style=theme.copilot,
-                        box=box.SIMPLE,
-                    ))
+            if role == 'user':
+                # Same format as print_user_message
+                panel = Panel(
+                    Text(text, style=theme.user),
+                    title=f"[{theme.user} bold]{theme.icon_user}[/]",
+                    title_align="left",
+                    border_style=theme.user,
+                    box=box.ROUNDED,
+                )
+                self.console.print(panel)
 
-            # Handle content blocks (may include tool calls)
-            elif isinstance(content, list):
-                text_parts = []
-                for block in content:
-                    if hasattr(block, 'text'):
-                        text_parts.append(block.text)
-                    elif hasattr(block, 'type') and block.type == 'tool_use':
-                        text_parts.append(f"[Tool: {block.name}]")
-
-                text = " ".join(text_parts)[:500]
-                if role == 'assistant':
-                    self.console.print(Panel(
-                        Text(text, style=theme.copilot),
-                        title=theme.icon_copilot,
-                        border_style=theme.copilot,
-                        box=box.SIMPLE,
-                    ))
+            elif role == 'assistant':
+                # Same format as print_copilot_message (with markdown)
+                panel = Panel(
+                    Markdown(text),
+                    title=f"[{theme.copilot} bold]{theme.icon_copilot}[/]",
+                    title_align="left",
+                    border_style=theme.copilot,
+                    box=box.ROUNDED,
+                )
+                self.console.print(panel)
 
         self.console.print()
 
