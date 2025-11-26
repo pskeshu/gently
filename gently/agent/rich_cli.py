@@ -659,6 +659,147 @@ class RichCopilotCLI:
 
         self.console.print(table)
 
+    def print_embryo_details(self, embryo):
+        """Print detailed view of a single embryo"""
+        theme = get_theme()
+
+        # Build title with nickname if present
+        title = f"{embryo.id}"
+        if embryo.nickname:
+            title += f' ("{embryo.nickname}")'
+        if embryo.user_label:
+            title += f" [{embryo.user_label}]"
+
+        sections = []
+
+        # === Identity & Position ===
+        pos = embryo.stage_position or {}
+        x = pos.get('x', 0)
+        y = pos.get('y', 0)
+        identity_lines = [
+            f"[{theme.secondary}]Stage Position:[/] X={x:.1f} µm, Y={y:.1f} µm",
+            f"[{theme.secondary}]Detection Confidence:[/] {embryo.detection_confidence:.1%}" if embryo.detection_confidence else "",
+        ]
+        sections.append(("Position", [l for l in identity_lines if l]))
+
+        # === Calibration ===
+        cal = embryo.calibration or {}
+        if cal:
+            cal_lines = []
+            if 'piezo_center' in cal:
+                cal_lines.append(f"[{theme.secondary}]Piezo Center:[/] {cal['piezo_center']:.2f} µm")
+            if 'piezo_amplitude' in cal:
+                cal_lines.append(f"[{theme.secondary}]Piezo Amplitude:[/] {cal['piezo_amplitude']:.2f} µm")
+            if 'galvo_center' in cal:
+                cal_lines.append(f"[{theme.secondary}]Galvo Center:[/] {cal['galvo_center']:.3f} V")
+            if 'galvo_amplitude' in cal:
+                cal_lines.append(f"[{theme.secondary}]Galvo Amplitude:[/] {cal['galvo_amplitude']:.3f} V")
+
+            # Any other calibration keys
+            shown_keys = {'piezo_center', 'piezo_amplitude', 'galvo_center', 'galvo_amplitude'}
+            for key, val in cal.items():
+                if key not in shown_keys:
+                    cal_lines.append(f"[{theme.secondary}]{key}:[/] {val}")
+
+            if cal_lines:
+                sections.append(("Calibration", cal_lines))
+        else:
+            sections.append(("Calibration", [f"[{theme.muted}]Not calibrated[/]"]))
+
+        # === Acquisition Settings ===
+        acq_lines = [
+            f"[{theme.secondary}]Interval:[/] {embryo.interval_seconds}s",
+            f"[{theme.secondary}]Slices:[/] {embryo.num_slices}",
+            f"[{theme.secondary}]Exposure:[/] {embryo.exposure_ms} ms",
+            f"[{theme.secondary}]Priority:[/] {embryo.priority}",
+        ]
+        sections.append(("Acquisition Settings", acq_lines))
+
+        # === Status ===
+        status_lines = []
+        if embryo.should_skip:
+            status_lines.append(f"[{theme.error}]⏸ Skipped:[/] {embryo.skip_reason or 'No reason given'}")
+        else:
+            status_lines.append(f"[{theme.success}]● Active[/]")
+
+        status_lines.append(f"[{theme.secondary}]Timepoints Acquired:[/] {embryo.timepoints_acquired}")
+
+        if embryo.last_imaged:
+            elapsed = (datetime.now() - embryo.last_imaged).total_seconds()
+            if elapsed < 60:
+                time_str = f"{int(elapsed)}s ago"
+            elif elapsed < 3600:
+                time_str = f"{int(elapsed / 60)}m ago"
+            else:
+                time_str = embryo.last_imaged.strftime("%Y-%m-%d %H:%M:%S")
+            status_lines.append(f"[{theme.secondary}]Last Imaged:[/] {time_str}")
+        else:
+            status_lines.append(f"[{theme.secondary}]Last Imaged:[/] Never")
+
+        sections.append(("Status", status_lines))
+
+        # === Hatching Status ===
+        if embryo.hatching_status:
+            hatch_lines = []
+            if embryo.hatching_status.get('hatched') or embryo.hatching_status.get('detected'):
+                hatch_lines.append(f"[{theme.success}]✓ Hatched[/]")
+                if 'timepoint' in embryo.hatching_status:
+                    hatch_lines.append(f"[{theme.secondary}]Timepoint:[/] {embryo.hatching_status['timepoint']}")
+                if 'confidence' in embryo.hatching_status:
+                    hatch_lines.append(f"[{theme.secondary}]Confidence:[/] {embryo.hatching_status['confidence']}")
+            else:
+                hatch_lines.append(f"[{theme.muted}]Not hatched[/]")
+            sections.append(("Hatching", hatch_lines))
+
+        # === Detection Results ===
+        if embryo.detection_results:
+            det_lines = []
+            for detector_name, results in embryo.detection_results.items():
+                count = len(results)
+                detected = any(r.get('detected', False) for r in results)
+                latest = results[-1] if results else {}
+
+                # Status indicator
+                if detected:
+                    status_icon = f"[{theme.success}]✓[/]"
+                else:
+                    status_icon = f"[{theme.muted}]○[/]"
+
+                det_lines.append(f"{status_icon} [{theme.info}]{detector_name}[/] ({count} runs)")
+
+                # Show latest result summary
+                if latest:
+                    latest_detected = latest.get('detected', False)
+                    latest_conf = latest.get('confidence', 'N/A')
+                    det_lines.append(f"    Latest: detected={latest_detected}, confidence={latest_conf}")
+            sections.append(("Detection Results", det_lines))
+        else:
+            sections.append(("Detection Results", [f"[{theme.muted}]No detections run[/]"]))
+
+        # === Focus History ===
+        if hasattr(embryo, 'focus_history') and embryo.focus_history:
+            focus_summary = embryo.get_focus_summary()
+            focus_lines = focus_summary.split('\n')
+            sections.append(("Focus History", focus_lines))
+
+        # === Build the panel content ===
+        content_parts = []
+        for section_name, lines in sections:
+            content_parts.append(f"[bold {theme.info}]{section_name}[/]")
+            for line in lines:
+                content_parts.append(f"  {line}")
+            content_parts.append("")
+
+        content = "\n".join(content_parts).rstrip()
+
+        panel = Panel(
+            content,
+            title=f"[bold]{title}[/]",
+            border_style=theme.secondary,
+            padding=(1, 2),
+        )
+        self.console.print(panel)
+
     async def stream_copilot_response(self, message: str):
         """
         Handle message with streaming response display
@@ -740,9 +881,24 @@ class RichCopilotCLI:
             self.print_detector_table(detectors)
             return False  # Handled, continue loop
 
-        elif cmd == '/embryos':
-            # List embryos
-            self.print_embryo_table(self.copilot.experiment.embryos)
+        elif cmd.startswith('/embryos'):
+            # List embryos or show details for specific embryo
+            parts = cmd.split(maxsplit=1)
+            if len(parts) > 1:
+                # Show details for specific embryo
+                embryo_id = parts[1].strip()
+                embryo = self.copilot.experiment.get_embryo_by_any_name(embryo_id)
+                if embryo:
+                    self.print_embryo_details(embryo)
+                else:
+                    theme = get_theme()
+                    available = list(self.copilot.experiment.embryos.keys())
+                    self.console.print(f"[{theme.error}]Embryo '{embryo_id}' not found.[/]")
+                    if available:
+                        self.console.print(f"[{theme.muted}]Available: {', '.join(available)}[/]")
+            else:
+                # List all embryos
+                self.print_embryo_table(self.copilot.experiment.embryos)
             return False  # Handled, continue loop
 
         elif cmd == '/history':
