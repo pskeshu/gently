@@ -15,6 +15,7 @@ from . import data_tools
 from . import timelapse_tools
 from . import session_tools
 from . import focus_tools
+from . import interaction_tools
 
 # Import tool registry utilities
 from ..tool_registry import get_tool_registry, ToolCategory

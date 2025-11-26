@@ -98,6 +98,10 @@ class EmbryoState:
     should_skip: bool = False
     skip_reason: Optional[str] = None
 
+    # Light exposure tracking (for phototoxicity monitoring)
+    exposure_count: int = 0  # Number of imaging events (snaps + volumes)
+    total_exposure_ms: float = 0.0  # Cumulative laser-on time in milliseconds
+
     # Analysis Results (cached)
     hatching_status: Dict = field(default_factory=dict)
     # {hatched: bool, confidence: str, timepoint: int}
@@ -459,6 +463,35 @@ class EmbryoState:
 
         return " | ".join(status_parts)
 
+    def record_exposure(self, exposure_ms: float, num_frames: int = 1):
+        """
+        Record light exposure for phototoxicity tracking.
+
+        Parameters
+        ----------
+        exposure_ms : float
+            Exposure time per frame in milliseconds
+        num_frames : int
+            Number of frames captured (1 for snap, num_slices for volume)
+        """
+        self.exposure_count += 1
+        self.total_exposure_ms += exposure_ms * num_frames
+
+    def get_exposure_summary(self) -> str:
+        """Get human-readable exposure summary"""
+        if self.exposure_count == 0:
+            return "No light exposure recorded"
+
+        total_sec = self.total_exposure_ms / 1000
+        if total_sec < 1:
+            time_str = f"{self.total_exposure_ms:.0f}ms"
+        elif total_sec < 60:
+            time_str = f"{total_sec:.1f}s"
+        else:
+            time_str = f"{total_sec / 60:.1f}min"
+
+        return f"{self.exposure_count} exposures, {time_str} total"
+
     def to_dict(self) -> Dict:
         """Serialize for API responses"""
         return {
@@ -466,6 +499,8 @@ class EmbryoState:
             'nickname': self.nickname,
             'user_label': self.user_label,
             'stage_position': self.stage_position,
+            'calibration': self.calibration,
+            'detection_confidence': self.detection_confidence,
             'interval_seconds': self.interval_seconds,
             'num_slices': self.num_slices,
             'exposure_ms': self.exposure_ms,
@@ -474,6 +509,8 @@ class EmbryoState:
             'timepoints_acquired': self.timepoints_acquired,
             'should_skip': self.should_skip,
             'skip_reason': self.skip_reason,
+            'exposure_count': self.exposure_count,
+            'total_exposure_ms': self.total_exposure_ms,
             'hatching_status': self.hatching_status,
             'recent_analyses': {
                 'morphology': self.morphology_history[-5:] if self.morphology_history else [],

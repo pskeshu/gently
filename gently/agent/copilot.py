@@ -115,6 +115,7 @@ class MicroscopyCopilot:
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
+        self.choice_handler: Optional[Callable] = None  # For interactive choice UI
 
         # Event bus for async messaging
         self._event_bus = get_event_bus()
@@ -570,6 +571,9 @@ class MicroscopyCopilot:
             Tool result content blocks
         """
         import time
+        import json
+        from .tools.interaction_tools import CHOICE_RESPONSE_TYPE
+
         results = []
 
         for block in content_blocks:
@@ -580,6 +584,18 @@ class MicroscopyCopilot:
 
                 try:
                     result = await self._execute_single_tool(block.name, block.input)
+
+                    # Check if result is a choice request that needs UI handling
+                    if self.choice_handler and isinstance(result, str):
+                        try:
+                            choice_data = json.loads(result)
+                            if isinstance(choice_data, dict) and choice_data.get("_type") == CHOICE_RESPONSE_TYPE:
+                                # Call choice handler to get user selection
+                                user_selection = await self.choice_handler(choice_data)
+                                result = user_selection  # Replace with actual selection
+                        except (json.JSONDecodeError, TypeError):
+                            pass  # Not a choice request, use original result
+
                 except Exception as e:
                     result = f"Error: {str(e)}"
                     is_error = True

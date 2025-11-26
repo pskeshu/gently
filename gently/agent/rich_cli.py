@@ -138,6 +138,9 @@ class RichCopilotCLI:
             mouse_support=False,  # Disable mouse support to allow terminal scrolling
         )
 
+        # Wire up choice handler for interactive selection UI
+        self.copilot.choice_handler = self.interactive_choice_picker
+
         # State
         self._running = False
         self._last_status_update = None
@@ -601,6 +604,156 @@ class RichCopilotCLI:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
             return None
 
+    async def interactive_choice_picker(self, choice_data: Dict) -> str:
+        """
+        Show interactive choice picker for tool-generated choices.
+
+        Parameters
+        ----------
+        choice_data : dict
+            Choice request from ask_user_choice tool containing:
+            - question: str
+            - options: List[{id, label, description?}]
+            - allow_multiple: bool
+            - default_id: str?
+
+        Returns
+        -------
+        str
+            Selected option ID (or comma-separated IDs if multiple)
+        """
+        theme = get_theme()
+
+        question = choice_data.get('question', 'Select an option:')
+        options = choice_data.get('options', [])
+        allow_multiple = choice_data.get('allow_multiple', False)
+        default_id = choice_data.get('default_id')
+
+        if not options:
+            return "Error: No options provided"
+
+        # Find default index
+        default_idx = 0
+        if default_id:
+            for i, opt in enumerate(options):
+                if opt.get('id') == default_id:
+                    default_idx = i
+                    break
+
+        # State for the picker
+        selected_idx = [default_idx]
+        selected_ids = [set()]  # For multiple selection
+        result = [None]
+        cancelled = [False]
+
+        # Key bindings
+        kb = KeyBindings()
+
+        @kb.add('up')
+        @kb.add('k')
+        def move_up(event):
+            selected_idx[0] = max(0, selected_idx[0] - 1)
+
+        @kb.add('down')
+        @kb.add('j')
+        def move_down(event):
+            selected_idx[0] = min(len(options) - 1, selected_idx[0] + 1)
+
+        @kb.add('space')
+        def toggle_select(event):
+            if allow_multiple:
+                opt_id = options[selected_idx[0]].get('id')
+                if opt_id in selected_ids[0]:
+                    selected_ids[0].discard(opt_id)
+                else:
+                    selected_ids[0].add(opt_id)
+
+        @kb.add('enter')
+        def select(event):
+            if allow_multiple:
+                if selected_ids[0]:
+                    result[0] = ','.join(sorted(selected_ids[0]))
+                else:
+                    # If nothing selected, select current
+                    result[0] = options[selected_idx[0]].get('id')
+            else:
+                result[0] = options[selected_idx[0]].get('id')
+            event.app.exit()
+
+        @kb.add('escape')
+        @kb.add('q')
+        def cancel(event):
+            cancelled[0] = True
+            event.app.exit()
+
+        def get_formatted_text():
+            text = f'<b>{question}</b>\n'
+            if allow_multiple:
+                text += '<style fg="#888888">(↑/↓ navigate, Space toggle, Enter confirm, Esc cancel)</style>\n'
+            else:
+                text += '<style fg="#888888">(↑/↓ navigate, Enter select, Esc cancel)</style>\n'
+            text += '─' * 60 + '\n'
+
+            for i, opt in enumerate(options):
+                is_cursor = (i == selected_idx[0])
+                is_selected = opt.get('id') in selected_ids[0] if allow_multiple else False
+
+                # Build marker
+                if allow_multiple:
+                    check = '✓' if is_selected else '○'
+                    marker = f'{check} '
+                else:
+                    marker = ''
+
+                cursor = '▶ ' if is_cursor else '  '
+
+                label = opt.get('label', opt.get('id', f'Option {i+1}'))
+                desc = opt.get('description', '')
+
+                if is_cursor:
+                    line = f'<style bg="#0066cc" fg="white"><b>{cursor}{marker}{label}</b>'
+                    if desc:
+                        line += f' <style fg="#cccccc">- {desc}</style>'
+                    line += '</style>\n'
+                else:
+                    line = f'{cursor}{marker}<style fg="#aaaaaa">{label}</style>'
+                    if desc:
+                        line += f' <style fg="#666666">- {desc}</style>'
+                    line += '\n'
+
+                text += line
+
+            text += '─' * 60
+            return HTML(text)
+
+        # Create the application
+        layout = Layout(
+            HSplit([
+                Window(
+                    content=FormattedTextControl(get_formatted_text),
+                    wrap_lines=False
+                )
+            ])
+        )
+
+        app = Application(
+            layout=layout,
+            key_bindings=kb,
+            full_screen=False,
+            mouse_support=False
+        )
+
+        self.console.print()  # Add spacing
+
+        try:
+            await app.run_async()
+            if cancelled[0]:
+                return "cancelled"
+            return result[0] or "cancelled"
+        except Exception as e:
+            self.console.print(f"[{theme.error}]Error: {e}[/]")
+            return "error"
+
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
         theme = get_theme()
@@ -737,6 +890,22 @@ class RichCopilotCLI:
             status_lines.append(f"[{theme.secondary}]Last Imaged:[/] Never")
 
         sections.append(("Status", status_lines))
+
+        # === Light Exposure ===
+        exposure_lines = []
+        if hasattr(embryo, 'exposure_count') and embryo.exposure_count > 0:
+            exposure_lines.append(f"[{theme.secondary}]Exposures:[/] {embryo.exposure_count}")
+            total_ms = getattr(embryo, 'total_exposure_ms', 0)
+            if total_ms < 1000:
+                time_str = f"{total_ms:.0f} ms"
+            elif total_ms < 60000:
+                time_str = f"{total_ms / 1000:.1f} s"
+            else:
+                time_str = f"{total_ms / 60000:.1f} min"
+            exposure_lines.append(f"[{theme.secondary}]Total Laser Time:[/] {time_str}")
+        else:
+            exposure_lines.append(f"[{theme.muted}]No light exposure recorded[/]")
+        sections.append(("Light Exposure", exposure_lines))
 
         # === Hatching Status ===
         if embryo.hatching_status:

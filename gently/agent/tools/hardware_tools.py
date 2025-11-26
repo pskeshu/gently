@@ -241,6 +241,8 @@ async def acquire_volume(
             embryo.timepoints_acquired += 1
             from datetime import datetime
             embryo.last_imaged = datetime.now()
+            # Record light exposure (num_slices frames at exposure_ms each)
+            embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
             return f"Acquired volume for {embryo.id}\nShape: {result.get('shape', 'unknown')}"
         else:
             return f"Acquisition failed: {result.get('error', 'Unknown error')}"
@@ -342,12 +344,14 @@ async def capture_lightsheet(
             image = result.get('image')
             run_uid = result.get('run_uid', 'unknown')
 
-            # Update embryo's last_imaged if specified
+            # Update embryo's last_imaged and exposure tracking if specified
             if embryo_id and copilot:
                 embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
                 if embryo:
                     from datetime import datetime
                     embryo.last_imaged = datetime.now()
+                    # Default lightsheet exposure is 50ms
+                    embryo.record_exposure(exposure_ms=50.0, num_frames=1)
 
             if image is not None and show:
                 # Display the image
