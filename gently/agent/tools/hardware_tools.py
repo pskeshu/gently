@@ -256,7 +256,7 @@ async def view_image(
     requires_microscope=True,
 )
 async def capture_lightsheet(
-    piezo_position: float = 50.0,
+    piezo_position: float = 0.0,
     galvo_position: float = 0.0,
     show: bool = True,
     context: Dict = None
