@@ -320,6 +320,85 @@ Copilot responds: "I've adjusted embryo 1 parameters:
 - Priority: normal → high (imaged first in queue)
 
 These changes take effect at the next timepoint."
+
+## Example 5: Adaptive Timelapse
+
+User: "Run a timelapse on all embryos until each one hatches"
+
+Copilot uses tools:
+1. enable_preset_detector(preset="hatching", action_mode="auto")
+2. start_adaptive_timelapse(stop_condition="hatching", interval_seconds=120)
+
+Copilot responds: "I've started an adaptive timelapse for all 5 embryos:
+- Each embryo will be imaged every 2 minutes
+- The hatching detector is enabled and will automatically stop imaging each embryo when it hatches
+- You can check status anytime with 'show timelapse status'
+- The timelapse runs in the background - you can still ask me questions while it's running"
+
+## Example 6: Mid-Timelapse Control
+
+User: "Stop imaging embryo 3, it's dead"
+
+Copilot uses tool: stop_timelapse_embryo
+Input: {"embryo_id": "embryo_3", "reason": "embryo dead"}
+
+Copilot responds: "I've stopped imaging embryo_3 (reason: embryo dead). The timelapse continues for the other 4 embryos."
+
+User: "Speed up imaging for embryo 2"
+
+Copilot uses tool: modify_timelapse_embryo
+Input: {"embryo_id": "embryo_2", "interval_seconds": 30}
+
+Copilot responds: "I've changed embryo_2's interval from 120s to 30s. It will be imaged more frequently now."
+"""
+
+
+# Adaptive timelapse capabilities
+ADAPTIVE_TIMELAPSE = """
+# Adaptive Timelapse System
+
+The copilot includes a powerful adaptive timelapse system that runs in the background.
+
+## Key Features
+
+1. **Non-blocking operation**: The timelapse runs independently - you can still chat with the user
+2. **Per-embryo stop conditions**: Each embryo can stop at different times (e.g., when hatching)
+3. **Dynamic intervals**: Adjust imaging frequency per-embryo during the experiment
+4. **Detector integration**: Stop conditions triggered by visual detection (hatching, comma stage, etc.)
+
+## Stop Conditions
+
+- `manual`: Only stops when user requests
+- `hatching`: Stops when hatching is detected
+- `comma`: Stops at comma stage
+- `timepoints:N`: Stops after N timepoints
+- `duration:Xh`: Stops after X hours
+
+## Typical Workflow
+
+1. User: "Run timelapse until all embryos hatch"
+2. Copilot:
+   - Enables hatching detector (enable_preset_detector)
+   - Starts timelapse with stop_condition="hatching"
+   - Reports progress on request
+   - Each embryo stops automatically when it hatches
+
+## Available Preset Detectors
+
+- **hatching**: Detects eggshell breach and embryo emergence
+- **comma**: Detects comma stage morphology
+- **pretzel**: Detects 3-fold/pretzel stage
+- **gastrulation**: Detects cell internalization
+- **first_division**: Detects 1-cell to 2-cell transition
+
+## Commands During Timelapse
+
+- Query status: get_timelapse_status
+- Stop one embryo: stop_timelapse_embryo
+- Change interval: modify_timelapse_embryo
+- Pause all: pause_timelapse
+- Resume: resume_timelapse
+- Stop all: stop_timelapse
 """
 
 
@@ -354,6 +433,8 @@ Your role is to:
 {DISPIM_HARDWARE}
 
 {BLUESKY_PLAN_EXAMPLES}
+
+{ADAPTIVE_TIMELAPSE}
 
 # Current Experiment State
 

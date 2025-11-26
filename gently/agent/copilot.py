@@ -23,6 +23,8 @@ from .prompts import build_system_prompt, build_context_message
 from .tool_registry import get_tool_registry
 from .detector_registry import DetectorRegistry
 from .detection_queue import DetectionQueue
+from .interaction_logger import InteractionLogger
+from .timelapse_orchestrator import TimelapseOrchestrator
 from ..session import SessionManager
 from ..core import EventType, get_event_bus, emit
 
@@ -120,6 +122,12 @@ class MicroscopyCopilot:
         # Event bus for async messaging
         self._event_bus = get_event_bus()
 
+        # Interaction logger for structured logging (research data collection)
+        self.interaction_logger: Optional[InteractionLogger] = None
+
+        # Timelapse orchestrator (initialized when microscope connected)
+        self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
+
         # Initialize or resume session
         if session_id:
             self.resume_session(session_id)
@@ -129,12 +137,49 @@ class MicroscopyCopilot:
                 'session_id': self.session_id,
             })
 
+        # Initialize interaction logger (for research data collection)
+        self._init_interaction_logger()
+
+        # Initialize timelapse orchestrator (if microscope connected)
+        self._init_timelapse_orchestrator()
+
         # Build initial system prompt
         self._update_system_prompt()
 
     def _update_system_prompt(self):
         """Rebuild system prompt with current experiment state"""
         self.system_prompt = build_system_prompt(self.experiment)
+
+    def _init_interaction_logger(self):
+        """Initialize the interaction logger for structured logging"""
+        try:
+            self.interaction_logger = InteractionLogger(
+                storage_path=self.storage_path,
+                session_id=self.session_id or "unknown",
+                model=self.model,
+            )
+        except Exception as e:
+            # Don't fail if logger can't be initialized
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to init interaction logger: {e}")
+            self.interaction_logger = None
+
+    def _init_timelapse_orchestrator(self):
+        """Initialize the timelapse orchestrator if microscope is connected"""
+        if not self._has_microscope():
+            return
+
+        try:
+            self.timelapse_orchestrator = TimelapseOrchestrator(
+                microscope_client=self.client,
+                experiment_state=self.experiment,
+                detection_queue=self.detection_queue,
+                on_volume_callback=self.on_volume_acquired,
+            )
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
+            self.timelapse_orchestrator = None
 
     def _has_microscope(self) -> bool:
         """Check if microscope server connection is available"""
@@ -407,6 +452,20 @@ class MicroscopyCopilot:
         str
             Claude's response
         """
+        import time
+        start_time = time.time()
+
+        # Start interaction logging
+        interaction = None
+        if self.interaction_logger:
+            interaction = self.interaction_logger.start_interaction(
+                user_prompt=user_message,
+                system_state={
+                    'embryos': {eid: e.to_dict() for eid, e in self.experiment.embryos.items()},
+                    'acquisition_status': self.experiment.acquisition_status,
+                }
+            )
+
         # Update system prompt with current state
         self._update_system_prompt()
 
@@ -416,31 +475,10 @@ class MicroscopyCopilot:
             "content": user_message
         })
 
-        # Call Claude with tools
-        response = await asyncio.to_thread(
-            self.claude.messages.create,
-            model=self.model,
-            system=self.system_prompt,
-            messages=self.conversation_history,
-            tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
-            max_tokens=4096
-        )
+        error_occurred = None
 
-        # Process tool calls
-        while response.stop_reason == "tool_use":
-            tool_results = await self._execute_tools(response.content)
-
-            # Continue conversation with tool results
-            self.conversation_history.append({
-                "role": "assistant",
-                "content": response.content
-            })
-            self.conversation_history.append({
-                "role": "user",
-                "content": tool_results
-            })
-
-            # Get next response
+        try:
+            # Call Claude with tools
             response = await asyncio.to_thread(
                 self.claude.messages.create,
                 model=self.model,
@@ -450,22 +488,128 @@ class MicroscopyCopilot:
                 max_tokens=4096
             )
 
-        # Extract text response
-        assistant_message = ""
-        for block in response.content:
-            if hasattr(block, 'text'):
-                assistant_message += block.text
+            # Process tool calls
+            while response.stop_reason == "tool_use":
+                tool_results = await self._execute_tools_with_logging(
+                    response.content, interaction
+                )
 
-        # Add to history
-        self.conversation_history.append({
-            "role": "assistant",
-            "content": response.content
-        })
+                # Continue conversation with tool results
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": response.content
+                })
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": tool_results
+                })
+
+                # Get next response
+                response = await asyncio.to_thread(
+                    self.claude.messages.create,
+                    model=self.model,
+                    system=self.system_prompt,
+                    messages=self.conversation_history,
+                    tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                    max_tokens=4096
+                )
+
+            # Extract text response
+            assistant_message = ""
+            for block in response.content:
+                if hasattr(block, 'text'):
+                    assistant_message += block.text
+
+            # Add to history
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response.content
+            })
+
+        except Exception as e:
+            import traceback
+            error_occurred = str(e)
+            error_tb = traceback.format_exc()
+            assistant_message = f"Error: {error_occurred}"
+
+            # Log error
+            if interaction and self.interaction_logger:
+                self.interaction_logger.complete_interaction(
+                    interaction=interaction,
+                    assistant_response=assistant_message,
+                    total_duration_seconds=time.time() - start_time,
+                    error=error_occurred,
+                    error_traceback=error_tb,
+                )
+            raise
+
+        # Complete interaction logging
+        if interaction and self.interaction_logger:
+            self.interaction_logger.complete_interaction(
+                interaction=interaction,
+                assistant_response=assistant_message,
+                total_duration_seconds=time.time() - start_time,
+            )
 
         # Auto-save after conversation turn
         self._auto_save()
 
         return assistant_message
+
+    async def _execute_tools_with_logging(self, content_blocks, interaction) -> List[Dict]:
+        """
+        Execute Claude's tool calls with interaction logging
+
+        Parameters
+        ----------
+        content_blocks : list
+            Content blocks from Claude response (may include tool uses)
+        interaction : InteractionRecord
+            Current interaction being logged
+
+        Returns
+        -------
+        list of dict
+            Tool result content blocks
+        """
+        import time
+        results = []
+
+        for block in content_blocks:
+            if block.type == "tool_use":
+                start_time = time.time()
+                is_error = False
+                error_message = None
+
+                try:
+                    result = await self._execute_single_tool(block.name, block.input)
+                except Exception as e:
+                    result = f"Error: {str(e)}"
+                    is_error = True
+                    error_message = str(e)
+
+                duration = time.time() - start_time
+
+                # Log tool call
+                if interaction and self.interaction_logger:
+                    self.interaction_logger.record_tool_call(
+                        interaction=interaction,
+                        tool_name=block.name,
+                        tool_input=block.input,
+                        result=result,
+                        duration_seconds=duration,
+                        is_error=is_error,
+                        error_message=error_message,
+                    )
+
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                    "is_error": is_error,
+                })
+
+        return results
 
     async def _call_claude_stream(self):
         """
@@ -800,6 +944,18 @@ class MicroscopyCopilot:
                 'timepoint': result.timepoint,
                 'confidence': result.confidence.value if result.confidence else None,
             })
+
+        # Notify timelapse orchestrator of detection result
+        if self.timelapse_orchestrator:
+            self.timelapse_orchestrator.on_detection_result(
+                embryo_id=embryo_id,
+                detector_name=detector.name,
+                result={
+                    'detected': result.detected,
+                    'confidence': result.confidence.value if result.confidence else None,
+                    'timepoint': result.timepoint,
+                }
+            )
 
         # Handle based on action mode
         if detector.actions.mode == DetectionMode.PASSIVE:

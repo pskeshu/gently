@@ -680,6 +680,86 @@ def add_detector(
 
 
 @tool(
+    name="enable_preset_detector",
+    description="Enable a preset detector (hatching, comma, pretzel, gastrulation, first_division). Useful for setting up 'run until hatching' workflows.",
+    category=ToolCategory.DETECTION,
+)
+def enable_preset_detector(
+    preset: str,
+    action_mode: str = "auto",
+    min_timepoint: int = None,
+    context: Dict = None
+) -> str:
+    """
+    Enable a preset detector for adaptive experiments
+
+    Parameters
+    ----------
+    preset : str
+        Preset name: "hatching", "comma", "pretzel", "gastrulation", "first_division"
+    action_mode : str
+        Action mode: "passive" (just log), "recommend" (suggest), "auto" (apply changes)
+    min_timepoint : int, optional
+        Don't run detector before this timepoint (e.g., 50 to skip early timepoints)
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode
+    from .detector_registry import get_detector_presets
+
+    presets = get_detector_presets()
+
+    if preset not in presets:
+        available = ", ".join(presets.keys())
+        return f"Unknown preset '{preset}'. Available: {available}"
+
+    preset_data = presets[preset]
+
+    # Check if already exists
+    existing = copilot.detector_registry.get(preset)
+    if existing:
+        existing.enabled = True
+        copilot.detector_registry.save()
+        return f"Enabled existing '{preset}' detector"
+
+    # Create detector from preset
+    conditions = DetectorConditions(min_timepoint=min_timepoint)
+    actions = DetectorActions(mode=DetectionMode(action_mode))
+
+    from .detector import ConfidenceLevel
+    detector = Detector(
+        name=preset_data['name'],
+        description=preset_data['description'],
+        detection_prompt=preset_data['prompt'],
+        enabled=True,
+        conditions=conditions,
+        actions=actions,
+        use_temporal_context=preset_data.get('use_temporal_context', True),
+        temporal_context_size=preset_data.get('temporal_context_size', 5),
+        confidence_threshold=ConfidenceLevel(preset_data.get('confidence_threshold', 'MEDIUM')),
+    )
+
+    copilot.detector_registry.add(detector)
+    copilot._mark_significant_action("detector_config")
+
+    return (
+        f"Enabled '{preset}' detector\n"
+        f"  Description: {preset_data['description']}\n"
+        f"  Action mode: {action_mode}\n"
+        f"  Min timepoint: {min_timepoint or 'none'}"
+    )
+
+
+@tool(
     name="generate_detector_prompt",
     description="Generate an optimal detection prompt from a description",
     category=ToolCategory.DETECTION,
@@ -1505,6 +1585,558 @@ async def generate_bluesky_plan(
 
     except Exception as e:
         return f"Error generating plan: {str(e)}"
+
+
+# =============================================================================
+# Timelapse Orchestration Tools
+# =============================================================================
+
+@tool(
+    name="start_adaptive_timelapse",
+    description="Start an adaptive timelapse that runs in the background. Copilot remains responsive while acquisition continues.",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def start_adaptive_timelapse(
+    embryo_ids: List[str] = None,
+    stop_condition: str = "manual",
+    interval_seconds: float = 120.0,
+    condition_value: int = None,
+    context: Dict = None
+) -> str:
+    """
+    Start adaptive timelapse in background
+
+    Parameters
+    ----------
+    embryo_ids : list of str, optional
+        Embryos to image (None = all active embryos)
+    stop_condition : str
+        When to stop: "manual", "hatching", "comma", "timepoints:N", "duration:Xh"
+    interval_seconds : float
+        Default interval between acquisitions
+    condition_value : int, optional
+        Value for stop condition (e.g., number of timepoints)
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Status message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    # Check if orchestrator exists
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "Error: Timelapse orchestrator not initialized. Check microscope connection."
+
+    orchestrator = copilot.timelapse_orchestrator
+
+    try:
+        result = await orchestrator.start(
+            embryo_ids=embryo_ids,
+            stop_condition=stop_condition,
+            base_interval_seconds=interval_seconds,
+            condition_value=condition_value,
+        )
+        return result
+    except Exception as e:
+        return f"Error starting timelapse: {str(e)}"
+
+
+@tool(
+    name="get_timelapse_status",
+    description="Get current status of the running timelapse including per-embryo progress",
+    category=ToolCategory.EXPERIMENT,
+)
+def get_timelapse_status(context: Dict = None) -> str:
+    """
+    Get timelapse status
+
+    Parameters
+    ----------
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Formatted status information
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "Timelapse orchestrator not initialized."
+
+    orchestrator = copilot.timelapse_orchestrator
+    state = orchestrator.get_status()
+    status_dict = state.to_dict()
+
+    # Format nicely
+    lines = [
+        f"Timelapse Status: {status_dict['status'].upper()}",
+        ""
+    ]
+
+    if status_dict['started_at']:
+        lines.append(f"Started: {status_dict['started_at']}")
+        lines.append(f"Duration: {status_dict['duration_minutes']:.1f} minutes")
+        lines.append(f"Total timepoints acquired: {status_dict['total_timepoints']}")
+        lines.append("")
+
+    lines.append(f"Active embryos: {status_dict['active_embryos']}")
+    lines.append(f"Completed embryos: {status_dict['completed_embryos']}")
+    lines.append("")
+
+    if status_dict['next_embryo']:
+        lines.append(f"Next acquisition: {status_dict['next_embryo']} in {status_dict['next_acquisition_in_seconds']:.0f}s")
+        lines.append("")
+
+    # Per-embryo details
+    if status_dict['embryo_details']:
+        lines.append("Embryo Details:")
+        for eid, details in status_dict['embryo_details'].items():
+            status_marker = "✓" if details['is_complete'] else "▶"
+            lines.append(f"  {status_marker} {eid}: t={details['timepoints']} "
+                        f"(interval={details['interval_seconds']}s)")
+            if details['is_complete']:
+                lines.append(f"      Completed: {details['completion_reason']}")
+
+    if status_dict['error']:
+        lines.append("")
+        lines.append(f"Error: {status_dict['error']}")
+
+    return "\n".join(lines)
+
+
+@tool(
+    name="modify_timelapse_embryo",
+    description="Modify parameters for a specific embryo during a running timelapse",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def modify_timelapse_embryo(
+    embryo_id: str,
+    interval_seconds: float = None,
+    stop_condition: str = None,
+    condition_value: int = None,
+    context: Dict = None
+) -> str:
+    """
+    Modify embryo parameters during timelapse
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to modify
+    interval_seconds : float, optional
+        New interval between acquisitions
+    stop_condition : str, optional
+        New stop condition
+    condition_value : int, optional
+        Value for stop condition
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "No timelapse running."
+
+    orchestrator = copilot.timelapse_orchestrator
+
+    try:
+        result = await orchestrator.modify_embryo(
+            embryo_id=embryo_id,
+            interval_seconds=interval_seconds,
+            stop_condition=stop_condition,
+            condition_value=condition_value,
+        )
+        return result
+    except Exception as e:
+        return f"Error modifying embryo: {str(e)}"
+
+
+@tool(
+    name="stop_timelapse_embryo",
+    description="Stop imaging a specific embryo in the timelapse (other embryos continue)",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def stop_timelapse_embryo(
+    embryo_id: str,
+    reason: str = "user_request",
+    context: Dict = None
+) -> str:
+    """
+    Stop imaging a specific embryo
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to stop
+    reason : str
+        Reason for stopping
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "No timelapse running."
+
+    orchestrator = copilot.timelapse_orchestrator
+
+    try:
+        result = await orchestrator.stop_embryo(embryo_id, reason)
+        return result
+    except Exception as e:
+        return f"Error stopping embryo: {str(e)}"
+
+
+@tool(
+    name="stop_timelapse",
+    description="Stop the entire timelapse acquisition",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def stop_timelapse(
+    reason: str = "user_request",
+    context: Dict = None
+) -> str:
+    """
+    Stop entire timelapse
+
+    Parameters
+    ----------
+    reason : str
+        Reason for stopping
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "No timelapse running."
+
+    orchestrator = copilot.timelapse_orchestrator
+
+    try:
+        result = await orchestrator.stop(reason)
+        return result
+    except Exception as e:
+        return f"Error stopping timelapse: {str(e)}"
+
+
+@tool(
+    name="pause_timelapse",
+    description="Pause the timelapse acquisition (can be resumed later)",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def pause_timelapse(context: Dict = None) -> str:
+    """Pause timelapse"""
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "No timelapse running."
+
+    try:
+        result = await copilot.timelapse_orchestrator.pause()
+        return result
+    except Exception as e:
+        return f"Error pausing timelapse: {str(e)}"
+
+
+@tool(
+    name="resume_timelapse",
+    description="Resume a paused timelapse",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def resume_timelapse(context: Dict = None) -> str:
+    """Resume timelapse"""
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "No timelapse to resume."
+
+    try:
+        result = await copilot.timelapse_orchestrator.resume()
+        return result
+    except Exception as e:
+        return f"Error resuming timelapse: {str(e)}"
+
+
+@tool(
+    name="add_interval_speedup_rule",
+    description="Add a rule to automatically speed up imaging when a detector fires (e.g., 'speed up to 30s when pretzel stage detected')",
+    category=ToolCategory.EXPERIMENT,
+)
+def add_interval_speedup_rule(
+    trigger_detector: str,
+    new_interval_seconds: float = 30.0,
+    embryo_ids: List[str] = None,
+    context: Dict = None
+) -> str:
+    """
+    Add interval speedup rule
+
+    Parameters
+    ----------
+    trigger_detector : str
+        Detector that triggers speedup (e.g., "pretzel", "comma")
+    new_interval_seconds : float
+        New interval when triggered
+    embryo_ids : list, optional
+        Only apply to these embryos (None = all)
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "Timelapse orchestrator not initialized."
+
+    orchestrator = copilot.timelapse_orchestrator
+    orchestrator.add_speedup_on_detection(
+        detector_name=trigger_detector,
+        new_interval_seconds=new_interval_seconds,
+        embryo_ids=embryo_ids,
+    )
+
+    msg = f"Added interval rule: speed up to {new_interval_seconds}s when '{trigger_detector}' detector fires"
+    if embryo_ids:
+        msg += f" (for embryos: {', '.join(embryo_ids)})"
+
+    return msg
+
+
+@tool(
+    name="enable_pre_hatching_speedup",
+    description="Enable automatic speedup when embryos approach hatching (triggers on pretzel/3-fold stage detection)",
+    category=ToolCategory.EXPERIMENT,
+)
+def enable_pre_hatching_speedup(
+    fast_interval_seconds: float = 30.0,
+    context: Dict = None
+) -> str:
+    """
+    Enable pre-hatching speedup
+
+    Parameters
+    ----------
+    fast_interval_seconds : float
+        Interval to use after pretzel detection
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Confirmation message
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+        return "Timelapse orchestrator not initialized."
+
+    # Enable pretzel detector if not already enabled
+    from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode, ConfidenceLevel
+    from .detector_registry import get_detector_presets
+
+    presets = get_detector_presets()
+    if 'pretzel' in presets and not copilot.detector_registry.get('pretzel'):
+        preset_data = presets['pretzel']
+        detector = Detector(
+            name='pretzel',
+            description=preset_data['description'],
+            detection_prompt=preset_data['prompt'],
+            enabled=True,
+            conditions=DetectorConditions(),
+            actions=DetectorActions(mode=DetectionMode.AUTO),
+            use_temporal_context=True,
+            temporal_context_size=5,
+            confidence_threshold=ConfidenceLevel.MEDIUM,
+        )
+        copilot.detector_registry.add(detector)
+
+    # Add the speedup rule
+    copilot.timelapse_orchestrator.add_pre_hatching_speedup(fast_interval_seconds)
+
+    return (
+        f"Enabled pre-hatching speedup:\n"
+        f"  - Pretzel detector enabled\n"
+        f"  - When pretzel (3-fold) detected, interval will change to {fast_interval_seconds}s\n"
+        f"  - This helps capture hatching at high temporal resolution"
+    )
+
+
+@tool(
+    name="classify_embryo_stage",
+    description="Use Claude Vision to classify the current developmental stage of an embryo",
+    category=ToolCategory.ANALYSIS,
+)
+async def classify_embryo_stage(
+    embryo_id: str,
+    context: Dict = None
+) -> str:
+    """
+    Classify embryo stage
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to classify
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Stage classification result
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    # Get embryo
+    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+    if not embryo:
+        return f"Embryo '{embryo_id}' not found"
+
+    # Check for recent images
+    if not embryo.recent_images:
+        return f"No images available for {embryo_id}. Acquire a volume first."
+
+    # Get latest image
+    latest = embryo.recent_images[-1]
+
+    # Initialize tracker if needed
+    if not hasattr(copilot, 'developmental_tracker') or copilot.developmental_tracker is None:
+        from .developmental_tracker import DevelopmentalTracker
+        copilot.developmental_tracker = DevelopmentalTracker(
+            claude_client=copilot.claude,
+            model=copilot.model,
+        )
+
+    # Get recent images for context
+    recent = []
+    for img in embryo.recent_images[-5:]:
+        recent.append({
+            'timepoint': img.timepoint,
+            'b64_image': img.max_projection_b64,
+        })
+
+    # Classify
+    result = copilot.developmental_tracker.classify_stage(
+        image_b64=latest.max_projection_b64,
+        embryo_id=embryo.id,
+        timepoint=latest.timepoint,
+        recent_images=recent,
+    )
+
+    lines = [
+        f"Stage Classification for {embryo.id}:",
+        f"  Stage: {result.stage.value}",
+        f"  Confidence: {result.confidence}",
+        f"  Reasoning: {result.reasoning}",
+    ]
+
+    if result.predicted_minutes_to_hatching is not None:
+        hours = result.predicted_minutes_to_hatching / 60
+        lines.append(f"  Predicted time to hatching: ~{hours:.1f} hours ({result.predicted_minutes_to_hatching} min)")
+
+    return "\n".join(lines)
+
+
+@tool(
+    name="get_stage_history",
+    description="Get the developmental stage progression history for an embryo",
+    category=ToolCategory.ANALYSIS,
+)
+def get_stage_history(
+    embryo_id: str,
+    context: Dict = None
+) -> str:
+    """
+    Get stage history
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to query
+    context : dict
+        Execution context
+
+    Returns
+    -------
+    str
+        Stage history summary
+    """
+    copilot = context.get('copilot')
+    if not copilot:
+        return "Error: No copilot context"
+
+    if not hasattr(copilot, 'developmental_tracker') or copilot.developmental_tracker is None:
+        return "No stage classifications recorded yet. Use classify_embryo_stage first."
+
+    summary = copilot.developmental_tracker.get_progression_summary(embryo_id)
+
+    if summary['observations'] == 0:
+        return f"No stage classifications for {embryo_id}. Use classify_embryo_stage first."
+
+    lines = [
+        f"Stage Progression for {embryo_id}:",
+        f"  Current stage: {summary['current_stage']} ({summary['current_confidence']})",
+        f"  Observations: {summary['observations']}",
+        f"  Stages observed: {', '.join(summary['stages_observed'])}",
+    ]
+
+    if summary['predicted_minutes_to_hatching'] is not None:
+        hours = summary['predicted_minutes_to_hatching'] / 60
+        lines.append(f"  Predicted time to hatching: ~{hours:.1f} hours")
+
+    return "\n".join(lines)
 
 
 # Auto-register on import (tools are registered by decorators)
