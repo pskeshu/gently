@@ -612,11 +612,18 @@ class RichCopilotCLI:
         )
 
         table.add_column("ID", style=theme.info)
+        table.add_column("XY (µm)", style=theme.muted)
         table.add_column("Status", justify="center")
         table.add_column("Last Imaging", style=theme.muted)
         table.add_column("Detections", style=theme.success)
 
         for embryo_id, embryo in embryos.items():
+            # XY position
+            pos = getattr(embryo, 'stage_position', {})
+            x = pos.get('x', 0)
+            y = pos.get('y', 0)
+            xy_str = f"{x:.0f}, {y:.0f}"
+
             # Status
             skip = getattr(embryo, 'skip', False)
             status = f"{theme.icon_error} Skipped" if skip else f"{theme.icon_success} Active"
@@ -644,6 +651,7 @@ class RichCopilotCLI:
 
             table.add_row(
                 embryo_id,
+                xy_str,
                 Text(status, style=status_style),
                 last_time,
                 detections_str,
