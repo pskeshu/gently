@@ -349,6 +349,50 @@ class SessionManager:
             'system_prompt': session.system_prompt,
         }
 
+    def update_state(
+        self,
+        conversation: List[Dict],
+        experiment: Dict,
+        system_prompt: str = "",
+    ):
+        """
+        Update session state from copilot (simplified API for auto-save)
+
+        Parameters
+        ----------
+        conversation : list of dict
+            Copilot's conversation history (raw dicts)
+        experiment : dict
+            Experiment state as dict (from experiment.to_dict())
+        system_prompt : str
+            Current system prompt
+        """
+        if not self._current_session:
+            logger.warning("No current session to update")
+            return
+
+        session = self._current_session
+
+        # Update conversation
+        session.conversation = []
+        for msg in conversation:
+            session.conversation.append(ConversationMessage(
+                role=msg.get('role', 'unknown'),
+                content=msg.get('content', ''),
+                timestamp=datetime.now(),
+            ))
+
+        # Update experiment data
+        session.experiment_data = experiment
+
+        # Update embryo states from experiment dict
+        session.embryo_states = experiment.get('embryos', {})
+
+        # Update system prompt
+        session.system_prompt = system_prompt
+
+        self._dirty = True
+
     # ===== Auto-save trigger methods =====
 
     def mark_significant_action(self, action_type: str):
