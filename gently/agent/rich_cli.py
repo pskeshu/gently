@@ -631,8 +631,8 @@ class RichCopilotCLI:
 
             # Last imaging
             last_time = "Never"
-            if hasattr(embryo, 'last_imaging_time') and embryo.last_imaging_time:
-                elapsed = (datetime.now() - embryo.last_imaging_time).total_seconds()
+            if hasattr(embryo, 'last_imaged') and embryo.last_imaged:
+                elapsed = (datetime.now() - embryo.last_imaged).total_seconds()
                 if elapsed < 60:
                     last_time = f"{int(elapsed)}s ago"
                 elif elapsed < 3600:

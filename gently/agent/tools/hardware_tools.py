@@ -306,22 +306,25 @@ async def view_image(
 Use when user says "take a lightsheet image", "lightsheet snap", or wants to see fluorescence at a specific Z position.
 This is a COMPLETE action - do NOT follow up with acquire_volume unless user explicitly asks for a 3D volume.
 If piezo_position is not specified, uses the CURRENT piezo position (preserves focus after fine_focus).
-The galvo_position (default 0) controls light sheet Y offset.""",
+The galvo_position (default 0) controls light sheet Y offset. Optionally specify embryo_id to update that embryo's last_imaged time.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
         ToolExample("Take a lightsheet image", {}),
         ToolExample("Lightsheet snap at piezo 50", {"piezo_position": 50.0}),
+        ToolExample("Capture lightsheet of embryo 1", {"embryo_id": "embryo_1"}),
     ],
 )
 async def capture_lightsheet(
     piezo_position: float = None,
     galvo_position: float = 0.0,
+    embryo_id: str = None,
     show: bool = True,
     context: Dict = None
 ) -> str:
     """Capture and optionally display a single lightsheet image"""
     client = context.get('client')
+    copilot = context.get('copilot')
 
     try:
         # If no piezo position specified, use current position
@@ -338,6 +341,13 @@ async def capture_lightsheet(
         if result.get('success'):
             image = result.get('image')
             run_uid = result.get('run_uid', 'unknown')
+
+            # Update embryo's last_imaged if specified
+            if embryo_id and copilot:
+                embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+                if embryo:
+                    from datetime import datetime
+                    embryo.last_imaged = datetime.now()
 
             if image is not None and show:
                 # Display the image
