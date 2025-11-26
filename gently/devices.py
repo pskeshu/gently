@@ -1739,7 +1739,7 @@ class DiSPIMLightSheetSnap:
     def configure(self,
                   sheet_width_deg: float = 8.0,
                   y_position_deg: float = 0.0,
-                  exposure_ms: float = 5.0):
+                  exposure_ms: float = 50.0):
         """
         Configure light sheet parameters for single snapshot.
 
@@ -1750,7 +1750,7 @@ class DiSPIMLightSheetSnap:
         y_position_deg : float
             Light sheet Y-position offset in degrees (default: 0.0)
         exposure_ms : float
-            Camera exposure time in milliseconds (default: 5.0)
+            Camera exposure time in milliseconds (default: 50.0)
         """
         # Configure scanner for continuous light sheet
         self.scanner.configure_for_calibration()
