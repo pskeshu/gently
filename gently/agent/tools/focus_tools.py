@@ -3,9 +3,16 @@ Focus Tools
 
 Tools for microscope focus operations including fine focus adjustment
 using FFT bandpass or gradient algorithms.
+
+Focus measurements are logged to each embryo's focus_history, building
+a sample-aware focus map over time. This enables:
+- Tracking the piezo-galvo relationship per embryo
+- Detecting focus drift during long timelapses
+- Predicting optimal focus for future acquisitions
 """
 
 from typing import Dict, List, Optional
+from datetime import datetime
 import numpy as np
 
 from ..tool_registry import tool, ToolCategory, ToolExample
@@ -30,6 +37,7 @@ using FFT bandpass or gradient algorithm, fits a Gaussian curve, and optionally 
 Use when user says "focus", "fine focus", "adjust focus", "find best focus", or after moving to an embryo position.
 Default sweep is ±10μm with 1μm steps (21 positions). Algorithm options: 'fft_bandpass' (default, best for lightsheet) or 'gradient'.
 
+If embryo_id is provided, logs the focus measurement to the embryo's focus_history for drift tracking and future reference.
 Returns the optimal piezo position and fit quality (R²). Higher R² indicates more reliable focus detection.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
@@ -37,6 +45,7 @@ Returns the optimal piezo position and fit quality (R²). Higher R² indicates m
         ToolExample("Focus at current position", {}),
         ToolExample("Fine focus with gradient algorithm", {"algorithm": "gradient"}),
         ToolExample("Focus sweep ±5um with 0.5um steps", {"range_um": 5.0, "step_um": 0.5}),
+        ToolExample("Focus for specific embryo", {"embryo_id": "embryo_2"}),
     ],
 )
 async def fine_focus(
@@ -46,6 +55,7 @@ async def fine_focus(
     algorithm: str = "fft_bandpass",
     move_to_best: bool = True,
     galvo_position: float = 0.0,
+    embryo_id: Optional[str] = None,
     context: Dict = None
 ) -> str:
     """
@@ -65,10 +75,13 @@ async def fine_focus(
         Whether to move piezo to best focus position after sweep
     galvo_position : float
         Galvo position to use during sweep (default: 0.0)
+    embryo_id : str, optional
+        Embryo to associate this focus measurement with. If provided, logs to embryo's focus_history.
     context : dict
-        Execution context with client
+        Execution context with client and copilot
     """
     client = context.get('client')
+    copilot = context.get('copilot')
 
     if not client:
         return "Error: No microscope client connected"
@@ -168,6 +181,22 @@ async def fine_focus(
                 galvo_position=float(galvo_position)
             )
 
+        # Log focus datapoint to embryo's focus_history if embryo_id provided
+        logged_to_embryo = False
+        if embryo_id and copilot:
+            embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+            if embryo:
+                embryo.add_focus_datapoint(
+                    galvo=galvo_position,
+                    piezo=best_position,
+                    score=float(best_measured_score),
+                    r_squared=float(r_squared),
+                    method='fine_focus',
+                    algorithm=algorithm,
+                )
+                logged_to_embryo = True
+                print(f"  Logged to {embryo_id} focus_history ({len(embryo.focus_history)} datapoints)")
+
         # Build result message
         result_lines = [
             f"✓ Fine focus complete",
@@ -179,6 +208,9 @@ async def fine_focus(
 
         if move_to_best:
             result_lines.append(f"  Moved to: {best_position:.2f} μm")
+
+        if logged_to_embryo:
+            result_lines.append(f"  Logged to: {embryo_id} focus history")
 
         # Add score statistics
         score_range = scores.max() - scores.min()
@@ -265,3 +297,65 @@ async def get_focus_score(
 
     except Exception as e:
         return f"Error getting focus score: {str(e)}"
+
+
+@tool(
+    name="get_focus_history",
+    description="""Get the focus history for an embryo showing all piezo-galvo measurements over time.
+Shows drift rate, piezo-galvo fit, and individual measurements. Use to understand how focus
+has changed during a timelapse and whether recalibration is needed.""",
+    category=ToolCategory.ANALYSIS,
+    requires_microscope=False,
+    examples=[
+        ToolExample("Check focus history for embryo 2", {"embryo_id": "embryo_2"}),
+    ],
+)
+async def get_focus_history(
+    embryo_id: str,
+    context: Dict = None
+) -> str:
+    """
+    Get focus measurement history for an embryo.
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to query focus history for
+    context : dict
+        Execution context with copilot
+    """
+    copilot = context.get('copilot')
+
+    if not copilot:
+        return "Error: No copilot context available"
+
+    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+    if not embryo:
+        return f"Error: Embryo '{embryo_id}' not found"
+
+    if not embryo.focus_history:
+        return f"No focus measurements recorded for {embryo_id}"
+
+    # Get summary
+    summary = embryo.get_focus_summary()
+
+    # Show recent measurements
+    lines = [f"Focus history for {embryo_id}:", ""]
+    lines.append(summary)
+    lines.append("")
+    lines.append("Recent measurements:")
+
+    for fp in embryo.focus_history[-10:]:  # Last 10
+        age_mins = (datetime.now() - fp.timestamp).total_seconds() / 60
+        lines.append(
+            f"  {fp.timestamp.strftime('%H:%M:%S')} ({age_mins:.0f}m ago): "
+            f"galvo={fp.galvo:.2f}, piezo={fp.piezo:.2f}µm, "
+            f"R²={fp.r_squared:.3f} [{fp.method}]"
+        )
+
+    # Check if refocus needed
+    if embryo.needs_refocus(max_age_minutes=60):
+        lines.append("")
+        lines.append("⚠ Focus data is stale (>60 min). Consider running fine_focus.")
+
+    return "\n".join(lines)
