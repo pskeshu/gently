@@ -152,3 +152,7 @@ animated_video/
 # Backup files
 *_backup.py
 *_backup/
+
+# Demo and capture outputs
+demo.yml
+lightsheet_captures/
