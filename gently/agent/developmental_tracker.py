@@ -66,6 +66,62 @@ TIME_TO_HATCHING = {
     DevelopmentalStage.HATCHED: 0,
 }
 
+# Variability in timing (±minutes) for confidence intervals
+TIMING_VARIABILITY = {
+    DevelopmentalStage.ONE_CELL: 60,
+    DevelopmentalStage.TWO_CELL: 50,
+    DevelopmentalStage.FOUR_CELL: 45,
+    DevelopmentalStage.EIGHT_CELL: 40,
+    DevelopmentalStage.GASTRULATION: 60,
+    DevelopmentalStage.COMMA: 45,
+    DevelopmentalStage.ONE_POINT_FIVE_FOLD: 40,
+    DevelopmentalStage.TWO_FOLD: 35,
+    DevelopmentalStage.PRETZEL: 30,
+    DevelopmentalStage.PRE_HATCHING: 20,
+    DevelopmentalStage.HATCHING: 10,
+    DevelopmentalStage.HATCHED: 0,
+}
+
+
+@dataclass
+class HatchingPrediction:
+    """Prediction of time to hatching with confidence interval"""
+    embryo_id: str
+    current_stage: DevelopmentalStage
+    predicted_minutes: int
+    min_minutes: int  # Lower bound (optimistic)
+    max_minutes: int  # Upper bound (conservative)
+    confidence: str   # Based on stage classification confidence
+    timestamp: datetime = field(default_factory=datetime.now)
+
+    @property
+    def predicted_hours(self) -> float:
+        return self.predicted_minutes / 60
+
+    @property
+    def range_hours(self) -> Tuple[float, float]:
+        return (self.min_minutes / 60, self.max_minutes / 60)
+
+    def to_dict(self) -> Dict:
+        return {
+            'embryo_id': self.embryo_id,
+            'current_stage': self.current_stage.value,
+            'predicted_minutes': self.predicted_minutes,
+            'predicted_hours': self.predicted_hours,
+            'min_minutes': self.min_minutes,
+            'max_minutes': self.max_minutes,
+            'range_hours': self.range_hours,
+            'confidence': self.confidence,
+            'timestamp': self.timestamp.isoformat(),
+        }
+
+    def __str__(self) -> str:
+        return (
+            f"{self.predicted_hours:.1f}h "
+            f"(range: {self.range_hours[0]:.1f}-{self.range_hours[1]:.1f}h, "
+            f"{self.confidence} confidence)"
+        )
+
 
 @dataclass
 class StageClassification:
@@ -428,3 +484,119 @@ class DevelopmentalTracker:
             'last_observation': current.timestamp.isoformat(),
             'predicted_minutes_to_hatching': current.predicted_minutes_to_hatching,
         }
+
+    def get_hatching_prediction(self, embryo_id: str) -> Optional[HatchingPrediction]:
+        """
+        Get detailed hatching prediction with confidence interval
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo to predict for
+
+        Returns
+        -------
+        HatchingPrediction or None
+            Prediction with range, or None if cannot predict
+        """
+        current = self.get_current_stage(embryo_id)
+        if not current or current.stage == DevelopmentalStage.UNKNOWN:
+            return None
+
+        if current.stage in (DevelopmentalStage.HATCHED, DevelopmentalStage.DEAD):
+            return None
+
+        base_time = TIME_TO_HATCHING.get(current.stage)
+        variability = TIMING_VARIABILITY.get(current.stage, 60)
+
+        if base_time is None:
+            return None
+
+        # Adjust confidence interval based on classification confidence
+        confidence_multiplier = {
+            'HIGH': 1.0,
+            'MEDIUM': 1.5,
+            'LOW': 2.0,
+        }.get(current.confidence, 2.0)
+
+        adjusted_variability = int(variability * confidence_multiplier)
+
+        return HatchingPrediction(
+            embryo_id=embryo_id,
+            current_stage=current.stage,
+            predicted_minutes=base_time,
+            min_minutes=max(0, base_time - adjusted_variability),
+            max_minutes=base_time + adjusted_variability,
+            confidence=current.confidence,
+        )
+
+    def get_all_predictions(self, embryo_ids: List[str]) -> Dict[str, HatchingPrediction]:
+        """
+        Get predictions for multiple embryos
+
+        Parameters
+        ----------
+        embryo_ids : list of str
+            Embryos to predict for
+
+        Returns
+        -------
+        dict
+            embryo_id -> HatchingPrediction
+        """
+        predictions = {}
+        for embryo_id in embryo_ids:
+            pred = self.get_hatching_prediction(embryo_id)
+            if pred:
+                predictions[embryo_id] = pred
+        return predictions
+
+    def estimate_development_rate(self, embryo_id: str) -> Optional[float]:
+        """
+        Estimate relative development rate compared to standard
+
+        Based on observed stage progression timing.
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo to analyze
+
+        Returns
+        -------
+        float or None
+            Rate multiplier (1.0 = normal, >1 = faster, <1 = slower)
+        """
+        history = self._stage_history.get(embryo_id, [])
+
+        if len(history) < 2:
+            return None
+
+        # Need at least two different stages
+        stages_seen = [(h.stage, h.timestamp) for h in history if h.stage != DevelopmentalStage.UNKNOWN]
+        if len(stages_seen) < 2:
+            return None
+
+        # Find first and last distinct stages
+        first_stage, first_time = stages_seen[0]
+        last_stage, last_time = stages_seen[-1]
+
+        if first_stage == last_stage:
+            return None
+
+        # Calculate expected vs actual time
+        expected_first = STAGE_TIMING_20C.get(first_stage, 0)
+        expected_last = STAGE_TIMING_20C.get(last_stage, 0)
+
+        if expected_last <= expected_first:
+            return None
+
+        expected_duration = expected_last - expected_first
+        actual_duration = (last_time - first_time).total_seconds() / 60
+
+        if actual_duration <= 0:
+            return None
+
+        # Rate = expected / actual (faster embryo = higher rate)
+        rate = expected_duration / actual_duration
+        return rate

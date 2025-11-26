@@ -921,6 +921,25 @@ Just type what you want! Examples:
         self._running = True
         self.print_welcome()
 
+        # Show restored conversation history if session was resumed
+        if self.copilot.conversation_history:
+            theme = get_theme()
+            num_messages = len(self.copilot.conversation_history)
+            self.console.print(Panel(
+                Text.from_markup(
+                    f"[{theme.secondary}]Session restored with {num_messages} previous messages[/]"
+                ),
+                title=f"[{theme.secondary}]Restored Session[/]",
+                border_style=theme.secondary,
+                box=box.SIMPLE,
+            ))
+            self.print_conversation_history()
+            self.console.print(Text(
+                f"{'─' * 40} Current Session {'─' * 40}",
+                style=theme.secondary
+            ))
+            self.console.print()
+
         try:
             while self._running:
                 try:
