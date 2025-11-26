@@ -1147,7 +1147,7 @@ async def detect_embryos(
 
 @tool(
     name="manual_mark_embryos",
-    description="Manually mark additional embryos by clicking on an image. New embryos get unique IDs that don't conflict with existing ones.",
+    description="Manually mark additional embryos by clicking on an image. Existing embryos shown in green. New embryos get unique IDs.",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
 )
@@ -1155,7 +1155,7 @@ async def manual_mark_embryos(
     exposure_ms: float = None,
     context: Dict = None
 ) -> str:
-    """Manual embryo marking - adds to existing embryos with unique IDs"""
+    """Manual embryo marking - shows existing embryos, adds new ones with unique IDs"""
     copilot = context.get('copilot')
     client = context.get('client')
 
@@ -1163,7 +1163,20 @@ async def manual_mark_embryos(
         return "Error: No copilot context"
 
     try:
-        result = await client.manual_mark_embryos(exposure_ms=exposure_ms)
+        # Build list of existing embryos with their stage positions
+        existing_embryos = []
+        for embryo_id, embryo_state in copilot.experiment.embryos.items():
+            pos = embryo_state.stage_position or {}
+            existing_embryos.append({
+                'embryo_id': embryo_id,
+                'stage_x': pos.get('x', 0),
+                'stage_y': pos.get('y', 0),
+            })
+
+        result = await client.manual_mark_embryos(
+            exposure_ms=exposure_ms,
+            existing_embryos=existing_embryos if existing_embryos else None
+        )
 
         if result.get('success'):
             embryos = result.get('embryos', [])

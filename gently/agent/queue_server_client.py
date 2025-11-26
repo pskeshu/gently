@@ -757,11 +757,13 @@ class QueueServerClient:
         pixel_size_um: float = 6.5,
         objective_mag: float = 4.0,
         exposure_ms: float = None,
+        existing_embryos: list = None,
     ) -> Dict:
         """
         Capture image and manually mark embryos via matplotlib.
 
         Opens a matplotlib window where user can click on embryo centers.
+        Existing embryos are shown in green for reference.
 
         Parameters
         ----------
@@ -772,6 +774,9 @@ class QueueServerClient:
         exposure_ms : float, optional
             Camera exposure time in milliseconds for better contrast.
             If None, uses current camera setting.
+        existing_embryos : list, optional
+            List of existing embryo dicts with stage positions.
+            Will be converted to pixel positions and displayed.
 
         Returns
         -------
@@ -797,6 +802,31 @@ class QueueServerClient:
             stage_pos = await self.get_stage_position()
             print(f"  Stage position: {stage_pos}")
 
+            # Convert existing embryos to pixel positions for display
+            display_embryos = None
+            if existing_embryos:
+                um_per_pixel = pixel_size_um / objective_mag
+                image_center_x = image.shape[1] / 2
+                image_center_y = image.shape[0] / 2
+
+                display_embryos = []
+                for emb in existing_embryos:
+                    stage_x = emb.get('stage_x', emb.get('x', 0))
+                    stage_y = emb.get('stage_y', emb.get('y', 0))
+
+                    # Convert stage to pixel
+                    dx_stage = stage_x - stage_pos[0]
+                    dy_stage = stage_y - stage_pos[1]
+                    pixel_x = image_center_x + dx_stage / um_per_pixel
+                    pixel_y = image_center_y + dy_stage / um_per_pixel
+
+                    display_embryos.append({
+                        'embryo_id': emb.get('embryo_id', '?'),
+                        'pixel_x': pixel_x,
+                        'pixel_y': pixel_y,
+                    })
+                print(f"  Showing {len(display_embryos)} existing embryos")
+
             # Run manual marking via rpyc (opens matplotlib window)
             print("  Opening manual marking window...")
             result = await asyncio.to_thread(
@@ -804,7 +834,8 @@ class QueueServerClient:
                 image,
                 stage_pos,
                 pixel_size_um=pixel_size_um,
-                objective_mag=objective_mag
+                objective_mag=objective_mag,
+                existing_embryos=display_embryos
             )
 
             # Convert rpyc netref to dict
