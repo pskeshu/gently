@@ -13,14 +13,15 @@ from ..tool_helpers import require_copilot, get_embryo_or_error
 
 @tool(
     name="get_experiment_summary",
-    description="Get a summary of the current experiment status including all embryos with their positions",
+    description="""Get a comprehensive summary of the current experiment including all embryos, their XY stage positions, calibration status, and imaging history.
+Use this tool when the user asks about embryo locations, experiment status, how many embryos exist, or wants an overview.
+This is the primary tool for answering questions like "where are the embryos?" or "what's the current status?"
+Returns all embryo IDs with their coordinates - no parameters needed.""",
     category=ToolCategory.EXPERIMENT,
     examples=[
-        ToolExample("Where are all the embryos?"),
-        ToolExample("What's the experiment status?"),
-        ToolExample("Show me the embryo positions"),
-        ToolExample("How many embryos do we have?"),
-        ToolExample("List all embryos"),
+        ToolExample("Where are all the embryos?", {}),
+        ToolExample("What's the experiment status?", {}),
+        ToolExample("How many embryos do we have?", {}),
     ],
 )
 def get_experiment_summary(context: Dict) -> str:
@@ -33,12 +34,14 @@ def get_experiment_summary(context: Dict) -> str:
 
 @tool(
     name="query_embryo_status",
-    description="Query the status of a specific embryo by ID or name",
+    description="""Query detailed status of a specific embryo including position, calibration data, imaging history, and detection results.
+Use this when the user asks about a specific embryo by ID or number (e.g., "how is embryo 3?", "check embryo_1").
+Returns JSON with stage_position, piezo_center, galvo_center, timepoints_acquired, and detection_results.
+The embryo_id can be like "embryo_1", "embryo_3", etc.""",
     category=ToolCategory.EMBRYO,
     examples=[
         ToolExample("What's happening with embryo 1?", {"embryo_id": "embryo_1"}),
-        ToolExample("Show me embryo 3 status", {"embryo_id": "embryo_3"}),
-        ToolExample("Check on embryo_2", {"embryo_id": "embryo_2"}),
+        ToolExample("Check on embryo 3", {"embryo_id": "embryo_3"}),
     ],
 )
 def query_embryo_status(embryo_id: str, context: Dict) -> str:
@@ -56,8 +59,13 @@ def query_embryo_status(embryo_id: str, context: Dict) -> str:
 
 @tool(
     name="skip_embryo",
-    description="Mark an embryo to be skipped in future acquisitions",
+    description="""Mark an embryo to be skipped in future timelapse acquisitions. The embryo remains in the experiment but won't be imaged.
+Use when user wants to temporarily stop imaging an embryo (e.g., "skip embryo 2", "stop imaging embryo_3").
+Requires a reason to document why the embryo is being skipped. Can be resumed later with resume_embryo.""",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Skip embryo 2, it's dead", {"embryo_id": "embryo_2", "reason": "embryo dead"}),
+    ],
 )
 def skip_embryo(embryo_id: str, reason: str, context: Dict) -> str:
     """Skip embryo in future acquisitions"""
@@ -77,8 +85,13 @@ def skip_embryo(embryo_id: str, reason: str, context: Dict) -> str:
 
 @tool(
     name="remove_embryo",
-    description="Permanently remove an embryo from the experiment (e.g., false detection)",
+    description="""Permanently remove an embryo from the experiment. This is irreversible - use for false detections or debris.
+Use when user says "remove embryo X", "delete embryo X", or "that's not an embryo".
+Unlike skip_embryo, this completely removes the embryo from tracking. Use carefully.""",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Remove embryo 4, it's a false positive", {"embryo_id": "embryo_4"}),
+    ],
 )
 def remove_embryo(embryo_id: str, context: Dict) -> str:
     """Remove embryo from experiment completely"""
@@ -99,8 +112,12 @@ def remove_embryo(embryo_id: str, context: Dict) -> str:
 
 @tool(
     name="resume_embryo",
-    description="Resume imaging a previously skipped embryo",
+    description="""Resume imaging a previously skipped embryo. Clears the skip flag so the embryo will be included in future acquisitions.
+Use when user wants to start imaging an embryo again after it was skipped (e.g., "resume embryo 2", "start imaging embryo_3 again").""",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Resume imaging embryo 2", {"embryo_id": "embryo_2"}),
+    ],
 )
 def resume_embryo(embryo_id: str, context: Dict) -> str:
     """Resume skipped embryo"""
@@ -120,8 +137,13 @@ def resume_embryo(embryo_id: str, context: Dict) -> str:
 
 @tool(
     name="assign_nickname",
-    description="Assign a memorable nickname to an embryo",
+    description="""Assign a memorable nickname to an embryo for easier reference in conversation.
+Use when you notice distinguishing characteristics or the user wants to name an embryo (e.g., "call embryo 1 speedy", "nickname embryo_2 as the fast one").
+Nicknames make conversation more natural - you can then refer to embryos by nickname.""",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Call embryo 1 speedy", {"embryo_id": "embryo_1", "nickname": "speedy"}),
+    ],
 )
 def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
     """Assign nickname to embryo"""
@@ -144,8 +166,13 @@ def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
 
 @tool(
     name="modify_parameters",
-    description="Modify acquisition parameters for a specific embryo",
+    description="""Modify acquisition parameters for a specific embryo during a timelapse. Can change interval_seconds, num_slices, exposure_ms, or priority.
+Use when user wants to adjust imaging for one embryo (e.g., "image embryo 2 faster", "increase slices for embryo_1").
+Requires a reason to document why parameters are being changed. Changes take effect at the next acquisition.""",
     category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Image embryo 2 every 30 seconds", {"embryo_id": "embryo_2", "changes": {"interval_seconds": 30}, "reason": "pre-hatching monitoring"}),
+    ],
 )
 def modify_parameters(
     embryo_id: str,

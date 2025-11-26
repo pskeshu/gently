@@ -14,13 +14,14 @@ from ..tool_helpers import require_copilot, get_embryo_or_error
 
 @tool(
     name="move_to_embryo",
-    description="Move the stage to a specific embryo's position",
+    description="""Move the XY stage to a specific embryo's stored position. The embryo must have been detected and have a valid stage_position.
+Use when user says "go to embryo X", "move to embryo X", or before imaging a specific embryo.
+This only moves XY - piezo/galvo are controlled separately during acquisition. Movement takes ~0.5 seconds.""",
     category=ToolCategory.MOVEMENT,
     requires_microscope=True,
     examples=[
         ToolExample("Go to embryo 1", {"embryo_id": "embryo_1"}),
         ToolExample("Move to embryo 3", {"embryo_id": "embryo_3"}),
-        ToolExample("Navigate to embryo_2", {"embryo_id": "embryo_2"}),
     ],
 )
 async def move_to_embryo(embryo_id: str, context: Dict) -> str:
@@ -52,14 +53,14 @@ async def move_to_embryo(embryo_id: str, context: Dict) -> str:
 
 @tool(
     name="get_stage_position",
-    description="Get the current XY stage position in micrometers",
+    description="""Get the current XY stage position in micrometers. Returns the real-time position from the hardware.
+Use when user asks "where is the stage?", "current position?", or when you need to know the microscope's current location.
+This reads from hardware - different from embryo stored positions which are in the experiment data.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
-        ToolExample("Where is the stage right now?"),
-        ToolExample("What's the current position?"),
-        ToolExample("Show me the stage position"),
-        ToolExample("Current XY position?"),
+        ToolExample("Where is the stage?", {}),
+        ToolExample("Current XY position?", {}),
     ],
 )
 async def get_stage_position(context: Dict) -> str:
@@ -126,9 +127,14 @@ async def get_led_status(context: Dict) -> str:
 
 @tool(
     name="calibrate_embryo",
-    description="Run piezo-galvo calibration for a specific embryo. Moves to embryo position first, then calibrates.",
+    description="""Run piezo-galvo calibration for a specific embryo to find optimal imaging parameters. Automatically moves to embryo position first.
+Use after detection to prepare an embryo for volume acquisition. Calibration finds piezo_center and galvo_center values.
+Required before acquire_volume - stores calibration in embryo state. Takes ~30 seconds per embryo.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
+    examples=[
+        ToolExample("Calibrate embryo 1", {"embryo_id": "embryo_1"}),
+    ],
 )
 async def calibrate_embryo(
     embryo_id: str,
@@ -174,9 +180,15 @@ async def calibrate_embryo(
 
 @tool(
     name="acquire_volume",
-    description="Acquire a single 3D volume for a specific embryo. Moves to embryo position and uses calibration data.",
+    description="""Acquire a single 3D lightsheet volume for a specific embryo. Moves to embryo position and uses its calibration data.
+Use when user wants a full 3D stack of an embryo (e.g., "acquire volume of embryo 1", "take a 3D image").
+Embryo must be calibrated first. Default 50 slices at 10ms exposure takes ~2.5 seconds. Turns laser on during acquisition.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
+    examples=[
+        ToolExample("Acquire volume of embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Take a 3D image of embryo 2 with 80 slices", {"embryo_id": "embryo_2", "num_slices": 80}),
+    ],
 )
 async def acquire_volume(
     embryo_id: str,
@@ -239,14 +251,15 @@ async def acquire_volume(
 
 @tool(
     name="view_image",
-    description="Capture and display the current bottom camera image (widefield view)",
+    description="""Capture and display the current bottom camera widefield image. Shows what's visible at the current stage position.
+Use when user says "show me the view", "take a picture", "what does it look like?", or to check sample positioning.
+This is the widefield/brightfield camera looking up at the sample - good for seeing embryo outlines and overall positioning.
+Image is automatically saved to camera_captures/ folder.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
-        ToolExample("Show me the current view"),
-        ToolExample("Take a picture"),
-        ToolExample("What does the sample look like?"),
-        ToolExample("Capture an image"),
+        ToolExample("Show me the current view", {}),
+        ToolExample("What does the sample look like?", {}),
     ],
 )
 async def view_image(
@@ -289,13 +302,15 @@ async def view_image(
 
 @tool(
     name="capture_lightsheet",
-    description="Capture and display a single 2D lightsheet image (one slice only). This is a COMPLETE action - do NOT follow up with acquire_volume unless explicitly asked for a 3D volume.",
+    description="""Capture a single 2D lightsheet fluorescence image at specified piezo/galvo position. Uses 50ms exposure by default.
+Use when user says "take a lightsheet image", "lightsheet snap", or wants to see fluorescence at a specific Z position.
+This is a COMPLETE action - do NOT follow up with acquire_volume unless user explicitly asks for a 3D volume.
+The piezo_position (default 0) controls Z depth, galvo_position (default 0) controls light sheet Y offset.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
-        ToolExample("Take a lightsheet image"),
-        ToolExample("Capture a lightsheet snap"),
-        ToolExample("Show me the lightsheet view"),
+        ToolExample("Take a lightsheet image", {}),
+        ToolExample("Lightsheet snap at piezo 50", {"piezo_position": 50.0}),
     ],
 )
 async def capture_lightsheet(

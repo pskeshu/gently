@@ -14,13 +14,15 @@ from ..tool_helpers import require_copilot
 
 @tool(
     name="detect_embryos",
-    description="Automatically detect embryos using brightness detection + SAM refinement",
+    description="""Automatically detect embryos in the current field of view using brightness detection and SAM segmentation.
+Use when user says "find embryos", "detect embryos", or at the start of an experiment to locate samples.
+Captures a bottom camera image and identifies bright spots as potential embryos. Returns embryo IDs and positions.
+Detected embryos are automatically added to the experiment. Use show_detected_embryos to visualize results.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
-        ToolExample("Find all embryos"),
-        ToolExample("Detect embryos automatically"),
-        ToolExample("Run embryo detection"),
+        ToolExample("Find all embryos", {}),
+        ToolExample("Detect embryos automatically", {}),
     ],
 )
 async def detect_embryos(
@@ -78,13 +80,14 @@ async def detect_embryos(
 
 @tool(
     name="manual_mark_embryos",
-    description="Manually mark additional embryos by clicking on an image. Existing embryos shown in green. New embryos get unique IDs.",
+    description="""Open an interactive window to manually mark embryos by clicking on them. Existing embryos are shown in green for reference.
+Use when automatic detection missed embryos, or user wants to add embryos manually (e.g., "let me mark embryos", "I'll click on them").
+Opens a matplotlib window - user clicks to mark positions, then closes the window. New embryos get unique IDs automatically.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
-        ToolExample("Let me mark embryos manually"),
-        ToolExample("I want to click on embryos"),
-        ToolExample("Mark embryos by hand"),
+        ToolExample("Let me mark embryos manually", {}),
+        ToolExample("I want to click on embryos", {}),
     ],
 )
 async def manual_mark_embryos(
@@ -162,13 +165,14 @@ async def manual_mark_embryos(
 
 @tool(
     name="show_detected_embryos",
-    description="Show detected embryos with bounding boxes. Captures fresh image and displays all active embryos.",
+    description="""Capture a fresh image and display all tracked embryos with labeled bounding boxes. Shows embryo IDs at their positions.
+Use when user wants to see where embryos are visually (e.g., "show me the embryos", "display embryo positions").
+Captures a new bottom camera image and overlays all active (non-skipped) embryo positions. Image is saved to detection_results/.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
-        ToolExample("Show me the embryos"),
-        ToolExample("Display detected embryos"),
-        ToolExample("Visualize the embryos"),
+        ToolExample("Show me the embryos", {}),
+        ToolExample("Display embryo positions", {}),
     ],
 )
 async def show_detected_embryos(

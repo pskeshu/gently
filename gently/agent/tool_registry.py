@@ -78,7 +78,7 @@ class ToolDefinition:
     examples: List[ToolExample] = field(default_factory=list)
 
     def to_claude_schema(self) -> Dict:
-        """Generate Claude API tool schema with examples"""
+        """Generate Claude API tool schema with input_examples"""
         properties = {}
         required = []
 
@@ -97,24 +97,23 @@ class ToolDefinition:
             if param.required:
                 required.append(param.name)
 
-        # Build description with examples
-        desc = self.description
-        if self.examples:
-            desc += "\n\nWhen to use this tool:"
-            for ex in self.examples:
-                desc += f"\n- User says: \"{ex.user_query}\""
-                if ex.tool_input:
-                    desc += f" → call with {ex.tool_input}"
-
-        return {
+        schema = {
             "name": self.name,
-            "description": desc,
+            "description": self.description,
             "input_schema": {
                 "type": "object",
                 "properties": properties,
                 "required": required,
             }
         }
+
+        # Add input_examples if we have examples (proper API field)
+        if self.examples:
+            schema["input_examples"] = [
+                ex.tool_input for ex in self.examples
+            ]
+
+        return schema
 
 
 def _python_type_to_json_schema(python_type) -> str:
