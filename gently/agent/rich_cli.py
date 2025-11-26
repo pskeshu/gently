@@ -612,9 +612,9 @@ class RichCopilotCLI:
         )
 
         table.add_column("ID", style=theme.info)
-        table.add_column("XY (µm)", style=theme.muted)
+        table.add_column("XY (µm)", style=theme.secondary)
         table.add_column("Status", justify="center")
-        table.add_column("Last Imaging", style=theme.muted)
+        table.add_column("Last Imaging", style=theme.info)
         table.add_column("Detections", style=theme.success)
 
         for embryo_id, embryo in embryos.items():

@@ -46,6 +46,27 @@ async def move_to_embryo(embryo_id: str, context: Dict) -> str:
 
 
 @tool(
+    name="get_stage_position",
+    description="Get the current XY stage position in micrometers",
+    category=ToolCategory.HARDWARE,
+    requires_microscope=True,
+)
+async def get_stage_position(context: Dict) -> str:
+    """Get current stage position"""
+    client = context.get('client')
+
+    if not client:
+        return "Error: No microscope client connected"
+
+    try:
+        pos = await client.get_stage_position()
+        return f"Current stage position: X={pos[0]:.1f} µm, Y={pos[1]:.1f} µm"
+
+    except Exception as e:
+        return f"Error reading stage position: {str(e)}"
+
+
+@tool(
     name="set_led",
     description="Set the LED illumination state",
     category=ToolCategory.HARDWARE,
