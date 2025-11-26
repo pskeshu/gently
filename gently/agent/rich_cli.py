@@ -842,7 +842,7 @@ class RichCopilotCLI:
 
         return str(content) if content else ""
 
-    def print_conversation_history(self, limit: int = 10):
+    def print_conversation_history(self, limit: int = 10, show_header: bool = True):
         """Print recent conversation history with same formatting as live session"""
         theme = get_theme()
         history = self.copilot.conversation_history[-limit:]
@@ -850,6 +850,14 @@ class RichCopilotCLI:
         if not history:
             self.console.print("No conversation history yet.", style=theme.muted)
             return
+
+        if show_header:
+            self.console.print(Panel(
+                Text(f"Showing last {len(history)} messages", style=theme.info),
+                title="Conversation History",
+                border_style=theme.info,
+            ))
+            self.console.print()
 
         for msg in history:
             role = msg.get('role', 'unknown')
@@ -934,7 +942,7 @@ Just type what you want! Examples:
                 border_style=theme.secondary,
                 box=box.SIMPLE,
             ))
-            self.print_conversation_history()
+            self.print_conversation_history(show_header=False)
             self.console.print(Text(
                 f"{'─' * 40} Current Session {'─' * 40}",
                 style=theme.secondary

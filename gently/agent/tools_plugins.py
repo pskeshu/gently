@@ -18,6 +18,12 @@ from .detector import (
     Detector, DetectorConditions, DetectorActions,
     DetectionMode, ConfidenceLevel
 )
+from .tool_helpers import (
+    require_copilot, get_embryo_or_error, require_microscope,
+    require_interaction_logger, require_developmental_tracker,
+    require_timelapse_orchestrator, require_databroker,
+    get_timestamp_string, format_duration
+)
 
 
 # =============================================================================
@@ -43,9 +49,9 @@ def get_experiment_summary(context: Dict) -> str:
     str
         Experiment summary
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
     return copilot.experiment.get_summary()
 
 
@@ -70,13 +76,13 @@ def query_embryo_status(embryo_id: str, context: Dict) -> str:
     str
         JSON formatted embryo status
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found. Available: {list(copilot.experiment.embryos.keys())}"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return f"{err}. Available: {list(copilot.experiment.embryos.keys())}"
 
     return json.dumps(embryo.to_dict(), indent=2)
 
@@ -104,13 +110,13 @@ def skip_embryo(embryo_id: str, reason: str, context: Dict) -> str:
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     embryo.should_skip = True
     embryo.skip_reason = reason
@@ -139,14 +145,14 @@ def remove_embryo(embryo_id: str, context: Dict) -> str:
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     # Try to find the embryo first
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     # Remove it
     actual_id = embryo.id  # Get the actual ID in case user used nickname
@@ -177,13 +183,13 @@ def resume_embryo(embryo_id: str, context: Dict) -> str:
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     embryo.should_skip = False
     embryo.skip_reason = None
@@ -214,13 +220,13 @@ def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     old_nickname = embryo.nickname
     embryo.nickname = nickname
@@ -261,13 +267,13 @@ def modify_parameters(
     str
         Summary of changes
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     old_params = {
         'interval_seconds': embryo.interval_seconds,
@@ -323,9 +329,9 @@ async def move_to_embryo(embryo_id: str, context: Dict) -> str:
     if not copilot:
         return "Error: No copilot context"
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     if not embryo.stage_position:
         return f"Embryo '{embryo_id}' has no stored position. Run calibration first."
@@ -505,9 +511,9 @@ def enable_disable_detector(
     str
         Result message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     if enabled:
         success = copilot.detector_registry.enable(detector_name)
@@ -543,9 +549,9 @@ def remove_detector(detector_name: str, context: Dict) -> str:
     str
         Result message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     success = copilot.detector_registry.remove(detector_name)
 
@@ -589,13 +595,13 @@ async def analyze_volume(
     context: Dict = None
 ) -> str:
     """Analyze embryo volume with Claude Vision"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     try:
         result = await copilot._analyze_with_vision(
@@ -616,9 +622,9 @@ async def analyze_volume(
 )
 def get_detection_summary(context: Dict) -> str:
     """Get detection summary"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     lines = ["Detection Summary:", ""]
 
@@ -651,9 +657,9 @@ def add_detector(
     context: Dict = None
 ) -> str:
     """Add a new detector"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     try:
         if preset:
@@ -713,9 +719,9 @@ def enable_preset_detector(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     from .detector_registry import get_detector_presets
 
@@ -772,9 +778,9 @@ async def generate_detector_prompt(
     context: Dict = None
 ) -> str:
     """Generate detector prompt using Claude"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     try:
         prompt = await copilot._generate_detector_prompt(
@@ -798,17 +804,17 @@ async def test_detector(
     context: Dict = None
 ) -> str:
     """Test detector on embryo"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     detector = copilot.detector_registry.get(detector_name)
     if not detector:
         return f"Detector '{detector_name}' not found"
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     try:
         result = await copilot._run_detector_test(
@@ -843,9 +849,9 @@ async def calibrate_embryo(
     if not copilot:
         return "Error: No copilot context"
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     positions = piezo_positions or [40.0, 60.0]
 
@@ -892,9 +898,9 @@ async def acquire_volume(
     if not copilot:
         return "Error: No copilot context"
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     try:
         # Move to embryo position first
@@ -1555,15 +1561,14 @@ async def start_adaptive_timelapse(
     str
         Status message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     # Check if orchestrator exists
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
-        return "Error: Timelapse orchestrator not initialized. Check microscope connection."
-
-    orchestrator = copilot.timelapse_orchestrator
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return err
 
     try:
         result = await orchestrator.start(
@@ -1596,14 +1601,13 @@ def get_timelapse_status(context: Dict = None) -> str:
     str
         Formatted status information
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
-        return "Timelapse orchestrator not initialized."
-
-    orchestrator = copilot.timelapse_orchestrator
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return err
     state = orchestrator.get_status()
     status_dict = state.to_dict()
 
@@ -1678,14 +1682,13 @@ async def modify_timelapse_embryo(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
         return "No timelapse running."
-
-    orchestrator = copilot.timelapse_orchestrator
 
     try:
         result = await orchestrator.modify_embryo(
@@ -1727,14 +1730,13 @@ async def stop_timelapse_embryo(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
         return "No timelapse running."
-
-    orchestrator = copilot.timelapse_orchestrator
 
     try:
         result = await orchestrator.stop_embryo(embryo_id, reason)
@@ -1768,14 +1770,13 @@ async def stop_timelapse(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
         return "No timelapse running."
-
-    orchestrator = copilot.timelapse_orchestrator
 
     try:
         result = await orchestrator.stop(reason)
@@ -1792,15 +1793,16 @@ async def stop_timelapse(
 )
 async def pause_timelapse(context: Dict = None) -> str:
     """Pause timelapse"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
         return "No timelapse running."
 
     try:
-        result = await copilot.timelapse_orchestrator.pause()
+        result = await orchestrator.pause()
         return result
     except Exception as e:
         return f"Error pausing timelapse: {str(e)}"
@@ -1814,15 +1816,16 @@ async def pause_timelapse(context: Dict = None) -> str:
 )
 async def resume_timelapse(context: Dict = None) -> str:
     """Resume timelapse"""
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
         return "No timelapse to resume."
 
     try:
-        result = await copilot.timelapse_orchestrator.resume()
+        result = await orchestrator.resume()
         return result
     except Exception as e:
         return f"Error resuming timelapse: {str(e)}"
@@ -1858,14 +1861,13 @@ def add_interval_speedup_rule(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
-        return "Timelapse orchestrator not initialized."
-
-    orchestrator = copilot.timelapse_orchestrator
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return err
     orchestrator.add_speedup_on_detection(
         detector_name=trigger_detector,
         new_interval_seconds=new_interval_seconds,
@@ -1903,12 +1905,13 @@ def enable_pre_hatching_speedup(
     str
         Confirmation message
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
-        return "Timelapse orchestrator not initialized."
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return err
 
     # Enable pretzel detector if not already enabled
     from .detector_registry import get_detector_presets
@@ -1930,7 +1933,7 @@ def enable_pre_hatching_speedup(
         copilot.detector_registry.add(detector)
 
     # Add the speedup rule
-    copilot.timelapse_orchestrator.add_pre_hatching_speedup(fast_interval_seconds)
+    orchestrator.add_pre_hatching_speedup(fast_interval_seconds)
 
     return (
         f"Enabled pre-hatching speedup:\n"
@@ -1964,14 +1967,14 @@ async def classify_embryo_stage(
     str
         Stage classification result
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     # Get embryo
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-    if not embryo:
-        return f"Embryo '{embryo_id}' not found"
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return err
 
     # Check for recent images
     if not embryo.recent_images:
@@ -2042,14 +2045,15 @@ def get_stage_history(
     str
         Stage history summary
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'developmental_tracker') or copilot.developmental_tracker is None:
-        return "No stage classifications recorded yet. Use classify_embryo_stage first."
+    tracker, err = require_developmental_tracker(copilot)
+    if err:
+        return err
 
-    summary = copilot.developmental_tracker.get_progression_summary(embryo_id)
+    summary = tracker.get_progression_summary(embryo_id)
 
     if summary['observations'] == 0:
         return f"No stage classifications for {embryo_id}. Use classify_embryo_stage first."
@@ -2095,14 +2099,13 @@ def predict_hatching(
     str
         Hatching prediction(s) with confidence intervals
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'developmental_tracker') or copilot.developmental_tracker is None:
-        return "No stage classifications recorded yet. Use classify_embryo_stage first."
-
-    tracker = copilot.developmental_tracker
+    tracker, err = require_developmental_tracker(copilot)
+    if err:
+        return err
 
     if all_embryos:
         # Get all embryos with stage classifications
@@ -2190,15 +2193,15 @@ async def assess_image_quality(
     str
         Quality assessment and suggestions
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     # Get image to assess
     if embryo_id:
-        embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-        if not embryo:
-            return f"Embryo '{embryo_id}' not found"
+        embryo, err = get_embryo_or_error(copilot, embryo_id)
+        if err:
+            return err
         if not embryo.recent_images:
             return f"No images available for {embryo_id}"
         latest = embryo.recent_images[-1]
@@ -2326,14 +2329,15 @@ def get_session_stats(context: Dict = None) -> str:
     str
         Session statistics
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'interaction_logger') or copilot.interaction_logger is None:
-        return "Interaction logging not enabled."
+    logger, err = require_interaction_logger(copilot)
+    if err:
+        return err
 
-    stats = copilot.interaction_logger.get_session_stats()
+    stats = logger.get_session_stats()
 
     lines = [
         "Session Statistics:",
@@ -2371,9 +2375,9 @@ def compare_embryo_development(
     str
         Development comparison
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
     # Get embryos
     if embryo_ids:
@@ -2454,14 +2458,15 @@ def analyze_corrections(
     str
         Correction analysis
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'interaction_logger') or copilot.interaction_logger is None:
-        return "Interaction logging not enabled."
+    logger, err = require_interaction_logger(copilot)
+    if err:
+        return err
 
-    interactions = copilot.interaction_logger.load_session_interactions()
+    interactions = logger.load_session_interactions()
 
     if not interactions:
         return "No interactions recorded yet."
@@ -2535,14 +2540,13 @@ def export_interaction_log(
     str
         Exported data or path to export file
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return "Error: No copilot context"
+    copilot, err = require_copilot(context)
+    if err:
+        return err
 
-    if not hasattr(copilot, 'interaction_logger') or copilot.interaction_logger is None:
-        return "Interaction logging not enabled."
-
-    logger = copilot.interaction_logger
+    logger, err = require_interaction_logger(copilot)
+    if err:
+        return err
 
     if format == "jsonl_path":
         return f"Interaction log file: {logger.log_file}"
