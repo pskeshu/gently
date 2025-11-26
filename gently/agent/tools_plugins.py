@@ -147,6 +147,12 @@ def remove_embryo(embryo_id: str, context: Dict) -> str:
     # Remove it
     actual_id = embryo.id  # Get the actual ID in case user used nickname
     if copilot.experiment.remove_embryo(actual_id):
+        # Also remove from detection cache to keep visualization in sync
+        if copilot.last_detection_result and copilot.last_detection_result.get('embryos'):
+            copilot.last_detection_result['embryos'] = [
+                e for e in copilot.last_detection_result['embryos']
+                if e.get('embryo_id') != actual_id
+            ]
         return f"✓ Removed {actual_id} from experiment (false detection deleted)"
     else:
         return f"Failed to remove {embryo_id}"
