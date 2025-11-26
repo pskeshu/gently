@@ -14,6 +14,10 @@ from .tool_registry import (
     tool, ToolCategory, ToolParameter,
     get_tool_registry,
 )
+from .detector import (
+    Detector, DetectorConditions, DetectorActions,
+    DetectionMode, ConfidenceLevel
+)
 
 
 # =============================================================================
@@ -719,7 +723,6 @@ def enable_preset_detector(
     if not copilot:
         return "Error: No copilot context"
 
-    from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode
     from .detector_registry import get_detector_presets
 
     presets = get_detector_presets()
@@ -741,7 +744,6 @@ def enable_preset_detector(
     conditions = DetectorConditions(min_timepoint=min_timepoint)
     actions = DetectorActions(mode=DetectionMode(action_mode))
 
-    from .detector import ConfidenceLevel
     detector = Detector(
         name=preset_data['name'],
         description=preset_data['description'],
@@ -940,53 +942,6 @@ async def acquire_volume(
 
     except Exception as e:
         return f"Error acquiring volume: {str(e)}"
-
-
-@tool(
-    name="start_multi_embryo_timelapse",
-    description="Start multi-embryo time-lapse volume acquisition (NOT YET IMPLEMENTED)",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-)
-async def start_multi_embryo_timelapse(
-    embryo_ids: List[str] = None,
-    num_timepoints: int = 500,
-    interval_seconds: float = 120,
-    num_slices: int = 50,
-    exposure_ms: float = 10.0,
-    enable_detectors: bool = True,
-    context: Dict = None
-) -> str:
-    """Start multi-embryo timelapse - NOT YET IMPLEMENTED"""
-    # TODO: Implement timelapse plan in backend
-    return ("⚠ Multi-embryo timelapse is not yet implemented.\n"
-            "For now, you can:\n"
-            "  - Use acquire_volume to capture single volumes\n"
-            "  - Manually repeat acquisitions at intervals")
-
-
-@tool(
-    name="pause_acquisition",
-    description="Pause currently running acquisition (NOT YET IMPLEMENTED)",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-)
-async def pause_acquisition(context: Dict = None) -> str:
-    """Pause acquisition - NOT YET IMPLEMENTED"""
-    # TODO: Implement pause in backend
-    return "⚠ Pause acquisition is not yet implemented."
-
-
-@tool(
-    name="resume_acquisition",
-    description="Resume previously paused acquisition (NOT YET IMPLEMENTED)",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-)
-async def resume_acquisition(context: Dict = None) -> str:
-    """Resume acquisition - NOT YET IMPLEMENTED"""
-    # TODO: Implement resume in backend
-    return "⚠ Resume acquisition is not yet implemented."
 
 
 @tool(
@@ -1987,7 +1942,6 @@ def enable_pre_hatching_speedup(
         return "Timelapse orchestrator not initialized."
 
     # Enable pretzel detector if not already enabled
-    from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode, ConfidenceLevel
     from .detector_registry import get_detector_presets
 
     presets = get_detector_presets()
