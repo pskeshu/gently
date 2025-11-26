@@ -110,9 +110,6 @@ class MicroscopyCopilot:
         # Hardware interface via RPC client
         self.client = microscope_client
 
-        # Detection results cache (for show_detected_embryos)
-        self.last_detection_result = None
-
         # Databroker (optional, for data catalog integration)
         self.databroker = None
 

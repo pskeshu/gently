@@ -147,13 +147,7 @@ def remove_embryo(embryo_id: str, context: Dict) -> str:
     # Remove it
     actual_id = embryo.id  # Get the actual ID in case user used nickname
     if copilot.experiment.remove_embryo(actual_id):
-        # Also remove from detection cache to keep visualization in sync
-        if copilot.last_detection_result and copilot.last_detection_result.get('embryos'):
-            copilot.last_detection_result['embryos'] = [
-                e for e in copilot.last_detection_result['embryos']
-                if e.get('embryo_id') != actual_id
-            ]
-        return f"✓ Removed {actual_id} from experiment (false detection deleted)"
+        return f"✓ Removed {actual_id} from experiment"
     else:
         return f"Failed to remove {embryo_id}"
 
@@ -1127,9 +1121,6 @@ async def detect_embryos(
         if result.get('success'):
             embryos = result.get('embryos', [])
 
-            # Store result for show_detected_embryos
-            copilot.last_detection_result = result
-
             # Add to experiment
             for emb in embryos:
                 # Build position dict from stage coordinates
@@ -1215,13 +1206,6 @@ async def manual_mark_embryos(
                 )
                 added_ids.append(new_id)
 
-            # Store result for show_detected_embryos (merge with existing if any)
-            if copilot.last_detection_result and copilot.last_detection_result.get('embryos'):
-                # Merge new embryos into existing detection result
-                copilot.last_detection_result['embryos'].extend(embryos)
-            else:
-                copilot.last_detection_result = result
-
             return f"✓ Added {len(added_ids)} embryo(s): {', '.join(added_ids)}"
         else:
             return f"Marking failed: {result.get('error', 'Unknown error')}"
@@ -1232,96 +1216,68 @@ async def manual_mark_embryos(
 
 @tool(
     name="show_detected_embryos",
-    description="Show detected embryos with bounding boxes. Shows only active (non-removed) embryos. Works with resumed sessions by capturing fresh image.",
+    description="Show detected embryos with bounding boxes. Captures fresh image and displays all active embryos.",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
 )
 async def show_detected_embryos(
-    only_active: bool = True,
     save_to_file: bool = True,
     context: Dict = None
 ) -> str:
-    """Show detected embryos visualization, filtered to active embryos"""
+    """Show detected embryos visualization using experiment.embryos as source of truth"""
     copilot = context.get('copilot')
     client = context.get('client')
 
     if not copilot:
         return "Error: No copilot context"
 
-    # Get active embryo IDs from experiment
-    active_ids = set(copilot.experiment.embryos.keys()) if copilot.experiment.embryos else set()
-
-    if not active_ids:
+    # Get embryos from experiment (single source of truth)
+    if not copilot.experiment.embryos:
         return "No embryos in experiment. Run detect_embryos first."
 
     try:
-        # Check if we have detection result with all active embryos
-        result = copilot.last_detection_result
-        have_all_embryos = False
+        # Always capture fresh image
+        print(f"  Capturing image...")
+        image = await client.capture_bottom_image()
+        if image is None or image.shape == (100, 100):
+            return "Failed to capture image for visualization."
 
-        if result and result.get('embryos') and result.get('image') is not None:
-            detection_ids = {e.get('embryo_id') for e in result.get('embryos', [])}
-            have_all_embryos = active_ids.issubset(detection_ids)
+        print(f"  Reading stage position...")
+        current_stage = await client.get_stage_position()
 
-        # If detection result is missing or incomplete, capture fresh image and calculate positions
-        if not have_all_embryos:
-            print(f"  Capturing fresh image for visualization...")
-            image = await client.capture_bottom_image()
-            if image is None or image.shape == (100, 100):
-                return "Failed to capture image for visualization."
+        # Calculate pixel positions from experiment embryo positions
+        pixel_size_um = 6.5
+        objective_mag = 4.0
+        um_per_pixel = pixel_size_um / objective_mag  # 1.625 um/pixel
 
-            print(f"  Reading current stage position...")
-            current_stage = await client.get_stage_position()
+        image_center_x = image.shape[1] / 2
+        image_center_y = image.shape[0] / 2
 
-            # Calculate pixel positions for all active embryos
-            # Formula: pixel = image_center + (embryo_stage - current_stage) / um_per_pixel
-            pixel_size_um = 6.5
-            objective_mag = 4.0
-            um_per_pixel = pixel_size_um / objective_mag  # 1.625 um/pixel
+        embryos = []
+        for embryo_id, embryo_state in copilot.experiment.embryos.items():
+            pos = embryo_state.stage_position or {}
 
-            image_center_x = image.shape[1] / 2
-            image_center_y = image.shape[0] / 2
+            stage_x = pos.get('x', current_stage[0])
+            stage_y = pos.get('y', current_stage[1])
 
-            embryos = []
-            for embryo_id in active_ids:
-                embryo_state = copilot.experiment.embryos[embryo_id]
-                pos = embryo_state.stage_position or {}
+            # Convert stage position to pixel position
+            dx_stage = stage_x - current_stage[0]
+            dy_stage = stage_y - current_stage[1]
 
-                stage_x = pos.get('x', current_stage[0])
-                stage_y = pos.get('y', current_stage[1])
+            pixel_x = image_center_x + dx_stage / um_per_pixel
+            pixel_y = image_center_y + dy_stage / um_per_pixel
 
-                # Convert stage position to pixel position
-                dx_stage = stage_x - current_stage[0]
-                dy_stage = stage_y - current_stage[1]
-
-                pixel_x = image_center_x + dx_stage / um_per_pixel
-                pixel_y = image_center_y + dy_stage / um_per_pixel
-
-                embryos.append({
-                    'embryo_id': embryo_id,
-                    'pixel_x': pixel_x,
-                    'pixel_y': pixel_y,
-                    'stage_x_um': stage_x,
-                    'stage_y_um': stage_y,
-                    'confidence': embryo_state.detection_confidence,
-                })
-
-            # Update detection result for future use
-            copilot.last_detection_result = {
-                'image': image,
-                'embryos': embryos,
-                'stage_position': list(current_stage),
-                'success': True
-            }
-            result = copilot.last_detection_result
-            print(f"  Calculated positions for {len(embryos)} embryos")
-        else:
-            # Filter existing detection result to active embryos
-            embryos = [e for e in result.get('embryos', []) if e.get('embryo_id') in active_ids]
-            image = result.get('image')
+            embryos.append({
+                'embryo_id': embryo_id,
+                'pixel_x': pixel_x,
+                'pixel_y': pixel_y,
+                'stage_x_um': stage_x,
+                'stage_y_um': stage_y,
+                'confidence': embryo_state.detection_confidence,
+            })
 
         if not embryos:
-            return f"No embryos to display. Active: {', '.join(active_ids)}"
+            return "No embryos to display."
 
         # Generate save path
         from datetime import datetime
@@ -1330,20 +1286,20 @@ async def show_detected_embryos(
         save_path = f"detection_results/detected_embryos_{timestamp}.png"
         Path("detection_results").mkdir(exist_ok=True)
 
-        print(f"  Showing {len(embryos)} embryos with bounding boxes...")
+        print(f"  Showing {len(embryos)} embryos...")
 
-        # Use client to view with filtered embryos
+        # Use client to view embryos
         view_result = await client.view_embryos(
             image=image,
             embryos=embryos,
-            title=f"Active Embryos ({len(embryos)})",
+            title=f"Embryos ({len(embryos)})",
             save_path=save_path,
             show=True
         )
 
         if view_result.get('success'):
             embryo_ids = [e.get('embryo_id', '?') for e in embryos]
-            return f"✓ Showing {len(embryos)} active embryos: {', '.join(embryo_ids)}\nSaved to: {save_path}"
+            return f"✓ Showing {len(embryos)} embryos: {', '.join(embryo_ids)}\nSaved to: {save_path}"
         elif view_result.get('error'):
             return f"Display error: {view_result.get('error')}"
         else:
