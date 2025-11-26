@@ -331,6 +331,36 @@ class QueueServerClient:
 
         return (0.0, 0.0)
 
+    async def get_piezo_position(self) -> float:
+        """
+        Get current piezo position.
+
+        Returns
+        -------
+        float
+            Piezo position in micrometers
+        """
+        result = await self._submit_plan_and_wait(
+            'read_piezo_plan',
+            kwargs={'piezo': 'piezo'}
+        )
+
+        if result.get('success'):
+            docs = result.get('documents', {})
+            events = docs.get('events', [])
+            if events:
+                data = events[0].get('data', {})
+                # Look for piezo position in various possible keys
+                for key in data.keys():
+                    if 'piezo' in key.lower():
+                        val = data[key]
+                        if isinstance(val, (int, float)):
+                            return float(val)
+                        elif isinstance(val, (list, tuple)) and len(val) > 0:
+                            return float(val[0])
+
+        return 0.0
+
     # =========================================================================
     # Calibration Operations
     # =========================================================================

@@ -66,6 +66,28 @@ def read_stage_plan(xy_stage) -> Generator[Any, Any, None]:
     yield from bp.count([xy_stage], num=1)
 
 
+def read_piezo_plan(piezo) -> Generator[Any, Any, None]:
+    """
+    Read current piezo position.
+
+    The position is stored in the run data and can be retrieved from Databroker.
+
+    Parameters
+    ----------
+    piezo : ophyd.Device
+        The piezo stage device
+
+    Example (via queue server API)
+    ------------------------------
+    >>> plan = BPlan("read_piezo_plan", piezo="piezo")
+    >>> rm.item_add(plan)
+    >>> # After completion, retrieve from databroker:
+    >>> run = db[-1]
+    >>> pos = run.primary.read()['piezo'].values[0]
+    """
+    yield from bp.count([piezo], num=1)
+
+
 def capture_bottom_image_plan(bottom_camera, led=None) -> Generator[Any, Any, None]:
     """
     Capture a single image from the bottom camera.

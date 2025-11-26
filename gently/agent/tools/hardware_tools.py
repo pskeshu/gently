@@ -305,7 +305,8 @@ async def view_image(
     description="""Capture a single 2D lightsheet fluorescence image at specified piezo/galvo position. Uses 50ms exposure by default.
 Use when user says "take a lightsheet image", "lightsheet snap", or wants to see fluorescence at a specific Z position.
 This is a COMPLETE action - do NOT follow up with acquire_volume unless user explicitly asks for a 3D volume.
-The piezo_position (default 0) controls Z depth, galvo_position (default 0) controls light sheet Y offset.""",
+If piezo_position is not specified, uses the CURRENT piezo position (preserves focus after fine_focus).
+The galvo_position (default 0) controls light sheet Y offset.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
@@ -314,7 +315,7 @@ The piezo_position (default 0) controls Z depth, galvo_position (default 0) cont
     ],
 )
 async def capture_lightsheet(
-    piezo_position: float = 0.0,
+    piezo_position: float = None,
     galvo_position: float = 0.0,
     show: bool = True,
     context: Dict = None
@@ -323,6 +324,11 @@ async def capture_lightsheet(
     client = context.get('client')
 
     try:
+        # If no piezo position specified, use current position
+        if piezo_position is None:
+            piezo_position = await client.get_piezo_position()
+            print(f"  Using current piezo position: {piezo_position:.1f}um")
+
         print(f"  Capturing lightsheet at piezo={piezo_position}um, galvo={galvo_position}V...")
         result = await client.capture_lightsheet_image(
             piezo_position=piezo_position,
