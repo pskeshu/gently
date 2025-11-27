@@ -71,11 +71,9 @@ class MicroscopeClient:
 
             self._conn = await asyncio.to_thread(_connect)
             self._server = self._conn.root
-            print(f"Connected to microscope server at {self.host}:{self.port}")
             return True
 
-        except Exception as e:
-            print(f"Failed to connect to microscope server: {e}")
+        except Exception:
             return False
 
     def disconnect(self):
