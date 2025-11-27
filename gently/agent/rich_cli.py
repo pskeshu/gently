@@ -643,7 +643,7 @@ class RichCopilotCLI:
         # State for the picker
         selected_idx = [default_idx]
         selected_ids = [set()]  # For multiple selection
-        result = [None]
+        confirmed = [False]  # Track if user confirmed vs cancelled
         cancelled = [False]
 
         # Key bindings
@@ -669,15 +669,9 @@ class RichCopilotCLI:
                     selected_ids[0].add(opt_id)
 
         @kb.add('enter')
+        @kb.add('c-m')  # Also bind Ctrl+M (same as Enter on some terminals)
         def select(event):
-            if allow_multiple:
-                if selected_ids[0]:
-                    result[0] = ','.join(sorted(selected_ids[0]))
-                else:
-                    # If nothing selected, select current
-                    result[0] = options[selected_idx[0]].get('id')
-            else:
-                result[0] = options[selected_idx[0]].get('id')
+            confirmed[0] = True
             event.app.exit()
 
         @kb.add('escape')
@@ -747,9 +741,20 @@ class RichCopilotCLI:
 
         try:
             await app.run_async()
+
             if cancelled[0]:
                 return "cancelled"
-            return result[0] or "cancelled"
+
+            if confirmed[0]:
+                # Get the selected value(s)
+                if allow_multiple and selected_ids[0]:
+                    return ','.join(sorted(selected_ids[0]))
+                else:
+                    # Return currently highlighted option
+                    return options[selected_idx[0]].get('id', 'cancelled')
+
+            # If neither confirmed nor cancelled, treat as cancelled
+            return "cancelled"
         except Exception as e:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
             return "error"
