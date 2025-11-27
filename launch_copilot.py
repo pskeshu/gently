@@ -20,6 +20,7 @@ from datetime import datetime
 
 from rich.console import Console
 from rich.table import Table
+from rich.text import Text
 from rich import box
 
 from prompt_toolkit.key_binding import KeyBindings
@@ -274,9 +275,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     client = None
 
     if not offline:
-        # Connect to servers
-        console.print(f"\n[bold {theme.primary}]Connecting to Servers[/]")
-
+        # Connect to servers with clean status display
         client = QueueServerClient(
             http_url="http://127.0.0.1:60610",
             sam_host="localhost",
@@ -285,30 +284,49 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
         connected = await client.connect()
 
+        # Build status table
+        status_lines = []
+
         if client.is_connected:
-            console.print(f"  [{theme.success}]{theme.icon_success}[/] Queue Server connected")
+            status_lines.append((theme.icon_success, "Queue Server", "connected", theme.success))
             status = await client.get_status()
             qs_status = status.get('queue_server', {})
-            console.print(f"  [{theme.info}]{theme.icon_info}[/] Manager: {qs_status.get('manager_state', 'unknown')}")
+            manager_state = qs_status.get('manager_state', 'unknown')
+            status_lines.append((theme.icon_info, "  Manager", manager_state, theme.muted))
         else:
-            console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Queue Server not connected")
+            status_lines.append((theme.icon_error, "Queue Server", "not connected", theme.error))
 
         if client.has_sam:
-            console.print(f"  [{theme.success}]{theme.icon_success}[/] SAM Server connected")
+            status_lines.append((theme.icon_success, "SAM Server", "connected", theme.success))
         else:
-            console.print(f"  [{theme.warning}]{theme.icon_warning}[/] SAM Server not connected")
+            status_lines.append((theme.icon_warning, "SAM Server", "not connected", theme.warning))
 
-        # Databroker status
         if client.has_databroker:
-            console.print(f"  [{theme.success}]{theme.icon_success}[/] Databroker connected")
+            status_lines.append((theme.icon_success, "Databroker", "connected", theme.success))
         else:
-            console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Databroker not connected")
+            status_lines.append((theme.icon_warning, "Databroker", "not connected", theme.warning))
+
+        # Print status table
+        table = Table(show_header=False, box=None, padding=(0, 1))
+        table.add_column("icon", width=2)
+        table.add_column("service", min_width=14)
+        table.add_column("status")
+
+        for icon, service, status_text, style in status_lines:
+            table.add_row(
+                Text(icon, style=style),
+                Text(service, style="bold" if not service.startswith(" ") else theme.muted),
+                Text(status_text, style=style)
+            )
+
+        console.print()
+        console.print(table)
 
         if not connected:
-            console.print(f"\n  [{theme.warning}]{theme.icon_warning}[/] Running in offline mode")
+            console.print(f"\n[{theme.warning}]{theme.icon_warning} Running in offline mode[/]")
             client = None
     else:
-        console.print(f"\n[{theme.info}]{theme.icon_info}[/] Running in offline mode")
+        console.print(f"\n[{theme.muted}]{theme.icon_info} Offline mode[/]")
 
     # Create copilot
     copilot = MicroscopyCopilot(
