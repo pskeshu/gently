@@ -622,6 +622,9 @@ class RichCopilotCLI:
         str
             Selected option ID (or comma-separated IDs if multiple)
         """
+        from prompt_toolkit.shortcuts import radiolist_dialog, checkboxlist_dialog
+        from prompt_toolkit.styles import Style
+
         theme = get_theme()
 
         question = choice_data.get('question', 'Select an option:')
@@ -632,56 +635,73 @@ class RichCopilotCLI:
         if not options:
             return "Error: No options provided"
 
-        # Simple numbered selection - more reliable on Windows
-        self.console.print()
-        self.console.print(f"[bold]{question}[/]")
-        self.console.print(f"[{theme.muted}]Enter number to select (or 'c' to cancel):[/]")
-        self.console.print()
-
-        for i, opt in enumerate(options):
-            label = opt.get('label', opt.get('id', f'Option {i+1}'))
+        # Build values list for dialog: [(id, label), ...]
+        values = []
+        for opt in options:
+            opt_id = opt.get('id', '')
+            label = opt.get('label', opt_id)
             desc = opt.get('description', '')
-            marker = "→" if (default_id and opt.get('id') == default_id) or (not default_id and i == 0) else " "
-
             if desc:
-                self.console.print(f"  {marker} [{theme.info}]{i+1}[/]. {label} [{theme.muted}]- {desc}[/]")
+                display = f"{label} - {desc}"
             else:
-                self.console.print(f"  {marker} [{theme.info}]{i+1}[/]. {label}")
+                display = label
+            values.append((opt_id, display))
 
-        self.console.print()
+        # Find default
+        default = default_id if default_id else (values[0][0] if values else None)
+
+        # Custom style
+        dialog_style = Style.from_dict({
+            'dialog': 'bg:#1a1a2e',
+            'dialog.body': 'bg:#1a1a2e fg:#ffffff',
+            'dialog frame.label': 'bg:#1a1a2e fg:#00d4ff bold',
+            'dialog.body label': 'fg:#ffffff',
+            'button': 'bg:#0066cc fg:#ffffff',
+            'button.focused': 'bg:#00d4ff fg:#000000 bold',
+            'radiolist': 'bg:#1a1a2e fg:#ffffff',
+            'checkbox': 'bg:#1a1a2e fg:#ffffff',
+        })
+
+        self.console.print()  # Add spacing
 
         try:
-            # Use simple text input - most reliable across platforms
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.session.prompt("Choice: ")
-            )
-            response = response.strip().lower()
-
-            if response == 'c' or response == 'cancel':
-                return "cancelled"
-
-            # Try to parse as number
-            try:
-                idx = int(response) - 1
-                if 0 <= idx < len(options):
-                    return options[idx].get('id', 'cancelled')
-                else:
-                    self.console.print(f"[{theme.warning}]Invalid choice, using first option[/]")
-                    return options[0].get('id', 'cancelled')
-            except ValueError:
-                # Maybe they typed the ID directly
-                for opt in options:
-                    if opt.get('id', '').lower() == response or opt.get('label', '').lower() == response:
-                        return opt.get('id', 'cancelled')
-                # Default to first option
-                self.console.print(f"[{theme.warning}]Invalid choice, using first option[/]")
-                return options[0].get('id', 'cancelled')
+            if allow_multiple:
+                # Checkbox list for multiple selection
+                default_values = [default] if default else []
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: checkboxlist_dialog(
+                        title="",
+                        text=question,
+                        values=values,
+                        default_values=default_values,
+                        style=dialog_style,
+                    ).run()
+                )
+                if result is None:
+                    return "cancelled"
+                return ','.join(result) if result else "cancelled"
+            else:
+                # Radio list for single selection
+                result = await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: radiolist_dialog(
+                        title="",
+                        text=question,
+                        values=values,
+                        default=default,
+                        style=dialog_style,
+                    ).run()
+                )
+                if result is None:
+                    return "cancelled"
+                return result
 
         except (EOFError, KeyboardInterrupt):
             return "cancelled"
         except Exception as e:
-            self.console.print(f"[{theme.error}]Error: {e}[/]")
+            self.console.print(f"[{theme.error}]Error with dialog: {e}[/]")
+            # Fallback to first option
             return options[0].get('id', 'error') if options else "error"
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
