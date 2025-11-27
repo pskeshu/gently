@@ -741,6 +741,12 @@ class RichCopilotCLI:
         self.console.print()  # Add spacing
 
         try:
+            # DEBUG: Show options received
+            self.console.print(f"[yellow]DEBUG: Picker received {len(options)} options[/]")
+            for i, opt in enumerate(options):
+                self.console.print(f"[yellow]  [{i}] id={repr(opt.get('id'))} label={repr(opt.get('label'))}[/]")
+            self.console.print(f"[yellow]DEBUG: default_idx={default_idx}, selected_idx={selected_idx[0]}[/]")
+
             # Run the picker synchronously in a thread to avoid event loop conflicts
             def run_picker():
                 return app.run()
@@ -748,14 +754,22 @@ class RichCopilotCLI:
             # app.run() returns the value passed to app.exit(result=...)
             selection = await asyncio.get_event_loop().run_in_executor(None, run_picker)
 
+            # DEBUG: Show what app.run() returned
+            self.console.print(f"[yellow]DEBUG: app.run() returned: {repr(selection)}[/]")
+            self.console.print(f"[yellow]DEBUG: selected_idx after picker: {selected_idx[0]}[/]")
+
             # Return the selection (will be "cancelled" if user pressed Escape/q)
             if selection:
+                self.console.print(f"[yellow]DEBUG: Returning selection: {repr(selection)}[/]")
                 return selection
 
             # Fallback if somehow selection is None/empty
-            return options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}"
+            fallback = options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}"
+            self.console.print(f"[yellow]DEBUG: Selection was falsy, using fallback: {repr(fallback)}[/]")
+            return fallback
         except Exception as e:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
+            self.console.print(f"[yellow]DEBUG: Exception: {repr(e)}[/]")
             return "error"
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
@@ -1460,6 +1474,10 @@ Just type what you want! Examples:
             theme = get_theme()
             self.console.print()
             self.console.print(Text("Goodbye!", style=theme.copilot))
+
+            # Clean up client session
+            if self.copilot.client:
+                await self.copilot.client.disconnect()
 
 
 async def run_rich_cli(copilot, history_file: Optional[Path] = None):

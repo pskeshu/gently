@@ -111,7 +111,8 @@ class MicroscopyCopilot:
         self.client = microscope_client
 
         # Databroker (optional, for data catalog integration)
-        self.databroker = None
+        # Get from client if available
+        self.databroker = getattr(microscope_client, '_db', None) if microscope_client else None
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
@@ -145,8 +146,18 @@ class MicroscopyCopilot:
         self._update_system_prompt()
 
     def _update_system_prompt(self):
-        """Rebuild system prompt with current experiment state"""
-        self.system_prompt = build_system_prompt(self.experiment)
+        """Rebuild system prompt with current experiment state and connection status"""
+        # Build connection status
+        if self.client:
+            connection_status = {
+                'queue_server': self.client.is_connected,
+                'sam_server': self.client.has_sam,
+                'databroker': self.client.has_databroker and self.client.is_connected,
+            }
+        else:
+            connection_status = None  # Offline mode
+
+        self.system_prompt = build_system_prompt(self.experiment, connection_status)
 
     def _init_interaction_logger(self):
         """Initialize the interaction logger for structured logging"""

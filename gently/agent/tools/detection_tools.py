@@ -42,6 +42,12 @@ async def detect_embryos(
     if not copilot:
         return "Error: No copilot context"
 
+    if not client:
+        return "Error: Microscope not connected. Cannot detect embryos in offline mode."
+
+    if not client.has_sam:
+        return "Error: SAM server not connected. Embryo detection requires the SAM segmentation server."
+
     try:
         result = await client.detect_embryos(
             min_confidence=min_confidence,
@@ -100,6 +106,9 @@ async def manual_mark_embryos(
 
     if not copilot:
         return "Error: No copilot context"
+
+    if not client:
+        return "Error: Microscope not connected. Cannot mark embryos in offline mode."
 
     try:
         # Build list of existing embryos with their stage positions
@@ -185,6 +194,9 @@ async def show_detected_embryos(
 
     if not copilot:
         return "Error: No copilot context"
+
+    if not client:
+        return "Error: Microscope not connected. Cannot show embryos in offline mode."
 
     if not copilot.experiment.embryos:
         return "No embryos in experiment. Run detect_embryos first."

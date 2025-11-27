@@ -301,7 +301,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         else:
             status_lines.append((theme.icon_warning, "SAM Server", "not connected", theme.warning))
 
-        if client.has_databroker:
+        # Databroker is only usable if Queue Server is connected (client gets nullified otherwise)
+        if client.has_databroker and client.is_connected:
             status_lines.append((theme.icon_success, "Databroker", "connected", theme.success))
         else:
             status_lines.append((theme.icon_warning, "Databroker", "not connected", theme.warning))
@@ -324,6 +325,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
         if not connected:
             console.print(f"\n[{theme.warning}]{theme.icon_warning} Running in offline mode[/]")
+            # Close the session before discarding client
+            await client.disconnect()
             client = None
     else:
         console.print(f"\n[{theme.muted}]{theme.icon_info} Offline mode[/]")

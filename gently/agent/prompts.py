@@ -441,7 +441,7 @@ The copilot includes a powerful adaptive timelapse system that runs in the backg
 """
 
 
-def build_system_prompt(experiment_state: ExperimentState) -> str:
+def build_system_prompt(experiment_state: ExperimentState, connection_status: dict = None) -> str:
     """
     Build complete system prompt for Claude
 
@@ -449,6 +449,8 @@ def build_system_prompt(experiment_state: ExperimentState) -> str:
     ----------
     experiment_state : ExperimentState
         Current experiment state
+    connection_status : dict, optional
+        Connection status for servers: {queue_server: bool, sam_server: bool, databroker: bool}
 
     Returns
     -------
@@ -456,6 +458,37 @@ def build_system_prompt(experiment_state: ExperimentState) -> str:
         Complete system prompt
     """
     embryo_summary = experiment_state.get_summary() if experiment_state.embryos else "No embryos loaded yet"
+
+    # Build connection status section
+    if connection_status:
+        qs = "connected" if connection_status.get('queue_server') else "NOT CONNECTED"
+        sam = "connected" if connection_status.get('sam_server') else "NOT CONNECTED"
+        db = "connected" if connection_status.get('databroker') else "NOT CONNECTED"
+
+        if not connection_status.get('queue_server'):
+            connection_section = f"""# Hardware Connection Status
+
+⚠️ **OFFLINE MODE** - Microscope server is not connected.
+
+- Queue Server: {qs}
+- SAM Server: {sam}
+- Databroker: {db}
+
+**Important**: You cannot perform hardware operations (detect embryos, capture images, move stage, etc.)
+without a connected microscope server. If the user asks for hardware operations, inform them that
+the microscope is not connected and suggest they start the server or check the connection."""
+        else:
+            connection_section = f"""# Hardware Connection Status
+
+- Queue Server: {qs}
+- SAM Server: {sam}
+- Databroker: {db}"""
+    else:
+        connection_section = """# Hardware Connection Status
+
+⚠️ **OFFLINE MODE** - No microscope client available.
+
+You cannot perform hardware operations. Inform users if they request hardware actions."""
 
     return f"""You are a Microscopy Copilot - an AI scientific collaborator assisting with diSPIM
 microscopy experiments on C. elegans embryos.
@@ -466,6 +499,8 @@ Your role is to:
 3. Monitor experiments in real-time and make intelligent decisions
 4. Communicate clearly with researchers about observations and actions
 5. Adapt acquisition parameters dynamically based on what you observe
+
+{connection_section}
 
 {CELEGANS_BIOLOGY}
 

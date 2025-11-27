@@ -67,6 +67,7 @@ class QueueServerClient:
         self._session = None  # aiohttp session
         self._sam_conn = None  # rpyc connection
         self._db = None  # databroker catalog
+        self._qs_connected = False  # Track actual queue server connection
 
         # Store last detection results for visualization
         self._last_detection = None  # {image, embryos, stage_position}
@@ -82,7 +83,7 @@ class QueueServerClient:
         """
         import aiohttp
 
-        success = True
+        self._qs_connected = False  # Track actual queue server connection
 
         # Create aiohttp session
         self._session = aiohttp.ClientSession()
@@ -92,10 +93,11 @@ class QueueServerClient:
             async with self._session.get(f"{self.http_url}/api/status") as resp:
                 if resp.status == 200:
                     await resp.json()  # Validate response
+                    self._qs_connected = True
                 else:
                     raise Exception(f"HTTP {resp.status}")
         except Exception:
-            success = False
+            self._qs_connected = False
 
         # Connect to SAM Server (rpyc)
         try:
@@ -133,7 +135,7 @@ class QueueServerClient:
         except Exception:
             self._db = None
 
-        return success
+        return self._qs_connected
 
     async def disconnect(self):
         """Disconnect from servers"""
@@ -147,7 +149,7 @@ class QueueServerClient:
     @property
     def is_connected(self) -> bool:
         """Check if connected to Microscope Server"""
-        return self._session is not None
+        return self._qs_connected
 
     @property
     def has_sam(self) -> bool:
