@@ -91,15 +91,10 @@ class QueueServerClient:
         try:
             async with self._session.get(f"{self.http_url}/api/status") as resp:
                 if resp.status == 200:
-                    status = await resp.json()
-                    print(f"Connected to Microscope Server at {self.http_url}")
-                    print(f"  Manager state: {status.get('manager_state')}")
-                    print(f"  Devices: {len(status.get('devices', []))}")
-                    print(f"  Plans: {len(status.get('plans', []))}")
+                    await resp.json()  # Validate response
                 else:
                     raise Exception(f"HTTP {resp.status}")
-        except Exception as e:
-            print(f"Failed to connect to Microscope Server: {e}")
+        except Exception:
             success = False
 
         # Connect to SAM Server (rpyc)
@@ -114,10 +109,7 @@ class QueueServerClient:
             self._sam_conn = rpyc.connect(
                 self.sam_host, self.sam_port, config=config
             )
-            print(f"Connected to SAM Server at {self.sam_host}:{self.sam_port}")
-        except Exception as e:
-            print(f"Failed to connect to SAM Server: {e}")
-            print("  SAM detection will not be available")
+        except Exception:
             self._sam_conn = None
             # Don't fail completely - SAM is optional
 
@@ -136,12 +128,9 @@ class QueueServerClient:
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")  # Suppress v0 fallback warning
                     self._db = Broker.from_config(config)
-                print(f"Connected to Databroker catalog: {self.databroker_catalog}")
             else:
-                print(f"Databroker config not found: {config_path}")
                 self._db = None
-        except Exception as e:
-            print(f"Failed to connect to Databroker: {e}")
+        except Exception:
             self._db = None
 
         return success
