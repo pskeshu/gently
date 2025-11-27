@@ -1059,6 +1059,12 @@ class RichCopilotCLI:
                                 chunk.get('tool_input', {}),
                                 chunk.get('duration')
                             )
+                        # Reset progress with fresh task (don't accumulate tasks)
+                        progress = Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            transient=True,
+                        )
                         progress.start()
                         task = progress.add_task("[cyan]Thinking...", total=None)
             finally:
