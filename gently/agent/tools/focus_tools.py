@@ -99,18 +99,12 @@ async def fine_focus(
     num_steps = int(2 * range_um / step_um) + 1
     positions = np.linspace(center_um - range_um, center_um + range_um, num_steps)
 
-    print(f"  Fine focus sweep: {center_um:.1f} ± {range_um:.1f} μm, step {step_um:.1f} μm")
-    print(f"  Algorithm: {algorithm}")
-    print(f"  Positions: {len(positions)}")
-
     try:
         # Capture images at each position
         images = []
         captured_positions = []
 
         for i, pos in enumerate(positions):
-            print(f"  [{i+1}/{len(positions)}] Capturing at piezo={pos:.1f}μm...", end='\r')
-
             result = await client.capture_lightsheet_image(
                 piezo_position=float(pos),
                 galvo_position=float(galvo_position)
@@ -119,16 +113,11 @@ async def fine_focus(
             if result.get('success') and result.get('image') is not None:
                 images.append(result['image'])
                 captured_positions.append(pos)
-            else:
-                print(f"\n  Warning: Failed to capture at position {pos:.1f}μm")
-
-        print()  # New line after progress
 
         if len(images) < 3:
             return f"Error: Only captured {len(images)} images, need at least 3 for focus analysis"
 
         # Calculate focus scores
-        print(f"  Calculating focus scores...")
         scores = []
         config = FocusAnalysisConfig(algorithm=algorithm)
 
@@ -145,7 +134,6 @@ async def fine_focus(
         best_measured_score = scores[max_idx]
 
         # Fit Gaussian curve for sub-step precision
-        print(f"  Fitting Gaussian curve...")
         try:
             fitted_positions, fitted_scores, fit_params, r_squared = fit_focus_curve(
                 captured_positions, scores, FitFunction.GAUSSIAN.value
@@ -159,23 +147,19 @@ async def fine_focus(
 
                 # Check if fitted peak is within sweep range
                 if best_position < captured_positions.min() or best_position > captured_positions.max():
-                    print(f"  Warning: Fitted peak ({best_position:.2f}μm) outside sweep range, using max score position")
                     best_position = best_measured_position
-                    fit_quality = "fallback"
+                    fit_quality = "fallback (peak outside range)"
             else:
                 best_position = best_measured_position
                 fit_quality = "poor"
-                print(f"  Warning: Poor fit (R²={r_squared:.3f}), using max score position")
 
         except Exception as e:
-            print(f"  Warning: Curve fitting failed ({e}), using max score position")
             best_position = best_measured_position
             r_squared = 0.0
             fit_quality = "failed"
 
         # Move to best position if requested
         if move_to_best:
-            print(f"  Moving to optimal position: {best_position:.2f}μm")
             await client.capture_lightsheet_image(
                 piezo_position=float(best_position),
                 galvo_position=float(galvo_position)
@@ -195,7 +179,6 @@ async def fine_focus(
                     algorithm=algorithm,
                 )
                 logged_to_embryo = True
-                print(f"  Logged to {embryo_id} focus_history ({len(embryo.focus_history)} datapoints)")
 
         # Build result message
         result_lines = [
@@ -271,7 +254,6 @@ async def get_focus_score(
         # If no piezo position specified, use current position
         if piezo_position is None:
             piezo_position = await client.get_piezo_position()
-            print(f"  Using current piezo position: {piezo_position:.1f}μm")
 
         # Capture image
         result = await client.capture_lightsheet_image(

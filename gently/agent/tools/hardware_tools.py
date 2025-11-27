@@ -158,13 +158,9 @@ async def calibrate_embryo(
         # First move to embryo position
         pos = embryo.stage_position
         if pos and pos.get('x') is not None and pos.get('y') is not None:
-            print(f"  Moving to {embryo.id} at ({pos['x']:.1f}, {pos['y']:.1f})...")
             await client.move_to_position(pos['x'], pos['y'])
-        else:
-            print(f"  Warning: No position stored for {embryo.id}, calibrating at current position")
 
         # Run calibration at current position
-        print(f"  Running piezo-galvo calibration...")
         result = await client.calibrate_piezo_galvo(piezo_positions=positions)
 
         if result.get('success'):
@@ -211,10 +207,7 @@ async def acquire_volume(
         # Move to embryo position first
         pos = embryo.stage_position
         if pos and pos.get('x') is not None and pos.get('y') is not None:
-            print(f"  Moving to {embryo.id} at ({pos['x']:.1f}, {pos['y']:.1f})...")
             await client.move_to_position(pos['x'], pos['y'])
-        else:
-            print(f"  Warning: No position stored for {embryo.id}, acquiring at current position")
 
         # Get calibration parameters (use defaults if not calibrated)
         cal = embryo.calibration or {}
@@ -223,10 +216,6 @@ async def acquire_volume(
         piezo_amplitude = cal.get('piezo_amplitude', 25.0)
         piezo_center = cal.get('piezo_center', 50.0)
 
-        if not embryo.calibration:
-            print(f"  Warning: {embryo.id} not calibrated, using default parameters")
-
-        print(f"  Acquiring {num_slices}-slice volume...")
         result = await client.acquire_volume(
             num_slices=num_slices,
             exposure_ms=exposure_ms,
@@ -274,7 +263,6 @@ async def view_image(
     client = context.get('client')
 
     try:
-        print(f"  Capturing bottom camera image...")
         image = await client.capture_bottom_image(exposure_ms=exposure_ms)
 
         if image is None or image.shape == (100, 100):
@@ -287,7 +275,6 @@ async def view_image(
             save_path = f"camera_captures/bottom_camera_{timestamp}.png"
             Path("camera_captures").mkdir(exist_ok=True)
 
-            print(f"  Displaying image...")
             view_result = await client.view_image(
                 image=image,
                 title=title,
@@ -307,14 +294,22 @@ async def view_image(
     description="""Capture a single 2D lightsheet fluorescence image at specified piezo/galvo position. Uses 50ms exposure by default.
 Use when user says "take a lightsheet image", "lightsheet snap", or wants to see fluorescence at a specific Z position.
 This is a COMPLETE action - do NOT follow up with acquire_volume unless user explicitly asks for a 3D volume.
-If piezo_position is not specified, uses the CURRENT piezo position (preserves focus after fine_focus).
-The galvo_position (default 0) controls light sheet Y offset. Optionally specify embryo_id to update that embryo's last_imaged time.""",
+
+IMPORTANT: Always pass embryo_id when capturing for an embryo. This ensures the image is captured at the correct
+focus position from the embryo's focus_history (set by fine_focus). Without embryo_id, focus may be incorrect.
+
+The piezo position is determined by priority:
+1. Explicit piezo_position parameter (if provided)
+2. Embryo's focus_history for the given galvo_position (if embryo_id provided and has focus data)
+3. Hardware query fallback (unreliable, may return 0)
+
+If embryo has no focus data for the requested galvo_position, consider running fine_focus first.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
-        ToolExample("Take a lightsheet image", {}),
-        ToolExample("Lightsheet snap at piezo 50", {"piezo_position": 50.0}),
-        ToolExample("Capture lightsheet of embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Take a lightsheet image of embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Lightsheet snap at specific piezo", {"embryo_id": "embryo_1", "piezo_position": 50.0}),
+        ToolExample("Capture at different galvo", {"embryo_id": "embryo_1", "galvo_position": 0.5}),
     ],
 )
 async def capture_lightsheet(
@@ -329,12 +324,31 @@ async def capture_lightsheet(
     copilot = context.get('copilot')
 
     try:
-        # If no piezo position specified, use current position
+        # Determine piezo position for best focus
+        # Priority: explicit param > embryo focus history > hardware query
+        focus_source = None
         if piezo_position is None:
-            piezo_position = await client.get_piezo_position()
-            print(f"  Using current piezo position: {piezo_position:.1f}um")
+            # Check embryo's focus history first (from fine_focus)
+            if embryo_id and copilot:
+                embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+                if embryo and embryo.focus_history:
+                    # Try interpolation if we have 2+ points
+                    fit = embryo.get_piezo_galvo_fit()
+                    if fit is not None:
+                        slope, intercept = fit
+                        piezo_position = slope * galvo_position + intercept
+                        focus_source = "interpolated"
+                    else:
+                        # Single point or exact match
+                        piezo_position = embryo.get_focus_at_galvo(galvo_position)
+                        if piezo_position is not None:
+                            focus_source = "focus_history"
 
-        print(f"  Capturing lightsheet at piezo={piezo_position}um, galvo={galvo_position}V...")
+            # Fall back to hardware query (unreliable)
+            if piezo_position is None:
+                piezo_position = await client.get_piezo_position()
+                focus_source = "hardware_query"
+
         result = await client.capture_lightsheet_image(
             piezo_position=piezo_position,
             galvo_position=galvo_position
@@ -353,6 +367,15 @@ async def capture_lightsheet(
                     # Default lightsheet exposure is 50ms
                     embryo.record_exposure(exposure_ms=50.0, num_frames=1)
 
+            # Build focus info string
+            focus_info = ""
+            if focus_source == "interpolated":
+                focus_info = " (focus: interpolated from calibration)"
+            elif focus_source == "focus_history":
+                focus_info = " (focus: from fine_focus)"
+            elif focus_source == "hardware_query":
+                focus_info = " (focus: hardware query - may be inaccurate)"
+
             if image is not None and show:
                 # Display the image
                 from datetime import datetime
@@ -361,18 +384,17 @@ async def capture_lightsheet(
                 save_path = f"lightsheet_captures/lightsheet_{timestamp}.png"
                 Path("lightsheet_captures").mkdir(exist_ok=True)
 
-                print(f"  Displaying lightsheet image...")
                 view_result = await client.view_image(
                     image=image,
-                    title=f"Lightsheet: piezo={piezo_position}um, galvo={galvo_position}V",
+                    title=f"Lightsheet: piezo={piezo_position:.2f}um, galvo={galvo_position}V",
                     save_path=save_path,
                     show=True
                 )
-                return f"Captured lightsheet image at piezo={piezo_position}um, galvo={galvo_position}V\nSaved to: {save_path}\nRun UID: {run_uid}"
+                return f"✓ Captured lightsheet at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info}\nSaved to: {save_path}"
             elif image is None:
-                return f"Lightsheet captured at piezo={piezo_position}um, galvo={galvo_position}V (image not displayed - databroker retrieval issue)\nRun UID: {run_uid}"
+                return f"✓ Lightsheet captured at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info} (image not displayed)\nRun UID: {run_uid}"
             else:
-                return f"Captured lightsheet at piezo={piezo_position}um, galvo={galvo_position}V\nRun UID: {run_uid}"
+                return f"✓ Captured lightsheet at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info}"
         else:
             return f"Failed: {result.get('error', 'Unknown error')}"
 

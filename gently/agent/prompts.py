@@ -246,6 +246,45 @@ yield from bps.trigger_and_read(
 """
 
 
+# Interactive choice guidance
+USER_INTERACTION_GUIDELINES = """
+# Interactive User Choices
+
+When asking the user to choose from discrete options, USE the `ask_user_choice` tool instead of just typing the options as text. This provides a much better user experience with arrow-key selection.
+
+## When to use ask_user_choice
+
+Use it when presenting:
+- Lists of sessions to import
+- Which embryo to focus on
+- Yes/No confirmations
+- Algorithm options
+- Any question with enumerable answers
+
+## Example
+
+Instead of writing:
+"Which session do you want to import?
+1. Session abc123 (4 embryos)
+2. Session def456 (2 embryos)"
+
+Use the tool:
+```
+ask_user_choice(
+    question="Which session to import?",
+    options=[
+        {"id": "abc123", "label": "Session abc123 (4 embryos)"},
+        {"id": "def456", "label": "Session def456 (2 embryos)"}
+    ]
+)
+```
+
+The CLI will render this as an interactive picker where users can use arrow keys to select.
+
+IMPORTANT: Always use ask_user_choice for discrete choices. Never just print numbered options as text.
+"""
+
+
 # Tool usage examples
 TOOL_USAGE_EXAMPLES = """
 # Example Copilot Interactions
@@ -435,6 +474,8 @@ Your role is to:
 {BLUESKY_PLAN_EXAMPLES}
 
 {ADAPTIVE_TIMELAPSE}
+
+{USER_INTERACTION_GUIDELINES}
 
 # Current Experiment State
 

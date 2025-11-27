@@ -190,12 +190,10 @@ async def show_detected_embryos(
         return "No embryos in experiment. Run detect_embryos first."
 
     try:
-        print(f"  Capturing image...")
         image = await client.capture_bottom_image()
         if image is None or image.shape == (100, 100):
             return "Failed to capture image for visualization."
 
-        print(f"  Reading stage position...")
         current_stage = await client.get_stage_position()
 
         # Calculate pixel positions from experiment embryo positions
@@ -234,8 +232,6 @@ async def show_detected_embryos(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         save_path = f"detection_results/detected_embryos_{timestamp}.png"
         Path("detection_results").mkdir(exist_ok=True)
-
-        print(f"  Showing {len(embryos)} embryos...")
 
         view_result = await client.view_embryos(
             image=image,
