@@ -622,8 +622,6 @@ class RichCopilotCLI:
         str
             Selected option ID (or comma-separated IDs if multiple)
         """
-        import msvcrt
-
         theme = get_theme()
 
         question = choice_data.get('question', 'Select an option:')
@@ -635,82 +633,130 @@ class RichCopilotCLI:
             return "Error: No options provided"
 
         # Find default index
-        selected_idx = 0
+        default_idx = 0
         if default_id:
             for i, opt in enumerate(options):
                 if opt.get('id') == default_id:
-                    selected_idx = i
+                    default_idx = i
                     break
 
-        def render_options():
-            """Render the options list"""
-            lines = []
-            lines.append(f"\n[bold]{question}[/]")
-            lines.append(f"[{theme.muted}]↑/↓ to move, Enter to select, Esc to cancel[/]\n")
+        # State for the picker (using lists for mutability in closures)
+        selected_idx = [default_idx]
+        selected_ids = [set()]  # For multiple selection
+
+        # Key bindings
+        kb = KeyBindings()
+
+        @kb.add('up')
+        @kb.add('k')
+        def move_up(event):
+            selected_idx[0] = max(0, selected_idx[0] - 1)
+
+        @kb.add('down')
+        @kb.add('j')
+        def move_down(event):
+            selected_idx[0] = min(len(options) - 1, selected_idx[0] + 1)
+
+        @kb.add('space')
+        def toggle_select(event):
+            if allow_multiple:
+                opt_id = options[selected_idx[0]].get('id')
+                if opt_id in selected_ids[0]:
+                    selected_ids[0].discard(opt_id)
+                else:
+                    selected_ids[0].add(opt_id)
+
+        @kb.add('enter')
+        def select(event):
+            # Use app.exit(result=...) to directly return the selected value
+            if allow_multiple:
+                if selected_ids[0]:
+                    event.app.exit(result=','.join(sorted(selected_ids[0])))
+                else:
+                    event.app.exit(result=options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}")
+            else:
+                event.app.exit(result=options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}")
+
+        @kb.add('escape')
+        @kb.add('q')
+        def cancel(event):
+            event.app.exit(result="cancelled")
+
+        def get_formatted_text():
+            text = f'<b>{question}</b>\n'
+            if allow_multiple:
+                text += '<style fg="#888888">(↑/↓ navigate, Space toggle, Enter confirm, Esc cancel)</style>\n'
+            else:
+                text += '<style fg="#888888">(↑/↓ navigate, Enter select, Esc cancel)</style>\n'
+            text += '─' * 60 + '\n'
 
             for i, opt in enumerate(options):
+                is_cursor = (i == selected_idx[0])
+                is_selected = opt.get('id') in selected_ids[0] if allow_multiple else False
+
+                if allow_multiple:
+                    check = '✓' if is_selected else '○'
+                    marker = f'{check} '
+                else:
+                    marker = ''
+
+                cursor = '▶ ' if is_cursor else '  '
+
                 label = opt.get('label', opt.get('id', f'Option {i+1}'))
                 desc = opt.get('description', '')
 
-                if i == selected_idx:
-                    marker = f"[{theme.success}]▶[/]"
-                    style = f"bold {theme.info}"
+                if is_cursor:
+                    line = f'<style bg="#0066cc" fg="white"><b>{cursor}{marker}{label}</b>'
+                    if desc:
+                        line += f' <style fg="#cccccc">- {desc}</style>'
+                    line += '</style>\n'
                 else:
-                    marker = " "
-                    style = theme.muted
+                    line = f'{cursor}{marker}<style fg="#aaaaaa">{label}</style>'
+                    if desc:
+                        line += f' <style fg="#666666">- {desc}</style>'
+                    line += '\n'
 
-                if desc:
-                    lines.append(f"  {marker} [{style}]{label}[/] [{theme.muted}]- {desc}[/]")
-                else:
-                    lines.append(f"  {marker} [{style}]{label}[/]")
+                text += line
 
-            return "\n".join(lines)
+            text += '─' * 60
+            return HTML(text)
 
-        def clear_and_render():
-            """Clear previous render and show updated options"""
-            # Move cursor up and clear lines
-            num_lines = len(options) + 3  # options + header + instructions + blank
-            print(f"\033[{num_lines}A\033[J", end="")
-            self.console.print(render_options())
+        # Create the application
+        layout = Layout(
+            HSplit([
+                Window(
+                    content=FormattedTextControl(get_formatted_text),
+                    wrap_lines=False
+                )
+            ])
+        )
 
-        # Initial render
-        self.console.print(render_options())
+        app = Application(
+            layout=layout,
+            key_bindings=kb,
+            full_screen=False,
+            mouse_support=False
+        )
+
+        self.console.print()  # Add spacing
 
         try:
-            while True:
-                # Wait for keypress (Windows-specific)
-                if msvcrt.kbhit():
-                    key = msvcrt.getch()
+            # Run the picker synchronously in a thread to avoid event loop conflicts
+            def run_picker():
+                return app.run()
 
-                    # Arrow keys come as two bytes on Windows
-                    if key == b'\xe0':  # Arrow key prefix
-                        key2 = msvcrt.getch()
-                        if key2 == b'H':  # Up arrow
-                            selected_idx = max(0, selected_idx - 1)
-                            clear_and_render()
-                        elif key2 == b'P':  # Down arrow
-                            selected_idx = min(len(options) - 1, selected_idx + 1)
-                            clear_and_render()
-                    elif key == b'\r':  # Enter
-                        self.console.print()  # New line after selection
-                        return options[selected_idx].get('id', 'cancelled')
-                    elif key == b'\x1b':  # Escape
-                        self.console.print()
-                        return "cancelled"
-                    elif key == b'k' or key == b'K':  # vim up
-                        selected_idx = max(0, selected_idx - 1)
-                        clear_and_render()
-                    elif key == b'j' or key == b'J':  # vim down
-                        selected_idx = min(len(options) - 1, selected_idx + 1)
-                        clear_and_render()
-                else:
-                    await asyncio.sleep(0.05)  # Small delay to prevent CPU spinning
+            # app.run() returns the value passed to app.exit(result=...)
+            selection = await asyncio.get_event_loop().run_in_executor(None, run_picker)
 
-        except (EOFError, KeyboardInterrupt):
-            return "cancelled"
+            # Return the selection (will be "cancelled" if user pressed Escape/q)
+            if selection:
+                return selection
+
+            # Fallback if somehow selection is None/empty
+            return options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}"
         except Exception as e:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
-            return options[0].get('id', 'error') if options else "error"
+            return "error"
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
