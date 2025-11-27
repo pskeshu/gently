@@ -622,8 +622,7 @@ class RichCopilotCLI:
         str
             Selected option ID (or comma-separated IDs if multiple)
         """
-        from prompt_toolkit.shortcuts import radiolist_dialog, checkboxlist_dialog
-        from prompt_toolkit.styles import Style
+        import msvcrt
 
         theme = get_theme()
 
@@ -635,73 +634,82 @@ class RichCopilotCLI:
         if not options:
             return "Error: No options provided"
 
-        # Build values list for dialog: [(id, label), ...]
-        values = []
-        for opt in options:
-            opt_id = opt.get('id', '')
-            label = opt.get('label', opt_id)
-            desc = opt.get('description', '')
-            if desc:
-                display = f"{label} - {desc}"
-            else:
-                display = label
-            values.append((opt_id, display))
+        # Find default index
+        selected_idx = 0
+        if default_id:
+            for i, opt in enumerate(options):
+                if opt.get('id') == default_id:
+                    selected_idx = i
+                    break
 
-        # Find default
-        default = default_id if default_id else (values[0][0] if values else None)
+        def render_options():
+            """Render the options list"""
+            lines = []
+            lines.append(f"\n[bold]{question}[/]")
+            lines.append(f"[{theme.muted}]↑/↓ to move, Enter to select, Esc to cancel[/]\n")
 
-        # Custom style
-        dialog_style = Style.from_dict({
-            'dialog': 'bg:#1a1a2e',
-            'dialog.body': 'bg:#1a1a2e fg:#ffffff',
-            'dialog frame.label': 'bg:#1a1a2e fg:#00d4ff bold',
-            'dialog.body label': 'fg:#ffffff',
-            'button': 'bg:#0066cc fg:#ffffff',
-            'button.focused': 'bg:#00d4ff fg:#000000 bold',
-            'radiolist': 'bg:#1a1a2e fg:#ffffff',
-            'checkbox': 'bg:#1a1a2e fg:#ffffff',
-        })
+            for i, opt in enumerate(options):
+                label = opt.get('label', opt.get('id', f'Option {i+1}'))
+                desc = opt.get('description', '')
 
-        self.console.print()  # Add spacing
+                if i == selected_idx:
+                    marker = f"[{theme.success}]▶[/]"
+                    style = f"bold {theme.info}"
+                else:
+                    marker = " "
+                    style = theme.muted
+
+                if desc:
+                    lines.append(f"  {marker} [{style}]{label}[/] [{theme.muted}]- {desc}[/]")
+                else:
+                    lines.append(f"  {marker} [{style}]{label}[/]")
+
+            return "\n".join(lines)
+
+        def clear_and_render():
+            """Clear previous render and show updated options"""
+            # Move cursor up and clear lines
+            num_lines = len(options) + 3  # options + header + instructions + blank
+            print(f"\033[{num_lines}A\033[J", end="")
+            self.console.print(render_options())
+
+        # Initial render
+        self.console.print(render_options())
 
         try:
-            if allow_multiple:
-                # Checkbox list for multiple selection
-                default_values = [default] if default else []
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: checkboxlist_dialog(
-                        title="",
-                        text=question,
-                        values=values,
-                        default_values=default_values,
-                        style=dialog_style,
-                    ).run()
-                )
-                if result is None:
-                    return "cancelled"
-                return ','.join(result) if result else "cancelled"
-            else:
-                # Radio list for single selection
-                result = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: radiolist_dialog(
-                        title="",
-                        text=question,
-                        values=values,
-                        default=default,
-                        style=dialog_style,
-                    ).run()
-                )
-                if result is None:
-                    return "cancelled"
-                return result
+            while True:
+                # Wait for keypress (Windows-specific)
+                if msvcrt.kbhit():
+                    key = msvcrt.getch()
+
+                    # Arrow keys come as two bytes on Windows
+                    if key == b'\xe0':  # Arrow key prefix
+                        key2 = msvcrt.getch()
+                        if key2 == b'H':  # Up arrow
+                            selected_idx = max(0, selected_idx - 1)
+                            clear_and_render()
+                        elif key2 == b'P':  # Down arrow
+                            selected_idx = min(len(options) - 1, selected_idx + 1)
+                            clear_and_render()
+                    elif key == b'\r':  # Enter
+                        self.console.print()  # New line after selection
+                        return options[selected_idx].get('id', 'cancelled')
+                    elif key == b'\x1b':  # Escape
+                        self.console.print()
+                        return "cancelled"
+                    elif key == b'k' or key == b'K':  # vim up
+                        selected_idx = max(0, selected_idx - 1)
+                        clear_and_render()
+                    elif key == b'j' or key == b'J':  # vim down
+                        selected_idx = min(len(options) - 1, selected_idx + 1)
+                        clear_and_render()
+                else:
+                    await asyncio.sleep(0.05)  # Small delay to prevent CPU spinning
 
         except (EOFError, KeyboardInterrupt):
             return "cancelled"
         except Exception as e:
-            self.console.print(f"[{theme.error}]Error with dialog: {e}[/]")
-            # Fallback to first option
+            self.console.print(f"[{theme.error}]Error: {e}[/]")
             return options[0].get('id', 'error') if options else "error"
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
