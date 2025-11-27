@@ -632,132 +632,57 @@ class RichCopilotCLI:
         if not options:
             return "Error: No options provided"
 
-        # Find default index
-        default_idx = 0
-        if default_id:
-            for i, opt in enumerate(options):
-                if opt.get('id') == default_id:
-                    default_idx = i
-                    break
+        # Simple numbered selection - more reliable on Windows
+        self.console.print()
+        self.console.print(f"[bold]{question}[/]")
+        self.console.print(f"[{theme.muted}]Enter number to select (or 'c' to cancel):[/]")
+        self.console.print()
 
-        # State for the picker
-        selected_idx = [default_idx]
-        selected_ids = [set()]  # For multiple selection
-        confirmed = [False]  # Track if user confirmed vs cancelled
-        cancelled = [False]
+        for i, opt in enumerate(options):
+            label = opt.get('label', opt.get('id', f'Option {i+1}'))
+            desc = opt.get('description', '')
+            marker = "→" if (default_id and opt.get('id') == default_id) or (not default_id and i == 0) else " "
 
-        # Key bindings
-        kb = KeyBindings()
-
-        @kb.add('up')
-        @kb.add('k')
-        def move_up(event):
-            selected_idx[0] = max(0, selected_idx[0] - 1)
-
-        @kb.add('down')
-        @kb.add('j')
-        def move_down(event):
-            selected_idx[0] = min(len(options) - 1, selected_idx[0] + 1)
-
-        @kb.add('space')
-        def toggle_select(event):
-            if allow_multiple:
-                opt_id = options[selected_idx[0]].get('id')
-                if opt_id in selected_ids[0]:
-                    selected_ids[0].discard(opt_id)
-                else:
-                    selected_ids[0].add(opt_id)
-
-        @kb.add('enter')
-        @kb.add('c-m')  # Also bind Ctrl+M (same as Enter on some terminals)
-        def select(event):
-            confirmed[0] = True
-            event.app.exit()
-
-        @kb.add('escape')
-        @kb.add('q')
-        def cancel(event):
-            cancelled[0] = True
-            event.app.exit()
-
-        def get_formatted_text():
-            text = f'<b>{question}</b>\n'
-            if allow_multiple:
-                text += '<style fg="#888888">(↑/↓ navigate, Space toggle, Enter confirm, Esc cancel)</style>\n'
+            if desc:
+                self.console.print(f"  {marker} [{theme.info}]{i+1}[/]. {label} [{theme.muted}]- {desc}[/]")
             else:
-                text += '<style fg="#888888">(↑/↓ navigate, Enter select, Esc cancel)</style>\n'
-            text += '─' * 60 + '\n'
+                self.console.print(f"  {marker} [{theme.info}]{i+1}[/]. {label}")
 
-            for i, opt in enumerate(options):
-                is_cursor = (i == selected_idx[0])
-                is_selected = opt.get('id') in selected_ids[0] if allow_multiple else False
-
-                # Build marker
-                if allow_multiple:
-                    check = '✓' if is_selected else '○'
-                    marker = f'{check} '
-                else:
-                    marker = ''
-
-                cursor = '▶ ' if is_cursor else '  '
-
-                label = opt.get('label', opt.get('id', f'Option {i+1}'))
-                desc = opt.get('description', '')
-
-                if is_cursor:
-                    line = f'<style bg="#0066cc" fg="white"><b>{cursor}{marker}{label}</b>'
-                    if desc:
-                        line += f' <style fg="#cccccc">- {desc}</style>'
-                    line += '</style>\n'
-                else:
-                    line = f'{cursor}{marker}<style fg="#aaaaaa">{label}</style>'
-                    if desc:
-                        line += f' <style fg="#666666">- {desc}</style>'
-                    line += '\n'
-
-                text += line
-
-            text += '─' * 60
-            return HTML(text)
-
-        # Create the application
-        layout = Layout(
-            HSplit([
-                Window(
-                    content=FormattedTextControl(get_formatted_text),
-                    wrap_lines=False
-                )
-            ])
-        )
-
-        app = Application(
-            layout=layout,
-            key_bindings=kb,
-            full_screen=False,
-            mouse_support=False
-        )
-
-        self.console.print()  # Add spacing
+        self.console.print()
 
         try:
-            await app.run_async()
+            # Use simple text input - most reliable across platforms
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.session.prompt("Choice: ")
+            )
+            response = response.strip().lower()
 
-            if cancelled[0]:
+            if response == 'c' or response == 'cancel':
                 return "cancelled"
 
-            if confirmed[0]:
-                # Get the selected value(s)
-                if allow_multiple and selected_ids[0]:
-                    return ','.join(sorted(selected_ids[0]))
+            # Try to parse as number
+            try:
+                idx = int(response) - 1
+                if 0 <= idx < len(options):
+                    return options[idx].get('id', 'cancelled')
                 else:
-                    # Return currently highlighted option
-                    return options[selected_idx[0]].get('id', 'cancelled')
+                    self.console.print(f"[{theme.warning}]Invalid choice, using first option[/]")
+                    return options[0].get('id', 'cancelled')
+            except ValueError:
+                # Maybe they typed the ID directly
+                for opt in options:
+                    if opt.get('id', '').lower() == response or opt.get('label', '').lower() == response:
+                        return opt.get('id', 'cancelled')
+                # Default to first option
+                self.console.print(f"[{theme.warning}]Invalid choice, using first option[/]")
+                return options[0].get('id', 'cancelled')
 
-            # If neither confirmed nor cancelled, treat as cancelled
+        except (EOFError, KeyboardInterrupt):
             return "cancelled"
         except Exception as e:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
-            return "error"
+            return options[0].get('id', 'error') if options else "error"
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
