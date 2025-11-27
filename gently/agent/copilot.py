@@ -374,6 +374,7 @@ class MicroscopyCopilot:
         Handle message with streaming response
 
         Yields chunks as they arrive from Claude API.
+        Supports asend() for sending values back (e.g., user choice selections).
 
         Parameters
         ----------
@@ -386,7 +387,7 @@ class MicroscopyCopilot:
             Chunks with 'type' and data:
             - {'type': 'text', 'text': '...'}
             - {'type': 'tool_call', 'tool_name': '...', 'tool_input': {...}, 'duration': 0.5}
-            - {'type': 'tool_result', 'result': '...'}
+            - {'type': 'choice_request', 'choice_data': {...}} - requires asend() with selection
         """
         # Try quick response first (no API call)
         if quick_response := self._try_quick_response(user_message):
@@ -402,9 +403,20 @@ class MicroscopyCopilot:
             "content": user_message
         })
 
-        # Stream from Claude
-        async for chunk in self._call_claude_stream():
-            yield chunk
+        # Stream from Claude - manually propagate asend() values
+        inner_gen = self._call_claude_stream()
+        sent_value = None
+
+        try:
+            while True:
+                if sent_value is None:
+                    chunk = await inner_gen.__anext__()
+                else:
+                    chunk = await inner_gen.asend(sent_value)
+                # Yield chunk and capture any sent value
+                sent_value = yield chunk
+        except StopAsyncIteration:
+            return
 
     def _try_quick_response(self, message: str) -> Optional[str]:
         """
@@ -676,6 +688,23 @@ class MicroscopyCopilot:
                     # Execute tool
                     try:
                         tool_result = await self._execute_single_tool(block.name, block.input)
+
+                        # Check if result is a choice request that needs UI handling
+                        if isinstance(tool_result, str):
+                            try:
+                                from .tools.interaction_tools import CHOICE_RESPONSE_TYPE
+                                choice_data = json.loads(tool_result)
+                                if isinstance(choice_data, dict) and choice_data.get("_type") == CHOICE_RESPONSE_TYPE:
+                                    # Yield choice data for CLI to handle directly
+                                    # CLI will run picker and send result back via asend()
+                                    user_selection = yield {
+                                        'type': 'choice_request',
+                                        'choice_data': choice_data
+                                    }
+                                    tool_result = user_selection or "cancelled"
+                            except (json.JSONDecodeError, TypeError):
+                                pass  # Not a choice request, use original result
+
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,

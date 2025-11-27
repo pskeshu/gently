@@ -1003,34 +1003,66 @@ class RichCopilotCLI:
                 segment_count += 1
                 response_text = ""
 
-        # Create live display for streaming
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            transient=True,
-        ) as progress:
+        # Get the stream iterator so we can manage Progress context and asend() separately
+        stream_iter = self.copilot.handle_message_stream(message).__aiter__()
+        pending_choice_result = None  # Result to send back via asend()
+
+        while True:
+            # Use Progress context for normal streaming, exit it for interactive UI
+            progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                transient=True,
+            )
+            progress.start()
             task = progress.add_task("[cyan]Thinking...", total=None)
 
-            # Get streaming response
-            async for chunk in self.copilot.handle_message_stream(message):
-                if chunk.get('type') == 'text':
-                    response_text += chunk.get('text', '')
-                    progress.update(task, description=f"[cyan]Copilot is responding...")
-                elif chunk.get('type') == 'tool_call':
-                    # Flush any accumulated text BEFORE showing tool
-                    progress.stop()
-                    flush_text_segment()
+            try:
+                while True:
+                    try:
+                        # Use asend() if we have a choice result to send back
+                        if pending_choice_result is not None:
+                            chunk = await stream_iter.asend(pending_choice_result)
+                            pending_choice_result = None
+                        else:
+                            chunk = await stream_iter.__anext__()
+                    except StopAsyncIteration:
+                        progress.stop()
+                        flush_text_segment()
+                        return  # Done with stream
 
-                    # Show tool call
-                    self.print_tool_call(
-                        chunk.get('tool_name', 'unknown'),
-                        chunk.get('tool_input', {}),
-                        chunk.get('duration')
-                    )
-                    progress.start()
+                    if chunk.get('type') == 'text':
+                        response_text += chunk.get('text', '')
+                        progress.update(task, description=f"[cyan]Copilot is responding...")
+                    elif chunk.get('type') == 'choice_request':
+                        # COMPLETELY stop Progress before running interactive picker
+                        progress.stop()
+                        flush_text_segment()
 
-        # Flush any remaining text after all tools complete
-        flush_text_segment()
+                        # Run the interactive picker OUTSIDE the Progress context
+                        choice_data = chunk.get('choice_data', {})
+                        user_selection = await self.interactive_choice_picker(choice_data)
+                        pending_choice_result = user_selection
+
+                        break  # Exit inner loop, will send result on next iteration
+                    elif chunk.get('type') == 'tool_call':
+                        tool_name = chunk.get('tool_name', 'unknown')
+
+                        # Flush any accumulated text BEFORE showing tool
+                        progress.stop()
+                        flush_text_segment()
+
+                        # Skip tool panel for ask_user_choice - the interactive picker handles UI
+                        if tool_name != 'ask_user_choice':
+                            self.print_tool_call(
+                                tool_name,
+                                chunk.get('tool_input', {}),
+                                chunk.get('duration')
+                            )
+                        progress.start()
+                        task = progress.add_task("[cyan]Thinking...", total=None)
+            finally:
+                progress.stop()
 
     async def handle_slash_command(self, command: str) -> Optional[bool]:
         """
