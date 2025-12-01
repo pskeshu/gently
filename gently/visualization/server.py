@@ -438,10 +438,98 @@ class VisualizationServer:
         if self._server:
             self._server.should_exit = True
             if self._server_task:
-                await self._server_task
+                try:
+                    await asyncio.wait_for(self._server_task, timeout=5.0)
+                except asyncio.TimeoutError:
+                    logger.warning("Server task did not complete in time, cancelling")
+                    self._server_task.cancel()
+                    try:
+                        await self._server_task
+                    except asyncio.CancelledError:
+                        pass
             self._server = None
             self._server_task = None
         logger.info("Visualization server stopped")
+
+    async def run_forever(self):
+        """
+        Run the server until interrupted.
+
+        This method handles Ctrl+C properly on both Windows and Unix.
+        Use this instead of start() + run_forever() pattern.
+        """
+        import signal
+        import sys
+
+        stop_event = asyncio.Event()
+
+        def signal_handler(*args):
+            logger.info("Received shutdown signal")
+            stop_event.set()
+
+        # Setup signal handlers
+        loop = asyncio.get_running_loop()
+
+        # Try asyncio signal handlers first (works on Unix)
+        signals_installed = False
+        if hasattr(signal, 'SIGINT'):
+            try:
+                loop.add_signal_handler(signal.SIGINT, signal_handler)
+                signals_installed = True
+            except NotImplementedError:
+                pass
+
+        if hasattr(signal, 'SIGTERM'):
+            try:
+                loop.add_signal_handler(signal.SIGTERM, signal_handler)
+            except NotImplementedError:
+                pass
+
+        # On Windows, use traditional signal handler as fallback
+        if sys.platform == 'win32' and not signals_installed:
+            signal.signal(signal.SIGINT, signal_handler)
+            signal.signal(signal.SIGTERM, signal_handler)
+
+        # Start the server
+        await self.start()
+
+        logger.info(f"Server running at http://{self.host}:{self.port} - Press Ctrl+C to stop")
+
+        # Wait for stop signal or server task completion
+        try:
+            # On Windows, we need to periodically check stop_event
+            # because signal handlers may not wake up the event loop
+            if sys.platform == 'win32':
+                while not stop_event.is_set():
+                    try:
+                        # Check every 0.5 seconds if we should stop
+                        await asyncio.wait_for(
+                            asyncio.shield(self._server_task),
+                            timeout=0.5
+                        )
+                        # Server task completed (crashed or stopped)
+                        break
+                    except asyncio.TimeoutError:
+                        # Check if stop was requested
+                        continue
+            else:
+                # On Unix, wait for either server task or stop event
+                stop_task = asyncio.create_task(stop_event.wait())
+                done, pending = await asyncio.wait(
+                    [self._server_task, stop_task],
+                    return_when=asyncio.FIRST_COMPLETED
+                )
+                for task in pending:
+                    task.cancel()
+                    try:
+                        await task
+                    except asyncio.CancelledError:
+                        pass
+
+        except asyncio.CancelledError:
+            logger.info("Server cancelled")
+        finally:
+            await self.stop()
 
     def _get_html_page(self) -> str:
         """Generate the main HTML page"""

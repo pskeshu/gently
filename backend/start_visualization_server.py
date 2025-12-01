@@ -3,28 +3,34 @@ Visualization Server Launcher
 Starts the Gently visualization server on port 8080
 """
 import asyncio
+import signal
 import sys
 sys.path.insert(0, '.')
 
 from gently.visualization.server import VisualizationServer
 
 
-def main():
-    print("Starting Visualization Server on http://127.0.0.1:8080")
+async def run_server():
+    """Run the visualization server with proper signal handling."""
     server = VisualizationServer(host="127.0.0.1", port=8080)
 
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+    # Use the server's run_forever method which handles signals properly
+    await server.run_forever()
+
+
+def main():
+    print("Starting Visualization Server on http://127.0.0.1:8080")
+    print("Press Ctrl+C to stop.")
+
+    # On Windows, we need special handling for Ctrl+C
+    if sys.platform == 'win32':
+        # Use ProactorEventLoop on Windows for better signal handling
+        asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
     try:
-        loop.run_until_complete(server.start())
-        print("Visualization Server running. Press Ctrl+C to stop.")
-        loop.run_forever()
+        asyncio.run(run_server())
     except KeyboardInterrupt:
-        print("\nShutting down...")
-        loop.run_until_complete(server.stop())
-    finally:
-        loop.close()
+        print("\nShutdown complete.")
 
 
 if __name__ == "__main__":
