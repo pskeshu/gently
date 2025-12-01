@@ -170,6 +170,40 @@ async def modify_timelapse_embryo(
 
 
 @tool(
+    name="add_embryo_to_timelapse",
+    description="Add an embryo to an already running timelapse. Use this when a timelapse is in progress and you want to add another embryo without stopping.",
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+async def add_embryo_to_timelapse(
+    embryo_id: str,
+    interval_seconds: float = None,
+    stop_condition: str = None,
+    condition_value: int = None,
+    context: Dict = None
+) -> str:
+    """Add an embryo to a running timelapse"""
+    copilot, err = require_copilot(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return "No timelapse running. Use start_adaptive_timelapse first."
+
+    try:
+        result = await orchestrator.add_embryo(
+            embryo_id=embryo_id,
+            interval_seconds=interval_seconds,
+            stop_condition=stop_condition,
+            condition_value=condition_value,
+        )
+        return result
+    except Exception as e:
+        return f"Error adding embryo: {str(e)}"
+
+
+@tool(
     name="stop_timelapse_embryo",
     description="Stop imaging a specific embryo in the timelapse (other embryos continue)",
     category=ToolCategory.EXPERIMENT,

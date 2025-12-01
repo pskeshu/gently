@@ -35,7 +35,7 @@ Sweeps the piezo through a range of positions, captures lightsheet images at eac
 using FFT bandpass or gradient algorithm, fits a Gaussian curve, and optionally moves to the best focus position.
 
 Use when user says "focus", "fine focus", "adjust focus", "find best focus", or after moving to an embryo position.
-Default sweep is ±10μm with 1μm steps (21 positions). Algorithm options: 'fft_bandpass' (default, best for lightsheet) or 'gradient'.
+Default sweep is ±3μm around 4μm with 1μm steps (7 positions). Algorithm options: 'fft_bandpass' (default, best for lightsheet) or 'gradient'.
 
 If embryo_id is provided, logs the focus measurement to the embryo's focus_history for drift tracking and future reference.
 Returns the optimal piezo position and fit quality (R²). Higher R² indicates more reliable focus detection.""",
@@ -49,9 +49,9 @@ Returns the optimal piezo position and fit quality (R²). Higher R² indicates m
     ],
 )
 async def fine_focus(
-    range_um: float = 10.0,
+    range_um: float = 3.0,
     step_um: float = 1.0,
-    center_um: Optional[float] = None,
+    center_um: Optional[float] = 4.0,
     algorithm: str = "fft_bandpass",
     move_to_best: bool = True,
     galvo_position: float = 0.0,
@@ -91,9 +91,9 @@ async def fine_focus(
     if algorithm not in valid_algorithms:
         return f"Error: Unknown algorithm '{algorithm}'. Valid options: {valid_algorithms}"
 
-    # Determine center position
+    # Determine center position (default is 4.0 for galvo=0)
     if center_um is None:
-        center_um = 0.0  # Default to center of piezo range
+        center_um = 4.0
 
     # Generate sweep positions
     num_steps = int(2 * range_um / step_um) + 1
@@ -179,6 +179,9 @@ async def fine_focus(
                     algorithm=algorithm,
                 )
                 logged_to_embryo = True
+                # Track light exposure: num_positions + 1 if moved to best
+                num_exposures = len(captured_positions) + (1 if move_to_best else 0)
+                embryo.record_exposure(exposure_ms=50.0, num_frames=num_exposures)
 
         # Build result message
         result_lines = [

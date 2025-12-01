@@ -37,6 +37,7 @@ from prompt_toolkit.formatted_text import HTML
 
 from .autocomplete import create_completer
 from .theme import get_theme, set_theme, list_themes, Theme
+from .timeline import TimelineManager, TimelineEvent, parse_time_delta
 
 
 # Backwards compatibility - ColorScheme now wraps theme
@@ -741,12 +742,6 @@ class RichCopilotCLI:
         self.console.print()  # Add spacing
 
         try:
-            # DEBUG: Show options received
-            self.console.print(f"[yellow]DEBUG: Picker received {len(options)} options[/]")
-            for i, opt in enumerate(options):
-                self.console.print(f"[yellow]  [{i}] id={repr(opt.get('id'))} label={repr(opt.get('label'))}[/]")
-            self.console.print(f"[yellow]DEBUG: default_idx={default_idx}, selected_idx={selected_idx[0]}[/]")
-
             # Run the picker synchronously in a thread to avoid event loop conflicts
             def run_picker():
                 return app.run()
@@ -754,23 +749,342 @@ class RichCopilotCLI:
             # app.run() returns the value passed to app.exit(result=...)
             selection = await asyncio.get_event_loop().run_in_executor(None, run_picker)
 
-            # DEBUG: Show what app.run() returned
-            self.console.print(f"[yellow]DEBUG: app.run() returned: {repr(selection)}[/]")
-            self.console.print(f"[yellow]DEBUG: selected_idx after picker: {selected_idx[0]}[/]")
-
             # Return the selection (will be "cancelled" if user pressed Escape/q)
             if selection:
-                self.console.print(f"[yellow]DEBUG: Returning selection: {repr(selection)}[/]")
                 return selection
 
             # Fallback if somehow selection is None/empty
             fallback = options[selected_idx[0]].get('id') or f"option_{selected_idx[0]}"
-            self.console.print(f"[yellow]DEBUG: Selection was falsy, using fallback: {repr(fallback)}[/]")
             return fallback
         except Exception as e:
             self.console.print(f"[{theme.error}]Error: {e}[/]")
-            self.console.print(f"[yellow]DEBUG: Exception: {repr(e)}[/]")
             return "error"
+
+    def print_timeline_horizontal(self, events: list):
+        """
+        Print annotated vertical timeline (git-log style)
+
+        Shows events in chronological order with visual timeline connector
+        """
+        theme = get_theme()
+
+        if not events:
+            self.console.print(f"[{theme.muted}]No events to display[/]")
+            return
+
+        # Get time range for title
+        start_time = events[0].timestamp
+        end_time = events[-1].timestamp
+        start_label = start_time.strftime("%H:%M")
+        end_label = end_time.strftime("%H:%M")
+
+        lines = []
+
+        for i, event in enumerate(events):
+            time_str = event.timestamp.strftime("%H:%M:%S")
+
+            # Determine style based on event type
+            if event.event_type == 'timelapse':
+                marker_style = theme.success
+                type_label = "TL"
+            else:
+                marker_style = theme.info
+                type_label = "DET"
+
+            # Event line with marker
+            event_line = Text()
+            event_line.append(f"  {time_str}  ", style=theme.muted)
+            event_line.append("*", style=f"bold {marker_style}")
+            event_line.append(f" {type_label} ", style=marker_style)
+            event_line.append(f"{event.event_subtype}", style=f"bold {theme.secondary}")
+
+            # Add embryo if present
+            if event.embryo_id:
+                event_line.append(f" [{event.embryo_id}]", style=theme.info)
+
+            # Add timepoint if present
+            if event.timepoint is not None:
+                event_line.append(f" t={event.timepoint}", style=theme.accent)
+
+            lines.append(event_line)
+
+            # Description line
+            desc_line = Text()
+            desc_line.append("             ", style=theme.muted)  # Align with above
+            if i < len(events) - 1:
+                desc_line.append("|  ", style=theme.muted)
+            else:
+                desc_line.append("   ", style=theme.muted)
+            desc_line.append(event.description, style=theme.muted)
+            lines.append(desc_line)
+
+            # Connector line (except for last event)
+            if i < len(events) - 1:
+                connector = Text()
+                connector.append("             ", style=theme.muted)
+                connector.append("|", style=theme.muted)
+                lines.append(connector)
+
+        # Build panel
+        content = Group(*lines)
+        panel = Panel(
+            content,
+            title=f"[bold {theme.primary}]Timeline ({start_label} - {end_label})[/]",
+            border_style=theme.secondary,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+
+        self.console.print(panel)
+
+    def print_timeline_axis(self, events: list):
+        """
+        Print horizontal axis timeline with simple markers
+        """
+        theme = get_theme()
+
+        if not events:
+            self.console.print(f"[{theme.muted}]No events to display[/]")
+            return
+
+        # Get time range
+        start_time = events[0].timestamp
+        end_time = events[-1].timestamp
+        duration = (end_time - start_time).total_seconds()
+
+        width = 60
+        start_label = start_time.strftime("%H:%M")
+        end_label = end_time.strftime("%H:%M")
+
+        def get_position(timestamp):
+            if duration == 0:
+                return width // 2
+            elapsed = (timestamp - start_time).total_seconds()
+            return max(0, min(int((elapsed / duration) * (width - 1)), width - 1))
+
+        # Build marker line
+        marker_line = list("-" * width)
+        for event in events:
+            pos = get_position(event.timestamp)
+            marker = "T" if event.event_type == 'timelapse' else "D"
+            marker_line[pos] = marker
+
+        # Time labels
+        time_line = [" "] * width
+        time_line[0:len(start_label)] = list(start_label)
+        time_line[width - len(end_label):] = list(end_label)
+
+        # Count events
+        tl_count = sum(1 for e in events if e.event_type == 'timelapse')
+        det_count = sum(1 for e in events if e.event_type == 'detection')
+
+        lines = []
+        lines.append(Text("".join(time_line), style=theme.muted))
+        lines.append(Text("|" + "".join(marker_line) + "|", style=theme.secondary))
+        lines.append(Text(""))
+
+        summary = Text()
+        summary.append(f"{len(events)} events: ", style=theme.muted)
+        summary.append(f"T", style=theme.success)
+        summary.append(f"={tl_count} timelapse  ", style=theme.muted)
+        summary.append(f"D", style=theme.info)
+        summary.append(f"={det_count} detection", style=theme.muted)
+        lines.append(summary)
+
+        panel = Panel(
+            Group(*lines),
+            title=f"[bold {theme.primary}]Timeline[/]",
+            border_style=theme.secondary,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+        self.console.print(panel)
+
+    def print_timeline_letters(self, events: list):
+        """
+        Print horizontal timeline with lettered markers and legend
+        """
+        theme = get_theme()
+
+        if not events:
+            self.console.print(f"[{theme.muted}]No events to display[/]")
+            return
+
+        start_time = events[0].timestamp
+        end_time = events[-1].timestamp
+        duration = (end_time - start_time).total_seconds()
+
+        width = 60
+        start_label = start_time.strftime("%H:%M")
+        end_label = end_time.strftime("%H:%M")
+
+        def get_position(timestamp):
+            if duration == 0:
+                return width // 2
+            elapsed = (timestamp - start_time).total_seconds()
+            return max(0, min(int((elapsed / duration) * (width - 1)), width - 1))
+
+        def get_marker(idx):
+            if idx < 26:
+                return chr(ord('A') + idx)
+            return str(idx - 25)
+
+        # Build marker line
+        marker_line = list("-" * width)
+        event_markers = []
+
+        for idx, event in enumerate(events[-20:]):
+            pos = get_position(event.timestamp)
+            marker = get_marker(idx)
+            # Find free position
+            actual_pos = pos
+            while actual_pos < width and marker_line[actual_pos] != '-':
+                actual_pos += 1
+            if actual_pos < width:
+                marker_line[actual_pos] = marker
+                event_markers.append((marker, event))
+
+        # Time labels
+        time_line = [" "] * width
+        time_line[0:len(start_label)] = list(start_label)
+        time_line[width - len(end_label):] = list(end_label)
+
+        lines = []
+        lines.append(Text("".join(time_line), style=theme.muted))
+        lines.append(Text("|" + "".join(marker_line) + "|", style=theme.secondary))
+        lines.append(Text(""))
+        lines.append(Text("Legend:", style=f"bold {theme.primary}"))
+
+        for marker, event in event_markers:
+            time_str = event.timestamp.strftime("%H:%M:%S")
+            type_style = theme.success if event.event_type == 'timelapse' else theme.info
+            type_label = "TL" if event.event_type == 'timelapse' else "DET"
+
+            line = Text()
+            line.append(f"  {marker} ", style=f"bold {theme.accent}")
+            line.append(f"[{time_str}] ", style=theme.muted)
+            line.append(f"{type_label} ", style=type_style)
+            line.append(event.description, style=theme.muted)
+            lines.append(line)
+
+        panel = Panel(
+            Group(*lines),
+            title=f"[bold {theme.primary}]Timeline ({start_label} - {end_label})[/]",
+            border_style=theme.secondary,
+            box=box.ROUNDED,
+            padding=(1, 2),
+        )
+        self.console.print(panel)
+
+    def print_timeline_list(self, events: list, title: str = "Timeline Events", compact: bool = False):
+        """
+        Print timeline events as a vertical list
+
+        Parameters
+        ----------
+        events : list of TimelineEvent
+            Events to display
+        title : str
+            Panel title
+        compact : bool
+            If True, show one-line-per-event format
+        """
+        theme = get_theme()
+
+        if not events:
+            self.console.print(f"[{theme.muted}]No events to display[/]")
+            return
+
+        if compact:
+            # Compact table format
+            table = Table(
+                title=title,
+                box=box.SIMPLE,
+                show_header=True,
+                header_style=f"bold {theme.secondary}",
+                padding=(0, 1),
+            )
+            table.add_column("Time", style=theme.muted, width=10)
+            table.add_column("Type", style=theme.info, width=10)
+            table.add_column("Embryo", style=theme.secondary, width=10)
+            table.add_column("Details", style=theme.muted)
+
+            for event in events:
+                time_str = event.timestamp.strftime("%H:%M:%S")
+
+                # Event type with color based on severity
+                type_style = theme.info
+                if event.severity == 'success':
+                    type_style = theme.success
+                elif event.severity == 'error':
+                    type_style = theme.error
+                elif event.severity == 'warning':
+                    type_style = theme.warning
+
+                type_text = f"{event.short_label} {event.event_subtype[:6]}"
+
+                embryo = event.embryo_id or "-"
+                details = event.description[:30] if len(event.description) > 30 else event.description
+
+                table.add_row(
+                    time_str,
+                    Text(type_text, style=type_style),
+                    embryo,
+                    details,
+                )
+
+            self.console.print(table)
+        else:
+            # Detailed list format
+            lines = []
+            current_date = None
+
+            for event in events:
+                # Add date header if changed
+                event_date = event.timestamp.date()
+                if event_date != current_date:
+                    current_date = event_date
+                    if event_date == datetime.now().date():
+                        date_label = "TODAY"
+                    else:
+                        date_label = event_date.strftime("%Y-%m-%d")
+                    lines.append(Text(f"\n{date_label}", style=f"bold {theme.primary}"))
+
+                # Event line
+                time_str = event.timestamp.strftime("%H:%M:%S")
+
+                # Icon and color based on severity
+                icon = event.icon
+                if event.severity == 'success':
+                    style = theme.success
+                elif event.severity == 'error':
+                    style = theme.error
+                elif event.severity == 'warning':
+                    style = theme.warning
+                else:
+                    style = theme.info
+
+                event_text = Text()
+                event_text.append(f"  {time_str}  ", style=theme.muted)
+                event_text.append(f"{icon} ", style=style)
+                event_text.append(f"{event.event_type}/{event.event_subtype}", style=style)
+                lines.append(event_text)
+
+                # Description line (indented)
+                desc_text = Text()
+                desc_text.append("            ", style=theme.muted)  # Indent
+                desc_text.append(event.description, style=theme.muted)
+                lines.append(desc_text)
+
+            content = Group(*lines)
+            panel = Panel(
+                content,
+                title=f"[bold {theme.primary}]{title}[/]",
+                border_style=theme.secondary,
+                box=box.ROUNDED,
+                padding=(1, 2),
+            )
+            self.console.print(panel)
 
     def print_embryo_table(self, embryos: Dict[str, Any]):
         """Print formatted embryo table"""
@@ -1063,7 +1377,7 @@ class RichCopilotCLI:
                         pending_choice_result = user_selection
 
                         break  # Exit inner loop, will send result on next iteration
-                    elif chunk.get('type') == 'tool_call':
+                    elif chunk.get('type') == 'tool_start':
                         tool_name = chunk.get('tool_name', 'unknown')
 
                         # Flush any accumulated text BEFORE showing tool
@@ -1075,9 +1389,27 @@ class RichCopilotCLI:
                             self.print_tool_call(
                                 tool_name,
                                 chunk.get('tool_input', {}),
-                                chunk.get('duration')
+                                None  # No duration yet - tool is starting
                             )
-                        # Reset progress with fresh task (don't accumulate tasks)
+                        # Reset progress to show tool is running
+                        progress = Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            transient=True,
+                        )
+                        progress.start()
+                        task = progress.add_task(f"[cyan]Running {tool_name}...", total=None)
+                    elif chunk.get('type') == 'tool_call':
+                        # Tool finished - update progress description with duration
+                        tool_name = chunk.get('tool_name', 'unknown')
+                        duration = chunk.get('duration')
+
+                        progress.stop()
+                        # Print duration if we want to show it
+                        if duration:
+                            self.console.print(f"   [dim]{duration:.2f}s[/dim]")
+
+                        # Reset progress for next operation
                         progress = Progress(
                             SpinnerColumn(),
                             TextColumn("[progress.description]{task.description}"),
@@ -1287,6 +1619,152 @@ class RichCopilotCLI:
 
             return False  # Handled, continue loop
 
+        elif cmd == '/timelapse':
+            # Show timelapse status
+            theme = get_theme()
+            if hasattr(self.copilot, 'timelapse_orchestrator') and self.copilot.timelapse_orchestrator:
+                state = self.copilot.timelapse_orchestrator.get_status()
+
+                # Header - check status enum
+                from .timelapse_orchestrator import TimelapseStatus
+                is_running = state.status == TimelapseStatus.RUNNING
+                status_color = theme.success if is_running else theme.muted
+                status_text = state.status.value.upper()
+                self.console.print(f"\n[bold {theme.primary}]Timelapse Status[/] [{status_color}][{status_text}][/]")
+
+                if state.embryos:
+                    # Create table for embryo states
+                    from rich.table import Table
+                    table = Table(show_header=True, header_style=f"bold {theme.primary}")
+                    table.add_column("Embryo")
+                    table.add_column("Timepoints")
+                    table.add_column("Last Imaged")
+                    table.add_column("Interval")
+                    table.add_column("Status")
+
+                    for eid, emb_state in state.embryos.items():
+                        # Last imaged
+                        if emb_state.last_acquired:
+                            from datetime import datetime
+                            mins_ago = (datetime.now() - emb_state.last_acquired).seconds // 60
+                            last_str = f"{mins_ago}m ago"
+                        else:
+                            last_str = "not yet"
+
+                        # Status
+                        if emb_state.is_complete:
+                            status = f"[{theme.success}]done ({emb_state.completion_reason})[/]"
+                        else:
+                            status = f"[{theme.info}]active[/]"
+
+                        table.add_row(
+                            eid,
+                            str(emb_state.timepoints_acquired),
+                            last_str,
+                            f"{emb_state.interval_seconds}s",
+                            status
+                        )
+
+                    self.console.print(table)
+
+                    # Next acquisition
+                    if is_running and state.next_acquisition_in:
+                        self.console.print(f"\n[{theme.muted}]Next acquisition in {state.next_acquisition_in:.0f}s[/]")
+                else:
+                    self.console.print(f"[{theme.muted}]No embryos in timelapse[/]")
+
+                if state.error_message:
+                    self.console.print(f"\n[{theme.error}]Error: {state.error_message}[/]")
+            else:
+                self.console.print(f"\n[{theme.muted}]No timelapse running[/]")
+            self.console.print()
+            return False  # Handled, continue loop
+
+        elif cmd.startswith('/timeline'):
+            # Show timeline of timelapse and detection events
+            theme = get_theme()
+            timeline = self.copilot.timeline_manager
+
+            if not timeline:
+                self.console.print(f"[{theme.muted}]Timeline not available[/]")
+                return False
+
+            # Parse command arguments
+            parts = command.strip().split()
+            args = parts[1:] if len(parts) > 1 else []
+
+            # Check for subcommands
+            if args and args[0] == 'clear':
+                # Clear timeline
+                before_time = None
+                if len(args) > 1 and args[1] == '--before':
+                    if len(args) > 2:
+                        delta = parse_time_delta(args[2])
+                        if delta:
+                            before_time = datetime.now() - delta
+                count = timeline.clear_events(before=before_time)
+                self.console.print(f"[{theme.success}]Cleared {count} timeline events[/]")
+                return False
+
+            # Parse filter options
+            event_filter = None
+            embryo_filter = None
+            since_time = None
+            show_all_sessions = False
+            style = "letters"  # Default style: letters, log, table, axis
+
+            i = 0
+            while i < len(args):
+                arg = args[i].lower()
+                if arg == '--filter' and i + 1 < len(args):
+                    event_filter = args[i + 1].lower()
+                    i += 2
+                elif arg == '--embryo' and i + 1 < len(args):
+                    embryo_filter = args[i + 1]
+                    i += 2
+                elif arg == '--since' and i + 1 < len(args):
+                    delta = parse_time_delta(args[i + 1])
+                    if delta:
+                        since_time = datetime.now() - delta
+                    i += 2
+                elif arg == '--style' and i + 1 < len(args):
+                    style = args[i + 1].lower()
+                    i += 2
+                elif arg == '--all':
+                    show_all_sessions = True
+                    i += 1
+                # Shortcuts for styles
+                elif arg in ('--log', '--table', '--axis', '--letters'):
+                    style = arg[2:]  # Remove '--'
+                    i += 1
+                else:
+                    i += 1
+
+            # Get filtered events (default: current session only)
+            events = timeline.get_events(
+                event_type=event_filter,
+                embryo_id=embryo_filter,
+                since=since_time,
+                session_id="all" if show_all_sessions else "current",
+                limit=50,
+            )
+
+            if not events:
+                self.console.print(f"[{theme.muted}]No timeline events found[/]")
+                return False
+
+            # Display based on style
+            if style == "table":
+                self.print_timeline_list(events, compact=True)
+            elif style == "axis":
+                self.print_timeline_axis(events)
+            elif style == "letters":
+                self.print_timeline_letters(events)
+            else:  # Default: log style
+                self.print_timeline_horizontal(events)
+
+            return False  # Handled, continue loop
+
         return None  # Not a slash command, send to copilot
 
     def _extract_text_from_content(self, content) -> str:
@@ -1374,6 +1852,17 @@ Just type what you want! Examples:
 - `/detectors` - List all detectors
 - `/embryos` - List all embryos
 - `/status` - Show experiment status
+- `/timelapse` - Show timelapse status table
+- `/timeline` - Show event timeline (current session only)
+  - `--letters` - Lettered markers with legend (default)
+  - `--log` - Git-log style vertical timeline
+  - `--table` - Compact table view
+  - `--axis` - Simple horizontal axis with T/D markers
+  - `--filter timelapse|detection` - Filter by event type
+  - `--embryo <id>` - Filter by embryo
+  - `--since 1h|30m|2d` - Show events from time period
+  - `--all` - Show events from all sessions
+  - `clear` - Clear timeline history
 - `/history` - Show recent conversation
 - `/sessions` - Browse and select saved sessions (interactive)
 - `/resume [id]` - Resume a session (interactive picker if no ID given)

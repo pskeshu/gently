@@ -25,6 +25,7 @@ from .detector_registry import DetectorRegistry
 from .detection_queue import DetectionQueue
 from .interaction_logger import InteractionLogger
 from .timelapse_orchestrator import TimelapseOrchestrator
+from .timeline import TimelineManager
 from ..session import SessionManager
 from ..core import EventType, get_event_bus, emit
 
@@ -45,7 +46,7 @@ class MicroscopyCopilot:
         self,
         api_key: Optional[str] = None,
         storage_path: Path = Path("./experiment_data"),
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
         microscope_client=None,
         session_id: Optional[str] = None,
     ):
@@ -127,6 +128,9 @@ class MicroscopyCopilot:
         # Timelapse orchestrator (initialized when microscope connected)
         self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
 
+        # Timeline manager for tracking events
+        self.timeline_manager: Optional[TimelineManager] = None
+
         # Initialize or resume session
         if session_id:
             self.resume_session(session_id)
@@ -141,6 +145,9 @@ class MicroscopyCopilot:
 
         # Initialize timelapse orchestrator (if microscope connected)
         self._init_timelapse_orchestrator()
+
+        # Initialize timeline manager (subscribes to event bus)
+        self._init_timeline_manager()
 
         # Build initial system prompt
         self._update_system_prompt()
@@ -158,6 +165,58 @@ class MicroscopyCopilot:
             connection_status = None  # Offline mode
 
         self.system_prompt = build_system_prompt(self.experiment, connection_status)
+
+    async def _call_api_with_retry(self, api_func, *args, max_retries=3, **kwargs):
+        """
+        Call an API function with retry logic for transient errors.
+
+        Parameters
+        ----------
+        api_func : callable
+            The API function to call
+        max_retries : int
+            Maximum number of retry attempts
+        *args, **kwargs
+            Arguments to pass to the API function
+
+        Returns
+        -------
+        The API response
+
+        Raises
+        ------
+        Exception
+            If all retries fail
+        """
+        from anthropic import APIStatusError
+
+        retry_delay = 1.0
+
+        for attempt in range(max_retries):
+            try:
+                return await asyncio.to_thread(api_func, *args, **kwargs)
+            except APIStatusError as e:
+                error_type = getattr(e, 'body', {})
+                if isinstance(error_type, dict):
+                    error_type = error_type.get('error', {}).get('type', '')
+
+                # Retry on overloaded or rate limit errors
+                is_retryable = (
+                    error_type in ('overloaded_error', 'rate_limit_error') or
+                    'overloaded' in str(e).lower() or
+                    'rate_limit' in str(e).lower()
+                )
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                    logger.warning(f"API error ({error_type}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+
+                # Re-raise if not retryable or out of retries
+                raise
+
+        raise RuntimeError(f"API call failed after {max_retries} retries")
 
     def _init_interaction_logger(self):
         """Initialize the interaction logger for structured logging"""
@@ -189,6 +248,22 @@ class MicroscopyCopilot:
             import logging
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
             self.timelapse_orchestrator = None
+
+    def _init_timeline_manager(self):
+        """Initialize the timeline manager for event tracking"""
+        try:
+            # Store timeline in sessions directory
+            timeline_path = self.session_manager.sessions_dir
+            self.timeline_manager = TimelineManager(
+                storage_path=timeline_path,
+                max_events=1000,
+                session_id=self.session_id,  # Tag events with current session
+            )
+            self.timeline_manager.start()
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to init timeline manager: {e}")
+            self.timeline_manager = None
 
     def _has_microscope(self) -> bool:
         """Check if microscope server connection is available"""
@@ -499,8 +574,8 @@ class MicroscopyCopilot:
         error_occurred = None
 
         try:
-            # Call Claude with tools
-            response = await asyncio.to_thread(
+            # Call Claude with tools (with retry for transient errors)
+            response = await self._call_api_with_retry(
                 self.claude.messages.create,
                 model=self.model,
                 system=self.system_prompt,
@@ -525,8 +600,8 @@ class MicroscopyCopilot:
                     "content": tool_results
                 })
 
-                # Get next response
-                response = await asyncio.to_thread(
+                # Get next response (with retry for transient errors)
+                response = await self._call_api_with_retry(
                     self.claude.messages.create,
                     model=self.model,
                     system=self.system_prompt,
@@ -657,6 +732,7 @@ class MicroscopyCopilot:
             Chunks as they arrive from Claude
         """
         import time
+        from anthropic import APIStatusError
 
         # Stream events (run entire streaming in thread since SDK is sync)
         def stream_and_collect():
@@ -677,8 +753,32 @@ class MicroscopyCopilot:
 
             return events, final_message
 
-        # Run streaming in thread
-        events, final_message = await asyncio.to_thread(stream_and_collect)
+        # Run streaming in thread with retry logic for transient errors
+        max_retries = 3
+        retry_delay = 1.0
+
+        for attempt in range(max_retries):
+            try:
+                events, final_message = await asyncio.to_thread(stream_and_collect)
+                break  # Success, exit retry loop
+            except APIStatusError as e:
+                error_type = getattr(e, 'body', {})
+                if isinstance(error_type, dict):
+                    error_type = error_type.get('error', {}).get('type', '')
+
+                # Retry on overloaded or rate limit errors
+                if error_type in ('overloaded_error', 'rate_limit_error') or 'overloaded' in str(e).lower():
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                        logger.warning(f"API overloaded, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        yield {'type': 'text', 'text': f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n"}
+                        await asyncio.sleep(wait_time)
+                        continue
+                # Re-raise if not retryable or out of retries
+                raise
+        else:
+            # All retries exhausted - should not reach here, but just in case
+            raise RuntimeError("API overloaded after multiple retries")
 
         # Process events and yield text
         for event in events:
@@ -695,6 +795,13 @@ class MicroscopyCopilot:
             for block in response_content:
                 if hasattr(block, 'type') and block.type == "tool_use":
                     start_time = time.time()
+
+                    # Yield tool start notification BEFORE execution
+                    yield {
+                        'type': 'tool_start',
+                        'tool_name': block.name,
+                        'tool_input': block.input,
+                    }
 
                     # Execute tool
                     try:
@@ -750,8 +857,21 @@ class MicroscopyCopilot:
             self._auto_save()
 
             # Get next response (recursively stream)
-            async for chunk in self._call_claude_stream():
-                yield chunk
+            # IMPORTANT: Don't use `async for` here because it doesn't propagate asend() values.
+            # We need to manually iterate and forward asend() values for choice_request handling.
+            recursive_gen = self._call_claude_stream()
+            sent_value = None
+            try:
+                while True:
+                    if sent_value is None:
+                        chunk = await recursive_gen.__anext__()
+                    else:
+                        chunk = await recursive_gen.asend(sent_value)
+                        sent_value = None
+                    # Yield chunk and capture any sent value from caller
+                    sent_value = yield chunk
+            except StopAsyncIteration:
+                pass
 
         else:
             # No tool calls - add final message to history
@@ -925,6 +1045,7 @@ class MicroscopyCopilot:
                 embryo.num_slices = embryo_data.get('num_slices', 50)
                 embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
                 embryo.priority = embryo_data.get('priority', 'normal')
+                embryo.acquisition_mode = embryo_data.get('acquisition_mode', 'volume')
                 # Note: timepoints_acquired is reset to 0 for fresh session
                 # Detection results are NOT imported - this is a fresh start
 

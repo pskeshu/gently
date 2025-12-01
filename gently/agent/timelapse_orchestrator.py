@@ -457,15 +457,29 @@ class TimelapseOrchestrator:
             piezo_amplitude = cal.get('piezo_amplitude', 25.0)
             piezo_center = cal.get('piezo_center', 50.0)
 
-            # Acquire volume
-            result = await self.client.acquire_volume(
-                num_slices=embryo.num_slices,
-                exposure_ms=embryo.exposure_ms,
-                galvo_amplitude=galvo_amplitude,
-                galvo_center=galvo_center,
-                piezo_amplitude=piezo_amplitude,
-                piezo_center=piezo_center,
-            )
+            # Acquire based on mode (volume or snap)
+            acquisition_mode = getattr(embryo, 'acquisition_mode', 'volume')
+
+            if acquisition_mode == 'snap':
+                # Single 2D lightsheet image
+                result = await self.client.capture_lightsheet_image(
+                    piezo_position=piezo_center,
+                    galvo_position=galvo_center,
+                )
+                num_frames = 1
+                exposure_ms = 50.0  # Default snap exposure
+            else:
+                # Full 3D volume (default)
+                result = await self.client.acquire_volume(
+                    num_slices=embryo.num_slices,
+                    exposure_ms=embryo.exposure_ms,
+                    galvo_amplitude=galvo_amplitude,
+                    galvo_center=galvo_center,
+                    piezo_amplitude=piezo_amplitude,
+                    piezo_center=piezo_center,
+                )
+                num_frames = embryo.num_slices
+                exposure_ms = embryo.exposure_ms
 
             if result.get('success'):
                 # Update state
@@ -477,21 +491,32 @@ class TimelapseOrchestrator:
                 # Update embryo state
                 embryo.timepoints_acquired = embryo_state.timepoints_acquired
                 embryo.last_imaged = embryo_state.last_acquired
+                # Record light exposure
+                embryo.record_exposure(
+                    exposure_ms=exposure_ms,
+                    num_frames=num_frames
+                )
 
-                # Emit event
-                self._emit_event(EventType.VOLUME_ACQUIRED, {
-                    'embryo_id': embryo_id,
-                    'timepoint': embryo_state.timepoints_acquired,
-                })
+                # Note: VOLUME_ACQUIRED event is emitted by the callback (copilot.on_volume_acquired)
+                # to avoid duplicate events and include more metadata
 
-                # Callback for volume processing
+                # Callback for volume/image processing
                 if self.on_volume_callback:
-                    volume = result.get('volume')
-                    await self.on_volume_callback(
-                        embryo_id,
-                        embryo_state.timepoints_acquired,
-                        volume
-                    )
+                    # Get data - 'volume' for volume mode, 'image' for snap mode
+                    data = result.get('volume') if acquisition_mode == 'volume' else result.get('image')
+                    if data is not None:
+                        # Ensure data is numpy array
+                        import numpy as np
+                        if not isinstance(data, np.ndarray):
+                            data = np.array(data)
+                        # For snap mode (2D), add Z dimension so store_volume works
+                        if acquisition_mode == 'snap' and data.ndim == 2:
+                            data = data[np.newaxis, ...]  # Add Z dimension: (Y,X) -> (1,Y,X)
+                        await self.on_volume_callback(
+                            embryo_id,
+                            embryo_state.timepoints_acquired,
+                            data
+                        )
 
                 # Check stop condition
                 await self._check_stop_condition(embryo_state)
@@ -595,6 +620,75 @@ class TimelapseOrchestrator:
             next_embryo=next_embryo,
             next_acquisition_in=next_time,
             error_message=self._error_message,
+        )
+
+    async def add_embryo(
+        self,
+        embryo_id: str,
+        interval_seconds: Optional[float] = None,
+        stop_condition: Optional[str] = None,
+        condition_value: Any = None,
+    ) -> str:
+        """
+        Add an embryo to a running timelapse
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo to add
+        interval_seconds : float, optional
+            Interval for this embryo (defaults to 120s)
+        stop_condition : str, optional
+            Stop condition (defaults to same as other embryos, or "manual")
+        condition_value : any, optional
+            Value for stop condition
+
+        Returns
+        -------
+        str
+            Confirmation message
+        """
+        if self._status != TimelapseStatus.RUNNING:
+            return "No timelapse running. Use start_adaptive_timelapse first."
+
+        if embryo_id in self._embryo_states:
+            return f"Embryo '{embryo_id}' already in timelapse"
+
+        # Validate embryo exists
+        if embryo_id not in self.experiment.embryos:
+            return f"Embryo '{embryo_id}' not found in experiment"
+
+        embryo = self.experiment.embryos[embryo_id]
+
+        # Determine stop condition - default to matching other embryos or manual
+        if stop_condition:
+            stop_cond = self._parse_stop_condition(stop_condition, condition_value)
+        else:
+            # Use the same stop condition as existing embryos
+            existing_states = list(self._embryo_states.values())
+            if existing_states:
+                stop_cond = existing_states[0].stop_condition
+            else:
+                stop_cond = StopCondition.manual()
+
+        # Determine interval
+        if interval_seconds is None:
+            interval_seconds = embryo.interval_seconds or 120.0
+
+        # Add new embryo state
+        self._embryo_states[embryo_id] = EmbryoAcquisitionState(
+            embryo_id=embryo_id,
+            interval_seconds=interval_seconds,
+            stop_condition=stop_cond,
+        )
+
+        logger.info(f"Added {embryo_id} to timelapse with interval {interval_seconds}s")
+
+        return (
+            f"✓ Added {embryo_id} to timelapse\n"
+            f"  Interval: {interval_seconds}s\n"
+            f"  Stop condition: {stop_cond.condition_type.value}\n"
+            f"  Will start imaging on next round"
         )
 
     async def modify_embryo(

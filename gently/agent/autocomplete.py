@@ -29,6 +29,8 @@ class CopilotCompleter(Completer):
         '/status',
         '/embryos',
         '/summary',
+        '/timelapse',
+        '/timeline',
         '/help',
         '/clear',
         '/quit',
@@ -39,6 +41,9 @@ class CopilotCompleter(Completer):
         '/sessions',
         '/save',
         '/import-embryos',
+        # Appearance
+        '/theme',
+        '/history',
     ]
 
     # Common command patterns

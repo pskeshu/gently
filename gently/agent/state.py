@@ -91,6 +91,7 @@ class EmbryoState:
     num_slices: int = 50
     exposure_ms: float = 10.0
     priority: str = "normal"  # high/normal/low
+    acquisition_mode: str = "volume"  # "volume" or "snap"
 
     # Status
     last_imaged: Optional[datetime] = None
@@ -505,6 +506,7 @@ class EmbryoState:
             'num_slices': self.num_slices,
             'exposure_ms': self.exposure_ms,
             'priority': self.priority,
+            'acquisition_mode': self.acquisition_mode,
             'last_imaged': self.last_imaged.isoformat() if self.last_imaged else None,
             'timepoints_acquired': self.timepoints_acquired,
             'should_skip': self.should_skip,

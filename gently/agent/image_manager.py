@@ -40,9 +40,54 @@ def extract_view_a_and_max_project(volume: np.ndarray) -> np.ndarray:
     np.ndarray
         2D max projection (Y, X)
     """
+    logger.debug(f"extract_view_a_and_max_project: input shape {volume.shape}")
+
+    # Handle edge cases with wrong dimensions
+    if volume.ndim == 1:
+        # 1D array - reshape to 2D
+        side = int(np.sqrt(len(volume)))
+        if side * side == len(volume):
+            volume = volume.reshape(side, side)
+        else:
+            # Can't make square, just make it a row
+            volume = volume.reshape(1, -1)
+        logger.warning(f"Reshaped 1D volume to {volume.shape}")
+        return volume
+
+    if volume.ndim == 2:
+        # Already 2D - just return it
+        return volume
+
+    # Handle degenerate 3D+ volumes by squeezing first
+    # This handles cases like (1, 1, 2048) where Z=1 and Y=1
+    original_shape = volume.shape
+    volume = np.squeeze(volume)
+    if volume.shape != original_shape:
+        logger.debug(f"Squeezed volume from {original_shape} to {volume.shape}")
+
+    # After squeeze, check if we're now 2D or less
+    if volume.ndim <= 2:
+        if volume.ndim == 1:
+            volume = volume.reshape(1, -1)
+            logger.warning(f"Volume squeezed to 1D, reshaped to {volume.shape}")
+        return volume
+
     # For diSPIM, View A is typically the full volume
-    # Create max projection along Z axis
+    # Create max projection along Z axis (axis 0)
     max_proj = np.max(volume, axis=0)
+
+    # Ensure we have a proper 2D array
+    if max_proj.ndim == 1:
+        max_proj = max_proj.reshape(1, -1)
+        logger.warning(f"Max projection was 1D, reshaped to {max_proj.shape}")
+    elif max_proj.ndim > 2:
+        # Still >2D after max, squeeze again
+        max_proj = np.squeeze(max_proj)
+        if max_proj.ndim > 2:
+            # Take another max projection
+            max_proj = np.max(max_proj, axis=0)
+            logger.warning(f"Had to take double max projection, final shape {max_proj.shape}")
+
     return max_proj
 
 
@@ -67,6 +112,38 @@ def compress_image_for_api(image: np.ndarray, max_dimension: int = 800,
     size_kb : float
         Size in kilobytes
     """
+    # Ensure 2D array - squeeze all singleton dimensions for images with 3+ dims
+    logger.debug(f"compress_image_for_api: input shape {image.shape}, ndim {image.ndim}")
+
+    # Keep squeezing until we get 2D or can't squeeze anymore
+    while image.ndim > 2:
+        # Find first singleton dimension to squeeze
+        squeezed = False
+        for axis in range(image.ndim):
+            if image.shape[axis] == 1:
+                image = image.squeeze(axis=axis)
+                logger.debug(f"Squeezed axis {axis}, new shape {image.shape}")
+                squeezed = True
+                break
+        if not squeezed:
+            # No singleton dimensions but still >2D - take max projection
+            logger.warning(f"Image still {image.ndim}D with shape {image.shape}, taking max along axis 0")
+            image = np.max(image, axis=0)
+
+    # Handle degenerate dimensions (e.g., height=1 or width=1)
+    if image.ndim == 2 and (image.shape[0] == 1 or image.shape[1] == 1):
+        logger.warning(f"Degenerate image shape {image.shape}, padding to make visible")
+        # Replicate to make at least 10 pixels in each dimension
+        if image.shape[0] == 1:
+            image = np.repeat(image, 10, axis=0)
+        if image.shape[1] == 1:
+            image = np.repeat(image, 10, axis=1)
+
+    # Final safety check - if still not 2D, force it
+    if image.ndim == 1:
+        image = image.reshape(1, -1)
+        logger.warning(f"1D array reshaped to {image.shape}")
+
     # Normalize to 0-255 uint8
     if image.dtype != np.uint8:
         # Handle different bit depths

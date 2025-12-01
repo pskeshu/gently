@@ -166,12 +166,14 @@ def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
 
 @tool(
     name="modify_parameters",
-    description="""Modify acquisition parameters for a specific embryo during a timelapse. Can change interval_seconds, num_slices, exposure_ms, or priority.
-Use when user wants to adjust imaging for one embryo (e.g., "image embryo 2 faster", "increase slices for embryo_1").
+    description="""Modify acquisition parameters for a specific embryo. Can change interval_seconds, num_slices, exposure_ms, priority, or acquisition_mode.
+Use when user wants to adjust imaging for one embryo (e.g., "image embryo 2 faster", "use snap mode for embryo_1").
+acquisition_mode can be "volume" (full 3D stack, default) or "snap" (single 2D lightsheet image - faster, less light exposure).
 Requires a reason to document why parameters are being changed. Changes take effect at the next acquisition.""",
     category=ToolCategory.EMBRYO,
     examples=[
         ToolExample("Image embryo 2 every 30 seconds", {"embryo_id": "embryo_2", "changes": {"interval_seconds": 30}, "reason": "pre-hatching monitoring"}),
+        ToolExample("Use snap mode for embryo 1", {"embryo_id": "embryo_1", "changes": {"acquisition_mode": "snap"}, "reason": "reduce light exposure"}),
     ],
 )
 def modify_parameters(
@@ -193,7 +195,8 @@ def modify_parameters(
         'interval_seconds': embryo.interval_seconds,
         'num_slices': embryo.num_slices,
         'exposure_ms': embryo.exposure_ms,
-        'priority': embryo.priority
+        'priority': embryo.priority,
+        'acquisition_mode': embryo.acquisition_mode,
     }
 
     if 'interval_seconds' in changes:
@@ -204,6 +207,12 @@ def modify_parameters(
         embryo.exposure_ms = changes['exposure_ms']
     if 'priority' in changes:
         embryo.priority = changes['priority']
+    if 'acquisition_mode' in changes:
+        mode = changes['acquisition_mode']
+        if mode in ('volume', 'snap'):
+            embryo.acquisition_mode = mode
+        else:
+            return f"Invalid acquisition_mode '{mode}'. Use 'volume' or 'snap'."
 
     return (f"Modified {embryo_id} parameters:\n"
             f"Reason: {reason}\n\n"
