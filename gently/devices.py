@@ -278,11 +278,10 @@ class DiSPIMXYStage:
 
         Notes
         -----
-        This method delegates to gently.coordinates.pixel_to_stage_offset for
-        the actual calculation. It's kept here for backward compatibility.
+        This method delegates to gently.coordinates for the actual calculation.
         """
-        from .coordinates import pixel_to_stage_offset
-        return pixel_to_stage_offset(pixel_offset_x, pixel_offset_y, pixel_size_um, invert_x=True)
+        from .coordinates import pixel_displacement_to_stage_movement
+        return pixel_displacement_to_stage_movement(pixel_offset_x, pixel_offset_y, pixel_size_um)
 
 
 class DiSPIMCamera:

@@ -184,7 +184,7 @@ class DevelopmentalTracker:
     def __init__(
         self,
         claude_client: Optional[anthropic.Anthropic] = None,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
     ):
         """
         Parameters

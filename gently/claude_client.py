@@ -112,7 +112,7 @@ class AsyncClaudeClient:
     api_key : str, optional
         Anthropic API key. If None, reads from ANTHROPIC_API_KEY env variable.
     model : str, optional
-        Claude model to use (default: claude-sonnet-4-5-20250929)
+        Claude model to use (default: claude-opus-4-5-20251101)
     max_tokens : int, optional
         Maximum tokens in response (default: 100)
     timeout : float, optional
@@ -128,7 +128,7 @@ class AsyncClaudeClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
         max_tokens: int = 100,
         timeout: float = 30.0
     ):

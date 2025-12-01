@@ -93,24 +93,15 @@ try:
 except ImportError:
     _ANALYSIS_AVAILABLE = False
 
-# Coordinate utilities - transformations and reference mapping
+# Coordinate utilities - transformations for pixel/stage conversions
 try:
     from .coordinates import (
-        piezo_to_galvo,
-        galvo_to_piezo,
-        calculate_piezo_galvo_calibration,
-        transform_coordinates_2d,
-        create_affine_transform_2d,
-        create_reference_map,
-        add_calibration_point,
-        add_embryo_position_stage,
-        stage_to_lightsheet_coordinates,
-        find_nearest_embryos,
-        save_reference_map,
-        load_reference_map,
-        validate_reference_map,
-        CalibrationPoint,
-        ReferenceMap
+        pixel_to_stage_position,
+        stage_to_pixel_position,
+        pixel_displacement_to_stage_movement,
+        get_um_per_pixel,
+        DEFAULT_PIXEL_SIZE_UM,
+        DEFAULT_OBJECTIVE_MAG
     )
     _COORDINATES_AVAILABLE = True
 except ImportError:
@@ -221,21 +212,12 @@ __all__ = [
     "FitFunction",
     
     # Coordinate functions
-    "piezo_to_galvo",
-    "galvo_to_piezo",
-    "calculate_piezo_galvo_calibration",
-    "transform_coordinates_2d",
-    "create_affine_transform_2d",
-    "create_reference_map",
-    "add_calibration_point",
-    "add_embryo_position_stage", 
-    "stage_to_lightsheet_coordinates",
-    "find_nearest_embryos",
-    "save_reference_map",
-    "load_reference_map",
-    "validate_reference_map",
-    "CalibrationPoint",
-    "ReferenceMap"
+    "pixel_to_stage_position",
+    "stage_to_pixel_position",
+    "pixel_displacement_to_stage_movement",
+    "get_um_per_pixel",
+    "DEFAULT_PIXEL_SIZE_UM",
+    "DEFAULT_OBJECTIVE_MAG"
 ]
 
 # Add visualization functions if available

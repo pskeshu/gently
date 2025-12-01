@@ -366,7 +366,7 @@ class PipelineBuilder:
     def vlm_analyze(
         self,
         prompt: str,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
         max_tokens: int = 1024,
     ) -> 'PipelineBuilder':
         """Add VLM analysis step"""

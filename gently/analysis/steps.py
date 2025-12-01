@@ -362,7 +362,7 @@ class VLMStep(AnalysisStep):
     def __init__(
         self,
         prompt: str,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
         max_tokens: int = 1024,
         name: str = "vlm_analysis",
         api_key: Optional[str] = None,

@@ -10,6 +10,8 @@ import asyncio
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 
+from gently.coordinates import DEFAULT_PIXEL_SIZE_UM, DEFAULT_OBJECTIVE_MAG
+
 
 class MicroscopeClient:
     """
@@ -221,8 +223,8 @@ class MicroscopeClient:
 
     async def detect_embryos(
         self,
-        pixel_size_um: float = 6.5,
-        objective_mag: float = 4.0,
+        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
         use_claude_review: bool = True,
         min_confidence: float = 0.7,
     ) -> Dict:

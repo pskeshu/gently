@@ -24,7 +24,6 @@ from bluesky.preprocessors import finalize_wrapper, run_wrapper
 
 # Import existing calibration infrastructure
 from .calibration_plans import calibrate_embryo_piezo_galvo
-from .coordinates import pixel_to_stage_offset
 from .visualization import mark_embryos_napari
 from .database import (
     export_multi_embryo_database,

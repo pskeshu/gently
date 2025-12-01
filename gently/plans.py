@@ -287,7 +287,7 @@ def move_to_pixel_plan(xy_stage,
     ...     xy_stage, bottom_camera, 1024, 1027
     ... )
     """
-    from .coordinates import pixel_to_stage_offset
+    from .coordinates import pixel_displacement_to_stage_movement
 
     # Get current position
     current_pos = yield from get_stage_position_plan(xy_stage)
@@ -301,12 +301,11 @@ def move_to_pixel_plan(xy_stage,
     pixel_offset_x = pixel_x - image_center_x
     pixel_offset_y = pixel_y - image_center_y
 
-    # Convert pixel offset to stage movement
-    dx, dy = pixel_to_stage_offset(
+    # Convert pixel displacement to stage movement
+    dx, dy = pixel_displacement_to_stage_movement(
         pixel_offset_x,
         pixel_offset_y,
-        bottom_camera.effective_pixel_size,
-        invert_x=True  # diSPIM X-axis inversion
+        bottom_camera.effective_pixel_size
     )
 
     # Calculate target position

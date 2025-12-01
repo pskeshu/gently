@@ -49,7 +49,7 @@ async def main():
     # Initialize copilot
     copilot = MicroscopyCopilot(
         storage_path=Path("./experiment_data"),
-        model="claude-sonnet-4-5-20250929"
+        model="claude-opus-4-5-20251101"
     )
 
     # Load embryos

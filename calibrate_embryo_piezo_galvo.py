@@ -174,7 +174,7 @@ def ask_claude_with_image(client, prompt, image_path, max_tokens=1024):
 
     # Call API with latest Sonnet
     message = client.messages.create(
-        model="claude-sonnet-4-5-20250929",
+        model="claude-opus-4-5-20251101",
         max_tokens=max_tokens,
         messages=[
             {
