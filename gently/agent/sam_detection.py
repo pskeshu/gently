@@ -17,6 +17,13 @@ import anthropic
 from typing import Dict, List, Tuple, Optional
 import os
 
+from gently.coordinates import (
+    pixel_to_stage_position,
+    get_um_per_pixel,
+    DEFAULT_PIXEL_SIZE_UM,
+    DEFAULT_OBJECTIVE_MAG,
+)
+
 
 class SAMEmbryoDetector:
     """
@@ -377,8 +384,8 @@ class SAMEmbryoDetector:
     async def detect_embryos(self,
                             image: np.ndarray,
                             stage_position: Tuple[float, float],
-                            pixel_size_um: float = 6.5,
-                            objective_mag: float = 4.0,
+                            pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+                            objective_mag: float = DEFAULT_OBJECTIVE_MAG,
                             use_claude_review: bool = True,
                             save_visualizations: bool = True,
                             output_dir: Optional[Path] = None,
@@ -402,7 +409,7 @@ class SAMEmbryoDetector:
         pixel_size_um : float
             Camera pixel size in micrometers (default: 6.5 for PCO)
         objective_mag : float
-            Objective magnification (default: 4x for bottom camera)
+            Objective magnification (default: 10x for bottom camera)
         use_claude_review : bool
             Whether to use Claude Vision for review (default: True)
         save_visualizations : bool
@@ -746,7 +753,7 @@ Respond in JSON:
 
         try:
             message = self.claude_client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model="claude-opus-4-5-20251101",
                 max_tokens=8000,
                 thinking={"type": "enabled", "budget_tokens": 5000},
                 messages=[{
@@ -806,7 +813,7 @@ Respond in JSON:
 
         try:
             message = self.claude_client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model="claude-opus-4-5-20251101",
                 max_tokens=6000,
                 thinking={"type": "enabled", "budget_tokens": 4000},
                 messages=[{
@@ -921,11 +928,10 @@ Respond in JSON:
         """
         Convert pixel coordinates to stage coordinates.
 
-        Uses canonical coordinate transformation from gently/coordinates.py:
-        - X is INVERTED (stage +X moves features LEFT in camera)
-        - Y is NOT inverted
+        Uses centralized coordinate transformation from gently/coordinates.py.
+        Returns the stage position that would CENTER each embryo.
         """
-        effective_pixel_um = pixel_size_um / objective_mag
+        effective_pixel_um = get_um_per_pixel(pixel_size_um, objective_mag)
         stage_x, stage_y = stage_pos
 
         # Image center (for offset calculation)
@@ -940,20 +946,17 @@ Respond in JSON:
             center_x_px = x + w / 2
             center_y_px = y + h / 2
 
-            # Calculate offset from image center
-            dx_pixels = center_x_px - image_center_x
-            dy_pixels = center_y_px - image_center_y
-
-            # Convert to stage coordinates - match multi_embryo_calibration.py formula
-            # The formula computes the TARGET stage position to center this embryo
-            # dx_pixels = (embryo - center), so:
-            # target_x = current_x + dx_pixels * pixel_size (no inversion here!)
-            # This matches multi_embryo_calibration.py: dx_stage = -(center - embryo) = (embryo - center)
-            dx_stage = dx_pixels * effective_pixel_um
-            dy_stage = dy_pixels * effective_pixel_um
-
-            embryo_stage_x = stage_x + dx_stage
-            embryo_stage_y = stage_y + dy_stage
+            # Convert to stage coordinates using centralized function
+            # This returns the stage position that would CENTER this embryo
+            embryo_stage_x, embryo_stage_y = pixel_to_stage_position(
+                pixel_x=center_x_px,
+                pixel_y=center_y_px,
+                image_center_x=image_center_x,
+                image_center_y=image_center_y,
+                stage_x=stage_x,
+                stage_y=stage_y,
+                um_per_pixel=effective_pixel_um
+            )
 
             embryo_positions.append({
                 'embryo_id': f'embryo_{i + 1}',

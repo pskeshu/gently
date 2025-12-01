@@ -118,10 +118,11 @@ if IN_RE_WORKER:
         from gently.plans_qserver import (
             move_stage_plan,
             read_stage_plan,
+            read_piezo_plan,
             capture_bottom_image_plan,
             capture_lightsheet_image_plan,
         )
-        print("  Imported utility plans: move_stage_plan, read_stage_plan, capture_bottom_image_plan, capture_lightsheet_image_plan")
+        print("  Imported utility plans: move_stage_plan, read_stage_plan, read_piezo_plan, capture_bottom_image_plan, capture_lightsheet_image_plan")
     except ImportError as e:
         print(f"  Warning: Could not import utility plans: {e}")
 

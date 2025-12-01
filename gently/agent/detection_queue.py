@@ -25,7 +25,7 @@ class DetectionQueue:
         registry: DetectorRegistry,
         image_manager: ImageManager,
         claude_client: anthropic.Anthropic,
-        model: str = "claude-sonnet-4-5-20250929",
+        model: str = "claude-opus-4-5-20251101",
         on_detection_callback: Optional[Callable] = None
     ):
         """

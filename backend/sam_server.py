@@ -25,6 +25,14 @@ project_root = Path(__file__).parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+# Import centralized coordinate conversion functions
+from gently.coordinates import (
+    pixel_to_stage_position,
+    get_um_per_pixel,
+    DEFAULT_PIXEL_SIZE_UM,
+    DEFAULT_OBJECTIVE_MAG,
+)
+
 
 class SAMService(rpyc.Service):
     """
@@ -69,8 +77,8 @@ class SAMService(rpyc.Service):
         self,
         image: np.ndarray,
         stage_position: tuple,
-        pixel_size_um: float = 6.5,
-        objective_mag: float = 4.0,
+        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
         use_claude_review: bool = True,
         min_confidence: float = 0.7,
         save_visualizations: bool = False,
@@ -174,10 +182,11 @@ class SAMService(rpyc.Service):
                         embryo[key] = int(value)
 
             print(f"  Detected {len(embryos)} embryos")
+
             return {
                 'embryos': embryos,
                 'initial_detections': results.get('initial_detections', len(embryos)),
-                'final_detections': results.get('final_detections', len(embryos)),
+                'final_detections': len(embryos),
                 'verification': results.get('verification', {}),
                 'success': True
             }
@@ -205,16 +214,16 @@ class SAMService(rpyc.Service):
         self,
         image: np.ndarray,
         stage_position: tuple,
-        pixel_size_um: float = 6.5,
-        objective_mag: float = 4.0,
+        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
         existing_embryos: list = None,
         title: str = "Click on embryo centers (close window when done)"
     ) -> dict:
         """
-        Manual embryo marking via matplotlib.
+        Manual embryo marking via napari.
 
-        Opens a matplotlib window where user can click on embryo centers.
-        Right-click or close window to finish.
+        Opens a napari viewer where user can click to add points.
+        Close the viewer window when done.
 
         Parameters
         ----------
@@ -237,9 +246,7 @@ class SAMService(rpyc.Service):
         dict
             Detection results with 'embryos' list
         """
-        import matplotlib
-        matplotlib.use('TkAgg')  # Use interactive backend
-        import matplotlib.pyplot as plt
+        import napari
 
         print(f"\n[SAM Server] Manual embryo marking...")
         print(f"  Image shape: {image.shape if hasattr(image, 'shape') else 'unknown'}")
@@ -260,78 +267,83 @@ class SAMService(rpyc.Service):
         # Calculate scale
         um_per_pixel = pixel_size_um / objective_mag
 
-        # Store clicked points
-        clicked_points = []
+        # Create napari viewer
+        viewer = napari.Viewer(title=title)
 
-        def onclick(event):
-            if event.button == 1 and event.inaxes:  # Left click
-                clicked_points.append((event.xdata, event.ydata))
-                # Draw marker for new embryo
-                ax.plot(event.xdata, event.ydata, 'r+', markersize=20, markeredgewidth=3)
-                ax.annotate(f'new_{len(clicked_points)}', (event.xdata + 30, event.ydata - 30),
-                           color='red', fontsize=12, fontweight='bold')
-                fig.canvas.draw()
-                print(f"    Marked new embryo {len(clicked_points)} at pixel ({event.xdata:.0f}, {event.ydata:.0f})")
+        # Add image layer
+        viewer.add_image(image, name='Bottom Camera', colormap='gray')
 
-        # Create figure
-        fig, ax = plt.subplots(figsize=(12, 12))
-        ax.imshow(image, cmap='gray')
-        ax.set_title(title, fontsize=14)
-
-        # Draw existing embryos in green
+        # Add existing embryos as green points
         if existing_embryos:
+            existing_points = []
+            existing_labels = []
             for emb in existing_embryos:
                 px = emb.get('pixel_x')
                 py = emb.get('pixel_y')
                 eid = emb.get('embryo_id', '?')
                 if px is not None and py is not None:
-                    ax.plot(px, py, 'g+', markersize=20, markeredgewidth=3)
-                    ax.annotate(eid, (px + 30, py - 30),
-                               color='lime', fontsize=11, fontweight='bold')
+                    existing_points.append([py, px])  # napari uses [row, col] = [y, x]
+                    existing_labels.append(eid)
 
-        ax.set_xlabel('Green = existing embryos. Left-click to add new. Close when done.')
+            if existing_points:
+                viewer.add_points(
+                    existing_points,
+                    name='Existing Embryos',
+                    face_color='green',
+                    border_color='white',
+                    size=30,
+                    symbol='cross'
+                )
 
-        # Connect click event
-        cid = fig.canvas.mpl_connect('button_press_event', onclick)
+        # Add points layer for new embryos (user will add points here)
+        new_points_layer = viewer.add_points(
+            name='New Embryos (click to add)',
+            face_color='red',
+            border_color='white',
+            size=30,
+            symbol='cross'
+        )
+        new_points_layer.mode = 'add'  # Start in add mode
 
-        print("\n  [INTERACTIVE] Click on embryo centers in the window.")
+        print("\n  [INTERACTIVE] Click on embryo centers in the napari window.")
+        print("  Use the 'New Embryos' layer to add points.")
         print("  Close the window when done marking.\n")
 
-        # Show window (blocking)
-        plt.show()
+        # Run napari (blocking)
+        napari.run()
 
-        # Disconnect event
-        fig.canvas.mpl_disconnect(cid)
+        # Get the points that were added
+        clicked_points = new_points_layer.data  # Array of [y, x] coordinates
 
         # Convert clicked points to embryo positions
         embryos = []
         image_center_x = image.shape[1] / 2
         image_center_y = image.shape[0] / 2
 
-        for i, (px, py) in enumerate(clicked_points):
-            # Calculate offset from image center in pixels
-            dx_pixels = px - image_center_x
-            dy_pixels = py - image_center_y
+        for i, point in enumerate(clicked_points):
+            py, px = point[0], point[1]  # napari stores as [y, x]
 
-            # Convert to stage coordinates - match multi_embryo_calibration.py formula
-            # dx_pixels = (embryo - center), target = current + dx_pixels * pixel_size
-            # This gives the TARGET stage position to center this embryo
-            dx_stage = dx_pixels * um_per_pixel
-            dy_stage = dy_pixels * um_per_pixel
-
-            # Calculate absolute stage position for this embryo
-            embryo_x = stage_position[0] + dx_stage
-            embryo_y = stage_position[1] + dy_stage
+            # Convert pixel to stage position using centralized function
+            embryo_x, embryo_y = pixel_to_stage_position(
+                pixel_x=px,
+                pixel_y=py,
+                image_center_x=image_center_x,
+                image_center_y=image_center_y,
+                stage_x=stage_position[0],
+                stage_y=stage_position[1],
+                um_per_pixel=um_per_pixel
+            )
 
             embryos.append({
-                'embryo_id': f'manual_{i + 1}',  # Placeholder, copilot assigns final ID
+                'embryo_id': f'manual_{i + 1}',
                 'pixel_x': float(px),
                 'pixel_y': float(py),
                 'stage_x_um': float(embryo_x),
                 'stage_y_um': float(embryo_y),
-                'confidence': 1.0,  # Manual marking = 100% confidence
+                'confidence': 1.0,
                 'source': 'manual'
             })
+            print(f"    Marked embryo {i + 1} at pixel ({px:.0f}, {py:.0f})")
 
         print(f"  Marked {len(embryos)} embryos manually")
 
@@ -349,10 +361,11 @@ class SAMService(rpyc.Service):
         title: str = "Image View",
         cmap: str = "gray",
         save_path: Optional[str] = None,
-        show: bool = True
+        show: bool = True,
+        embryo_annotations: list = None
     ) -> dict:
         """
-        View an image in a matplotlib window.
+        View an image in a napari window with optional embryo annotations.
 
         Parameters
         ----------
@@ -361,42 +374,85 @@ class SAMService(rpyc.Service):
         title : str
             Window title
         cmap : str
-            Colormap
+            Colormap (napari colormap name)
         save_path : str, optional
             Path to save the image
         show : bool
-            Whether to show in matplotlib window (blocking)
+            Whether to show in napari window (blocking)
+        embryo_annotations : list, optional
+            List of embryo dicts with 'embryo_id', 'pixel_x', 'pixel_y', 'label'
 
         Returns
         -------
         dict
             Success status and save path if saved
         """
-        import matplotlib
-        matplotlib.use('TkAgg')
-        import matplotlib.pyplot as plt
+        import napari
 
         # Convert image to numpy if needed
         if not isinstance(image, np.ndarray):
             image = np.array(image, dtype=np.uint16)
 
-        fig, ax = plt.subplots(figsize=(12, 12))
-        ax.imshow(image, cmap=cmap)
-        ax.set_title(title)
-
         result = {'success': True}
 
-        # Save if path provided
+        # Save if path provided (before showing to ensure it's saved even if viewer is closed early)
         if save_path:
-            fig.savefig(save_path, dpi=150, bbox_inches='tight')
+            import tifffile
+            tifffile.imwrite(save_path, image)
             result['saved_to'] = save_path
             print(f"  Saved image to: {save_path}")
 
         # Show if requested
         if show:
-            plt.show()
+            viewer = napari.Viewer(title=title)
 
-        plt.close(fig)  # Clean up figure to prevent duplicates
+            # Add image layer
+            viewer.add_image(image, name='Image', colormap=cmap)
+
+            # Draw embryo annotations if provided
+            if embryo_annotations:
+                in_view_points = []
+                out_of_view_points = []
+                in_view_labels = []
+                out_of_view_labels = []
+
+                for emb in embryo_annotations:
+                    px = emb.get('pixel_x')
+                    py = emb.get('pixel_y')
+                    label = emb.get('label', emb.get('embryo_id', '?'))
+
+                    if px is not None and py is not None:
+                        in_view = 0 <= px < image.shape[1] and 0 <= py < image.shape[0]
+                        if in_view:
+                            in_view_points.append([py, px])
+                            in_view_labels.append(label)
+                        else:
+                            out_of_view_points.append([py, px])
+                            out_of_view_labels.append(label)
+
+                # Add in-view embryos (green)
+                if in_view_points:
+                    viewer.add_points(
+                        in_view_points,
+                        name='Embryos (in view)',
+                        face_color='lime',
+                        border_color='white',
+                        size=30,
+                        symbol='cross'
+                    )
+
+                # Add out-of-view embryos (orange)
+                if out_of_view_points:
+                    viewer.add_points(
+                        out_of_view_points,
+                        name='Embryos (out of view)',
+                        face_color='orange',
+                        border_color='white',
+                        size=30,
+                        symbol='cross'
+                    )
+
+            napari.run()
 
         return result
 
@@ -409,7 +465,7 @@ class SAMService(rpyc.Service):
         show: bool = True
     ) -> dict:
         """
-        View embryos with bounding boxes overlaid on image.
+        View embryos with markers overlaid on image using napari.
 
         Parameters
         ----------
@@ -420,19 +476,16 @@ class SAMService(rpyc.Service):
         title : str
             Window title
         save_path : str, optional
-            Path to save the image. If provided, saves instead of/in addition to showing.
+            Path to save the image.
         show : bool
-            Whether to display in matplotlib window (blocking)
+            Whether to display in napari window (blocking)
 
         Returns
         -------
         dict
             Success status and save path if saved
         """
-        import matplotlib
-        matplotlib.use('TkAgg')
-        import matplotlib.pyplot as plt
-        import matplotlib.patches as patches
+        import napari
 
         # Convert image to numpy if needed
         if not isinstance(image, np.ndarray):
@@ -443,65 +496,293 @@ class SAMService(rpyc.Service):
             embryos = list(embryos)
         embryos = [dict(e) for e in embryos]
 
-        fig, ax = plt.subplots(figsize=(14, 14))
-        ax.imshow(image, cmap='gray')
-
-        # Define colors for embryos
-        colors = plt.cm.tab10(np.linspace(0, 1, 10))
-
-        for i, embryo in enumerate(embryos):
-            color = colors[i % 10]
-
-            # Get pixel position
-            px = embryo.get('pixel_x', embryo.get('center_x', 0))
-            py = embryo.get('pixel_y', embryo.get('center_y', 0))
-
-            # Draw center marker
-            ax.plot(px, py, 'o', color=color, markersize=15,
-                   markeredgecolor='white', markeredgewidth=2)
-
-            # Draw bounding box if available
-            bbox = embryo.get('bbox_pixel', embryo.get('bbox'))
-            if bbox:
-                if len(bbox) == 4:
-                    x, y, w, h = bbox
-                    rect = patches.Rectangle(
-                        (x, y), w, h,
-                        linewidth=2, edgecolor=color, facecolor='none'
-                    )
-                    ax.add_patch(rect)
-
-            # Add label
-            embryo_id = embryo.get('embryo_id', embryo.get('id', i))
-            confidence = embryo.get('confidence', embryo.get('stability_score', 0))
-            label = f"#{embryo_id}"
-            if confidence:
-                label += f" ({confidence:.2f})"
-
-            ax.annotate(
-                label, (px + 30, py - 30),
-                color='white', fontsize=12, fontweight='bold',
-                bbox=dict(boxstyle='round', facecolor=color, alpha=0.8)
-            )
-
-        ax.set_title(title, fontsize=14, fontweight='bold')
-        ax.set_xlabel(f"Detected {len(embryos)} embryos")
-        plt.tight_layout()
-
         result = {'success': True, 'num_embryos': len(embryos)}
 
         # Save if path provided
         if save_path:
-            fig.savefig(save_path, dpi=150, bbox_inches='tight')
+            from pathlib import Path
+            from PIL import Image as PILImage
+
+            # Normalize image to 8-bit for saving
+            if image.dtype != np.uint8:
+                img_normalized = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
+            else:
+                img_normalized = image
+
+            pil_img = PILImage.fromarray(img_normalized)
+
+            # Use appropriate format based on extension
+            ext = Path(save_path).suffix.lower()
+            if ext in ['.jpg', '.jpeg']:
+                pil_img.save(save_path, 'JPEG', quality=70, optimize=True)
+            elif ext == '.png':
+                pil_img.save(save_path, 'PNG', optimize=True)
+            else:
+                # Fallback to tifffile for other formats
+                import tifffile
+                tifffile.imwrite(save_path, image)
+
             result['saved_to'] = save_path
-            print(f"  Saved visualization to: {save_path}")
+            print(f"  Saved image to: {save_path}")
 
         # Show if requested
         if show:
-            plt.show()
+            viewer = napari.Viewer(title=title)
 
-        plt.close(fig)
+            # Add image layer
+            viewer.add_image(image, name='Image', colormap='gray')
+
+            # Collect embryo points and colors
+            points = []
+            colors = []
+            labels = []
+
+            # Define distinct colors for embryos
+            color_palette = [
+                'red', 'blue', 'green', 'yellow', 'magenta',
+                'cyan', 'orange', 'purple', 'pink', 'lime'
+            ]
+
+            for i, embryo in enumerate(embryos):
+                px = embryo.get('pixel_x', embryo.get('center_x', 0))
+                py = embryo.get('pixel_y', embryo.get('center_y', 0))
+
+                points.append([py, px])  # napari uses [row, col] = [y, x]
+                colors.append(color_palette[i % len(color_palette)])
+
+                embryo_id = embryo.get('embryo_id', embryo.get('id', i))
+                confidence = embryo.get('confidence', embryo.get('stability_score', 0))
+                label = f"#{embryo_id}"
+                if confidence:
+                    label += f" ({confidence:.2f})"
+                labels.append(label)
+
+            # Add points layer for embryos with text labels
+            if points:
+                # Build properties dict for text display
+                properties = {'label': labels}
+
+                viewer.add_points(
+                    points,
+                    name=f'Embryos ({len(embryos)})',
+                    face_color=colors,
+                    border_color='white',
+                    size=40,
+                    symbol='disc',
+                    properties=properties,
+                    text={
+                        'string': '{label}',
+                        'size': 14,
+                        'color': 'white',
+                        'anchor': 'upper_left',
+                    }
+                )
+
+                print(f"  Showing {len(embryos)} embryos:")
+                for i, label in enumerate(labels):
+                    print(f"    {label} at ({points[i][1]:.0f}, {points[i][0]:.0f})")
+
+            napari.run()
+
         return result
+
+
+    def exposed_edit_embryos(
+        self,
+        image: np.ndarray,
+        embryos: list,
+        stage_position: tuple,
+        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
+        title: str = "Edit Embryos - Add/Delete/Move points, then close window"
+    ) -> dict:
+        """
+        Interactive embryo editor using napari.
+
+        Allows adding, deleting, and moving embryo positions.
+        - Click to add new embryos
+        - Select + Delete key to remove
+        - Drag to move existing embryos
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Input image from bottom camera
+        embryos : list
+            List of existing embryo dicts with pixel_x, pixel_y, embryo_id
+        stage_position : tuple
+            Current (x, y) stage position in micrometers
+        pixel_size_um : float
+            Camera pixel size in micrometers
+        objective_mag : float
+            Objective magnification
+        title : str
+            Window title
+
+        Returns
+        -------
+        dict
+            Updated embryo list with:
+            - embryos: list of all embryos (original + new, minus deleted)
+            - added: count of new embryos
+            - removed: count of removed embryos
+            - moved: count of moved embryos
+        """
+        import napari
+
+        print(f"\n[SAM Server] Interactive embryo editing...")
+        print(f"  Image shape: {image.shape if hasattr(image, 'shape') else 'unknown'}")
+        print(f"  Existing embryos: {len(embryos)}")
+
+        # Convert image to numpy if needed
+        if not isinstance(image, np.ndarray):
+            image = np.array(image, dtype=np.uint16)
+        elif hasattr(image, 'dtype') and not isinstance(image.dtype, np.dtype):
+            image = np.array(image, dtype=np.uint16)
+
+        # Convert embryos from rpyc netref if needed
+        if not isinstance(embryos, list):
+            embryos = list(embryos)
+        embryos = [dict(e) for e in embryos]
+
+        # Convert stage position
+        if not isinstance(stage_position, tuple):
+            stage_position = tuple(stage_position)
+
+        um_per_pixel = pixel_size_um / objective_mag
+        image_center_x = image.shape[1] / 2
+        image_center_y = image.shape[0] / 2
+
+        # Build initial points array and track original positions
+        original_points = []
+        original_ids = []
+        for emb in embryos:
+            px = emb.get('pixel_x')
+            py = emb.get('pixel_y')
+            if px is not None and py is not None:
+                original_points.append([py, px])  # napari [row, col]
+                original_ids.append(emb.get('embryo_id', f'embryo_{len(original_ids)+1}'))
+
+        # Create napari viewer
+        viewer = napari.Viewer(title=title)
+
+        # Add image layer
+        viewer.add_image(image, name='Bottom Camera', colormap='gray')
+
+        # Add editable points layer
+        points_layer = viewer.add_points(
+            original_points if original_points else None,
+            name='Embryos (editable)',
+            face_color='lime',
+            border_color='white',
+            size=35,
+            symbol='cross'
+        )
+        points_layer.mode = 'select'  # Start in select mode for editing
+
+        # Store original state for comparison
+        original_points_set = set(tuple(p) for p in original_points)
+
+        print("\n  [INTERACTIVE] Edit embryos in napari:")
+        print("    - Press '2' or click 'Add points' to add new embryos")
+        print("    - Press '3' or click 'Select points' to select existing")
+        print("    - Press Delete/Backspace to remove selected points")
+        print("    - Drag points to move them")
+        print("    - Close window when done\n")
+
+        # Run napari (blocking)
+        napari.run()
+
+        # Get final points
+        final_points = points_layer.data
+
+        # Analyze changes
+        final_points_set = set(tuple(p) for p in final_points)
+
+        # Points that were in original but not in final = removed
+        removed_points = original_points_set - final_points_set
+
+        # Points that are in final but not in original = added (or moved)
+        new_points = final_points_set - original_points_set
+
+        # Build final embryo list
+        final_embryos = []
+        next_id = len(embryos) + 1
+
+        for i, point in enumerate(final_points):
+            py, px = point[0], point[1]
+
+            # Check if this point matches an original (not moved)
+            point_tuple = tuple(point)
+            original_idx = None
+            for j, orig_point in enumerate(original_points):
+                if tuple(orig_point) == point_tuple:
+                    original_idx = j
+                    break
+
+            if original_idx is not None:
+                # Existing embryo, keep original data
+                emb = embryos[original_idx].copy()
+            else:
+                # New or moved embryo - calculate stage coordinates using centralized function
+                stage_x_um, stage_y_um = pixel_to_stage_position(
+                    pixel_x=px,
+                    pixel_y=py,
+                    image_center_x=image_center_x,
+                    image_center_y=image_center_y,
+                    stage_x=stage_position[0],
+                    stage_y=stage_position[1],
+                    um_per_pixel=um_per_pixel
+                )
+
+                emb = {
+                    'embryo_id': f'embryo_{next_id}',
+                    'pixel_x': float(px),
+                    'pixel_y': float(py),
+                    'stage_x_um': float(stage_x_um),
+                    'stage_y_um': float(stage_y_um),
+                    'confidence': 1.0,
+                    'source': 'manual_edit'
+                }
+                next_id += 1
+
+            # Always update pixel coordinates from napari
+            emb['pixel_x'] = float(px)
+            emb['pixel_y'] = float(py)
+
+            # Recalculate stage coordinates using centralized function
+            stage_x_um, stage_y_um = pixel_to_stage_position(
+                pixel_x=px,
+                pixel_y=py,
+                image_center_x=image_center_x,
+                image_center_y=image_center_y,
+                stage_x=stage_position[0],
+                stage_y=stage_position[1],
+                um_per_pixel=um_per_pixel
+            )
+            emb['stage_x_um'] = float(stage_x_um)
+            emb['stage_y_um'] = float(stage_y_um)
+
+            final_embryos.append(emb)
+
+        # Summary
+        added = len(new_points)
+        removed = len(removed_points)
+        moved = len([p for p in final_points if tuple(p) not in original_points_set]) - added
+
+        print(f"  Edit complete:")
+        print(f"    Original: {len(embryos)} embryos")
+        print(f"    Final: {len(final_embryos)} embryos")
+        print(f"    Added: {added}, Removed: {removed}")
+
+        return {
+            'embryos': final_embryos,
+            'original_count': len(embryos),
+            'final_count': len(final_embryos),
+            'added': added,
+            'removed': removed,
+            'success': True
+        }
 
 
 def start_sam_server(
