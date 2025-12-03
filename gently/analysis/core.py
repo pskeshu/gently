@@ -64,6 +64,188 @@ class FocusResult:
     error_message: Optional[str] = None
 
 
+class AdaptiveSweepState:
+    """
+    Real-time state during an adaptive focus sweep.
+
+    Tracks running statistics for early stopping decisions. Used by the
+    adaptive calibration algorithm to determine when to stop sweeping
+    (either because the peak has been found or confidence is high enough).
+
+    Early stopping criteria:
+    - Score drops below 70% of max with 3+ consecutive declines
+    - R² >= 0.90 with stable peak position across fits
+    - Sufficient points past peak for robust fitting
+    """
+
+    # Early stopping thresholds
+    DECLINE_THRESHOLD: float = 0.70  # Stop if score drops below 70% of max
+    MIN_DECLINE_COUNT: int = 3       # Require N consecutive declines
+    MIN_POINTS_FOR_FIT: int = 5      # Minimum points before attempting fit
+    MIN_POINTS_PAST_PEAK: int = 3    # Need N points past peak for robust fit
+    STABILITY_THRESHOLD_UM: float = 0.5  # Peak position stability threshold
+    HIGH_CONFIDENCE_R2: float = 0.90  # R² threshold for early exit
+
+    def __init__(self):
+        self.positions: List[float] = []
+        self.scores: List[float] = []
+
+        # Peak detection state
+        self.running_max_score: float = 0.0
+        self.running_max_position: float = 0.0
+        self.running_max_idx: int = 0
+        self.decline_count: int = 0
+        self.peak_detected: bool = False
+
+        # Confidence metrics updated after each point
+        self.current_r_squared: float = 0.0
+        self.fit_stable: bool = False
+        self.last_fit_position: float = 0.0
+        self.fit_history: List[Dict[str, float]] = []
+
+    def add_point(self, position: float, score: float) -> Dict[str, Any]:
+        """
+        Add new measurement and compute early stopping decision.
+
+        Parameters
+        ----------
+        position : float
+            Piezo position (µm)
+        score : float
+            Focus score at this position
+
+        Returns
+        -------
+        dict
+            - should_stop: bool - whether to stop sweeping
+            - reason: str - reason for stopping (if applicable)
+            - confidence: float - confidence in current fit (0-1)
+        """
+        self.positions.append(position)
+        self.scores.append(score)
+
+        result = {
+            'should_stop': False,
+            'reason': None,
+            'confidence': 0.0,
+        }
+
+        # Update running max
+        if score > self.running_max_score:
+            self.running_max_score = score
+            self.running_max_position = position
+            self.running_max_idx = len(self.positions) - 1
+            self.decline_count = 0
+        else:
+            # Check for decline from peak
+            if score < self.running_max_score * self.DECLINE_THRESHOLD:
+                self.decline_count += 1
+
+        # Early stopping check: peak detection via decline
+        points_past_peak = len(self.positions) - self.running_max_idx - 1
+        if self.decline_count >= self.MIN_DECLINE_COUNT:
+            self.peak_detected = True
+            result['confidence'] = 0.7
+
+            # Continue a few more points past detected peak for robust fitting
+            if points_past_peak >= self.MIN_POINTS_PAST_PEAK:
+                result['should_stop'] = True
+                result['reason'] = 'peak_passed'
+
+        # Confidence-based early exit (if we have enough points)
+        if len(self.positions) >= self.MIN_POINTS_FOR_FIT:
+            fit_result = self._attempt_fit()
+            if fit_result:
+                self.current_r_squared = fit_result['r_squared']
+                new_position = fit_result['peak_position']
+
+                # Track fit history for stability check
+                self.fit_history.append({
+                    'position': new_position,
+                    'r_squared': fit_result['r_squared'],
+                })
+
+                # Check stability (position change across recent fits)
+                if len(self.fit_history) >= 3:
+                    recent_positions = [f['position'] for f in self.fit_history[-3:]]
+                    position_range = max(recent_positions) - min(recent_positions)
+                    self.fit_stable = position_range < self.STABILITY_THRESHOLD_UM
+
+                self.last_fit_position = new_position
+
+                # High confidence early exit
+                if (self.current_r_squared >= self.HIGH_CONFIDENCE_R2 and
+                    self.fit_stable and len(self.positions) >= 7):
+                    result['should_stop'] = True
+                    result['reason'] = 'high_confidence_fit'
+                    result['confidence'] = self.current_r_squared
+
+        return result
+
+    def _attempt_fit(self) -> Optional[Dict[str, Any]]:
+        """
+        Attempt Gaussian fit on current data.
+
+        Returns
+        -------
+        dict or None
+            Fit results with 'peak_position', 'r_squared', 'params'
+        """
+        if len(self.positions) < self.MIN_POINTS_FOR_FIT:
+            return None
+
+        try:
+            positions = np.array(self.positions)
+            scores = np.array(self.scores)
+
+            # Use existing fit_focus_curve
+            _, _, params, r_squared = fit_focus_curve(
+                positions, scores, FitFunction.GAUSSIAN.value
+            )
+
+            return {
+                'peak_position': float(params[1]),  # mu
+                'r_squared': r_squared,
+                'params': params,
+            }
+        except Exception:
+            return None
+
+    def get_best_position(self) -> Tuple[float, float]:
+        """
+        Get best focus position from current data.
+
+        Returns
+        -------
+        tuple
+            (best_position, r_squared)
+        """
+        if not self.positions:
+            return (0.0, 0.0)
+
+        # Try fit first
+        fit_result = self._attempt_fit()
+        if fit_result and fit_result['r_squared'] >= 0.5:
+            return (fit_result['peak_position'], fit_result['r_squared'])
+
+        # Fall back to max score position
+        return (self.running_max_position, 0.0)
+
+    def reset(self):
+        """Reset state for a new sweep."""
+        self.positions = []
+        self.scores = []
+        self.running_max_score = 0.0
+        self.running_max_position = 0.0
+        self.running_max_idx = 0
+        self.decline_count = 0
+        self.peak_detected = False
+        self.current_r_squared = 0.0
+        self.fit_stable = False
+        self.last_fit_position = 0.0
+        self.fit_history = []
+
+
 def calculate_focus_score(image: np.ndarray, algorithm: str = FocusAlgorithm.VOLATH.value,
                          roi: Optional[Tuple[int, int, int, int]] = None,
                          config: Optional[FocusAnalysisConfig] = None) -> float:
