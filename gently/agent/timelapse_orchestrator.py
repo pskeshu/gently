@@ -281,7 +281,7 @@ class TimelapseOrchestrator:
         if missing:
             return f"Embryos not found: {missing}"
 
-        # Initialize embryo states
+        # Initialize embryo states (preserve existing timepoint counts)
         self._embryo_states = {}
         for eid in embryo_ids:
             embryo = self.experiment.embryos[eid]
@@ -289,12 +289,14 @@ class TimelapseOrchestrator:
                 embryo_id=eid,
                 interval_seconds=embryo.interval_seconds or base_interval_seconds,
                 stop_condition=stop_cond,
+                timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
+                last_acquired=embryo.last_imaged,  # Preserve last acquisition time
             )
 
-        # Reset state
+        # Reset state (but preserve total timepoints from existing embryos)
         self._status = TimelapseStatus.RUNNING
         self._started_at = datetime.now()
-        self._total_timepoints = 0
+        self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
         self._current_round = 0
         self._paused = False
         self._stop_requested = False
@@ -490,11 +492,11 @@ class TimelapseOrchestrator:
 
                 # Update embryo state
                 embryo.timepoints_acquired = embryo_state.timepoints_acquired
-                embryo.last_imaged = embryo_state.last_acquired
-                # Record light exposure
+                # Record light exposure (includes updating last_imaged)
                 embryo.record_exposure(
                     exposure_ms=exposure_ms,
-                    num_frames=num_frames
+                    num_frames=num_frames,
+                    timestamp=embryo_state.last_acquired
                 )
 
                 # Note: VOLUME_ACQUIRED event is emitted by the callback (copilot.on_volume_acquired)

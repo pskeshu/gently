@@ -199,16 +199,30 @@ class ImageManager:
         Parameters
         ----------
         storage_path : Path
-            Directory to store volume TIFFs
+            Base directory to store volume TIFFs (session subdirs created within)
         history_length : int
             Number of recent images to keep per embryo for temporal context
         data_store : DataStore, optional
             UID-based data store for unified storage
         """
-        self.storage_path = Path(storage_path)
-        self.storage_path.mkdir(parents=True, exist_ok=True)
+        self.base_storage_path = Path(storage_path)
+        self.base_storage_path.mkdir(parents=True, exist_ok=True)
+        self.storage_path = self.base_storage_path  # Updated when session is set
         self.history_length = history_length
         self._data_store = data_store
+
+    def set_session(self, session_id: str) -> None:
+        """
+        Set the current session, updating storage path to session subdirectory
+
+        Parameters
+        ----------
+        session_id : str
+            Current session ID
+        """
+        self.storage_path = self.base_storage_path / session_id
+        self.storage_path.mkdir(parents=True, exist_ok=True)
+        logger.info(f"Image storage path set to: {self.storage_path}")
 
     @property
     def data_store(self) -> Optional['DataStore']:
@@ -314,8 +328,7 @@ class ImageManager:
         if len(embryo_state.recent_images) > self.history_length:
             embryo_state.recent_images.pop(0)
 
-        # Update embryo state
-        embryo_state.last_imaged = datetime.now()
+        # Update timepoint count (last_imaged is set by record_exposure)
         embryo_state.timepoints_acquired = timepoint + 1
 
         return record
