@@ -1640,64 +1640,110 @@ class RichCopilotCLI:
 
             return False  # Handled, continue loop
 
-        elif cmd == '/timelapse':
-            # Show timelapse status
+        elif cmd == '/timelapse' or cmd == '/timelapse watch':
+            # Show timelapse status (with optional live watch mode)
+            watch_mode = 'watch' in cmd
             theme = get_theme()
-            if hasattr(self.copilot, 'timelapse_orchestrator') and self.copilot.timelapse_orchestrator:
-                state = self.copilot.timelapse_orchestrator.get_status()
 
-                # Header - check status enum
-                from .timelapse_orchestrator import TimelapseStatus
+            if not (hasattr(self.copilot, 'timelapse_orchestrator') and self.copilot.timelapse_orchestrator):
+                self.console.print(f"\n[{theme.muted}]No timelapse running[/]")
+                self.console.print()
+                return False
+
+            from .timelapse_orchestrator import TimelapseStatus
+
+            def build_timelapse_display():
+                """Build the timelapse status display"""
+                from rich.table import Table
+                from rich.panel import Panel
+                from rich.text import Text
+                from datetime import datetime
+
+                state = self.copilot.timelapse_orchestrator.get_status()
                 is_running = state.status == TimelapseStatus.RUNNING
-                status_color = theme.success if is_running else theme.muted
-                status_text = state.status.value.upper()
-                self.console.print(f"\n[bold {theme.primary}]Timelapse Status[/] [{status_color}][{status_text}][/]")
+
+                # Build table
+                table = Table(show_header=True, header_style=f"bold {theme.primary}", box=box.SIMPLE)
+                table.add_column("Embryo")
+                table.add_column("Timepoints")
+                table.add_column("Last Imaged")
+                table.add_column("Next In", justify="right")
+                table.add_column("Status")
 
                 if state.embryos:
-                    # Create table for embryo states
-                    from rich.table import Table
-                    table = Table(show_header=True, header_style=f"bold {theme.primary}")
-                    table.add_column("Embryo")
-                    table.add_column("Timepoints")
-                    table.add_column("Last Imaged")
-                    table.add_column("Interval")
-                    table.add_column("Status")
-
+                    now = datetime.now()
                     for eid, emb_state in state.embryos.items():
                         # Last imaged
                         if emb_state.last_acquired:
-                            from datetime import datetime
-                            mins_ago = (datetime.now() - emb_state.last_acquired).seconds // 60
-                            last_str = f"{mins_ago}m ago"
+                            secs_ago = (now - emb_state.last_acquired).total_seconds()
+                            if secs_ago < 60:
+                                last_str = f"{int(secs_ago)}s ago"
+                            else:
+                                last_str = f"{int(secs_ago // 60)}m ago"
                         else:
                             last_str = "not yet"
 
-                        # Status
+                        # Next acquisition countdown
                         if emb_state.is_complete:
-                            status = f"[{theme.success}]done ({emb_state.completion_reason})[/]"
-                        else:
+                            next_str = "-"
+                            status = f"[{theme.success}]done[/]"
+                        elif emb_state.next_acquisition_time:
+                            secs_until = (emb_state.next_acquisition_time - now).total_seconds()
+                            if secs_until <= 0:
+                                next_str = f"[bold {theme.warning}]NOW[/]"
+                            elif secs_until < 60:
+                                next_str = f"[bold {theme.info}]{int(secs_until)}s[/]"
+                            else:
+                                mins = int(secs_until // 60)
+                                secs = int(secs_until % 60)
+                                next_str = f"{mins}m {secs}s"
                             status = f"[{theme.info}]active[/]"
+                        else:
+                            next_str = "?"
+                            status = f"[{theme.muted}]waiting[/]"
 
                         table.add_row(
                             eid,
                             str(emb_state.timepoints_acquired),
                             last_str,
-                            f"{emb_state.interval_seconds}s",
+                            next_str,
                             status
                         )
 
-                    self.console.print(table)
+                # Header with status
+                status_color = theme.success if is_running else theme.muted
+                status_text = state.status.value.upper()
+                header = Text()
+                header.append("Timelapse ", style=f"bold {theme.primary}")
+                header.append(f"[{status_text}]", style=status_color)
+                if watch_mode:
+                    header.append(" (press Ctrl+C to exit)", style=theme.muted)
 
-                    # Next acquisition
-                    if is_running and state.next_acquisition_in:
-                        self.console.print(f"\n[{theme.muted}]Next acquisition in {state.next_acquisition_in:.0f}s[/]")
-                else:
-                    self.console.print(f"[{theme.muted}]No embryos in timelapse[/]")
+                return Panel(table, title=header, border_style=theme.primary)
 
-                if state.error_message:
-                    self.console.print(f"\n[{theme.error}]Error: {state.error_message}[/]")
+            if watch_mode:
+                # Live updating display
+                from rich.live import Live
+                import time
+
+                self.console.print(f"\n[{theme.info}]Starting live timelapse monitor...[/]")
+
+                try:
+                    with Live(build_timelapse_display(), refresh_per_second=1, console=self.console) as live:
+                        while True:
+                            time.sleep(1)
+                            state = self.copilot.timelapse_orchestrator.get_status()
+                            live.update(build_timelapse_display())
+                            # Exit if timelapse stopped
+                            if state.status != TimelapseStatus.RUNNING:
+                                break
+                except KeyboardInterrupt:
+                    self.console.print(f"\n[{theme.muted}]Exited watch mode[/]")
             else:
-                self.console.print(f"\n[{theme.muted}]No timelapse running[/]")
+                # Static display
+                self.console.print()
+                self.console.print(build_timelapse_display())
+
             self.console.print()
             return False  # Handled, continue loop
 
@@ -1873,7 +1919,7 @@ Just type what you want! Examples:
 - `/detectors` - List all detectors
 - `/embryos` - List all embryos
 - `/status` - Show experiment status
-- `/timelapse` - Show timelapse status table
+- `/timelapse` - Show timelapse status (add `watch` for live countdown)
 - `/timeline` - Show event timeline (current session only)
   - `--letters` - Lettered markers with legend (default)
   - `--log` - Git-log style vertical timeline
