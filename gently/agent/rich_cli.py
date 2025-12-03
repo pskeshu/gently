@@ -1100,6 +1100,7 @@ class RichCopilotCLI:
         table.add_column("XY (µm)", style=theme.secondary)
         table.add_column("Status", justify="center")
         table.add_column("Last Imaging", style=theme.info)
+        table.add_column("Exposures", style=theme.warning)
         table.add_column("Detections", style=theme.success)
 
         for embryo_id, embryo in embryos.items():
@@ -1125,6 +1126,18 @@ class RichCopilotCLI:
                 else:
                     last_time = f"{int(elapsed / 3600)}h ago"
 
+            # Exposures
+            exposure_count = getattr(embryo, 'exposure_count', 0)
+            total_exposure_ms = getattr(embryo, 'total_exposure_ms', 0)
+            if exposure_count > 0:
+                total_sec = total_exposure_ms / 1000
+                if total_sec < 1:
+                    exposure_str = f"{exposure_count} ({total_exposure_ms:.0f}ms)"
+                else:
+                    exposure_str = f"{exposure_count} ({total_sec:.1f}s)"
+            else:
+                exposure_str = "0"
+
             # Detections
             detections = []
             if hasattr(embryo, 'detection_results'):
@@ -1139,6 +1152,7 @@ class RichCopilotCLI:
                 xy_str,
                 Text(status, style=status_style),
                 last_time,
+                exposure_str,
                 detections_str,
             )
 
@@ -1517,6 +1531,13 @@ class RichCopilotCLI:
                 self.console.print(f"\n[{theme.muted}]Session selection cancelled[/]")
             return False  # Handled, continue loop
 
+        elif cmd == '/tokens':
+            # Show token usage for session
+            theme = get_theme()
+            self.console.print(f"\n[bold {theme.primary}]Token Usage[/]")
+            self.console.print(f"  {self.copilot.token_usage_summary}\n")
+            return False  # Handled, continue loop
+
         elif cmd.startswith('/resume'):
             # Resume a session by ID (for autocomplete/direct use)
             parts = command.strip().split()
@@ -1867,6 +1888,7 @@ Just type what you want! Examples:
 - `/sessions` - Browse and select saved sessions (interactive)
 - `/resume [id]` - Resume a session (interactive picker if no ID given)
 - `/save` - Save current session
+- `/tokens` - Show API token usage and estimated cost
 - `/theme [name]` - Switch theme (vibrant, scientific, claude, monochrome)
 - `/help` - Show this help
 - `/clear` - Clear screen
@@ -1963,6 +1985,10 @@ Just type what you want! Examples:
             theme = get_theme()
             self.console.print()
             self.console.print(Text("Goodbye!", style=theme.copilot))
+
+            # Clean up viz server
+            if self.copilot.viz_server:
+                await self.copilot.stop_viz_server()
 
             # Clean up client session
             if self.copilot.client:
