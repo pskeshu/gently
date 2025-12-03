@@ -280,10 +280,22 @@ class VisualizationServer:
                         await websocket.send_json({"type": "ping"})
 
             except WebSocketDisconnect:
-                await self.manager.disconnect(websocket)
+                try:
+                    await self.manager.disconnect(websocket)
+                except Exception:
+                    pass  # Ignore errors during disconnect
+            except asyncio.CancelledError:
+                # Graceful shutdown - don't log as error
+                try:
+                    await self.manager.disconnect(websocket)
+                except Exception:
+                    pass
             except Exception as e:
                 logger.error(f"WebSocket error: {e}")
-                await self.manager.disconnect(websocket)
+                try:
+                    await self.manager.disconnect(websocket)
+                except Exception:
+                    pass
 
     async def _handle_ws_message(self, websocket: WebSocket, message: str):
         """Handle incoming WebSocket message"""
@@ -348,11 +360,17 @@ class VisualizationServer:
     ) -> ImageData:
         """Convert numpy array to ImageData with base64 PNG"""
 
-        # Handle 3D volumes - take max projection
+        # Handle 3D arrays - distinguish RGB images from volumes
         if array.ndim == 3:
-            array = np.max(array, axis=0)
+            # Check if it's an RGB/RGBA image (last dim is 3 or 4)
+            if array.shape[2] in (3, 4):
+                # It's an RGB(A) image - keep as is, PIL will handle it
+                pass
+            else:
+                # It's a volume (Z, H, W) - take max projection
+                array = np.max(array, axis=0)
 
-        # Normalize to 0-255
+        # Normalize to 0-255 (skip for RGB uint8 images)
         if array.dtype != np.uint8:
             arr_min, arr_max = array.min(), array.max()
             if arr_max > arr_min:
@@ -671,6 +689,7 @@ class VisualizationServer:
     <div class="header">
         <h1>Gently Microscopy</h1>
         <div class="status">
+            <span id="current-embryo" style="color:#00ff88;font-weight:bold;margin-right:1rem;"></span>
             <span id="status-text">Disconnected</span>
             <div class="status-dot" id="status-dot"></div>
         </div>
@@ -692,6 +711,10 @@ class VisualizationServer:
             <div class="panel">
                 <h3>Image Info</h3>
                 <div id="image-details">
+                    <div class="info-row">
+                        <span class="info-label">Embryo:</span>
+                        <span class="info-value" id="info-embryo" style="color:#00ff88;">-</span>
+                    </div>
                     <div class="info-row">
                         <span class="info-label">UID:</span>
                         <span class="info-value" id="info-uid">-</span>
@@ -775,6 +798,11 @@ class VisualizationServer:
                 img.style.display = 'block';
                 placeholder.style.display = 'none';
             }
+
+            // Update embryo display
+            const embryoId = data.metadata?.embryo_id || '-';
+            document.getElementById('current-embryo').textContent = embryoId !== '-' ? embryoId : '';
+            document.getElementById('info-embryo').textContent = embryoId;
 
             document.getElementById('image-info').textContent = data.data_type;
             document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();

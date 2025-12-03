@@ -184,8 +184,8 @@ def _extract_parameters_from_function(func: Callable) -> List[ToolParameter]:
 
     parameters = []
     for param_name, param in sig.parameters.items():
-        # Skip 'self' and 'tool_input' (legacy pattern)
-        if param_name in ('self', 'tool_input'):
+        # Skip 'self', 'tool_input' (legacy pattern), and 'context' (injected at runtime)
+        if param_name in ('self', 'tool_input', 'context'):
             continue
 
         python_type = hints.get(param_name, str)
@@ -412,8 +412,16 @@ class ToolRegistry:
         if not tool:
             raise ValueError(f"Unknown tool: {tool_name}")
 
-        # Use provided context or fall back to stored context
-        exec_context = context if context is not None else self._context
+        # Determine execution context:
+        # 1. Use explicit context parameter if provided (from copilot.execute_tool)
+        # 2. Check if context was passed in tool_input (from nested tool calls via wrapper)
+        # 3. Fall back to stored registry context
+        if context is not None:
+            exec_context = context
+        elif 'context' in tool_input and tool_input['context'] is not None:
+            exec_context = tool_input['context']
+        else:
+            exec_context = self._context
 
         # Check microscope requirement
         if tool.requires_microscope:
@@ -427,9 +435,9 @@ class ToolRegistry:
             # Prepare arguments
             kwargs = dict(tool_input)
 
-            # Inject context if handler expects it
+            # Inject context if handler expects it (but don't overwrite if already provided)
             sig = inspect.signature(tool.handler)
-            if 'context' in sig.parameters:
+            if 'context' in sig.parameters and 'context' not in kwargs:
                 kwargs['context'] = exec_context
 
             # Execute handler
