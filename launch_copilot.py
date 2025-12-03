@@ -9,6 +9,7 @@ Usage:
     python launch_copilot.py --offline
     python launch_copilot.py --sessions          # List and select a session
     python launch_copilot.py --resume            # Interactive session picker
+    python launch_copilot.py --resume latest     # Resume most recent session
     python launch_copilot.py --resume <id>       # Resume specific session
 """
 
@@ -252,11 +253,22 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         list_sessions(storage_dir, console)
         return
 
-    # Handle --resume (interactive picker or specific session)
+    # Handle --resume (interactive picker, "latest", or specific session)
     session_to_resume = None
     if pick_session:
         # Show interactive session picker
         session_to_resume = await show_session_picker(storage_dir, console)
+    elif resume_session == "latest":
+        # Find the most recent session
+        session_mgr = SessionManager(sessions_dir=storage_dir / "sessions")
+        sessions = session_mgr.list_sessions()
+        if sessions:
+            # Sessions are sorted by last_active (most recent first)
+            latest = sessions[0]
+            session_to_resume = latest.get('session_id', latest.get('id'))
+            console.print(f"\n[{theme.info}]{theme.icon_info}[/] Resuming latest session: [bold]{session_to_resume}[/]")
+        else:
+            console.print(f"\n[{theme.warning}]{theme.icon_warning}[/] No sessions found - starting fresh")
     elif resume_session:
         session_to_resume = resume_session
 
@@ -337,6 +349,11 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         storage_path=storage_dir,
         session_id=session_to_resume  # Resume specific session if provided
     )
+
+    # Start visualization server for real-time feedback
+    await copilot.start_viz_server(port=8080)
+    if copilot.viz_server is not None:
+        console.print(f"\n[{theme.info}]{theme.icon_info}[/] Viz dashboard: [link=http://localhost:8080]http://localhost:8080[/link]")
 
     # Report session status
     if session_to_resume:

@@ -9,12 +9,19 @@ Now integrated with:
 
 import asyncio
 import json
+import logging
 import os
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
 
 import anthropic
+import numpy as np
+
+if TYPE_CHECKING:
+    from ..visualization.server import VisualizationServer
+
+logger = logging.getLogger(__name__)
 
 from .state import ExperimentState, EmbryoState, ImageRecord
 from .image_manager import ImageManager
@@ -131,6 +138,14 @@ class MicroscopyCopilot:
         # Timeline manager for tracking events
         self.timeline_manager: Optional[TimelineManager] = None
 
+        # Visualization server for real-time feedback
+        self.viz_server: Optional["VisualizationServer"] = None
+
+        # Token usage tracking for session
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+        self.api_call_count: int = 0
+
         # Initialize or resume session
         if session_id:
             self.resume_session(session_id)
@@ -139,6 +154,10 @@ class MicroscopyCopilot:
             self._emit_event(EventType.SESSION_STARTED, {
                 'session_id': self.session_id,
             })
+
+        # Set session-specific storage path for images
+        if self.session_id:
+            self.image_manager.set_session(self.session_id)
 
         # Initialize interaction logger (for research data collection)
         self._init_interaction_logger()
@@ -165,6 +184,26 @@ class MicroscopyCopilot:
             connection_status = None  # Offline mode
 
         self.system_prompt = build_system_prompt(self.experiment, connection_status)
+
+    def _track_token_usage(self, response):
+        """Track token usage from API response"""
+        if hasattr(response, 'usage'):
+            self.total_input_tokens += response.usage.input_tokens
+            self.total_output_tokens += response.usage.output_tokens
+            self.api_call_count += 1
+
+    @property
+    def token_usage_summary(self) -> str:
+        """Get human-readable token usage summary"""
+        total = self.total_input_tokens + self.total_output_tokens
+        # Rough cost estimate (Claude Opus pricing as of 2024)
+        input_cost = self.total_input_tokens * 0.015 / 1000  # $15/M input
+        output_cost = self.total_output_tokens * 0.075 / 1000  # $75/M output
+        total_cost = input_cost + output_cost
+        return (
+            f"Tokens: {total:,} total ({self.total_input_tokens:,} in, {self.total_output_tokens:,} out) | "
+            f"API calls: {self.api_call_count} | Est. cost: ${total_cost:.2f}"
+        )
 
     async def _call_api_with_retry(self, api_func, *args, max_retries=3, **kwargs):
         """
@@ -265,6 +304,86 @@ class MicroscopyCopilot:
             logging.getLogger(__name__).warning(f"Failed to init timeline manager: {e}")
             self.timeline_manager = None
 
+    # ===== Visualization Server Methods =====
+
+    async def start_viz_server(self, port: int = 8080):
+        """
+        Start the visualization server for real-time feedback.
+
+        Opens a web dashboard at http://localhost:{port} for viewing
+        live images during calibration and acquisition.
+
+        Parameters
+        ----------
+        port : int
+            Port for web server (default: 8080)
+        """
+        if self.viz_server is not None:
+            logger.info("Visualization server already running")
+            return
+
+        try:
+            from ..visualization.server import VisualizationServer
+
+            self.viz_server = VisualizationServer(
+                port=port,
+                event_bus=self._event_bus,
+            )
+            await self.viz_server.start()
+            logger.info(f"Visualization server started at http://localhost:{port}")
+        except ImportError as e:
+            logger.warning(f"FastAPI not available for viz server: {e}")
+            self.viz_server = None
+        except Exception as e:
+            logger.warning(f"Failed to start viz server: {e}")
+            self.viz_server = None
+
+    async def stop_viz_server(self):
+        """Stop the visualization server if running."""
+        if self.viz_server is not None:
+            await self.viz_server.stop()
+            self.viz_server = None
+            logger.info("Visualization server stopped")
+
+    def push_viz(
+        self,
+        array: np.ndarray,
+        uid: str,
+        data_type: str = "image",
+        metadata: Optional[Dict[str, Any]] = None,
+    ):
+        """
+        Non-blocking push of image to visualization server.
+
+        Uses asyncio.create_task() for fire-and-forget behavior.
+        Copilot doesn't wait for viz server to process the image.
+
+        Parameters
+        ----------
+        array : np.ndarray
+            Image or volume to push (2D or 3D). 3D volumes are max-projected.
+        uid : str
+            Unique identifier for this image
+        data_type : str
+            Type: 'calibration', 'focus_sweep', 'volume_projection', 'edge_detection', etc.
+        metadata : dict, optional
+            Additional metadata (embryo_id, galvo, piezo, score, etc.)
+        """
+        if self.viz_server is None:
+            return  # No viz server, silently skip
+
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.create_task(
+                self.viz_server.push_image(array, uid, data_type, metadata or {})
+            )
+        except RuntimeError:
+            # No running event loop - shouldn't happen in async context
+            pass
+        except Exception as e:
+            # Fire-and-forget: never block copilot for viz errors
+            logger.debug(f"Failed to push image to viz server: {e}")
+
     def _has_microscope(self) -> bool:
         """Check if microscope server connection is available"""
         return self.client is not None
@@ -334,6 +453,9 @@ class MicroscopyCopilot:
         detector_configs = state.get('detector_configs', {})
         # Note: detector registry already persists to its own file,
         # so we don't need to restore from session state
+
+        # Update image storage path for this session
+        self.image_manager.set_session(session_id)
 
         # Emit session restored event
         self._emit_event(EventType.SESSION_RESTORED, {
@@ -583,6 +705,7 @@ class MicroscopyCopilot:
                 tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                 max_tokens=4096
             )
+            self._track_token_usage(response)
 
             # Process tool calls
             while response.stop_reason == "tool_use":
@@ -609,6 +732,7 @@ class MicroscopyCopilot:
                     tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                     max_tokens=4096
                 )
+                self._track_token_usage(response)
 
             # Extract text response
             assistant_message = ""
@@ -760,6 +884,8 @@ class MicroscopyCopilot:
         for attempt in range(max_retries):
             try:
                 events, final_message = await asyncio.to_thread(stream_and_collect)
+                # Track token usage from streaming response
+                self._track_token_usage(final_message)
                 break  # Success, exit retry loop
             except APIStatusError as e:
                 error_type = getattr(e, 'body', {})
@@ -1046,8 +1172,27 @@ class MicroscopyCopilot:
                 embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
                 embryo.priority = embryo_data.get('priority', 'normal')
                 embryo.acquisition_mode = embryo_data.get('acquisition_mode', 'volume')
-                # Note: timepoints_acquired is reset to 0 for fresh session
-                # Detection results are NOT imported - this is a fresh start
+
+                # Preserve exposure tracking across sessions (cumulative for phototoxicity)
+                embryo.exposure_count = embryo_data.get('exposure_count', 0)
+                embryo.total_exposure_ms = embryo_data.get('total_exposure_ms', 0.0)
+                embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
+
+                # Restore last_imaged if available
+                last_imaged_str = embryo_data.get('last_imaged')
+                if last_imaged_str:
+                    try:
+                        embryo.last_imaged = datetime.fromisoformat(last_imaged_str)
+                    except (ValueError, TypeError):
+                        embryo.last_imaged = None
+                else:
+                    # Handle legacy data: if exposure recorded but no last_imaged, clear inconsistent data
+                    if embryo.exposure_count > 0:
+                        # Legacy session without proper tracking - reset to avoid confusion
+                        embryo.exposure_count = 0
+                        embryo.total_exposure_ms = 0.0
+
+                # Note: Detection results are NOT imported - this is a fresh start
 
                 imported.append(embryo_id)
 
@@ -1093,6 +1238,24 @@ class MicroscopyCopilot:
 
         # Store image
         record = self.image_manager.store_volume(embryo, timepoint, volume)
+
+        # Push to viz server
+        if self.viz_server and volume is not None:
+            try:
+                max_proj = np.max(volume, axis=0)
+                self.push_viz(
+                    array=max_proj,
+                    uid=f"volume_{embryo_id}_t{timepoint:04d}",
+                    data_type="volume_projection",
+                    metadata={
+                        'embryo_id': embryo_id,
+                        'timepoint': timepoint,
+                        'shape': list(volume.shape),
+                    }
+                )
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Failed to push to viz: {e}")
 
         # Emit volume acquired event
         self._emit_event(EventType.VOLUME_ACQUIRED, {
