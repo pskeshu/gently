@@ -242,21 +242,10 @@ class CopilotEvaluator:
         """
         Get the tool call Claude would make for a query
 
-        This calls the copilot in "dry run" mode to get the tool selection
-        without actually executing the tool.
+        Uses copilot.get_tool_call() which makes a real API call
+        but doesn't execute the selected tool (dry-run mode).
         """
-        # TODO: Implement dry-run mode in copilot
-        # For now, this is a placeholder that needs copilot integration
-
-        # Option 1: Add a dry_run parameter to copilot.process_message()
-        # Option 2: Mock the tool execution
-        # Option 3: Parse the response to extract tool calls
-
-        raise NotImplementedError(
-            "Need to implement dry-run mode in copilot. "
-            "Add copilot.get_tool_call(query) that returns the tool "
-            "Claude would call without executing it."
-        )
+        return await copilot.get_tool_call(query)
 
 
 def compare_reports(before: BenchmarkReport, after: BenchmarkReport) -> Dict:
