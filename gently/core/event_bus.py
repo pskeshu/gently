@@ -59,6 +59,7 @@ class EventType(Enum):
     CV_TASK_QUEUED = auto()
     CV_TASK_COMPLETED = auto()
     CV_TASK_FAILED = auto()
+    CV_AGENT_THINKING = auto()  # Streamed thinking blocks from CV agent
 
     # Hardware events
     STAGE_MOVED = auto()

@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import CVSubagentConfig, CELEGANS_STAGES
 from .tasks.task_queue import TaskQueue, TaskPriority, CVTask
+from .events import publish_cv_agent_thinking
 
 logger = logging.getLogger(__name__)
 
@@ -567,15 +568,24 @@ When you have gathered enough information, provide a final summary.
                 assistant_content = response.content
                 stop_reason = response.stop_reason
 
-                # Collect thinking blocks for user visibility (interleaved thinking)
+                # Stream thinking blocks in real-time via EventBus (interleaved thinking)
+                task_id = task.task_id if task else "immediate"
                 for block in assistant_content:
                     if hasattr(block, 'type') and block.type == "thinking":
                         thinking_text = getattr(block, 'thinking', '')
                         if thinking_text:
+                            # Collect for final result
                             thinking_steps.append({
                                 "iteration": iteration,
                                 "thinking": thinking_text,
                             })
+                            # Publish for real-time streaming to subscribers
+                            publish_cv_agent_thinking(
+                                task_id=task_id,
+                                thinking=thinking_text,
+                                iteration=iteration,
+                                embryo_id=embryo_id,
+                            )
                             logger.debug(f"Agent thinking (iter {iteration}): {thinking_text[:200]}...")
 
                 # Add assistant message to conversation
@@ -639,6 +649,7 @@ When you have gathered enough information, provide a final summary.
             "processing_time_ms": processing_time,
             "tools_used": list(set(tools_used)),
             "iterations": iteration,
+            "thinking_steps": thinking_steps,  # Agent reasoning visible to user
         }
 
         if task:

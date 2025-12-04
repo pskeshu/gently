@@ -365,3 +365,48 @@ def publish_cv_task_failed(
         data=data,
         source=CV_SOURCE,
     )
+
+
+def publish_cv_agent_thinking(
+    task_id: str,
+    thinking: str,
+    iteration: int,
+    embryo_id: Optional[str] = None,
+) -> Event:
+    """
+    Publish CV_AGENT_THINKING event for real-time streaming of agent reasoning.
+
+    Allows subscribers (viz server, copilot) to display the agent's
+    reasoning process as it happens, providing transparency into
+    multi-step analysis decisions.
+
+    Parameters
+    ----------
+    task_id : str
+        Associated task ID
+    thinking : str
+        The thinking/reasoning text from Claude
+    iteration : int
+        Current iteration number in the agentic loop
+    embryo_id : str, optional
+        Embryo identifier
+
+    Returns
+    -------
+    Event
+        The published event
+    """
+    data = {
+        "task_id": task_id,
+        "thinking": thinking,
+        "iteration": iteration,
+    }
+    if embryo_id:
+        data["embryo_id"] = embryo_id
+
+    event_bus = get_event_bus()
+    return event_bus.publish(
+        event_type=EventType.CV_AGENT_THINKING,
+        data=data,
+        source=CV_SOURCE,
+    )
