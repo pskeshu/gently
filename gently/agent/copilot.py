@@ -704,7 +704,7 @@ class MicroscopyCopilot:
         Parameters
         ----------
         user_message : str
-            User message
+            User message (append --think to enable extended thinking)
 
         Returns
         -------
@@ -712,7 +712,12 @@ class MicroscopyCopilot:
             Claude's response
         """
         import time
+        import re
         start_time = time.time()
+
+        # Enable extended thinking when 'think' or 'thinking' appears in message
+        # This allows natural prompts like "what do you think about..."
+        use_thinking = bool(re.search(r'\bthink(ing)?\b', user_message, re.IGNORECASE))
 
         # Start interaction logging
         interaction = None
@@ -737,15 +742,23 @@ class MicroscopyCopilot:
         error_occurred = None
 
         try:
+            # Build API call kwargs
+            api_kwargs = {
+                "model": self.model,
+                "system": self._get_cached_system_prompt(),
+                "messages": self.conversation_history,
+                "tools": get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                "max_tokens": 16000 if use_thinking else 4096,
+            }
+            # Enable extended thinking if --think flag was used
+            if use_thinking:
+                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+
             # Call Claude with tools (with retry for transient errors)
             # Use cached system prompt to reduce token costs
             response = await self._call_api_with_retry(
                 self.claude.messages.create,
-                model=self.model,
-                system=self._get_cached_system_prompt(),
-                messages=self.conversation_history,
-                tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
-                max_tokens=4096
+                **api_kwargs
             )
             self._track_token_usage(response)
 
@@ -766,13 +779,11 @@ class MicroscopyCopilot:
                 })
 
                 # Get next response (with retry for transient errors)
+                # Reuse api_kwargs but update messages
+                api_kwargs["messages"] = self.conversation_history
                 response = await self._call_api_with_retry(
                     self.claude.messages.create,
-                    model=self.model,
-                    system=self._get_cached_system_prompt(),
-                    messages=self.conversation_history,
-                    tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
-                    max_tokens=4096
+                    **api_kwargs
                 )
                 self._track_token_usage(response)
 
