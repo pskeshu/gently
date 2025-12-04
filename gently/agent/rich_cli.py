@@ -181,6 +181,39 @@ class RichCopilotCLI:
 
         return HTML(" │ ".join(parts))
 
+    def _get_status_text(self) -> Text:
+        """Generate status text for Rich display (used during processing)"""
+        theme = get_theme()
+        parts = []
+
+        # Token usage
+        total_tokens = self.copilot.total_input_tokens + self.copilot.total_output_tokens
+        if total_tokens > 0:
+            input_cost = self.copilot.total_input_tokens * 0.015 / 1000
+            output_cost = self.copilot.total_output_tokens * 0.075 / 1000
+            cost = input_cost + output_cost
+            parts.append(f"Tokens: {total_tokens:,} (${cost:.2f})")
+        else:
+            parts.append("Tokens: 0")
+
+        # Session ID (truncated)
+        session_id = self.copilot.session_id or "none"
+        if len(session_id) > 20:
+            session_id = session_id[:17] + "..."
+        parts.append(f"Session: {session_id}")
+
+        # Embryo count
+        embryo_count = len(self.copilot.experiment.embryos) if self.copilot.experiment else 0
+        parts.append(f"Embryos: {embryo_count}")
+
+        # Connection status
+        if self.copilot.client and self.copilot.client.is_connected:
+            parts.append("● Connected")
+        else:
+            parts.append("○ Offline")
+
+        return Text(" │ ".join(parts), style=theme.muted)
+
     def print_welcome(self):
         """Print welcome banner with categorized commands"""
         from .command_registry import get_command_registry, CommandCategory
@@ -1385,6 +1418,9 @@ class RichCopilotCLI:
         """
         theme = get_theme()
 
+        # Show status bar while processing (prompt toolbar is hidden during response)
+        self.console.print(self._get_status_text())
+
         # Accumulated response for current segment
         response_text = ""
         segment_count = 0
@@ -1431,6 +1467,8 @@ class RichCopilotCLI:
                     except StopAsyncIteration:
                         progress.stop()
                         flush_text_segment()
+                        # Show updated status after processing
+                        self.console.print(self._get_status_text())
                         return  # Done with stream
 
                     if chunk.get('type') == 'text':
