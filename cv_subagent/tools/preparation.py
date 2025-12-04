@@ -1,0 +1,627 @@
+"""
+Image Preparation Tools for CV Agent
+
+Tools for preparing volumes for Claude Vision analysis.
+These tools implement the context enrichment pattern:
+1. Detect and frame the embryo ROI
+2. Crop with appropriate padding
+3. Add scale bars and annotations
+4. Project 3D to 2D for vision analysis
+"""
+
+import base64
+import io
+import logging
+import uuid
+from typing import Any, Dict, List, Optional, Tuple
+
+import numpy as np
+
+from .registry import cv_tool, ToolCategory
+from .data_access import get_cached_volume, cache_volume
+
+logger = logging.getLogger(__name__)
+
+# Try to import image processing libraries
+try:
+    from PIL import Image, ImageDraw, ImageFont
+    HAS_PIL = True
+except ImportError:
+    HAS_PIL = False
+    logger.warning("PIL not available, some preparation features limited")
+
+try:
+    from scipy import ndimage
+    HAS_SCIPY = True
+except ImportError:
+    HAS_SCIPY = False
+    logger.warning("scipy not available, using basic ROI detection")
+
+try:
+    from skimage import filters, measure, morphology
+    HAS_SKIMAGE = True
+except ImportError:
+    HAS_SKIMAGE = False
+    logger.warning("skimage not available, using basic methods")
+
+
+@cv_tool(
+    name="detect_embryo_roi",
+    description="Detect embryo bounding box for proper framing. Returns bbox and center coordinates.",
+    category=ToolCategory.PREPARATION,
+)
+def detect_embryo_roi(
+    volume_uid: str,
+    method: str = "threshold",
+    min_size_voxels: int = 1000,
+) -> Dict[str, Any]:
+    """
+    Find embryo bounding box in a volume
+
+    Parameters
+    ----------
+    volume_uid : str
+        UID of the volume to analyze
+    method : str
+        Detection method: "threshold", "otsu", or "adaptive"
+    min_size_voxels : int
+        Minimum object size to consider as embryo
+
+    Returns
+    -------
+    dict
+        bbox: [z1, y1, x1, z2, y2, x2] bounding box
+        center: [z, y, x] center coordinates
+        volume_voxels: number of voxels in detected region
+        confidence: detection confidence (0-1)
+    """
+    logger.info(f"Detecting embryo ROI in {volume_uid}, method={method}")
+
+    volume = get_cached_volume(volume_uid)
+    if volume is None:
+        return {
+            "error": f"Volume {volume_uid} not found in cache",
+            "bbox": None,
+            "center": None,
+        }
+
+    try:
+        # Get binary mask of embryo
+        if method == "otsu" and HAS_SKIMAGE:
+            threshold = filters.threshold_otsu(volume)
+            mask = volume > threshold
+        elif method == "adaptive" and HAS_SKIMAGE:
+            # Use local adaptive thresholding
+            threshold = filters.threshold_local(
+                volume.max(axis=0),  # 2D projection for speed
+                block_size=51,
+            )
+            mask_2d = volume.max(axis=0) > threshold
+            # Extend to 3D
+            mask = np.zeros_like(volume, dtype=bool)
+            for z in range(volume.shape[0]):
+                mask[z] = mask_2d
+        else:
+            # Simple threshold method
+            threshold = np.percentile(volume, 75)
+            mask = volume > threshold
+
+        # Clean up mask
+        if HAS_SCIPY:
+            # Remove small objects
+            labeled, num_features = ndimage.label(mask)
+            if num_features > 0:
+                sizes = ndimage.sum(mask, labeled, range(1, num_features + 1))
+                # Keep only largest object above minimum size
+                valid_labels = [i + 1 for i, s in enumerate(sizes) if s >= min_size_voxels]
+                if valid_labels:
+                    # Keep the largest
+                    largest_label = valid_labels[np.argmax([sizes[i-1] for i in valid_labels])]
+                    mask = labeled == largest_label
+
+        # Find bounding box
+        coords = np.argwhere(mask)
+        if len(coords) == 0:
+            # No embryo found, return full volume
+            return {
+                "bbox": [0, 0, 0, volume.shape[0], volume.shape[1], volume.shape[2]],
+                "center": [s // 2 for s in volume.shape],
+                "volume_voxels": 0,
+                "confidence": 0.0,
+                "message": "No embryo detected, returning full volume",
+            }
+
+        z_min, y_min, x_min = coords.min(axis=0)
+        z_max, y_max, x_max = coords.max(axis=0)
+
+        # Calculate center
+        center = [
+            (z_min + z_max) // 2,
+            (y_min + y_max) // 2,
+            (x_min + x_max) // 2,
+        ]
+
+        # Calculate confidence based on object properties
+        volume_voxels = np.sum(mask)
+        total_voxels = np.prod(volume.shape)
+        # Embryo should be a reasonable fraction of the volume
+        fill_ratio = volume_voxels / total_voxels
+        confidence = min(1.0, fill_ratio * 10)  # Scale up small ratios
+
+        return {
+            "bbox": [int(z_min), int(y_min), int(x_min), int(z_max), int(y_max), int(x_max)],
+            "center": [int(c) for c in center],
+            "volume_voxels": int(volume_voxels),
+            "confidence": float(confidence),
+            "method": method,
+        }
+
+    except Exception as e:
+        logger.error(f"ROI detection failed: {e}")
+        # Return full volume as fallback
+        return {
+            "bbox": [0, 0, 0, volume.shape[0], volume.shape[1], volume.shape[2]],
+            "center": [s // 2 for s in volume.shape],
+            "volume_voxels": 0,
+            "confidence": 0.0,
+            "error": str(e),
+        }
+
+
+@cv_tool(
+    name="crop_roi",
+    description="Crop volume to region of interest with padding for context.",
+    category=ToolCategory.PREPARATION,
+)
+def crop_roi(
+    volume_uid: str,
+    bbox: List[int],
+    padding_percent: float = 20.0,
+) -> Dict[str, Any]:
+    """
+    Crop volume to bounding box with padding
+
+    Parameters
+    ----------
+    volume_uid : str
+        UID of volume to crop
+    bbox : list
+        Bounding box [z1, y1, x1, z2, y2, x2]
+    padding_percent : float
+        Padding to add around bbox as percentage
+
+    Returns
+    -------
+    dict
+        cropped_uid: UID of the cropped volume (cached)
+        shape: New volume dimensions
+        actual_bbox: Final bbox after padding applied
+    """
+    logger.info(f"Cropping {volume_uid} with {padding_percent}% padding")
+
+    volume = get_cached_volume(volume_uid)
+    if volume is None:
+        return {"error": f"Volume {volume_uid} not found in cache"}
+
+    z1, y1, x1, z2, y2, x2 = bbox
+
+    # Calculate padding in voxels
+    z_pad = int((z2 - z1) * padding_percent / 100)
+    y_pad = int((y2 - y1) * padding_percent / 100)
+    x_pad = int((x2 - x1) * padding_percent / 100)
+
+    # Apply padding with bounds checking
+    z1_pad = max(0, z1 - z_pad)
+    y1_pad = max(0, y1 - y_pad)
+    x1_pad = max(0, x1 - x_pad)
+    z2_pad = min(volume.shape[0], z2 + z_pad)
+    y2_pad = min(volume.shape[1], y2 + y_pad)
+    x2_pad = min(volume.shape[2], x2 + x_pad)
+
+    # Crop
+    cropped = volume[z1_pad:z2_pad, y1_pad:y2_pad, x1_pad:x2_pad].copy()
+
+    # Cache the cropped volume
+    cropped_uid = f"cropped_{uuid.uuid4().hex[:8]}"
+    cache_volume(cropped_uid, cropped, {
+        "source_uid": volume_uid,
+        "original_bbox": bbox,
+        "applied_bbox": [z1_pad, y1_pad, x1_pad, z2_pad, y2_pad, x2_pad],
+        "padding_percent": padding_percent,
+    })
+
+    return {
+        "cropped_uid": cropped_uid,
+        "shape": list(cropped.shape),
+        "original_bbox": bbox,
+        "actual_bbox": [z1_pad, y1_pad, x1_pad, z2_pad, y2_pad, x2_pad],
+        "padding_applied": [z_pad, y_pad, x_pad],
+    }
+
+
+@cv_tool(
+    name="prepare_for_vision",
+    description="Prepare volume for Claude Vision: add scale bar, annotations, project to 2D. Returns base64 image.",
+    category=ToolCategory.PREPARATION,
+)
+def prepare_for_vision(
+    volume_uid: str,
+    scale_bar_um: float = 10.0,
+    scale_um_per_px: float = 0.5,
+    annotations: Optional[Dict[str, Any]] = None,
+    projection: str = "max",
+    slice_index: Optional[int] = None,
+    colormap: str = "gray",
+    contrast_percentile: Tuple[float, float] = (1, 99),
+) -> Dict[str, Any]:
+    """
+    Prepare a volume for Claude Vision analysis
+
+    Creates a 2D projection with scale bar and annotations.
+
+    Parameters
+    ----------
+    volume_uid : str
+        UID of volume to prepare
+    scale_bar_um : float
+        Scale bar length in micrometers
+    scale_um_per_px : float
+        Pixel size in micrometers
+    annotations : dict, optional
+        Annotations to overlay: {"nuclei": 24, "stage": "gastrula", ...}
+    projection : str
+        Projection method: "max", "mean", "sum", or "slice"
+    slice_index : int, optional
+        Slice index if projection="slice"
+    colormap : str
+        Colormap name (gray, viridis, etc.)
+    contrast_percentile : tuple
+        Percentile range for contrast adjustment
+
+    Returns
+    -------
+    dict
+        image_base64: Base64 encoded PNG image
+        width: Image width in pixels
+        height: Image height in pixels
+        scale_bar_px: Scale bar length in pixels
+    """
+    logger.info(f"Preparing {volume_uid} for vision, projection={projection}")
+
+    volume = get_cached_volume(volume_uid)
+    if volume is None:
+        return {"error": f"Volume {volume_uid} not found in cache"}
+
+    if not HAS_PIL:
+        return {"error": "PIL not available for image preparation"}
+
+    try:
+        # Create 2D projection
+        if projection == "max":
+            image_2d = np.max(volume, axis=0)
+        elif projection == "mean":
+            image_2d = np.mean(volume, axis=0)
+        elif projection == "sum":
+            image_2d = np.sum(volume, axis=0)
+        elif projection == "slice":
+            idx = slice_index if slice_index is not None else volume.shape[0] // 2
+            idx = min(max(0, idx), volume.shape[0] - 1)
+            image_2d = volume[idx]
+        else:
+            image_2d = np.max(volume, axis=0)
+
+        # Normalize to 0-255 with contrast adjustment
+        p_low, p_high = contrast_percentile
+        v_min = np.percentile(image_2d, p_low)
+        v_max = np.percentile(image_2d, p_high)
+        if v_max > v_min:
+            image_norm = np.clip((image_2d - v_min) / (v_max - v_min), 0, 1)
+        else:
+            image_norm = np.zeros_like(image_2d)
+        image_uint8 = (image_norm * 255).astype(np.uint8)
+
+        # Create PIL image
+        pil_image = Image.fromarray(image_uint8, mode='L')
+
+        # Convert to RGB for annotations
+        pil_image = pil_image.convert('RGB')
+
+        # Add scale bar
+        scale_bar_px = int(scale_bar_um / scale_um_per_px)
+        draw = ImageDraw.Draw(pil_image)
+
+        # Position scale bar in bottom-left
+        margin = 10
+        bar_height = 5
+        bar_y = pil_image.height - margin - bar_height
+        bar_x1 = margin
+        bar_x2 = margin + scale_bar_px
+
+        # Draw white bar with black outline
+        draw.rectangle([bar_x1-1, bar_y-1, bar_x2+1, bar_y+bar_height+1], fill='black')
+        draw.rectangle([bar_x1, bar_y, bar_x2, bar_y+bar_height], fill='white')
+
+        # Add scale text
+        scale_text = f"{scale_bar_um:.0f} µm"
+        try:
+            font = ImageFont.truetype("arial.ttf", 12)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+
+        text_bbox = draw.textbbox((0, 0), scale_text, font=font)
+        text_width = text_bbox[2] - text_bbox[0]
+        text_x = bar_x1 + (scale_bar_px - text_width) // 2
+        text_y = bar_y - 15
+
+        # Draw text with outline for visibility
+        for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+            draw.text((text_x + dx, text_y + dy), scale_text, fill='black', font=font)
+        draw.text((text_x, text_y), scale_text, fill='white', font=font)
+
+        # Add annotations if provided
+        if annotations:
+            annotation_lines = []
+            for key, value in annotations.items():
+                if isinstance(value, float):
+                    annotation_lines.append(f"{key}: {value:.2f}")
+                else:
+                    annotation_lines.append(f"{key}: {value}")
+
+            # Draw annotations in top-left
+            y_pos = margin
+            for line in annotation_lines:
+                # Outline for visibility
+                for dx, dy in [(-1, -1), (-1, 1), (1, -1), (1, 1)]:
+                    draw.text((margin + dx, y_pos + dy), line, fill='black', font=font)
+                draw.text((margin, y_pos), line, fill='cyan', font=font)
+                y_pos += 15
+
+        # Convert to base64
+        buffer = io.BytesIO()
+        pil_image.save(buffer, format='PNG')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+        return {
+            "image_base64": image_base64,
+            "width": pil_image.width,
+            "height": pil_image.height,
+            "scale_bar_um": scale_bar_um,
+            "scale_bar_px": scale_bar_px,
+            "scale_um_per_px": scale_um_per_px,
+            "projection": projection,
+            "annotations_added": list(annotations.keys()) if annotations else [],
+        }
+
+    except Exception as e:
+        logger.error(f"Vision preparation failed: {e}")
+        return {"error": str(e)}
+
+
+@cv_tool(
+    name="create_timeline_image",
+    description="Create a timeline montage of multiple volumes for temporal analysis.",
+    category=ToolCategory.PREPARATION,
+)
+def create_timeline_image(
+    volume_uids: List[str],
+    labels: Optional[List[str]] = None,
+    scale_bar_um: float = 10.0,
+    scale_um_per_px: float = 0.5,
+    layout: str = "horizontal",
+    max_width: int = 1200,
+) -> Dict[str, Any]:
+    """
+    Create a timeline montage of multiple volumes
+
+    Parameters
+    ----------
+    volume_uids : list
+        List of volume UIDs to include
+    labels : list, optional
+        Labels for each volume (e.g., timepoint labels)
+    scale_bar_um : float
+        Scale bar length in micrometers
+    scale_um_per_px : float
+        Pixel size
+    layout : str
+        Layout: "horizontal" or "grid"
+    max_width : int
+        Maximum output image width
+
+    Returns
+    -------
+    dict
+        image_base64: Base64 encoded montage
+        width, height: Image dimensions
+        num_frames: Number of volumes included
+    """
+    logger.info(f"Creating timeline image from {len(volume_uids)} volumes")
+
+    if not HAS_PIL:
+        return {"error": "PIL not available for timeline creation"}
+
+    if not volume_uids:
+        return {"error": "No volume UIDs provided"}
+
+    try:
+        # Create projections for each volume
+        projections = []
+        for uid in volume_uids:
+            volume = get_cached_volume(uid)
+            if volume is not None:
+                proj = np.max(volume, axis=0)
+                # Normalize
+                p_low, p_high = np.percentile(proj, [1, 99])
+                if p_high > p_low:
+                    proj = np.clip((proj - p_low) / (p_high - p_low), 0, 1)
+                else:
+                    proj = np.zeros_like(proj)
+                projections.append((proj * 255).astype(np.uint8))
+            else:
+                logger.warning(f"Volume {uid} not found, skipping")
+
+        if not projections:
+            return {"error": "No volumes could be loaded"}
+
+        # Calculate layout
+        n_frames = len(projections)
+        frame_h, frame_w = projections[0].shape
+
+        if layout == "horizontal":
+            # Scale frames to fit max_width
+            total_width = frame_w * n_frames
+            if total_width > max_width:
+                scale = max_width / total_width
+                frame_w = int(frame_w * scale)
+                frame_h = int(frame_h * scale)
+
+            canvas_w = frame_w * n_frames
+            canvas_h = frame_h + 20  # Extra space for labels
+        else:
+            # Grid layout
+            cols = int(np.ceil(np.sqrt(n_frames)))
+            rows = int(np.ceil(n_frames / cols))
+            canvas_w = frame_w * cols
+            canvas_h = (frame_h + 20) * rows
+
+        # Create canvas
+        canvas = Image.new('RGB', (canvas_w, canvas_h), color='black')
+        draw = ImageDraw.Draw(canvas)
+
+        try:
+            font = ImageFont.truetype("arial.ttf", 12)
+        except (OSError, IOError):
+            font = ImageFont.load_default()
+
+        # Place frames
+        for i, proj in enumerate(projections):
+            pil_frame = Image.fromarray(proj, mode='L').convert('RGB')
+
+            # Resize if needed
+            if pil_frame.size != (frame_w, frame_h):
+                pil_frame = pil_frame.resize((frame_w, frame_h), Image.Resampling.LANCZOS)
+
+            if layout == "horizontal":
+                x = i * frame_w
+                y = 0
+            else:
+                col = i % cols
+                row = i // cols
+                x = col * frame_w
+                y = row * (frame_h + 20)
+
+            canvas.paste(pil_frame, (x, y))
+
+            # Add label
+            if labels and i < len(labels):
+                label = labels[i]
+            else:
+                label = f"t{i}"
+
+            draw.text((x + 5, y + frame_h + 2), label, fill='white', font=font)
+
+        # Add scale bar on first frame
+        scale_bar_px = int(scale_bar_um / scale_um_per_px)
+        bar_y = frame_h - 10
+        draw.rectangle([5, bar_y, 5 + scale_bar_px, bar_y + 3], fill='white')
+        draw.text((5, bar_y - 12), f"{scale_bar_um:.0f}µm", fill='white', font=font)
+
+        # Convert to base64
+        buffer = io.BytesIO()
+        canvas.save(buffer, format='PNG')
+        buffer.seek(0)
+        image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+        return {
+            "image_base64": image_base64,
+            "width": canvas_w,
+            "height": canvas_h,
+            "num_frames": n_frames,
+            "layout": layout,
+            "frame_size": [frame_w, frame_h],
+        }
+
+    except Exception as e:
+        logger.error(f"Timeline creation failed: {e}")
+        return {"error": str(e)}
+
+
+@cv_tool(
+    name="normalize_volume",
+    description="Normalize volume intensity for consistent analysis.",
+    category=ToolCategory.PREPARATION,
+)
+def normalize_volume(
+    volume_uid: str,
+    method: str = "percentile",
+    percentile_range: Tuple[float, float] = (1, 99),
+) -> Dict[str, Any]:
+    """
+    Normalize volume intensity
+
+    Parameters
+    ----------
+    volume_uid : str
+        UID of volume to normalize
+    method : str
+        Normalization method: "percentile", "minmax", "zscore"
+    percentile_range : tuple
+        Percentile range for "percentile" method
+
+    Returns
+    -------
+    dict
+        normalized_uid: UID of normalized volume
+        original_range: [min, max] of original
+        normalized_range: [min, max] of result
+    """
+    logger.info(f"Normalizing {volume_uid}, method={method}")
+
+    volume = get_cached_volume(volume_uid)
+    if volume is None:
+        return {"error": f"Volume {volume_uid} not found in cache"}
+
+    original_range = [float(volume.min()), float(volume.max())]
+
+    if method == "percentile":
+        p_low, p_high = percentile_range
+        v_min = np.percentile(volume, p_low)
+        v_max = np.percentile(volume, p_high)
+        if v_max > v_min:
+            normalized = np.clip((volume - v_min) / (v_max - v_min), 0, 1)
+        else:
+            normalized = np.zeros_like(volume, dtype=np.float32)
+    elif method == "minmax":
+        v_min, v_max = volume.min(), volume.max()
+        if v_max > v_min:
+            normalized = (volume - v_min) / (v_max - v_min)
+        else:
+            normalized = np.zeros_like(volume, dtype=np.float32)
+    elif method == "zscore":
+        mean = volume.mean()
+        std = volume.std()
+        if std > 0:
+            normalized = (volume - mean) / std
+        else:
+            normalized = np.zeros_like(volume, dtype=np.float32)
+    else:
+        return {"error": f"Unknown normalization method: {method}"}
+
+    # Convert to float32
+    normalized = normalized.astype(np.float32)
+
+    # Cache result
+    normalized_uid = f"norm_{uuid.uuid4().hex[:8]}"
+    cache_volume(normalized_uid, normalized, {
+        "source_uid": volume_uid,
+        "normalization_method": method,
+    })
+
+    return {
+        "normalized_uid": normalized_uid,
+        "shape": list(normalized.shape),
+        "original_range": original_range,
+        "normalized_range": [float(normalized.min()), float(normalized.max())],
+        "method": method,
+    }
