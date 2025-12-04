@@ -87,7 +87,7 @@ class CVSubagentConfig:
     stardist_model: str = "2D_versatile_fluo"
 
     # Claude Vision settings
-    vision_model: str = "claude-sonnet-4-20250514"
+    vision_model: str = "claude-sonnet-4-5-20250929"
     vision_max_tokens: int = 4096
 
     # Extended thinking settings (for multi-step reasoning between tool calls)
