@@ -6,6 +6,7 @@ REM
 REM This script starts all required services for the Gently system:
 REM   1. Simple Server (Microscope API on port 60610)
 REM   2. SAM Server (Segmentation model on port 18862)
+REM   3. CV Subagent (Computer Vision analysis on port 8100)
 REM
 REM Note: Visualization Server is now started by the copilot automatically.
 REM
@@ -58,6 +59,13 @@ REM Start SAM server in a new window
 echo Starting SAM Server...
 start "SAM Server" cmd /k "call venv\Scripts\activate.bat && python backend/sam_server.py"
 
+REM Give SAM server a moment to start
+timeout /t 2 /nobreak > nul
+
+REM Start CV Subagent in a new window
+echo Starting CV Subagent...
+start "CV Subagent" cmd /k "call venv\Scripts\activate.bat && python start_cv_service.py"
+
 echo.
 echo All services started!
 echo.
@@ -65,6 +73,7 @@ echo ======================================================================
 echo Services running:
 echo   - Microscope API:        http://127.0.0.1:60610
 echo   - SAM Server:            localhost:18862
+echo   - CV Subagent:           http://localhost:8100
 echo.
 echo Note: Visualization Server starts with the copilot (port 8080)
 echo ======================================================================

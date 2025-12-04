@@ -217,6 +217,13 @@ By nuclei count:
         # Tool registry (lazy init)
         self._tools = None
 
+        # Token usage tracking (for cost estimation)
+        self.total_input_tokens: int = 0
+        self.total_output_tokens: int = 0
+        self.cache_creation_tokens: int = 0
+        self.cache_read_tokens: int = 0
+        self.api_call_count: int = 0
+
         # Register task processor if queue provided
         if self.task_queue:
             self.task_queue.register_processor("cv_analysis", self._process_task)
@@ -231,6 +238,57 @@ By nuclei count:
             except ImportError:
                 raise RuntimeError("anthropic package not installed")
         return self._client
+
+    def _get_cached_system_prompt(self) -> List[Dict]:
+        """Get system prompt formatted for Anthropic prompt caching.
+
+        Returns the system prompt as a list with cache_control to enable
+        prompt caching, which dramatically reduces token costs for the
+        large system prompt on subsequent API calls.
+
+        Uses 1-hour TTL since CV analysis sessions may have gaps between
+        embryo analyses.
+        """
+        return [
+            {
+                "type": "text",
+                "text": self.SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral", "ttl": "1h"}
+            }
+        ]
+
+    def _track_token_usage(self, response):
+        """Track token usage from API response, including cache metrics"""
+        if hasattr(response, 'usage'):
+            usage = response.usage
+            self.total_input_tokens += usage.input_tokens
+            self.total_output_tokens += usage.output_tokens
+            self.api_call_count += 1
+
+            # Track cache metrics if available (prompt caching)
+            self.cache_creation_tokens += getattr(usage, 'cache_creation_input_tokens', 0)
+            self.cache_read_tokens += getattr(usage, 'cache_read_input_tokens', 0)
+
+    @property
+    def token_usage_summary(self) -> str:
+        """Get human-readable token usage summary"""
+        cache_read = self.cache_read_tokens
+        cache_created = self.cache_creation_tokens
+        total_input = self.total_input_tokens + cache_read + cache_created
+        total = total_input + self.total_output_tokens
+
+        # Cost estimate (Claude Sonnet pricing with 1-hour cache)
+        input_cost = self.total_input_tokens * 0.003 / 1000
+        cache_read_cost = cache_read * 0.0003 / 1000  # 90% off
+        cache_write_cost = cache_created * 0.006 / 1000  # 2x for 1h TTL
+        output_cost = self.total_output_tokens * 0.015 / 1000
+        total_cost = input_cost + cache_read_cost + cache_write_cost + output_cost
+
+        summary = f"Tokens: {total:,} | API calls: {self.api_call_count} | Est. cost: ${total_cost:.3f}"
+        if cache_read > 0:
+            savings = (cache_read * 0.003 / 1000) - cache_read_cost
+            summary += f" (cache saved ${savings:.3f})"
+        return summary
 
     @property
     def tools(self):
@@ -472,14 +530,17 @@ When you have gathered enough information, provide a final summary.
                 )
 
             try:
-                # Call Claude
+                # Call Claude with prompt caching for system prompt
                 response = self.client.messages.create(
                     model=self.config.vision_model,
                     max_tokens=self.config.vision_max_tokens,
-                    system=self.SYSTEM_PROMPT,
+                    system=self._get_cached_system_prompt(),
                     tools=claude_tools,
                     messages=messages,
                 )
+
+                # Track token usage including cache metrics
+                self._track_token_usage(response)
 
                 # Process response
                 assistant_content = response.content
