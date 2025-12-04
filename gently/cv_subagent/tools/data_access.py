@@ -50,7 +50,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +81,10 @@ def _get_store() -> Optional["DataStore"]:
     name="list_embryos",
     description="List all embryos available in the data store with their metadata.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("What embryos are available?", {}),
+        ToolExample("List embryos from session exp_001", {"session_id": "exp_001"}),
+    ],
 )
 def list_embryos(
     session_id: Optional[str] = None,
@@ -179,6 +183,10 @@ def list_embryos(
     name="get_embryo_info",
     description="Get detailed information about a specific embryo.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Get info about embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Show details for E003", {"embryo_id": "E003"}),
+    ],
 )
 def get_embryo_info(embryo_id: str) -> Dict[str, Any]:
     """
@@ -265,6 +273,10 @@ def get_embryo_info(embryo_id: str) -> Dict[str, Any]:
     name="get_volume",
     description="Load a volume by embryo ID and timepoint. Returns volume_uid for use with other tools.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Load the latest volume for embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Get timepoint 5 for embryo_2", {"embryo_id": "embryo_2", "timepoint": 5}),
+    ],
 )
 def get_volume(
     embryo_id: str,
@@ -337,6 +349,10 @@ def get_volume(
     name="get_embryo_history",
     description="Get list of available timepoints for an embryo with timestamps.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("What timepoints are available for embryo 1?", {"embryo_id": "embryo_1"}),
+        ToolExample("Get the last 5 timepoints for embryo_2", {"embryo_id": "embryo_2", "last_n": 5}),
+    ],
 )
 def get_embryo_history(
     embryo_id: str,
@@ -412,6 +428,9 @@ def get_embryo_history(
     name="get_latest_volume",
     description="Get the most recent volume for an embryo.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Get the latest volume for embryo 1", {"embryo_id": "embryo_1"}),
+    ],
 )
 def get_latest_volume(embryo_id: str) -> Dict[str, Any]:
     """
@@ -439,6 +458,10 @@ def get_latest_volume(embryo_id: str) -> Dict[str, Any]:
     name="get_volume_range",
     description="Load multiple consecutive volumes for temporal analysis.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Load timepoints 0-4 for embryo 1", {"embryo_id": "embryo_1", "start_timepoint": 0, "end_timepoint": 4}),
+        ToolExample("Get volumes 10-15 for tracking", {"embryo_id": "embryo_2", "start_timepoint": 10, "end_timepoint": 15}),
+    ],
 )
 def get_volume_range(
     embryo_id: str,
@@ -487,6 +510,10 @@ def get_volume_range(
     name="query_volumes",
     description="Query volumes from the data store with flexible filters.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Find all GFP channel volumes", {"channel": "GFP"}),
+        ToolExample("Query volumes from session exp_001 timepoints 5-10", {"session_id": "exp_001", "timepoint_min": 5, "timepoint_max": 10}),
+    ],
 )
 def query_volumes(
     embryo_id: Optional[str] = None,
@@ -578,6 +605,10 @@ def query_volumes(
     name="store_analysis_result",
     description="Store an analysis result linked to its source volume.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Store segmentation result", {"volume_uid": "vol_abc", "result_type": "segmentation", "result": {"num_cells": 24}}),
+        ToolExample("Save classification result", {"volume_uid": "vol_xyz", "result_type": "classification", "result": {"stage": "gastrula", "confidence": 0.92}}),
+    ],
 )
 def store_analysis_result(
     volume_uid: str,
@@ -649,6 +680,10 @@ def store_analysis_result(
     name="get_analysis_results",
     description="Get previous analysis results for an embryo or volume.",
     category=ToolCategory.DATA_ACCESS,
+    examples=[
+        ToolExample("Get all analyses for embryo 1", {"embryo_id": "embryo_1"}),
+        ToolExample("Get segmentation results only", {"embryo_id": "embryo_1", "result_type": "segmentation"}),
+    ],
 )
 def get_analysis_results(
     embryo_id: Optional[str] = None,

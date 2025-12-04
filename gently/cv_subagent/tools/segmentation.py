@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample, ToolParameter
 from .data_access import get_cached_volume, cache_volume
 
 logger = logging.getLogger(__name__)
@@ -41,6 +41,21 @@ Cellpose is a deep learning model for cell segmentation. Use model_type:
 Returns cell count, mask UID, and cell properties (centroids, volumes).""",
     category=ToolCategory.SEGMENTATION,
     requires_gpu=True,
+    examples=[
+        ToolExample("Segment nuclei in volume", {"volume_uid": "vol_abc", "model_type": "nuclei"}),
+        ToolExample("Segment cytoplasm with custom diameter", {"volume_uid": "vol_xyz", "model_type": "cyto2", "diameter": 30.0}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uid", type="string", description="UID of volume to segment", required=True),
+        ToolParameter(name="model_type", type="string", description="Cellpose model type",
+                      required=False, default="nuclei", enum=["nuclei", "cyto2", "cyto"]),
+        ToolParameter(name="diameter", type="number", description="Expected cell diameter in pixels (None for auto)", required=False),
+        ToolParameter(name="flow_threshold", type="number", description="Flow error threshold (lower = stricter)", required=False, default=0.4),
+        ToolParameter(name="cellprob_threshold", type="number", description="Cell probability threshold", required=False, default=0.0),
+        ToolParameter(name="do_3D", type="boolean", description="Run full 3D segmentation (vs slice-by-slice)", required=False, default=True),
+        ToolParameter(name="anisotropy", type="number", description="Z/XY anisotropy ratio (e.g., 2.0 if Z spacing is 2x XY)", required=False),
+        ToolParameter(name="min_size", type="integer", description="Minimum cell size in voxels", required=False, default=15),
+    ],
 )
 def cellpose_segment_3d(
     volume_uid: str,
@@ -172,6 +187,19 @@ StarDist is optimized for star-convex shaped objects like nuclei.
 Best for dense nuclear segmentation with touching nuclei.""",
     category=ToolCategory.SEGMENTATION,
     requires_gpu=True,
+    examples=[
+        ToolExample("Segment nuclei with StarDist", {"volume_uid": "vol_abc"}),
+        ToolExample("Use 3D model for better accuracy", {"volume_uid": "vol_xyz", "use_3d_model": True}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uid", type="string", description="UID of volume to segment", required=True),
+        ToolParameter(name="model_name", type="string", description="StarDist model name",
+                      required=False, default="2D_versatile_fluo", enum=["2D_versatile_fluo", "2D_versatile_he", "3D_demo"]),
+        ToolParameter(name="prob_thresh", type="number", description="Object probability threshold", required=False, default=0.5),
+        ToolParameter(name="nms_thresh", type="number", description="Non-maximum suppression threshold", required=False, default=0.3),
+        ToolParameter(name="n_tiles", type="array", description="Number of tiles for large images [z, y, x]", required=False),
+        ToolParameter(name="use_3d_model", type="boolean", description="Use 3D StarDist model (slower but more accurate)", required=False, default=False),
+    ],
 )
 def stardist_segment_3d(
     volume_uid: str,
@@ -401,6 +429,9 @@ def _synthetic_segmentation(
     name="get_segmentation_masks",
     description="Retrieve segmentation masks by UID for further analysis.",
     category=ToolCategory.SEGMENTATION,
+    examples=[
+        ToolExample("Get masks from previous segmentation", {"mask_uid": "mask_abc123"}),
+    ],
 )
 def get_segmentation_masks(mask_uid: str) -> Dict[str, Any]:
     """

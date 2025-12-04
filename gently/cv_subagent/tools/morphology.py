@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample
 from .data_access import get_cached_volume
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,10 @@ Returns morphological features important for developmental staging:
 
 Use after cellpose_segment_3d or stardist_segment_3d.""",
     category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Measure embryo shape from masks", {"masks_uid": "mask_abc123"}),
+        ToolExample("Get per-cell measurements", {"masks_uid": "mask_xyz", "include_per_cell": True}),
+    ],
 )
 def measure_morphology(
     masks_uid: str,
@@ -98,6 +102,10 @@ The elongation ratio (length/width) is critical for distinguishing:
 - 1.5-fold: ratio 2.0-2.5
 - 2-fold: ratio 2.5-3.5
 - 3-fold: ratio > 3.5""",
+    examples=[
+        ToolExample("Measure elongation from masks", {"masks_uid": "mask_abc"}),
+        ToolExample("Measure from raw volume", {"volume_uid": "vol_xyz"}),
+    ],
     category=ToolCategory.ANALYSIS,
 )
 def measure_embryo_elongation(
@@ -168,6 +176,9 @@ def measure_embryo_elongation(
     name="measure_cell_sizes",
     description="Measure the size distribution of segmented cells.",
     category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Get cell size distribution", {"masks_uid": "mask_abc123"}),
+    ],
 )
 def measure_cell_sizes(masks_uid: str) -> Dict[str, Any]:
     """

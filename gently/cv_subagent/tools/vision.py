@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Any, Dict, List, Optional
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,10 @@ Provide detailed context in the prompt including:
 
 The more quantitative context you provide, the more accurate the analysis.""",
     category=ToolCategory.VISION,
+    examples=[
+        ToolExample("Analyze embryo image", {"image_base64": "<base64>", "prompt": "This image shows a C. elegans embryo with 24 nuclei. What developmental stage is this?"}),
+        ToolExample("Check for anomalies", {"image_base64": "<base64>", "prompt": "Check this embryo for any developmental abnormalities. Elongation ratio is 2.1."}),
+    ],
 )
 def claude_vision_analyze(
     image_base64: str,
@@ -163,6 +167,10 @@ When analyzing, consider both visual features AND any quantitative data provided
 This is a high-level tool that combines vision analysis with quantitative data.
 Provide nuclei count and morphology metrics for best results.""",
     category=ToolCategory.VISION,
+    examples=[
+        ToolExample("Classify stage with cell count", {"image_base64": "<base64>", "nuclei_count": 24, "elongation_ratio": 1.8}),
+        ToolExample("Quick classification without metrics", {"image_base64": "<base64>"}),
+    ],
 )
 def classify_developmental_stage(
     image_base64: str,
@@ -296,6 +304,10 @@ def classify_developmental_stage(
 
 Look for developmental defects, unusual morphology, or unexpected features.""",
     category=ToolCategory.VISION,
+    examples=[
+        ToolExample("Check for anomalies", {"image_base64": "<base64>", "expected_stage": "gastrula", "expected_nuclei": 200}),
+        ToolExample("General anomaly detection", {"image_base64": "<base64>"}),
+    ],
 )
 def detect_visual_anomalies(
     image_base64: str,
@@ -401,6 +413,10 @@ def detect_visual_anomalies(
 
 Useful for tracking developmental progression and detecting changes.""",
     category=ToolCategory.VISION,
+    examples=[
+        ToolExample("Track development progression", {"timeline_image_base64": "<base64>", "timepoint_labels": ["t=0", "t=1", "t=2"], "focus_aspect": "progression"}),
+        ToolExample("Focus on cell divisions", {"timeline_image_base64": "<base64>", "nuclei_counts": [4, 6, 8, 12], "focus_aspect": "divisions"}),
+    ],
 )
 def compare_timepoints(
     timeline_image_base64: str,

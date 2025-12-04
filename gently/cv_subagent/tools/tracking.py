@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample
 from .data_access import get_cached_volume
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,10 @@ logger = logging.getLogger(__name__)
 Links objects between consecutive timepoint masks based on centroid proximity.
 Detects division events when one object in frame t becomes two in frame t+1.""",
     category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Track cells across 5 timepoints", {"mask_uids": ["m1", "m2", "m3", "m4", "m5"]}),
+        ToolExample("Track with larger search distance", {"mask_uids": ["m1", "m2", "m3"], "max_distance": 100.0}),
+    ],
 )
 def track_objects(
     mask_uids: List[str],
@@ -123,6 +127,9 @@ def track_objects(
 
 Analyzes mask changes to identify where one cell became two.""",
     category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Check for divisions between t1 and t2", {"masks_uid_t1": "mask_t1", "masks_uid_t2": "mask_t2"}),
+    ],
 )
 def detect_divisions(
     masks_uid_t1: str,
@@ -201,6 +208,9 @@ def detect_divisions(
     name="count_cells_over_time",
     description="Count cells at each timepoint from a list of mask UIDs.",
     category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Count cells across 5 timepoints", {"mask_uids": ["m1", "m2", "m3", "m4", "m5"]}),
+    ],
 )
 def count_cells_over_time(mask_uids: List[str]) -> Dict[str, Any]:
     """

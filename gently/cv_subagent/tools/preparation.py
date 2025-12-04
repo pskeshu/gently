@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .registry import cv_tool, ToolCategory
+from .registry import cv_tool, ToolCategory, ToolExample, ToolParameter
 from .data_access import get_cached_volume, cache_volume
 
 logger = logging.getLogger(__name__)
@@ -49,6 +49,17 @@ except ImportError:
     name="detect_embryo_roi",
     description="Detect embryo bounding box for proper framing. Returns bbox and center coordinates.",
     category=ToolCategory.PREPARATION,
+    examples=[
+        ToolExample("Find the embryo in volume abc", {"volume_uid": "abc"}),
+        ToolExample("Detect embryo using Otsu thresholding", {"volume_uid": "xyz", "method": "otsu"}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uid", type="string", description="UID of the volume to analyze", required=True),
+        ToolParameter(name="method", type="string", description="Detection method",
+                      required=False, default="threshold", enum=["threshold", "otsu", "adaptive"]),
+        ToolParameter(name="min_size_voxels", type="integer", description="Minimum object size to consider as embryo",
+                      required=False, default=1000),
+    ],
 )
 def detect_embryo_roi(
     volume_uid: str,
@@ -172,6 +183,10 @@ def detect_embryo_roi(
     name="crop_roi",
     description="Crop volume to region of interest with padding for context.",
     category=ToolCategory.PREPARATION,
+    examples=[
+        ToolExample("Crop volume to detected embryo region", {"volume_uid": "vol_abc", "bbox": [10, 50, 50, 40, 200, 200]}),
+        ToolExample("Crop with extra padding", {"volume_uid": "vol_xyz", "bbox": [5, 30, 30, 45, 220, 220], "padding": 20}),
+    ],
 )
 def crop_roi(
     volume_uid: str,
@@ -243,6 +258,22 @@ def crop_roi(
     name="prepare_for_vision",
     description="Prepare volume for Claude Vision: add scale bar, annotations, project to 2D. Returns base64 image.",
     category=ToolCategory.PREPARATION,
+    examples=[
+        ToolExample("Prepare volume for vision analysis", {"volume_uid": "vol_abc"}),
+        ToolExample("Create mean projection with annotations", {"volume_uid": "vol_xyz", "projection": "mean", "annotations": {"stage": "gastrula"}}),
+        ToolExample("Show specific slice", {"volume_uid": "vol_abc", "projection": "slice", "slice_index": 25}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uid", type="string", description="UID of volume to prepare", required=True),
+        ToolParameter(name="scale_bar_um", type="number", description="Scale bar length in micrometers", required=False, default=10.0),
+        ToolParameter(name="scale_um_per_px", type="number", description="Pixel size in micrometers", required=False, default=0.5),
+        ToolParameter(name="annotations", type="object", description="Annotations to overlay: {\"nuclei\": 24, \"stage\": \"gastrula\"}", required=False),
+        ToolParameter(name="projection", type="string", description="Projection method for 3D to 2D",
+                      required=False, default="max", enum=["max", "mean", "sum", "slice"]),
+        ToolParameter(name="slice_index", type="integer", description="Slice index if projection='slice'", required=False),
+        ToolParameter(name="colormap", type="string", description="Colormap name (gray, viridis, etc.)", required=False, default="gray"),
+        ToolParameter(name="contrast_percentile", type="array", description="Percentile range for contrast [low, high]", required=False, default=[1, 99]),
+    ],
 )
 def prepare_for_vision(
     volume_uid: str,
@@ -402,6 +433,19 @@ def prepare_for_vision(
     name="create_timeline_image",
     description="Create a timeline montage of multiple volumes for temporal analysis.",
     category=ToolCategory.PREPARATION,
+    examples=[
+        ToolExample("Create timeline of 5 volumes", {"volume_uids": ["v1", "v2", "v3", "v4", "v5"]}),
+        ToolExample("Grid layout with labels", {"volume_uids": ["v1", "v2", "v3", "v4"], "labels": ["t=0", "t=1", "t=2", "t=3"], "layout": "grid"}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uids", type="array", description="List of volume UIDs to include", required=True),
+        ToolParameter(name="labels", type="array", description="Labels for each volume (e.g., timepoint labels)", required=False),
+        ToolParameter(name="scale_bar_um", type="number", description="Scale bar length in micrometers", required=False, default=10.0),
+        ToolParameter(name="scale_um_per_px", type="number", description="Pixel size in micrometers", required=False, default=0.5),
+        ToolParameter(name="layout", type="string", description="Layout arrangement",
+                      required=False, default="horizontal", enum=["horizontal", "grid"]),
+        ToolParameter(name="max_width", type="integer", description="Maximum image width in pixels", required=False, default=1200),
+    ],
 )
 def create_timeline_image(
     volume_uids: List[str],
@@ -551,6 +595,17 @@ def create_timeline_image(
     name="normalize_volume",
     description="Normalize volume intensity for consistent analysis.",
     category=ToolCategory.PREPARATION,
+    examples=[
+        ToolExample("Normalize with default percentile method", {"volume_uid": "vol_abc"}),
+        ToolExample("Use z-score normalization", {"volume_uid": "vol_xyz", "method": "zscore"}),
+    ],
+    parameters=[
+        ToolParameter(name="volume_uid", type="string", description="UID of volume to normalize", required=True),
+        ToolParameter(name="method", type="string", description="Normalization method",
+                      required=False, default="percentile", enum=["percentile", "minmax", "zscore"]),
+        ToolParameter(name="percentile_range", type="array", description="Percentile range for 'percentile' method [low, high]",
+                      required=False, default=[1, 99]),
+    ],
 )
 def normalize_volume(
     volume_uid: str,
