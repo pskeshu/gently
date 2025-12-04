@@ -137,6 +137,7 @@ class RichCopilotCLI:
             completer=create_completer(copilot),
             complete_while_typing=True,
             mouse_support=False,  # Disable mouse support to allow terminal scrolling
+            bottom_toolbar=self._get_status_bar,
         )
 
         # Wire up choice handler for interactive selection UI
@@ -145,6 +146,40 @@ class RichCopilotCLI:
         # State
         self._running = False
         self._last_status_update = None
+
+    def _get_status_bar(self):
+        """Generate bottom status bar content"""
+        from prompt_toolkit.formatted_text import HTML
+
+        parts = []
+
+        # Token usage
+        total_tokens = self.copilot.total_input_tokens + self.copilot.total_output_tokens
+        if total_tokens > 0:
+            input_cost = self.copilot.total_input_tokens * 0.015 / 1000
+            output_cost = self.copilot.total_output_tokens * 0.075 / 1000
+            cost = input_cost + output_cost
+            parts.append(f"<b>Tokens:</b> {total_tokens:,} (${cost:.2f})")
+        else:
+            parts.append("<b>Tokens:</b> 0")
+
+        # Session ID (truncated)
+        session_id = self.copilot.session_id or "none"
+        if len(session_id) > 20:
+            session_id = session_id[:17] + "..."
+        parts.append(f"<b>Session:</b> {session_id}")
+
+        # Embryo count
+        embryo_count = len(self.copilot.experiment.embryos) if self.copilot.experiment else 0
+        parts.append(f"<b>Embryos:</b> {embryo_count}")
+
+        # Connection status
+        if self.copilot.client and self.copilot.client.is_connected:
+            parts.append("<style fg='green'>● Connected</style>")
+        else:
+            parts.append("<style fg='yellow'>○ Offline</style>")
+
+        return HTML(" │ ".join(parts))
 
     def print_welcome(self):
         """Print welcome banner with categorized commands"""

@@ -17,9 +17,15 @@ uvicorn>=0.24.0
 websockets>=12.0
 python-multipart>=0.0.6
 
+# Async HTTP client (for queue server communication)
+aiohttp>=3.9.0
+
 # Rich CLI interface
 rich>=13.7.0
 prompt-toolkit>=3.0.43
+
+# Visualization (optional - for interactive embryo marking)
+napari>=0.4.18
 
 # Already in your project (likely installed)
 # bluesky>=1.11.0

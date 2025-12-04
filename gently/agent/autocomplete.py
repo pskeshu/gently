@@ -161,9 +161,14 @@ class CopilotCompleter(Completer):
 
     def _complete_command_name(self, text: str) -> Iterable[Completion]:
         """Complete slash command names with descriptions"""
+        # Track what we've already yielded to avoid duplicates
+        yielded = set()
+        search_text = text[1:] if text.startswith('/') else text  # Strip leading /
+
+        # First pass: prefix matches (higher priority)
         for cmd in self._registry.get_all():
-            # Match main command name
             if cmd.name.startswith(text):
+                yielded.add(cmd.name)
                 yield Completion(
                     cmd.name,
                     start_position=-len(text),
@@ -173,12 +178,23 @@ class CopilotCompleter(Completer):
             # Match aliases
             for alias in cmd.aliases:
                 if alias.startswith(text):
+                    yielded.add(alias)
                     yield Completion(
                         alias,
                         start_position=-len(text),
                         display=alias,
                         display_meta=f"{cmd.description} (→{cmd.name})",
                     )
+
+        # Second pass: substring matches (lower priority)
+        for cmd in self._registry.get_all():
+            if cmd.name not in yielded and search_text in cmd.name:
+                yield Completion(
+                    cmd.name,
+                    start_position=-len(text),
+                    display=cmd.name,
+                    display_meta=cmd.description,
+                )
 
     def _complete_subcommand(self, cmd: CommandDefinition, current: str,
                              at_space: bool) -> Iterable[Completion]:

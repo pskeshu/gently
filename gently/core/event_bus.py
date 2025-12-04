@@ -50,6 +50,16 @@ class EventType(Enum):
     DETECTION_TRIGGERED = auto()
     HATCHING_DETECTED = auto()
 
+    # CV Subagent events
+    SEGMENTATION_COMPLETED = auto()
+    STAGE_DETECTED = auto()
+    CELL_DIVISION_DETECTED = auto()
+    LINEAGE_UPDATED = auto()
+    ANOMALY_DETECTED = auto()
+    CV_TASK_QUEUED = auto()
+    CV_TASK_COMPLETED = auto()
+    CV_TASK_FAILED = auto()
+
     # Hardware events
     STAGE_MOVED = auto()
     FOCUS_CHANGED = auto()
