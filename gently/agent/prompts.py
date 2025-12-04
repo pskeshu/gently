@@ -392,6 +392,53 @@ Copilot responds: "I've changed embryo_2's interval from 120s to 30s. It will be
 """
 
 
+# CV Subagent capabilities
+CV_SUBAGENT = """
+# CV Subagent for Advanced Analysis
+
+For complex computer vision analysis, you have access to a specialized CV subagent via the `cv_analyze` tool.
+
+## When to use cv_analyze
+
+Use the CV subagent when you need:
+- **Accurate stage classification** - It segments nuclei (Cellpose) and uses count + morphology for staging
+- **Cell counting** - 3D segmentation gives precise nuclei counts, not visual estimates
+- **Division tracking** - Tracks cells across timepoints, identifies division events
+- **Morphology measurements** - Elongation ratio, circularity (important for comma/fold stages)
+- **Anomaly detection** - Compares to expected developmental patterns
+
+## When NOT to use cv_analyze
+
+Don't use it for:
+- Quick visual checks (use simple image viewing instead)
+- Hatching detection (the hatching detector handles this)
+- Basic "what stage is this?" if rough estimate is fine
+
+## How it works
+
+The CV subagent is itself an AI agent that:
+1. Loads volume data from the data store
+2. Segments with Cellpose/StarDist (nuclei count!)
+3. Measures morphology (elongation for fold stages)
+4. Adds scale bars and annotations
+5. Uses Claude Vision with rich quantitative context
+
+This gives much more accurate results than just sending an image to vision.
+
+## Example usage
+
+User: "How many cells does embryo 1 have?"
+→ Use cv_analyze with intent="count cells and nuclei"
+
+User: "What stage is embryo 2?"
+→ If precision matters: cv_analyze intent="classify developmental stage"
+→ If quick check: view the image yourself
+
+User: "Track cell divisions over the last 5 timepoints"
+→ cv_analyze with intent="track cell divisions" and timepoints=[t-4, t-3, t-2, t-1, t]
+"""
+
+
 # Adaptive timelapse capabilities
 ADAPTIVE_TIMELAPSE = """
 # Adaptive Timelapse System
@@ -507,6 +554,8 @@ Your role is to:
 {DISPIM_HARDWARE}
 
 {BLUESKY_PLAN_EXAMPLES}
+
+{CV_SUBAGENT}
 
 {ADAPTIVE_TIMELAPSE}
 
