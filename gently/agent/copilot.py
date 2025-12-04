@@ -217,25 +217,26 @@ class MicroscopyCopilot:
     @property
     def token_usage_summary(self) -> str:
         """Get human-readable token usage summary"""
-        total = self.total_input_tokens + self.total_output_tokens
-        # Cost estimate (Claude Sonnet pricing)
-        # Cached input tokens are 90% cheaper than regular input
-        cache_read = getattr(self, 'cache_read_tokens', 0)
-        cache_created = getattr(self, 'cache_creation_tokens', 0)
-        regular_input = self.total_input_tokens - cache_read
+        # Note: input_tokens is SEPARATE from cache tokens (per Anthropic API)
+        # Total = input_tokens + cache_read + cache_created + output_tokens
+        cache_read = self.cache_read_tokens
+        cache_created = self.cache_creation_tokens
+        total_input = self.total_input_tokens + cache_read + cache_created
+        total = total_input + self.total_output_tokens
 
-        input_cost = regular_input * 0.003 / 1000  # $3/M input
+        # Cost estimate (Claude Sonnet pricing)
+        input_cost = self.total_input_tokens * 0.003 / 1000  # $3/M input
         cache_read_cost = cache_read * 0.0003 / 1000  # $0.30/M cached (90% off)
         cache_write_cost = cache_created * 0.00375 / 1000  # $3.75/M cache write (25% more)
         output_cost = self.total_output_tokens * 0.015 / 1000  # $15/M output
         total_cost = input_cost + cache_read_cost + cache_write_cost + output_cost
 
-        # Calculate savings from caching
-        cost_without_cache = (self.total_input_tokens * 0.003 + self.total_output_tokens * 0.015) / 1000
+        # Calculate savings from caching (what it would cost without cache)
+        cost_without_cache = (total_input * 0.003 + self.total_output_tokens * 0.015) / 1000
         savings = cost_without_cache - total_cost
 
         summary = (
-            f"Tokens: {total:,} total ({self.total_input_tokens:,} in, {self.total_output_tokens:,} out) | "
+            f"Tokens: {total:,} total ({total_input:,} in, {self.total_output_tokens:,} out) | "
             f"API calls: {self.api_call_count} | Est. cost: ${total_cost:.3f}"
         )
         if cache_read > 0:

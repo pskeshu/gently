@@ -154,16 +154,22 @@ class RichCopilotCLI:
         parts = []
 
         # Token usage with cache-aware cost calculation
-        total_tokens = self.copilot.total_input_tokens + self.copilot.total_output_tokens
-        if total_tokens > 0:
-            cache_read = getattr(self.copilot, 'cache_read_tokens', 0)
-            regular_input = self.copilot.total_input_tokens - cache_read
+        # Note: input_tokens is SEPARATE from cache tokens (not inclusive)
+        cache_read = getattr(self.copilot, 'cache_read_tokens', 0)
+        cache_created = getattr(self.copilot, 'cache_creation_tokens', 0)
+        input_tokens = self.copilot.total_input_tokens  # Non-cached input
+        output_tokens = self.copilot.total_output_tokens
 
-            # Sonnet pricing with caching
-            input_cost = regular_input * 0.003 / 1000
-            cache_cost = cache_read * 0.0003 / 1000  # 90% cheaper
-            output_cost = self.copilot.total_output_tokens * 0.015 / 1000
-            cost = input_cost + cache_cost + output_cost
+        # Total tokens = input + cache_read + cache_created + output
+        total_tokens = input_tokens + cache_read + cache_created + output_tokens
+
+        if total_tokens > 0:
+            # Sonnet pricing: input $3/M, output $15/M, cache_read $0.30/M, cache_write $3.75/M
+            input_cost = input_tokens * 0.003 / 1000
+            cache_read_cost = cache_read * 0.0003 / 1000  # 90% cheaper
+            cache_write_cost = cache_created * 0.00375 / 1000  # 25% more
+            output_cost = output_tokens * 0.015 / 1000
+            cost = input_cost + cache_read_cost + cache_write_cost + output_cost
 
             if cache_read > 0:
                 parts.append(f"<b>Tokens:</b> {total_tokens:,} (${cost:.3f}) <style fg='green'>⚡cached</style>")
