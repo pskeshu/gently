@@ -176,76 +176,6 @@ Fast Z-positioning for light sheet.
 """
 
 
-# Bluesky plan examples
-BLUESKY_PLAN_EXAMPLES = """
-# Bluesky Plan Structure
-
-All plans are Python generator functions that use `yield from` to execute operations.
-
-## Basic Plan Example
-
-```python
-def simple_volume_plan(volume_scanner):
-    '''Acquire a single volume'''
-    import bluesky.plan_stubs as bps
-
-    # Configure device
-    volume_scanner.configure(num_slices=50, exposure_ms=10.0)
-
-    # Trigger and read
-    yield from bps.trigger_and_read([volume_scanner])
-```
-
-## Multi-Position Example
-
-```python
-def multi_position_plan(volume_scanner, xy_stage, positions):
-    '''Acquire volumes at multiple positions'''
-    import bluesky.plan_stubs as bps
-
-    for position in positions:
-        # Move stage
-        yield from bps.mov(xy_stage.x, position['x'], xy_stage.y, position['y'])
-
-        # Acquire
-        yield from bps.trigger_and_read([volume_scanner])
-```
-
-## Time-lapse Example
-
-```python
-def timelapse_plan(volume_scanner, num_timepoints, interval_seconds):
-    '''Time-lapse acquisition'''
-    import bluesky.plan_stubs as bps
-
-    for i in range(num_timepoints):
-        yield from bps.trigger_and_read([volume_scanner])
-
-        if i < num_timepoints - 1:  # Don't wait after last timepoint
-            yield from bps.sleep(interval_seconds)
-```
-
-## Key Operations
-
-- `bps.mov(device, value)`: Move device to value
-- `bps.trigger_and_read([devices])`: Trigger acquisition and read data
-- `bps.sleep(seconds)`: Wait for specified time
-- `bps.trigger(device)`: Trigger without reading
-- `bps.read(device)`: Read without triggering
-
-## Metadata
-
-Always include metadata for provenance:
-
-```python
-yield from bps.trigger_and_read(
-    [volume_scanner],
-    md={'embryo_id': 'embryo_001', 'purpose': 'hatching_detection'}
-)
-```
-"""
-
-
 # Interactive choice guidance
 USER_INTERACTION_GUIDELINES = """
 # Interactive User Choices
@@ -282,113 +212,6 @@ ask_user_choice(
 The CLI will render this as an interactive picker where users can use arrow keys to select.
 
 IMPORTANT: Always use ask_user_choice for discrete choices. Never just print numbered options as text.
-"""
-
-
-# Tool usage examples
-TOOL_USAGE_EXAMPLES = """
-# Example Copilot Interactions
-
-## Example 1: Status Query
-
-User: "What's happening with embryo 3?"
-
-Copilot uses tool: query_embryo_status
-Input: {"embryo_id": "embryo_003"}
-
-Response: "Embryo 3 was last imaged 2 minutes ago. It's at approximately the
-3-fold stage based on morphology (highly elongated, active movement). No signs
-of hatching yet. I estimate hatching in 30-60 minutes based on typical
-developmental timing."
-
-## Example 2: Plan Generation
-
-User: "Start monitoring all embryos for hatching"
-
-Copilot uses tool: generate_bluesky_plan
-Input: {
-    "goal": "Monitor all embryos and detect hatching",
-    "embryo_ids": ["embryo_001", "embryo_002", "embryo_003"],
-    "parameters": {
-        "interval_seconds": 120,
-        "num_timepoints": 500,
-        "num_slices": 50,
-        "exposure_ms": 10.0
-    }
-}
-
-Copilot generates adaptive timelapse plan and responds: "I've created a
-monitoring plan for all 3 embryos. I'll image every 2 minutes and analyze
-each volume for hatching. When I detect an embryo is close to hatching,
-I'll automatically increase the sampling rate to capture the event. Should
-I start?"
-
-## Example 3: Mid-Experiment Analysis
-
-User: "Check embryo 2 in detail"
-
-Copilot uses tools:
-1. query_embryo_status → Gets basic info
-2. analyze_volume → Sends latest image to Claude Vision
-
-Copilot responds: "I just analyzed the latest volume of embryo 2. It shows:
-- Stage: Late 3-fold, highly elongated
-- Movement: Active, continuous
-- Eggshell: Intact, no visible breaches
-- Prediction: Likely to hatch within 20-40 minutes
-
-Would you like me to increase imaging frequency for embryo 2?"
-
-## Example 4: Dynamic Adjustment
-
-User: "Focus more on embryo 1"
-
-Copilot uses tool: modify_parameters
-Input: {
-    "embryo_id": "embryo_001",
-    "changes": {
-        "interval_seconds": 60,
-        "num_slices": 80,
-        "priority": "high"
-    }
-}
-
-Copilot responds: "I've adjusted embryo 1 parameters:
-- Interval: 120s → 60s (doubled sampling rate)
-- Z-slices: 50 → 80 (more coverage)
-- Priority: normal → high (imaged first in queue)
-
-These changes take effect at the next timepoint."
-
-## Example 5: Adaptive Timelapse
-
-User: "Run a timelapse on all embryos until each one hatches"
-
-Copilot uses tools:
-1. enable_preset_detector(preset="hatching", action_mode="auto")
-2. start_adaptive_timelapse(stop_condition="hatching", interval_seconds=120)
-
-Copilot responds: "I've started an adaptive timelapse for all 5 embryos:
-- Each embryo will be imaged every 2 minutes
-- The hatching detector is enabled and will automatically stop imaging each embryo when it hatches
-- You can check status anytime with 'show timelapse status'
-- The timelapse runs in the background - you can still ask me questions while it's running"
-
-## Example 6: Mid-Timelapse Control
-
-User: "Stop imaging embryo 3, it's dead"
-
-Copilot uses tool: stop_timelapse_embryo
-Input: {"embryo_id": "embryo_3", "reason": "embryo dead"}
-
-Copilot responds: "I've stopped imaging embryo_3 (reason: embryo dead). The timelapse continues for the other 4 embryos."
-
-User: "Speed up imaging for embryo 2"
-
-Copilot uses tool: modify_timelapse_embryo
-Input: {"embryo_id": "embryo_2", "interval_seconds": 30}
-
-Copilot responds: "I've changed embryo_2's interval from 120s to 30s. It will be imaged more frequently now."
 """
 
 
@@ -553,8 +376,6 @@ Your role is to:
 
 {DISPIM_HARDWARE}
 
-{BLUESKY_PLAN_EXAMPLES}
-
 {CV_SUBAGENT}
 
 {ADAPTIVE_TIMELAPSE}
@@ -564,8 +385,6 @@ Your role is to:
 # Current Experiment State
 
 {embryo_summary}
-
-{TOOL_USAGE_EXAMPLES}
 
 # Tool Use Guidelines
 
