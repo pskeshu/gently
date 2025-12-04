@@ -145,6 +145,8 @@ class MicroscopyCopilot:
         self.total_input_tokens: int = 0
         self.total_output_tokens: int = 0
         self.api_call_count: int = 0
+        self.cache_creation_tokens: int = 0  # Tokens written to cache
+        self.cache_read_tokens: int = 0  # Tokens read from cache (90% cheaper)
 
         # Initialize or resume session
         if session_id:
@@ -185,25 +187,60 @@ class MicroscopyCopilot:
 
         self.system_prompt = build_system_prompt(self.experiment, connection_status)
 
+    def _get_cached_system_prompt(self):
+        """Get system prompt formatted for Anthropic prompt caching.
+
+        Returns the system prompt as a list with cache_control to enable
+        prompt caching, which dramatically reduces token costs for the
+        ~4K token system prompt on subsequent API calls.
+        """
+        return [
+            {
+                "type": "text",
+                "text": self.system_prompt,
+                "cache_control": {"type": "ephemeral"}
+            }
+        ]
+
     def _track_token_usage(self, response):
-        """Track token usage from API response"""
+        """Track token usage from API response, including cache metrics"""
         if hasattr(response, 'usage'):
-            self.total_input_tokens += response.usage.input_tokens
-            self.total_output_tokens += response.usage.output_tokens
+            usage = response.usage
+            self.total_input_tokens += usage.input_tokens
+            self.total_output_tokens += usage.output_tokens
             self.api_call_count += 1
+
+            # Track cache metrics if available (prompt caching)
+            self.cache_creation_tokens += getattr(usage, 'cache_creation_input_tokens', 0)
+            self.cache_read_tokens += getattr(usage, 'cache_read_input_tokens', 0)
 
     @property
     def token_usage_summary(self) -> str:
         """Get human-readable token usage summary"""
         total = self.total_input_tokens + self.total_output_tokens
-        # Rough cost estimate (Claude Opus pricing as of 2024)
-        input_cost = self.total_input_tokens * 0.015 / 1000  # $15/M input
-        output_cost = self.total_output_tokens * 0.075 / 1000  # $75/M output
-        total_cost = input_cost + output_cost
-        return (
+        # Cost estimate (Claude Sonnet pricing)
+        # Cached input tokens are 90% cheaper than regular input
+        cache_read = getattr(self, 'cache_read_tokens', 0)
+        cache_created = getattr(self, 'cache_creation_tokens', 0)
+        regular_input = self.total_input_tokens - cache_read
+
+        input_cost = regular_input * 0.003 / 1000  # $3/M input
+        cache_read_cost = cache_read * 0.0003 / 1000  # $0.30/M cached (90% off)
+        cache_write_cost = cache_created * 0.00375 / 1000  # $3.75/M cache write (25% more)
+        output_cost = self.total_output_tokens * 0.015 / 1000  # $15/M output
+        total_cost = input_cost + cache_read_cost + cache_write_cost + output_cost
+
+        # Calculate savings from caching
+        cost_without_cache = (self.total_input_tokens * 0.003 + self.total_output_tokens * 0.015) / 1000
+        savings = cost_without_cache - total_cost
+
+        summary = (
             f"Tokens: {total:,} total ({self.total_input_tokens:,} in, {self.total_output_tokens:,} out) | "
-            f"API calls: {self.api_call_count} | Est. cost: ${total_cost:.2f}"
+            f"API calls: {self.api_call_count} | Est. cost: ${total_cost:.3f}"
         )
+        if cache_read > 0:
+            summary += f" (cache saved ${savings:.3f})"
+        return summary
 
     async def _call_api_with_retry(self, api_func, *args, max_retries=3, **kwargs):
         """
@@ -697,10 +734,11 @@ class MicroscopyCopilot:
 
         try:
             # Call Claude with tools (with retry for transient errors)
+            # Use cached system prompt to reduce token costs
             response = await self._call_api_with_retry(
                 self.claude.messages.create,
                 model=self.model,
-                system=self.system_prompt,
+                system=self._get_cached_system_prompt(),
                 messages=self.conversation_history,
                 tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                 max_tokens=4096
@@ -727,7 +765,7 @@ class MicroscopyCopilot:
                 response = await self._call_api_with_retry(
                     self.claude.messages.create,
                     model=self.model,
-                    system=self.system_prompt,
+                    system=self._get_cached_system_prompt(),
                     messages=self.conversation_history,
                     tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                     max_tokens=4096
@@ -866,7 +904,7 @@ class MicroscopyCopilot:
 
             with self.claude.messages.stream(
                 model=self.model,
-                system=self.system_prompt,
+                system=self._get_cached_system_prompt(),
                 messages=self.conversation_history,
                 tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
                 max_tokens=4096
