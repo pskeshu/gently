@@ -2077,8 +2077,7 @@ class RichCopilotCLI:
                         # result is None means not recognized, fall through to copilot
 
                     # Check if thinking mode will be triggered
-                    import re
-                    if re.search(r'\bthink(ing)?\b', user_input, re.IGNORECASE):
+                    if self.copilot._should_use_thinking(user_input):
                         self.console.print(f"[{theme.info}]💭 Extended thinking enabled[/]")
 
                     # Stream copilot response

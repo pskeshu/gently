@@ -700,6 +700,48 @@ class MicroscopyCopilot:
         # No quick response available
         return None
 
+    def _should_use_thinking(self, message: str) -> bool:
+        """
+        Determine if extended thinking should be enabled for this message.
+
+        Auto-triggers for:
+        - Explicit "think/thinking" in message
+        - Calibration operations
+        - Plan generation / timelapse setup
+        - Image/volume analysis
+        - Complex multi-step queries
+        """
+        import re
+        msg_lower = message.lower()
+
+        # Explicit thinking request
+        if re.search(r'\bthink(ing)?\b', message, re.IGNORECASE):
+            return True
+
+        # Calibration operations
+        if re.search(r'\bcalibrat', msg_lower):
+            return True
+
+        # Plan generation and timelapse
+        if re.search(r'\b(plan|timelapse|time-lapse|acquisition)\b', msg_lower):
+            return True
+
+        # Image/volume analysis
+        if re.search(r'\b(analy[sz]e|look at|check|inspect|review).*(image|volume|embryo)', msg_lower):
+            return True
+
+        # Complex queries - multiple embryos or steps
+        if re.search(r'\b(all|every|each)\s+(embryo|sample)', msg_lower):
+            return True
+        if re.search(r'\b(first|then|after|next|finally)\b.*\b(first|then|after|next|finally)\b', msg_lower):
+            return True
+
+        # Troubleshooting / problem solving
+        if re.search(r'\b(why|problem|issue|error|wrong|fail|debug|troubleshoot)', msg_lower):
+            return True
+
+        return False
+
     async def _call_claude(self, user_message: str) -> str:
         """
         Call Claude API with full context and tool access
@@ -718,9 +760,8 @@ class MicroscopyCopilot:
         import re
         start_time = time.time()
 
-        # Enable extended thinking when 'think' or 'thinking' appears in message
-        # This allows natural prompts like "what do you think about..."
-        use_thinking = bool(re.search(r'\bthink(ing)?\b', user_message, re.IGNORECASE))
+        # Auto-enable extended thinking for complex operations
+        use_thinking = self._should_use_thinking(user_message)
 
         # Start interaction logging
         interaction = None
