@@ -27,7 +27,6 @@ from rich.syntax import Syntax
 from rich import box
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory
-from prompt_toolkit.auto_suggest import AutoSuggestFromHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.application import Application
 from prompt_toolkit.layout import Layout
@@ -35,7 +34,7 @@ from prompt_toolkit.layout.containers import Window, HSplit
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.formatted_text import HTML
 
-from .autocomplete import create_completer
+from .autocomplete import create_completer, create_auto_suggest
 from .theme import get_theme, set_theme, list_themes, Theme
 from .timeline import TimelineManager, TimelineEvent, parse_time_delta
 
@@ -129,11 +128,12 @@ class RichCopilotCLI:
         if history_file is None:
             history_file = Path.home() / '.copilot_history'
         self.history_file = history_file
+        self._history = FileHistory(str(self.history_file))
 
-        # Prompt session with autocomplete
+        # Prompt session with autocomplete and command-aware auto-suggest
         self.session = PromptSession(
-            history=FileHistory(str(self.history_file)),
-            auto_suggest=AutoSuggestFromHistory(),
+            history=self._history,
+            auto_suggest=create_auto_suggest(copilot, history=self._history),
             completer=create_completer(copilot),
             complete_while_typing=True,
             mouse_support=False,  # Disable mouse support to allow terminal scrolling
@@ -147,17 +147,38 @@ class RichCopilotCLI:
         self._last_status_update = None
 
     def print_welcome(self):
-        """Print welcome banner"""
+        """Print welcome banner with categorized commands"""
+        from .command_registry import get_command_registry, CommandCategory
+
         theme = get_theme()
+        registry = get_command_registry()
+
+        # Build categorized command list
+        category_labels = {
+            CommandCategory.NAVIGATION: "Navigate",
+            CommandCategory.INSPECTION: "Inspect",
+            CommandCategory.SESSION: "Session",
+            CommandCategory.APPEARANCE: "Style",
+        }
+
+        cmd_lines = []
+        for category in CommandCategory:
+            cmds = registry.get_by_category(category)
+            if cmds:
+                label = category_labels.get(category, category.name)
+                cmd_names = ", ".join(f"[{theme.tool}]{c.name}[/]" for c in cmds)
+                cmd_lines.append(f"  [{theme.muted}]{label:8}[/] {cmd_names}")
+
+        cmd_section = "\n".join(cmd_lines)
+
         welcome = Panel(
             Text.from_markup(
                 f"[bold {theme.primary}]Microscopy Copilot v2.0[/]\n"
                 f"[{theme.muted}]AI-powered adaptive microscopy control[/]\n\n"
                 f"[{theme.secondary}]Commands:[/]\n"
-                f"  {theme.icon_info} Type naturally to interact with copilot\n"
-                f"  {theme.icon_info} Use [{theme.tool}]/detectors[/], [{theme.tool}]/status[/], [{theme.tool}]/embryos[/], [{theme.tool}]/theme[/]\n"
-                f"  {theme.icon_info} Press [{theme.tool}]Tab[/] for autocomplete\n"
-                f"  {theme.icon_info} Press [{theme.tool}]Ctrl+C[/] to exit\n"
+                f"{cmd_section}\n\n"
+                f"  {theme.icon_info} Type naturally or use commands above\n"
+                f"  {theme.icon_info} [{theme.tool}]Tab[/] autocomplete, [{theme.tool}]Right Arrow[/] accept suggestion\n"
             ),
             title=f"[bold {theme.primary}]Welcome[/]",
             border_style=theme.primary,
@@ -1442,7 +1463,17 @@ class RichCopilotCLI:
         -------
         True if should quit, False if handled (continue loop), None if not a slash command
         """
+        from .command_registry import get_command_registry
+
         cmd = command.strip().lower()
+
+        # Extract command name (first word) for registry validation
+        cmd_name = cmd.split()[0] if cmd.split() else cmd
+        registry = get_command_registry()
+
+        # Validate command exists in registry (prevents ghost commands)
+        if not registry.get(cmd_name):
+            return None  # Not a registered command, send to copilot
 
         if cmd in ['/quit', '/exit', '/q']:
             return True  # Signal to quit
@@ -1452,8 +1483,11 @@ class RichCopilotCLI:
             self.print_welcome()
             return False  # Handled, continue loop
 
-        elif cmd == '/help':
-            self.print_help()
+        elif cmd == '/help' or cmd.startswith('/help '):
+            # Support /help and /help <command>
+            parts = command.strip().split(maxsplit=1)
+            help_cmd = parts[1] if len(parts) > 1 else None
+            self.print_help(help_cmd)
             return False  # Handled, continue loop
 
         elif cmd == '/status':
@@ -1583,9 +1617,25 @@ class RichCopilotCLI:
             theme = get_theme()
             parts = cmd.split(maxsplit=1)
 
-            # If session ID provided directly
+            # If session ID or 'last' provided
             if len(parts) > 1:
-                session_id = parts[1].strip()
+                arg = parts[1].strip().lower()
+
+                # Handle 'last' shortcut - import from most recent session with embryos
+                if arg == 'last':
+                    sessions = self.copilot.list_sessions()
+                    sessions_with_embryos = [s for s in sessions if s.get('embryo_count', 0) > 0]
+                    if not sessions_with_embryos:
+                        self.console.print(f"[{theme.muted}]No sessions with embryos found.[/]")
+                        return False
+                    # Most recent is first (sessions are sorted by last_active desc)
+                    session_id = sessions_with_embryos[0].get('session_id', '')
+                    if not session_id:
+                        self.console.print(f"[{theme.error}]✗ Could not find last session[/]")
+                        return False
+                else:
+                    session_id = parts[1].strip()  # Use original case for session ID
+
                 result = self.copilot.import_embryos_from_session(session_id)
                 if result.get('success'):
                     imported = result.get('imported', [])
@@ -1902,51 +1952,31 @@ class RichCopilotCLI:
 
         self.console.print()
 
-    def print_help(self):
-        """Print help message"""
-        help_text = """
-# Copilot Commands
+    def print_help(self, command: Optional[str] = None):
+        """Print help message (auto-generated from command registry)
 
-## Natural Language
-Just type what you want! Examples:
-- "What detectors do we have?"
-- "Add a detector for comma stage"
-- "Test hatching detector on embryo 1"
-- "Show me the status"
-- "Start imaging all embryos"
-
-## Slash Commands
-- `/detectors` - List all detectors
-- `/embryos` - List all embryos
-- `/status` - Show experiment status
-- `/timelapse` - Show timelapse status (add `watch` for live countdown)
-- `/timeline` - Show event timeline (current session only)
-  - `--letters` - Lettered markers with legend (default)
-  - `--log` - Git-log style vertical timeline
-  - `--table` - Compact table view
-  - `--axis` - Simple horizontal axis with T/D markers
-  - `--filter timelapse|detection` - Filter by event type
-  - `--embryo <id>` - Filter by embryo
-  - `--since 1h|30m|2d` - Show events from time period
-  - `--all` - Show events from all sessions
-  - `clear` - Clear timeline history
-- `/history` - Show recent conversation
-- `/sessions` - Browse and select saved sessions (interactive)
-- `/resume [id]` - Resume a session (interactive picker if no ID given)
-- `/save` - Save current session
-- `/tokens` - Show API token usage and estimated cost
-- `/theme [name]` - Switch theme (vibrant, scientific, claude, monochrome)
-- `/help` - Show this help
-- `/clear` - Clear screen
-- `/quit` - Exit
-
-## Keyboard Shortcuts
-- `Tab` - Autocomplete commands/IDs
-- `Ctrl+C` - Exit
-- `Ctrl+L` - Clear screen
-- `Ctrl+R` - Reverse search history
+        Parameters
+        ----------
+        command : str, optional
+            Specific command to show detailed help for (e.g., "timeline")
         """
-        self.console.print(Markdown(help_text))
+        from .command_registry import get_command_registry
+        registry = get_command_registry()
+
+        if command:
+            # Show detailed help for specific command
+            cmd_name = command if command.startswith('/') else f'/{command}'
+            help_text = registry.generate_command_help(cmd_name)
+            if help_text:
+                self.console.print(Markdown(help_text))
+            else:
+                theme = get_theme()
+                self.console.print(f"[{theme.error}]Unknown command: {command}[/]")
+                self.console.print(f"[{theme.muted}]Use /help to see all commands[/]")
+        else:
+            # Show full help
+            help_text = registry.generate_help_markdown()
+            self.console.print(Markdown(help_text))
 
     async def run(self):
         """Run interactive CLI loop"""
