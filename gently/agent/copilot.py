@@ -193,12 +193,15 @@ class MicroscopyCopilot:
         Returns the system prompt as a list with cache_control to enable
         prompt caching, which dramatically reduces token costs for the
         ~4K token system prompt on subsequent API calls.
+
+        Uses 1-hour TTL since microscopy sessions have gaps during
+        timelapse acquisition (5-min default would expire too quickly).
         """
         return [
             {
                 "type": "text",
                 "text": self.system_prompt,
-                "cache_control": {"type": "ephemeral"}
+                "cache_control": {"type": "ephemeral", "ttl": "1h"}
             }
         ]
 
@@ -224,10 +227,10 @@ class MicroscopyCopilot:
         total_input = self.total_input_tokens + cache_read + cache_created
         total = total_input + self.total_output_tokens
 
-        # Cost estimate (Claude Sonnet pricing)
+        # Cost estimate (Claude Sonnet pricing with 1-hour cache)
         input_cost = self.total_input_tokens * 0.003 / 1000  # $3/M input
         cache_read_cost = cache_read * 0.0003 / 1000  # $0.30/M cached (90% off)
-        cache_write_cost = cache_created * 0.00375 / 1000  # $3.75/M cache write (25% more)
+        cache_write_cost = cache_created * 0.006 / 1000  # $6/M cache write (2x for 1h TTL)
         output_cost = self.total_output_tokens * 0.015 / 1000  # $15/M output
         total_cost = input_cost + cache_read_cost + cache_write_cost + output_cost
 

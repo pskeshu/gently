@@ -164,10 +164,10 @@ class RichCopilotCLI:
         total_tokens = input_tokens + cache_read + cache_created + output_tokens
 
         if total_tokens > 0:
-            # Sonnet pricing: input $3/M, output $15/M, cache_read $0.30/M, cache_write $3.75/M
+            # Sonnet pricing: input $3/M, output $15/M, cache_read $0.30/M, cache_write $6/M (1h TTL)
             input_cost = input_tokens * 0.003 / 1000
             cache_read_cost = cache_read * 0.0003 / 1000  # 90% cheaper
-            cache_write_cost = cache_created * 0.00375 / 1000  # 25% more
+            cache_write_cost = cache_created * 0.006 / 1000  # 2x for 1-hour TTL
             output_cost = output_tokens * 0.015 / 1000
             cost = input_cost + cache_read_cost + cache_write_cost + output_cost
 
