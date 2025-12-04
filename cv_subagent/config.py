@@ -90,6 +90,10 @@ class CVSubagentConfig:
     vision_model: str = "claude-sonnet-4-20250514"
     vision_max_tokens: int = 4096
 
+    # Extended thinking settings (for multi-step reasoning between tool calls)
+    enable_interleaved_thinking: bool = True
+    thinking_budget_tokens: int = 10000  # Budget for thinking across all steps
+
     @classmethod
     def from_env(cls) -> "CVSubagentConfig":
         """Create config from environment variables"""

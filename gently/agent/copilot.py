@@ -71,8 +71,11 @@ class MicroscopyCopilot:
         session_id : str, optional
             Session ID to resume. If None, creates new session.
         """
-        # API client
-        self.claude = anthropic.Anthropic(api_key=api_key or os.getenv("ANTHROPIC_API_KEY"))
+        # API client with interleaved thinking support
+        self.claude = anthropic.Anthropic(
+            api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+            default_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"}
+        )
         self.model = model
 
         # Conversation state

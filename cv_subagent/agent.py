@@ -230,11 +230,21 @@ By nuclei count:
 
     @property
     def client(self):
-        """Get or create Anthropic client"""
+        """Get or create Anthropic client with interleaved thinking support"""
         if self._client is None:
             try:
                 import anthropic
-                self._client = anthropic.Anthropic(api_key=self.api_key)
+
+                # Enable interleaved thinking beta for multi-step reasoning
+                if self.config.enable_interleaved_thinking:
+                    self._client = anthropic.Anthropic(
+                        api_key=self.api_key,
+                        default_headers={
+                            "anthropic-beta": "interleaved-thinking-2025-05-14"
+                        }
+                    )
+                else:
+                    self._client = anthropic.Anthropic(api_key=self.api_key)
             except ImportError:
                 raise RuntimeError("anthropic package not installed")
         return self._client
@@ -492,6 +502,7 @@ By nuclei count:
         context = context or {}
         start_time = datetime.now()
         tools_used = []
+        thinking_steps = []  # Collect thinking blocks to show user
 
         # Build initial user message
         user_message = f"""Analyze the following request for C. elegans embryo analysis:
@@ -530,14 +541,24 @@ When you have gathered enough information, provide a final summary.
                 )
 
             try:
+                # Build API call parameters
+                api_params = {
+                    "model": self.config.vision_model,
+                    "max_tokens": self.config.vision_max_tokens,
+                    "system": self._get_cached_system_prompt(),
+                    "tools": claude_tools,
+                    "messages": messages,
+                }
+
+                # Add interleaved thinking for multi-step reasoning between tool calls
+                if self.config.enable_interleaved_thinking:
+                    api_params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": self.config.thinking_budget_tokens,
+                    }
+
                 # Call Claude with prompt caching for system prompt
-                response = self.client.messages.create(
-                    model=self.config.vision_model,
-                    max_tokens=self.config.vision_max_tokens,
-                    system=self._get_cached_system_prompt(),
-                    tools=claude_tools,
-                    messages=messages,
-                )
+                response = self.client.messages.create(**api_params)
 
                 # Track token usage including cache metrics
                 self._track_token_usage(response)
@@ -545,6 +566,17 @@ When you have gathered enough information, provide a final summary.
                 # Process response
                 assistant_content = response.content
                 stop_reason = response.stop_reason
+
+                # Collect thinking blocks for user visibility (interleaved thinking)
+                for block in assistant_content:
+                    if hasattr(block, 'type') and block.type == "thinking":
+                        thinking_text = getattr(block, 'thinking', '')
+                        if thinking_text:
+                            thinking_steps.append({
+                                "iteration": iteration,
+                                "thinking": thinking_text,
+                            })
+                            logger.debug(f"Agent thinking (iter {iteration}): {thinking_text[:200]}...")
 
                 # Add assistant message to conversation
                 messages.append({"role": "assistant", "content": assistant_content})
