@@ -22,8 +22,8 @@ import sys
 # Add package to path if running directly
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from cv_subagent import CVSubagentService
-from cv_subagent.config import CVSubagentConfig
+from gently.cv_subagent import CVSubagentService
+from gently.cv_subagent.config import CVSubagentConfig
 
 
 def setup_logging(debug: bool = False):
