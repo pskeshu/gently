@@ -873,6 +873,77 @@ class MicroscopyCopilot:
 
         return assistant_message
 
+    async def get_tool_call(self, user_message: str) -> Optional[Dict]:
+        """
+        Get what tool Claude would call without executing it (dry-run mode).
+
+        Used for benchmarking tool selection accuracy. Makes a real API call
+        but doesn't execute the selected tool.
+
+        Parameters
+        ----------
+        user_message : str
+            User query to analyze
+
+        Returns
+        -------
+        dict or None
+            Tool call info: {name, input, input_tokens, output_tokens, latency_ms}
+            None if Claude doesn't call a tool
+        """
+        import time
+        start_time = time.time()
+
+        # Update system prompt with current state
+        self._update_system_prompt()
+
+        # Build messages (don't modify conversation history)
+        messages = self.conversation_history.copy()
+        messages.append({
+            "role": "user",
+            "content": user_message
+        })
+
+        try:
+            # Build API call kwargs
+            api_kwargs = {
+                "model": self.model,
+                "system": self._get_cached_system_prompt(),
+                "messages": messages,
+                "tools": get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                "max_tokens": 4096,
+            }
+
+            # Call Claude
+            response = await self._call_api_with_retry(
+                self.claude.messages.create,
+                **api_kwargs
+            )
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            # Extract token usage
+            input_tokens = getattr(response.usage, 'input_tokens', 0)
+            output_tokens = getattr(response.usage, 'output_tokens', 0)
+
+            # Find tool use block
+            for block in response.content:
+                if block.type == "tool_use":
+                    return {
+                        "name": block.name,
+                        "input": block.input,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "latency_ms": latency_ms,
+                    }
+
+            # No tool called
+            return None
+
+        except Exception as e:
+            logger.error(f"Error in get_tool_call: {e}")
+            raise
+
     async def _execute_tools_with_logging(self, content_blocks, interaction) -> List[Dict]:
         """
         Execute Claude's tool calls with interaction logging
