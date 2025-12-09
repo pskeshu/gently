@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gently - Microscopy Visualization</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <h1>Gently Microscopy</h1>
+        <div class="status-bar">
+            <div class="status-item">
+                <span id="current-embryo" style="color: var(--accent-green); font-weight: 500;"></span>
+            </div>
+            <select class="embryo-filter" id="embryo-filter">
+                <option value="">All Embryos</option>
+            </select>
+            <div class="status-item">
+                <span id="status-text">Connecting...</span>
+                <div class="status-dot" id="status-dot"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="main">
+            Main
+            <span class="tab-badge" id="main-count">0</span>
+        </div>
+        <div class="tab" data-tab="volumes">
+            Volumes
+            <span class="tab-badge" id="volumes-count">0</span>
+        </div>
+        <div class="tab" data-tab="calibration">
+            Calibration
+            <span class="tab-badge" id="calibration-count">0</span>
+        </div>
+        <div class="tab" data-tab="events">
+            Events
+            <span class="tab-badge" id="events-count">0</span>
+        </div>
+    </div>
+
+    <!-- Main Tab -->
+    <div id="main-content" class="tab-content active">
+        <div class="main">
+            <div class="viewer">
+                <div class="viewer-header">
+                    <span class="image-title" id="image-info">No image selected</span>
+                    <span class="image-title" id="image-time"></span>
+                </div>
+                <div class="viewer-with-slider">
+                    <div class="image-container">
+                        <img id="main-image" style="display: none;">
+                        <div class="placeholder" id="placeholder">Waiting for images...</div>
+                    </div>
+                    <div class="z-slider-container" id="z-slider-container">
+                        <div class="z-slider-label">Z</div>
+                        <div class="z-slider-value" id="z-slider-value">0</div>
+                        <input type="range" class="z-slider" id="z-slider" min="0" max="0" value="0" orient="vertical">
+                        <div class="z-slider-info" id="z-slider-info">0 / 0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="sidebar">
+                <div class="panel">
+                    <div class="panel-title">Image Info</div>
+                    <div class="info-grid">
+                        <span class="info-label">Embryo</span>
+                        <span class="info-value accent" id="info-embryo">-</span>
+                        <span class="info-label">Type</span>
+                        <span class="info-value" id="info-type">-</span>
+                        <span class="info-label">Shape</span>
+                        <span class="info-value" id="info-shape">-</span>
+                        <span class="info-label">UID</span>
+                        <span class="info-value" id="info-uid">-</span>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">Recent Images</div>
+                    <div id="recent-list" style="max-height: 200px; overflow-y: auto;"></div>
+                </div>
+
+                <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
+                    <div class="panel-title">Event Log</div>
+                    <div class="event-log" id="event-log"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Volumes Tab -->
+    <div id="volumes-content" class="tab-content">
+        <div class="gallery" id="volumes-gallery">
+            <div class="empty-state">No volume images yet</div>
+        </div>
+    </div>
+
+    <!-- Calibration Tab -->
+    <div id="calibration-content" class="tab-content">
+        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; flex-shrink: 0;">3D Segmentations</div>
+        <div class="gallery" id="volumes3d-gallery" style="max-height: 200px; min-height: 80px; flex-shrink: 0;">
+            <div class="empty-state">No 3D segmentations yet</div>
+        </div>
+        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; border-top: 1px solid var(--border); flex-shrink: 0;">Calibration Images</div>
+        <div class="gallery" id="calibration-gallery">
+            <div class="empty-state">No calibration images yet</div>
+        </div>
+    </div>
+
+    <!-- Events Tab -->
+    <div id="events-content" class="tab-content">
+        <div class="events-container">
+            <div class="events-toolbar">
+                <select class="event-filter" id="event-type-filter">
+                    <option value="">All Events</option>
+                    <optgroup label="CV Agent">
+                        <option value="CV_TASK_QUEUED">CV_TASK_QUEUED</option>
+                        <option value="CV_TASK_COMPLETED">CV_TASK_COMPLETED</option>
+                        <option value="CV_TASK_FAILED">CV_TASK_FAILED</option>
+                        <option value="CV_AGENT_THINKING">CV_AGENT_THINKING</option>
+                        <option value="CV_RESULT_READY">CV_RESULT_READY</option>
+                    </optgroup>
+                    <optgroup label="Analysis">
+                        <option value="SEGMENTATION_COMPLETED">SEGMENTATION_COMPLETED</option>
+                        <option value="STAGE_DETECTED">STAGE_DETECTED</option>
+                        <option value="CELL_DIVISION_DETECTED">CELL_DIVISION_DETECTED</option>
+                        <option value="ANOMALY_DETECTED">ANOMALY_DETECTED</option>
+                    </optgroup>
+                    <optgroup label="Acquisition">
+                        <option value="VOLUME_ACQUIRED">VOLUME_ACQUIRED</option>
+                        <option value="IMAGE_ACQUIRED">IMAGE_ACQUIRED</option>
+                    </optgroup>
+                    <optgroup label="Session">
+                        <option value="SESSION_STARTED">SESSION_STARTED</option>
+                        <option value="SESSION_RESTORED">SESSION_RESTORED</option>
+                    </optgroup>
+                </select>
+                <select class="event-filter" id="event-source-filter">
+                    <option value="">All Sources</option>
+                </select>
+                <button class="event-btn" id="clear-events-btn">Clear</button>
+                <span class="events-stats" id="events-stats">0 events</span>
+            </div>
+            <div class="events-table-container">
+                <table class="events-table">
+                    <thead>
+                        <tr>
+                            <th class="col-time">Time</th>
+                            <th class="col-type">Event Type</th>
+                            <th class="col-source">Source</th>
+                            <th class="col-data">Data</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/viewer.js"></script>
+    <script src="/static/js/gallery.js"></script>
+    <script src="/static/js/events.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

@@ -36,12 +36,16 @@ try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
     from fastapi.responses import HTMLResponse, JSONResponse, Response
     from fastapi.staticfiles import StaticFiles
+    from fastapi.templating import Jinja2Templates
     from fastapi.middleware.cors import CORSMiddleware
     import uvicorn
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
     logger.warning("FastAPI not available. Install with: pip install fastapi uvicorn")
+
+# Import web asset paths
+from .web import TEMPLATES_DIR, STATIC_DIR
 
 try:
     from PIL import Image
@@ -340,12 +344,14 @@ class ConnectionManager:
             'data': image_data.to_dict()
         })
 
-    async def send_event(self, event_type: str, data: Dict):
+    async def send_event(self, event_type: str, data: Dict, source: str = None, event_id: str = None):
         """Send event notification to all clients"""
         await self.broadcast({
             'type': 'event',
             'event_type': event_type,
             'data': data,
+            'source': source or 'unknown',
+            'event_id': event_id or '',
             'timestamp': datetime.now().isoformat()
         })
 
@@ -405,6 +411,10 @@ class VisualizationServer:
             version="2.0.0"
         )
 
+        # Setup templates and static files
+        self.templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+        self.app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
         # Add CORS middleware
         self.app.add_middleware(
             CORSMiddleware,
@@ -429,9 +439,12 @@ class VisualizationServer:
         """Setup FastAPI routes"""
 
         @self.app.get("/", response_class=HTMLResponse)
-        async def index():
+        async def index(request: Request):
             """Serve the main visualization page"""
-            return self._get_html_page()
+            return self.templates.TemplateResponse(
+                "index.html",
+                {"request": request}
+            )
 
         @self.app.get("/api/status")
         async def get_status():
@@ -476,6 +489,45 @@ class VisualizationServer:
             """Get list of embryos with images"""
             return {
                 "embryos": self.store.get_embryo_ids()
+            }
+
+        @self.app.get("/api/events")
+        async def list_events(
+            event_type: Optional[str] = None,
+            source: Optional[str] = None,
+            limit: int = 100
+        ):
+            """Get event history from EventBus"""
+            if not self.event_bus:
+                return {"events": [], "total": 0}
+
+            # Get history from event bus
+            from ..core import EventType
+            et = None
+            if event_type:
+                try:
+                    et = EventType[event_type]
+                except KeyError:
+                    pass
+
+            events = self.event_bus.get_history(
+                event_type=et,
+                source=source,
+                limit=limit
+            )
+
+            return {
+                "events": [
+                    {
+                        "event_type": e.event_type.name if hasattr(e.event_type, 'name') else str(e.event_type),
+                        "data": e.data,
+                        "source": e.source,
+                        "timestamp": e.timestamp.isoformat(),
+                        "event_id": e.event_id
+                    }
+                    for e in events
+                ],
+                "total": len(events)
             }
 
         @self.app.get("/api/images/{uid}")
@@ -691,35 +743,21 @@ class VisualizationServer:
             logger.warning(f"Invalid JSON received: {message[:100]}")
 
     def _subscribe_to_events(self):
-        """Subscribe to EventBus for automatic updates"""
-        from ..core import EventType
+        """Subscribe to EventBus for automatic updates - broadcasts ALL events"""
 
-        events_to_broadcast = [
-            EventType.VOLUME_ACQUIRED,
-            EventType.DETECTION_TRIGGERED,
-            EventType.HATCHING_DETECTED,
-            EventType.EMBRYO_CENTERED,
-            EventType.ANALYSIS_COMPLETED,
-            EventType.SESSION_STARTED,
-            EventType.SESSION_RESTORED,
-            # CV Agent events
-            EventType.CV_TASK_QUEUED,
-            EventType.CV_TASK_COMPLETED,
-            EventType.CV_TASK_FAILED,
-            EventType.CV_AGENT_THINKING,
-            EventType.SEGMENTATION_COMPLETED,
-            EventType.STAGE_DETECTED,
-        ]
-
-        for event_type in events_to_broadcast:
-            self.event_bus.subscribe(
-                event_type,
-                lambda e, et=event_type: asyncio.create_task(
-                    self.manager.send_event(et.name, e.data)
-                )
+        async def on_event_async(event):
+            """Async handler for all events - broadcasts to WebSocket clients"""
+            await self.manager.send_event(
+                event_type=event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type),
+                data=event.data,
+                source=event.source,
+                event_id=event.event_id
             )
 
-        logger.info(f"Subscribed to {len(events_to_broadcast)} event types")
+        # Subscribe to ALL events using wildcard with async handler
+        self.event_bus.subscribe_async("*", on_event_async)
+
+        logger.info("Subscribed to ALL event types via wildcard")
 
     def _array_to_image_data(
         self,
@@ -845,6 +883,11 @@ class VisualizationServer:
 
     async def start(self):
         """Start the visualization server"""
+        # Set the event loop on the event bus so async handlers work
+        # even when events are published from sync code
+        if self.event_bus:
+            self.event_bus.set_event_loop(asyncio.get_running_loop())
+
         config = uvicorn.Config(
             self.app,
             host=self.host,
@@ -945,882 +988,11 @@ class VisualizationServer:
         finally:
             await self.stop()
 
-    def _get_html_page(self) -> str:
-        """Generate the main HTML page with tabs"""
-        return '''<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gently - Microscopy Visualization</title>
-    <style>
-        :root {
-            --bg-dark: #0d1117;
-            --bg-card: #161b22;
-            --bg-hover: #21262d;
-            --border: #30363d;
-            --text: #c9d1d9;
-            --text-muted: #8b949e;
-            --accent: #58a6ff;
-            --accent-green: #3fb950;
-            --accent-purple: #a371f7;
-            --accent-orange: #d29922;
-        }
 
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: var(--bg-dark);
-            color: var(--text);
-            min-height: 100vh;
-        }
-
-        /* Header */
-        .header {
-            background: var(--bg-card);
-            padding: 0.75rem 1.5rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid var(--border);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .header h1 {
-            color: var(--accent);
-            font-size: 1.25rem;
-            font-weight: 600;
-        }
-
-        .status-bar {
-            display: flex;
-            gap: 1.5rem;
-            align-items: center;
-            font-size: 0.85rem;
-        }
-
-        .status-item {
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #f85149;
-        }
-
-        .status-dot.connected { background: var(--accent-green); }
-
-        .embryo-filter {
-            background: var(--bg-hover);
-            border: 1px solid var(--border);
-            border-radius: 6px;
-            padding: 0.35rem 0.75rem;
-            color: var(--text);
-            font-size: 0.85rem;
-            cursor: pointer;
-        }
-
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 0;
-            background: var(--bg-card);
-            border-bottom: 1px solid var(--border);
-            padding: 0 1.5rem;
-        }
-
-        .tab {
-            padding: 0.75rem 1.25rem;
-            cursor: pointer;
-            color: var(--text-muted);
-            border-bottom: 2px solid transparent;
-            transition: all 0.2s;
-            font-size: 0.9rem;
-        }
-
-        .tab:hover {
-            color: var(--text);
-            background: var(--bg-hover);
-        }
-
-        .tab.active {
-            color: var(--accent);
-            border-bottom-color: var(--accent);
-        }
-
-        .tab-badge {
-            background: var(--bg-hover);
-            padding: 0.1rem 0.5rem;
-            border-radius: 10px;
-            font-size: 0.75rem;
-            margin-left: 0.5rem;
-        }
-
-        /* Main Layout */
-        .main {
-            display: grid;
-            grid-template-columns: 1fr 280px;
-            height: calc(100vh - 100px);
-        }
-
-        /* Viewer */
-        .viewer {
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 1rem;
-        }
-
-        .viewer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .image-title {
-            font-size: 0.9rem;
-            color: var(--text-muted);
-        }
-
-        .image-container {
-            flex: 1;
-            background: #000;
-            border-radius: 8px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            overflow: hidden;
-            min-height: 500px;
-        }
-
-        .image-container img {
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-        }
-
-        .placeholder {
-            color: var(--text-muted);
-            font-size: 1rem;
-        }
-
-        /* Sidebar */
-        .sidebar {
-            background: var(--bg-card);
-            border-left: 1px solid var(--border);
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .panel {
-            padding: 1rem;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .panel-title {
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            margin-bottom: 0.75rem;
-        }
-
-        .info-grid {
-            display: grid;
-            grid-template-columns: auto 1fr;
-            gap: 0.5rem 1rem;
-            font-size: 0.85rem;
-        }
-
-        .info-label { color: var(--text-muted); }
-        .info-value { color: var(--text); }
-        .info-value.accent { color: var(--accent-green); font-weight: 500; }
-
-        /* Event Log */
-        .event-log {
-            flex: 1;
-            overflow-y: auto;
-            padding: 0.5rem 1rem;
-        }
-
-        .event-item {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid var(--border);
-            font-size: 0.8rem;
-        }
-
-        .event-time { color: var(--text-muted); margin-right: 0.5rem; }
-        .event-type { color: var(--accent); }
-        .event-type.cv-event { color: #7C3AED; font-weight: 500; }  /* Purple for CV/AI events */
-
-        /* Gallery Grid */
-        .gallery {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 0.75rem;
-            padding: 1rem;
-            overflow-y: auto;
-        }
-
-        .gallery-item {
-            background: var(--bg-card);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .gallery-item:hover {
-            border-color: var(--accent);
-            transform: translateY(-2px);
-        }
-
-        .gallery-item.selected {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 1px var(--accent);
-        }
-
-        .gallery-img {
-            width: 100%;
-            aspect-ratio: 1;
-            object-fit: cover;
-            background: #000;
-        }
-
-        .gallery-info {
-            padding: 0.5rem;
-            font-size: 0.75rem;
-        }
-
-        .gallery-type {
-            color: var(--accent);
-            font-weight: 500;
-        }
-
-        .gallery-meta {
-            color: var(--text-muted);
-            margin-top: 0.25rem;
-        }
-
-        /* Tab Content */
-        .tab-content {
-            display: none;
-            height: 100%;
-        }
-
-        .tab-content.active {
-            display: flex;
-        }
-
-        /* Volumes/Calibration full gallery */
-        #volumes-content, #calibration-content {
-            flex-direction: column;
-        }
-
-        .empty-state {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            height: 200px;
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
-
-        /* Scrollbar */
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-dark); }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-        /* Z-Slider for 3D volumes */
-        .z-slider-container {
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            padding: 0.5rem;
-            background: var(--bg-card);
-            border-left: 1px solid var(--border);
-            min-width: 50px;
-        }
-
-        .z-slider-container.active {
-            display: flex;
-        }
-
-        .z-slider-label {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            margin-bottom: 0.5rem;
-            text-transform: uppercase;
-        }
-
-        .z-slider-value {
-            font-size: 0.85rem;
-            color: var(--accent);
-            font-weight: 600;
-            margin-bottom: 0.5rem;
-        }
-
-        .z-slider {
-            -webkit-appearance: slider-vertical;
-            writing-mode: bt-lr;
-            width: 20px;
-            flex: 1;
-            min-height: 200px;
-            cursor: pointer;
-        }
-
-        /* Firefox vertical slider */
-        @-moz-document url-prefix() {
-            .z-slider {
-                width: 20px;
-            }
-        }
-
-        .z-slider-info {
-            font-size: 0.7rem;
-            color: var(--text-muted);
-            margin-top: 0.5rem;
-            text-align: center;
-        }
-
-        /* Image container needs to accommodate slider */
-        .viewer-with-slider {
-            display: flex;
-            flex: 1;
-            overflow: hidden;
-        }
-
-        .viewer-with-slider .image-container {
-            flex: 1;
-        }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>Gently Microscopy</h1>
-        <div class="status-bar">
-            <div class="status-item">
-                <span id="current-embryo" style="color: var(--accent-green); font-weight: 500;"></span>
-            </div>
-            <select class="embryo-filter" id="embryo-filter">
-                <option value="">All Embryos</option>
-            </select>
-            <div class="status-item">
-                <span id="status-text">Connecting...</span>
-                <div class="status-dot" id="status-dot"></div>
-            </div>
-        </div>
-    </div>
-
-    <div class="tabs">
-        <div class="tab active" data-tab="main">
-            Main
-            <span class="tab-badge" id="main-count">0</span>
-        </div>
-        <div class="tab" data-tab="volumes">
-            Volumes
-            <span class="tab-badge" id="volumes-count">0</span>
-        </div>
-        <div class="tab" data-tab="calibration">
-            Calibration
-            <span class="tab-badge" id="calibration-count">0</span>
-        </div>
-    </div>
-
-    <!-- Main Tab -->
-    <div id="main-content" class="tab-content active">
-        <div class="main">
-            <div class="viewer">
-                <div class="viewer-header">
-                    <span class="image-title" id="image-info">No image selected</span>
-                    <span class="image-title" id="image-time"></span>
-                </div>
-                <div class="viewer-with-slider">
-                    <div class="image-container">
-                        <img id="main-image" style="display: none;">
-                        <div class="placeholder" id="placeholder">Waiting for images...</div>
-                    </div>
-                    <div class="z-slider-container" id="z-slider-container">
-                        <div class="z-slider-label">Z</div>
-                        <div class="z-slider-value" id="z-slider-value">0</div>
-                        <input type="range" class="z-slider" id="z-slider" min="0" max="0" value="0" orient="vertical">
-                        <div class="z-slider-info" id="z-slider-info">0 / 0</div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="sidebar">
-                <div class="panel">
-                    <div class="panel-title">Image Info</div>
-                    <div class="info-grid">
-                        <span class="info-label">Embryo</span>
-                        <span class="info-value accent" id="info-embryo">-</span>
-                        <span class="info-label">Type</span>
-                        <span class="info-value" id="info-type">-</span>
-                        <span class="info-label">Shape</span>
-                        <span class="info-value" id="info-shape">-</span>
-                        <span class="info-label">UID</span>
-                        <span class="info-value" id="info-uid">-</span>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">Recent Images</div>
-                    <div id="recent-list" style="max-height: 200px; overflow-y: auto;"></div>
-                </div>
-
-                <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                    <div class="panel-title">Event Log</div>
-                    <div class="event-log" id="event-log"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Volumes Tab -->
-    <div id="volumes-content" class="tab-content">
-        <div class="gallery" id="volumes-gallery">
-            <div class="empty-state">No volume images yet</div>
-        </div>
-    </div>
-
-    <!-- Calibration Tab -->
-    <div id="calibration-content" class="tab-content">
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500;">3D Segmentations</div>
-        <div class="gallery" id="volumes3d-gallery" style="max-height: 200px; min-height: 80px;">
-            <div class="empty-state">No 3D segmentations yet</div>
-        </div>
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; border-top: 1px solid var(--border);">Calibration Images</div>
-        <div class="gallery" id="calibration-gallery">
-            <div class="empty-state">No calibration images yet</div>
-        </div>
-    </div>
-
-    <script>
-        // State
-        const state = {
-            ws: null,
-            connected: false,
-            tab: 'main',
-            embryoFilter: '',
-            snapshots: [],
-            volumes: [],
-            calibration: [],
-            embryos: [],
-            volumes3d: [],
-            currentImage: null,
-            current3dVolume: null,  // Currently displayed 3D volume
-            currentZ: 0
-        };
-
-        // Data type classification
-        const CALIBRATION_TYPES = ['focus_sweep', 'focus_plot', 'edge_detection', 'calibration_summary',
-                                   'focus_snap', 'focus_coarse', 'focus_curve', 'focus_assess'];
-        const ANALYSIS_TYPES = ['segmentation', 'detection', 'classification', 'tracking',
-                                'roi_detection', 'cropped_roi', 'vision_prepared', 'timeline', 'cv_visualization'];
-        const VOLUME_TYPES = ['volume', 'volume_projection', 'z_stack', 'timelapse'];
-
-        // Connect WebSocket
-        function connect() {
-            const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-            state.ws = new WebSocket(`${protocol}//${location.host}/ws`);
-
-            state.ws.onopen = () => {
-                state.connected = true;
-                document.getElementById('status-text').textContent = 'Connected';
-                document.getElementById('status-dot').classList.add('connected');
-                logEvent('system', 'Connected to server');
-
-                // Request initial data
-                state.ws.send(JSON.stringify({type: 'get_embryos'}));
-                state.ws.send(JSON.stringify({type: 'get_snapshots'}));
-                state.ws.send(JSON.stringify({type: 'get_volumes'}));
-                state.ws.send(JSON.stringify({type: 'get_calibration'}));
-            };
-
-            state.ws.onclose = () => {
-                state.connected = false;
-                document.getElementById('status-text').textContent = 'Disconnected';
-                document.getElementById('status-dot').classList.remove('connected');
-                logEvent('system', 'Disconnected');
-                setTimeout(connect, 3000);
-            };
-
-            state.ws.onerror = () => logEvent('error', 'Connection error');
-
-            state.ws.onmessage = (event) => {
-                const msg = JSON.parse(event.data);
-                handleMessage(msg);
-            };
-        }
-
-        function handleMessage(msg) {
-            if (msg.type === 'image') {
-                handleNewImage(msg.data);
-            } else if (msg.type === 'volume_3d') {
-                handleNew3DVolume(msg.data);
-            } else if (msg.type === 'snapshots') {
-                state.snapshots = msg.data || [];
-                updateMainCount();
-                renderRecentList();
-            } else if (msg.type === 'volumes') {
-                state.volumes = msg.data || [];
-                updateVolumesCount();
-                if (state.tab === 'volumes') renderVolumesGallery();
-            } else if (msg.type === 'calibration') {
-                state.calibration = msg.data || [];
-                updateCalibrationCount();
-                if (state.tab === 'calibration') renderCalibrationGallery();
-            } else if (msg.type === 'embryos') {
-                state.embryos = msg.data || [];
-                updateEmbryoFilter();
-            } else if (msg.type === 'event') {
-                // Format CV events nicely
-                let eventMsg;
-                if (msg.event_type === 'CV_AGENT_THINKING') {
-                    const thinking = msg.data.thinking || '';
-                    const preview = thinking.length > 40 ? thinking.slice(0, 40) + '...' : thinking;
-                    eventMsg = `iter ${msg.data.iteration}: ${preview}`;
-                } else if (msg.event_type === 'CV_TASK_QUEUED') {
-                    eventMsg = `${msg.data.intent} (${msg.data.embryo_id})`;
-                } else if (msg.event_type === 'CV_TASK_COMPLETED') {
-                    eventMsg = `${msg.data.intent} done in ${(msg.data.processing_time_ms/1000).toFixed(1)}s`;
-                } else if (msg.event_type === 'CV_TASK_FAILED') {
-                    eventMsg = `${msg.data.intent} failed: ${msg.data.error?.slice(0, 30) || 'unknown'}`;
-                } else {
-                    eventMsg = JSON.stringify(msg.data).slice(0, 50);
-                }
-                logEvent(msg.event_type, eventMsg);
-            } else if (msg.type === 'ping') {
-                state.ws.send(JSON.stringify({type: 'pong'}));
-            }
-        }
-
-        function handleNew3DVolume(data) {
-            // Add to volumes3d list
-            state.volumes3d.push(data);
-            logEvent('segmentation', `3D: ${data.num_cells} cells, ${data.num_slices} slices`);
-
-            // Update counts and galleries
-            updateCalibrationCount();
-            if (state.tab === 'calibration') {
-                render3DVolumesGallery();
-            }
-
-            // Auto-display the new 3D volume
-            if (state.tab === 'main') {
-                display3DVolume(data);
-            }
-        }
-
-        function display3DVolume(data) {
-            state.current3dVolume = data;
-            state.currentZ = Math.floor(data.num_slices / 2);  // Start in middle
-
-            // Setup slider
-            const slider = document.getElementById('z-slider');
-            const sliderContainer = document.getElementById('z-slider-container');
-
-            slider.min = 0;
-            slider.max = data.num_slices - 1;
-            slider.value = state.currentZ;
-
-            // Show slider
-            sliderContainer.classList.add('active');
-
-            // Update info
-            updateZSliderDisplay();
-
-            // Load the slice
-            loadZSlice(data.uid, state.currentZ);
-
-            // Update image info
-            document.getElementById('info-type').textContent = '3D Segmentation';
-            document.getElementById('info-shape').textContent = data.shape.join(' × ');
-            document.getElementById('info-uid').textContent = data.uid.slice(0, 16) + '...';
-            document.getElementById('info-embryo').textContent = data.metadata?.embryo_id || '-';
-            document.getElementById('image-info').textContent = `3D Seg: ${data.num_cells} cells`;
-            document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
-        }
-
-        function loadZSlice(uid, z) {
-            const img = document.getElementById('main-image');
-            const placeholder = document.getElementById('placeholder');
-
-            // Add cache buster to force reload
-            img.src = `/api/volumes3d/${uid}/slice/${z}?t=${Date.now()}`;
-            img.style.display = 'block';
-            placeholder.style.display = 'none';
-        }
-
-        function updateZSliderDisplay() {
-            const data = state.current3dVolume;
-            if (!data) return;
-
-            document.getElementById('z-slider-value').textContent = state.currentZ;
-            document.getElementById('z-slider-info').textContent = `${state.currentZ + 1} / ${data.num_slices}`;
-        }
-
-        function hideZSlider() {
-            document.getElementById('z-slider-container').classList.remove('active');
-            state.current3dVolume = null;
-        }
-
-        function handleNewImage(data) {
-            const dataType = data.data_type;
-            const embryoId = data.metadata?.embryo_id;
-
-            // Route to appropriate list
-            if (CALIBRATION_TYPES.includes(dataType) || ANALYSIS_TYPES.includes(dataType)) {
-                state.calibration.push(data);
-                updateCalibrationCount();
-                if (state.tab === 'calibration') renderCalibrationGallery();
-                const eventType = ANALYSIS_TYPES.includes(dataType) ? 'analysis' : 'calibration';
-                logEvent(eventType, `${dataType}${embryoId ? ' ' + embryoId : ''}`);
-            } else if (VOLUME_TYPES.includes(dataType)) {
-                state.volumes.push(data);
-                updateVolumesCount();
-                if (state.tab === 'volumes') renderVolumesGallery();
-                logEvent('volume', `${dataType}${embryoId ? ' ' + embryoId : ''}`);
-            } else {
-                state.snapshots.push(data);
-                updateMainCount();
-                renderRecentList();
-                logEvent('image', `${dataType}${embryoId ? ' ' + embryoId : ''}`);
-            }
-
-            // Update embryo list if new
-            if (embryoId && !state.embryos.includes(embryoId)) {
-                state.embryos.push(embryoId);
-                updateEmbryoFilter();
-            }
-
-            // Show on main viewer if main tab
-            if (state.tab === 'main') {
-                displayImage(data);
-            }
-        }
-
-        function displayImage(data) {
-            state.currentImage = data;
-
-            // Hide Z slider when showing regular 2D images
-            hideZSlider();
-
-            const img = document.getElementById('main-image');
-            const placeholder = document.getElementById('placeholder');
-
-            if (data.base64_png) {
-                img.src = 'data:image/png;base64,' + data.base64_png;
-                img.style.display = 'block';
-                placeholder.style.display = 'none';
-            }
-
-            const embryoId = data.metadata?.embryo_id || '-';
-            document.getElementById('current-embryo').textContent = embryoId !== '-' ? embryoId : '';
-            document.getElementById('info-embryo').textContent = embryoId;
-            document.getElementById('info-type').textContent = data.data_type;
-            document.getElementById('info-shape').textContent = data.shape ? data.shape.join(' × ') : '-';
-            document.getElementById('info-uid').textContent = data.uid.slice(0, 16) + '...';
-            document.getElementById('image-info').textContent = data.data_type;
-            document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
-        }
-
-        function renderRecentList() {
-            const list = document.getElementById('recent-list');
-            const filtered = filterByEmbryo(state.snapshots);
-
-            list.innerHTML = filtered.slice(-15).reverse().map(img => `
-                <div class="gallery-item" style="margin-bottom: 0.5rem;" onclick="displayImage(state.snapshots.find(i => i.uid === '${img.uid}'))">
-                    <div class="gallery-info">
-                        <div class="gallery-type">${img.data_type}</div>
-                        <div class="gallery-meta">${img.uid.slice(0, 8)}...</div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function renderVolumesGallery() {
-            const gallery = document.getElementById('volumes-gallery');
-            const filtered = filterByEmbryo(state.volumes);
-
-            if (filtered.length === 0) {
-                gallery.innerHTML = '<div class="empty-state">No volume images yet</div>';
-                return;
-            }
-
-            gallery.innerHTML = filtered.slice(-50).reverse().map(img => `
-                <div class="gallery-item" onclick="showInModal('${img.uid}', 'volumes')">
-                    <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
-                    <div class="gallery-info">
-                        <div class="gallery-type">${img.data_type}</div>
-                        <div class="gallery-meta">${img.metadata?.embryo_id || 'unknown'}</div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function renderCalibrationGallery() {
-            const gallery = document.getElementById('calibration-gallery');
-            const filtered = filterByEmbryo(state.calibration);
-
-            if (filtered.length === 0) {
-                gallery.innerHTML = '<div class="empty-state">No calibration images yet</div>';
-                return;
-            }
-
-            gallery.innerHTML = filtered.slice(-50).reverse().map(img => `
-                <div class="gallery-item" onclick="showInModal('${img.uid}', 'calibration')">
-                    <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
-                    <div class="gallery-info">
-                        <div class="gallery-type">${img.data_type}</div>
-                        <div class="gallery-meta">${img.metadata?.embryo_id || ''} ${formatMeta(img.metadata)}</div>
-                    </div>
-                </div>
-            `).join('');
-
-            // Also render 3D volumes
-            render3DVolumesGallery();
-        }
-
-        function render3DVolumesGallery() {
-            const gallery = document.getElementById('volumes3d-gallery');
-            if (!gallery) return;
-
-            if (state.volumes3d.length === 0) {
-                gallery.innerHTML = '<div class="empty-state">No 3D segmentations yet</div>';
-                return;
-            }
-
-            gallery.innerHTML = state.volumes3d.slice(-20).reverse().map(vol => `
-                <div class="gallery-item" onclick="show3DVolume('${vol.uid}')" style="min-width: 120px;">
-                    <div class="gallery-info" style="padding: 0.75rem; text-align: center;">
-                        <div class="gallery-type">3D Seg</div>
-                        <div class="gallery-meta" style="font-size: 1.1rem; color: var(--accent-green);">${vol.num_cells} cells</div>
-                        <div class="gallery-meta">${vol.num_slices} slices</div>
-                        <div class="gallery-meta" style="font-size: 0.65rem;">${vol.uid.slice(0, 12)}...</div>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function show3DVolume(uid) {
-            const vol = state.volumes3d.find(v => v.uid === uid);
-            if (vol) {
-                display3DVolume(vol);
-                switchTab('main');
-            }
-        }
-
-        function formatMeta(meta) {
-            if (!meta) return '';
-            if (meta.focus_score) return `score: ${meta.focus_score.toFixed(2)}`;
-            if (meta.piezo_um) return `${meta.piezo_um.toFixed(1)}µm`;
-            return '';
-        }
-
-        function showInModal(uid, source) {
-            const list = source === 'volumes' ? state.volumes : state.calibration;
-            const img = list.find(i => i.uid === uid);
-            if (img) displayImage(img);
-            // Switch to main tab to show the image
-            switchTab('main');
-        }
-
-        function filterByEmbryo(list) {
-            if (!state.embryoFilter) return list;
-            return list.filter(img => img.metadata?.embryo_id === state.embryoFilter);
-        }
-
-        function updateEmbryoFilter() {
-            const select = document.getElementById('embryo-filter');
-            const currentValue = select.value;
-            select.innerHTML = '<option value="">All Embryos</option>' +
-                state.embryos.map(e => `<option value="${e}">${e}</option>`).join('');
-            select.value = currentValue;
-        }
-
-        function updateMainCount() {
-            document.getElementById('main-count').textContent = filterByEmbryo(state.snapshots).length;
-        }
-
-        function updateVolumesCount() {
-            document.getElementById('volumes-count').textContent = filterByEmbryo(state.volumes).length;
-        }
-
-        function updateCalibrationCount() {
-            const calCount = filterByEmbryo(state.calibration).length;
-            const vol3dCount = state.volumes3d.length;
-            document.getElementById('calibration-count').textContent = calCount + vol3dCount;
-        }
-
-        function switchTab(tabName) {
-            state.tab = tabName;
-
-            // Update tab styling
-            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-            document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
-
-            // Show/hide content
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById(`${tabName}-content`).classList.add('active');
-
-            // Render galleries
-            if (tabName === 'volumes') renderVolumesGallery();
-            if (tabName === 'calibration') renderCalibrationGallery();
-        }
-
-        function logEvent(type, message) {
-            const log = document.getElementById('event-log');
-            const div = document.createElement('div');
-            div.className = 'event-item';
-            // CV events get special styling
-            const isCvEvent = type.startsWith('CV_') || type === 'SEGMENTATION_COMPLETED' || type === 'STAGE_DETECTED';
-            const typeClass = isCvEvent ? 'event-type cv-event' : 'event-type';
-            div.innerHTML = `<span class="event-time">${new Date().toLocaleTimeString()}</span>
-                            <span class="${typeClass}">${type}</span>: ${message}`;
-            log.insertBefore(div, log.firstChild);
-            while (log.children.length > 50) log.removeChild(log.lastChild);
-        }
-
-        // Event listeners
-        document.querySelectorAll('.tab').forEach(tab => {
-            tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-        });
-
-        document.getElementById('embryo-filter').addEventListener('change', (e) => {
-            state.embryoFilter = e.target.value;
-            updateMainCount();
-            updateVolumesCount();
-            updateCalibrationCount();
-            renderRecentList();
-            if (state.tab === 'volumes') renderVolumesGallery();
-            if (state.tab === 'calibration') renderCalibrationGallery();
-        });
-
-        // Z-slider event listener
-        document.getElementById('z-slider').addEventListener('input', (e) => {
-            if (!state.current3dVolume) return;
-            state.currentZ = parseInt(e.target.value);
-            updateZSliderDisplay();
-            loadZSlice(state.current3dVolume.uid, state.currentZ);
-        });
-
-        // Start
-        connect();
-    </script>
-</body>
-</html>'''
+# NOTE: HTML/CSS/JS has been extracted to gently/visualization/web/
+# - templates/index.html
+# - static/css/main.css
+# - static/js/app.js, websocket.js, viewer.js, gallery.js
 
 
 # Convenience function
