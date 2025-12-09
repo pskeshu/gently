@@ -400,23 +400,199 @@ async def _adaptive_focus_sweep(
     return result_dict, total_exposures
 
 
+async def _fine_focus_sweep(
+    client,
+    copilot,
+    embryo_id: str,
+    galvo_name: str,
+    galvo_pos: float,
+    expected_piezo: float,
+    select_best_view,
+    calculate_focus_score,
+) -> Tuple[Dict, int]:
+    """
+    Fine-only focus sweep - assumes heuristic is close.
+
+    Used when Claude has identified feature-rich positions during edge detection.
+    Since heuristic piezo position is already good, we only do a fine sweep.
+
+    Parameters
+    ----------
+    client : QueueServerClient
+        Microscope client for image capture
+    copilot : MicroscopyCopilot
+        Copilot for viz server access
+    embryo_id : str
+        Embryo identifier for viz metadata
+    galvo_name : str
+        'top' or 'bottom' for logging
+    galvo_pos : float
+        Galvo position (degrees)
+    expected_piezo : float
+        Expected piezo position from heuristic
+    select_best_view : callable
+        Function to select best view from dual-view image and crop to ROI
+    calculate_focus_score : callable
+        Function to calculate focus score
+
+    Returns
+    -------
+    tuple
+        (result_dict, total_exposures)
+        result_dict has 'galvo', 'piezo', 'max_score', 'r_squared', 'fit_params'
+    """
+    FINE_RANGE = 5.0   # ±5µm around expected
+    FINE_STEP = 0.5    # 0.5µm steps
+    MIN_R_SQUARED = 0.75
+    total_exposures = 0
+
+    print(f"\n  === FINE-ONLY {galvo_name.upper()} FOCUS SWEEP at galvo={galvo_pos:.3f}° ===")
+    print(f"  Sweeping ±{FINE_RANGE}µm around heuristic ({expected_piezo:.1f}µm), {FINE_STEP}µm steps...")
+
+    positions = np.arange(
+        expected_piezo - FINE_RANGE,
+        expected_piezo + FINE_RANGE + FINE_STEP,
+        FINE_STEP
+    )
+
+    piezo_scores = []
+    for piezo in positions:
+        result = await client.capture_lightsheet_image(
+            piezo_position=float(piezo),
+            galvo_position=float(galvo_pos)
+        )
+        if result.get('success'):
+            total_exposures += 1
+        if result.get('success') and result.get('image') is not None:
+            img = select_best_view(result['image'])
+            score = calculate_focus_score(img, algorithm='fft_bandpass')
+            piezo_scores.append((float(piezo), float(score)))
+
+            print(f"    piezo={piezo:.1f}: score={score:.2e}")
+
+            # Push to viz server
+            if copilot.viz_server:
+                copilot.push_viz(
+                    array=img,
+                    uid=f"focus_fine_{embryo_id}_{galvo_name}_{piezo:.1f}",
+                    data_type="focus_sweep",
+                    metadata={
+                        'embryo_id': embryo_id,
+                        'sweep': 'fine_only',
+                        'galvo_name': galvo_name,
+                        'galvo': float(galvo_pos),
+                        'piezo': float(piezo),
+                        'score': float(score),
+                    }
+                )
+
+    # Fit Gaussian to find peak
+    if len(piezo_scores) >= 4:
+        positions_arr = np.array([p for p, _ in piezo_scores])
+        scores_arr = np.array([s for _, s in piezo_scores])
+
+        try:
+            _, _, fit_params, r_squared = fit_focus_curve(
+                positions_arr, scores_arr, FitFunction.GAUSSIAN.value
+            )
+            # Gaussian fit: params = [amplitude, center, sigma, offset]
+            best_piezo = float(fit_params[1])
+            # Clamp to measured range
+            best_piezo = max(min(best_piezo, positions_arr.max()), positions_arr.min())
+        except Exception as fit_err:
+            print(f"    Warning: Gaussian fit failed ({fit_err}), using max score position")
+            best_idx = np.argmax(scores_arr)
+            best_piezo = float(positions_arr[best_idx])
+            r_squared = 0.0
+            fit_params = None
+    else:
+        # Not enough points for fit
+        if piezo_scores:
+            best_piezo = max(piezo_scores, key=lambda x: x[1])[0]
+        else:
+            best_piezo = expected_piezo
+        r_squared = 0.0
+        fit_params = None
+
+    # Determine fit quality
+    if r_squared >= MIN_R_SQUARED:
+        fit_quality = "good"
+    elif r_squared >= 0.5:
+        fit_quality = "moderate"
+    else:
+        fit_quality = "fallback"
+
+    max_score = max(s for _, s in piezo_scores) if piezo_scores else 0.0
+    print(f"    → Best focus: piezo={best_piezo:.2f}µm (R²={r_squared:.3f}, {fit_quality})")
+    print(f"    Total exposures: {total_exposures}")
+
+    # Build result dict
+    result_dict = {
+        'galvo': galvo_pos,
+        'piezo': best_piezo,
+        'max_score': max_score,
+        'r_squared': r_squared,
+        'fit_params': fit_params,
+    }
+
+    # Push focus curve plot
+    if copilot.viz_server and len(piezo_scores) >= 4:
+        try:
+            positions_arr = np.array([p for p, _ in piezo_scores])
+            scores_arr = np.array([s for _, s in piezo_scores])
+
+            plot_img = generate_focus_curve_plot(
+                positions=positions_arr,
+                scores=scores_arr,
+                best_position=best_piezo,
+                fit_params=fit_params,
+                r_squared=r_squared,
+                title=f'{embryo_id} - {galvo_name.upper()} Focus Curve (Fine-Only)',
+            )
+            copilot.push_viz(
+                array=plot_img,
+                uid=f"focus_curve_{embryo_id}_{galvo_name}",
+                data_type="focus_plot",
+                metadata={
+                    'embryo_id': embryo_id,
+                    'galvo_name': galvo_name,
+                    'galvo': float(galvo_pos),
+                    'best_piezo': best_piezo,
+                    'r_squared': r_squared,
+                    'fine_only': True,
+                    'exposures': total_exposures,
+                }
+            )
+        except Exception as plot_err:
+            print(f"    Warning: Failed to generate focus plot: {plot_err}")
+
+    return result_dict, total_exposures
+
+
 @tool(
     name="calibrate_embryo",
     description="""Run full piezo-galvo calibration for a specific embryo using Claude vision.
 This performs:
 1. Move to embryo XY position
-2. Use Claude vision to detect embryo Z extent (top/bottom edges)
-3. Two-stage focus sweeps at interior positions (coarse ±20µm then fine ±5µm)
-4. FFT bandpass scoring with Gaussian fit (R² ≥ 0.75 threshold)
-5. 2-point linear fit to establish piezo = slope*galvo + offset
-6. Store calibration including volume acquisition parameters
+2. Use Claude vision to detect embryo Z extent (top/bottom edges) AND rate feature richness
+3. Select two feature-rich positions (score ≥6/10) that are ≥30% of embryo range apart
+4. Run focus sweeps at selected positions:
+   - Fine-only (±5µm) if feature-rich positions found (faster, ~20 exposures per position)
+   - Adaptive coarse+fine if fallback positions used (~30-40 exposures per position)
+5. FFT bandpass scoring with Gaussian fit (R² ≥ 0.75 threshold)
+6. 2-point linear fit to establish piezo = slope*galvo + offset
+7. Store calibration including volume acquisition parameters
 
-Use after detection to prepare an embryo for volume acquisition. Takes ~3-5 minutes per embryo.""",
+Use after detection to prepare an embryo for volume acquisition. Takes ~2-4 minutes per embryo.
+
+The z_buffer_um parameter controls how much empty space is captured above and below the embryo.
+Default is 15µm. Increase for more context (useful for segmentation), decrease for faster acquisition.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
         ToolExample("Calibrate embryo 1", {"embryo_id": "embryo_1"}),
         ToolExample("Skip edge detection", {"embryo_id": "embryo_2", "skip_edge_detection": True}),
+        ToolExample("More Z padding", {"embryo_id": "embryo_1", "z_buffer_um": 25.0}),
     ],
 )
 async def calibrate_embryo(
@@ -427,6 +603,7 @@ async def calibrate_embryo(
     edge_step: float = 0.05,
     edge_max_range: float = 0.5,
     inset_fraction: float = 0.4,
+    z_buffer_um: float = 15.0,
     context: Dict = None
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection"""
@@ -466,6 +643,59 @@ async def calibrate_embryo(
             return left_view
         return right_view
 
+    # Helper to detect and crop to embryo ROI for focus scoring
+    def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.ndarray:
+        """
+        Detect embryo in image and crop to ROI.
+        Returns cropped image for more accurate focus scoring.
+        """
+        try:
+            from scipy import ndimage
+
+            # Threshold to find embryo
+            threshold = np.percentile(image, 75)
+            mask = image > threshold
+
+            # Label connected components
+            labeled, num_features = ndimage.label(mask)
+            if num_features == 0:
+                return image  # No embryo found, return full image
+
+            # Find largest component
+            sizes = ndimage.sum(mask, labeled, range(1, num_features + 1))
+            largest_label = np.argmax(sizes) + 1
+            embryo_mask = labeled == largest_label
+
+            # Get bounding box
+            coords = np.argwhere(embryo_mask)
+            if len(coords) < 100:  # Too small, probably noise
+                return image
+
+            y_min, x_min = coords.min(axis=0)
+            y_max, x_max = coords.max(axis=0)
+
+            # Add padding
+            h, w = image.shape
+            y_pad = int((y_max - y_min) * padding_percent / 100)
+            x_pad = int((x_max - x_min) * padding_percent / 100)
+
+            y1 = max(0, y_min - y_pad)
+            x1 = max(0, x_min - x_pad)
+            y2 = min(h, y_max + y_pad + 1)
+            x2 = min(w, x_max + x_pad + 1)
+
+            cropped = image[y1:y2, x1:x2]
+            return cropped
+
+        except Exception:
+            return image  # Fallback to full image
+
+    # Wrapper that does view selection + ROI cropping
+    def select_view_and_crop_roi(image: np.ndarray) -> np.ndarray:
+        """Select best view and crop to embryo ROI for focus scoring"""
+        view = select_best_view(image)
+        return crop_to_embryo_roi(view)
+
     # Get session-level calibration prior for cross-embryo learning
     session_prior = copilot.experiment.calibration_prior
 
@@ -498,9 +728,13 @@ async def calibrate_embryo(
         # Initialize Claude client for vision
         claude_vision = AsyncClaudeClient()
 
+        # Track feature richness during edge detection for optimal focus position selection
+        # Claude rates each slice 1-10 for how good it would be for focus calibration
+        edge_detection_data = []  # List of {galvo, piezo, visible, feature_score}
+
         # Helper to save image and check embryo presence
         async def check_embryo_at_position(galvo_pos: float) -> bool:
-            """Capture image and ask Claude if embryo is visible"""
+            """Capture image, check embryo presence, and get feature richness score from Claude"""
             nonlocal total_exposures
             piezo_pos = HEURISTIC_SLOPE * galvo_pos + HEURISTIC_OFFSET  # Track light sheet
             result = await client.capture_lightsheet_image(
@@ -514,17 +748,27 @@ async def calibrate_embryo(
 
             img = result['image']
             # Select best view from dual-view image
-            img = select_best_view(img)
+            img_view = select_best_view(img)
+
             # Save to temp file for Claude
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
                 temp_path = Path(f.name)
                 # Normalize and save
-                img_norm = ((img - img.min()) / (img.max() - img.min() + 1e-10) * 255).astype(np.uint8)
+                img_norm = ((img_view - img_view.min()) / (img_view.max() - img_view.min() + 1e-10) * 255).astype(np.uint8)
                 Image.fromarray(img_norm).save(temp_path)
 
             try:
-                visible, description = await claude_vision.detect_embryo_presence(temp_path)
-                print(f"    galvo={galvo_pos:+.3f}°: {'VISIBLE' if visible else 'EMPTY'} - {description[:50]}...")
+                # Claude now returns (visible, feature_score, description)
+                visible, feature_score, description = await claude_vision.detect_embryo_presence(temp_path)
+                print(f"    galvo={galvo_pos:+.3f}°: {'VISIBLE' if visible else 'EMPTY'} (features={feature_score}/10) - {description[:40]}...")
+
+                # Record for optimal focus position selection
+                edge_detection_data.append({
+                    'galvo': float(galvo_pos),
+                    'piezo': float(piezo_pos),
+                    'visible': visible,
+                    'feature_score': feature_score,
+                })
 
                 # Push edge detection image to viz server
                 if copilot.viz_server:
@@ -537,6 +781,7 @@ async def calibrate_embryo(
                             'galvo': float(galvo_pos),
                             'piezo': float(piezo_pos),
                             'visible': visible,
+                            'feature_score': feature_score,
                         }
                     )
 
@@ -580,38 +825,139 @@ async def calibrate_embryo(
             print(f"    Bottom edge: galvo={detected_bottom:.3f}°")
             print(f"    Range: {detected_bottom - detected_top:.3f}° (~{(detected_bottom - detected_top) * 100:.0f}µm)")
 
-        # === PHASE 2: CALCULATE INTERIOR CALIBRATION POSITIONS ===
-        # Don't calibrate at edges where embryo is sparse - move inward
+        # === PHASE 2: SELECT OPTIMAL FOCUS POSITIONS ===
+        # Use Claude's feature richness scores to find best positions for calibration
+        # Need two positions that are ≥30% of embryo range apart for good 2-point slope
         galvo_range = detected_bottom - detected_top
-        calib_top = detected_top + galvo_range * inset_fraction
-        calib_bottom = detected_bottom - galvo_range * inset_fraction
+        min_separation = galvo_range * 0.3  # Minimum 30% separation for good slope
 
-        print(f"\n  Calibration positions (interior, {inset_fraction*100:.0f}% inset from edges):")
-        print(f"    Top calibration: galvo={calib_top:.3f}°")
-        print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+        use_fine_only = False  # Will be set to True if we found good feature-rich positions
 
-        # === PHASE 3: ADAPTIVE FOCUS SWEEPS AT CALIBRATION POSITIONS ===
-        # Uses sparse-then-dense approach with early stopping for efficiency
+        if edge_detection_data and not skip_edge_detection:
+            # Filter to visible positions with good features (score >= 6)
+            good_positions = [p for p in edge_detection_data if p['visible'] and p['feature_score'] >= 6]
 
-        print(f"\n  Phase 2: Adaptive focus sweeps at calibration positions...")
+            if len(good_positions) >= 2:
+                # Sort by feature score (best first)
+                good_positions.sort(key=lambda x: x['feature_score'], reverse=True)
+
+                # Best overall position
+                calib_pos_1 = good_positions[0]
+
+                # Find second position that's far enough from first (≥30% apart)
+                calib_pos_2 = None
+                for pos in good_positions[1:]:
+                    if abs(pos['galvo'] - calib_pos_1['galvo']) >= min_separation:
+                        calib_pos_2 = pos
+                        break
+
+                if calib_pos_2 is None and len(good_positions) > 1:
+                    # Fallback: use second best regardless of distance
+                    calib_pos_2 = good_positions[1]
+
+                if calib_pos_2 is not None:
+                    # Assign to top/bottom based on galvo position
+                    if calib_pos_1['galvo'] < calib_pos_2['galvo']:
+                        calib_top, calib_bottom = calib_pos_1['galvo'], calib_pos_2['galvo']
+                        score_top, score_bottom = calib_pos_1['feature_score'], calib_pos_2['feature_score']
+                    else:
+                        calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
+                        score_top, score_bottom = calib_pos_2['feature_score'], calib_pos_1['feature_score']
+
+                    actual_separation = abs(calib_bottom - calib_top) / galvo_range * 100
+                    use_fine_only = True  # Feature-rich positions, use fine-only sweep
+
+                    print(f"\n  Optimal focus positions (selected by Claude feature richness):")
+                    print(f"    Position 1: galvo={calib_top:.3f}° (features={score_top}/10)")
+                    print(f"    Position 2: galvo={calib_bottom:.3f}° (features={score_bottom}/10)")
+                    print(f"    Separation: {actual_separation:.0f}% of embryo range")
+                    print(f"    → Using FINE-ONLY focus sweeps (heuristic is good enough)")
+                else:
+                    # Only one good position found, fall back to inset
+                    calib_top = detected_top + galvo_range * inset_fraction
+                    calib_bottom = detected_bottom - galvo_range * inset_fraction
+                    print(f"\n  Calibration positions (fallback - only 1 feature-rich position found):")
+                    print(f"    Top calibration: galvo={calib_top:.3f}°")
+                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+            else:
+                # Not enough good positions (score >= 6), try positions with any visibility
+                visible_positions = [p for p in edge_detection_data if p['visible']]
+                if len(visible_positions) >= 2:
+                    # Sort by feature score and pick best two that are apart
+                    visible_positions.sort(key=lambda x: x['feature_score'], reverse=True)
+                    calib_pos_1 = visible_positions[0]
+                    calib_pos_2 = None
+                    for pos in visible_positions[1:]:
+                        if abs(pos['galvo'] - calib_pos_1['galvo']) >= min_separation:
+                            calib_pos_2 = pos
+                            break
+                    if calib_pos_2 is None and len(visible_positions) > 1:
+                        calib_pos_2 = visible_positions[1]
+
+                    if calib_pos_2 is not None:
+                        if calib_pos_1['galvo'] < calib_pos_2['galvo']:
+                            calib_top, calib_bottom = calib_pos_1['galvo'], calib_pos_2['galvo']
+                        else:
+                            calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
+                        print(f"\n  Calibration positions (moderate features, using adaptive sweep):")
+                        print(f"    Top: galvo={calib_top:.3f}° (features={calib_pos_1['feature_score']}/10)")
+                        print(f"    Bottom: galvo={calib_bottom:.3f}° (features={calib_pos_2['feature_score']}/10)")
+                    else:
+                        calib_top = detected_top + galvo_range * inset_fraction
+                        calib_bottom = detected_bottom - galvo_range * inset_fraction
+                else:
+                    calib_top = detected_top + galvo_range * inset_fraction
+                    calib_bottom = detected_bottom - galvo_range * inset_fraction
+                    print(f"\n  Calibration positions (fallback to {inset_fraction*100:.0f}% inset):")
+                    print(f"    Top calibration: galvo={calib_top:.3f}°")
+                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+        else:
+            # No edge detection data, use traditional inset method
+            calib_top = detected_top + galvo_range * inset_fraction
+            calib_bottom = detected_bottom - galvo_range * inset_fraction
+            print(f"\n  Calibration positions (interior, {inset_fraction*100:.0f}% inset from edges):")
+            print(f"    Top calibration: galvo={calib_top:.3f}°")
+            print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+
+        # === PHASE 3: FOCUS SWEEPS AT CALIBRATION POSITIONS ===
+        # Use fine-only if we found feature-rich positions, otherwise adaptive sweep
+
+        if use_fine_only:
+            print(f"\n  Phase 2: Fine-only focus sweeps at feature-rich positions...")
+        else:
+            print(f"\n  Phase 2: Adaptive focus sweeps at calibration positions...")
+
         results = {}
 
         for galvo_name, galvo_pos in [("top", calib_top), ("bottom", calib_bottom)]:
             # Expected piezo from heuristic
             expected_piezo = galvo_pos * HEURISTIC_SLOPE + HEURISTIC_OFFSET
 
-            # Run adaptive sweep with early stopping
-            result_dict, sweep_exposures = await _adaptive_focus_sweep(
-                client=client,
-                copilot=copilot,
-                embryo_id=embryo_id,
-                galvo_name=galvo_name,
-                galvo_pos=galvo_pos,
-                expected_piezo=expected_piezo,
-                session_prior=session_prior,
-                select_best_view=select_best_view,
-                calculate_focus_score=calculate_focus_score,
-            )
+            if use_fine_only:
+                # Fine-only sweep - heuristic is good enough at feature-rich positions
+                result_dict, sweep_exposures = await _fine_focus_sweep(
+                    client=client,
+                    copilot=copilot,
+                    embryo_id=embryo_id,
+                    galvo_name=galvo_name,
+                    galvo_pos=galvo_pos,
+                    expected_piezo=expected_piezo,
+                    select_best_view=select_view_and_crop_roi,  # Use ROI cropping for focus
+                    calculate_focus_score=calculate_focus_score,
+                )
+            else:
+                # Adaptive sweep with early stopping for lower-confidence positions
+                result_dict, sweep_exposures = await _adaptive_focus_sweep(
+                    client=client,
+                    copilot=copilot,
+                    embryo_id=embryo_id,
+                    galvo_name=galvo_name,
+                    galvo_pos=galvo_pos,
+                    expected_piezo=expected_piezo,
+                    session_prior=session_prior,
+                    select_best_view=select_view_and_crop_roi,  # Use ROI cropping for focus
+                    calculate_focus_score=calculate_focus_score,
+                )
 
             results[galvo_name] = result_dict
             total_exposures += sweep_exposures
@@ -631,16 +977,17 @@ async def calibrate_embryo(
 
         # Calculate volume acquisition parameters from embryo extent
         # Use detected edges (not calibration positions) for full coverage
-        # Add buffer zone above and below embryo (~5µm each side)
-        VOLUME_BUFFER_DEG = 0.05  # ~5µm buffer on each side (0.01° ≈ 1µm)
+        # Add buffer zone above and below embryo (configurable via z_buffer_um)
+        # Conversion: 0.01° ≈ 1µm, so z_buffer_um / 100 gives degrees
+        volume_buffer_deg = z_buffer_um / 100.0
 
         galvo_center = (detected_top + detected_bottom) / 2
-        galvo_amplitude = (detected_bottom - detected_top) / 2 + VOLUME_BUFFER_DEG
+        galvo_amplitude = (detected_bottom - detected_top) / 2 + volume_buffer_deg
 
         # Calculate piezo range using the linear relationship
         # Include buffer in the range calculation
-        galvo_top_with_buffer = detected_top - VOLUME_BUFFER_DEG
-        galvo_bottom_with_buffer = detected_bottom + VOLUME_BUFFER_DEG
+        galvo_top_with_buffer = detected_top - volume_buffer_deg
+        galvo_bottom_with_buffer = detected_bottom + volume_buffer_deg
         piezo_at_top = slope * galvo_top_with_buffer + offset
         piezo_at_bottom = slope * galvo_bottom_with_buffer + offset
         piezo_center = (piezo_at_top + piezo_at_bottom) / 2
@@ -661,6 +1008,7 @@ async def calibrate_embryo(
             'galvo_amplitude': galvo_amplitude,
             'piezo_center': piezo_center,
             'piezo_amplitude': piezo_amplitude,
+            'z_buffer_um': z_buffer_um,
             'r_squared_top': results['top']['r_squared'],
             'r_squared_bottom': results['bottom']['r_squared'],
         }
@@ -736,7 +1084,7 @@ async def calibrate_embryo(
             f"  Bottom: galvo={g_bottom:.3f}° → piezo={p_bottom:.1f}µm\n"
             f"  Volume params: galvo={galvo_center:.3f}°±{galvo_amplitude:.3f}°, "
             f"piezo={piezo_center:.1f}µm±{piezo_amplitude:.1f}µm\n"
-            f"  Buffer: ±{VOLUME_BUFFER_DEG:.2f}° (~{VOLUME_BUFFER_DEG * 100:.0f}µm) above/below embryo"
+            f"  Z buffer: ±{z_buffer_um:.0f}µm above/below embryo"
         )
 
     except Exception as e:
@@ -748,17 +1096,22 @@ async def calibrate_embryo(
     name="calibrate_all_embryos",
     description="""Run piezo-galvo calibration for all detected embryos sequentially.
 Uses Claude vision to detect embryo Z extent for each embryo, then runs focus sweeps.
-Use after detecting multiple embryos.""",
+Use after detecting multiple embryos.
+
+The z_buffer_um parameter controls how much empty space is captured above and below each embryo.
+Default is 15µm.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
         ToolExample("Calibrate all embryos", {}),
         ToolExample("Quick calibration without edge detection", {"skip_edge_detection": True}),
+        ToolExample("More Z padding for all", {"z_buffer_um": 25.0}),
     ],
 )
 async def calibrate_all_embryos(
     embryo_ids: List[str] = None,
     skip_edge_detection: bool = False,
+    z_buffer_um: float = 15.0,
     context: Dict = None
 ) -> str:
     """Calibrate all embryos sequentially with Claude vision"""
@@ -785,6 +1138,7 @@ async def calibrate_all_embryos(
         result = await calibrate_embryo(
             embryo_id=eid,
             skip_edge_detection=skip_edge_detection,
+            z_buffer_um=z_buffer_um,
             context=context
         )
         # Get first two lines of result
@@ -799,18 +1153,23 @@ async def calibrate_all_embryos(
     name="acquire_volume",
     description="""Acquire a single 3D lightsheet volume for a specific embryo. Moves to embryo position and uses its calibration data.
 Use when user wants a full 3D stack of an embryo (e.g., "acquire volume of embryo 1", "take a 3D image").
-Embryo must be calibrated first. Default 50 slices at 10ms exposure takes ~2.5 seconds. Turns laser on during acquisition.""",
+Embryo must be calibrated first. Default 50 slices at 10ms exposure takes ~2.5 seconds. Turns laser on during acquisition.
+
+The z_buffer_um parameter can override the calibrated Z range to add more empty space above/below the embryo.
+This is useful for segmentation without needing to recalibrate. Set to None to use calibrated range.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
         ToolExample("Acquire volume of embryo 1", {"embryo_id": "embryo_1"}),
         ToolExample("Take a 3D image of embryo 2 with 80 slices", {"embryo_id": "embryo_2", "num_slices": 80}),
+        ToolExample("Acquire with more Z padding", {"embryo_id": "embryo_1", "z_buffer_um": 20.0}),
     ],
 )
 async def acquire_volume(
     embryo_id: str,
     num_slices: int = 50,
     exposure_ms: float = 10.0,
+    z_buffer_um: float = None,
     context: Dict = None
 ) -> str:
     """Acquire single volume - moves to embryo first, uses calibration"""
@@ -836,6 +1195,23 @@ async def acquire_volume(
         galvo_center = cal.get('galvo_center', 0.0)
         piezo_amplitude = cal.get('piezo_amplitude', 25.0)
         piezo_center = cal.get('piezo_center', 50.0)
+
+        # Override Z range if z_buffer_um is specified
+        z_buffer_applied = None
+        if z_buffer_um is not None and cal:
+            # Get the original embryo extent from calibration
+            calibrated_buffer = cal.get('z_buffer_um', 5.0)  # Old default was 5µm
+            slope = cal.get('slope_um_per_deg', 100.0)
+
+            # Calculate additional buffer needed
+            additional_buffer_um = z_buffer_um - calibrated_buffer
+            if additional_buffer_um > 0:
+                # Convert µm to degrees and add to amplitude
+                additional_buffer_deg = additional_buffer_um / 100.0
+                galvo_amplitude = galvo_amplitude + additional_buffer_deg
+                # Piezo amplitude scales with slope
+                piezo_amplitude = piezo_amplitude + (additional_buffer_um * abs(slope) / 100.0)
+                z_buffer_applied = z_buffer_um
 
         result = await client.acquire_volume(
             num_slices=num_slices,
@@ -889,10 +1265,11 @@ async def acquire_volume(
 
             # Build response
             shape_str = str(result.get('shape', 'unknown'))
+            z_info = f" (z_buffer: {z_buffer_applied}µm)" if z_buffer_applied else ""
             if saved_path:
-                return f"Acquired volume for {embryo.id}\nShape: {shape_str}\nSaved: {saved_path}"
+                return f"Acquired volume for {embryo.id}{z_info}\nShape: {shape_str}\nSaved: {saved_path}"
             else:
-                return f"Acquired volume for {embryo.id}\nShape: {shape_str}\n(Volume not saved to disk)"
+                return f"Acquired volume for {embryo.id}{z_info}\nShape: {shape_str}\n(Volume not saved to disk)"
         else:
             return f"Acquisition failed: {result.get('error', 'Unknown error')}"
 

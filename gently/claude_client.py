@@ -66,33 +66,30 @@ EMBRYO_EDGE_PROMPT = """You are an expert microscopist specializing in diSPIM li
 
 This image shows ONE camera view of an embryo captured with light sheet illumination. We are trying to determine if the embryo is still visible at this Z position.
 
-CONTEXT:
-- We are sweeping through Z positions to find where the embryo appears/disappears
-- This may be at the edge of the embryo where it starts to fade out
-- We need to detect even faint/sparse embryo signal
-
 YOUR TASK:
-Determine if there is ANY embryo structure visible in this image, even if faint or sparse.
+1. Determine if there is ANY embryo structure visible in this image
+2. Rate the "feature richness" - how good this slice would be for focus calibration
 
 WHAT COUNTS AS VISIBLE:
-✓ YES (embryo visible):
-  - Any distinct embryo structure, even if faint
-  - Partial embryo at edge (sparse but present)
-  - Moderate contrast showing biological structure
-  - Even if only a small portion is visible
+✓ YES: Any distinct embryo structure, even if faint or partial
+✗ NO: Completely empty/uniform background, only noise
 
-✗ NO (embryo not visible):
-  - Completely empty/uniform background
-  - Only noise and artifacts, no structure
-  - Embryo has completely disappeared
+FEATURE RICHNESS (1-10):
+- 10: Dense nuclei/cells clearly visible, lots of structure detail
+- 7-9: Good structure visibility, multiple features present
+- 4-6: Moderate features, some structure but sparse
+- 1-3: Very sparse, edge of embryo, minimal features
+- 0: No embryo visible (use when answering "no")
 
 RESPOND FORMAT:
-Line 1: "yes" if embryo is visible (even faintly), "no" if completely absent
-Line 2: Brief description
+Line 1: "yes" or "no" (embryo visible)
+Line 2: Feature richness score (1-10, or 0 if not visible)
+Line 3: Brief description
 
 Example:
 yes
-Faint embryo structure visible in center, appears to be at edge of sample."""
+8
+Dense region with multiple visible nuclei and clear cellular boundaries."""
 
 
 # ============================================================================
@@ -298,12 +295,13 @@ class AsyncClaudeClient:
         self,
         image_path: Path,
         custom_prompt: Optional[str] = None
-    ) -> Tuple[bool, str]:
+    ) -> Tuple[bool, int, str]:
         """
         Detect if embryo is present at current Z position (for edge detection).
 
         Uses EMBRYO_EDGE_PROMPT to determine if any embryo structure is
-        visible, even if faint or at the edge of the sample.
+        visible, even if faint or at the edge of the sample. Also returns
+        a feature richness score for focus position selection.
 
         Parameters
         ----------
@@ -316,20 +314,25 @@ class AsyncClaudeClient:
         -------
         bool
             True if any embryo structure is visible
+        int
+            Feature richness score (0-10). Higher = better for focus calibration.
+            0 if no embryo visible, 1-3 sparse edge, 7-10 dense features.
         str
             Description of what Claude sees
 
         Examples
         --------
         >>> client = AsyncClaudeClient()
-        >>> present, desc = await client.detect_embryo_presence(Path("edge.png"))
+        >>> present, score, desc = await client.detect_embryo_presence(Path("edge.png"))
         >>> if not present:
         ...     print("Reached embryo edge")
+        >>> elif score >= 7:
+        ...     print("Good candidate for focus calibration")
         """
         image_path = Path(image_path)
 
         if not image_path.exists():
-            return False, f"Image file not found: {image_path}"
+            return False, 0, f"Image file not found: {image_path}"
 
         # Encode image
         image_data = self.encode_image(image_path)
@@ -378,15 +381,39 @@ class AsyncClaudeClient:
             # Extract text response
             response_text = response.content[0].text
 
-            # Parse yes/no response
-            is_present, description = self.parse_yes_no_response(response_text)
+            # Parse response - now 3 lines: yes/no, score, description
+            lines = response_text.strip().split('\n')
 
-            return is_present, description
+            # Line 1: yes/no
+            is_present = 'yes' in lines[0].lower() if lines else False
+
+            # Line 2: feature score (1-10)
+            feature_score = 0
+            if len(lines) > 1:
+                try:
+                    # Extract number from second line
+                    score_line = lines[1].strip()
+                    # Handle cases like "8" or "Score: 8" or "8/10"
+                    import re
+                    match = re.search(r'\d+', score_line)
+                    if match:
+                        feature_score = min(10, max(0, int(match.group())))
+                except (ValueError, IndexError):
+                    feature_score = 5 if is_present else 0  # Default
+
+            # Line 3+: description
+            description = '\n'.join(lines[2:]).strip() if len(lines) > 2 else "No description"
+
+            # If not present, ensure score is 0
+            if not is_present:
+                feature_score = 0
+
+            return is_present, feature_score, description
 
         except asyncio.TimeoutError:
-            return False, f"Claude API timeout after {self.timeout}s"
+            return False, 0, f"Claude API timeout after {self.timeout}s"
         except Exception as e:
-            return False, f"Claude API error: {str(e)}"
+            return False, 0, f"Claude API error: {str(e)}"
 
     async def validate_focus_montage(
         self,
@@ -533,7 +560,7 @@ class ClaudeClient:
         """Sync version of check_embryo_centered."""
         return asyncio.run(self.async_client.check_embryo_centered(image_path))
 
-    def detect_embryo_presence(self, image_path: Path) -> Tuple[bool, str]:
+    def detect_embryo_presence(self, image_path: Path) -> Tuple[bool, int, str]:
         """Sync version of detect_embryo_presence."""
         return asyncio.run(self.async_client.detect_embryo_presence(image_path))
 
