@@ -24,6 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from gently.cv_subagent import CVSubagentService
 from gently.cv_subagent.config import CVSubagentConfig
+from gently.cv_subagent.cli_display import CVAgentDisplay
 
 
 def setup_logging(debug: bool = False):
@@ -95,14 +96,10 @@ async def main():
     setup_logging(debug=args.debug)
     logger = logging.getLogger(__name__)
 
-    # Log startup info
-    logger.info("=" * 60)
-    logger.info("CV Subagent Service")
-    logger.info("=" * 60)
-    logger.info(f"Host: {args.host}")
-    logger.info(f"Port: {args.port}")
-    logger.info(f"GPU Device: {args.gpu_device}")
-    logger.info(f"Debug: {args.debug}")
+    # Initialize Rich display
+    display = CVAgentDisplay()
+    display.print_welcome()
+    display.print_status(f"Host: {args.host}  |  Port: {args.port}  |  GPU: {args.gpu_device}", "info")
 
     # Check for API key
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -131,11 +128,8 @@ async def main():
         # Start service
         await service.start()
 
-        logger.info("=" * 60)
-        logger.info(f"Service running at http://{args.host}:{args.port}")
-        logger.info(f"API docs at http://{args.host}:{args.port}/docs")
-        logger.info("Press Ctrl+C to stop")
-        logger.info("=" * 60)
+        display.print_status(f"Service running at http://{args.host}:{args.port}", "success")
+        display.print_status("Press Ctrl+C to stop", "muted")
 
         # Wait for shutdown signal
         await shutdown_event.wait()

@@ -22,11 +22,46 @@ from typing import Any, Dict, List, Optional, Tuple
 from .config import CVSubagentConfig, CELEGANS_STAGES
 from .tasks.task_queue import TaskQueue, TaskPriority, CVTask
 from .events import publish_cv_agent_thinking
+from .cli_display import CVAgentDisplay
 
 logger = logging.getLogger(__name__)
 
 # Maximum iterations to prevent infinite loops
 MAX_AGENT_ITERATIONS = 20
+
+# Maximum size for tool result content (to prevent context overflow)
+MAX_TOOL_RESULT_SIZE = 10000  # ~2500 tokens
+
+
+def _truncate_tool_result(result: Any) -> Any:
+    """Truncate large tool results to prevent context overflow.
+
+    The main culprits are:
+    - cells list with hundreds of entries
+    - base64 encoded images
+    - large numpy array dumps
+    """
+    if isinstance(result, dict):
+        truncated = {}
+        for key, value in result.items():
+            if key == 'cells' and isinstance(value, list) and len(value) > 10:
+                # Keep only first 10 cells, add summary
+                truncated[key] = value[:10]
+                truncated['cells_truncated'] = True
+                truncated['total_cells'] = len(value)
+            elif key == 'image_base64' and isinstance(value, str) and len(value) > 1000:
+                # Don't include base64 in conversation - agent already saw the image
+                truncated[key] = f"[base64 image, {len(value)} chars - omitted from context]"
+            elif isinstance(value, str) and len(value) > MAX_TOOL_RESULT_SIZE:
+                truncated[key] = value[:MAX_TOOL_RESULT_SIZE] + f"... [truncated, {len(value)} total chars]"
+            elif isinstance(value, (list, dict)):
+                truncated[key] = _truncate_tool_result(value)
+            else:
+                truncated[key] = value
+        return truncated
+    elif isinstance(result, list) and len(result) > 50:
+        return result[:50] + [f"... and {len(result) - 50} more items"]
+    return result
 
 
 class CVAgent:
@@ -93,30 +128,30 @@ Your job is to:
 
 - prepare_for_vision: Add scale bar, annotations, and project to 2D
   Parameters: volume_uid (str), scale_bar_um (float), annotations (dict)
-  Returns: image_base64 ready for vision analysis
+  Returns: prepared_image_uid (use this with vision tools)
 
 - create_timeline_image: Create montage of multiple volumes
   Parameters: volume_uids (list), labels (list), layout (str)
-  Returns: image_base64 of timeline montage
+  Returns: prepared_image_uid of timeline montage
 
 - normalize_volume: Normalize volume intensity
   Parameters: volume_uid (str), method (str: "percentile"/"minmax"/"zscore")
 
 ### Vision Analysis
 - claude_vision_analyze: Analyze image with Claude Vision
-  Parameters: image_base64 (str), prompt (str)
+  Parameters: image_input (str - prepared_image_uid from prepare_for_vision), prompt (str)
   Returns: analysis text
 
 - classify_developmental_stage: High-level stage classification
-  Parameters: image_base64 (str), nuclei_count (int), elongation_ratio (float)
+  Parameters: image_input (str - prepared_image_uid), nuclei_count (int), elongation_ratio (float)
   Returns: stage, confidence, reasoning
 
 - detect_visual_anomalies: Detect abnormalities
-  Parameters: image_base64 (str), expected_stage (str), expected_nuclei (int)
+  Parameters: image_input (str - prepared_image_uid), expected_stage (str), expected_nuclei (int)
   Returns: anomalies_detected, anomaly_list, severity
 
 - compare_timepoints: Compare development across timepoints
-  Parameters: timeline_image_base64 (str), nuclei_counts (list)
+  Parameters: timeline_image_input (str - prepared_image_uid), nuclei_counts (list)
   Returns: progression_summary, changes, division_events
 
 ### Results Storage
@@ -224,6 +259,9 @@ By nuclei count:
         self.cache_creation_tokens: int = 0
         self.cache_read_tokens: int = 0
         self.api_call_count: int = 0
+
+        # Rich terminal display
+        self.display = CVAgentDisplay()
 
         # Register task processor if queue provided
         if self.task_queue:
@@ -461,6 +499,7 @@ By nuclei count:
         context = params.get("context", {})
 
         logger.info(f"Processing CV task: {task.task_id} - {intent}")
+        self.display.print_task_started(task.task_id, intent, embryo_id)
 
         # Update progress
         self.task_queue.update_progress(task.task_id, 0, "Starting analysis")
@@ -480,6 +519,7 @@ By nuclei count:
 
         except Exception as e:
             logger.error(f"Analysis failed: {e}", exc_info=True)
+            self.display.print_task_failed(task.task_id, str(e))
             raise
 
     async def _execute_analysis(
@@ -506,15 +546,21 @@ By nuclei count:
         thinking_steps = []  # Collect thinking blocks to show user
 
         # Build initial user message
+        session_timepoint = context.get("session_timepoint") if context else None
+
         user_message = f"""Analyze the following request for C. elegans embryo analysis:
 
 Intent: {intent}
 Embryo ID: {embryo_id}
 Timepoints: {timepoints if timepoints else "use latest available"}
+{"Session timepoint: " + str(session_timepoint) if session_timepoint is not None else ""}
 Additional context: {json.dumps(context) if context else "none"}
 
+IMPORTANT: If a specific timepoint is provided above, use get_volume with that exact timepoint.
+Do NOT use get_latest_volume if a specific timepoint is given - it may load old data.
+
 Please execute the analysis by calling the appropriate tools in sequence.
-Start by loading the volume data, then proceed step by step.
+Start by loading the volume data for the specified timepoint, then proceed step by step.
 When you have gathered enough information, provide a final summary.
 """
 
@@ -586,6 +632,7 @@ When you have gathered enough information, provide a final summary.
                                 iteration=iteration,
                                 embryo_id=embryo_id,
                             )
+                            self.display.print_thinking(thinking_text, iteration)
                             logger.debug(f"Agent thinking (iter {iteration}): {thinking_text[:200]}...")
 
                 # Add assistant message to conversation
@@ -611,18 +658,26 @@ When you have gathered enough information, provide a final summary.
                             tool_use_id = block.id
 
                             logger.info(f"Executing tool: {tool_name}")
+                            self.display.print_tool_call(tool_name, tool_input)
                             tools_used.append(tool_name)
 
                             # Execute the tool
+                            tool_start = datetime.now()
                             try:
                                 result = await self.tools.execute(tool_name, **tool_input)
+                                tool_duration = (datetime.now() - tool_start).total_seconds() * 1000
+                                self.display.print_tool_result(tool_name, result, is_error=False, duration_ms=tool_duration)
+                                # Truncate large results to prevent context overflow
+                                truncated_result = _truncate_tool_result(result)
                                 tool_results.append({
                                     "type": "tool_result",
                                     "tool_use_id": tool_use_id,
-                                    "content": json.dumps(result) if isinstance(result, dict) else str(result),
+                                    "content": json.dumps(truncated_result) if isinstance(truncated_result, dict) else str(truncated_result),
                                 })
                             except Exception as e:
+                                tool_duration = (datetime.now() - tool_start).total_seconds() * 1000
                                 logger.error(f"Tool {tool_name} failed: {e}")
+                                self.display.print_tool_result(tool_name, str(e), is_error=True, duration_ms=tool_duration)
                                 tool_results.append({
                                     "type": "tool_result",
                                     "tool_use_id": tool_use_id,
@@ -656,6 +711,13 @@ When you have gathered enough information, provide a final summary.
             self.task_queue.update_progress(task.task_id, 100, "Complete")
 
         logger.info(f"Analysis completed in {iteration} iterations, {processing_time:.0f}ms")
+        self.display.print_task_completed(
+            task_id=task.task_id if task else "immediate",
+            summary=final_result or "Analysis completed",
+            duration_ms=processing_time,
+            tools_used=list(set(tools_used)),
+            iterations=iteration,
+        )
         return result
 
     async def analyze_immediate(

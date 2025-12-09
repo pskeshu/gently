@@ -12,6 +12,7 @@ These tools implement the context enrichment pattern:
 import base64
 import io
 import logging
+import os
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,7 +21,73 @@ import numpy as np
 from .registry import cv_tool, ToolCategory, ToolExample, ToolParameter
 from .data_access import get_cached_volume, cache_volume
 
+# Cache for prepared images (base64) - separate from volume cache
+_prepared_images: Dict[str, str] = {}
+
+
+def cache_prepared_image(uid: str, base64_data: str):
+    """Cache a prepared base64 image"""
+    _prepared_images[uid] = base64_data
+    # Keep cache bounded
+    if len(_prepared_images) > 50:
+        # Remove oldest entries
+        keys = list(_prepared_images.keys())
+        for k in keys[:10]:
+            del _prepared_images[k]
+
+
+def get_prepared_image(uid: str) -> Optional[str]:
+    """Get a cached prepared image by UID"""
+    return _prepared_images.get(uid)
+
 logger = logging.getLogger(__name__)
+
+# Viz server URL for pushing visualizations
+VIZ_SERVER_URL = os.environ.get("VIZ_SERVER_URL", "http://localhost:8080")
+
+
+def _push_image_to_viz(
+    array: np.ndarray,
+    uid: str,
+    data_type: str = "cv_visualization",
+    metadata: Dict = None
+):
+    """Push a 2D image to viz server via HTTP POST.
+
+    The CV subagent runs as a separate process, so we use HTTP to communicate
+    with the viz server instead of direct function calls.
+    """
+    import requests
+
+    try:
+        # Ensure array is contiguous for proper serialization
+        array = np.ascontiguousarray(array)
+
+        # Encode array as base64
+        image_b64 = base64.b64encode(array.tobytes()).decode('ascii')
+
+        payload = {
+            'image_b64': image_b64,
+            'uid': uid,
+            'shape': list(array.shape),
+            'dtype': str(array.dtype),
+            'data_type': data_type,
+            'metadata': metadata or {}
+        }
+
+        response = requests.post(
+            f"{VIZ_SERVER_URL}/api/images",
+            json=payload,
+            timeout=10
+        )
+
+        if response.status_code == 200:
+            logger.info(f"Pushed {data_type} to viz server: {uid}")
+        else:
+            logger.warning(f"Viz server returned {response.status_code}: {response.text}")
+
+    except Exception as e:
+        logger.debug(f"Viz server not available: {e}")
 
 # Try to import image processing libraries
 try:
@@ -43,6 +110,35 @@ try:
 except ImportError:
     HAS_SKIMAGE = False
     logger.warning("skimage not available, using basic methods")
+
+
+def _ensure_3d(volume: np.ndarray) -> np.ndarray:
+    """Ensure volume is 3D (Z, Y, X) by squeezing or taking first channel/timepoint"""
+    if volume.ndim == 3:
+        return volume
+    elif volume.ndim == 4:
+        # Could be (T, Z, Y, X) or (C, Z, Y, X) - take first along dim 0
+        if volume.shape[0] == 1:
+            return volume[0]
+        else:
+            # Take first timepoint/channel
+            logger.warning(f"4D volume {volume.shape}, using first frame")
+            return volume[0]
+    elif volume.ndim == 2:
+        # Add Z dimension
+        return volume[np.newaxis, :, :]
+    elif volume.ndim > 4:
+        # Squeeze all singleton dimensions
+        squeezed = np.squeeze(volume)
+        if squeezed.ndim == 3:
+            return squeezed
+        elif squeezed.ndim == 4:
+            return squeezed[0]
+        else:
+            logger.warning(f"Cannot reduce {volume.shape} to 3D, taking slice")
+            return volume.reshape(-1, volume.shape[-2], volume.shape[-1])[:volume.shape[-3]]
+    else:
+        return volume
 
 
 @cv_tool(
@@ -95,6 +191,9 @@ def detect_embryo_roi(
             "bbox": None,
             "center": None,
         }
+
+    # Ensure volume is 3D
+    volume = _ensure_3d(volume)
 
     try:
         # Get binary mask of embryo
@@ -159,6 +258,35 @@ def detect_embryo_roi(
         fill_ratio = volume_voxels / total_voxels
         confidence = min(1.0, fill_ratio * 10)  # Scale up small ratios
 
+        # Create visualization: max projection with ROI box
+        try:
+            max_proj = np.max(volume, axis=0)
+            # Normalize to 0-255
+            max_proj = ((max_proj - max_proj.min()) / (max_proj.max() - max_proj.min() + 1e-8) * 255).astype(np.uint8)
+            # Convert to RGB
+            vis_img = np.stack([max_proj, max_proj, max_proj], axis=-1)
+            # Draw ROI rectangle (green)
+            # Top and bottom edges
+            vis_img[y_min, x_min:x_max, :] = [0, 255, 0]
+            vis_img[min(y_max, vis_img.shape[0]-1), x_min:x_max, :] = [0, 255, 0]
+            # Left and right edges
+            vis_img[y_min:y_max, x_min, :] = [0, 255, 0]
+            vis_img[y_min:y_max, min(x_max, vis_img.shape[1]-1), :] = [0, 255, 0]
+            # Draw center crosshair (red)
+            cy, cx = center[1], center[2]
+            vis_img[max(0, cy-5):min(vis_img.shape[0], cy+5), cx, :] = [255, 0, 0]
+            vis_img[cy, max(0, cx-5):min(vis_img.shape[1], cx+5), :] = [255, 0, 0]
+            # Push to viz server
+            roi_uid = f"roi_{volume_uid}_{uuid.uuid4().hex[:6]}"
+            _push_image_to_viz(vis_img, roi_uid, "roi_detection", {
+                "source_uid": volume_uid,
+                "bbox": [int(z_min), int(y_min), int(x_min), int(z_max), int(y_max), int(x_max)],
+                "confidence": float(confidence),
+                "method": method,
+            })
+        except Exception as e:
+            logger.debug(f"ROI visualization failed: {e}")
+
         return {
             "bbox": [int(z_min), int(y_min), int(x_min), int(z_max), int(y_max), int(x_max)],
             "center": [int(c) for c in center],
@@ -218,6 +346,9 @@ def crop_roi(
     if volume is None:
         return {"error": f"Volume {volume_uid} not found in cache"}
 
+    # Ensure volume is 3D
+    volume = _ensure_3d(volume)
+
     z1, y1, x1, z2, y2, x2 = bbox
 
     # Calculate padding in voxels
@@ -244,6 +375,18 @@ def crop_roi(
         "applied_bbox": [z1_pad, y1_pad, x1_pad, z2_pad, y2_pad, x2_pad],
         "padding_percent": padding_percent,
     })
+
+    # Push cropped visualization to viz server
+    try:
+        max_proj = np.max(cropped, axis=0)
+        max_proj = ((max_proj - max_proj.min()) / (max_proj.max() - max_proj.min() + 1e-8) * 255).astype(np.uint8)
+        _push_image_to_viz(max_proj, cropped_uid, "cropped_roi", {
+            "source_uid": volume_uid,
+            "bbox": [z1_pad, y1_pad, x1_pad, z2_pad, y2_pad, x2_pad],
+            "shape": list(cropped.shape),
+        })
+    except Exception as e:
+        logger.debug(f"Crop viz push failed: {e}")
 
     return {
         "cropped_uid": cropped_uid,
@@ -325,6 +468,9 @@ def prepare_for_vision(
 
     if not HAS_PIL:
         return {"error": "PIL not available for image preparation"}
+
+    # Ensure volume is 3D
+    volume = _ensure_3d(volume)
 
     try:
         # Create 2D projection
@@ -413,8 +559,25 @@ def prepare_for_vision(
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
+        # Generate UID and cache the prepared image
+        prepared_uid = f"prepared_{volume_uid}_{uuid.uuid4().hex[:6]}"
+        cache_prepared_image(prepared_uid, image_base64)
+
+        # Push to viz server
+        try:
+            vis_array = np.array(pil_image)
+            _push_image_to_viz(vis_array, prepared_uid, "vision_prepared", {
+                "source_uid": volume_uid,
+                "projection": projection,
+                "scale_bar_um": scale_bar_um,
+                "annotations": list(annotations.keys()) if annotations else [],
+            })
+        except Exception as e:
+            logger.debug(f"Vision prep viz push failed: {e}")
+
+        # Return UID instead of base64 to avoid bloating conversation context
         return {
-            "image_base64": image_base64,
+            "prepared_image_uid": prepared_uid,
             "width": pil_image.width,
             "height": pil_image.height,
             "scale_bar_um": scale_bar_um,
@@ -422,6 +585,7 @@ def prepare_for_vision(
             "scale_um_per_px": scale_um_per_px,
             "projection": projection,
             "annotations_added": list(annotations.keys()) if annotations else [],
+            "note": "Use this prepared_image_uid with claude_vision_analyze or classify_developmental_stage",
         }
 
     except Exception as e:
@@ -494,6 +658,7 @@ def create_timeline_image(
         for uid in volume_uids:
             volume = get_cached_volume(uid)
             if volume is not None:
+                volume = _ensure_3d(volume)
                 proj = np.max(volume, axis=0)
                 # Normalize
                 p_low, p_high = np.percentile(proj, [1, 99])
@@ -577,6 +742,19 @@ def create_timeline_image(
         buffer.seek(0)
         image_base64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
+        # Push to viz server
+        try:
+            vis_array = np.array(canvas)
+            vis_uid = f"timeline_{uuid.uuid4().hex[:8]}"
+            _push_image_to_viz(vis_array, vis_uid, "timeline", {
+                "num_frames": n_frames,
+                "layout": layout,
+                "volume_uids": volume_uids[:5],  # First 5 for metadata
+                "labels": labels[:5] if labels else None,
+            })
+        except Exception as e:
+            logger.debug(f"Timeline viz push failed: {e}")
+
         return {
             "image_base64": image_base64,
             "width": canvas_w,
@@ -636,6 +814,9 @@ def normalize_volume(
     volume = get_cached_volume(volume_uid)
     if volume is None:
         return {"error": f"Volume {volume_uid} not found in cache"}
+
+    # Ensure volume is 3D
+    volume = _ensure_3d(volume)
 
     original_range = [float(volume.min()), float(volume.max())]
 
