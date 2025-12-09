@@ -221,6 +221,20 @@ CV_SUBAGENT = """
 
 For complex computer vision analysis, you have access to a specialized CV subagent via the `cv_analyze` tool.
 
+## IMPORTANT: Volume Required First!
+
+Before using cv_analyze or classify_embryo_stage, you MUST ensure the embryo has a volume acquired
+in this session. If the user asks for cell counting, stage classification, or any analysis:
+
+1. Check if the embryo has been imaged (recent_images exists)
+2. If NOT, acquire a volume first with `acquire_volume`
+3. Then proceed with analysis
+
+Example workflow:
+User: "Count the cells in embryo_3"
+→ First: acquire_volume(embryo_id="embryo_3")  # Get fresh data
+→ Then: cv_analyze(intent="count cells", embryo_id="embryo_3")
+
 ## When to use cv_analyze
 
 Use the CV subagent when you need:
@@ -251,10 +265,10 @@ This gives much more accurate results than just sending an image to vision.
 ## Example usage
 
 User: "How many cells does embryo 1 have?"
-→ Use cv_analyze with intent="count cells and nuclei"
+→ First acquire_volume if needed, then cv_analyze with intent="count cells and nuclei"
 
 User: "What stage is embryo 2?"
-→ If precision matters: cv_analyze intent="classify developmental stage"
+→ If precision matters: acquire_volume then cv_analyze intent="classify developmental stage"
 → If quick check: view the image yourself
 
 User: "Track cell divisions over the last 5 timepoints"

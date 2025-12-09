@@ -173,6 +173,9 @@ class MicroscopyCopilot:
         # Initialize timeline manager (subscribes to event bus)
         self._init_timeline_manager()
 
+        # Subscribe to CV result events for EmbryoState integration
+        self._subscribe_to_cv_events()
+
         # Build initial system prompt
         self._update_system_prompt()
 
@@ -348,6 +351,74 @@ class MicroscopyCopilot:
             logging.getLogger(__name__).warning(f"Failed to init timeline manager: {e}")
             self.timeline_manager = None
 
+    def _subscribe_to_cv_events(self):
+        """
+        Subscribe to CV subagent result events for EmbryoState integration.
+
+        When the CV agent completes analysis, it publishes CV_RESULT_READY events.
+        This handler updates the corresponding EmbryoState with the results,
+        making them accessible via /embryos and persistent across sessions.
+        """
+        try:
+            # Store unsubscribe functions for cleanup
+            self._cv_subscriptions = []
+
+            # Subscribe to CV_RESULT_READY for direct result handling
+            def on_cv_result(event):
+                """Handle CV result ready event"""
+                try:
+                    data = event.data
+                    embryo_id = data.get("embryo_id")
+                    result = data.get("result", {})
+                    result_type = data.get("result_type", "analysis")
+
+                    if embryo_id and embryo_id in self.experiment.embryos:
+                        embryo = self.experiment.embryos[embryo_id]
+
+                        # Extract structured result
+                        structured = result.get("structured", result)
+
+                        # Add to EmbryoState
+                        embryo.add_cv_result(result_type, structured)
+
+                        logger.info(f"Updated {embryo_id} with CV {result_type} result")
+
+                        # Auto-save session
+                        if self.session_manager:
+                            self._save_session_state()
+
+                except Exception as e:
+                    logger.warning(f"Error handling CV result event: {e}")
+
+            unsub = self._event_bus.subscribe(EventType.CV_RESULT_READY, on_cv_result)
+            self._cv_subscriptions.append(unsub)
+
+            # Also subscribe to specific result types for backwards compatibility
+            def on_stage_detected(event):
+                """Handle stage detection event"""
+                try:
+                    data = event.data
+                    embryo_id = data.get("embryo_id")
+                    if embryo_id and embryo_id in self.experiment.embryos:
+                        embryo = self.experiment.embryos[embryo_id]
+                        embryo.add_cv_result("stage_classification", {
+                            "stage": data.get("stage"),
+                            "confidence": data.get("confidence"),
+                            "nuclei_count": data.get("nuclei_count"),
+                            "timepoint": data.get("timepoint"),
+                        })
+                except Exception as e:
+                    logger.warning(f"Error handling stage detected event: {e}")
+
+            unsub = self._event_bus.subscribe(EventType.STAGE_DETECTED, on_stage_detected)
+            self._cv_subscriptions.append(unsub)
+
+            logger.debug("Subscribed to CV result events")
+
+        except Exception as e:
+            logger.warning(f"Failed to subscribe to CV events: {e}")
+            self._cv_subscriptions = []
+
     # ===== Visualization Server Methods =====
 
     async def start_viz_server(self, port: int = 8080):
@@ -375,6 +446,14 @@ class MicroscopyCopilot:
             )
             await self.viz_server.start()
             logger.info(f"Visualization server started at http://localhost:{port}")
+
+            # Wire up CV subagent's segmentation module to push results to viz
+            try:
+                from ..cv_subagent.tools.segmentation import set_viz_server
+                set_viz_server(self.viz_server)
+                logger.info("CV subagent segmentation wired to viz server")
+            except ImportError:
+                logger.debug("CV subagent not available for viz server wiring")
         except ImportError as e:
             logger.warning(f"FastAPI not available for viz server: {e}")
             self.viz_server = None
@@ -385,6 +464,13 @@ class MicroscopyCopilot:
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
         if self.viz_server is not None:
+            # Clear CV subagent segmentation reference
+            try:
+                from ..cv_subagent.tools.segmentation import set_viz_server
+                set_viz_server(None)
+            except ImportError:
+                pass
+
             await self.viz_server.stop()
             self.viz_server = None
             logger.info("Visualization server stopped")

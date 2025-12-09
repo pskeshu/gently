@@ -367,6 +367,65 @@ def publish_cv_task_failed(
     )
 
 
+def publish_cv_result_ready(
+    task_id: str,
+    result_type: str,
+    embryo_id: str,
+    result: Dict[str, Any],
+    timepoint: Optional[int] = None,
+    session_id: Optional[str] = None,
+    correlation_id: Optional[str] = None,
+) -> Event:
+    """
+    Publish CV_RESULT_READY event for event-driven communication with copilot.
+
+    This is the primary mechanism for returning CV analysis results to the copilot.
+    The copilot subscribes to this event and updates EmbryoState when results arrive.
+
+    Parameters
+    ----------
+    task_id : str
+        Associated task ID
+    result_type : str
+        Type of result: "nuclei_count", "stage_classification", "elongation", etc.
+    embryo_id : str
+        Embryo identifier
+    result : dict
+        The structured result data
+    timepoint : int, optional
+        Timepoint analyzed
+    session_id : str, optional
+        Session ID from copilot
+    correlation_id : str, optional
+        Correlation ID for matching request/response
+
+    Returns
+    -------
+    Event
+        The published event
+    """
+    data = {
+        "task_id": task_id,
+        "result_type": result_type,
+        "embryo_id": embryo_id,
+        "result": result,
+    }
+    if timepoint is not None:
+        data["timepoint"] = timepoint
+    if session_id:
+        data["session_id"] = session_id
+    if correlation_id:
+        data["correlation_id"] = correlation_id
+
+    event_bus = get_event_bus()
+    return event_bus.publish(
+        event_type=EventType.CV_RESULT_READY,
+        data=data,
+        source=CV_SOURCE,
+        correlation_id=correlation_id,
+    )
+
+
 def publish_cv_agent_thinking(
     task_id: str,
     thinking: str,

@@ -179,6 +179,23 @@ function handleFullEvent(event) {
     addEventToTable(event);
 }
 
+// Fetch initial events from the API
+async function fetchInitialEvents() {
+    try {
+        const response = await fetch('/api/events?limit=100');
+        const data = await response.json();
+
+        if (data.events && data.events.length > 0) {
+            // Add events in chronological order (oldest first, so newest ends up at top)
+            data.events.reverse().forEach(event => {
+                addEventToTable(event, true);
+            });
+        }
+    } catch (error) {
+        console.error('Failed to fetch initial events:', error);
+    }
+}
+
 // Initialize events tab listeners
 function initEventsTab() {
     // Initialize state
@@ -210,4 +227,7 @@ function initEventsTab() {
     if (clearBtn) {
         clearBtn.addEventListener('click', clearEvents);
     }
+
+    // Fetch initial events from API
+    fetchInitialEvents();
 }

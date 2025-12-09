@@ -4,17 +4,123 @@ CV Subagent Tools
 Tools for delegating computer vision analysis to the CV subagent service.
 The CV subagent receives high-level intent and autonomously determines
 which CV tools to use for C. elegans embryo analysis.
+
+Event-Driven Communication
+--------------------------
+Instead of polling cv_task_status repeatedly, cv_analyze now uses event-driven
+waiting. The CV agent publishes CV_RESULT_READY when analysis completes, and
+the copilot subscribes to receive results automatically.
 """
 
+import asyncio
+import logging
+import uuid
 from typing import Dict, List, Optional
 
 from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import require_copilot, get_embryo_or_error
 
+logger = logging.getLogger(__name__)
+
+# Default timeout for waiting for CV results (seconds)
+CV_RESULT_TIMEOUT = 120.0
+
+
+def _update_embryo_state_from_cv_result(copilot, embryo_id: str, result: Dict):
+    """
+    Update EmbryoState with CV analysis result.
+
+    This is called when CV results arrive via event or direct return.
+    """
+    try:
+        embryo = copilot.experiment.embryos.get(embryo_id)
+        if embryo is None:
+            logger.warning(f"Embryo {embryo_id} not found for CV result update")
+            return
+
+        # Extract structured result
+        structured = result.get("structured", {})
+        result_type = structured.get("result_type", "analysis")
+
+        # Update EmbryoState based on result type
+        if hasattr(embryo, 'add_cv_result'):
+            embryo.add_cv_result(result_type, structured)
+
+        # Update quick-access fields
+        if result_type == "nuclei_count" and "num_nuclei" in structured:
+            if hasattr(embryo, 'latest_nuclei_count'):
+                embryo.latest_nuclei_count = structured["num_nuclei"]
+
+        elif result_type == "stage_classification" and "stage" in structured:
+            if hasattr(embryo, 'latest_developmental_stage'):
+                embryo.latest_developmental_stage = structured["stage"]
+
+        elif result_type == "elongation" and "elongation_ratio" in structured:
+            if hasattr(embryo, 'latest_elongation_ratio'):
+                embryo.latest_elongation_ratio = structured["elongation_ratio"]
+
+        logger.info(f"Updated EmbryoState for {embryo_id} with {result_type} result")
+
+    except Exception as e:
+        logger.warning(f"Failed to update EmbryoState from CV result: {e}")
+
+
+def _format_cv_result(result: Dict) -> str:
+    """Format CV analysis result for display."""
+    lines = []
+
+    # Get structured data if available
+    structured = result.get("structured", {})
+    result_type = structured.get("result_type", "analysis")
+
+    if result_type == "nuclei_count":
+        num_nuclei = structured.get("num_nuclei", "unknown")
+        lines.append(f"Nuclei count: {num_nuclei}")
+
+    elif result_type == "stage_classification":
+        stage = structured.get("stage", "unknown")
+        confidence = structured.get("confidence", "")
+        nuclei_count = structured.get("nuclei_count")
+        lines.append(f"Developmental stage: {stage}")
+        if confidence:
+            lines.append(f"Confidence: {confidence}")
+        if nuclei_count:
+            lines.append(f"Nuclei count: {nuclei_count}")
+
+    elif result_type == "elongation":
+        ratio = structured.get("elongation_ratio", "unknown")
+        hint = structured.get("stage_hint", "")
+        lines.append(f"Elongation ratio: {ratio}")
+        if hint:
+            lines.append(f"Stage hint: {hint}")
+
+    elif result_type == "hatching_detection":
+        hatched = structured.get("hatched", False)
+        confidence = structured.get("confidence", "")
+        lines.append(f"Hatched: {'Yes' if hatched else 'No'}")
+        if confidence:
+            lines.append(f"Confidence: {confidence}")
+
+    # Add summary if available
+    summary = result.get("summary") or structured.get("summary", "")
+    if summary and len(lines) == 0:
+        lines.append(summary[:500])  # Truncate long summaries
+
+    # Add metadata
+    if result.get("processing_time_ms"):
+        lines.append(f"Processing time: {result['processing_time_ms']:.0f}ms")
+    if result.get("tools_used"):
+        lines.append(f"Tools used: {', '.join(result['tools_used'][:5])}")
+
+    return "\n".join(lines) if lines else "Analysis completed"
+
 
 @tool(
     name="cv_analyze",
     description="""Delegate a computer vision analysis task to the CV subagent.
+
+IMPORTANT: This tool requires a volume to have been acquired for the embryo
+in the current session. If no volume exists, acquire one first with acquire_volume.
 
 The CV subagent is an intelligent agent that receives high-level intent
 and autonomously determines which CV tools to use (Cellpose, StarDist,
@@ -35,7 +141,7 @@ The CV agent will:
 5. Use Claude Vision with rich context (scale bars, annotations)
 6. Return synthesized results
 
-This is an async operation - it returns a task_id for tracking.""",
+This tool waits for the CV analysis to complete and returns the result directly.""",
     category=ToolCategory.ANALYSIS,
     examples=[
         ToolExample(
@@ -64,7 +170,7 @@ async def cv_analyze(
     context: Dict = None
 ) -> str:
     """
-    Submit a CV analysis request to the CV subagent
+    Submit a CV analysis request and wait for result via event-driven communication.
 
     Parameters
     ----------
@@ -82,7 +188,7 @@ async def cv_analyze(
     Returns
     -------
     str
-        Task submission result with task_id and execution plan
+        Analysis result (waits for completion)
     """
     copilot, err = require_copilot(context)
     if err:
@@ -92,12 +198,27 @@ async def cv_analyze(
     if err:
         return err
 
+    # Check if embryo has volume data in this session
+    if not embryo.recent_images:
+        return (
+            f"No volume data for {embryo_id} in this session.\n"
+            f"Please acquire a volume first with: acquire_volume {embryo_id}\n"
+            f"Then retry the analysis."
+        )
+
     # Get CV client
     try:
         from gently.cv_client import get_cv_client
         cv_client = get_cv_client()
     except ImportError:
         return "Error: CV client not available. Is cv_client.py installed?"
+
+    # Get event bus for result waiting
+    try:
+        from gently.core.event_bus import get_event_bus, EventType
+        event_bus = get_event_bus()
+    except ImportError:
+        event_bus = None
 
     try:
         # Connect if not already connected
@@ -112,35 +233,86 @@ async def cv_analyze(
             cv_context["current_stage"] = getattr(embryo, "developmental_stage", None)
             cv_context["embryo_name"] = embryo.name if hasattr(embryo, "name") else embryo_id
 
+            # Tell CV agent which timepoint to use (latest from this session)
+            if embryo.recent_images:
+                latest = embryo.recent_images[-1]
+                cv_context["session_timepoint"] = latest.timepoint
+                cv_context["session_id"] = copilot.experiment.session_id if hasattr(copilot.experiment, 'session_id') else None
+
+        # If no specific timepoints requested, use the latest from this session
+        if timepoints is None and embryo.recent_images:
+            timepoints = [embryo.recent_images[-1].timepoint]
+
+        # Set up event-based result waiting
+        result_future = asyncio.get_event_loop().create_future()
+        unsubscribe = None
+
+        if event_bus is not None:
+            def on_cv_result(event):
+                """Handle CV result event"""
+                try:
+                    data = event.data
+                    # Check if this result is for our embryo
+                    if data.get("embryo_id") == embryo_id:
+                        if not result_future.done():
+                            result_future.set_result(data.get("result", data))
+                except Exception as e:
+                    logger.warning(f"Error handling CV result event: {e}")
+
+            # Subscribe to result event
+            unsubscribe = event_bus.subscribe(EventType.CV_RESULT_READY, on_cv_result)
+            logger.debug(f"Subscribed to CV_RESULT_READY for {embryo_id}")
+
         # Submit analysis request
-        result = await cv_client.analyze(
+        submit_result = await cv_client.analyze(
             intent=intent,
             embryo_id=embryo_id,
             timepoints=timepoints,
             context=cv_context,
         )
 
-        # Format response
-        task_id = result.get("task_id", "unknown")
-        status = result.get("status", "unknown")
-        plan = result.get("plan", [])
+        task_id = submit_result.get("task_id", "unknown")
+        logger.info(f"Submitted CV analysis task: {task_id}")
 
-        response_lines = [
-            f"CV analysis task submitted: {task_id}",
-            f"Status: {status}",
-            "",
-            "Execution plan:",
-        ]
-        for step in plan:
-            response_lines.append(f"  {step}")
+        # Wait for result via event
+        if event_bus is not None and unsubscribe is not None:
+            try:
+                result = await asyncio.wait_for(result_future, timeout=CV_RESULT_TIMEOUT)
 
-        response_lines.append("")
-        response_lines.append(f"Use 'cv_task_status {task_id}' to check progress.")
+                # Update EmbryoState with result
+                _update_embryo_state_from_cv_result(copilot, embryo_id, result)
 
-        return "\n".join(response_lines)
+                # Format result for display
+                return _format_cv_result(result)
+
+            except asyncio.TimeoutError:
+                logger.warning(f"CV analysis timed out after {CV_RESULT_TIMEOUT}s")
+                return (
+                    f"CV analysis task {task_id} is still running.\n"
+                    f"The analysis is taking longer than expected.\n"
+                    f"Use 'cv_task_status {task_id}' to check progress."
+                )
+
+            finally:
+                # Unsubscribe from events
+                if unsubscribe:
+                    unsubscribe()
+        else:
+            # Fallback: no event bus, return task submission info
+            plan = submit_result.get("plan", [])
+            response_lines = [
+                f"CV analysis task submitted: {task_id}",
+                "Execution plan:",
+            ]
+            for step in plan:
+                response_lines.append(f"  {step}")
+            response_lines.append("")
+            response_lines.append(f"Use 'cv_task_status {task_id}' to check progress.")
+            return "\n".join(response_lines)
 
     except Exception as e:
-        return f"Error submitting CV analysis: {str(e)}"
+        logger.error(f"CV analysis error: {e}", exc_info=True)
+        return f"Error in CV analysis: {str(e)}"
 
 
 @tool(

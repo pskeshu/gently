@@ -6,8 +6,11 @@ Provides settings for models, GPU, and service configuration.
 
 import os
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 from pathlib import Path
+
+if TYPE_CHECKING:
+    from .context import CVContext
 
 
 @dataclass
@@ -74,8 +77,16 @@ class CVSubagentConfig:
     # Auto-analysis settings
     auto_analysis: AutoAnalysisConfig = field(default_factory=AutoAnalysisConfig)
 
+    # Microscope and organism context (explicit, no guessing)
+    microscope_type: str = "diSPIM"
+    has_dual_view: bool = True
+    view_a_range: tuple = (0, 1024)  # X pixel range for View A
+    organism: str = "c_elegans"
+    expected_cell_diameter_um: float = 5.0  # Typical nucleus diameter
+
     # C. elegans specific settings
-    scale_um_per_px: float = 0.5  # Microscope scale
+    scale_um_per_px: float = 0.406  # Microscope scale (XY)
+    scale_um_per_px_z: float = 1.0  # Z step size
     default_scale_bar_um: float = 10.0
 
     # Cellpose defaults
@@ -104,6 +115,49 @@ class CVSubagentConfig:
             data_store_url=os.environ.get("GENTLY_DATA_STORE_URL"),
             gpu_device=int(os.environ.get("CV_SUBAGENT_GPU_DEVICE", "0")),
             max_concurrent_tasks=int(os.environ.get("CV_SUBAGENT_MAX_CONCURRENT", "2")),
+        )
+
+    def create_context(
+        self,
+        embryo_id: str = None,
+        timepoint: int = None,
+        session_id: str = None,
+        additional_context: Dict = None,
+    ) -> "CVContext":
+        """
+        Create a CVContext from this config.
+
+        Parameters
+        ----------
+        embryo_id : str, optional
+            Embryo ID being analyzed
+        timepoint : int, optional
+            Specific timepoint
+        session_id : str, optional
+            Session ID from copilot
+        additional_context : dict, optional
+            Additional context from copilot
+
+        Returns
+        -------
+        CVContext
+            Context ready for CV tool execution
+        """
+        from .context import CVContext
+
+        return CVContext(
+            microscope_type=self.microscope_type,
+            scale_um_per_px_xy=self.scale_um_per_px,
+            scale_um_per_px_z=self.scale_um_per_px_z,
+            has_dual_view=self.has_dual_view,
+            view_a_range=self.view_a_range,
+            organism=self.organism,
+            expected_cell_diameter_um=self.expected_cell_diameter_um,
+            session_id=session_id,
+            embryo_id=embryo_id,
+            timepoint=timepoint,
+            data_store_url=self.data_store_url,
+            additional_context=additional_context or {},
         )
 
 

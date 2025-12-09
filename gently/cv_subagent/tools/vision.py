@@ -11,8 +11,28 @@ import os
 from typing import Any, Dict, List, Optional
 
 from .registry import cv_tool, ToolCategory, ToolExample
+from .preparation import get_prepared_image
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_image(image_input: str) -> Optional[str]:
+    """Resolve image input to base64 data.
+
+    Accepts either:
+    - A prepared_image_uid (e.g., "prepared_vol_abc_123456")
+    - Direct base64 data
+    """
+    if image_input.startswith("prepared_"):
+        # Look up from cache
+        base64_data = get_prepared_image(image_input)
+        if base64_data is None:
+            logger.error(f"Prepared image {image_input} not found in cache")
+            return None
+        return base64_data
+    else:
+        # Assume it's direct base64
+        return image_input
 
 
 # =============================================================================
@@ -24,6 +44,8 @@ logger = logging.getLogger(__name__)
     description="""Analyze an image using Claude Vision with rich context.
 
 Use this tool AFTER preparing the image with scale bars and annotations.
+Pass the prepared_image_uid from prepare_for_vision.
+
 Provide detailed context in the prompt including:
 - Nuclei count from segmentation
 - Morphology metrics (elongation, circularity)
@@ -33,12 +55,12 @@ Provide detailed context in the prompt including:
 The more quantitative context you provide, the more accurate the analysis.""",
     category=ToolCategory.VISION,
     examples=[
-        ToolExample("Analyze embryo image", {"image_base64": "<base64>", "prompt": "This image shows a C. elegans embryo with 24 nuclei. What developmental stage is this?"}),
-        ToolExample("Check for anomalies", {"image_base64": "<base64>", "prompt": "Check this embryo for any developmental abnormalities. Elongation ratio is 2.1."}),
+        ToolExample("Analyze embryo image", {"image_input": "prepared_vol_abc_123456", "prompt": "This image shows a C. elegans embryo with 24 nuclei. What developmental stage is this?"}),
+        ToolExample("Check for anomalies", {"image_input": "prepared_vol_xyz_789012", "prompt": "Check this embryo for any developmental abnormalities. Elongation ratio is 2.1."}),
     ],
 )
 def claude_vision_analyze(
-    image_base64: str,
+    image_input: str,
     prompt: str,
     include_developmental_context: bool = True,
 ) -> Dict[str, Any]:
@@ -47,8 +69,8 @@ def claude_vision_analyze(
 
     Parameters
     ----------
-    image_base64 : str
-        Base64 encoded image (PNG or JPEG)
+    image_input : str
+        Either a prepared_image_uid from prepare_for_vision, or direct base64 data
     prompt : str
         Analysis prompt with context about what to look for
     include_developmental_context : bool
@@ -61,6 +83,14 @@ def claude_vision_analyze(
         model: Model used
         tokens_used: Approximate tokens used
     """
+    # Resolve image input to base64
+    image_base64 = _resolve_image(image_input)
+    if image_base64 is None:
+        return {
+            "error": f"Could not resolve image: {image_input}",
+            "analysis": None,
+        }
+
     logger.info(f"Running Claude Vision analysis, prompt length={len(prompt)}")
 
     # Get API key
@@ -165,15 +195,16 @@ When analyzing, consider both visual features AND any quantitative data provided
     description="""Classify the developmental stage of a C. elegans embryo.
 
 This is a high-level tool that combines vision analysis with quantitative data.
+Pass the prepared_image_uid from prepare_for_vision.
 Provide nuclei count and morphology metrics for best results.""",
     category=ToolCategory.VISION,
     examples=[
-        ToolExample("Classify stage with cell count", {"image_base64": "<base64>", "nuclei_count": 24, "elongation_ratio": 1.8}),
-        ToolExample("Quick classification without metrics", {"image_base64": "<base64>"}),
+        ToolExample("Classify stage with cell count", {"image_input": "prepared_vol_abc_123456", "nuclei_count": 24, "elongation_ratio": 1.8}),
+        ToolExample("Quick classification without metrics", {"image_input": "prepared_vol_xyz_789012"}),
     ],
 )
 def classify_developmental_stage(
-    image_base64: str,
+    image_input: str,
     nuclei_count: Optional[int] = None,
     elongation_ratio: Optional[float] = None,
     additional_context: Optional[str] = None,
@@ -183,8 +214,8 @@ def classify_developmental_stage(
 
     Parameters
     ----------
-    image_base64 : str
-        Base64 encoded embryo image
+    image_input : str
+        Either a prepared_image_uid from prepare_for_vision, or direct base64 data
     nuclei_count : int, optional
         Number of nuclei detected by segmentation
     elongation_ratio : float, optional
@@ -264,7 +295,7 @@ def classify_developmental_stage(
 
     # Run vision analysis
     result = claude_vision_analyze(
-        image_base64=image_base64,
+        image_input=image_input,
         prompt=prompt,
         include_developmental_context=True,
     )
@@ -302,15 +333,16 @@ def classify_developmental_stage(
     name="detect_visual_anomalies",
     description="""Detect visual anomalies or abnormalities in an embryo image.
 
-Look for developmental defects, unusual morphology, or unexpected features.""",
+Look for developmental defects, unusual morphology, or unexpected features.
+Pass the prepared_image_uid from prepare_for_vision.""",
     category=ToolCategory.VISION,
     examples=[
-        ToolExample("Check for anomalies", {"image_base64": "<base64>", "expected_stage": "gastrula", "expected_nuclei": 200}),
-        ToolExample("General anomaly detection", {"image_base64": "<base64>"}),
+        ToolExample("Check for anomalies", {"image_input": "prepared_vol_abc_123456", "expected_stage": "gastrula", "expected_nuclei": 200}),
+        ToolExample("General anomaly detection", {"image_input": "prepared_vol_xyz_789012"}),
     ],
 )
 def detect_visual_anomalies(
-    image_base64: str,
+    image_input: str,
     expected_stage: Optional[str] = None,
     expected_nuclei: Optional[int] = None,
     comparison_context: Optional[str] = None,
@@ -375,7 +407,7 @@ def detect_visual_anomalies(
     prompt = "\n".join(prompt_parts)
 
     result = claude_vision_analyze(
-        image_base64=image_base64,
+        image_input=image_input,
         prompt=prompt,
         include_developmental_context=True,
     )
@@ -411,15 +443,16 @@ def detect_visual_anomalies(
     name="compare_timepoints",
     description="""Compare embryo images across multiple timepoints.
 
-Useful for tracking developmental progression and detecting changes.""",
+Useful for tracking developmental progression and detecting changes.
+Pass the prepared_image_uid from create_timeline_image.""",
     category=ToolCategory.VISION,
     examples=[
-        ToolExample("Track development progression", {"timeline_image_base64": "<base64>", "timepoint_labels": ["t=0", "t=1", "t=2"], "focus_aspect": "progression"}),
-        ToolExample("Focus on cell divisions", {"timeline_image_base64": "<base64>", "nuclei_counts": [4, 6, 8, 12], "focus_aspect": "divisions"}),
+        ToolExample("Track development progression", {"timeline_image_input": "prepared_timeline_123456", "timepoint_labels": ["t=0", "t=1", "t=2"], "focus_aspect": "progression"}),
+        ToolExample("Focus on cell divisions", {"timeline_image_input": "prepared_timeline_789012", "nuclei_counts": [4, 6, 8, 12], "focus_aspect": "divisions"}),
     ],
 )
 def compare_timepoints(
-    timeline_image_base64: str,
+    timeline_image_input: str,
     timepoint_labels: Optional[List[str]] = None,
     nuclei_counts: Optional[List[int]] = None,
     focus_aspect: str = "progression",
@@ -498,7 +531,7 @@ def compare_timepoints(
     prompt = "\n".join(prompt_parts)
 
     result = claude_vision_analyze(
-        image_base64=timeline_image_base64,
+        image_input=timeline_image_input,
         prompt=prompt,
         include_developmental_context=True,
     )

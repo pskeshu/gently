@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .config import CVSubagentConfig, CELEGANS_STAGES
 from .tasks.task_queue import TaskQueue, TaskPriority, CVTask
-from .events import publish_cv_agent_thinking
+from .events import publish_cv_agent_thinking, publish_cv_result_ready, publish_cv_task_completed
 from .cli_display import CVAgentDisplay
 
 logger = logging.getLogger(__name__)
@@ -78,17 +78,47 @@ class CVAgent:
 
     SYSTEM_PROMPT = """You are a computer vision agent specialized in C. elegans embryo analysis.
 
+IMPORTANT CONTEXT: You are analyzing diSPIM (dual-view SPIM) images of C. elegans embryos.
+The microscope type and organism are configured - do NOT try to infer them from image dimensions.
+
 Your job is to:
 1. UNDERSTAND the intent (classify, track, detect anomaly, etc.)
-2. PLAN which tools to use and in what order
-3. ENRICH CONTEXT before using Claude Vision:
-   - Frame ROI properly around the embryo
-   - Get quantitative metrics (nuclei count, morphology)
-   - Add scale bars and annotations to images
-   - Provide numerical context in vision prompts
-4. SYNTHESIZE results from multiple tools into a final answer
+2. CHOOSE the right tool approach:
+   - For SIMPLE queries (count cells, classify stage), use ATOMIC TOOLS directly
+   - For COMPLEX analysis (multi-timepoint, custom workflows), use primitive tools
+3. ENRICH CONTEXT before using Claude Vision (for complex workflows only)
+4. SYNTHESIZE results into a clear, concise answer
 
-## Available Tools
+## Atomic Tools (Use for Simple Queries!)
+
+For common analysis tasks, use these single-purpose atomic tools that handle everything:
+
+- count_nuclei: Count nuclei at a timepoint
+  Parameters: embryo_id (str), timepoint (int, optional)
+  Returns: num_nuclei, mask_uid
+  USE FOR: "how many cells?", "count nuclei", "cell count"
+
+- classify_stage: Determine developmental stage
+  Parameters: embryo_id (str), timepoint (int, optional)
+  Returns: stage, confidence, nuclei_count, elongation_ratio
+  USE FOR: "what stage?", "classify stage", "developmental stage"
+
+- measure_elongation: Measure embryo elongation ratio
+  Parameters: embryo_id (str), timepoint (int, optional)
+  Returns: elongation_ratio, stage_hint, major_axis, minor_axis
+  USE FOR: "how elongated?", "measure elongation"
+
+- segment_nuclei: Run segmentation and return mask UID
+  Parameters: embryo_id (str), timepoint (int, optional)
+  Returns: mask_uid, num_cells, cells (centroids)
+  USE FOR: "segment nuclei", "run segmentation"
+
+- detect_hatching: Check if embryo has hatched
+  Parameters: embryo_id (str), timepoint (int, optional)
+  Returns: hatched (bool), confidence, indicators
+  USE FOR: "has it hatched?", "detect hatching"
+
+## Primitive Tools (For Complex Workflows)
 
 ### Embryo Discovery
 - list_embryos: List all embryos in the data store
@@ -718,7 +748,107 @@ When you have gathered enough information, provide a final summary.
             tools_used=list(set(tools_used)),
             iterations=iteration,
         )
+
+        # Publish CV_RESULT_READY event for event-driven communication with copilot
+        # Extract structured data from result for EmbryoState integration
+        structured_result = self._extract_structured_result(result, tools_used)
+        if structured_result:
+            result["structured"] = structured_result
+
+        # Publish completion event with structured result
+        publish_cv_result_ready(
+            task_id=result["task_id"],
+            result_type=structured_result.get("result_type", "analysis") if structured_result else "analysis",
+            embryo_id=embryo_id,
+            result=result,
+            timepoint=timepoints[0] if timepoints else context.get("session_timepoint"),
+            session_id=context.get("session_id") if context else None,
+        )
+
+        # Also publish CV_TASK_COMPLETED for backwards compatibility
+        publish_cv_task_completed(
+            task_id=result["task_id"],
+            result=result,
+            embryo_id=embryo_id,
+        )
+
         return result
+
+    def _extract_structured_result(
+        self,
+        result: Dict[str, Any],
+        tools_used: List[str],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract structured data from analysis result for EmbryoState integration.
+
+        Parses the summary text and tool outputs to extract key metrics
+        like nuclei count, stage classification, elongation, etc.
+
+        Parameters
+        ----------
+        result : dict
+            Full analysis result
+        tools_used : list
+            Tools that were called during analysis
+
+        Returns
+        -------
+        dict or None
+            Structured result with extracted fields, or None if extraction fails
+        """
+        import re
+
+        summary = result.get("summary", "")
+        structured = {}
+
+        # Determine result type based on intent and tools used
+        intent = result.get("intent", "").lower()
+
+        if "count" in intent or "nuclei" in intent or "count_nuclei" in tools_used:
+            structured["result_type"] = "nuclei_count"
+
+            # Try to extract nuclei count from summary
+            count_match = re.search(r'(\d+)\s*(?:nuclei|cells?|cell)', summary, re.IGNORECASE)
+            if count_match:
+                structured["num_nuclei"] = int(count_match.group(1))
+
+        elif "stage" in intent or "classify" in intent or "classify_stage" in tools_used:
+            structured["result_type"] = "stage_classification"
+
+            # Try to extract stage from summary
+            for stage in CELEGANS_STAGES.keys():
+                if stage.lower() in summary.lower():
+                    structured["stage"] = stage
+                    break
+
+            # Extract nuclei count if mentioned
+            count_match = re.search(r'(\d+)\s*(?:nuclei|cells?)', summary, re.IGNORECASE)
+            if count_match:
+                structured["nuclei_count"] = int(count_match.group(1))
+
+        elif "elongation" in intent or "measure_elongation" in tools_used:
+            structured["result_type"] = "elongation"
+
+            # Try to extract elongation ratio
+            ratio_match = re.search(r'elongation[:\s]*(\d+\.?\d*)', summary, re.IGNORECASE)
+            if ratio_match:
+                structured["elongation_ratio"] = float(ratio_match.group(1))
+
+        elif "hatch" in intent or "detect_hatching" in tools_used:
+            structured["result_type"] = "hatching_detection"
+
+            # Try to determine hatching status
+            structured["hatched"] = "hatched" in summary.lower() and "not hatched" not in summary.lower()
+
+        else:
+            # Generic analysis result
+            structured["result_type"] = "analysis"
+
+        # Add summary as text
+        structured["summary"] = summary
+
+        return structured if structured.get("result_type") else None
 
     async def analyze_immediate(
         self,

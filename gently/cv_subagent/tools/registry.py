@@ -316,10 +316,30 @@ class CVToolRegistry:
         self.data_store_url = data_store_url
         self.config = config
 
+        # Current context for tool execution (set per-request)
+        self._current_context: Optional[Any] = None
+
         self._tools: Dict[str, ToolDefinition] = {}
 
         # Register built-in tools
         self._register_builtin_tools()
+
+    def set_context(self, context: "CVContext"):
+        """
+        Set the current CVContext for tool execution.
+
+        This context is injected into tools that have a 'context' parameter.
+
+        Parameters
+        ----------
+        context : CVContext
+            The context to inject into tools
+        """
+        self._current_context = context
+
+    def get_context(self) -> Optional["CVContext"]:
+        """Get the current CVContext."""
+        return self._current_context
 
     def register(self, tool_def: ToolDefinition):
         """Register a tool"""
@@ -394,7 +414,7 @@ class CVToolRegistry:
 
         return schemas
 
-    async def execute(self, name: str, **kwargs) -> Any:
+    async def execute(self, name: str, context: Optional[Any] = None, **kwargs) -> Any:
         """
         Execute a tool by name.
 
@@ -402,6 +422,9 @@ class CVToolRegistry:
         ----------
         name : str
             Tool name
+        context : CVContext, optional
+            Context to inject into the tool. If not provided, uses the registry's
+            current context (set via set_context).
         **kwargs
             Tool arguments
 
@@ -415,6 +438,14 @@ class CVToolRegistry:
             raise ValueError(f"Unknown tool: {name}")
 
         logger.info(f"Executing tool: {name}")
+
+        # Determine which context to use
+        effective_context = context or self._current_context
+
+        # Check if the tool function accepts a 'context' parameter
+        sig = inspect.signature(tool.function)
+        if 'context' in sig.parameters and effective_context is not None:
+            kwargs['context'] = effective_context
 
         # Execute the tool function
         result = tool.function(**kwargs)
@@ -437,6 +468,13 @@ class CVToolRegistry:
             from . import tracking
 
             modules = [data_access, preparation, vision, segmentation, morphology, tracking]
+
+            # Also try to import atomic tools (new task-oriented tools)
+            try:
+                from . import atomic
+                modules.append(atomic)
+            except ImportError:
+                logger.debug("Atomic tools module not yet available")
 
             for module in modules:
                 self._register_module_tools(module)

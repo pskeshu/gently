@@ -259,6 +259,16 @@ class EmbryoState:
     # detector_name -> list of detection results
     # e.g., {"comma_stage": [{"timepoint": 120, "detected": False, "confidence": "HIGH"}, ...]}
 
+    # CV Subagent analysis results (populated from CV_RESULT_READY events)
+    cv_analyses: Dict[str, List[Dict]] = field(default_factory=dict)
+    # result_type -> list of results by timepoint
+    # e.g., {"nuclei_count": [{"timepoint": 5, "num_nuclei": 66, ...}]}
+
+    # Quick-access fields for latest CV results (for /embryos display)
+    latest_nuclei_count: Optional[int] = None
+    latest_developmental_stage: Optional[str] = None
+    latest_elongation_ratio: Optional[float] = None
+
     # Images (recent for context)
     recent_images: List[ImageRecord] = field(default_factory=list)
     # Keep last 10 for temporal context in Claude Vision calls
@@ -554,6 +564,88 @@ class EmbryoState:
             return False
 
         return any(r.get('detected', False) for r in self.detection_results[detector_name])
+
+    def add_cv_result(self, result_type: str, result: Dict):
+        """
+        Add CV analysis result from CV subagent.
+
+        Parameters
+        ----------
+        result_type : str
+            Type of result: "nuclei_count", "stage_classification", "elongation", etc.
+        result : dict
+            Analysis result data
+        """
+        if result_type not in self.cv_analyses:
+            self.cv_analyses[result_type] = []
+
+        # Add timestamp if not present
+        if 'timestamp' not in result:
+            result['timestamp'] = datetime.now().isoformat()
+
+        self.cv_analyses[result_type].append(result)
+
+        # Update quick-access fields
+        if result_type == "nuclei_count" and "num_nuclei" in result:
+            self.latest_nuclei_count = result["num_nuclei"]
+        elif result_type == "stage_classification" and "stage" in result:
+            self.latest_developmental_stage = result["stage"]
+        elif result_type == "elongation" and "elongation_ratio" in result:
+            self.latest_elongation_ratio = result["elongation_ratio"]
+
+    def get_cv_result(
+        self,
+        result_type: str,
+        timepoint: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Get CV analysis result, optionally filtered by timepoint.
+
+        Parameters
+        ----------
+        result_type : str
+            Type of result to retrieve
+        timepoint : int, optional
+            Specific timepoint, or latest if None
+
+        Returns
+        -------
+        dict or None
+            Result data, or None if not found
+        """
+        if result_type not in self.cv_analyses:
+            return None
+
+        results = self.cv_analyses[result_type]
+        if not results:
+            return None
+
+        if timepoint is not None:
+            # Filter by timepoint
+            matching = [r for r in results if r.get("timepoint") == timepoint]
+            return matching[-1] if matching else None
+
+        # Return most recent
+        return results[-1]
+
+    def get_cv_summary(self) -> Dict:
+        """
+        Get summary of CV analysis results for display.
+
+        Returns
+        -------
+        dict
+            Summary with latest values and counts
+        """
+        return {
+            "nuclei_count": self.latest_nuclei_count,
+            "developmental_stage": self.latest_developmental_stage,
+            "elongation_ratio": self.latest_elongation_ratio,
+            "analyses_count": {
+                result_type: len(results)
+                for result_type, results in self.cv_analyses.items()
+            },
+        }
 
     def update_from_analysis(self, analysis_result: Dict):
         """Update state with new analysis"""

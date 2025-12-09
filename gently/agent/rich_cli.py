@@ -24,6 +24,7 @@ from rich.text import Text
 from rich.markdown import Markdown
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
 from rich.syntax import Syntax
+from rich.prompt import Prompt
 from rich import box
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import FileHistory

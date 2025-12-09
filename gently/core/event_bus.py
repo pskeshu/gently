@@ -61,6 +61,13 @@ class EventType(Enum):
     CV_TASK_FAILED = auto()
     CV_AGENT_THINKING = auto()  # Streamed thinking blocks from CV agent
 
+    # CV Atomic tool result events (for event-driven communication)
+    CV_RESULT_READY = auto()  # Generic result ready event
+    CV_NUCLEI_COUNTED = auto()
+    CV_STAGE_CLASSIFIED = auto()
+    CV_ELONGATION_MEASURED = auto()
+    CV_HATCHING_DETECTED = auto()
+
     # Hardware events
     STAGE_MOVED = auto()
     FOCUS_CHANGED = auto()
@@ -343,20 +350,30 @@ class EventBus:
         if not handlers:
             return
 
-        # Try to get or create event loop
+        # Try to get running loop (if we're in async context)
+        running_loop = None
         try:
-            loop = asyncio.get_running_loop()
+            running_loop = asyncio.get_running_loop()
         except RuntimeError:
-            # No running loop, try to use cached one
-            loop = self._event_loop
-            if loop is None or loop.is_closed():
-                return  # Can't dispatch async without a loop
+            pass
+
+        # Use running loop if available, otherwise fall back to cached loop
+        loop = running_loop or self._event_loop
+        if loop is None or loop.is_closed():
+            return  # Can't dispatch async without a loop
 
         for handler in handlers:
             try:
                 coro = handler(event)
                 if asyncio.iscoroutine(coro):
-                    asyncio.ensure_future(coro, loop=loop)
+                    if running_loop is not None:
+                        # We're in an async context, can use ensure_future directly
+                        asyncio.ensure_future(coro, loop=loop)
+                    else:
+                        # We're in sync context, need to schedule thread-safely
+                        loop.call_soon_threadsafe(
+                            lambda c=coro: asyncio.ensure_future(c, loop=loop)
+                        )
             except Exception as e:
                 logger.error(f"Async handler error for {event}: {e}")
 
