@@ -224,6 +224,26 @@ class MicroscopyCopilot:
             self.cache_read_tokens += getattr(usage, 'cache_read_input_tokens', 0)
 
     @property
+    def current_context_tokens(self) -> int:
+        """Estimate current context window size in tokens (what Claude sees per call)"""
+        import json
+
+        # System prompt
+        system_tokens = len(self.system_prompt) // 4 if self.system_prompt else 0
+
+        # Tool schemas (roughly constant)
+        tool_tokens = 10000  # ~10K tokens for 65 tools
+
+        # Conversation history
+        conv_chars = sum(
+            len(json.dumps(msg.get('content', '')))
+            for msg in self.conversation_history
+        )
+        conv_tokens = conv_chars // 4
+
+        return system_tokens + tool_tokens + conv_tokens
+
+    @property
     def token_usage_summary(self) -> str:
         """Get human-readable token usage summary"""
         # Note: input_tokens is SEPARATE from cache tokens (per Anthropic API)

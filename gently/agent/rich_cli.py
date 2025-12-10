@@ -154,30 +154,31 @@ class RichCopilotCLI:
 
         parts = []
 
-        # Token usage with cache-aware cost calculation
-        # Note: input_tokens is SEPARATE from cache tokens (not inclusive)
+        # Context size (what Claude sees per call) and cost
+        context_tokens = getattr(self.copilot, 'current_context_tokens', 0)
+
+        # Cost calculation from cumulative tokens
         cache_read = getattr(self.copilot, 'cache_read_tokens', 0)
         cache_created = getattr(self.copilot, 'cache_creation_tokens', 0)
-        input_tokens = self.copilot.total_input_tokens  # Non-cached input
+        input_tokens = self.copilot.total_input_tokens
         output_tokens = self.copilot.total_output_tokens
 
-        # Total tokens = input + cache_read + cache_created + output
-        total_tokens = input_tokens + cache_read + cache_created + output_tokens
-
-        if total_tokens > 0:
+        if input_tokens > 0 or output_tokens > 0:
             # Sonnet pricing: input $3/M, output $15/M, cache_read $0.30/M, cache_write $6/M (1h TTL)
             input_cost = input_tokens * 0.003 / 1000
-            cache_read_cost = cache_read * 0.0003 / 1000  # 90% cheaper
-            cache_write_cost = cache_created * 0.006 / 1000  # 2x for 1-hour TTL
+            cache_read_cost = cache_read * 0.0003 / 1000
+            cache_write_cost = cache_created * 0.006 / 1000
             output_cost = output_tokens * 0.015 / 1000
             cost = input_cost + cache_read_cost + cache_write_cost + output_cost
 
+            # Show context size and cost
+            context_k = context_tokens / 1000
             if cache_read > 0:
-                parts.append(f"<b>Tokens:</b> {total_tokens:,} (${cost:.3f}) <style fg='green'>⚡cached</style>")
+                parts.append(f"<b>Context:</b> {context_k:.1f}K (${cost:.3f}) <style fg='green'>⚡</style>")
             else:
-                parts.append(f"<b>Tokens:</b> {total_tokens:,} (${cost:.3f})")
+                parts.append(f"<b>Context:</b> {context_k:.1f}K (${cost:.3f})")
         else:
-            parts.append("<b>Tokens:</b> 0")
+            parts.append("<b>Context:</b> 0")
 
         # Session ID (truncated)
         session_id = self.copilot.session_id or "none"
@@ -1625,7 +1626,31 @@ class RichCopilotCLI:
             # Show token usage for session
             theme = get_theme()
             self.console.print(f"\n[bold {theme.primary}]Token Usage[/]")
-            self.console.print(f"  {self.copilot.token_usage_summary}\n")
+
+            # Current context size
+            context_tokens = self.copilot.current_context_tokens
+            self.console.print(f"  [bold]Current context:[/] {context_tokens:,} tokens (~{context_tokens/1000:.1f}K)")
+
+            # Cumulative usage breakdown
+            cache_read = self.copilot.cache_read_tokens
+            cache_created = self.copilot.cache_creation_tokens
+            total_input = self.copilot.total_input_tokens + cache_read + cache_created
+            total_output = self.copilot.total_output_tokens
+            total_cumulative = total_input + total_output
+
+            self.console.print(f"  [bold]Cumulative (billed):[/] {total_cumulative:,} tokens")
+            self.console.print(f"    Input: {total_input:,} (cached: {cache_read:,})")
+            self.console.print(f"    Output: {total_output:,}")
+            self.console.print(f"    API calls: {self.copilot.api_call_count}")
+
+            # Cost
+            input_cost = self.copilot.total_input_tokens * 0.003 / 1000
+            cache_read_cost = cache_read * 0.0003 / 1000
+            cache_write_cost = cache_created * 0.006 / 1000
+            output_cost = total_output * 0.015 / 1000
+            total_cost = input_cost + cache_read_cost + cache_write_cost + output_cost
+            self.console.print(f"  [bold]Est. cost:[/] ${total_cost:.3f}\n")
+
             return False  # Handled, continue loop
 
         elif cmd.startswith('/resume'):
