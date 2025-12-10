@@ -332,7 +332,7 @@ class RichCopilotCLI:
             status_lines = []
 
             # Microscope connection status
-            has_hardware = self.copilot._has_hardware() if hasattr(self.copilot, '_has_hardware') else False
+            has_hardware = self.copilot.client and self.copilot.client.is_connected
             devices = getattr(self.copilot, 'devices', {}) or {}
 
             if has_hardware:
@@ -358,7 +358,7 @@ class RichCopilotCLI:
             status_lines.append(Text(f"Session: ", style=theme.muted) + Text(session_id, style=theme.info))
 
             # Experiment status
-            status = experiment.status.value if hasattr(experiment, 'status') else 'unknown'
+            status = experiment.acquisition_status or 'idle'
             status_color = {
                 'running': theme.success,
                 'idle': theme.info,
@@ -379,16 +379,21 @@ class RichCopilotCLI:
             total_detectors = len(all_detectors)
             status_lines.append(Text(f"Detectors: {enabled_detectors}/{total_detectors}", style=theme.info))
 
-            # Last imaging time
+            # Last imaging time - find most recent across all embryos
             last_imaging = "Never"
+            most_recent = None
             for embryo in experiment.embryos.values():
-                if hasattr(embryo, 'last_imaging_time') and embryo.last_imaging_time:
-                    elapsed = (datetime.now() - embryo.last_imaging_time).total_seconds()
-                    if elapsed < 60:
-                        last_imaging = f"{int(elapsed)}s ago"
-                    else:
-                        last_imaging = f"{int(elapsed / 60)}m ago"
-                    break
+                if embryo.last_imaged:
+                    if most_recent is None or embryo.last_imaged > most_recent:
+                        most_recent = embryo.last_imaged
+            if most_recent:
+                elapsed = (datetime.now() - most_recent).total_seconds()
+                if elapsed < 60:
+                    last_imaging = f"{int(elapsed)}s ago"
+                elif elapsed < 3600:
+                    last_imaging = f"{int(elapsed / 60)}m ago"
+                else:
+                    last_imaging = f"{elapsed / 3600:.1f}h ago"
 
             status_lines.append(Text(f"Last image: {last_imaging}", style=theme.muted))
 
