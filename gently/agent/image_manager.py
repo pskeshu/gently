@@ -260,8 +260,9 @@ class ImageManager:
         """
         embryo_id = embryo_state.id
 
-        # Save full volume to disk
-        volume_filename = f"{embryo_id}_t{timepoint:04d}.tif"
+        # Save full volume to disk with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        volume_filename = f"{embryo_id}_{timestamp}.tif"
         volume_path = self.storage_path / volume_filename
         tifffile.imwrite(str(volume_path), volume, compression='zlib')
 

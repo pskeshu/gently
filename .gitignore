@@ -139,6 +139,14 @@ nul
 # Video environments
 venv_video/
 
+# CV environment
+venv_cv/
+
+# Test/debug directories
+camera_captures/
+centering_debug/
+centering_error.json
+
 # Large binary data (don't track)
 dispim_data/
 animated_video/

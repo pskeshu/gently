@@ -1,0 +1,37 @@
+# CV Agent Requirements
+# Compatible with numpy 1.24.0 for pymmcore
+
+# Core - pinned for pymmcore compatibility
+numpy==1.24.0
+scipy==1.10.1
+
+# Deep learning segmentation
+torch>=2.0.0
+cellpose>=3.0.0
+stardist>=0.8.5
+tensorflow>=2.10.0  # required by stardist
+
+# Image processing
+scikit-image>=0.21.0
+pillow>=10.0.0
+tifffile>=2023.0.0
+
+# AI/LLM
+anthropic>=0.39.0
+
+# Web framework (for agent API)
+fastapi>=0.104.0
+uvicorn>=0.24.0
+websockets>=12.0
+python-multipart>=0.0.6
+aiohttp>=3.9.0
+
+# Template engine
+jinja2>=3.1.0
+
+# CLI interface
+rich>=13.7.0
+prompt-toolkit>=3.0.43
+
+# Optional: napari for visualization
+# napari>=0.4.18
