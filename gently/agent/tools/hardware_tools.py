@@ -223,7 +223,7 @@ async def _adaptive_focus_sweep(
     MIN_R_SQUARED = 0.75
 
     # Get adaptive range from prior
-    sparse_range = session_prior.get_reduced_sweep_range(base_range_um=20.0)
+    sparse_range = session_prior.get_reduced_sweep_range(base_range_um=5.0)
 
     print(f"\n  === ADAPTIVE {galvo_name.upper()} FOCUS SWEEP at galvo={galvo_pos:.3f}° ===")
     print(f"  Using adaptive range: ±{sparse_range:.1f}µm (prior: {session_prior.num_calibrations} calibrations)")
