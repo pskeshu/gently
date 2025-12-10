@@ -219,7 +219,7 @@ class EmbryoState:
     detection_confidence: float = 0.0  # SAM/detection confidence score (0-1)
 
     # Acquisition Parameters (current)
-    interval_seconds: float = 120
+    interval_seconds: Optional[float] = None  # Per-embryo interval; None = use timelapse default
     num_slices: int = 50
     exposure_ms: float = 10.0
     priority: str = "normal"  # high/normal/low

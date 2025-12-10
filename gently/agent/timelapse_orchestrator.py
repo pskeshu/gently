@@ -285,9 +285,11 @@ class TimelapseOrchestrator:
         self._embryo_states = {}
         for eid in embryo_ids:
             embryo = self.experiment.embryos[eid]
+            # Use per-embryo interval if explicitly set, otherwise use timelapse default
+            effective_interval = embryo.interval_seconds if embryo.interval_seconds is not None else base_interval_seconds
             self._embryo_states[eid] = EmbryoAcquisitionState(
                 embryo_id=eid,
-                interval_seconds=embryo.interval_seconds or base_interval_seconds,
+                interval_seconds=effective_interval,
                 stop_condition=stop_cond,
                 timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
                 last_acquired=embryo.last_imaged,  # Preserve last acquisition time
@@ -673,9 +675,15 @@ class TimelapseOrchestrator:
             else:
                 stop_cond = StopCondition.manual()
 
-        # Determine interval
+        # Determine interval: use passed value, then per-embryo setting, then match existing timelapse
         if interval_seconds is None:
-            interval_seconds = embryo.interval_seconds or 120.0
+            if embryo.interval_seconds is not None:
+                interval_seconds = embryo.interval_seconds
+            elif self._embryo_states:
+                # Match interval of existing embryos in timelapse
+                interval_seconds = next(iter(self._embryo_states.values())).interval_seconds
+            else:
+                interval_seconds = 120.0
 
         # Add new embryo state
         self._embryo_states[embryo_id] = EmbryoAcquisitionState(

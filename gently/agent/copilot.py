@@ -561,7 +561,7 @@ class MicroscopyCopilot:
             # Restore additional embryo state
             embryo = self.experiment.embryos[embryo_id]
             embryo.nickname = embryo_data.get('nickname')
-            embryo.interval_seconds = embryo_data.get('interval_seconds', 120)
+            embryo.interval_seconds = embryo_data.get('interval_seconds')  # None = use timelapse default
             embryo.num_slices = embryo_data.get('num_slices', 50)
             embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
             embryo.priority = embryo_data.get('priority', 'normal')
@@ -1421,7 +1421,7 @@ class MicroscopyCopilot:
                 # Restore additional state
                 embryo = self.experiment.embryos[embryo_id]
                 embryo.nickname = embryo_data.get('nickname')
-                embryo.interval_seconds = embryo_data.get('interval_seconds', 120)
+                embryo.interval_seconds = embryo_data.get('interval_seconds')  # None = use timelapse default
                 embryo.num_slices = embryo_data.get('num_slices', 50)
                 embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
                 embryo.priority = embryo_data.get('priority', 'normal')
