@@ -109,7 +109,7 @@ class MicroscopyCopilot:
             registry=self.detector_registry,
             image_manager=self.image_manager,
             claude_client=self.claude,
-            model=self.model,
+            model="claude-sonnet-4-5-20250929",  # Use Sonnet for faster/cheaper detection
             on_detection_callback=self._on_detection_fired,
             on_evaluation_callback=self._on_detection_evaluated
         )
@@ -1712,15 +1712,21 @@ Write a brief status summary. Examples:
         # Push to viz server
         if self.viz_server and volume is not None:
             try:
-                max_proj = np.max(volume, axis=0)
+                # Select View A if 4D (Views, Z, Y, X)
+                vol = volume[0] if volume.ndim == 4 else volume
+                max_proj = np.max(vol, axis=0)
+                # Use proper UID from DataStore, fallback to constructed if None
+                viz_uid = record.projection_uid or f"volume_{embryo_id}_t{timepoint:04d}"
                 self.push_viz(
                     array=max_proj,
-                    uid=f"volume_{embryo_id}_t{timepoint:04d}",
+                    uid=viz_uid,
                     data_type="volume_projection",
                     metadata={
                         'embryo_id': embryo_id,
                         'timepoint': timepoint,
                         'shape': list(volume.shape),
+                        'projection_uid': record.projection_uid,
+                        'volume_uid': record.volume_uid,
                     }
                 )
             except Exception as e:
@@ -1835,17 +1841,24 @@ Write a brief status summary. Examples:
         """
         Callback for every detector evaluation (regardless of detected=True/False)
 
-        Emits DETECTION_TRIGGERED event with full reasoning for visualization.
+        Emits DETECTOR_EVALUATED event with full reasoning for visualization.
         """
-        # Get projection_uid from most recent image (this is what viz server stores)
+        # Look up the actual UID from the embryo's recent images
         volume_uid = None
-        if embryo_state.recent_images:
-            latest_img = embryo_state.recent_images[-1]
-            # Prefer projection_uid (max projection), fallback to volume_uid
-            volume_uid = getattr(latest_img, 'projection_uid', None) or getattr(latest_img, 'volume_uid', None)
+        projection_uid = None
+        if result.timepoint is not None and embryo_state.recent_images:
+            # Find the ImageRecord for this timepoint
+            for img_record in embryo_state.recent_images:
+                if img_record.timepoint == result.timepoint:
+                    volume_uid = img_record.volume_uid
+                    projection_uid = img_record.projection_uid
+                    break
+            # Fallback to constructed if not found (shouldn't happen)
+            if projection_uid is None:
+                projection_uid = f"volume_{embryo_id}_t{result.timepoint:04d}"
 
         # Emit event for ALL evaluations (this populates the reasoning panel)
-        self._emit_event(EventType.DETECTION_TRIGGERED, {
+        self._emit_event(EventType.DETECTOR_EVALUATED, {
             'detector_name': detector.name,
             'embryo_id': embryo_id,
             'detected': result.detected,
@@ -1853,6 +1866,7 @@ Write a brief status summary. Examples:
             'timepoint': result.timepoint,
             'reasoning': result.reasoning,
             'volume_uid': volume_uid,
+            'projection_uid': projection_uid,
         })
 
     async def _on_detection_fired(self, detector, embryo_id: str, result):
@@ -1875,8 +1889,14 @@ Write a brief status summary. Examples:
         if not embryo:
             return
 
-        # Note: DETECTION_TRIGGERED is already emitted by _on_detection_evaluated for ALL evaluations
-        # This callback handles actions for positive detections only
+        # Emit DETECTION_TRIGGERED for positive detections (detected=True)
+        # Note: DETECTOR_EVALUATED is emitted by _on_detection_evaluated for ALL evaluations
+        self._emit_event(EventType.DETECTION_TRIGGERED, {
+            'detector_name': detector.name,
+            'embryo_id': embryo_id,
+            'confidence': result.confidence.value if result.confidence else None,
+            'timepoint': result.timepoint,
+        })
 
         # Emit specific event for hatching detection
         if detector.name == 'hatching' and result.detected:

@@ -66,6 +66,32 @@ function handleMessage(msg) {
             event_id: msg.event_id || ''
         });
 
+        // Route timelapse/task events to TasksManager
+        if (typeof TasksManager !== 'undefined') {
+            if (msg.event_type === 'ACQUISITION_STARTED') {
+                TasksManager.handleAcquisitionStarted(msg.data);
+            } else if (msg.event_type === 'ACQUISITION_COMPLETED') {
+                TasksManager.handleAcquisitionCompleted(msg.data);
+            } else if (msg.event_type === 'VOLUME_ACQUIRED') {
+                TasksManager.handleVolumeAcquired(msg.data);
+            } else if (msg.event_type === 'DETECTOR_EVALUATED') {
+                // All detector evaluations (with reasoning) - for reasoning panel
+                TasksManager.handleDetectorEvaluated(msg.data);
+            } else if (msg.event_type === 'DETECTION_TRIGGERED') {
+                // Positive detection - update embryo status
+                TasksManager.handleDetectionTriggered(msg.data);
+            } else if (msg.event_type === 'STATUS_CHANGED') {
+                TasksManager.handleStatusChanged(msg.data);
+            } else if (msg.event_type === 'HATCHING_DETECTED') {
+                // Hatching is a positive detection
+                TasksManager.handleDetectionTriggered({
+                    embryo_id: msg.data.embryo_id,
+                    detector_name: 'hatching',
+                    ...msg.data
+                });
+            }
+        }
+
         // Format CV events nicely for sidebar log
         let eventMsg;
         if (msg.event_type === 'CV_AGENT_THINKING') {
@@ -78,10 +104,20 @@ function handleMessage(msg) {
             eventMsg = `${msg.data.intent} done in ${(msg.data.processing_time_ms/1000).toFixed(1)}s`;
         } else if (msg.event_type === 'CV_TASK_FAILED') {
             eventMsg = `${msg.data.intent} failed: ${msg.data.error?.slice(0, 30) || 'unknown'}`;
+        } else if (msg.event_type === 'ACQUISITION_STARTED') {
+            const embryoCount = msg.data.embryo_ids?.length || 0;
+            eventMsg = `Timelapse started with ${embryoCount} embryo${embryoCount !== 1 ? 's' : ''}`;
+        } else if (msg.event_type === 'ACQUISITION_COMPLETED') {
+            eventMsg = 'Timelapse completed';
         } else {
             eventMsg = JSON.stringify(msg.data).slice(0, 50);
         }
         logEvent(msg.event_type, eventMsg);
+    } else if (msg.type === 'timelapse_state') {
+        // Server sending authoritative timelapse state on connect
+        if (typeof TasksManager !== 'undefined') {
+            TasksManager.reconcileWithServerState(msg.data);
+        }
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
     }

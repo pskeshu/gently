@@ -301,6 +301,126 @@ class ImageStore:
         }
 
 
+class TimelapseStateTracker:
+    """
+    Tracks timelapse state from events for client synchronization.
+
+    Maintains state from EventBus events so new WebSocket clients
+    can receive current timelapse status on connect.
+    """
+
+    def __init__(self):
+        self.status = "IDLE"  # IDLE, RUNNING, PAUSED, COMPLETED
+        self.started_at: Optional[str] = None
+        self.embryos: Dict[str, dict] = {}  # embryo_id -> state
+        self.total_timepoints = 0
+        self.base_interval = 120
+        self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
+
+    def handle_event(self, event_type: str, data: dict):
+        """Update state based on incoming event"""
+        if event_type == "ACQUISITION_STARTED":
+            self.status = "RUNNING"
+            self.started_at = datetime.now().isoformat()
+            self.base_interval = data.get("interval_seconds", 120)
+            self.embryos = {}
+            self.detection_reasoning = {}
+            self.total_timepoints = 0
+            for eid in data.get("embryo_ids", []):
+                self.embryos[eid] = {
+                    "embryo_id": eid,
+                    "stop_condition": data.get("stop_condition", "manual"),
+                    "interval_seconds": self.base_interval,
+                    "timepoints": 0,
+                    "is_complete": False,
+                    "last_acquired": None,
+                    "detections": {}
+                }
+                self.detection_reasoning[eid] = []
+
+        elif event_type == "VOLUME_ACQUIRED":
+            eid = data.get("embryo_id")
+            if eid:
+                # Create embryo if not exists (late join)
+                if eid not in self.embryos:
+                    self.embryos[eid] = {
+                        "embryo_id": eid,
+                        "stop_condition": "unknown",
+                        "interval_seconds": self.base_interval,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "last_acquired": None,
+                        "detections": {}
+                    }
+                    self.detection_reasoning[eid] = []
+                    if self.status == "IDLE":
+                        self.status = "RUNNING"
+                        self.started_at = datetime.now().isoformat()
+
+                self.embryos[eid]["timepoints"] = data.get("timepoint", 0) + 1
+                self.embryos[eid]["last_acquired"] = datetime.now().isoformat()
+                self.total_timepoints += 1
+
+        elif event_type == "ACQUISITION_COMPLETED":
+            self.status = "COMPLETED"
+            for embryo in self.embryos.values():
+                embryo["is_complete"] = True
+
+        elif event_type == "DETECTOR_EVALUATED":
+            # All detector evaluations (with reasoning) - populates reasoning panel
+            eid = data.get("embryo_id")
+            if eid:
+                detection = {
+                    "detector_name": data.get("detector_name", "unknown"),
+                    "detected": data.get("detected", False),
+                    "confidence": data.get("confidence"),
+                    "reasoning": data.get("reasoning"),
+                    "timepoint": data.get("timepoint"),
+                    "volume_uid": data.get("volume_uid"),
+                    "projection_uid": data.get("projection_uid"),
+                    "timestamp": datetime.now().isoformat()
+                }
+                if eid not in self.detection_reasoning:
+                    self.detection_reasoning[eid] = []
+                self.detection_reasoning[eid].append(detection)
+
+        elif event_type in ("DETECTION_TRIGGERED", "HATCHING_DETECTED"):
+            # Positive detection events - update embryo status
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                detector_name = data.get("detector_name", "unknown")
+                self.embryos[eid]["detections"][detector_name] = {
+                    "detected": True,
+                    "confidence": data.get("confidence")
+                }
+                if detector_name == "hatching":
+                    self.embryos[eid]["is_complete"] = True
+
+        elif event_type == "STATUS_CHANGED":
+            if data.get("status"):
+                self.status = data["status"]
+            # Handle interval changes
+            if data.get("embryo_id") and data.get("new_interval_seconds"):
+                eid = data["embryo_id"]
+                if eid in self.embryos:
+                    self.embryos[eid]["interval_seconds"] = data["new_interval_seconds"]
+
+    def to_dict(self) -> dict:
+        """Serialize for WebSocket transmission"""
+        return {
+            "status": self.status,
+            "started_at": self.started_at,
+            "embryos": self.embryos,
+            "total_timepoints": self.total_timepoints,
+            "base_interval": self.base_interval,
+            "detection_reasoning": self.detection_reasoning
+        }
+
+    def reset(self):
+        """Clear state for new timelapse"""
+        self.__init__()
+
+
 class ConnectionManager:
     """Manages WebSocket connections for broadcasting updates"""
 
@@ -403,6 +523,9 @@ class VisualizationServer:
 
         # Organized image storage
         self.store = ImageStore(max_per_category=50)
+
+        # Timelapse state tracker for client sync
+        self.timelapse_tracker = TimelapseStateTracker()
 
         # Create FastAPI app
         self.app = FastAPI(
@@ -663,6 +786,14 @@ class VisualizationServer:
                     "timestamp": datetime.now().isoformat()
                 })
 
+                # Send current timelapse state if active
+                timelapse_state = self.timelapse_tracker.to_dict()
+                if timelapse_state["status"] != "IDLE" or timelapse_state["embryos"]:
+                    await websocket.send_json({
+                        "type": "timelapse_state",
+                        "data": timelapse_state
+                    })
+
                 # Keep connection alive and handle incoming messages
                 while True:
                     try:
@@ -747,8 +878,14 @@ class VisualizationServer:
 
         async def on_event_async(event):
             """Async handler for all events - broadcasts to WebSocket clients"""
+            event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
+
+            # Update timelapse state tracker
+            self.timelapse_tracker.handle_event(event_type_str, event.data)
+
+            # Broadcast to all clients
             await self.manager.send_event(
-                event_type=event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type),
+                event_type=event_type_str,
                 data=event.data,
                 source=event.source,
                 event_id=event.event_id
@@ -767,6 +904,10 @@ class VisualizationServer:
         metadata: Optional[Dict] = None
     ) -> ImageData:
         """Convert numpy array to ImageData with base64 PNG"""
+
+        # Handle 4D arrays (Views, Z, Y, X) - select View A only
+        if array.ndim == 4:
+            array = array[0]  # View A
 
         # Handle 3D arrays - distinguish RGB images from volumes
         if array.ndim == 3:

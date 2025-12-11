@@ -1246,8 +1246,12 @@ async def acquire_volume(
             # Push max projection to viz server
             if copilot.viz_server and volume is not None:
                 try:
-                    # Create max intensity projection
-                    max_proj = np.max(volume, axis=0)
+                    # Create max intensity projection (View A only)
+                    vol = volume
+                    # If 4D (Views, Z, Y, X), select View A (index 0)
+                    if vol.ndim == 4:
+                        vol = vol[0]  # View A
+                    max_proj = np.max(vol, axis=0)
                     copilot.push_viz(
                         array=max_proj,
                         uid=f"volume_{embryo_id}_t{timepoint:04d}",

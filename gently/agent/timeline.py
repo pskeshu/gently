@@ -164,11 +164,17 @@ EVENT_MAPPING = {
         'icon': 'x',
         'severity': 'error',
     },
+    EventType.DETECTOR_EVALUATED: {
+        'event_type': 'detection',
+        'event_subtype': 'evaluated',
+        'icon': '?',
+        'severity': 'info',
+    },
     EventType.DETECTION_TRIGGERED: {
         'event_type': 'detection',
         'event_subtype': 'triggered',
-        'icon': '>',
-        'severity': 'info',
+        'icon': '!',
+        'severity': 'success',
     },
     EventType.HATCHING_DETECTED: {
         'event_type': 'detection',

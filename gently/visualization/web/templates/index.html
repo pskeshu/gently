@@ -56,6 +56,10 @@
             Events
             <span class="tab-badge" id="events-count">0</span>
         </div>
+        <div class="tab" data-tab="tasks">
+            Tasks
+            <span class="tab-badge" id="tasks-count">0</span>
+        </div>
     </div>
 
     <!-- Main Tab -->
@@ -201,6 +205,42 @@
         </div>
     </div>
 
+    <!-- Tasks Tab -->
+    <div id="tasks-content" class="tab-content">
+        <div class="tasks-container">
+            <div class="tasks-header">
+                <h2 class="tasks-title">Active Tasks</h2>
+                <div class="timelapse-status" id="timelapse-status">
+                    <span class="status-indicator" id="timelapse-indicator"></span>
+                    <span class="status-text" id="timelapse-status-text">No active timelapse</span>
+                    <span class="timelapse-duration" id="timelapse-duration"></span>
+                </div>
+            </div>
+
+            <div class="tasks-summary" id="tasks-summary">
+                <!-- Summary rendered dynamically -->
+            </div>
+
+            <div class="tasks-body">
+                <!-- Left sidebar: Embryo list (~25%) -->
+                <div class="embryo-list" id="embryo-list">
+                    <div class="embryo-list-header">Embryos</div>
+                    <div class="embryo-cards" id="embryo-cards">
+                        <div class="empty-state" id="tasks-empty">No active timelapse tasks</div>
+                    </div>
+                </div>
+
+                <!-- Right panel: Reasoning detail (~75%) -->
+                <div class="reasoning-panel" id="reasoning-panel">
+                    <div class="reasoning-empty">
+                        <div class="reasoning-empty-icon">&#x1F50D;</div>
+                        <div class="reasoning-empty-text">Select an embryo to view detection history</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Lightbox Modal -->
     <div id="lightbox-overlay" class="lightbox-overlay">
         <div class="lightbox-container">
@@ -249,6 +289,7 @@
     <script src="/static/js/viewer.js"></script>
     <script src="/static/js/gallery.js"></script>
     <script src="/static/js/events.js"></script>
+    <script src="/static/js/tasks.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

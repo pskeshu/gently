@@ -47,7 +47,8 @@ class EventType(Enum):
     # Analysis events
     ANALYSIS_STARTED = auto()
     ANALYSIS_COMPLETED = auto()
-    DETECTION_TRIGGERED = auto()
+    DETECTOR_EVALUATED = auto()   # Emitted for every detector run (all evaluations)
+    DETECTION_TRIGGERED = auto()  # Emitted only when detected=True (positive detection)
     HATCHING_DETECTED = auto()
 
     # CV Subagent events

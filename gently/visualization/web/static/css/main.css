@@ -1566,3 +1566,746 @@ kbd {
     min-width: 1.5rem;
     text-align: center;
 }
+
+/* ========================================
+   TASKS TAB - Timelapse Tracking
+   ======================================== */
+
+.tasks-container {
+    padding: 1.5rem;
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.tasks-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.tasks-title {
+    margin: 0;
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+/* Timelapse Status Badge */
+.timelapse-status {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1rem;
+    background: var(--bg-card);
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    font-size: 0.9rem;
+}
+
+.timelapse-status .status-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.timelapse-status.running .status-indicator {
+    background: var(--accent-green);
+    box-shadow: 0 0 8px var(--accent-green);
+    animation: statusPulse 2s ease-in-out infinite;
+}
+
+.timelapse-status.paused .status-indicator {
+    background: var(--accent-orange);
+}
+
+.timelapse-status.completed .status-indicator {
+    background: var(--accent-green);
+}
+
+.timelapse-status .status-text {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.timelapse-status .timelapse-duration {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+@keyframes statusPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(1.1); }
+}
+
+/* Tasks Summary Bar */
+.tasks-summary {
+    display: flex;
+    gap: 1.5rem;
+    padding: 1rem 1.25rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+}
+
+.tasks-summary.hidden {
+    display: none;
+}
+
+.summary-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.summary-stat .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-stat .stat-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+/* Embryo Cards Grid */
+.embryo-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 1rem;
+}
+
+.embryo-cards .empty-state {
+    grid-column: 1 / -1;
+}
+
+/* Individual Embryo Card */
+.embryo-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.25rem;
+    transition: all 0.2s ease;
+}
+
+.embryo-card:hover {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-glow);
+}
+
+.embryo-card.running {
+    border-left: 3px solid var(--accent-green);
+}
+
+.embryo-card.paused {
+    border-left: 3px solid var(--accent-orange);
+}
+
+.embryo-card.complete {
+    border-left: 3px solid var(--accent-green);
+    opacity: 0.8;
+}
+
+.embryo-card.error {
+    border-left: 3px solid #f85149;
+}
+
+/* Embryo Card Header */
+.embryo-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+}
+
+.embryo-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.embryo-status {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.25rem 0.6rem;
+    border-radius: 12px;
+    background: var(--bg-hover);
+}
+
+.embryo-status.running {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+}
+
+.embryo-status.paused {
+    background: rgba(251, 146, 60, 0.15);
+    color: var(--accent-orange);
+}
+
+.embryo-status.complete {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+}
+
+.embryo-status.error {
+    background: rgba(248, 81, 73, 0.15);
+    color: #f85149;
+}
+
+.embryo-status-icon {
+    font-size: 0.9rem;
+}
+
+/* Stop Condition Display */
+.stop-condition {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+    background: var(--bg-hover);
+    border-radius: 8px;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.condition-icon {
+    font-size: 1rem;
+}
+
+.condition-text {
+    color: var(--text);
+}
+
+/* Progress Section */
+.progress-section {
+    margin-bottom: 1rem;
+}
+
+.progress-bar {
+    height: 8px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 0.5rem;
+}
+
+.progress-fill {
+    height: 100%;
+    background: var(--gradient-primary);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+}
+
+.embryo-card.complete .progress-fill {
+    background: var(--accent-green);
+}
+
+.progress-stats {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.progress-stats .timepoints {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Next Acquisition Countdown */
+.next-acquisition {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    padding: 0.75rem;
+    background: var(--bg-dark);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.next-label {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.next-countdown {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+.interval-info {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+/* Detection Status */
+.detection-status {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    font-size: 0.8rem;
+}
+
+.detector-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+}
+
+.detector-item.detected {
+    color: var(--accent-green);
+}
+
+.detector-item .detector-icon {
+    font-size: 0.9rem;
+}
+
+/* Completion Info */
+.completion-info {
+    padding: 0.75rem;
+    background: rgba(74, 222, 128, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+}
+
+.completion-reason {
+    font-size: 0.85rem;
+    color: var(--accent-green);
+    font-weight: 500;
+    margin-bottom: 0.25rem;
+}
+
+.completion-duration {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Error display */
+.error-info {
+    padding: 0.75rem;
+    background: rgba(248, 81, 73, 0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(248, 81, 73, 0.2);
+}
+
+.error-message {
+    font-size: 0.85rem;
+    color: #f85149;
+}
+
+/* ========================================
+   TASKS TAB - Master-Detail Layout
+   ======================================== */
+
+.tasks-body {
+    display: flex;
+    gap: 1.5rem;
+    flex: 1;
+    min-height: 0;  /* Important for flex children to shrink */
+    overflow: hidden;
+}
+
+/* Left Sidebar - Embryo List */
+.embryo-list {
+    width: 380px;
+    min-width: 320px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.embryo-list-header {
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border);
+}
+
+.embryo-list .embryo-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.embryo-list .empty-state {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+/* Sidebar Embryo Card Styles */
+.embryo-card.sidebar-card {
+    margin: 0.5rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.embryo-card.sidebar-card:hover {
+    transform: translateX(2px);
+}
+
+.embryo-card.sidebar-card.selected {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent), var(--shadow-glow);
+}
+
+.embryo-header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+
+.reasoning-count {
+    background: var(--accent);
+    color: white;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.2rem 0.5rem;
+    border-radius: 10px;
+    min-width: 20px;
+    text-align: center;
+}
+
+/* Countdown in sidebar cards */
+.mini-countdown {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--accent);
+    font-variant-numeric: tabular-nums;
+}
+
+/* Right Panel - Reasoning Detail */
+.reasoning-panel {
+    flex: 1;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.reasoning-empty {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    color: var(--text-muted);
+}
+
+.reasoning-empty-icon {
+    font-size: 3rem;
+    opacity: 0.5;
+}
+
+.reasoning-empty-text {
+    font-size: 0.95rem;
+}
+
+.reasoning-header {
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-hover);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.reasoning-embryo-info {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.reasoning-status-dot {
+    font-size: 0.9rem;
+}
+
+.reasoning-status-dot.running { color: var(--accent-green); }
+.reasoning-status-dot.complete { color: var(--accent-green); }
+.reasoning-status-dot.error { color: #f85149; }
+
+.reasoning-embryo-name {
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.reasoning-condition {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    background: var(--bg-dark);
+    padding: 0.25rem 0.6rem;
+    border-radius: 12px;
+}
+
+.reasoning-stats {
+    display: flex;
+    gap: 1rem;
+}
+
+.reasoning-stats .stat {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.reasoning-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.no-detections {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    text-align: center;
+    padding: 2rem;
+}
+
+.no-detections-icon {
+    font-size: 2.5rem;
+    opacity: 0.5;
+}
+
+.no-detections-text {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+}
+
+.no-detections-hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+/* Detection Card in Reasoning Panel */
+.detection-card {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem;
+    transition: all 0.2s ease;
+}
+
+.detection-card:hover {
+    border-color: var(--border-light);
+}
+
+.detection-card.detected {
+    border-left: 3px solid var(--accent-green);
+}
+
+.detection-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.detection-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.detector-badge {
+    background: var(--accent);
+    color: white;
+    padding: 0.2rem 0.5rem;
+    border-radius: 5px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: capitalize;
+}
+
+.detection-result {
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+}
+
+.detection-result.positive {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+}
+
+.detection-result.negative {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.confidence-badge {
+    font-size: 0.7rem;
+    font-weight: 500;
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+    text-transform: uppercase;
+}
+
+.confidence-badge.high {
+    background: rgba(74, 222, 128, 0.2);
+    color: var(--accent-green);
+}
+
+.confidence-badge.medium {
+    background: rgba(251, 146, 60, 0.2);
+    color: var(--accent-orange);
+}
+
+.confidence-badge.low {
+    background: rgba(248, 81, 73, 0.2);
+    color: #f85149;
+}
+
+.detection-timing {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.timepoint-badge {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--accent);
+    background: rgba(139, 92, 246, 0.1);
+    padding: 0.15rem 0.4rem;
+    border-radius: 4px;
+}
+
+.detection-time {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.detection-reasoning-text {
+    font-size: 0.85rem;
+    line-height: 1.5;
+    color: var(--text);
+    background: var(--bg-card);
+    padding: 0.75rem;
+    border-radius: 6px;
+    margin-top: 0.5rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Collapsible Image Section */
+.detection-image-section {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+}
+
+.toggle-image-btn {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.75rem;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.toggle-image-btn:hover {
+    background: var(--bg-card);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.toggle-icon {
+    font-size: 0.65rem;
+    transition: transform 0.2s ease;
+}
+
+.detection-image-container {
+    max-height: 0;
+    overflow: hidden;
+    transition: max-height 0.3s ease;
+}
+
+.detection-image-container.expanded {
+    max-height: 400px;
+    margin-top: 0.75rem;
+}
+
+.detection-image {
+    max-width: 100%;
+    height: auto;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    display: block;
+}
+
+/* Responsive adjustments for tasks */
+@media (max-width: 1200px) {
+    .embryo-list {
+        width: 320px;
+        min-width: 280px;
+    }
+}
+
+@media (max-width: 900px) {
+    .tasks-body {
+        flex-direction: column;
+    }
+
+    .embryo-list {
+        width: 100%;
+        max-height: 300px;
+    }
+
+    .reasoning-panel {
+        min-height: 400px;
+    }
+}

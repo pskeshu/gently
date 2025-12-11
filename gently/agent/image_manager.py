@@ -72,6 +72,11 @@ def extract_view_a_and_max_project(volume: np.ndarray) -> np.ndarray:
             logger.warning(f"Volume squeezed to 1D, reshaped to {volume.shape}")
         return volume
 
+    # If 4D (Views, Z, Y, X), select View A (index 0)
+    if volume.ndim == 4:
+        logger.debug(f"4D volume detected, selecting View A from shape {volume.shape}")
+        volume = volume[0]  # View A
+
     # For diSPIM, View A is typically the full volume
     # Create max projection along Z axis (axis 0)
     max_proj = np.max(volume, axis=0)

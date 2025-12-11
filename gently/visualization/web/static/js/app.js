@@ -128,6 +128,7 @@ const KeyboardShortcuts = {
         '2': () => switchTab('volumes'),
         '3': () => switchTab('calibration'),
         '4': () => switchTab('events'),
+        '5': () => switchTab('tasks'),
         'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
@@ -183,6 +184,7 @@ const KeyboardShortcuts = {
                             <div class="shortcut"><kbd>2</kbd> Volumes tab</div>
                             <div class="shortcut"><kbd>3</kbd> Calibration tab</div>
                             <div class="shortcut"><kbd>4</kbd> Events tab</div>
+                            <div class="shortcut"><kbd>5</kbd> Tasks tab</div>
                         </div>
                         <div class="shortcut-group">
                             <h4>3D Volume</h4>
