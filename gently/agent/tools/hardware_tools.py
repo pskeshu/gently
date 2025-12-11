@@ -603,7 +603,7 @@ async def calibrate_embryo(
     edge_step: float = 0.05,
     edge_max_range: float = 0.5,
     inset_fraction: float = 0.4,
-    z_buffer_um: float = 15.0,
+    z_buffer_um: float = 25.0,
     context: Dict = None
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection"""
@@ -1111,7 +1111,7 @@ Default is 15µm.""",
 async def calibrate_all_embryos(
     embryo_ids: List[str] = None,
     skip_edge_detection: bool = False,
-    z_buffer_um: float = 15.0,
+    z_buffer_um: float = 25.0,
     context: Dict = None
 ) -> str:
     """Calibrate all embryos sequentially with Claude vision"""
