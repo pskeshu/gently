@@ -212,7 +212,7 @@ A: Depends on usage. Typical session:
 **Q: Can I use a different model?**
 A: Yes! Change the `model` parameter:
 ```python
-copilot = MicroscopyCopilot(model="claude-haiku-3-5-20241022")  # Cheaper, faster
+copilot = MicroscopyCopilot(model="claude-haiku-4-5-20251001")  # Cheaper, faster
 ```
 
 **Q: Does this work offline?**

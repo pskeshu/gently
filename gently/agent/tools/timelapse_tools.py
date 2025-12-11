@@ -303,6 +303,78 @@ async def resume_timelapse(context: Dict = None) -> str:
 
 
 @tool(
+    name="add_stop_condition",
+    description="Add an additional stop condition to a running timelapse (OR logic). E.g., add 'hatching' condition to a timelapse running with a duration limit.",
+    category=ToolCategory.EXPERIMENT,
+)
+def add_stop_condition(
+    embryo_id: str,
+    condition: str,
+    context: Dict = None
+) -> str:
+    """
+    Add an additional stop condition to an embryo in a running timelapse.
+
+    The new condition is added with OR logic - the embryo will stop when
+    ANY condition is met (the original OR the new one).
+
+    Parameters
+    ----------
+    embryo_id : str
+        ID of the embryo to modify
+    condition : str
+        Stop condition to add. Supported formats:
+        - "hatching" - stop when hatching detected
+        - "comma" or "comma_stage" - stop at comma stage
+        - "duration:10" or "duration:10h" - stop after 10 hours
+        - "timepoints:100" - stop after 100 timepoints
+
+    Examples
+    --------
+    - Timelapse started with "duration:10h", add hatching detection:
+      add_stop_condition(embryo_id="embryo1", condition="hatching")
+      Result: Embryo stops on hatching OR 10h, whichever comes first
+
+    Returns
+    -------
+    str
+        Confirmation message with new stop condition description
+    """
+    copilot, err = require_copilot(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(copilot)
+    if err:
+        return "No timelapse running."
+
+    # Parse the new condition
+    from ..timelapse_orchestrator import StopCondition
+
+    try:
+        new_condition = StopCondition.parse(condition)
+    except ValueError as e:
+        return f"Invalid stop condition: {e}"
+
+    # Find the embryo state in the orchestrator
+    embryo_state = orchestrator._embryo_states.get(embryo_id)
+    if not embryo_state:
+        available = list(orchestrator._embryo_states.keys())
+        return f"Embryo '{embryo_id}' not found in timelapse. Available: {available}"
+
+    # Add the condition
+    embryo_state.stop_condition.add_condition(new_condition)
+
+    # Get updated description
+    new_desc = embryo_state.stop_condition.describe()
+
+    return (
+        f"Added stop condition '{condition}' to {embryo_id}\n"
+        f"Stop conditions: {new_desc}"
+    )
+
+
+@tool(
     name="add_interval_speedup_rule",
     description="Add a rule to automatically speed up imaging when a detector fires (e.g., 'speed up to 30s when pretzel stage detected')",
     category=ToolCategory.EXPERIMENT,

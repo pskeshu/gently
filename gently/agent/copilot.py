@@ -30,6 +30,7 @@ from .prompts import build_system_prompt, build_context_message
 from .tool_registry import get_tool_registry
 from .detector_registry import DetectorRegistry
 from .detection_queue import DetectionQueue
+from .detection_verifier import DetectionVerifier
 from .interaction_logger import InteractionLogger
 from .timelapse_orchestrator import TimelapseOrchestrator
 from .timeline import TimelineManager
@@ -112,6 +113,12 @@ class MicroscopyCopilot:
             on_detection_callback=self._on_detection_fired
         )
 
+        # Detection verifier (challenger agent for AUTO mode)
+        self.detection_verifier = DetectionVerifier(
+            claude_client=self.claude,
+            model="claude-haiku-4-5-20251001"  # Use Haiku for speed/cost
+        )
+
         # Session management
         self.session_manager = SessionManager(
             sessions_dir=self.storage_path / "sessions",
@@ -151,6 +158,11 @@ class MicroscopyCopilot:
         self.cache_creation_tokens: int = 0  # Tokens written to cache
         self.cache_read_tokens: int = 0  # Tokens read from cache (90% cheaper)
 
+        # Context summary caching (for state awareness)
+        self._context_summary_cache: Optional[str] = None
+        self._context_summary_time: Optional[datetime] = None
+        self._context_summary_ttl: int = 300  # 5 minutes
+
         # Initialize or resume session
         if session_id:
             self.resume_session(session_id)
@@ -179,8 +191,16 @@ class MicroscopyCopilot:
         # Build initial system prompt
         self._update_system_prompt()
 
-    def _update_system_prompt(self):
-        """Rebuild system prompt with current experiment state and connection status"""
+    def _update_system_prompt(self, context_summary: str = None):
+        """
+        Rebuild system prompt with current experiment state and connection status.
+
+        Parameters
+        ----------
+        context_summary : str, optional
+            AI-generated context summary for session awareness.
+            If None, no context section is included in the prompt.
+        """
         # Build connection status
         if self.client:
             connection_status = {
@@ -191,7 +211,164 @@ class MicroscopyCopilot:
         else:
             connection_status = None  # Offline mode
 
-        self.system_prompt = build_system_prompt(self.experiment, connection_status)
+        self.system_prompt = build_system_prompt(
+            self.experiment, connection_status, context_summary
+        )
+
+    def _gather_context_data(self) -> dict:
+        """
+        Gather raw context data for summarization.
+
+        Collects timelapse status, recent events, and detection results
+        to provide situational awareness to the LLM.
+
+        Returns
+        -------
+        dict
+            Context data including timelapse status, events, and detections
+        """
+        import json
+        data = {
+            'current_time': datetime.now().isoformat(),
+            'timelapse_status': None,
+            'recent_events': [],
+            'recent_detections': [],
+            'detection_reasoning': [],  # Include vision API reasoning
+        }
+
+        # Timelapse status
+        if self.timelapse_orchestrator:
+            try:
+                status = self.timelapse_orchestrator.get_status()
+                # get_status() returns TimelapseState object, not dict
+                data['timelapse_status'] = {
+                    'state': status.status.value if status.status else 'unknown',
+                    'total_timepoints': status.total_timepoints or 0,
+                    'started_at': status.started_at.isoformat() if status.started_at else None,
+                    'embryo_count': len(status.embryos) if status.embryos else 0,
+                }
+            except Exception as e:
+                logger.debug(f"Could not get timelapse status: {e}")
+
+        # Recent timeline events (last 20)
+        if self.timeline_manager:
+            try:
+                events = self.timeline_manager.get_events(limit=20, session_id='current')
+                data['recent_events'] = [
+                    {
+                        'type': e.event_subtype,
+                        'time': e.timestamp.isoformat(),
+                        'embryo': e.embryo_id,
+                        'detector': e.detector_name,
+                        'timepoint': e.timepoint,
+                        'confidence': e.confidence,
+                    }
+                    for e in events
+                ]
+            except Exception as e:
+                logger.debug(f"Could not get timeline events: {e}")
+
+        # Recent detection results with reasoning (from embryo states)
+        try:
+            for embryo_id, embryo_state in self.experiment.embryos.items():
+                if not hasattr(embryo_state, 'detection_results'):
+                    continue
+                for detector_name, results in embryo_state.detection_results.items():
+                    # Get last 3 results per detector
+                    recent_results = results[-3:] if len(results) > 3 else results
+                    for r in recent_results:
+                        if r.get('detected'):
+                            data['recent_detections'].append({
+                                'detector': detector_name,
+                                'embryo': embryo_id,
+                                'timepoint': r.get('timepoint'),
+                                'confidence': r.get('confidence'),
+                            })
+                            # Include reasoning if available
+                            if r.get('reasoning'):
+                                data['detection_reasoning'].append({
+                                    'detector': detector_name,
+                                    'embryo': embryo_id,
+                                    'timepoint': r.get('timepoint'),
+                                    'reasoning': r.get('reasoning')[:500],  # Truncate long reasoning
+                                })
+        except Exception as e:
+            logger.debug(f"Could not get detection results: {e}")
+
+        return data
+
+    async def _generate_context_summary(self) -> str:
+        """
+        Generate concise context summary using Haiku.
+
+        Calls Claude Haiku to summarize raw context data into
+        a brief, actionable summary for the main LLM.
+
+        Returns
+        -------
+        str
+            Brief context summary (2-3 sentences)
+        """
+        import json
+        raw_data = self._gather_context_data()
+
+        # Skip if nothing interesting
+        has_timelapse = raw_data['timelapse_status'] is not None
+        has_events = len(raw_data['recent_events']) > 0
+        has_detections = len(raw_data['recent_detections']) > 0
+
+        if not (has_timelapse or has_events or has_detections):
+            return ""
+
+        prompt = f"""Summarize the current microscopy session state in 2-3 sentences for another AI assistant.
+Focus on: timelapse status (is it running, completed, or idle?), time since last activity, and notable detections.
+Be factual and concise.
+
+Raw session data:
+{json.dumps(raw_data, indent=2, default=str)}
+
+Write a brief status summary. Examples:
+- "Timelapse completed 10h ago with 233 timepoints. Hatching was detected at timepoints 175-193 with HIGH confidence."
+- "Timelapse is currently running for embryo_1 at timepoint 45. No detections yet."
+- "No active timelapse. Last session had 50 timepoints, with comma stage detected at t=30."
+"""
+
+        try:
+            response = await asyncio.to_thread(
+                self.claude.messages.create,
+                model="claude-haiku-4-5-20251001",
+                max_tokens=150,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.content[0].text.strip()
+        except Exception as e:
+            logger.warning(f"Failed to generate context summary: {e}")
+            return ""
+
+    async def _get_cached_context_summary(self) -> str:
+        """
+        Get context summary with caching.
+
+        Caches the context summary for 5 minutes to avoid
+        excessive API calls during rapid interactions.
+
+        Returns
+        -------
+        str
+            Cached or newly generated context summary
+        """
+        now = datetime.now()
+        if (self._context_summary_cache is None or
+            self._context_summary_time is None or
+            (now - self._context_summary_time).total_seconds() > self._context_summary_ttl):
+            self._context_summary_cache = await self._generate_context_summary()
+            self._context_summary_time = now
+        return self._context_summary_cache
+
+    def invalidate_context_cache(self):
+        """Invalidate the context summary cache to force regeneration."""
+        self._context_summary_cache = None
+        self._context_summary_time = None
 
     def _get_cached_system_prompt(self):
         """Get system prompt formatted for Anthropic prompt caching.
@@ -226,19 +403,34 @@ class MicroscopyCopilot:
     @property
     def current_context_tokens(self) -> int:
         """Estimate current context window size in tokens (what Claude sees per call)"""
-        import json
-
         # System prompt
         system_tokens = len(self.system_prompt) // 4 if self.system_prompt else 0
 
         # Tool schemas (roughly constant)
         tool_tokens = 10000  # ~10K tokens for 65 tools
 
-        # Conversation history
-        conv_chars = sum(
-            len(json.dumps(msg.get('content', '')))
-            for msg in self.conversation_history
-        )
+        # Conversation history - handle various content types safely
+        conv_chars = 0
+        for msg in self.conversation_history:
+            content = msg.get('content', '')
+            if isinstance(content, str):
+                conv_chars += len(content)
+            elif isinstance(content, list):
+                # Content can be a list of content blocks
+                for block in content:
+                    if isinstance(block, dict):
+                        # Text block or other dict-based content
+                        conv_chars += len(str(block.get('text', '')))
+                    elif hasattr(block, 'text'):
+                        # Anthropic SDK content block (TextBlock, etc.)
+                        conv_chars += len(str(block.text))
+                    else:
+                        # Fallback: estimate from string repr
+                        conv_chars += len(str(block))
+            else:
+                # Fallback for other types
+                conv_chars += len(str(content))
+
         conv_tokens = conv_chars // 4
 
         return system_tokens + tool_tokens + conv_tokens
@@ -752,8 +944,9 @@ class MicroscopyCopilot:
             yield {'type': 'text', 'text': quick_response}
             return
 
-        # Update system prompt with current state
-        self._update_system_prompt()
+        # Update system prompt with current state and context awareness
+        context_summary = await self._get_cached_context_summary()
+        self._update_system_prompt(context_summary)
 
         # Add user message to history
         self.conversation_history.append({
@@ -880,8 +1073,9 @@ class MicroscopyCopilot:
                 }
             )
 
-        # Update system prompt with current state
-        self._update_system_prompt()
+        # Update system prompt with current state and context awareness
+        context_summary = await self._get_cached_context_summary()
+        self._update_system_prompt(context_summary)
 
         # Add user message to history
         self.conversation_history.append({
@@ -1000,8 +1194,9 @@ class MicroscopyCopilot:
         import time
         start_time = time.time()
 
-        # Update system prompt with current state
-        self._update_system_prompt()
+        # Update system prompt with current state and context awareness
+        context_summary = await self._get_cached_context_summary()
+        self._update_system_prompt(context_summary)
 
         # Build messages (don't modify conversation history)
         messages = self.conversation_history.copy()
@@ -1692,13 +1887,72 @@ class MicroscopyCopilot:
             # that gets presented to user next time they interact
 
         elif detector.actions.mode == DetectionMode.AUTO:
-            # Automatically apply parameter changes
+            # For critical actions (stop_timelapse), verify detection first
+            if detector.actions.stop_timelapse:
+                # Run challenger/verifier agent
+                logger.info(f"[VERIFIER] Running verification for {detector.name} detection on {embryo_id}")
+
+                try:
+                    verification = await self.detection_verifier.verify(
+                        detector=detector,
+                        embryo_state=embryo,
+                        original_result=result,
+                        timepoint=result.timepoint or 0,
+                    )
+
+                    # Log verification result
+                    self._emit_event(EventType.DETECTION_TRIGGERED, {
+                        'detector_name': detector.name,
+                        'embryo_id': embryo_id,
+                        'action': 'verification_completed',
+                        'verification': verification.to_dict(),
+                    })
+
+                    if not verification.consensus:
+                        # Verification failed - downgrade to RECOMMEND mode
+                        logger.warning(
+                            f"[VERIFIER] Verification failed for {detector.name}: {verification.consensus_reasoning}"
+                        )
+                        # Show user the disagreement instead of auto-acting
+                        print(f"\n[VERIFICATION FAILED] {detector.name} detection on {embryo_id}")
+                        print(f"  Consensus: {verification.consensus_reasoning}")
+                        print(f"  Please manually verify and use /stop_timelapse if confirmed.\n")
+
+                        self._emit_event(EventType.DETECTION_TRIGGERED, {
+                            'detector_name': detector.name,
+                            'embryo_id': embryo_id,
+                            'action': 'verification_failed',
+                            'reason': verification.consensus_reasoning,
+                        })
+                        return  # Don't proceed with auto-action
+
+                    # Verification passed - proceed with stop
+                    logger.info(f"[VERIFIER] Verification passed for {detector.name}, proceeding with stop")
+
+                except Exception as e:
+                    logger.error(f"[VERIFIER] Verification error: {e}")
+                    # On error, fall back to RECOMMEND mode rather than auto-stop
+                    print(f"\n[VERIFICATION ERROR] Could not verify {detector.name} detection: {e}")
+                    print(f"  Please manually verify and use /stop_timelapse if confirmed.\n")
+                    return
+
+                # Verified - stop timelapse
+                if self.timelapse_orchestrator:
+                    logger.info(f"[AUTO-ACTION] Stopping timelapse for {embryo_id} due to verified {detector.name} detection")
+                    await self.timelapse_orchestrator.stop_embryo(embryo_id, reason=f"{detector.name} detected (verified)")
+                    self._emit_event(EventType.DETECTION_TRIGGERED, {
+                        'detector_name': detector.name,
+                        'embryo_id': embryo_id,
+                        'action': 'stopped_timelapse',
+                        'verified': True,
+                    })
+
+            # Apply parameter changes (non-critical, no verification needed)
             if detector.actions.parameter_changes:
                 for param, value in detector.actions.parameter_changes.items():
                     if hasattr(embryo, param):
                         setattr(embryo, param, value)
-
-                print(f"\n[AUTO-ACTION] Applied changes to {embryo_id}: {detector.actions.parameter_changes}\n")
+                logger.info(f"[AUTO-ACTION] Applied changes to {embryo_id}: {detector.actions.parameter_changes}")
 
     async def run_detectors_on_volume(self, embryo_id: str, timepoint: int):
         """

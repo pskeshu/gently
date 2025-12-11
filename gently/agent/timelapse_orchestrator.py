@@ -71,9 +71,68 @@ class IntervalRule:
 
 @dataclass
 class StopCondition:
-    """Configuration for when to stop imaging an embryo"""
+    """
+    Configuration for when to stop imaging an embryo.
+
+    Supports composite conditions with OR logic via additional_conditions.
+    If ANY condition is met (primary or additional), the embryo will stop.
+    """
     condition_type: StopConditionType
     value: Any = None  # e.g., number of timepoints, hours, etc.
+    additional_conditions: List['StopCondition'] = field(default_factory=list)
+
+    def add_condition(self, condition: 'StopCondition') -> None:
+        """
+        Add another stop condition (OR logic).
+
+        The embryo will stop when ANY condition is met.
+
+        Parameters
+        ----------
+        condition : StopCondition
+            Additional condition to add
+        """
+        self.additional_conditions.append(condition)
+
+    def all_conditions(self) -> List['StopCondition']:
+        """
+        Get all conditions including self (flattened).
+
+        Returns
+        -------
+        List[StopCondition]
+            Primary condition plus all additional conditions
+        """
+        return [self] + self.additional_conditions
+
+    def describe(self) -> str:
+        """
+        Human-readable description of the stop condition(s).
+
+        Returns
+        -------
+        str
+            Description like "hatching OR duration:10h"
+        """
+        def _describe_single(cond: 'StopCondition') -> str:
+            if cond.condition_type == StopConditionType.MANUAL:
+                return "manual"
+            elif cond.condition_type == StopConditionType.HATCHING:
+                return "hatching"
+            elif cond.condition_type == StopConditionType.COMMA_STAGE:
+                return "comma_stage"
+            elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
+                return f"{cond.value} timepoints"
+            elif cond.condition_type == StopConditionType.DURATION:
+                return f"{cond.value}h duration"
+            else:
+                return str(cond.condition_type.value)
+
+        descriptions = [_describe_single(self)]
+        for cond in self.additional_conditions:
+            descriptions.append(_describe_single(cond))
+
+        return " OR ".join(descriptions)
 
     @classmethod
     def until_hatching(cls) -> 'StopCondition':
@@ -94,6 +153,79 @@ class StopCondition:
     @classmethod
     def manual(cls) -> 'StopCondition':
         return cls(StopConditionType.MANUAL)
+
+    @classmethod
+    def composite(cls, *conditions: 'StopCondition') -> 'StopCondition':
+        """
+        Create a composite stop condition from multiple conditions (OR logic).
+
+        Parameters
+        ----------
+        *conditions : StopCondition
+            Multiple conditions to combine
+
+        Returns
+        -------
+        StopCondition
+            First condition with others added as additional
+
+        Examples
+        --------
+        >>> StopCondition.composite(
+        ...     StopCondition.until_hatching(),
+        ...     StopCondition.duration_hours(10)
+        ... )
+        # Stops on hatching OR after 10 hours
+        """
+        if not conditions:
+            return cls.manual()
+
+        primary = conditions[0]
+        for cond in conditions[1:]:
+            primary.add_condition(cond)
+        return primary
+
+    @classmethod
+    def parse(cls, spec: str) -> 'StopCondition':
+        """
+        Parse a stop condition specification string.
+
+        Supports composite conditions with | separator.
+
+        Parameters
+        ----------
+        spec : str
+            Specification like "hatching", "duration:10", "hatching|duration:10"
+
+        Returns
+        -------
+        StopCondition
+            Parsed condition(s)
+        """
+        def _parse_single(s: str) -> 'StopCondition':
+            s = s.strip().lower()
+            if s == 'manual':
+                return cls.manual()
+            elif s == 'hatching':
+                return cls.until_hatching()
+            elif s in ('comma', 'comma_stage'):
+                return cls.until_comma()
+            elif s.startswith('timepoints:'):
+                n = int(s.split(':')[1])
+                return cls.fixed_timepoints(n)
+            elif s.startswith('duration:'):
+                hours_str = s.split(':')[1]
+                # Handle "10h" or "10" format
+                if hours_str.endswith('h'):
+                    hours_str = hours_str[:-1]
+                hours = float(hours_str)
+                return cls.duration_hours(hours)
+            else:
+                raise ValueError(f"Unknown stop condition: {s}")
+
+        parts = spec.split('|')
+        conditions = [_parse_single(p) for p in parts]
+        return cls.composite(*conditions)
 
 
 @dataclass
@@ -545,23 +677,52 @@ class TimelapseOrchestrator:
             logger.error(f"Error acquiring {embryo_id}: {e}")
 
     async def _check_stop_condition(self, embryo_state: EmbryoAcquisitionState):
-        """Check if embryo should stop based on its condition"""
-        cond = embryo_state.stop_condition
+        """
+        Check if ANY stop condition is met (OR logic for composite conditions).
 
+        Supports both single conditions and composite conditions.
+        """
+        # Check all conditions (primary + additional) with OR logic
+        for cond in embryo_state.stop_condition.all_conditions():
+            reason = self._evaluate_single_condition(cond, embryo_state)
+            if reason:
+                embryo_state.is_complete = True
+                embryo_state.completion_reason = reason
+                logger.info(f"Embryo {embryo_state.embryo_id} stopped: {reason}")
+                return  # Stop on first matching condition
+
+    def _evaluate_single_condition(
+        self,
+        cond: StopCondition,
+        embryo_state: EmbryoAcquisitionState
+    ) -> Optional[str]:
+        """
+        Evaluate a single stop condition.
+
+        Parameters
+        ----------
+        cond : StopCondition
+            Condition to evaluate
+        embryo_state : EmbryoAcquisitionState
+            Current embryo state
+
+        Returns
+        -------
+        str or None
+            Completion reason if condition is met, None otherwise
+        """
         if cond.condition_type == StopConditionType.MANUAL:
             # Never auto-stop
-            pass
+            return None
 
         elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
             if embryo_state.timepoints_acquired >= cond.value:
-                embryo_state.is_complete = True
-                embryo_state.completion_reason = f"reached {cond.value} timepoints"
+                return f"reached {cond.value} timepoints"
 
         elif cond.condition_type == StopConditionType.DURATION:
             elapsed_hours = (datetime.now() - self._started_at).total_seconds() / 3600
             if elapsed_hours >= cond.value:
-                embryo_state.is_complete = True
-                embryo_state.completion_reason = f"reached {cond.value}h duration"
+                return f"reached {cond.value}h duration"
 
         elif cond.condition_type == StopConditionType.HATCHING:
             # Check if hatching was detected (check both places)
@@ -573,13 +734,11 @@ class TimelapseOrchestrator:
                 hatched_via_detector = embryo.was_detected('hatching')
 
                 if hatched_via_status or hatched_via_detector:
-                    embryo_state.is_complete = True
-                    embryo_state.completion_reason = "hatching detected"
                     self._emit_event(EventType.HATCHING_DETECTED, {
                         'embryo_id': embryo_state.embryo_id,
                         'timepoint': embryo_state.timepoints_acquired,
                     })
-                    logger.info(f"Embryo {embryo_state.embryo_id} stopped: hatching detected")
+                    return "hatching detected"
 
         elif cond.condition_type == StopConditionType.COMMA_STAGE:
             # Check if comma stage was detected
@@ -587,9 +746,9 @@ class TimelapseOrchestrator:
             if embryo:
                 # Use the was_detected helper from EmbryoState
                 if embryo.was_detected('comma') or embryo.was_detected('comma_stage'):
-                    embryo_state.is_complete = True
-                    embryo_state.completion_reason = "comma stage detected"
-                    logger.info(f"Embryo {embryo_state.embryo_id} stopped: comma stage detected")
+                    return "comma stage detected"
+
+        return None
 
     def get_status(self) -> TimelapseState:
         """

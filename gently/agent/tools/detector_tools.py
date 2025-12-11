@@ -110,7 +110,7 @@ def remove_detector(detector_name: str, context: Dict) -> str:
 
 @tool(
     name="add_detector",
-    description="Add a new detector to the system",
+    description="Add a new detector to the system. Use stop_timelapse=True to automatically stop imaging when detected.",
     category=ToolCategory.DETECTION,
 )
 def add_detector(
@@ -119,6 +119,7 @@ def add_detector(
     detection_prompt: str = None,
     preset: str = None,
     action_mode: str = "passive",
+    stop_timelapse: bool = False,
     parameter_changes: Dict = None,
     min_timepoint: int = None,
     context: Dict = None
@@ -130,30 +131,55 @@ def add_detector(
 
     try:
         if preset:
-            detector = copilot.detector_registry.create_from_preset(preset, name)
-        else:
-            from ..detector import Detector, DetectorConfig, DetectorActions, DetectorConditions, ActionMode
-
-            actions = DetectorActions(
-                mode=ActionMode(action_mode),
-                parameter_changes=parameter_changes or {}
+            # Create from preset with custom name
+            from ..detector_registry import get_detector_presets
+            presets = get_detector_presets()
+            if preset not in presets:
+                available = ", ".join(presets.keys())
+                return f"Unknown preset '{preset}'. Available: {available}"
+            preset_data = presets[preset]
+            # Use preset's stop_timelapse unless explicitly overridden
+            preset_stop = preset_data.get('stop_timelapse', False)
+            detector = Detector(
+                name=name,
+                description=preset_data['description'],
+                detection_prompt=preset_data['prompt'],
+                enabled=True,
+                conditions=DetectorConditions(min_timepoint=min_timepoint),
+                actions=DetectorActions(
+                    mode=DetectionMode(action_mode),
+                    stop_timelapse=stop_timelapse or preset_stop,
+                    parameter_changes=parameter_changes or {}
+                ),
+                use_temporal_context=preset_data.get('use_temporal_context', True),
+                temporal_context_size=preset_data.get('temporal_context_size', 5),
+                confidence_threshold=ConfidenceLevel(preset_data.get('confidence_threshold', 'MEDIUM')),
             )
-            conditions = DetectorConditions(min_timepoint=min_timepoint)
-            config = DetectorConfig(
+        else:
+            # Create custom detector
+            if not detection_prompt:
+                return "Error: detection_prompt is required for custom detectors"
+            detector = Detector(
                 name=name,
                 description=description or f"Custom detector: {name}",
-                detection_prompt=detection_prompt or "",
-                actions=actions,
-                conditions=conditions
+                detection_prompt=detection_prompt,
+                enabled=True,
+                conditions=DetectorConditions(min_timepoint=min_timepoint),
+                actions=DetectorActions(
+                    mode=DetectionMode(action_mode),
+                    stop_timelapse=stop_timelapse,
+                    parameter_changes=parameter_changes or {}
+                ),
             )
-            detector = Detector(config)
-            copilot.detector_registry.register(detector)
 
+        copilot.detector_registry.add(detector)
         copilot._mark_significant_action("detector_config")
-        return f"Added detector '{name}' with action mode '{action_mode}'"
+        stop_info = " (will stop timelapse)" if detector.actions.stop_timelapse else ""
+        return f"Added detector '{name}' with action mode '{action_mode}'{stop_info}"
 
     except Exception as e:
-        return f"Error adding detector: {str(e)}"
+        import traceback
+        return f"Error adding detector: {str(e)}\n{traceback.format_exc()}"
 
 
 @tool(
@@ -191,7 +217,10 @@ def enable_preset_detector(
 
     # Create detector from preset
     conditions = DetectorConditions(min_timepoint=min_timepoint)
-    actions = DetectorActions(mode=DetectionMode(action_mode))
+    actions = DetectorActions(
+        mode=DetectionMode(action_mode),
+        stop_timelapse=preset_data.get('stop_timelapse', False),
+    )
 
     detector = Detector(
         name=preset_data['name'],
@@ -274,3 +303,94 @@ async def test_detector(
         return json.dumps(result, indent=2)
     except Exception as e:
         return f"Error testing detector: {str(e)}"
+
+
+@tool(
+    name="query_timeline_events",
+    description="Query timeline for detection and timelapse events. Use this to find when hatching was detected, when acquisitions occurred, or review recent experiment history.",
+    category=ToolCategory.DETECTION,
+)
+def query_timeline_events(
+    event_type: str = None,
+    embryo_id: str = None,
+    detector_name: str = None,
+    limit: int = 50,
+    session_id: str = "current",
+    context: Dict = None
+) -> str:
+    """
+    Query timeline for detection and timelapse events.
+
+    Parameters
+    ----------
+    event_type : str, optional
+        Filter by type: "detection" or "timelapse"
+    embryo_id : str, optional
+        Filter by embryo ID
+    detector_name : str, optional
+        Filter detection events by detector name (e.g., "hatching")
+    limit : int
+        Maximum events to return (default 50)
+    session_id : str
+        Session filter: "current" (default), "all", or specific session ID
+    context : Dict
+        Tool context with copilot reference
+
+    Returns
+    -------
+    str
+        Formatted list of timeline events
+    """
+    copilot, err = require_copilot(context)
+    if err:
+        return err
+
+    if not hasattr(copilot, 'timeline_manager') or copilot.timeline_manager is None:
+        return "Timeline not available"
+
+    try:
+        events = copilot.timeline_manager.get_events(
+            event_type=event_type,
+            embryo_id=embryo_id,
+            session_id=session_id,
+            limit=limit,
+        )
+
+        # Filter by detector_name if specified
+        if detector_name and event_type == "detection":
+            events = [e for e in events if e.detector_name == detector_name]
+
+        if not events:
+            filters = []
+            if event_type:
+                filters.append(f"type={event_type}")
+            if embryo_id:
+                filters.append(f"embryo={embryo_id}")
+            if detector_name:
+                filters.append(f"detector={detector_name}")
+            filter_str = ", ".join(filters) if filters else "none"
+            return f"No events found (filters: {filter_str})"
+
+        lines = [f"Timeline Events ({len(events)} results):", ""]
+
+        for event in events:
+            timestamp = event.timestamp.strftime("%Y-%m-%d %H:%M:%S")
+            line = f"[{timestamp}] {event.event_type}/{event.event_subtype}"
+
+            if event.embryo_id:
+                line += f" | embryo={event.embryo_id}"
+            if event.detector_name:
+                line += f" | detector={event.detector_name}"
+            if event.timepoint is not None:
+                line += f" | t={event.timepoint}"
+            if event.confidence:
+                line += f" | confidence={event.confidence}"
+
+            lines.append(line)
+            if event.description:
+                lines.append(f"    {event.description}")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"Error querying timeline: {str(e)}"

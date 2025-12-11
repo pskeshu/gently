@@ -280,7 +280,8 @@ CONFIDENCE: [HIGH/MEDIUM/LOW]
 REASONING: [Brief explanation of what you observe]""",
             'use_temporal_context': True,
             'temporal_context_size': 10,
-            'confidence_threshold': 'HIGH'
+            'confidence_threshold': 'HIGH',
+            'stop_timelapse': True,  # Auto-stop when hatching detected
         },
 
         'comma': {
