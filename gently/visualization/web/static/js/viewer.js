@@ -2,6 +2,117 @@
  * Image viewer and Z-slider functionality for Gently Visualization
  */
 
+/**
+ * Main Viewer Zoom Controller
+ */
+const MainViewerZoom = {
+    zoom: { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 },
+    container: null,
+    image: null,
+    indicator: null,
+    indicatorTimeout: null,
+
+    init() {
+        this.container = document.getElementById('main-image-container');
+        this.image = document.getElementById('main-image');
+        this.indicator = document.getElementById('main-zoom-indicator');
+
+        if (!this.container || !this.image) return;
+
+        this.bindEvents();
+    },
+
+    bindEvents() {
+        // Mouse wheel zoom
+        this.container.addEventListener('wheel', (e) => {
+            if (this.image.style.display === 'none') return;
+            e.preventDefault();
+            this.handleZoomDelta(e.deltaY > 0 ? -0.15 : 0.15);
+        }, { passive: false });
+
+        // Double-click reset
+        this.container.addEventListener('dblclick', () => this.reset());
+
+        // Pan
+        this.container.addEventListener('mousedown', (e) => this.startPan(e));
+        document.addEventListener('mousemove', (e) => this.doPan(e));
+        document.addEventListener('mouseup', () => this.endPan());
+
+        // Button controls
+        document.getElementById('zoom-in')?.addEventListener('click', () => this.handleZoomDelta(0.25));
+        document.getElementById('zoom-out')?.addEventListener('click', () => this.handleZoomDelta(-0.25));
+        document.getElementById('zoom-reset')?.addEventListener('click', () => this.reset());
+    },
+
+    handleZoomDelta(delta) {
+        const newScale = Math.max(0.25, Math.min(8, this.zoom.scale + delta));
+        if (newScale !== this.zoom.scale) {
+            this.zoom.scale = newScale;
+            this.apply();
+            this.showIndicator();
+        }
+    },
+
+    startPan(e) {
+        if (this.zoom.scale <= 1) return;
+        if (e.target.closest('.zoom-controls')) return; // Don't pan when clicking controls
+
+        this.zoom.isDragging = true;
+        this.zoom.startX = e.clientX - this.zoom.offsetX;
+        this.zoom.startY = e.clientY - this.zoom.offsetY;
+        this.image.classList.add('zoomed');
+    },
+
+    doPan(e) {
+        if (!this.zoom.isDragging) return;
+        this.zoom.offsetX = e.clientX - this.zoom.startX;
+        this.zoom.offsetY = e.clientY - this.zoom.startY;
+        this.apply();
+    },
+
+    endPan() {
+        this.zoom.isDragging = false;
+    },
+
+    reset() {
+        this.zoom = { scale: 1, offsetX: 0, offsetY: 0, isDragging: false, startX: 0, startY: 0 };
+        this.apply();
+        this.image?.classList.remove('zoomed');
+    },
+
+    apply() {
+        if (this.image) {
+            this.image.style.transform =
+                `translate(${this.zoom.offsetX}px, ${this.zoom.offsetY}px) scale(${this.zoom.scale})`;
+
+            if (this.zoom.scale > 1) {
+                this.image.classList.add('zoomed');
+            } else {
+                this.image.classList.remove('zoomed');
+            }
+        }
+    },
+
+    showIndicator() {
+        if (this.indicator) {
+            this.indicator.textContent = `${Math.round(this.zoom.scale * 100)}%`;
+            this.indicator.classList.add('visible');
+
+            clearTimeout(this.indicatorTimeout);
+            this.indicatorTimeout = setTimeout(() => {
+                this.indicator?.classList.remove('visible');
+            }, 1200);
+        }
+    }
+};
+
+// Initialize zoom on DOM ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => MainViewerZoom.init());
+} else {
+    MainViewerZoom.init();
+}
+
 function handleNew3DVolume(data) {
     // Add to volumes3d list
     state.volumes3d.push(data);
@@ -112,6 +223,9 @@ function displayImage(data) {
 
     // Hide Z slider when showing regular 2D images
     hideZSlider();
+
+    // Reset zoom when showing new image
+    MainViewerZoom.reset();
 
     const img = document.getElementById('main-image');
     const placeholder = document.getElementById('placeholder');

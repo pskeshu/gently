@@ -6,14 +6,21 @@ function renderRecentList() {
     const list = document.getElementById('recent-list');
     const filtered = filterByEmbryo(state.snapshots);
 
-    list.innerHTML = filtered.slice(-15).reverse().map(img => `
-        <div class="gallery-item" style="margin-bottom: 0.5rem;" onclick="displayImage(state.snapshots.find(i => i.uid === '${img.uid}'))">
+    const displayList = filtered.slice(-15).reverse();
+    list.innerHTML = displayList.map((img, index) => `
+        <div class="gallery-item" style="margin-bottom: 0.5rem;" onclick="openSnapshotsLightbox(${index})">
             <div class="gallery-info">
                 <div class="gallery-type">${img.data_type}</div>
                 <div class="gallery-meta">${img.uid.slice(0, 8)}...</div>
             </div>
         </div>
     `).join('');
+}
+
+function openSnapshotsLightbox(index) {
+    const filtered = filterByEmbryo(state.snapshots);
+    const displayList = filtered.slice(-15).reverse();
+    Lightbox.open(displayList, index, 'snapshots');
 }
 
 function renderVolumesGallery() {
@@ -25,8 +32,9 @@ function renderVolumesGallery() {
         return;
     }
 
-    gallery.innerHTML = filtered.slice(-50).reverse().map(img => `
-        <div class="gallery-item" onclick="showInModal('${img.uid}', 'volumes')">
+    const displayList = filtered.slice(-50).reverse();
+    gallery.innerHTML = displayList.map((img, index) => `
+        <div class="gallery-item" onclick="openVolumesLightbox(${index})">
             <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
             <div class="gallery-info">
                 <div class="gallery-type">${img.data_type}</div>
@@ -34,6 +42,12 @@ function renderVolumesGallery() {
             </div>
         </div>
     `).join('');
+}
+
+function openVolumesLightbox(index) {
+    const filtered = filterByEmbryo(state.volumes);
+    const displayList = filtered.slice(-50).reverse();
+    Lightbox.open(displayList, index, 'volumes');
 }
 
 function renderCalibrationGallery() {
@@ -45,8 +59,9 @@ function renderCalibrationGallery() {
         return;
     }
 
-    gallery.innerHTML = filtered.slice(-50).reverse().map(img => `
-        <div class="gallery-item" onclick="showInModal('${img.uid}', 'calibration')">
+    const displayList = filtered.slice(-50).reverse();
+    gallery.innerHTML = displayList.map((img, index) => `
+        <div class="gallery-item" onclick="openCalibrationLightbox(${index})">
             <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
             <div class="gallery-info">
                 <div class="gallery-type">${img.data_type}</div>
@@ -57,6 +72,12 @@ function renderCalibrationGallery() {
 
     // Also render 3D volumes
     render3DVolumesGallery();
+}
+
+function openCalibrationLightbox(index) {
+    const filtered = filterByEmbryo(state.calibration);
+    const displayList = filtered.slice(-50).reverse();
+    Lightbox.open(displayList, index, 'calibration');
 }
 
 function render3DVolumesGallery() {
