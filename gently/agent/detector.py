@@ -80,6 +80,7 @@ class DetectorActions:
     """Actions to take when detector fires"""
     mode: DetectionMode = DetectionMode.RECOMMEND
     parameter_changes: Optional[Dict[str, Any]] = None  # e.g., {"interval_seconds": 60}
+    stop_timelapse: bool = False                        # Stop timelapse when detected
     custom_message: Optional[str] = None                # Custom notification
     webhook_url: Optional[str] = None                   # External notification
 

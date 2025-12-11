@@ -325,7 +325,11 @@ The copilot includes a powerful adaptive timelapse system that runs in the backg
 """
 
 
-def build_system_prompt(experiment_state: ExperimentState, connection_status: dict = None) -> str:
+def build_system_prompt(
+    experiment_state: ExperimentState,
+    connection_status: dict = None,
+    context_summary: str = None
+) -> str:
     """
     Build complete system prompt for Claude
 
@@ -335,6 +339,8 @@ def build_system_prompt(experiment_state: ExperimentState, connection_status: di
         Current experiment state
     connection_status : dict, optional
         Connection status for servers: {queue_server: bool, sam_server: bool, databroker: bool}
+    context_summary : str, optional
+        AI-generated summary of current session context (timelapse status, recent events)
 
     Returns
     -------
@@ -374,6 +380,16 @@ the microscope is not connected and suggest they start the server or check the c
 
 You cannot perform hardware operations. Inform users if they request hardware actions."""
 
+    # Build context section (session awareness from AI summary)
+    if context_summary:
+        context_section = f"""
+# Session Context
+
+{context_summary}
+"""
+    else:
+        context_section = ""
+
     return f"""You are a Microscopy Copilot - an AI scientific collaborator assisting with diSPIM
 microscopy experiments on C. elegans embryos.
 
@@ -399,7 +415,7 @@ Your role is to:
 # Current Experiment State
 
 {embryo_summary}
-
+{context_section}
 # Tool Use Guidelines
 
 Answer the user's request using relevant tools. Before calling a tool, do some analysis:

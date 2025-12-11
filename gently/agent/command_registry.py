@@ -443,6 +443,29 @@ Use 'last' to import from the most recent session with embryos.""",
         category=CommandCategory.SESSION,
     ))
 
+    registry.register(CommandDefinition(
+        name="/make-video",
+        description="Create timelapse video",
+        help_text="""Generate MP4 video from timelapse volumes in current session.
+
+Creates max projection videos for each embryo. Optionally specify embryo ID to generate video for a single embryo.
+
+Options:
+  --fps N     Frames per second (default: 10)
+  --all       Include all embryos""",
+        positional_arg="embryo_id",
+        positional_hint="embryo_id",
+        options=[
+            CommandOption(
+                name="--fps",
+                description="Frames per second",
+                takes_value=True,
+                value_hint="N",
+            ),
+        ],
+        category=CommandCategory.SESSION,
+    ))
+
     # === Appearance Commands ===
     registry.register(CommandDefinition(
         name="/theme",

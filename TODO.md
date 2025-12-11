@@ -14,6 +14,8 @@
 
 ## Architecture / Investigation
 
+- [ ] Add detailed hardware action logging (galvo, piezo, setConfig calls, laser state changes, etc.)
+- [ ] Standardize tool output format in copilot (currently inconsistent/poorly defined)
 - [ ] Rethink viz server layout
 - [ ] Figure out datastore methods
 - [ ] Figure out slow volume acquisition

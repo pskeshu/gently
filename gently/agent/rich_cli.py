@@ -468,10 +468,9 @@ class RichCopilotCLI:
             status = theme.icon_success if detector.enabled else theme.icon_error
             status_style = theme.success if detector.enabled else theme.error
 
-            # Get stats
-            stats = detector.stats if hasattr(detector, 'stats') else {}
-            total_runs = stats.get('total_runs', 0)
-            total_detections = stats.get('total_detections', 0)
+            # Get stats from detector attributes
+            total_runs = detector.run_count
+            total_detections = detector.detection_count
 
             table.add_row(
                 detector.name,
@@ -1769,6 +1768,107 @@ class RichCopilotCLI:
                             else:
                                 self.console.print(f"[{theme.error}]✗ {result.get('error', 'Import failed')}[/]")
 
+            return False  # Handled, continue loop
+
+        elif cmd.startswith('/make-video'):
+            # Generate timelapse video from volumes
+            from .video_maker import make_session_videos, discover_volumes, create_timelapse_video
+            from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn
+
+            theme = get_theme()
+            parts = cmd.split()
+
+            # Parse arguments
+            embryo_id = None
+            fps = 10
+
+            i = 1
+            while i < len(parts):
+                if parts[i] == '--fps' and i + 1 < len(parts):
+                    try:
+                        fps = int(parts[i + 1])
+                    except ValueError:
+                        pass
+                    i += 2
+                elif not parts[i].startswith('--'):
+                    embryo_id = parts[i]
+                    i += 1
+                else:
+                    i += 1
+
+            session_id = self.copilot.session_id
+            if not session_id:
+                self.console.print(f"[{theme.error}]No active session[/]")
+                return False
+
+            # Get storage path
+            storage_path = self.copilot.storage_path
+            session_images_dir = storage_path / "images" / session_id
+
+            if not session_images_dir.exists():
+                self.console.print(f"[{theme.error}]No images found for session {session_id}[/]")
+                return False
+
+            # Discover volumes
+            all_volumes = discover_volumes(session_images_dir, embryo_id)
+
+            if not all_volumes:
+                self.console.print(f"[{theme.muted}]No timelapse volumes found[/]")
+                return False
+
+            self.console.print(f"\n[bold {theme.primary}]Creating Timelapse Videos[/]")
+            self.console.print(f"[{theme.muted}]Session: {session_id}[/]")
+            self.console.print(f"[{theme.muted}]FPS: {fps}[/]\n")
+
+            for eid, volumes in all_volumes.items():
+                self.console.print(f"[{theme.info}]{eid}:[/] {len(volumes)} frames")
+
+            self.console.print()
+
+            # Generate videos with progress
+            output_dir = storage_path / "videos" / session_id
+            results = {}
+
+            with Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                console=self.console
+            ) as progress:
+                for eid, volumes in all_volumes.items():
+                    task = progress.add_task(f"[cyan]{eid}", total=len(volumes))
+
+                    output_path = output_dir / f"{eid}_timelapse.mp4"
+
+                    def update_progress(current, total):
+                        progress.update(task, completed=current)
+
+                    result = create_timelapse_video(
+                        volume_paths=volumes,
+                        output_path=output_path,
+                        fps=fps,
+                        add_timestamps=True,
+                        embryo_id=eid,
+                        progress_callback=update_progress
+                    )
+
+                    progress.update(task, completed=len(volumes))
+                    results[eid] = result
+
+            # Print results
+            self.console.print()
+            for eid, result in results.items():
+                if result.get('success'):
+                    path = result['output_path']
+                    frames = result['frame_count']
+                    duration = result['duration_seconds']
+                    self.console.print(f"[{theme.success}]+ {eid}:[/] {frames} frames, {duration:.1f}s")
+                    self.console.print(f"  [{theme.muted}]{path}[/]")
+                else:
+                    self.console.print(f"[{theme.error}]x {eid}:[/] {result.get('error', 'Failed')}")
+
+            self.console.print()
             return False  # Handled, continue loop
 
         elif cmd == '/timelapse' or cmd == '/timelapse watch':
