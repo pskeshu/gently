@@ -230,31 +230,20 @@ class StopCondition:
 
 @dataclass
 class EmbryoAcquisitionState:
-    """State for a single embryo in the timelapse"""
+    """
+    State for a single embryo in the timelapse.
+
+    Note: Timing is now handled globally by the orchestrator's round-based
+    scheduling. Per-embryo timing fields are kept for backward compatibility
+    but the orchestrator uses global round timing for synchronization.
+    """
     embryo_id: str
-    interval_seconds: float = 120.0
     timepoints_acquired: int = 0
-    last_acquired: Optional[datetime] = None
     stop_condition: StopCondition = field(default_factory=StopCondition.manual)
     is_complete: bool = False
     completion_reason: Optional[str] = None
     error_count: int = 0
     last_error: Optional[str] = None
-
-    @property
-    def next_acquisition_time(self) -> Optional[datetime]:
-        """When this embryo should next be acquired"""
-        if self.is_complete or self.last_acquired is None:
-            return None
-        return self.last_acquired + timedelta(seconds=self.interval_seconds)
-
-    @property
-    def seconds_until_next(self) -> Optional[float]:
-        """Seconds until next acquisition (None if complete or never acquired)"""
-        next_time = self.next_acquisition_time
-        if next_time is None:
-            return None
-        return max(0, (next_time - datetime.now()).total_seconds())
 
 
 class TimelapseStatus(Enum):
@@ -274,8 +263,9 @@ class TimelapseState:
     embryos: Dict[str, EmbryoAcquisitionState]
     total_timepoints: int = 0
     current_round: int = 0
-    next_embryo: Optional[str] = None
-    next_acquisition_in: Optional[float] = None
+    interval_seconds: float = 120.0
+    next_round_time: Optional[datetime] = None
+    seconds_until_next_round: Optional[float] = None
     error_message: Optional[str] = None
 
     def to_dict(self) -> Dict:
@@ -289,17 +279,16 @@ class TimelapseState:
             'duration_minutes': (datetime.now() - self.started_at).total_seconds() / 60 if self.started_at else 0,
             'total_timepoints': self.total_timepoints,
             'current_round': self.current_round,
+            'interval_seconds': self.interval_seconds,
+            'next_round_time': self.next_round_time.isoformat() if self.next_round_time else None,
+            'seconds_until_next_round': self.seconds_until_next_round,
             'active_embryos': len(active),
             'completed_embryos': len(completed),
-            'next_embryo': self.next_embryo,
-            'next_acquisition_in_seconds': self.next_acquisition_in,
             'embryo_details': {
                 eid: {
                     'timepoints': e.timepoints_acquired,
                     'is_complete': e.is_complete,
                     'completion_reason': e.completion_reason,
-                    'interval_seconds': e.interval_seconds,
-                    'seconds_until_next': e.seconds_until_next,
                 }
                 for eid, e in self.embryos.items()
             },
@@ -353,6 +342,12 @@ class TimelapseOrchestrator:
         self._total_timepoints = 0
         self._current_round = 0
         self._error_message: Optional[str] = None
+
+        # Round-based scheduling (global timing for all embryos)
+        self._base_interval_seconds: float = 120.0
+        self._timelapse_start_time: Optional[datetime] = None
+        self._total_pause_duration: timedelta = timedelta(0)
+        self._pause_start: Optional[datetime] = None
 
         # Control
         self._acquisition_task: Optional[asyncio.Task] = None
@@ -417,21 +412,23 @@ class TimelapseOrchestrator:
         self._embryo_states = {}
         for eid in embryo_ids:
             embryo = self.experiment.embryos[eid]
-            # Use per-embryo interval if explicitly set, otherwise use timelapse default
-            effective_interval = embryo.interval_seconds if embryo.interval_seconds is not None else base_interval_seconds
             self._embryo_states[eid] = EmbryoAcquisitionState(
                 embryo_id=eid,
-                interval_seconds=effective_interval,
                 stop_condition=stop_cond,
                 timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
-                last_acquired=embryo.last_imaged,  # Preserve last acquisition time
             )
+
+        # Initialize round-based scheduling (global timing for all embryos)
+        self._base_interval_seconds = base_interval_seconds
+        self._timelapse_start_time = datetime.now()
+        self._total_pause_duration = timedelta(0)
+        self._pause_start = None
 
         # Reset state (but preserve total timepoints from existing embryos)
         self._status = TimelapseStatus.RUNNING
-        self._started_at = datetime.now()
+        self._started_at = self._timelapse_start_time
         self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
-        self._current_round = 0
+        self._current_round = -1  # Will become 0 on first round
         self._paused = False
         self._stop_requested = False
         self._error_message = None
@@ -483,16 +480,55 @@ class TimelapseOrchestrator:
             logger.warning(f"Unknown stop condition '{condition}', using manual")
             return StopCondition.manual()
 
+    def _get_round_scheduled_time(self, round_num: int) -> datetime:
+        """
+        Get when a round should start, accounting for pauses.
+
+        Parameters
+        ----------
+        round_num : int
+            Round number (0-indexed)
+
+        Returns
+        -------
+        datetime
+            Scheduled time for the round
+        """
+        base_time = self._timelapse_start_time + timedelta(seconds=round_num * self._base_interval_seconds)
+        return base_time + self._total_pause_duration
+
+    def _get_elapsed_active_time(self) -> float:
+        """Get elapsed time excluding pauses, in seconds"""
+        now = datetime.now()
+        elapsed = (now - self._timelapse_start_time).total_seconds()
+        pause_seconds = self._total_pause_duration.total_seconds()
+        return elapsed - pause_seconds
+
     async def _run_loop(self):
-        """Main acquisition loop - runs in background"""
+        """Main acquisition loop - runs in background with round-based scheduling"""
         try:
             while not self._stop_requested:
-                # Check if all embryos are complete
-                active_embryos = [
-                    e for e in self._embryo_states.values()
-                    if not e.is_complete
-                ]
+                # Handle pause
+                if self._paused:
+                    await asyncio.sleep(1)
+                    continue
 
+                # Calculate which round we should be on based on elapsed active time
+                elapsed_active = self._get_elapsed_active_time()
+                target_round = int(elapsed_active // self._base_interval_seconds)
+
+                # If we haven't reached next round yet, wait
+                if target_round <= self._current_round:
+                    next_round_time = self._get_round_scheduled_time(self._current_round + 1)
+                    wait_seconds = (next_round_time - datetime.now()).total_seconds()
+                    if wait_seconds > 0:
+                        await asyncio.sleep(min(wait_seconds, 5))  # Check every 5s max
+                    else:
+                        await asyncio.sleep(0.5)
+                    continue
+
+                # Check if all embryos are complete
+                active_embryos = [e for e in self._embryo_states.values() if not e.is_complete]
                 if not active_embryos:
                     self._status = TimelapseStatus.COMPLETED
                     self._emit_event(EventType.ACQUISITION_COMPLETED, {
@@ -502,32 +538,16 @@ class TimelapseOrchestrator:
                     logger.info("Timelapse completed - all embryos finished")
                     break
 
-                # Handle pause
-                if self._paused:
-                    await asyncio.sleep(1)
-                    continue
+                # Execute round - ALL active embryos together
+                self._current_round = target_round
+                round_time = self._get_round_scheduled_time(target_round)
 
-                # Get next embryo to acquire (by next acquisition time)
-                self._current_round += 1
-                embryos_this_round = self._get_embryos_for_round()
+                logger.info(f"Starting round {target_round} (scheduled: {round_time.strftime('%H:%M:%S')})")
 
-                if not embryos_this_round:
-                    # Wait until next embryo is ready
-                    wait_time = self._get_min_wait_time()
-                    if wait_time and wait_time > 0:
-                        await asyncio.sleep(min(wait_time, 10))  # Check every 10s max
-                    else:
-                        await asyncio.sleep(1)
-                    continue
-
-                # Acquire each ready embryo
-                for embryo_state in embryos_this_round:
+                for embryo_state in active_embryos:
                     if self._stop_requested:
                         break
-
-                    await self._acquire_embryo(embryo_state)
-
-                    # Small delay between embryos
+                    await self._acquire_embryo(embryo_state, round_time=round_time)
                     await asyncio.sleep(0.5)
 
         except asyncio.CancelledError:
@@ -541,37 +561,16 @@ class TimelapseOrchestrator:
                 'error': str(e),
             })
 
-    def _get_embryos_for_round(self) -> List[EmbryoAcquisitionState]:
-        """Get embryos that are ready for acquisition now"""
-        now = datetime.now()
-        ready = []
+    async def _acquire_embryo(self, embryo_state: EmbryoAcquisitionState, round_time: datetime = None):
+        """Acquire a single volume for one embryo
 
-        for embryo_state in self._embryo_states.values():
-            if embryo_state.is_complete:
-                continue
-
-            # First acquisition or time has elapsed
-            if embryo_state.last_acquired is None:
-                ready.append(embryo_state)
-            elif embryo_state.next_acquisition_time <= now:
-                ready.append(embryo_state)
-
-        return ready
-
-    def _get_min_wait_time(self) -> Optional[float]:
-        """Get minimum time until any embryo is ready"""
-        wait_times = []
-        for embryo_state in self._embryo_states.values():
-            if embryo_state.is_complete:
-                continue
-            secs = embryo_state.seconds_until_next
-            if secs is not None:
-                wait_times.append(secs)
-
-        return min(wait_times) if wait_times else None
-
-    async def _acquire_embryo(self, embryo_state: EmbryoAcquisitionState):
-        """Acquire a single volume for one embryo"""
+        Parameters
+        ----------
+        embryo_state : EmbryoAcquisitionState
+            Embryo state to acquire
+        round_time : datetime, optional
+            Shared timestamp for all embryos in this round (keeps them in sync)
+        """
         embryo_id = embryo_state.embryo_id
         embryo = self.experiment.embryos.get(embryo_id)
 
@@ -620,9 +619,11 @@ class TimelapseOrchestrator:
             if result.get('success'):
                 # Update state
                 embryo_state.timepoints_acquired += 1
-                embryo_state.last_acquired = datetime.now()
                 embryo_state.error_count = 0
                 self._total_timepoints += 1
+
+                # Use round_time for consistent timestamps across all embryos
+                acquisition_timestamp = round_time if round_time else datetime.now()
 
                 # Update embryo state
                 embryo.timepoints_acquired = embryo_state.timepoints_acquired
@@ -630,7 +631,7 @@ class TimelapseOrchestrator:
                 embryo.record_exposure(
                     exposure_ms=exposure_ms,
                     num_frames=num_frames,
-                    timestamp=embryo_state.last_acquired
+                    timestamp=acquisition_timestamp
                 )
 
                 # Note: VOLUME_ACQUIRED event is emitted by the callback (copilot.on_volume_acquired)
@@ -761,18 +762,13 @@ class TimelapseOrchestrator:
         TimelapseState
             Current state with all embryo details
         """
-        # Calculate next acquisition
-        next_embryo = None
-        next_time = None
+        # Calculate next round timing
+        next_round_time = None
+        seconds_until_next = None
 
-        if self._status == TimelapseStatus.RUNNING:
-            for eid, estate in self._embryo_states.items():
-                if estate.is_complete:
-                    continue
-                secs = estate.seconds_until_next
-                if secs is not None and (next_time is None or secs < next_time):
-                    next_time = secs
-                    next_embryo = eid
+        if self._status == TimelapseStatus.RUNNING and self._timelapse_start_time:
+            next_round_time = self._get_round_scheduled_time(self._current_round + 1)
+            seconds_until_next = max(0, (next_round_time - datetime.now()).total_seconds())
 
         return TimelapseState(
             status=self._status,
@@ -780,27 +776,25 @@ class TimelapseOrchestrator:
             embryos=self._embryo_states.copy(),
             total_timepoints=self._total_timepoints,
             current_round=self._current_round,
-            next_embryo=next_embryo,
-            next_acquisition_in=next_time,
+            interval_seconds=self._base_interval_seconds,
+            next_round_time=next_round_time,
+            seconds_until_next_round=seconds_until_next,
             error_message=self._error_message,
         )
 
     async def add_embryo(
         self,
         embryo_id: str,
-        interval_seconds: Optional[float] = None,
         stop_condition: Optional[str] = None,
         condition_value: Any = None,
     ) -> str:
         """
-        Add an embryo to a running timelapse
+        Add an embryo to a running timelapse (round-based architecture)
 
         Parameters
         ----------
         embryo_id : str
             Embryo to add
-        interval_seconds : float, optional
-            Interval for this embryo (defaults to 120s)
         stop_condition : str, optional
             Stop condition (defaults to same as other embryos, or "manual")
         condition_value : any, optional
@@ -821,8 +815,6 @@ class TimelapseOrchestrator:
         if embryo_id not in self.experiment.embryos:
             return f"Embryo '{embryo_id}' not found in experiment"
 
-        embryo = self.experiment.embryos[embryo_id]
-
         # Determine stop condition - default to matching other embryos or manual
         if stop_condition:
             stop_cond = self._parse_stop_condition(stop_condition, condition_value)
@@ -834,48 +826,106 @@ class TimelapseOrchestrator:
             else:
                 stop_cond = StopCondition.manual()
 
-        # Determine interval: use passed value, then per-embryo setting, then match existing timelapse
-        if interval_seconds is None:
-            if embryo.interval_seconds is not None:
-                interval_seconds = embryo.interval_seconds
-            elif self._embryo_states:
-                # Match interval of existing embryos in timelapse
-                interval_seconds = next(iter(self._embryo_states.values())).interval_seconds
-            else:
-                interval_seconds = 120.0
-
-        # Add new embryo state
+        # Add new embryo state (round-based: no per-embryo interval)
         self._embryo_states[embryo_id] = EmbryoAcquisitionState(
             embryo_id=embryo_id,
-            interval_seconds=interval_seconds,
             stop_condition=stop_cond,
         )
 
-        logger.info(f"Added {embryo_id} to timelapse with interval {interval_seconds}s")
+        logger.info(f"Added {embryo_id} to timelapse (will join round {self._current_round + 1})")
 
         return (
-            f"✓ Added {embryo_id} to timelapse\n"
-            f"  Interval: {interval_seconds}s\n"
+            f"Added {embryo_id} to timelapse\n"
             f"  Stop condition: {stop_cond.condition_type.value}\n"
-            f"  Will start imaging on next round"
+            f"  Global interval: {self._base_interval_seconds}s\n"
+            f"  Will start imaging on round {self._current_round + 1}"
         )
+
+    async def remove_embryo(self, embryo_id: str, mark_complete: bool = True) -> str:
+        """
+        Remove an embryo from a running timelapse
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo to remove
+        mark_complete : bool
+            If True, mark as complete (preserves history). If False, remove entirely.
+
+        Returns
+        -------
+        str
+            Confirmation message
+        """
+        if self._status != TimelapseStatus.RUNNING:
+            return "No timelapse running."
+
+        if embryo_id not in self._embryo_states:
+            return f"Embryo '{embryo_id}' not in timelapse"
+
+        emb_state = self._embryo_states[embryo_id]
+        timepoints = emb_state.timepoints_acquired
+
+        if mark_complete:
+            # Mark as complete so it's excluded from future rounds
+            emb_state.is_complete = True
+            emb_state.completion_reason = "removed by user"
+            logger.info(f"Marked {embryo_id} as complete (removed from timelapse)")
+            return (
+                f"Removed {embryo_id} from timelapse\n"
+                f"  Timepoints acquired: {timepoints}\n"
+                f"  Status: marked complete"
+            )
+        else:
+            # Remove entirely from tracking
+            del self._embryo_states[embryo_id]
+            logger.info(f"Removed {embryo_id} from timelapse tracking entirely")
+            return (
+                f"Removed {embryo_id} from timelapse\n"
+                f"  Timepoints acquired: {timepoints}\n"
+                f"  Status: removed from tracking"
+            )
+
+    def modify_interval(self, new_interval_seconds: float) -> str:
+        """
+        Change the global acquisition interval (affects all embryos).
+
+        The change takes effect on the next round.
+
+        Parameters
+        ----------
+        new_interval_seconds : float
+            New interval in seconds (must be >= 10)
+
+        Returns
+        -------
+        str
+            Confirmation message
+        """
+        if new_interval_seconds < 10:
+            return "Error: Interval must be at least 10 seconds"
+
+        old_interval = self._base_interval_seconds
+        self._base_interval_seconds = new_interval_seconds
+        logger.info(f"Interval changed from {old_interval}s to {new_interval_seconds}s")
+
+        return f"Interval changed from {old_interval}s to {new_interval_seconds}s (takes effect next round)"
 
     async def modify_embryo(
         self,
         embryo_id: str,
-        interval_seconds: Optional[float] = None,
         stop_condition: Optional[str] = None,
         condition_value: Any = None,
     ) -> str:
         """
         Modify parameters for a single embryo during timelapse
 
+        Note: Interval is now global for all embryos. Use modify_interval() to change it.
+
         Parameters
         ----------
         embryo_id : str
             Embryo to modify
-        interval_seconds : float, optional
-            New interval
         stop_condition : str, optional
             New stop condition
         condition_value : any, optional
@@ -893,18 +943,13 @@ class TimelapseOrchestrator:
 
         changes = []
 
-        if interval_seconds is not None:
-            old_interval = estate.interval_seconds
-            estate.interval_seconds = interval_seconds
-            changes.append(f"interval: {old_interval}s -> {interval_seconds}s")
-
         if stop_condition is not None:
             new_cond = self._parse_stop_condition(stop_condition, condition_value)
             estate.stop_condition = new_cond
             changes.append(f"stop condition: {stop_condition}")
 
         if not changes:
-            return f"No changes specified for {embryo_id}"
+            return f"No changes specified for {embryo_id}. Note: use modify_interval() to change acquisition interval."
 
         return f"Modified {embryo_id}: {', '.join(changes)}"
 
@@ -970,6 +1015,7 @@ class TimelapseOrchestrator:
             return "No timelapse running"
 
         self._paused = True
+        self._pause_start = datetime.now()  # Track when pause started
         self._status = TimelapseStatus.PAUSED
 
         return "Timelapse paused. Use resume() to continue."
@@ -978,6 +1024,11 @@ class TimelapseOrchestrator:
         """Resume a paused timelapse"""
         if self._status != TimelapseStatus.PAUSED:
             return "Timelapse not paused"
+
+        # Track pause duration to exclude from scheduling
+        if self._pause_start:
+            self._total_pause_duration += datetime.now() - self._pause_start
+            self._pause_start = None
 
         self._paused = False
         self._status = TimelapseStatus.RUNNING
@@ -1078,19 +1129,20 @@ class TimelapseOrchestrator:
                 stage=stage,
                 timepoint=estate.timepoints_acquired,
             ):
-                old_interval = estate.interval_seconds
-                estate.interval_seconds = rule.new_interval_seconds
+                # Round-based: interval rules now modify the global interval
+                old_interval = self._base_interval_seconds
+                self._base_interval_seconds = rule.new_interval_seconds
                 applied.add(rule.name)
 
                 logger.info(
-                    f"Applied interval rule '{rule.name}' to {embryo_id}: "
-                    f"{old_interval}s -> {rule.new_interval_seconds}s"
+                    f"Applied interval rule '{rule.name}' (triggered by {embryo_id}): "
+                    f"global interval {old_interval}s -> {rule.new_interval_seconds}s"
                 )
 
                 # Emit event
                 self._emit_event(EventType.STATUS_CHANGED, {
                     'embryo_id': embryo_id,
-                    'change': 'interval_adjusted',
+                    'change': 'global_interval_adjusted',
                     'rule': rule.name,
                     'old_interval': old_interval,
                     'new_interval': rule.new_interval_seconds,

@@ -329,8 +329,8 @@ class ImageManager:
         if len(embryo_state.recent_images) > self.history_length:
             embryo_state.recent_images.pop(0)
 
-        # Update timepoint count (last_imaged is set by record_exposure)
-        embryo_state.timepoints_acquired = timepoint + 1
+        # Note: timepoints_acquired is now managed solely by the timelapse orchestrator
+        # to avoid duplicate counting and ensure consistency
 
         return record
 

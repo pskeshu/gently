@@ -137,18 +137,17 @@ def get_timelapse_status(context: Dict = None) -> str:
 
 @tool(
     name="modify_timelapse_embryo",
-    description="Modify parameters for a specific embryo during a running timelapse",
+    description="Modify parameters for a specific embryo during a running timelapse. Note: interval is now global - use modify_timelapse_interval to change it.",
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
 async def modify_timelapse_embryo(
     embryo_id: str,
-    interval_seconds: float = None,
     stop_condition: str = None,
     condition_value: int = None,
     context: Dict = None
 ) -> str:
-    """Modify embryo parameters during timelapse"""
+    """Modify embryo parameters during timelapse (stop condition only - interval is global)"""
     copilot, err = require_copilot(context)
     if err:
         return err
@@ -160,7 +159,6 @@ async def modify_timelapse_embryo(
     try:
         result = await orchestrator.modify_embryo(
             embryo_id=embryo_id,
-            interval_seconds=interval_seconds,
             stop_condition=stop_condition,
             condition_value=condition_value,
         )
@@ -171,18 +169,17 @@ async def modify_timelapse_embryo(
 
 @tool(
     name="add_embryo_to_timelapse",
-    description="Add an embryo to an already running timelapse. Use this when a timelapse is in progress and you want to add another embryo without stopping.",
+    description="Add an embryo to an already running timelapse. The embryo will use the global interval and join on the next round.",
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
 async def add_embryo_to_timelapse(
     embryo_id: str,
-    interval_seconds: float = None,
     stop_condition: str = None,
     condition_value: int = None,
     context: Dict = None
 ) -> str:
-    """Add an embryo to a running timelapse"""
+    """Add an embryo to a running timelapse (uses global interval)"""
     copilot, err = require_copilot(context)
     if err:
         return err
@@ -194,7 +191,6 @@ async def add_embryo_to_timelapse(
     try:
         result = await orchestrator.add_embryo(
             embryo_id=embryo_id,
-            interval_seconds=interval_seconds,
             stop_condition=stop_condition,
             condition_value=condition_value,
         )

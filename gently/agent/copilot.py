@@ -110,13 +110,14 @@ class MicroscopyCopilot:
             image_manager=self.image_manager,
             claude_client=self.claude,
             model=self.model,
-            on_detection_callback=self._on_detection_fired
+            on_detection_callback=self._on_detection_fired,
+            on_evaluation_callback=self._on_detection_evaluated
         )
 
         # Detection verifier (challenger agent for AUTO mode)
         self.detection_verifier = DetectionVerifier(
             claude_client=self.claude,
-            model="claude-haiku-4-5-20251001"  # Use Haiku for speed/cost
+            model="claude-opus-4-20250514"  # Use Opus for critical verification decisions
         )
 
         # Session management
@@ -1735,8 +1736,16 @@ Write a brief status summary. Examples:
             'shape': list(volume.shape),
         })
 
-        # Run detectors on newly acquired volume
-        await self.run_detectors_on_volume(embryo_id, timepoint)
+        # Run detectors on newly acquired volume (non-blocking)
+        # This allows acquisition to continue while detectors run in background
+        asyncio.create_task(self._run_detectors_background(embryo_id, timepoint))
+
+    async def _run_detectors_background(self, embryo_id: str, timepoint: int):
+        """Run detectors in background - errors are logged but don't block acquisition"""
+        try:
+            await self.run_detectors_on_volume(embryo_id, timepoint)
+        except Exception as e:
+            logger.warning(f"Background detector error for {embryo_id} t{timepoint}: {e}")
 
     def should_stop_experiment(self) -> bool:
         """Check if experiment should stop (e.g., all embryos hatched)"""
@@ -1822,6 +1831,30 @@ Write a brief status summary. Examples:
 
     # === Detector System Integration ===
 
+    async def _on_detection_evaluated(self, detector, embryo_id: str, result, embryo_state):
+        """
+        Callback for every detector evaluation (regardless of detected=True/False)
+
+        Emits DETECTION_TRIGGERED event with full reasoning for visualization.
+        """
+        # Get projection_uid from most recent image (this is what viz server stores)
+        volume_uid = None
+        if embryo_state.recent_images:
+            latest_img = embryo_state.recent_images[-1]
+            # Prefer projection_uid (max projection), fallback to volume_uid
+            volume_uid = getattr(latest_img, 'projection_uid', None) or getattr(latest_img, 'volume_uid', None)
+
+        # Emit event for ALL evaluations (this populates the reasoning panel)
+        self._emit_event(EventType.DETECTION_TRIGGERED, {
+            'detector_name': detector.name,
+            'embryo_id': embryo_id,
+            'detected': result.detected,
+            'confidence': result.confidence.value if result.confidence else None,
+            'timepoint': result.timepoint,
+            'reasoning': result.reasoning,
+            'volume_uid': volume_uid,
+        })
+
     async def _on_detection_fired(self, detector, embryo_id: str, result):
         """
         Callback when a detector fires (detected=True with sufficient confidence)
@@ -1842,14 +1875,8 @@ Write a brief status summary. Examples:
         if not embryo:
             return
 
-        # Emit detection triggered event
-        self._emit_event(EventType.DETECTION_TRIGGERED, {
-            'detector_name': detector.name,
-            'embryo_id': embryo_id,
-            'detected': result.detected,
-            'confidence': result.confidence.value if result.confidence else None,
-            'timepoint': result.timepoint,
-        })
+        # Note: DETECTION_TRIGGERED is already emitted by _on_detection_evaluated for ALL evaluations
+        # This callback handles actions for positive detections only
 
         # Emit specific event for hatching detection
         if detector.name == 'hatching' and result.detected:

@@ -72,6 +72,9 @@ class SimpleMicroscopeServer:
         self._run_history = []
         self._last_documents = {}
 
+        # Plan execution timing log
+        self._plan_execution_log = []
+
     async def initialize(self):
         """Initialize hardware and RunEngine"""
         print("=" * 60)
@@ -202,6 +205,8 @@ class SimpleMicroscopeServer:
 
     async def _plan_executor(self):
         """Background task that executes plans from the queue"""
+        from datetime import datetime
+
         print("\nPlan executor started - waiting for plans...")
         self._running = True
 
@@ -215,7 +220,16 @@ class SimpleMicroscopeServer:
             except asyncio.TimeoutError:
                 continue
 
-            print(f"\n>>> Executing plan: {request.plan_name}")
+            # Log execution start with timestamp
+            start_time = datetime.now()
+            execution_record = {
+                'plan_name': request.plan_name,
+                'kwargs': {k: str(v) for k, v in request.kwargs.items()},  # Stringify for JSON
+                'start_time': start_time.isoformat(),
+                'start_time_formatted': start_time.strftime('%H:%M:%S.%f')[:-3],
+            }
+
+            print(f"\n>>> [{start_time.strftime('%H:%M:%S')}] Executing: {request.plan_name}")
 
             try:
                 # Get the plan function
@@ -236,7 +250,19 @@ class SimpleMicroscopeServer:
                 # Get the run UID
                 uid = result[0] if result else None
 
-                print(f"<<< Plan complete: {request.plan_name} (uid={uid})")
+                # Log completion
+                end_time = datetime.now()
+                duration_ms = (end_time - start_time).total_seconds() * 1000
+
+                execution_record.update({
+                    'end_time': end_time.isoformat(),
+                    'end_time_formatted': end_time.strftime('%H:%M:%S.%f')[:-3],
+                    'duration_ms': duration_ms,
+                    'success': True,
+                    'uid': uid,
+                })
+
+                print(f"<<< [{end_time.strftime('%H:%M:%S')}] Complete: {request.plan_name} ({duration_ms:.0f}ms)")
 
                 # Complete the future with result
                 request.future.set_result({
@@ -247,8 +273,25 @@ class SimpleMicroscopeServer:
 
             except Exception as e:
                 import traceback
-                print(f"<<< Plan failed: {request.plan_name} - {e}")
+                end_time = datetime.now()
+                duration_ms = (end_time - start_time).total_seconds() * 1000
+
+                execution_record.update({
+                    'end_time': end_time.isoformat(),
+                    'end_time_formatted': end_time.strftime('%H:%M:%S.%f')[:-3],
+                    'duration_ms': duration_ms,
+                    'success': False,
+                    'error': str(e),
+                })
+
+                print(f"<<< [{end_time.strftime('%H:%M:%S')}] Failed: {request.plan_name} - {e}")
                 request.future.set_exception(e)
+
+            # Store execution record
+            self._plan_execution_log.append(execution_record)
+            # Keep last 1000 entries
+            if len(self._plan_execution_log) > 1000:
+                self._plan_execution_log = self._plan_execution_log[-1000:]
 
     async def submit_plan(self, plan_name: str, kwargs: Dict = None) -> Dict:
         """Submit a plan and wait for completion"""
@@ -483,6 +526,23 @@ class SimpleMicroscopeServer:
                 'traceback': traceback.format_exc()
             }, status=500)
 
+    async def handle_get_plan_log(self, request):
+        """GET /api/plan_log - Get recent plan execution log with timing"""
+        try:
+            limit = int(request.query.get('limit', 100))
+            return web.json_response({
+                'success': True,
+                'entries': self._plan_execution_log[-limit:],
+                'total_count': len(self._plan_execution_log),
+            })
+        except Exception as e:
+            import traceback
+            return web.json_response({
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }, status=500)
+
     async def run(self, host: str = '127.0.0.1', port: int = 60610):
         """Start the server"""
         await self.initialize()
@@ -499,6 +559,7 @@ class SimpleMicroscopeServer:
         app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
         app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
         app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
+        app.router.add_get('/api/plan_log', self.handle_get_plan_log)
 
         # Start plan executor
         executor_task = asyncio.create_task(self._plan_executor())
@@ -519,6 +580,7 @@ class SimpleMicroscopeServer:
         print(f"  GET  /api/history    - Run history")
         print(f"  GET  /api/led/status - LED status and configs")
         print(f"  POST /api/led/set    - Set LED state directly")
+        print(f"  GET  /api/plan_log   - Plan execution timing log")
         print(f"\nPress Ctrl+C to stop")
         print("=" * 60 + "\n")
 

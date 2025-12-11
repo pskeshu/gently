@@ -26,7 +26,8 @@ class DetectionQueue:
         image_manager: ImageManager,
         claude_client: anthropic.Anthropic,
         model: str = "claude-opus-4-5-20251101",
-        on_detection_callback: Optional[Callable] = None
+        on_detection_callback: Optional[Callable] = None,
+        on_evaluation_callback: Optional[Callable] = None
     ):
         """
         Parameters
@@ -40,13 +41,16 @@ class DetectionQueue:
         model : str
             Claude model to use
         on_detection_callback : callable, optional
-            Called when detector fires: callback(detector, embryo_id, result)
+            Called when detector fires (detected=True): callback(detector, embryo_id, result)
+        on_evaluation_callback : callable, optional
+            Called for every evaluation: callback(detector, embryo_id, result, embryo_state)
         """
         self.registry = registry
         self.image_manager = image_manager
         self.claude = claude_client
         self.model = model
         self.on_detection_callback = on_detection_callback
+        self.on_evaluation_callback = on_evaluation_callback
 
     async def run_detectors(
         self,
@@ -92,11 +96,15 @@ class DetectionQueue:
             # Mark detector as run
             detector.mark_run(embryo_id, timepoint)
 
+            # Always trigger evaluation callback (for all results, not just positive)
+            if self.on_evaluation_callback:
+                await self.on_evaluation_callback(detector, embryo_id, result, embryo_state)
+
             # Check if detected and meets confidence threshold
             if result.detected and self._meets_confidence_threshold(result, detector):
                 detector.mark_detected(embryo_id)
 
-                # Trigger callback
+                # Trigger detection callback (for positive detections only)
                 if self.on_detection_callback:
                     await self.on_detection_callback(detector, embryo_id, result)
 

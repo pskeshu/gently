@@ -1284,7 +1284,6 @@ class RichCopilotCLI:
 
         # === Acquisition Settings ===
         acq_lines = [
-            f"[{theme.secondary}]Interval:[/] {embryo.interval_seconds}s",
             f"[{theme.secondary}]Slices:[/] {embryo.num_slices}",
             f"[{theme.secondary}]Exposure:[/] {embryo.exposure_ms} ms",
             f"[{theme.secondary}]Priority:[/] {embryo.priority}",
@@ -1903,30 +1902,25 @@ class RichCopilotCLI:
 
                 if state.embryos:
                     now = datetime.now()
-                    for eid, emb_state in state.embryos.items():
-                        # Last imaged
-                        if emb_state.last_acquired:
-                            secs_ago = (now - emb_state.last_acquired).total_seconds()
-                            if secs_ago < 60:
-                                last_str = f"{int(secs_ago)}s ago"
-                            else:
-                                last_str = f"{int(secs_ago // 60)}m ago"
-                        else:
-                            last_str = "not yet"
+                    # Round-based: all embryos share the same next round time
+                    next_round_secs = state.seconds_until_next_round
 
-                        # Next acquisition countdown
+                    for eid, emb_state in state.embryos.items():
+                        # Timepoints acquired shows progress
+                        tp_str = str(emb_state.timepoints_acquired)
+
+                        # Next acquisition countdown (shared for all active embryos)
                         if emb_state.is_complete:
                             next_str = "-"
                             status = f"[{theme.success}]done[/]"
-                        elif emb_state.next_acquisition_time:
-                            secs_until = (emb_state.next_acquisition_time - now).total_seconds()
-                            if secs_until <= 0:
+                        elif next_round_secs is not None:
+                            if next_round_secs <= 0:
                                 next_str = f"[bold {theme.warning}]NOW[/]"
-                            elif secs_until < 60:
-                                next_str = f"[bold {theme.info}]{int(secs_until)}s[/]"
+                            elif next_round_secs < 60:
+                                next_str = f"[bold {theme.info}]{int(next_round_secs)}s[/]"
                             else:
-                                mins = int(secs_until // 60)
-                                secs = int(secs_until % 60)
+                                mins = int(next_round_secs // 60)
+                                secs = int(next_round_secs % 60)
                                 next_str = f"{mins}m {secs}s"
                             status = f"[{theme.info}]active[/]"
                         else:
@@ -1935,8 +1929,8 @@ class RichCopilotCLI:
 
                         table.add_row(
                             eid,
-                            str(emb_state.timepoints_acquired),
-                            last_str,
+                            tp_str,
+                            f"round {state.current_round}",
                             next_str,
                             status
                         )
