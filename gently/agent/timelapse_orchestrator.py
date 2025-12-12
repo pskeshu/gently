@@ -76,9 +76,14 @@ class StopCondition:
 
     Supports composite conditions with OR logic via additional_conditions.
     If ANY condition is met (primary or additional), the embryo will stop.
+
+    For detection-based conditions (HATCHING, COMMA_STAGE), confirm_timepoints
+    specifies how many additional timepoints to acquire after detection before
+    actually stopping - useful to verify the detection is real.
     """
     condition_type: StopConditionType
     value: Any = None  # e.g., number of timepoints, hours, etc.
+    confirm_timepoints: int = 0  # Extra timepoints to acquire after detection
     additional_conditions: List['StopCondition'] = field(default_factory=list)
 
     def add_condition(self, condition: 'StopCondition') -> None:
@@ -115,12 +120,13 @@ class StopCondition:
             Description like "hatching OR duration:10h"
         """
         def _describe_single(cond: 'StopCondition') -> str:
+            confirm_suffix = f"+{cond.confirm_timepoints}tp" if cond.confirm_timepoints > 0 else ""
             if cond.condition_type == StopConditionType.MANUAL:
                 return "manual"
             elif cond.condition_type == StopConditionType.HATCHING:
-                return "hatching"
+                return f"hatching{confirm_suffix}"
             elif cond.condition_type == StopConditionType.COMMA_STAGE:
-                return "comma_stage"
+                return f"comma_stage{confirm_suffix}"
             elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
                 return f"{cond.value} timepoints"
             elif cond.condition_type == StopConditionType.DURATION:
@@ -135,12 +141,28 @@ class StopCondition:
         return " OR ".join(descriptions)
 
     @classmethod
-    def until_hatching(cls) -> 'StopCondition':
-        return cls(StopConditionType.HATCHING)
+    def until_hatching(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+        """
+        Stop when hatching is detected.
+
+        Parameters
+        ----------
+        confirm_timepoints : int
+            Extra timepoints to acquire after detection to confirm (default 0)
+        """
+        return cls(StopConditionType.HATCHING, confirm_timepoints=confirm_timepoints)
 
     @classmethod
-    def until_comma(cls) -> 'StopCondition':
-        return cls(StopConditionType.COMMA_STAGE)
+    def until_comma(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+        """
+        Stop when comma stage is detected.
+
+        Parameters
+        ----------
+        confirm_timepoints : int
+            Extra timepoints to acquire after detection to confirm (default 0)
+        """
+        return cls(StopConditionType.COMMA_STAGE, confirm_timepoints=confirm_timepoints)
 
     @classmethod
     def fixed_timepoints(cls, n: int) -> 'StopCondition':
@@ -204,12 +226,23 @@ class StopCondition:
         """
         def _parse_single(s: str) -> 'StopCondition':
             s = s.strip().lower()
+
+            # Check for confirmation timepoints suffix: "hatching+3" or "comma+5"
+            confirm_timepoints = 0
+            if '+' in s:
+                base, confirm_str = s.rsplit('+', 1)
+                try:
+                    confirm_timepoints = int(confirm_str)
+                    s = base
+                except ValueError:
+                    pass  # Not a valid number, treat as part of the string
+
             if s == 'manual':
                 return cls.manual()
             elif s == 'hatching':
-                return cls.until_hatching()
+                return cls.until_hatching(confirm_timepoints=confirm_timepoints)
             elif s in ('comma', 'comma_stage'):
-                return cls.until_comma()
+                return cls.until_comma(confirm_timepoints=confirm_timepoints)
             elif s.startswith('timepoints:'):
                 n = int(s.split(':')[1])
                 return cls.fixed_timepoints(n)
@@ -244,6 +277,9 @@ class EmbryoAcquisitionState:
     completion_reason: Optional[str] = None
     error_count: int = 0
     last_error: Optional[str] = None
+    # Track when detection first occurred (for confirm_timepoints feature)
+    detection_triggered_at: Optional[int] = None  # Timepoint when detection first fired
+    detection_type: Optional[str] = None  # What was detected (hatching, comma, etc.)
 
 
 class TimelapseStatus(Enum):
@@ -735,11 +771,25 @@ class TimelapseOrchestrator:
                 hatched_via_detector = embryo.was_detected('hatching')
 
                 if hatched_via_status or hatched_via_detector:
-                    self._emit_event(EventType.HATCHING_DETECTED, {
-                        'embryo_id': embryo_state.embryo_id,
-                        'timepoint': embryo_state.timepoints_acquired,
-                    })
-                    return "hatching detected"
+                    # First time detecting hatching - record the timepoint
+                    if embryo_state.detection_triggered_at is None:
+                        embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
+                        embryo_state.detection_type = "hatching"
+                        self._emit_event(EventType.HATCHING_DETECTED, {
+                            'embryo_id': embryo_state.embryo_id,
+                            'timepoint': embryo_state.timepoints_acquired,
+                        })
+                        logger.info(
+                            f"Hatching detected for {embryo_state.embryo_id} at t{embryo_state.timepoints_acquired}, "
+                            f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
+                        )
+
+                    # Check if we've acquired enough confirmation timepoints
+                    timepoints_since_detection = embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                    if timepoints_since_detection >= cond.confirm_timepoints:
+                        if cond.confirm_timepoints > 0:
+                            return f"hatching detected + {cond.confirm_timepoints} confirmation timepoints"
+                        return "hatching detected"
 
         elif cond.condition_type == StopConditionType.COMMA_STAGE:
             # Check if comma stage was detected
@@ -747,7 +797,21 @@ class TimelapseOrchestrator:
             if embryo:
                 # Use the was_detected helper from EmbryoState
                 if embryo.was_detected('comma') or embryo.was_detected('comma_stage'):
-                    return "comma stage detected"
+                    # First time detecting comma - record the timepoint
+                    if embryo_state.detection_triggered_at is None:
+                        embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
+                        embryo_state.detection_type = "comma_stage"
+                        logger.info(
+                            f"Comma stage detected for {embryo_state.embryo_id} at t{embryo_state.timepoints_acquired}, "
+                            f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
+                        )
+
+                    # Check if we've acquired enough confirmation timepoints
+                    timepoints_since_detection = embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                    if timepoints_since_detection >= cond.confirm_timepoints:
+                        if cond.confirm_timepoints > 0:
+                            return f"comma stage detected + {cond.confirm_timepoints} confirmation timepoints"
+                        return "comma stage detected"
 
         return None
 
