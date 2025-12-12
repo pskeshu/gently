@@ -143,8 +143,12 @@ const TasksManager = {
 
         // Store detection reasoning from server
         this.detectionReasoning = serverState.detection_reasoning || {};
+        this.expandedImages = {};  // Clear expanded image state
 
-        // Auto-select first embryo if none selected
+        // Clear selection if selected embryo no longer exists, then auto-select first
+        if (this.selectedEmbryoId && !this.state.embryos[this.selectedEmbryoId]) {
+            this.selectedEmbryoId = null;
+        }
         if (!this.selectedEmbryoId && Object.keys(this.state.embryos).length > 0) {
             this.selectedEmbryoId = Object.keys(this.state.embryos)[0];
         }
@@ -159,11 +163,15 @@ const TasksManager = {
     // ==========================================
 
     handleAcquisitionStarted(data) {
+        // Clear all state for fresh experiment
         this.state.status = 'RUNNING';
         this.state.startedAt = new Date();
         this.state.totalTimepoints = 0;
         this.state.baseInterval = data.interval_seconds || 120;
         this.state.embryos = {};
+        this.detectionReasoning = {};  // Clear old detection data
+        this.selectedEmbryoId = null;
+        this.expandedImages = {};
 
         // Initialize embryo states
         const embryoIds = data.embryo_ids || [];
