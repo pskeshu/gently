@@ -4,6 +4,10 @@
  */
 
 const TasksManager = {
+    // Session ID for tracking experiment boundaries
+    // When session_id changes, all state is cleared (new experiment)
+    currentSessionId: null,
+
     state: {
         status: 'IDLE', // IDLE, RUNNING, PAUSED, COMPLETED, FAILED
         startedAt: null,
@@ -40,6 +44,7 @@ const TasksManager = {
     saveState() {
         try {
             const toSave = {
+                sessionId: this.currentSessionId,  // Include session ID for validation on load
                 status: this.state.status,
                 startedAt: this.state.startedAt ? this.state.startedAt.toISOString() : null,
                 embryos: JSON.parse(JSON.stringify(this.state.embryos)),  // Deep clone
@@ -78,6 +83,9 @@ const TasksManager = {
                 }
             }
 
+            // Restore session ID (will be validated against server on connect)
+            this.currentSessionId = data.sessionId || null;
+
             this.state.status = data.status || 'IDLE';
             this.state.startedAt = data.startedAt ? new Date(data.startedAt) : null;
             this.state.totalTimepoints = data.totalTimepoints || 0;
@@ -100,7 +108,7 @@ const TasksManager = {
                 this.selectedEmbryoId = Object.keys(this.state.embryos)[0];
             }
 
-            console.log('Restored tasks state:', this.state.status, Object.keys(this.state.embryos).length, 'embryos');
+            console.log('Restored tasks state:', this.state.status, Object.keys(this.state.embryos).length, 'embryos', 'session:', this.currentSessionId);
             this.updateTasksCount();
         } catch (err) {
             console.warn('Failed to load tasks state:', err);
@@ -116,15 +124,26 @@ const TasksManager = {
     // ==========================================
 
     reconcileWithServerState(serverState) {
-        console.log('Reconciling with server state:', serverState.status);
+        const serverSessionId = serverState.session_id;
+        const isNewSession = serverSessionId && serverSessionId !== this.currentSessionId;
 
-        // Server state is authoritative
+        if (isNewSession) {
+            console.log(`Session changed: ${this.currentSessionId} → ${serverSessionId}`);
+            this.clearAllState();
+        } else {
+            console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);
+        }
+
+        // Update session ID
+        this.currentSessionId = serverSessionId;
+
+        // Server state is authoritative - replace everything
         this.state.status = serverState.status || 'IDLE';
         this.state.startedAt = serverState.started_at ? new Date(serverState.started_at) : null;
         this.state.totalTimepoints = serverState.total_timepoints || 0;
         this.state.baseInterval = serverState.base_interval || 120;
 
-        // Merge embryo states
+        // Replace embryo states entirely
         this.state.embryos = {};
         for (const [eid, embryoData] of Object.entries(serverState.embryos || {})) {
             this.state.embryos[eid] = {
@@ -141,7 +160,7 @@ const TasksManager = {
             };
         }
 
-        // Store detection reasoning from server
+        // Replace detection reasoning from server
         this.detectionReasoning = serverState.detection_reasoning || {};
         this.expandedImages = {};  // Clear expanded image state
 
@@ -156,6 +175,20 @@ const TasksManager = {
         this.updateTasksCount();
         this.render();
         this.saveState();
+    },
+
+    // Clear all state (for session boundary)
+    clearAllState() {
+        this.state = {
+            status: 'IDLE',
+            startedAt: null,
+            embryos: {},
+            totalTimepoints: 0,
+            baseInterval: 120
+        };
+        this.detectionReasoning = {};
+        this.selectedEmbryoId = null;
+        this.expandedImages = {};
     },
 
     // ==========================================
@@ -221,9 +254,14 @@ const TasksManager = {
         }
 
         const embryo = this.state.embryos[embryoId];
-        embryo.timepoints = (data.timepoint !== undefined) ? data.timepoint + 1 : embryo.timepoints + 1;
+        const newTimepoints = (data.timepoint !== undefined) ? data.timepoint + 1 : embryo.timepoints + 1;
+
+        // Only update totalTimepoints if this is actually a new timepoint
+        if (newTimepoints > embryo.timepoints) {
+            this.state.totalTimepoints += (newTimepoints - embryo.timepoints);
+        }
+        embryo.timepoints = newTimepoints;
         embryo.lastAcquired = new Date();
-        this.state.totalTimepoints++;
 
         this.updateTasksCount();
         this.updateEmbryoCard(embryoId);
@@ -262,20 +300,26 @@ const TasksManager = {
             timepoint: data.timepoint
         };
 
-        // Store detection reasoning for the panel
+        // Store detection reasoning for the panel (avoid duplicates)
         if (!this.detectionReasoning[embryoId]) {
             this.detectionReasoning[embryoId] = [];
         }
-        this.detectionReasoning[embryoId].push({
-            detector_name: detectorName,
-            detected: detected,
-            confidence: data.confidence,
-            reasoning: data.reasoning,
-            timepoint: data.timepoint,
-            volume_uid: data.volume_uid,
-            projection_uid: data.projection_uid,
-            timestamp: new Date().toISOString()
-        });
+        // Check if we already have this detection (same timepoint + detector)
+        const isDuplicate = this.detectionReasoning[embryoId].some(
+            r => r.timepoint === data.timepoint && r.detector_name === detectorName
+        );
+        if (!isDuplicate) {
+            this.detectionReasoning[embryoId].push({
+                detector_name: detectorName,
+                detected: detected,
+                confidence: data.confidence,
+                reasoning: data.reasoning,
+                timepoint: data.timepoint,
+                volume_uid: data.volume_uid,
+                projection_uid: data.projection_uid,
+                timestamp: new Date().toISOString()
+            });
+        }
 
         this.updateEmbryoCard(embryoId);
         // Update reasoning panel if this embryo is selected

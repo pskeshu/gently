@@ -307,9 +307,13 @@ class TimelapseStateTracker:
 
     Maintains state from EventBus events so new WebSocket clients
     can receive current timelapse status on connect.
+
+    Uses session_id to help clients identify session boundaries and
+    clear stale data when a new experiment starts.
     """
 
     def __init__(self):
+        self.session_id: Optional[str] = None  # Unique ID per experiment
         self.status = "IDLE"  # IDLE, RUNNING, PAUSED, COMPLETED
         self.started_at: Optional[str] = None
         self.embryos: Dict[str, dict] = {}  # embryo_id -> state
@@ -320,6 +324,9 @@ class TimelapseStateTracker:
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
         if event_type == "ACQUISITION_STARTED":
+            # Generate new session ID for this experiment
+            import uuid
+            self.session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
             self.status = "RUNNING"
             self.started_at = datetime.now().isoformat()
             self.base_interval = data.get("interval_seconds", 120)
@@ -408,6 +415,7 @@ class TimelapseStateTracker:
     def to_dict(self) -> dict:
         """Serialize for WebSocket transmission"""
         return {
+            "session_id": self.session_id,
             "status": self.status,
             "started_at": self.started_at,
             "embryos": self.embryos,
