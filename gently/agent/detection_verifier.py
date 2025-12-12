@@ -53,6 +53,17 @@ class TemporalResult:
 
 
 @dataclass
+class EnsembleResult:
+    """Result of ensemble voting strategy"""
+    votes_yes: int
+    votes_no: int
+    total_votes: int
+    agreement_ratio: float  # votes_yes / total_votes if detected, votes_no / total_votes if not
+    consensus_detected: bool  # True if >70% agree on YES
+    raw_responses: List[str] = field(default_factory=list)
+
+
+@dataclass
 class VerificationResult:
     """Combined result of all verification strategies"""
     original_detected: bool
@@ -62,10 +73,11 @@ class VerificationResult:
     adversarial: AdversarialResult
     independent: IndependentResult
     temporal: TemporalResult
+    ensemble: Optional[EnsembleResult] = None  # Only for hatching detection
 
     # Consensus
-    consensus: bool
-    consensus_reasoning: str
+    consensus: bool = False
+    consensus_reasoning: str = ""
 
     # Metadata
     timestamp: datetime = field(default_factory=datetime.now)
@@ -73,7 +85,7 @@ class VerificationResult:
 
     def to_dict(self) -> Dict[str, Any]:
         """Serialize to dictionary"""
-        return {
+        result = {
             'original_detected': self.original_detected,
             'original_confidence': self.original_confidence.value if self.original_confidence else None,
             'adversarial': {
@@ -96,6 +108,15 @@ class VerificationResult:
             'timestamp': self.timestamp.isoformat(),
             'verification_duration_seconds': self.verification_duration_seconds,
         }
+        if self.ensemble:
+            result['ensemble'] = {
+                'votes_yes': self.ensemble.votes_yes,
+                'votes_no': self.ensemble.votes_no,
+                'total_votes': self.ensemble.total_votes,
+                'agreement_ratio': self.ensemble.agreement_ratio,
+                'consensus_detected': self.ensemble.consensus_detected,
+            }
+        return result
 
 
 class DetectionVerifier:
@@ -110,6 +131,9 @@ class DetectionVerifier:
         self,
         claude_client: anthropic.Anthropic,
         model: str = "claude-haiku-4-5-20251001",
+        ensemble_model: str = "claude-haiku-4-5-20251001",
+        ensemble_size: int = 50,
+        ensemble_threshold: float = 0.70,
     ):
         """
         Parameters
@@ -117,10 +141,19 @@ class DetectionVerifier:
         claude_client : anthropic.Anthropic
             Claude API client
         model : str
-            Model to use for verification (Haiku for speed/cost)
+            Model to use for verification strategies (Opus for accuracy)
+        ensemble_model : str
+            Model to use for ensemble voting (Haiku for cost efficiency)
+        ensemble_size : int
+            Number of parallel calls for ensemble voting (default: 50)
+        ensemble_threshold : float
+            Agreement ratio required for ensemble consensus (default: 0.70 = 70%)
         """
         self.claude = claude_client
         self.model = model
+        self.ensemble_model = ensemble_model
+        self.ensemble_size = ensemble_size
+        self.ensemble_threshold = ensemble_threshold
 
     async def verify(
         self,
@@ -161,13 +194,21 @@ class DetectionVerifier:
             detector, embryo_state, timepoint
         )
 
-        adversarial, independent, temporal = await asyncio.gather(
-            adversarial_task, independent_task, temporal_task
-        )
+        # For hatching detection, also run ensemble voting
+        ensemble_result = None
+        if detector.name == 'hatching':
+            ensemble_task = self._run_ensemble_hatching(embryo_state)
+            adversarial, independent, temporal, ensemble_result = await asyncio.gather(
+                adversarial_task, independent_task, temporal_task, ensemble_task
+            )
+        else:
+            adversarial, independent, temporal = await asyncio.gather(
+                adversarial_task, independent_task, temporal_task
+            )
 
         # Determine consensus
         consensus, reasoning = self._evaluate_consensus(
-            original_result, adversarial, independent, temporal
+            original_result, adversarial, independent, temporal, ensemble_result
         )
 
         duration = (datetime.now() - start_time).total_seconds()
@@ -178,6 +219,7 @@ class DetectionVerifier:
             adversarial=adversarial,
             independent=independent,
             temporal=temporal,
+            ensemble=ensemble_result,
             consensus=consensus,
             consensus_reasoning=reasoning,
             verification_duration_seconds=duration,
@@ -186,6 +228,7 @@ class DetectionVerifier:
         logger.info(
             f"Verification complete for {detector.name}: "
             f"consensus={consensus}, duration={duration:.2f}s"
+            + (f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES" if ensemble_result else "")
         )
 
         return result
@@ -214,7 +257,21 @@ class DetectionVerifier:
                     raw_response="",
                 )
 
-            prompt = f"""You are reviewing a detection result for a C. elegans embryo.
+            # Build detector-specific critical review guidance
+            if detector.name == 'hatching':
+                specific_guidance = """
+For HATCHING specifically, look for these common FALSE POSITIVE patterns:
+- Is the worm still COILED/PRETZEL-SHAPED inside the eggshell?
+- Is the eggshell just EXPANDED/STRETCHED but worm still contained?
+- Is the worm filling the shell but NOT actually OUTSIDE the boundary?
+- Could this be late 3-fold stage (tightly packed) rather than hatched?
+
+TRUE hatching requires the worm to be OUTSIDE the shell (free-floating, elongated, or field empty).
+"""
+            else:
+                specific_guidance = ""
+
+            prompt = f"""You are reviewing a detection result for a C. elegans embryo (diSPIM max projection).
 
 The system detected: {detector.name}
 Original confidence: {original_result.confidence.value if original_result.confidence else 'unknown'}
@@ -225,7 +282,7 @@ NOW ACT AS A CRITICAL REVIEWER. Your job is to find reasons why this detection m
 - Are there artifacts, noise, or imaging issues that could be misleading?
 - Is the evidence actually conclusive, or could it be interpreted differently?
 - Are there alternative explanations for what is observed?
-
+{specific_guidance}
 Analyze the image(s) carefully and respond in EXACTLY this format:
 COUNTER_EVIDENCE_FOUND: [YES/NO]
 CONCERNS: [list specific doubts or alternative explanations, separated by semicolons]
@@ -276,12 +333,26 @@ CONFIDENCE_IN_ORIGINAL: [HIGH/MEDIUM/LOW]
                     raw_response="",
                 )
 
+            # Build detector-specific criteria
+            if detector.name == 'hatching':
+                criteria = """
+TRUE HATCHING criteria (must meet at least one):
+- Worm body is OUTSIDE the eggshell boundary (free-floating, elongated)
+- Empty field of view (worm has left)
+- Worm moving in/out of frame (not confined to egg location)
+
+NOT HATCHING indicators:
+- Worm is still coiled/pretzel-shaped INSIDE the eggshell
+- Expanded/stretched shell with worm still contained"""
+            else:
+                criteria = detector.description
+
             # Use a neutral prompt that doesn't reveal the previous detection
-            prompt = f"""Analyze this C. elegans embryo image at timepoint {timepoint}.
+            prompt = f"""Analyze this C. elegans embryo image (diSPIM max projection) at timepoint {timepoint}.
 
 Question: Has '{detector.name}' occurred in this embryo?
 
-{detector.description}
+{criteria}
 
 Provide an independent assessment based SOLELY on what you observe in this image.
 Do not assume any prior state - analyze only what is visible now.
@@ -359,7 +430,20 @@ KEY_EVIDENCE: [what specifically do you observe that supports your conclusion?]
                     raw_response="",
                 )
 
-            prompt = f"""Compare these sequential timepoints of a C. elegans embryo.
+            # Build detector-specific temporal criteria
+            if detector.name == 'hatching':
+                temporal_criteria = """For HATCHING, look for:
+- A visible BREACH appearing in the eggshell boundary (not just expansion)
+- The worm physically EXITING the shell (part of body moves outside)
+- A transition from INSIDE to OUTSIDE the shell
+- NOT just shell expansion or increased movement while still contained"""
+            else:
+                temporal_criteria = f"""For {detector.name}, look for:
+- Actual transition or change between frames
+- Not just a static state that could have existed before
+- Clear evidence of progression or event occurrence"""
+
+            prompt = f"""Compare these sequential timepoints of a C. elegans embryo (diSPIM max projection).
 
 PREVIOUS TIMEPOINTS (shown first):
 These are from t={timepoint-2} to t={timepoint-1}
@@ -369,10 +453,7 @@ This is t={timepoint}
 
 Question: Is there a clear CHANGE consistent with '{detector.name}'?
 
-For {detector.name}, look for:
-- Actual transition or change between frames
-- Not just a static state that could have existed before
-- Clear evidence of progression or event occurrence
+{temporal_criteria}
 
 Respond in EXACTLY this format:
 CHANGE_DETECTED: [YES/NO]
@@ -423,6 +504,106 @@ CONFIDENCE: [HIGH/MEDIUM/LOW]
                 })
 
         return images
+
+    async def _run_ensemble_hatching(self, embryo_state: EmbryoState) -> EnsembleResult:
+        """
+        Run ensemble voting for hatching detection using many parallel Haiku calls.
+
+        This provides statistical noise reduction through collective wisdom.
+        Each call makes an independent YES/NO hatching determination.
+
+        Returns
+        -------
+        EnsembleResult
+            Voting results with agreement ratio
+        """
+        try:
+            # Get the current image
+            images = self._get_image_content(embryo_state, num_images=1)
+            if not images:
+                return EnsembleResult(
+                    votes_yes=0,
+                    votes_no=0,
+                    total_votes=0,
+                    agreement_ratio=0.0,
+                    consensus_detected=False,
+                    raw_responses=["No images available"],
+                )
+
+            # Simple, focused prompt for hatching detection
+            ensemble_prompt = """Look at this C. elegans embryo image (diSPIM max projection).
+
+Answer ONE question: Has the embryo HATCHED?
+
+HATCHED means: The worm body is OUTSIDE the eggshell (free-floating, elongated, or field is empty because worm left).
+NOT HATCHED means: The worm is still INSIDE the eggshell (coiled/pretzel-shaped, even if shell looks expanded).
+
+Respond with ONLY: YES or NO"""
+
+            async def single_vote() -> str:
+                """Make a single API call for one vote"""
+                try:
+                    content = [{"type": "text", "text": ensemble_prompt}] + images
+                    response = await asyncio.to_thread(
+                        self.claude.messages.create,
+                        model=self.ensemble_model,
+                        max_tokens=10,  # Very short response expected
+                        messages=[{"role": "user", "content": content}]
+                    )
+                    return response.content[0].text.strip().upper()
+                except Exception as e:
+                    logger.debug(f"Ensemble vote failed: {e}")
+                    return "ERROR"
+
+            # Run all votes in parallel
+            logger.info(f"[ENSEMBLE] Running {self.ensemble_size} parallel Haiku calls for hatching verification")
+            tasks = [single_vote() for _ in range(self.ensemble_size)]
+            responses = await asyncio.gather(*tasks)
+
+            # Count votes
+            votes_yes = sum(1 for r in responses if "YES" in r)
+            votes_no = sum(1 for r in responses if "NO" in r)
+            errors = sum(1 for r in responses if "ERROR" in r)
+            total_valid = votes_yes + votes_no
+
+            if total_valid == 0:
+                return EnsembleResult(
+                    votes_yes=0,
+                    votes_no=0,
+                    total_votes=0,
+                    agreement_ratio=0.0,
+                    consensus_detected=False,
+                    raw_responses=responses,
+                )
+
+            # Calculate agreement ratio
+            agreement_ratio = votes_yes / total_valid
+            consensus_detected = agreement_ratio >= self.ensemble_threshold
+
+            logger.info(
+                f"[ENSEMBLE] Results: {votes_yes} YES, {votes_no} NO, {errors} errors. "
+                f"Agreement: {agreement_ratio:.1%}. Consensus: {consensus_detected}"
+            )
+
+            return EnsembleResult(
+                votes_yes=votes_yes,
+                votes_no=votes_no,
+                total_votes=total_valid,
+                agreement_ratio=agreement_ratio,
+                consensus_detected=consensus_detected,
+                raw_responses=responses[:10],  # Keep only first 10 for debugging
+            )
+
+        except Exception as e:
+            logger.error(f"Ensemble verification failed: {e}")
+            return EnsembleResult(
+                votes_yes=0,
+                votes_no=0,
+                total_votes=0,
+                agreement_ratio=0.0,
+                consensus_detected=False,
+                raw_responses=[f"Error: {str(e)}"],
+            )
 
     def _parse_adversarial_response(self, response: str) -> AdversarialResult:
         """Parse adversarial strategy response"""
@@ -512,6 +693,7 @@ CONFIDENCE: [HIGH/MEDIUM/LOW]
         adversarial: AdversarialResult,
         independent: IndependentResult,
         temporal: TemporalResult,
+        ensemble: Optional[EnsembleResult] = None,
     ) -> tuple[bool, str]:
         """
         Evaluate consensus across all verification strategies.
@@ -521,6 +703,7 @@ CONFIDENCE: [HIGH/MEDIUM/LOW]
         # Count agreements
         agreements = 0
         disagreements = []
+        total_strategies = 3  # Base: adversarial, independent, temporal
 
         # Check adversarial: should NOT find strong counter-evidence
         if not adversarial.found_counter_evidence:
@@ -540,18 +723,37 @@ CONFIDENCE: [HIGH/MEDIUM/LOW]
         else:
             disagreements.append(f"No temporal change detected: {temporal.description}")
 
-        # Consensus requires all 3 strategies to agree
-        consensus = agreements == 3
+        # Check ensemble (if available, for hatching detection)
+        if ensemble is not None:
+            total_strategies = 4
+            if ensemble.consensus_detected:
+                agreements += 1
+            else:
+                disagreements.append(
+                    f"Ensemble voting disagrees: {ensemble.votes_yes}/{ensemble.total_votes} YES "
+                    f"({ensemble.agreement_ratio:.0%}), threshold is {self.ensemble_threshold:.0%}"
+                )
+
+        # Consensus requires all strategies to agree
+        consensus = agreements == total_strategies
 
         if consensus:
-            reasoning = (
-                f"All verification strategies agree: "
-                f"no counter-evidence found, independent analysis confirms detection, "
-                f"temporal change observed."
-            )
+            if ensemble:
+                reasoning = (
+                    f"All verification strategies agree ({total_strategies}/{total_strategies}): "
+                    f"no counter-evidence found, independent analysis confirms detection, "
+                    f"temporal change observed, ensemble voting confirms "
+                    f"({ensemble.votes_yes}/{ensemble.total_votes} = {ensemble.agreement_ratio:.0%} YES)."
+                )
+            else:
+                reasoning = (
+                    f"All verification strategies agree: "
+                    f"no counter-evidence found, independent analysis confirms detection, "
+                    f"temporal change observed."
+                )
         else:
             reasoning = (
-                f"Verification disagreement ({agreements}/3 agree): "
+                f"Verification disagreement ({agreements}/{total_strategies} agree): "
                 f"{'; '.join(disagreements)}"
             )
 

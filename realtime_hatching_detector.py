@@ -153,28 +153,34 @@ class RealtimeHatchingDetector:
         # Add instruction text
         content.append({
             "type": "text",
-            "text": f"""You are analyzing real-time C. elegans embryo development from diSPIM microscopy.
+            "text": f"""You are analyzing real-time C. elegans embryo development from diSPIM light sheet microscopy (max projection images).
 You are seeing {len(recent_images)} recent timepoints (each 2 minutes apart).
 
 Your task: Determine if the embryo has HATCHED in the MOST RECENT (final) timepoint.
 
-Key characteristics of hatching:
-- The embryo breaks out of the eggshell
-- Visible breach or rupture in the outer boundary
-- Embryo emerges from confined eggshell space
-- Morphology changes from egg-contained to elongated worm shape
+TRUE HATCHING looks like (must meet at least one):
+- Most or all of the worm body is OUTSIDE the eggshell boundary
+- Worm is free-floating, elongated, "worm-like" in the field of view (NOT coiled/intertwined)
+- Empty field of view where embryo used to be (worm has left entirely)
+- Worm partially visible, moving in/out of the frame (not confined to original egg location)
+- Clear spatial separation between the worm body and the (now-empty or deflated) eggshell
 
-IMPORTANT: We need high confidence to stop acquisition. Only report hatching if you are certain.
+NOT HATCHING - common false positives to AVOID:
+- Worm is still coiled/pretzel-shaped INSIDE an expanded eggshell
+- Eggshell appears stretched or larger, but worm remains CONTAINED within
+- Worm appears to fill the eggshell completely but NO part extends beyond the boundary
+- Vigorous movement WITHIN the shell (even if dramatic) without actual breach
+- Late 3-fold stage where worm is tightly packed but still enclosed
 
-Please analyze the sequence and answer:
-1. Has the embryo hatched in the final timepoint? (YES/NO)
-2. Confidence level (LOW/MEDIUM/HIGH)
-3. Brief reasoning (1-2 sentences)
+CRITICAL: The worm must have PHYSICALLY EXITED through a visible breach point.
+Simply appearing "ready to hatch" or having an expanded shell is NOT hatching.
+
+IMPORTANT: We need high confidence to stop acquisition. Only report hatching if you are certain the worm is OUTSIDE the shell.
 
 Format your response as:
 HATCHED: [YES/NO]
 CONFIDENCE: [LOW/MEDIUM/HIGH]
-REASONING: [your explanation]
+REASONING: [your explanation - specifically state if worm is INSIDE or OUTSIDE the shell]
 """
         })
 

@@ -552,12 +552,73 @@ class EmbryoState:
         results = self.detection_results[detector_name]
         return results[-1] if results else None
 
-    def was_detected(self, detector_name: str) -> bool:
-        """Check if detector has ever fired (detected=True) for this embryo"""
+    def was_detected(self, detector_name: str, require_verified: bool = False) -> bool:
+        """
+        Check if detector has ever fired (detected=True) for this embryo.
+
+        Parameters
+        ----------
+        detector_name : str
+            Name of detector to check
+        require_verified : bool
+            If True, only return True if the detection was also verified.
+            This is important for critical actions like stopping experiments.
+
+        Returns
+        -------
+        bool
+            True if detected (and verified if require_verified=True)
+        """
         if detector_name not in self.detection_results:
             return False
 
-        return any(r.get('detected', False) for r in self.detection_results[detector_name])
+        for result in self.detection_results[detector_name]:
+            if result.get('detected', False):
+                if require_verified:
+                    if result.get('verified', False):
+                        return True
+                else:
+                    return True
+        return False
+
+    def mark_detection_verified(self, detector_name: str, timepoint: Optional[int] = None) -> bool:
+        """
+        Mark a detection result as verified by the challenger system.
+
+        Parameters
+        ----------
+        detector_name : str
+            Name of detector
+        timepoint : int, optional
+            Specific timepoint to mark. If None, marks the most recent detection.
+
+        Returns
+        -------
+        bool
+            True if a detection was found and marked verified
+        """
+        if detector_name not in self.detection_results:
+            return False
+
+        results = self.detection_results[detector_name]
+        if not results:
+            return False
+
+        # Find the result to mark
+        if timepoint is not None:
+            # Find by timepoint
+            for result in results:
+                if result.get('timepoint') == timepoint and result.get('detected', False):
+                    result['verified'] = True
+                    return True
+        else:
+            # Mark the most recent detected result
+            for result in reversed(results):
+                if result.get('detected', False):
+                    result['verified'] = True
+                    return True
+
+        return False
 
     def add_cv_result(self, result_type: str, result: Dict):
         """

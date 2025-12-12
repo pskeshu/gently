@@ -264,20 +264,31 @@ def get_detector_presets() -> Dict:
         'hatching': {
             'name': 'hatching',
             'description': 'Detects when C. elegans embryo hatches from eggshell',
-            'prompt': """Analyze this C. elegans embryo image and determine if the embryo has HATCHED.
+            'prompt': """Analyze this C. elegans embryo image (diSPIM light sheet max projection) and determine if the embryo has HATCHED.
 
-Key characteristics of hatching:
-- Visible breach or rupture in the eggshell (vitelline membrane)
-- Embryo emerging or partially emerged from shell
-- Clear separation between larva and eggshell
-- Change in overall morphology from constrained to free-moving
+TRUE HATCHING looks like (must meet at least one):
+- Most or all of the worm body is OUTSIDE the eggshell boundary
+- Worm is free-floating, elongated, "worm-like" in the field of view (NOT coiled/intertwined)
+- Empty field of view where embryo used to be (worm has left entirely)
+- Worm partially visible, moving in/out of the frame (not confined to original egg location)
+- Clear spatial separation between the worm body and the (now-empty or deflated) eggshell
+
+NOT HATCHING - common false positives to AVOID:
+- Worm is still coiled/pretzel-shaped INSIDE an expanded eggshell
+- Eggshell appears stretched or larger, but worm remains CONTAINED within
+- Worm appears to fill the eggshell completely but NO part extends beyond the boundary
+- Vigorous movement WITHIN the shell (even if dramatic) without actual breach
+- Late 3-fold stage where worm is tightly packed but still enclosed
+
+CRITICAL: The worm must have PHYSICALLY EXITED through a visible breach point.
+Simply appearing "ready to hatch" or having an expanded shell is NOT hatching.
 
 Focus on the CURRENT/LATEST image (the final one shown).
 
 Respond in this exact format:
 DETECTED: [YES/NO]
 CONFIDENCE: [HIGH/MEDIUM/LOW]
-REASONING: [Brief explanation of what you observe]""",
+REASONING: [Brief explanation - specifically state if worm is INSIDE or OUTSIDE the shell]""",
             'use_temporal_context': True,
             'temporal_context_size': 10,
             'confidence_threshold': 'HIGH',

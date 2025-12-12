@@ -768,7 +768,9 @@ class TimelapseOrchestrator:
                 # Check hatching_status (legacy)
                 hatched_via_status = embryo.hatching_status.get('hatched', False)
                 # Check detection_results (from detector system)
-                hatched_via_detector = embryo.was_detected('hatching')
+                # IMPORTANT: require_verified=True ensures the verifier has confirmed the detection
+                # This prevents false positives from prematurely stopping experiments
+                hatched_via_detector = embryo.was_detected('hatching', require_verified=True)
 
                 if hatched_via_status or hatched_via_detector:
                     # First time detecting hatching - record the timepoint

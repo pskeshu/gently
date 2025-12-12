@@ -1973,8 +1973,12 @@ Write a brief status summary. Examples:
                         })
                         return  # Don't proceed with auto-action
 
-                    # Verification passed - proceed with stop
+                    # Verification passed - mark detection as verified and proceed with stop
                     logger.info(f"[VERIFIER] Verification passed for {detector.name}, proceeding with stop")
+
+                    # Mark the detection as verified in embryo state
+                    # This allows StopCondition.until_hatching() to also recognize verified detections
+                    embryo.mark_detection_verified(detector.name, result.timepoint)
 
                 except Exception as e:
                     logger.error(f"[VERIFIER] Verification error: {e}")
