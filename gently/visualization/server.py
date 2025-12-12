@@ -917,13 +917,13 @@ class VisualizationServer:
                     "timestamp": datetime.now().isoformat()
                 })
 
-                # Send current timelapse state if active
+                # Always send timelapse state on connect so client can reconcile
+                # (if IDLE with no session_id, client will clear stale cached state)
                 timelapse_state = self.timelapse_tracker.to_dict()
-                if timelapse_state["status"] != "IDLE" or timelapse_state["embryos"]:
-                    await websocket.send_json({
-                        "type": "timelapse_state",
-                        "data": timelapse_state
-                    })
+                await websocket.send_json({
+                    "type": "timelapse_state",
+                    "data": timelapse_state
+                })
 
                 # Keep connection alive and handle incoming messages
                 while True:

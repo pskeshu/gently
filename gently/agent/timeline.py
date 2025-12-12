@@ -418,7 +418,8 @@ class TimelineManager:
             with open(self.storage_file, 'r', encoding='utf-8') as f:
                 for line in f:
                     line = line.strip()
-                    if line:
+                    # Only parse lines that look like JSON objects
+                    if line and line.startswith('{'):
                         try:
                             data = json.loads(line)
                             event = TimelineEvent.from_dict(data)

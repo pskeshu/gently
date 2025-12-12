@@ -140,10 +140,12 @@ const TasksManager = {
 
     reconcileWithServerState(serverState) {
         const serverSessionId = serverState.session_id;
-        const isNewSession = serverSessionId && serverSessionId !== this.currentSessionId;
+        // Clear state if: server has new session ID, OR server is IDLE/fresh and client has stale data
+        const serverHasNewSession = serverSessionId && serverSessionId !== this.currentSessionId;
+        const serverIsIdleButClientHasData = !serverSessionId && this.currentSessionId;
 
-        if (isNewSession) {
-            console.log(`Session changed: ${this.currentSessionId} → ${serverSessionId}`);
+        if (serverHasNewSession || serverIsIdleButClientHasData) {
+            console.log(`Session changed: ${this.currentSessionId} → ${serverSessionId || '(none)'}`);
             this.clearAllState();
         } else {
             console.log('Reconciling with server state:', serverState.status, 'session:', serverSessionId);

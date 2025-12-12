@@ -239,6 +239,7 @@ body {
 
 .tab-content.active {
     display: flex;
+    flex-direction: column;
 }
 
 /* Fix 3: Main grid fills available space */
@@ -1577,7 +1578,7 @@ kbd {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    overflow: hidden;
+    overflow-y: auto;  /* Allow vertical scrolling */
 }
 
 .tasks-header {
@@ -1918,9 +1919,10 @@ kbd {
 
 .tasks-body {
     display: flex;
+    align-items: stretch;  /* Children fill full height */
     gap: 1.5rem;
-    flex: 1;
-    min-height: 0;  /* Important for flex children to shrink */
+    flex: 1 1 auto;  /* Grow to fill available space */
+    min-height: 1000px;  /* Large space for embryo list */
     overflow: hidden;
 }
 
@@ -1929,6 +1931,7 @@ kbd {
     width: 380px;
     min-width: 320px;
     flex-shrink: 0;
+    align-self: stretch;  /* Fill parent height */
     display: flex;
     flex-direction: column;
     background: var(--bg-card);
@@ -3020,6 +3023,7 @@ kbd {
     margin-bottom: 1rem;
     overflow: hidden;
     transition: all 0.3s ease;
+    flex-shrink: 0;  /* Don't shrink - keep its natural size */
 }
 
 .narrative-panel.collapsed .narrative-content {
