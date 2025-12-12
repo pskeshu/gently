@@ -280,6 +280,57 @@ class ImageStore:
         """Get info for all 3D volumes (without heavy data)"""
         return [v.to_info_dict() for v in self._volumes_3d.values()]
 
+    def get_sequence(
+        self,
+        embryo_id: str,
+        start: int = 0,
+        end: Optional[int] = None,
+        data_type: Optional[str] = None
+    ) -> List[ImageData]:
+        """Get ordered sequence of images for an embryo within a timepoint range.
+
+        Args:
+            embryo_id: The embryo to get images for
+            start: Starting timepoint (inclusive)
+            end: Ending timepoint (inclusive), None for all
+            data_type: Filter by data type (e.g., 'volume_projection')
+
+        Returns:
+            List of ImageData sorted by timepoint
+        """
+        cache = self._embryo_caches.get(embryo_id)
+        if not cache:
+            return []
+
+        # Get all images for this embryo (volumes + snapshots)
+        all_images = list(cache.volumes) + list(cache.snapshots)
+
+        # Filter by data type if specified
+        if data_type:
+            all_images = [img for img in all_images if img.data_type == data_type]
+
+        # Filter by timepoint range
+        def get_timepoint(img: ImageData) -> Optional[int]:
+            tp = img.metadata.get('timepoint')
+            if tp is not None:
+                return int(tp)
+            return None
+
+        filtered = []
+        for img in all_images:
+            tp = get_timepoint(img)
+            if tp is None:
+                continue
+            if tp < start:
+                continue
+            if end is not None and tp > end:
+                continue
+            filtered.append(img)
+
+        # Sort by timepoint
+        filtered.sort(key=lambda x: get_timepoint(x) or 0)
+        return filtered
+
     def get_stats(self) -> Dict:
         """Get storage statistics"""
         total_cal = len(self._calibration_images)
@@ -622,6 +673,66 @@ class VisualizationServer:
                 "embryos": self.store.get_embryo_ids()
             }
 
+        @self.app.get("/api/sequence/{embryo_id}")
+        async def get_image_sequence(
+            embryo_id: str,
+            start: int = 0,
+            end: Optional[int] = None,
+            data_type: str = "volume_projection",
+            buffer_percent: float = 0.15
+        ):
+            """Get ordered sequence of images for timepoint range.
+
+            Returns a list of image metadata (without base64 data) for lazy loading.
+            Use /api/images/{uid}/png to load individual frames.
+
+            Args:
+                embryo_id: The embryo to get images for
+                start: Starting timepoint (inclusive)
+                end: Ending timepoint (inclusive)
+                data_type: Filter by data type (default: volume_projection)
+                buffer_percent: Extend range by this percentage on each side
+
+            Returns:
+                Sequence metadata with UIDs for lazy loading
+            """
+            # Calculate buffered range
+            if end is not None:
+                range_size = end - start
+                buffer = int(range_size * buffer_percent)
+                buffered_start = max(0, start - buffer)
+                buffered_end = end + buffer
+            else:
+                buffered_start = start
+                buffered_end = None
+
+            images = self.store.get_sequence(
+                embryo_id=embryo_id,
+                start=buffered_start,
+                end=buffered_end,
+                data_type=data_type
+            )
+
+            # Return lightweight metadata (no base64 data)
+            sequence = []
+            for img in images:
+                sequence.append({
+                    "uid": img.uid,
+                    "timepoint": img.metadata.get("timepoint"),
+                    "timestamp": img.timestamp,
+                    "data_type": img.data_type,
+                    "shape": img.shape,
+                    "embryo_id": img.metadata.get("embryo_id")
+                })
+
+            return {
+                "embryo_id": embryo_id,
+                "requested_range": {"start": start, "end": end},
+                "buffered_range": {"start": buffered_start, "end": buffered_end},
+                "sequence": sequence,
+                "count": len(sequence)
+            }
+
         @self.app.get("/api/events")
         async def list_events(
             event_type: Optional[str] = None,
@@ -780,6 +891,18 @@ class VisualizationServer:
             except Exception as e:
                 logger.error(f"Failed to push image via HTTP: {e}")
                 raise HTTPException(status_code=500, detail=str(e))
+
+        @self.app.get("/api/narrative")
+        async def get_narrative(since: Optional[str] = None):
+            """Generate experiment narrative summary.
+
+            This endpoint generates an AI-powered summary of the experiment state.
+            Currently returns a local summary; can be extended to use Claude Haiku.
+
+            Args:
+                since: Optional ISO timestamp to get differential summary
+            """
+            return self._generate_narrative_summary(since)
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -1029,6 +1152,103 @@ class VisualizationServer:
         })
 
         logger.info(f"Pushed 3D volume {uid} ({volume.shape}) to {len(self.manager.active_connections)} clients")
+
+    def _generate_narrative_summary(self, since: Optional[str] = None) -> Dict[str, Any]:
+        """Generate a narrative summary of the experiment state.
+
+        This generates a local summary based on the timelapse tracker state.
+        Can be extended to use Claude Haiku for AI-powered narratives.
+
+        Args:
+            since: Optional ISO timestamp to generate differential summary
+
+        Returns:
+            Dict with status, headline, summary, and details
+        """
+        tracker = self.timelapse_tracker
+
+        # If no active experiment
+        if tracker.status == "IDLE" and not tracker.embryos:
+            return {
+                "status": "normal",
+                "headline": "No Active Experiment",
+                "summary": None,
+                "details": ["Start a timelapse to see experiment summaries here."],
+                "generated_at": datetime.now().isoformat()
+            }
+
+        # Count embryos
+        embryo_count = len(tracker.embryos)
+        active_embryos = [e for e in tracker.embryos.values() if not e.get("is_complete")]
+        completed_embryos = [e for e in tracker.embryos.values() if e.get("is_complete")]
+
+        # Count detections
+        total_detections = 0
+        detection_details = []
+        for embryo_id, reasoning_list in tracker.detection_reasoning.items():
+            positives = [r for r in reasoning_list if r.get("detected")]
+            total_detections += len(positives)
+            for d in positives:
+                detector = d.get("detector_name", "unknown")
+                tp = d.get("timepoint", "?")
+                detection_details.append(f"{embryo_id}: {detector.title()} at T{tp}")
+
+        # Build details list
+        details = []
+
+        if len(active_embryos) > 0:
+            details.append(f"{len(active_embryos)} embryo{'s' if len(active_embryos) != 1 else ''} actively imaging")
+
+        if len(completed_embryos) > 0:
+            details.append(f"{len(completed_embryos)} embryo{'s' if len(completed_embryos) != 1 else ''} completed")
+
+        details.append(f"{tracker.total_timepoints} total timepoints acquired")
+
+        if tracker.base_interval:
+            interval_str = f"{tracker.base_interval // 60} min" if tracker.base_interval >= 60 else f"{tracker.base_interval}s"
+            details.append(f"Imaging interval: {interval_str}")
+
+        if detection_details:
+            if len(detection_details) <= 3:
+                details.append(f"{total_detections} detection{'s' if total_detections != 1 else ''}: {', '.join(detection_details)}")
+            else:
+                details.append(f"{total_detections} detection{'s' if total_detections != 1 else ''}: {', '.join(detection_details[:3])}...")
+
+        # Calculate duration
+        if tracker.started_at:
+            started = datetime.fromisoformat(tracker.started_at) if isinstance(tracker.started_at, str) else tracker.started_at
+            duration_sec = (datetime.now() - started).total_seconds()
+            hours = int(duration_sec // 3600)
+            minutes = int((duration_sec % 3600) // 60)
+            duration_str = f"{hours}h {minutes}m" if hours > 0 else f"{minutes}m"
+            details.append(f"Running for {duration_str}")
+
+        # Determine status and headline
+        if total_detections > 0:
+            status = "notable"
+            headline = f"{total_detections} Detection{'s' if total_detections != 1 else ''} Found"
+        elif len(completed_embryos) > 0:
+            status = "normal"
+            headline = f"{len(completed_embryos)}/{embryo_count} Embryos Complete"
+        else:
+            status = "normal"
+            headline = "Experiment In Progress"
+
+        # Build summary text
+        summary = None
+        if total_detections > 0:
+            latest = detection_details[-1] if detection_details else None
+            summary = f"Positive detections have been identified. {latest}. All imaging continues normally."
+        elif len(completed_embryos) > 0:
+            summary = f"{len(completed_embryos)} embryo{'s have' if len(completed_embryos) != 1 else ' has'} reached their stop condition. {len(active_embryos)} still being imaged."
+
+        return {
+            "status": status,
+            "headline": headline,
+            "summary": summary,
+            "details": details,
+            "generated_at": datetime.now().isoformat()
+        }
 
     async def start(self):
         """Start the visualization server"""

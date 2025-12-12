@@ -311,6 +311,653 @@ const Lightbox = {
     }
 };
 
+/**
+ * TimepointPlayer - Video playback for embryo timelapse sequences
+ * Extends Lightbox with animated playback, timeline, and VLM context
+ */
+const TimepointPlayer = {
+    // Playback state
+    sequence: [],           // Array of {uid, timepoint, ...}
+    currentIndex: 0,
+    isPlaying: false,
+    fps: 3,                 // Default speed (biology-appropriate)
+    looping: true,          // Loop by default
+    animationId: null,
+    lastFrameTime: 0,
+
+    // Context for VLM highlighting
+    embryoId: null,
+    vlmRange: null,         // {start: 73, end: 81}
+    detectionPoint: null,   // Timepoint where detection occurred
+    reasoningText: null,    // Original VLM text
+
+    // Preloading
+    preloadRadius: 5,       // Frames to preload ahead/behind
+    imageCache: new Map(),  // uid -> Image object
+    loadingSet: new Set(),  // UIDs currently loading
+
+    // DOM elements (created on open)
+    els: {},
+
+    async openSequence(embryoId, start, end, options = {}) {
+        /**
+         * Open video player for a timepoint range
+         *
+         * @param {string} embryoId - Embryo to play
+         * @param {number} start - Start timepoint
+         * @param {number} end - End timepoint (optional)
+         * @param {object} options - {vlmRange, detectionPoint, reasoningText, bufferPercent}
+         */
+        this.embryoId = embryoId;
+        this.vlmRange = options.vlmRange || {start, end};
+        this.detectionPoint = options.detectionPoint || null;
+        this.reasoningText = options.reasoningText || null;
+
+        // Fetch sequence from server
+        const bufferPercent = options.bufferPercent || 0.15;
+        const params = new URLSearchParams({
+            start: start,
+            data_type: 'volume_projection',
+            buffer_percent: bufferPercent
+        });
+        if (end !== null && end !== undefined) {
+            params.set('end', end);
+        }
+
+        try {
+            const resp = await fetch(`/api/sequence/${embryoId}?${params}`);
+            const data = await resp.json();
+
+            if (!data.sequence || data.sequence.length === 0) {
+                console.warn('TimepointPlayer: no images in sequence');
+                return;
+            }
+
+            this.sequence = data.sequence;
+            this.currentIndex = 0;
+            this.imageCache.clear();
+            this.loadingSet.clear();
+
+            // Open in video mode
+            this.openVideoMode();
+
+            // Start preloading
+            this.preloadAround(0);
+
+            // Show first frame
+            await this.showFrame(0);
+
+        } catch (err) {
+            console.error('TimepointPlayer: failed to load sequence', err);
+        }
+    },
+
+    openVideoMode() {
+        /**
+         * Transform lightbox into video mode with controls and context panel
+         */
+        const overlay = document.getElementById('lightbox-overlay');
+        if (!overlay) return;
+
+        overlay.classList.add('active', 'video-mode');
+        document.body.style.overflow = 'hidden';
+
+        // Inject video-specific UI if not already present
+        if (!document.getElementById('video-controls')) {
+            this.injectVideoUI(overlay);
+        }
+
+        // Show video UI
+        document.getElementById('video-controls')?.classList.remove('hidden');
+        document.getElementById('video-timeline')?.classList.remove('hidden');
+        document.getElementById('video-context-panel')?.classList.remove('hidden');
+
+        // Hide standard lightbox nav
+        document.querySelector('.lightbox-nav')?.classList.add('hidden');
+        document.getElementById('lightbox-thumbnails')?.classList.add('hidden');
+
+        // Update context panel
+        this.updateContextPanel();
+
+        // Bind video-specific keys
+        this.bindVideoKeys();
+
+        Lightbox.isOpen = true;
+    },
+
+    injectVideoUI(overlay) {
+        /**
+         * Inject video player UI elements into the lightbox
+         */
+        const container = overlay.querySelector('.lightbox-container');
+        if (!container) return;
+
+        // Timeline
+        const timeline = document.createElement('div');
+        timeline.id = 'video-timeline';
+        timeline.className = 'video-timeline';
+        timeline.innerHTML = `
+            <div class="timeline-track" id="timeline-track">
+                <div class="timeline-buffer" id="timeline-buffer"></div>
+                <div class="timeline-vlm-range" id="timeline-vlm-range"></div>
+                <div class="timeline-detection-marker" id="timeline-detection-marker"></div>
+                <div class="timeline-playhead" id="timeline-playhead"></div>
+            </div>
+            <div class="timeline-labels" id="timeline-labels"></div>
+        `;
+        container.appendChild(timeline);
+
+        // Playback controls
+        const controls = document.createElement('div');
+        controls.id = 'video-controls';
+        controls.className = 'video-controls';
+        controls.innerHTML = `
+            <div class="controls-left">
+                <button class="ctrl-btn" id="ctrl-step-back" title="Step back (Left arrow)">
+                    <span class="ctrl-icon">|◀</span>
+                </button>
+                <button class="ctrl-btn ctrl-play" id="ctrl-play-pause" title="Play/Pause (Space)">
+                    <span class="ctrl-icon" id="play-icon">▶</span>
+                </button>
+                <button class="ctrl-btn" id="ctrl-step-forward" title="Step forward (Right arrow)">
+                    <span class="ctrl-icon">▶|</span>
+                </button>
+            </div>
+            <div class="controls-center">
+                <button class="ctrl-btn ctrl-small ${this.looping ? 'active' : ''}" id="ctrl-loop" title="Toggle loop (L)">
+                    <span class="ctrl-icon">↺</span>
+                </button>
+                <div class="speed-control">
+                    <button class="ctrl-btn ctrl-small" id="ctrl-slower" title="Slower (-)">−</button>
+                    <span class="speed-label" id="speed-label">${this.fps} fps</span>
+                    <button class="ctrl-btn ctrl-small" id="ctrl-faster" title="Faster (+)">+</button>
+                </div>
+            </div>
+            <div class="controls-right">
+                <span class="frame-counter" id="frame-counter">T0 / 0</span>
+            </div>
+        `;
+        container.appendChild(controls);
+
+        // Context panel (side panel for VLM reasoning)
+        const contextPanel = document.createElement('div');
+        contextPanel.id = 'video-context-panel';
+        contextPanel.className = 'video-context-panel';
+        contextPanel.innerHTML = `
+            <div class="context-header">
+                <span class="context-title">VLM Analysis</span>
+                <button class="context-close" id="context-panel-close">×</button>
+            </div>
+            <div class="context-verdict" id="context-verdict"></div>
+            <div class="context-reasoning" id="context-reasoning"></div>
+            <div class="context-info" id="context-info"></div>
+        `;
+        overlay.appendChild(contextPanel);
+
+        // Bind control events
+        this.bindControlEvents();
+    },
+
+    bindControlEvents() {
+        // Play/Pause
+        document.getElementById('ctrl-play-pause')?.addEventListener('click', () => {
+            this.isPlaying ? this.pause() : this.play();
+        });
+
+        // Step
+        document.getElementById('ctrl-step-back')?.addEventListener('click', () => this.stepFrame(-1));
+        document.getElementById('ctrl-step-forward')?.addEventListener('click', () => this.stepFrame(1));
+
+        // Loop
+        document.getElementById('ctrl-loop')?.addEventListener('click', () => this.toggleLoop());
+
+        // Speed
+        document.getElementById('ctrl-slower')?.addEventListener('click', () => this.setSpeed(this.fps - 0.5));
+        document.getElementById('ctrl-faster')?.addEventListener('click', () => this.setSpeed(this.fps + 0.5));
+
+        // Timeline click
+        document.getElementById('timeline-track')?.addEventListener('click', (e) => this.handleTimelineClick(e));
+
+        // Context panel close
+        document.getElementById('context-panel-close')?.addEventListener('click', () => {
+            document.getElementById('video-context-panel')?.classList.add('collapsed');
+        });
+    },
+
+    bindVideoKeys() {
+        // Store handler reference for cleanup
+        this._videoKeyHandler = (e) => {
+            if (!Lightbox.isOpen) return;
+
+            // Don't intercept if typing in input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            switch (e.key) {
+                case ' ':  // Space - play/pause
+                    e.preventDefault();
+                    this.isPlaying ? this.pause() : this.play();
+                    break;
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    this.stepFrame(-1);
+                    break;
+                case 'ArrowRight':
+                    e.preventDefault();
+                    this.stepFrame(1);
+                    break;
+                case '-':
+                    e.preventDefault();
+                    this.setSpeed(this.fps - 0.5);
+                    break;
+                case '+':
+                case '=':
+                    e.preventDefault();
+                    this.setSpeed(this.fps + 0.5);
+                    break;
+                case 'l':
+                case 'L':
+                    e.preventDefault();
+                    this.toggleLoop();
+                    break;
+                case 'd':
+                case 'D':
+                    e.preventDefault();
+                    this.jumpToDetection();
+                    break;
+                case '[':
+                    e.preventDefault();
+                    this.jumpToVlmStart();
+                    break;
+                case ']':
+                    e.preventDefault();
+                    this.jumpToVlmEnd();
+                    break;
+                case 'Home':
+                    e.preventDefault();
+                    this.seekTo(0);
+                    break;
+                case 'End':
+                    e.preventDefault();
+                    this.seekTo(this.sequence.length - 1);
+                    break;
+                case 'Escape':
+                    e.preventDefault();
+                    this.close();
+                    break;
+            }
+        };
+
+        // Remove existing and add new
+        document.removeEventListener('keydown', this._videoKeyHandler);
+        document.addEventListener('keydown', this._videoKeyHandler);
+    },
+
+    // Playback controls
+    play() {
+        if (this.isPlaying || this.sequence.length === 0) return;
+
+        this.isPlaying = true;
+        this.lastFrameTime = performance.now();
+        this.updatePlayButton();
+        this.animate();
+    },
+
+    pause() {
+        this.isPlaying = false;
+        if (this.animationId) {
+            cancelAnimationFrame(this.animationId);
+            this.animationId = null;
+        }
+        this.updatePlayButton();
+    },
+
+    animate() {
+        if (!this.isPlaying) return;
+
+        const now = performance.now();
+        const elapsed = now - this.lastFrameTime;
+        const frameInterval = 1000 / this.fps;
+
+        if (elapsed >= frameInterval) {
+            this.lastFrameTime = now - (elapsed % frameInterval);
+
+            // Advance frame
+            let nextIndex = this.currentIndex + 1;
+            if (nextIndex >= this.sequence.length) {
+                if (this.looping) {
+                    nextIndex = 0;
+                } else {
+                    this.pause();
+                    return;
+                }
+            }
+
+            this.showFrame(nextIndex);
+        }
+
+        this.animationId = requestAnimationFrame(() => this.animate());
+    },
+
+    stepFrame(direction) {
+        this.pause();
+        let newIndex = this.currentIndex + direction;
+
+        // Wrap around if looping
+        if (newIndex < 0) {
+            newIndex = this.looping ? this.sequence.length - 1 : 0;
+        } else if (newIndex >= this.sequence.length) {
+            newIndex = this.looping ? 0 : this.sequence.length - 1;
+        }
+
+        this.showFrame(newIndex);
+    },
+
+    setSpeed(fps) {
+        this.fps = Math.max(0.5, Math.min(15, fps));
+        document.getElementById('speed-label').textContent = `${this.fps} fps`;
+    },
+
+    toggleLoop() {
+        this.looping = !this.looping;
+        document.getElementById('ctrl-loop')?.classList.toggle('active', this.looping);
+    },
+
+    seekTo(index) {
+        if (index < 0 || index >= this.sequence.length) return;
+        this.showFrame(index);
+    },
+
+    jumpToDetection() {
+        if (this.detectionPoint === null) return;
+        const idx = this.sequence.findIndex(s => s.timepoint === this.detectionPoint);
+        if (idx >= 0) this.seekTo(idx);
+    },
+
+    jumpToVlmStart() {
+        if (!this.vlmRange) return;
+        const idx = this.sequence.findIndex(s => s.timepoint >= this.vlmRange.start);
+        if (idx >= 0) this.seekTo(idx);
+    },
+
+    jumpToVlmEnd() {
+        if (!this.vlmRange) return;
+        // Find last frame in VLM range
+        for (let i = this.sequence.length - 1; i >= 0; i--) {
+            if (this.sequence[i].timepoint <= this.vlmRange.end) {
+                this.seekTo(i);
+                return;
+            }
+        }
+    },
+
+    // Frame display
+    async showFrame(index) {
+        if (index < 0 || index >= this.sequence.length) return;
+
+        this.currentIndex = index;
+        const frame = this.sequence[index];
+
+        // Get or load image
+        let img = this.imageCache.get(frame.uid);
+        if (!img) {
+            img = await this.loadImage(frame.uid);
+        }
+
+        // Display
+        const lightboxImg = document.getElementById('lightbox-image');
+        if (lightboxImg && img) {
+            lightboxImg.src = img.src;
+        }
+
+        // Update UI
+        this.updateFrameCounter();
+        this.updatePlayhead();
+        this.updateContextHighlight();
+
+        // Preload nearby frames
+        this.preloadAround(index);
+    },
+
+    async loadImage(uid) {
+        // Return cached if available
+        if (this.imageCache.has(uid)) {
+            return this.imageCache.get(uid);
+        }
+
+        // Prevent duplicate loading
+        if (this.loadingSet.has(uid)) {
+            return new Promise((resolve) => {
+                const check = () => {
+                    if (this.imageCache.has(uid)) {
+                        resolve(this.imageCache.get(uid));
+                    } else if (!this.loadingSet.has(uid)) {
+                        resolve(null);
+                    } else {
+                        setTimeout(check, 50);
+                    }
+                };
+                check();
+            });
+        }
+
+        this.loadingSet.add(uid);
+
+        return new Promise((resolve) => {
+            const img = new Image();
+            img.onload = () => {
+                this.imageCache.set(uid, img);
+                this.loadingSet.delete(uid);
+                resolve(img);
+            };
+            img.onerror = () => {
+                this.loadingSet.delete(uid);
+                resolve(null);
+            };
+            img.src = `/api/images/${uid}/png`;
+        });
+    },
+
+    preloadAround(centerIndex) {
+        // Preload frames around current position
+        for (let offset = -this.preloadRadius; offset <= this.preloadRadius; offset++) {
+            const idx = centerIndex + offset;
+            if (idx >= 0 && idx < this.sequence.length) {
+                const frame = this.sequence[idx];
+                if (!this.imageCache.has(frame.uid) && !this.loadingSet.has(frame.uid)) {
+                    this.loadImage(frame.uid);  // Fire and forget
+                }
+            }
+        }
+    },
+
+    // UI updates
+    updatePlayButton() {
+        const icon = document.getElementById('play-icon');
+        if (icon) {
+            icon.textContent = this.isPlaying ? '⏸' : '▶';
+        }
+    },
+
+    updateFrameCounter() {
+        const counter = document.getElementById('frame-counter');
+        const frame = this.sequence[this.currentIndex];
+        if (counter && frame) {
+            counter.textContent = `T${frame.timepoint} / ${this.sequence.length}`;
+        }
+    },
+
+    updatePlayhead() {
+        const playhead = document.getElementById('timeline-playhead');
+        const track = document.getElementById('timeline-track');
+        if (!playhead || !track || this.sequence.length === 0) return;
+
+        const percent = (this.currentIndex / (this.sequence.length - 1)) * 100;
+        playhead.style.left = `${percent}%`;
+    },
+
+    updateContextHighlight() {
+        // Highlight timepoint references in VLM text that match current frame
+        const frame = this.sequence[this.currentIndex];
+        if (!frame || !this.reasoningText) return;
+
+        const reasoningEl = document.getElementById('context-reasoning');
+        if (!reasoningEl) return;
+
+        // Re-render with current timepoint highlighted
+        const currentTp = frame.timepoint;
+        let html = this.escapeHtml(this.reasoningText);
+
+        // Highlight ranges that include current timepoint
+        html = html.replace(
+            /timepoints?\s+(\d+)(?:\s*[-–]\s*(\d+))?/gi,
+            (match, start, end) => {
+                const s = parseInt(start);
+                const e = end ? parseInt(end) : s;
+                const isActive = currentTp >= s && currentTp <= e;
+                return `<mark class="${isActive ? 'active' : ''}">${match}</mark>`;
+            }
+        );
+
+        // Also highlight T-format references
+        html = html.replace(
+            /T(\d+)(?:\s*[-–]\s*T?(\d+))?/gi,
+            (match, start, end) => {
+                const s = parseInt(start);
+                const e = end ? parseInt(end) : s;
+                const isActive = currentTp >= s && currentTp <= e;
+                return `<mark class="${isActive ? 'active' : ''}">${match}</mark>`;
+            }
+        );
+
+        reasoningEl.innerHTML = html;
+    },
+
+    updateContextPanel() {
+        const verdictEl = document.getElementById('context-verdict');
+        const reasoningEl = document.getElementById('context-reasoning');
+        const infoEl = document.getElementById('context-info');
+
+        if (verdictEl) {
+            if (this.detectionPoint !== null) {
+                verdictEl.textContent = `DETECTED at T${this.detectionPoint}`;
+                verdictEl.className = 'context-verdict detected';
+            } else {
+                verdictEl.textContent = 'Analyzing...';
+                verdictEl.className = 'context-verdict';
+            }
+        }
+
+        if (reasoningEl && this.reasoningText) {
+            reasoningEl.textContent = this.reasoningText;
+        }
+
+        if (infoEl) {
+            const firstTp = this.sequence[0]?.timepoint || '?';
+            const lastTp = this.sequence[this.sequence.length - 1]?.timepoint || '?';
+            infoEl.textContent = `Embryo: ${this.embryoId} | Range: T${firstTp}-T${lastTp}`;
+        }
+
+        // Update timeline markers
+        this.renderTimeline();
+    },
+
+    renderTimeline() {
+        const track = document.getElementById('timeline-track');
+        const labelsEl = document.getElementById('timeline-labels');
+        const vlmRangeEl = document.getElementById('timeline-vlm-range');
+        const detectionMarker = document.getElementById('timeline-detection-marker');
+
+        if (!track || this.sequence.length === 0) return;
+
+        const firstTp = this.sequence[0].timepoint;
+        const lastTp = this.sequence[this.sequence.length - 1].timepoint;
+        const range = lastTp - firstTp;
+
+        // VLM range highlight
+        if (vlmRangeEl && this.vlmRange) {
+            const startPct = ((this.vlmRange.start - firstTp) / range) * 100;
+            const endPct = ((this.vlmRange.end - firstTp) / range) * 100;
+            vlmRangeEl.style.left = `${Math.max(0, startPct)}%`;
+            vlmRangeEl.style.width = `${Math.min(100, endPct) - Math.max(0, startPct)}%`;
+        }
+
+        // Detection point marker
+        if (detectionMarker && this.detectionPoint !== null) {
+            const pct = ((this.detectionPoint - firstTp) / range) * 100;
+            detectionMarker.style.left = `${pct}%`;
+            detectionMarker.style.display = 'block';
+        } else if (detectionMarker) {
+            detectionMarker.style.display = 'none';
+        }
+
+        // Labels
+        if (labelsEl) {
+            labelsEl.innerHTML = `
+                <span class="timeline-label" style="left: 0">T${firstTp}</span>
+                ${this.vlmRange ? `<span class="timeline-label" style="left: ${((this.vlmRange.start - firstTp) / range) * 100}%">T${this.vlmRange.start}</span>` : ''}
+                ${this.vlmRange ? `<span class="timeline-label" style="left: ${((this.vlmRange.end - firstTp) / range) * 100}%">T${this.vlmRange.end}</span>` : ''}
+                <span class="timeline-label" style="left: 100%">T${lastTp}</span>
+            `;
+        }
+    },
+
+    handleTimelineClick(e) {
+        const track = document.getElementById('timeline-track');
+        if (!track || this.sequence.length === 0) return;
+
+        const rect = track.getBoundingClientRect();
+        const pct = (e.clientX - rect.left) / rect.width;
+        const index = Math.round(pct * (this.sequence.length - 1));
+        this.seekTo(Math.max(0, Math.min(this.sequence.length - 1, index)));
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    },
+
+    close() {
+        this.pause();
+        this.imageCache.clear();
+        this.loadingSet.clear();
+        this.sequence = [];
+
+        // Remove video mode class
+        const overlay = document.getElementById('lightbox-overlay');
+        overlay?.classList.remove('video-mode');
+
+        // Hide video UI
+        document.getElementById('video-controls')?.classList.add('hidden');
+        document.getElementById('video-timeline')?.classList.add('hidden');
+        document.getElementById('video-context-panel')?.classList.add('hidden');
+
+        // Show standard lightbox nav
+        document.querySelector('.lightbox-nav')?.classList.remove('hidden');
+        document.getElementById('lightbox-thumbnails')?.classList.remove('hidden');
+
+        // Close lightbox
+        Lightbox.close();
+
+        // Remove key handler
+        if (this._videoKeyHandler) {
+            document.removeEventListener('keydown', this._videoKeyHandler);
+        }
+    },
+
+    // Convenience method for playing all timepoints of an embryo
+    async playAll(embryoId) {
+        await this.openSequence(embryoId, 0, null, {
+            bufferPercent: 0
+        });
+        this.play();
+    }
+};
+
+// Make available globally
+window.TimepointPlayer = TimepointPlayer;
+
+
 // Initialize on DOM ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => Lightbox.init());

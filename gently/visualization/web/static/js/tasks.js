@@ -25,12 +25,27 @@ const TasksManager = {
     // Expanded image states
     expandedImages: {},  // detection index -> true/false
 
+    // Expanded reasoning states (for collapsible reasoning text)
+    expandedReasoning: {},  // detection index -> true/false
+
+    // Expanded range states (for collapsed timepoint ranges)
+    expandedRanges: {},  // range key -> true/false
+
+    // Filter state for detection panel
+    detectionFilter: 'all',  // 'all', 'detections', 'high-confidence'
+
+    // Number of items to show in expanded ranges
+    rangeLoadLimit: 10,  // Initial items to show
+    rangeLoadMore: {},  // range key -> number of items loaded
+
     countdownInterval: null,
     storageKey: 'gently-tasks-state',
 
     init() {
         // Restore state from localStorage
         this.loadState();
+        // Load detection agreements
+        this.loadAgreements();
         // Start countdown update timer
         this.startCountdownUpdates();
         // Initial render
@@ -189,6 +204,10 @@ const TasksManager = {
         this.detectionReasoning = {};
         this.selectedEmbryoId = null;
         this.expandedImages = {};
+        this.expandedReasoning = {};
+        this.expandedRanges = {};
+        this.detectionFilter = 'all';
+        this.rangeLoadMore = {};
     },
 
     // ==========================================
@@ -499,10 +518,18 @@ const TasksManager = {
         const maxTimepoints = this.getMaxTimepoints(embryo);
         const progressPct = maxTimepoints > 0 ? Math.min(100, (embryo.timepoints / maxTimepoints) * 100) : 0;
 
-        // Reasoning count badge
-        const reasoningCount = (this.detectionReasoning[embryo.embryoId] || []).length;
-        const reasoningBadge = reasoningCount > 0 ?
-            `<span class="reasoning-count" title="${reasoningCount} detection evaluations">${reasoningCount}</span>` : '';
+        // Detection counts for badge
+        const reasoning = this.detectionReasoning[embryo.embryoId] || [];
+        const positiveCount = reasoning.filter(r => r.detected).length;
+        const totalCount = reasoning.length;
+
+        // Show positive detections prominently, or total evaluations if none
+        let detectionBadge = '';
+        if (positiveCount > 0) {
+            detectionBadge = `<span class="reasoning-count" style="background: var(--accent-green);" title="${positiveCount} positive detection${positiveCount > 1 ? 's' : ''}">${positiveCount} detected</span>`;
+        } else if (totalCount > 0) {
+            detectionBadge = `<span class="reasoning-count" title="${totalCount} detection evaluations">${totalCount}</span>`;
+        }
 
         // Calculate countdown
         let countdownHtml = '';
@@ -562,12 +589,21 @@ const TasksManager = {
             `;
         }
 
+        // Play button for viewing all timepoints as video
+        const hasTimepoints = embryo.timepoints > 0;
+        const playButton = hasTimepoints ? `
+            <button class="embryo-play-btn" onclick="event.stopPropagation(); TasksManager.playEmbryoTimelapse('${embryo.embryoId}')" title="Play all timepoints">
+                <span class="play-icon">▶</span>
+            </button>
+        ` : '';
+
         return `
             <div class="embryo-card sidebar-card ${status} ${isSelected ? 'selected' : ''}" data-embryo-id="${embryo.embryoId}">
                 <div class="embryo-header">
                     <div class="embryo-header-left">
                         <span class="embryo-name">${embryo.embryoId}</span>
-                        ${reasoningBadge}
+                        ${detectionBadge}
+                        ${playButton}
                     </div>
                     <span class="embryo-status ${status}">
                         <span class="embryo-status-icon">${statusIcon}</span>
@@ -627,29 +663,59 @@ const TasksManager = {
         const embryo = this.state.embryos[this.selectedEmbryoId];
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
 
+        // Calculate statistics
+        const totalEvaluations = reasoning.length;
+        const positiveDetections = reasoning.filter(r => r.detected);
+        const highConfidence = reasoning.filter(r => r.confidence?.toLowerCase() === 'high');
+
         // Embryo info header
         const statusIcon = embryo.isComplete ? '&#x2714;' :
                           embryo.lastError ? '&#x2718;' : '&#x25CF;';
         const statusClass = embryo.isComplete ? 'complete' :
                            embryo.lastError ? 'error' : 'running';
 
-        // Detection history (most recent first)
-        const sortedReasoning = [...reasoning].reverse();
+        // Build quick jump badges for positive detections
+        const quickJumpsHtml = positiveDetections.length > 0
+            ? positiveDetections.map(d => `
+                <span class="quick-jump-badge" onclick="TasksManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Jump to detection">
+                    <span class="detector-icon">${this.getDetectorIcon(d.detector_name)}</span>
+                    ${this.formatDetectorName(d.detector_name)} @ T${d.timepoint}
+                </span>
+            `).join('')
+            : '<span style="font-size: 0.8rem; color: var(--text-muted);">No positive detections yet</span>';
 
-        let reasoningListHtml = '';
-        if (sortedReasoning.length === 0) {
-            reasoningListHtml = `
+        // Build filter buttons with counts
+        const filterButtonsHtml = `
+            <div class="detection-filter-group">
+                <button class="filter-btn ${this.detectionFilter === 'all' ? 'active' : ''}"
+                        onclick="TasksManager.setDetectionFilter('all')">
+                    All<span class="count">${totalEvaluations}</span>
+                </button>
+                <button class="filter-btn ${this.detectionFilter === 'detections' ? 'active' : ''}"
+                        onclick="TasksManager.setDetectionFilter('detections')">
+                    Detected<span class="count">${positiveDetections.length}</span>
+                </button>
+                <button class="filter-btn ${this.detectionFilter === 'high-confidence' ? 'active' : ''}"
+                        onclick="TasksManager.setDetectionFilter('high-confidence')">
+                    High Conf<span class="count">${highConfidence.length}</span>
+                </button>
+            </div>
+        `;
+
+        // Build detection list based on filter
+        let detectionListHtml = '';
+        if (totalEvaluations === 0) {
+            detectionListHtml = `
                 <div class="no-detections">
                     <div class="no-detections-icon">&#x1F9EC;</div>
                     <div class="no-detections-text">No detection evaluations yet</div>
                     <div class="no-detections-hint">
-                        Detector reasoning will appear here as each timepoint is analyzed.<br>
-                        All evaluations are shown, regardless of detection result.
+                        Detector reasoning will appear here as each timepoint is analyzed.
                     </div>
                 </div>
             `;
         } else {
-            reasoningListHtml = sortedReasoning.map((r, idx) => this.renderDetectionCard(r, idx)).join('');
+            detectionListHtml = this.renderDetectionListWithCollapse(reasoning);
         }
 
         panel.innerHTML = `
@@ -661,17 +727,252 @@ const TasksManager = {
                 </div>
                 <div class="reasoning-stats">
                     <span class="stat">${embryo.timepoints} timepoints</span>
-                    <span class="stat">${reasoning.length} detections</span>
+                    <span class="stat">${totalEvaluations} evaluations</span>
                 </div>
             </div>
-            <div class="reasoning-list" id="reasoning-list">
-                ${reasoningListHtml}
+            <div class="detection-summary-strip">
+                <div class="detection-summary-stat">
+                    <span class="stat-value ${positiveDetections.length > 0 ? 'has-detections' : ''}">${positiveDetections.length}</span>
+                    <span class="stat-label">Detections</span>
+                </div>
+                <div class="detection-summary-stat">
+                    <span class="stat-value">${totalEvaluations}</span>
+                    <span class="stat-label">Evaluations</span>
+                </div>
+                <div class="detection-quick-jumps">
+                    ${quickJumpsHtml}
+                </div>
+            </div>
+            ${totalEvaluations > 0 ? this.renderTimelineSparkline(reasoning, embryo.timepoints) : ''}
+            <div class="detection-controls">
+                ${filterButtonsHtml}
+            </div>
+            <div class="detection-list-container" id="detection-list-container">
+                ${detectionListHtml}
             </div>
         `;
     },
 
-    renderDetectionCard(detection, index) {
-        const isExpanded = this.expandedImages[index] || false;
+    // Render detections with range collapse for "not detected" sequences
+    renderDetectionListWithCollapse(reasoning) {
+        // Sort by timepoint descending (newest first)
+        const sorted = [...reasoning].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
+
+        // Apply filter
+        let filtered = sorted;
+        if (this.detectionFilter === 'detections') {
+            filtered = sorted.filter(r => r.detected);
+        } else if (this.detectionFilter === 'high-confidence') {
+            filtered = sorted.filter(r => r.confidence?.toLowerCase() === 'high');
+        }
+
+        // If showing only detections, render them directly without collapse
+        if (this.detectionFilter !== 'all') {
+            if (filtered.length === 0) {
+                return `
+                    <div class="detection-empty-filtered">
+                        <div class="icon">&#x1F50E;</div>
+                        <div class="message">No ${this.detectionFilter === 'detections' ? 'positive detections' : 'high confidence evaluations'} found</div>
+                        <div class="hint">Try selecting "All" to see all evaluations</div>
+                    </div>
+                `;
+            }
+            return filtered.map((r, idx) => this.renderDetectionCard(r, idx, true)).join('');
+        }
+
+        // For "all" view, use range collapse
+        // Group consecutive "not detected" items, but always show "detected" items expanded
+        const groups = this.groupDetectionsForCollapse(sorted);
+
+        let html = '';
+
+        // First, render positive detections section if any exist
+        const positiveDetections = sorted.filter(r => r.detected);
+        if (positiveDetections.length > 0) {
+            html += `
+                <div class="positive-detections-section">
+                    <div class="section-header">
+                        <span class="icon">&#x2714;</span>
+                        <span class="title">Positive Detections</span>
+                        <span class="count">${positiveDetections.length} found</span>
+                    </div>
+                    ${positiveDetections.map((r, idx) => this.renderDetectionCard(r, `pos-${idx}`, true)).join('')}
+                </div>
+            `;
+        }
+
+        // Then render the timeline with collapsed ranges
+        html += `<div class="section-header" style="margin-top: 1rem;">
+            <span class="icon">&#x1F4C5;</span>
+            <span class="title" style="color: var(--text-muted);">Evaluation Timeline</span>
+            <span class="count">${sorted.length} total</span>
+        </div>`;
+
+        groups.forEach((group, groupIdx) => {
+            if (group.type === 'positive') {
+                // Already rendered above in positive section, just show a marker
+                html += `
+                    <div class="detection-card positive-highlight" style="padding: 0.75rem; margin-bottom: 0.5rem;">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="color: var(--accent-green);">&#x2714;</span>
+                            <span class="timepoint-badge">T${group.items[0].timepoint}</span>
+                            <span class="detector-badge">${this.formatDetectorName(group.items[0].detector_name)}</span>
+                            <span style="color: var(--accent-green); font-weight: 500;">DETECTED</span>
+                        </div>
+                    </div>
+                `;
+            } else {
+                // Collapsed range of "not detected" items
+                const rangeKey = `range-${groupIdx}`;
+                const isExpanded = this.expandedRanges[rangeKey] || false;
+                const items = group.items;
+                const startTp = items[items.length - 1].timepoint ?? '?';
+                const endTp = items[0].timepoint ?? '?';
+                const rangeLabel = items.length === 1
+                    ? `Timepoint ${startTp}`
+                    : `Timepoints ${endTp} - ${startTp}`;
+
+                html += `
+                    <div class="collapsed-range ${isExpanded ? 'expanded' : ''}" onclick="TasksManager.toggleRange('${rangeKey}')">
+                        <span class="range-indicator"></span>
+                        <span class="range-label"><strong>${rangeLabel}</strong>: No detections</span>
+                        <span class="range-count">${items.length} evaluation${items.length > 1 ? 's' : ''}</span>
+                        <span class="range-chevron">&#x25BC;</span>
+                    </div>
+                    <div class="range-expansion ${isExpanded ? 'expanded' : ''}" id="${rangeKey}">
+                        <div class="range-expansion-inner">
+                            ${this.renderRangeItems(items, rangeKey)}
+                        </div>
+                    </div>
+                `;
+            }
+        });
+
+        return html;
+    },
+
+    // Group detections into positive singles and negative ranges
+    groupDetectionsForCollapse(sorted) {
+        const groups = [];
+        let currentNegatives = [];
+
+        sorted.forEach(item => {
+            if (item.detected) {
+                // Flush any accumulated negatives
+                if (currentNegatives.length > 0) {
+                    groups.push({ type: 'negative', items: currentNegatives });
+                    currentNegatives = [];
+                }
+                // Add positive as its own group
+                groups.push({ type: 'positive', items: [item] });
+            } else {
+                currentNegatives.push(item);
+            }
+        });
+
+        // Flush remaining negatives
+        if (currentNegatives.length > 0) {
+            groups.push({ type: 'negative', items: currentNegatives });
+        }
+
+        return groups;
+    },
+
+    // Render items inside an expanded range
+    renderRangeItems(items, rangeKey) {
+        const loadedCount = this.rangeLoadMore[rangeKey] || this.rangeLoadLimit;
+        const visibleItems = items.slice(0, loadedCount);
+        const hasMore = items.length > loadedCount;
+
+        let html = visibleItems.map(item => `
+            <div class="detection-row-compact" onclick="TasksManager.showDetectionDetail('${item.detector_name}', ${item.timepoint})">
+                <span class="tp-badge">T${item.timepoint ?? '?'}</span>
+                <span class="detector-name">${this.formatDetectorName(item.detector_name)}</span>
+                <span class="result">Not detected</span>
+                ${item.confidence ? `<span class="confidence ${item.confidence.toLowerCase()}">${item.confidence}</span>` : ''}
+            </div>
+        `).join('');
+
+        if (hasMore) {
+            html += `
+                <button class="load-more-btn" onclick="event.stopPropagation(); TasksManager.loadMoreInRange('${rangeKey}', ${items.length})">
+                    Load more (${items.length - loadedCount} remaining)
+                </button>
+            `;
+        }
+
+        return html;
+    },
+
+    // Toggle a collapsed range
+    toggleRange(rangeKey) {
+        this.expandedRanges[rangeKey] = !this.expandedRanges[rangeKey];
+
+        const rangeHeader = document.querySelector(`.collapsed-range[onclick*="${rangeKey}"]`);
+        const expansion = document.getElementById(rangeKey);
+
+        if (rangeHeader && expansion) {
+            rangeHeader.classList.toggle('expanded', this.expandedRanges[rangeKey]);
+            expansion.classList.toggle('expanded', this.expandedRanges[rangeKey]);
+        }
+    },
+
+    // Load more items in a range
+    loadMoreInRange(rangeKey, totalItems) {
+        const current = this.rangeLoadMore[rangeKey] || this.rangeLoadLimit;
+        this.rangeLoadMore[rangeKey] = Math.min(current + this.rangeLoadLimit, totalItems);
+        this.renderReasoningPanel();
+    },
+
+    // Set detection filter
+    setDetectionFilter(filter) {
+        this.detectionFilter = filter;
+        this.renderReasoningPanel();
+    },
+
+    // Scroll to a specific detection
+    scrollToDetection(timepoint, detectorName) {
+        // Set filter to "all" to ensure the detection is visible
+        this.detectionFilter = 'all';
+        this.renderReasoningPanel();
+
+        // Find and scroll to the detection card
+        setTimeout(() => {
+            const container = document.getElementById('detection-list-container');
+            if (container) {
+                // Look for the positive detection card with matching timepoint
+                const cards = container.querySelectorAll('.detection-card.positive-highlight');
+                cards.forEach(card => {
+                    if (card.textContent.includes(`T${timepoint}`) && card.textContent.includes(this.formatDetectorName(detectorName))) {
+                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // Add a brief highlight effect
+                        card.style.animation = 'none';
+                        card.offsetHeight; // Trigger reflow
+                        card.style.animation = 'highlightPulse 1s ease-out';
+                    }
+                });
+            }
+        }, 100);
+    },
+
+    // Show detail for a compact row (placeholder for future enhancement)
+    showDetectionDetail(detectorName, timepoint) {
+        console.log(`Show detail for ${detectorName} at timepoint ${timepoint}`);
+        // Could open a modal or expand inline - for now, just log
+    },
+
+    // Get icon for detector type
+    getDetectorIcon(detectorName) {
+        const name = detectorName?.toLowerCase() || '';
+        if (name.includes('hatching')) return '&#x1F423;';
+        if (name.includes('comma')) return '&#x1F52C;';
+        if (name.includes('twofold')) return '&#x1F9EC;';
+        return '&#x1F50D;';
+    },
+
+    renderDetectionCard(detection, index, isPositiveHighlight = false) {
+        const imageExpanded = this.expandedImages[index] || false;
+        const reasoningExpanded = this.expandedReasoning[index] || false;
         // Use projection_uid (proper DataStore UID) with fallback to volume_uid
         const imageUid = detection.projection_uid || detection.volume_uid;
         const hasImage = !!imageUid;
@@ -680,8 +981,55 @@ const TasksManager = {
         // Confidence styling
         const confidenceClass = detection.confidence ? detection.confidence.toLowerCase() : '';
 
+        // For positive detections, show context (confidence trend from previous timepoints)
+        let contextHtml = '';
+        if (detection.detected && isPositiveHighlight) {
+            contextHtml = this.renderDetectionContext(detection);
+        }
+
+        // Card class based on detection status
+        const cardClass = detection.detected
+            ? (isPositiveHighlight ? 'detection-card positive-highlight' : 'detection-card detected')
+            : 'detection-card';
+
+        // Reasoning section - collapsible for non-detected, always visible for detected
+        // Use linkifyTimepoints to make timepoint references clickable for video playback
+        let reasoningHtml = '';
+        if (detection.reasoning) {
+            // Build context for the linkifier
+            const linkContext = {
+                detectionPoint: detection.detected ? detection.timepoint : null,
+                reasoningText: detection.reasoning
+            };
+            const embryoId = this.selectedEmbryoId || '';
+            const linkedReasoning = this.linkifyTimepoints(detection.reasoning, embryoId, linkContext);
+
+            if (detection.detected) {
+                // For positive detections, always show reasoning with clickable timepoints
+                reasoningHtml = `
+                    <div class="detection-reasoning-text">
+                        ${linkedReasoning}
+                    </div>
+                `;
+            } else {
+                // For negative detections, make reasoning collapsible
+                reasoningHtml = `
+                    <button class="reasoning-toggle ${reasoningExpanded ? 'expanded' : ''}"
+                            onclick="event.stopPropagation(); TasksManager.toggleReasoning('${index}')">
+                        <span class="chevron">&#x25B6;</span>
+                        ${reasoningExpanded ? 'Hide' : 'Show'} VLM reasoning
+                    </button>
+                    <div class="reasoning-content ${reasoningExpanded ? 'expanded' : ''}" id="reasoning-${index}">
+                        <div class="detection-reasoning-text">
+                            ${linkedReasoning}
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
         return `
-            <div class="detection-card ${detection.detected ? 'detected' : ''}">
+            <div class="${cardClass}" data-timepoint="${detection.timepoint}" data-detector="${detection.detector_name}">
                 <div class="detection-card-header">
                     <div class="detection-meta">
                         <span class="detector-badge">${this.formatDetectorName(detection.detector_name)}</span>
@@ -691,28 +1039,205 @@ const TasksManager = {
                         ${detection.confidence ? `<span class="confidence-badge ${confidenceClass}">${detection.confidence}</span>` : ''}
                     </div>
                     <div class="detection-timing">
-                        <span class="timepoint-badge">TP ${detection.timepoint ?? '?'}</span>
+                        <span class="timepoint-badge">T${detection.timepoint ?? '?'}</span>
                         <span class="detection-time">${timestamp}</span>
                     </div>
                 </div>
-                ${detection.reasoning ? `
-                    <div class="detection-reasoning-text">
-                        ${this.escapeHtml(detection.reasoning)}
-                    </div>
-                ` : ''}
+                ${contextHtml}
+                ${reasoningHtml}
                 ${hasImage ? `
                     <div class="detection-image-section">
-                        <button class="toggle-image-btn" onclick="TasksManager.toggleImage(${index}, '${imageUid}')">
-                            <span class="toggle-icon">${isExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
-                            ${isExpanded ? 'Hide' : 'Show'} Volume Projection
+                        <button class="toggle-image-btn" onclick="event.stopPropagation(); TasksManager.toggleImage('${index}', '${imageUid}')">
+                            <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
+                            ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
                         </button>
-                        <div class="detection-image-container ${isExpanded ? 'expanded' : ''}" id="detection-image-${index}">
-                            ${isExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}
+                        <div class="detection-image-container ${imageExpanded ? 'expanded' : ''}" id="detection-image-${index}">
+                            ${imageExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}
                         </div>
                     </div>
                 ` : ''}
+                ${detection.detected ? this.renderAgreeDisagreeButtons(detection, index) : ''}
             </div>
         `;
+    },
+
+    // Render agree/disagree buttons for detection feedback
+    renderAgreeDisagreeButtons(detection, index) {
+        const agreement = this.detectionAgreements[`${detection.detector_name}-${detection.timepoint}`];
+        const agreedClass = agreement === true ? 'agreed' : '';
+        const disagreedClass = agreement === false ? 'disagreed' : '';
+
+        return `
+            <div class="vlm-actions">
+                <button class="vlm-action-btn agree ${agreedClass}"
+                        onclick="event.stopPropagation(); TasksManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, true)">
+                    ${agreement === true ? '&#x2714; Agreed' : 'I Agree'}
+                </button>
+                <button class="vlm-action-btn disagree ${disagreedClass}"
+                        onclick="event.stopPropagation(); TasksManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, false)">
+                    ${agreement === false ? '&#x2718; Disagreed' : 'I Disagree'}
+                </button>
+                <button class="vlm-action-btn" onclick="event.stopPropagation(); TasksManager.compareDetection('${detection.detector_name}', ${detection.timepoint})">
+                    Compare
+                </button>
+            </div>
+        `;
+    },
+
+    // Track user agreement/disagreement with detections
+    detectionAgreements: {},  // key: "{detector}-{timepoint}" -> true/false
+
+    markAgreement(detectorName, timepoint, agrees) {
+        const key = `${detectorName}-${timepoint}`;
+        const current = this.detectionAgreements[key];
+
+        // Toggle off if clicking same button
+        if (current === agrees) {
+            delete this.detectionAgreements[key];
+        } else {
+            this.detectionAgreements[key] = agrees;
+        }
+
+        // Save to localStorage
+        try {
+            localStorage.setItem('gently-detection-agreements', JSON.stringify(this.detectionAgreements));
+        } catch (e) {
+            console.warn('Failed to save detection agreements:', e);
+        }
+
+        // Log for potential future analytics
+        console.log(`Detection feedback: ${detectorName} at T${timepoint} - ${agrees ? 'agreed' : 'disagreed'}`);
+
+        // Re-render the panel to update button states
+        this.renderReasoningPanel();
+    },
+
+    // Load saved agreements
+    loadAgreements() {
+        try {
+            const saved = localStorage.getItem('gently-detection-agreements');
+            if (saved) {
+                this.detectionAgreements = JSON.parse(saved);
+            }
+        } catch (e) {
+            console.warn('Failed to load detection agreements:', e);
+        }
+    },
+
+    // Compare detection to previous timepoint (placeholder for future enhancement)
+    compareDetection(detectorName, timepoint) {
+        console.log(`Compare detection: ${detectorName} at T${timepoint} vs T${timepoint - 1}`);
+        // TODO: Open comparison modal showing current vs previous timepoint
+        // For now, just show a notification
+        const msg = `Comparison view coming soon. This will show ${detectorName} at T${timepoint} vs T${timepoint - 1}`;
+        alert(msg);
+    },
+
+    // Render a timeline sparkline showing detection distribution
+    renderTimelineSparkline(reasoning, totalTimepoints) {
+        if (!reasoning || reasoning.length === 0 || totalTimepoints <= 0) {
+            return '';
+        }
+
+        // Find max timepoint for scaling
+        const maxTp = Math.max(totalTimepoints, ...reasoning.map(r => r.timepoint || 0));
+
+        // Group by timepoint and determine status
+        const timepoints = {};
+        reasoning.forEach(r => {
+            const tp = r.timepoint ?? 0;
+            if (!timepoints[tp]) {
+                timepoints[tp] = { detected: false, confidence: 'low' };
+            }
+            if (r.detected) {
+                timepoints[tp].detected = true;
+            }
+            // Keep highest confidence
+            const confOrder = { 'high': 3, 'medium': 2, 'low': 1 };
+            const existingConf = confOrder[timepoints[tp].confidence] || 0;
+            const newConf = confOrder[r.confidence?.toLowerCase()] || 0;
+            if (newConf > existingConf) {
+                timepoints[tp].confidence = r.confidence?.toLowerCase() || 'low';
+            }
+        });
+
+        // Generate timeline points
+        let pointsHtml = '';
+        Object.entries(timepoints).forEach(([tp, data]) => {
+            const position = (parseInt(tp) / maxTp) * 100;
+            const isPositive = data.detected;
+            const className = isPositive ? 'positive' : '';
+            const title = isPositive
+                ? `T${tp}: DETECTED`
+                : `T${tp}: Not detected (${data.confidence})`;
+
+            pointsHtml += `<div class="timeline-point ${className}"
+                               style="left: ${position}%"
+                               title="${title}"
+                               onclick="TasksManager.scrollToDetection(${tp}, '')"></div>`;
+        });
+
+        // Labels for timeline
+        const midTp = Math.floor(maxTp / 2);
+
+        return `
+            <div class="detection-timeline">
+                <div class="timeline-track">
+                    ${pointsHtml}
+                </div>
+                <div class="timeline-labels">
+                    <span>T1</span>
+                    <span>T${midTp}</span>
+                    <span>T${maxTp}</span>
+                </div>
+            </div>
+        `;
+    },
+
+    // Render context showing confidence trend leading up to a positive detection
+    renderDetectionContext(detection) {
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        const detectorName = detection.detector_name;
+        const timepoint = detection.timepoint;
+
+        // Get previous evaluations for same detector
+        const previousEvals = reasoning
+            .filter(r => r.detector_name === detectorName && (r.timepoint ?? 0) < timepoint)
+            .sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0))
+            .slice(0, 3);  // Last 3 before detection
+
+        if (previousEvals.length === 0) return '';
+
+        const dots = previousEvals.reverse().map(e => {
+            const conf = e.confidence?.toLowerCase() || 'low';
+            return `<span class="context-dot ${conf}" title="T${e.timepoint}: ${e.confidence || 'Unknown'}"></span>`;
+        }).join('');
+
+        return `
+            <div class="detection-context">
+                <span>Confidence trend:</span>
+                <div class="context-dots">${dots}</div>
+                <span style="color: var(--accent-green);">&#x2714;</span>
+                <span style="font-size: 0.7rem; color: var(--text-muted);">(${previousEvals.length} prior evaluations)</span>
+            </div>
+        `;
+    },
+
+    // Toggle reasoning visibility for a detection
+    toggleReasoning(index) {
+        this.expandedReasoning[index] = !this.expandedReasoning[index];
+
+        const toggle = document.querySelector(`.reasoning-toggle[onclick*="'${index}'"]`);
+        const content = document.getElementById(`reasoning-${index}`);
+
+        if (toggle && content) {
+            toggle.classList.toggle('expanded', this.expandedReasoning[index]);
+            content.classList.toggle('expanded', this.expandedReasoning[index]);
+            toggle.innerHTML = `
+                <span class="chevron">&#x25B6;</span>
+                ${this.expandedReasoning[index] ? 'Hide' : 'Show'} VLM reasoning
+            `;
+        }
     },
 
     toggleImage(index, volumeUid) {
@@ -738,6 +1263,128 @@ const TasksManager = {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    },
+
+    /**
+     * Parse VLM reasoning text and convert timepoint references to clickable links
+     * that trigger video playback when clicked.
+     *
+     * Recognizes patterns like:
+     * - "timepoint 73", "timepoints 73-81"
+     * - "T73", "T73-81", "T73-T81"
+     * - "t=73"
+     *
+     * @param {string} text - The reasoning text to parse
+     * @param {string} embryoId - The embryo ID for video playback
+     * @param {object} context - Optional context {detectionPoint, detectorName}
+     * @returns {string} HTML with clickable timepoint links
+     */
+    linkifyTimepoints(text, embryoId, context = {}) {
+        if (!text) return '';
+
+        // First escape HTML to prevent XSS
+        let html = this.escapeHtml(text);
+
+        // Pattern for "timepoint 73" or "timepoints 73-81" or "timepoints 73 - 81"
+        html = html.replace(
+            /timepoints?\s+(\d+)(?:\s*[-–]\s*(\d+))?/gi,
+            (match, start, end) => {
+                const startTp = parseInt(start);
+                const endTp = end ? parseInt(end) : startTp;
+                return this.createTimepointLink(match, embryoId, startTp, endTp, context);
+            }
+        );
+
+        // Pattern for "T73" or "T73-81" or "T73-T81"
+        html = html.replace(
+            /(?<![a-zA-Z0-9])T(\d+)(?:\s*[-–]\s*T?(\d+))?(?![a-zA-Z0-9])/gi,
+            (match, start, end) => {
+                const startTp = parseInt(start);
+                const endTp = end ? parseInt(end) : startTp;
+                return this.createTimepointLink(match, embryoId, startTp, endTp, context);
+            }
+        );
+
+        // Pattern for "t=73" (common in some scientific writing)
+        html = html.replace(
+            /t\s*=\s*(\d+)/gi,
+            (match, tp) => {
+                const timepoint = parseInt(tp);
+                return this.createTimepointLink(match, embryoId, timepoint, timepoint, context);
+            }
+        );
+
+        return html;
+    },
+
+    /**
+     * Create a clickable timepoint link element
+     */
+    createTimepointLink(text, embryoId, start, end, context = {}) {
+        const { detectionPoint, reasoningText } = context;
+
+        // Build the onclick handler parameters
+        const params = {
+            embryoId,
+            start,
+            end,
+            detectionPoint: detectionPoint ?? null,
+            reasoningText: reasoningText ?? null
+        };
+
+        // Escape for use in onclick attribute
+        const paramsStr = JSON.stringify(params).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+        return `<span class="timepoint-link"
+                      data-start="${start}"
+                      data-end="${end}"
+                      data-embryo="${embryoId}"
+                      onclick="TasksManager.playTimepointRange(${paramsStr})"
+                      title="Click to play T${start}${end !== start ? '-T' + end : ''}">${text}</span>`;
+    },
+
+    /**
+     * Handle click on a timepoint link - opens video player
+     */
+    async playTimepointRange(params) {
+        const { embryoId, start, end, detectionPoint, reasoningText } = params;
+
+        if (typeof TimepointPlayer !== 'undefined') {
+            await TimepointPlayer.openSequence(embryoId, start, end, {
+                vlmRange: { start, end },
+                detectionPoint,
+                reasoningText,
+                bufferPercent: 0.2  // 20% buffer on each side
+            });
+        } else {
+            console.warn('TimepointPlayer not available');
+        }
+    },
+
+    /**
+     * Play all timepoints for an embryo as a video timelapse
+     */
+    async playEmbryoTimelapse(embryoId) {
+        if (typeof TimepointPlayer !== 'undefined') {
+            // Get detection info if available
+            const reasoning = this.detectionReasoning[embryoId] || [];
+            const positiveDetections = reasoning.filter(r => r.detected);
+            const latestDetection = positiveDetections.length > 0
+                ? positiveDetections[positiveDetections.length - 1]
+                : null;
+
+            await TimepointPlayer.openSequence(embryoId, 0, null, {
+                vlmRange: null,  // No specific VLM range for "play all"
+                detectionPoint: latestDetection?.timepoint ?? null,
+                reasoningText: latestDetection?.reasoning ?? null,
+                bufferPercent: 0  // No buffer for "play all"
+            });
+
+            // Auto-play when opening from gallery
+            TimepointPlayer.play();
+        } else {
+            console.warn('TimepointPlayer not available');
+        }
     },
 
     updateEmbryoCard(embryoId) {
@@ -931,7 +1578,385 @@ const TasksManager = {
     }
 };
 
+/**
+ * Global Experiment Status Strip Manager
+ * Shows persistent experiment status at a glance
+ */
+const ExperimentStrip = {
+    lastCheck: null,  // Track when user last viewed
+    newDetections: [],  // Detections since last check
+
+    init() {
+        // Load last check time from localStorage
+        const saved = localStorage.getItem('gently-last-check');
+        if (saved) {
+            this.lastCheck = new Date(saved);
+        }
+        this.update();
+    },
+
+    update() {
+        const strip = document.getElementById('experiment-strip');
+        if (!strip) return;
+
+        const state = TasksManager.state;
+        const embryoCount = Object.keys(state.embryos).length;
+
+        // Show/hide strip based on whether there's an experiment
+        if (embryoCount === 0 && state.status === 'IDLE') {
+            strip.classList.add('hidden');
+            return;
+        }
+        strip.classList.remove('hidden');
+
+        // Update status indicator
+        const indicator = document.getElementById('strip-indicator');
+        const statusText = document.getElementById('strip-status');
+        if (indicator && statusText) {
+            indicator.className = 'strip-indicator ' + state.status.toLowerCase();
+            statusText.textContent = this.formatStatus(state.status);
+        }
+
+        // Update duration
+        const durationEl = document.getElementById('strip-duration');
+        if (durationEl && state.startedAt) {
+            durationEl.textContent = TasksManager.formatDuration(Date.now() - state.startedAt.getTime());
+        }
+
+        // Update embryo count
+        const embryosEl = document.getElementById('strip-embryos');
+        if (embryosEl) {
+            const activeCount = Object.values(state.embryos).filter(e => !e.isComplete).length;
+            const totalCount = embryoCount;
+            embryosEl.textContent = `${activeCount}/${totalCount}`;
+        }
+
+        // Update next countdown
+        const countdownEl = document.getElementById('strip-countdown');
+        if (countdownEl) {
+            const nextSeconds = this.getNextAcquisitionSeconds();
+            countdownEl.textContent = nextSeconds > 0 ? TasksManager.formatCountdown(nextSeconds) : '--:--';
+        }
+
+        // Update detection alert
+        this.updateDetectionAlert();
+    },
+
+    getNextAcquisitionSeconds() {
+        const embryos = Object.values(TasksManager.state.embryos);
+        const activeEmbryos = embryos.filter(e => !e.isComplete);
+        if (activeEmbryos.length === 0) return 0;
+
+        // Find the next acquisition (minimum countdown)
+        let minSeconds = Infinity;
+        activeEmbryos.forEach(embryo => {
+            if (embryo.lastAcquired) {
+                const elapsed = (Date.now() - new Date(embryo.lastAcquired).getTime()) / 1000;
+                const remaining = Math.max(0, embryo.intervalSeconds - elapsed);
+                minSeconds = Math.min(minSeconds, remaining);
+            }
+        });
+
+        return minSeconds === Infinity ? 0 : Math.floor(minSeconds);
+    },
+
+    formatStatus(status) {
+        switch (status) {
+            case 'RUNNING': return 'Running';
+            case 'PAUSED': return 'Paused';
+            case 'COMPLETED': return 'Completed';
+            case 'FAILED': return 'Failed';
+            default: return 'Idle';
+        }
+    },
+
+    updateDetectionAlert() {
+        const alert = document.getElementById('strip-alert');
+        if (!alert) return;
+
+        // Count positive detections across all embryos
+        let totalDetections = 0;
+        let latestDetection = null;
+
+        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
+            const positives = reasoning.filter(r => r.detected);
+            totalDetections += positives.length;
+
+            positives.forEach(d => {
+                if (!latestDetection || new Date(d.timestamp) > new Date(latestDetection.timestamp)) {
+                    latestDetection = { ...d, embryoId };
+                }
+            });
+        });
+
+        if (totalDetections === 0) {
+            alert.classList.add('hidden');
+            return;
+        }
+
+        alert.classList.remove('hidden');
+        alert.classList.toggle('success', totalDetections > 0);
+
+        const badge = document.getElementById('strip-alert-badge');
+        const text = document.getElementById('strip-alert-text');
+
+        if (badge) badge.textContent = totalDetections;
+        if (text && latestDetection) {
+            text.textContent = `${TasksManager.formatDetectorName(latestDetection.detector_name)} detected`;
+        }
+    },
+
+    handleAlertClick() {
+        // Switch to Tasks tab and select the embryo with the latest detection
+        switchTab('tasks');
+
+        // Find embryo with most recent detection
+        let latestDetection = null;
+        let latestEmbryoId = null;
+
+        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
+            const positives = reasoning.filter(r => r.detected);
+            positives.forEach(d => {
+                if (!latestDetection || new Date(d.timestamp) > new Date(latestDetection.timestamp)) {
+                    latestDetection = d;
+                    latestEmbryoId = embryoId;
+                }
+            });
+        });
+
+        if (latestEmbryoId) {
+            TasksManager.selectEmbryo(latestEmbryoId);
+        }
+    },
+
+    markChecked() {
+        this.lastCheck = new Date();
+        localStorage.setItem('gently-last-check', this.lastCheck.toISOString());
+        this.newDetections = [];
+        this.updateDetectionAlert();
+    }
+};
+
+/**
+ * Narrative Summary Manager
+ * Manages AI-generated experiment summaries
+ */
+const NarrativeManager = {
+    isLoading: false,
+    lastNarrative: null,
+    isCollapsed: false,
+
+    init() {
+        // Load collapsed state from localStorage
+        const collapsed = localStorage.getItem('gently-narrative-collapsed');
+        this.isCollapsed = collapsed === 'true';
+        this.applyCollapseState();
+    },
+
+    toggle() {
+        this.isCollapsed = !this.isCollapsed;
+        localStorage.setItem('gently-narrative-collapsed', this.isCollapsed.toString());
+        this.applyCollapseState();
+    },
+
+    applyCollapseState() {
+        const panel = document.getElementById('narrative-panel');
+        if (panel) {
+            panel.classList.toggle('collapsed', this.isCollapsed);
+        }
+    },
+
+    async refresh() {
+        if (this.isLoading) return;
+
+        this.isLoading = true;
+        this.showLoading(true);
+
+        try {
+            const response = await fetch('/api/narrative');
+            if (response.ok) {
+                const narrative = await response.json();
+                this.lastNarrative = narrative;
+                this.renderNarrative(narrative);
+            } else {
+                this.renderError('Failed to generate summary');
+            }
+        } catch (error) {
+            console.error('Failed to fetch narrative:', error);
+            this.renderError('Connection error');
+        } finally {
+            this.isLoading = false;
+            this.showLoading(false);
+        }
+    },
+
+    async showSinceLastCheck() {
+        if (this.isLoading) return;
+
+        const lastCheck = ExperimentStrip.lastCheck;
+        if (!lastCheck) {
+            this.renderLocalSummary();
+            return;
+        }
+
+        this.isLoading = true;
+        this.showLoading(true);
+
+        try {
+            const response = await fetch(`/api/narrative?since=${lastCheck.toISOString()}`);
+            if (response.ok) {
+                const narrative = await response.json();
+                this.lastNarrative = narrative;
+                this.renderNarrative(narrative);
+            } else {
+                this.renderLocalSummary();
+            }
+        } catch (error) {
+            this.renderLocalSummary();
+        } finally {
+            this.isLoading = false;
+            this.showLoading(false);
+            ExperimentStrip.markChecked();
+        }
+    },
+
+    renderLocalSummary() {
+        // Generate a simple local summary when API isn't available
+        const state = TasksManager.state;
+        const embryoCount = Object.keys(state.embryos).length;
+
+        if (embryoCount === 0) {
+            this.updateNarrativeUI({
+                status: 'normal',
+                headline: 'No Active Experiment',
+                details: ['Start a timelapse to see AI-generated summaries here.']
+            });
+            return;
+        }
+
+        const activeCount = Object.values(state.embryos).filter(e => !e.isComplete).length;
+        const completedCount = Object.values(state.embryos).filter(e => e.isComplete).length;
+
+        // Count detections
+        let totalDetections = 0;
+        let detectionDetails = [];
+        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
+            const positives = reasoning.filter(r => r.detected);
+            totalDetections += positives.length;
+            positives.forEach(d => {
+                detectionDetails.push(`${embryoId}: ${TasksManager.formatDetectorName(d.detector_name)} at T${d.timepoint}`);
+            });
+        });
+
+        const details = [];
+        if (activeCount > 0) details.push(`${activeCount} embryo${activeCount !== 1 ? 's' : ''} actively imaging`);
+        if (completedCount > 0) details.push(`${completedCount} embryo${completedCount !== 1 ? 's' : ''} completed`);
+        details.push(`${state.totalTimepoints} total timepoints acquired`);
+
+        if (detectionDetails.length > 0) {
+            details.push(`${totalDetections} positive detection${totalDetections !== 1 ? 's' : ''}: ${detectionDetails.slice(0, 3).join(', ')}${detectionDetails.length > 3 ? '...' : ''}`);
+        }
+
+        const status = totalDetections > 0 ? 'notable' :
+                      completedCount > 0 ? 'normal' : 'normal';
+
+        const headline = totalDetections > 0 ?
+            `${totalDetections} Detection${totalDetections !== 1 ? 's' : ''} Found` :
+            completedCount > 0 ?
+            `${completedCount}/${embryoCount} Embryos Complete` :
+            'Experiment In Progress';
+
+        this.updateNarrativeUI({ status, headline, details });
+    },
+
+    renderNarrative(narrative) {
+        this.updateNarrativeUI({
+            status: narrative.status || 'normal',
+            headline: narrative.headline || 'Experiment Summary',
+            summary: narrative.summary,
+            details: narrative.details || []
+        });
+    },
+
+    renderError(message) {
+        this.updateNarrativeUI({
+            status: 'attention',
+            headline: 'Summary Unavailable',
+            details: [message, 'Showing local summary instead.']
+        });
+        // Fall back to local summary
+        setTimeout(() => this.renderLocalSummary(), 2000);
+    },
+
+    updateNarrativeUI({ status, headline, summary, details }) {
+        // Update badge
+        const badge = document.getElementById('narrative-badge');
+        if (badge) {
+            badge.className = `narrative-status-badge ${status}`;
+            badge.innerHTML = status === 'normal' ? '&#x2714;' :
+                             status === 'notable' ? '&#x1F514;' : '&#x26A0;';
+        }
+
+        // Update headline
+        const headlineEl = document.getElementById('narrative-headline');
+        if (headlineEl) headlineEl.textContent = headline;
+
+        // Update meta
+        const metaEl = document.getElementById('narrative-meta');
+        if (metaEl) metaEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
+
+        // Update body
+        const bodyEl = document.getElementById('narrative-body');
+        if (bodyEl) {
+            let html = '';
+
+            if (summary) {
+                html += `
+                    <div class="narrative-section">
+                        <div class="narrative-section-title">Summary</div>
+                        <p class="narrative-text">${this.escapeHtml(summary)}</p>
+                    </div>
+                `;
+            }
+
+            if (details && details.length > 0) {
+                html += `
+                    <div class="narrative-section">
+                        <div class="narrative-section-title">Details</div>
+                        <ul class="narrative-bullets">
+                            ${details.map(d => `<li>${this.escapeHtml(d)}</li>`).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+
+            bodyEl.innerHTML = html || '<p class="narrative-text">No summary available.</p>';
+        }
+    },
+
+    showLoading(show) {
+        const loading = document.getElementById('narrative-loading');
+        const body = document.getElementById('narrative-body');
+        if (loading) loading.style.display = show ? 'flex' : 'none';
+        if (body) body.style.display = show ? 'none' : 'block';
+    },
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+};
+
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     TasksManager.init();
+    ExperimentStrip.init();
+    NarrativeManager.init();
+
+    // Update experiment strip every second
+    setInterval(() => ExperimentStrip.update(), 1000);
+
+    // Generate initial narrative summary
+    setTimeout(() => NarrativeManager.renderLocalSummary(), 500);
 });
