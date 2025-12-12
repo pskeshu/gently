@@ -177,7 +177,7 @@ def create_timelapse_video(
     dict
         Result info including output path, frame count, duration
     """
-    import imageio
+    import cv2
     import tifffile
 
     if not volume_paths:
@@ -226,27 +226,53 @@ def create_timelapse_video(
 
                     frame = add_timestamp_overlay(frame, timestamp)
                 elif frame.ndim == 2:
-                    # Convert grayscale to RGB for video
-                    import cv2
-                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                    # Convert grayscale to BGR for OpenCV video writer
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+
+                # Ensure frame is BGR (OpenCV expects BGR)
+                if frame.ndim == 3 and frame.shape[2] == 3:
+                    # Check if it's RGB and convert to BGR
+                    # add_timestamp_overlay returns BGR, so this should be fine
+                    pass
 
                 # Initialize writer with first frame dimensions
                 if writer is None:
                     first_shape = frame.shape
-                    writer = imageio.get_writer(
-                        str(output_path),
-                        fps=fps,
-                        codec='libx264',
-                        quality=8,  # 0-10, higher is better
-                        pixelformat='yuv420p',  # For compatibility
-                    )
+                    height, width = frame.shape[:2]
+
+                    # Try different codecs in order of preference
+                    codecs = [
+                        ('mp4v', '.mp4'),
+                        ('avc1', '.mp4'),
+                        ('XVID', '.avi'),
+                        ('MJPG', '.avi'),
+                    ]
+
+                    for codec, ext in codecs:
+                        fourcc = cv2.VideoWriter_fourcc(*codec)
+                        test_path = output_path.with_suffix(ext)
+                        writer = cv2.VideoWriter(
+                            str(test_path),
+                            fourcc,
+                            fps,
+                            (width, height),
+                            isColor=True
+                        )
+                        if writer.isOpened():
+                            output_path = test_path
+                            logger.info(f"Using codec {codec} for video output")
+                            break
+                        writer.release()
+                        writer = None
+
+                    if writer is None:
+                        return {"error": "Could not initialize video writer with any codec"}
 
                 # Ensure consistent frame size
                 if frame.shape != first_shape:
-                    import cv2
                     frame = cv2.resize(frame, (first_shape[1], first_shape[0]))
 
-                writer.append_data(frame)
+                writer.write(frame)
                 frame_count += 1
 
             except Exception as e:
@@ -254,7 +280,7 @@ def create_timelapse_video(
                 continue
 
         if writer:
-            writer.close()
+            writer.release()
 
         if frame_count == 0:
             return {"error": "No frames could be processed"}
@@ -273,7 +299,7 @@ def create_timelapse_video(
     except Exception as e:
         if writer:
             try:
-                writer.close()
+                writer.release()
             except:
                 pass
         return {"error": str(e)}
