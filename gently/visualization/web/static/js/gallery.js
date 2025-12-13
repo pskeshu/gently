@@ -23,33 +23,6 @@ function openSnapshotsLightbox(index) {
     Lightbox.open(displayList, index, 'snapshots');
 }
 
-function renderVolumesGallery() {
-    const gallery = document.getElementById('volumes-gallery');
-    const filtered = filterByEmbryo(state.volumes);
-
-    if (filtered.length === 0) {
-        gallery.innerHTML = '<div class="empty-state">No volume images yet</div>';
-        return;
-    }
-
-    const displayList = filtered.slice(-50).reverse();
-    gallery.innerHTML = displayList.map((img, index) => `
-        <div class="gallery-item" onclick="openVolumesLightbox(${index})">
-            <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
-            <div class="gallery-info">
-                <div class="gallery-type">${img.data_type}</div>
-                <div class="gallery-meta">${img.metadata?.embryo_id || 'unknown'}</div>
-            </div>
-        </div>
-    `).join('');
-}
-
-function openVolumesLightbox(index) {
-    const filtered = filterByEmbryo(state.volumes);
-    const displayList = filtered.slice(-50).reverse();
-    Lightbox.open(displayList, index, 'volumes');
-}
-
 function renderCalibrationGallery() {
     const gallery = document.getElementById('calibration-gallery');
     const filtered = filterByEmbryo(state.calibration);

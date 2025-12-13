@@ -6,10 +6,8 @@
 const state = {
     ws: null,
     connected: false,
-    tab: 'main',
-    embryoFilter: '',
+    tab: 'embryos',  // Default to Embryos tab
     snapshots: [],
-    volumes: [],
     calibration: [],
     embryos: [],
     volumes3d: [],
@@ -31,24 +29,12 @@ const ANALYSIS_TYPES = ['segmentation', 'detection', 'classification', 'tracking
 const VOLUME_TYPES = ['volume', 'volume_projection', 'z_stack', 'timelapse'];
 
 // UI Update functions
-function updateEmbryoFilter() {
-    const select = document.getElementById('embryo-filter');
-    const currentValue = select.value;
-    select.innerHTML = '<option value="">All Embryos</option>' +
-        state.embryos.map(e => `<option value="${e}">${e}</option>`).join('');
-    select.value = currentValue;
-}
-
 function updateMainCount() {
-    document.getElementById('main-count').textContent = filterByEmbryo(state.snapshots).length;
-}
-
-function updateVolumesCount() {
-    document.getElementById('volumes-count').textContent = filterByEmbryo(state.volumes).length;
+    document.getElementById('main-count').textContent = state.snapshots.length;
 }
 
 function updateCalibrationCount() {
-    const calCount = filterByEmbryo(state.calibration).length;
+    const calCount = state.calibration.length;
     const vol3dCount = state.volumes3d.length;
     document.getElementById('calibration-count').textContent = calCount + vol3dCount;
 }
@@ -65,9 +51,13 @@ function switchTab(tabName) {
     document.getElementById(`${tabName}-content`).classList.add('active');
 
     // Render galleries
-    if (tabName === 'volumes') renderVolumesGallery();
     if (tabName === 'calibration') renderCalibrationGallery();
     if (tabName === 'events') renderEventsTable();
+
+    // Clear detection badge when viewing Embryos tab
+    if (tabName === 'embryos' && typeof EmbryosManager !== 'undefined') {
+        EmbryosManager.clearDetectionBadge();
+    }
 }
 
 function logEvent(type, message) {
@@ -84,14 +74,93 @@ function logEvent(type, message) {
 }
 
 /**
+ * Tooltip System - Shows helpful hints on hover
+ */
+const Tooltips = {
+    current: null,
+    timeout: null,
+
+    init() {
+        // Use event delegation for better performance
+        document.addEventListener('mouseenter', (e) => {
+            if (!e.target || !e.target.closest) return;
+            const target = e.target.closest('[data-tooltip]');
+            if (target) this.show(target);
+        }, true);
+
+        document.addEventListener('mouseleave', (e) => {
+            if (!e.target || !e.target.closest) return;
+            const target = e.target.closest('[data-tooltip]');
+            if (target) this.hide();
+        }, true);
+
+        // Hide on scroll
+        document.addEventListener('scroll', () => this.hide(), true);
+    },
+
+    show(target) {
+        const text = target.dataset.tooltip;
+        if (!text) return;
+
+        // Small delay before showing
+        this.timeout = setTimeout(() => {
+            // Remove any existing tooltip
+            this.hide();
+
+            // Create tooltip element
+            const tooltip = document.createElement('div');
+            tooltip.className = 'tooltip';
+            tooltip.textContent = text;
+            document.body.appendChild(tooltip);
+
+            // Position below the target element
+            const rect = target.getBoundingClientRect();
+            const tooltipRect = tooltip.getBoundingClientRect();
+
+            // Default position below, centered
+            let top = rect.bottom + 8;
+            let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+
+            // Keep within viewport bounds
+            if (left < 8) left = 8;
+            if (left + tooltipRect.width > window.innerWidth - 8) {
+                left = window.innerWidth - tooltipRect.width - 8;
+            }
+
+            // If below would go off-screen, show above
+            if (top + tooltipRect.height > window.innerHeight - 8) {
+                top = rect.top - tooltipRect.height - 8;
+                tooltip.classList.add('tooltip-above');
+            }
+
+            tooltip.style.top = `${top}px`;
+            tooltip.style.left = `${left}px`;
+
+            this.current = tooltip;
+        }, 150);  // 150ms delay - faster for better responsiveness
+    },
+
+    hide() {
+        if (this.timeout) {
+            clearTimeout(this.timeout);
+            this.timeout = null;
+        }
+        if (this.current) {
+            this.current.remove();
+            this.current = null;
+        }
+    }
+};
+
+/**
  * Theme Manager - Dark/Light mode toggle
  */
 const ThemeManager = {
     storageKey: 'gently-theme',
 
     init() {
-        // Load saved theme or default to dark
-        const savedTheme = localStorage.getItem(this.storageKey) || 'dark';
+        // Load saved theme or default to light
+        const savedTheme = localStorage.getItem(this.storageKey) || 'light';
         this.setTheme(savedTheme);
 
         // Setup toggle button
@@ -124,11 +193,10 @@ const KeyboardShortcuts = {
     enabled: true,
 
     shortcuts: {
-        '1': () => switchTab('main'),
-        '2': () => switchTab('volumes'),
-        '3': () => switchTab('calibration'),
-        '4': () => switchTab('events'),
-        '5': () => switchTab('tasks'),
+        '1': () => switchTab('embryos'),     // Embryos
+        '2': () => switchTab('events'),      // System
+        '3': () => switchTab('main'),        // Live View
+        '4': () => switchTab('calibration'), // Setup
         'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
@@ -180,11 +248,10 @@ const KeyboardShortcuts = {
                     <div class="shortcuts-body">
                         <div class="shortcut-group">
                             <h4>Navigation</h4>
-                            <div class="shortcut"><kbd>1</kbd> Main tab</div>
-                            <div class="shortcut"><kbd>2</kbd> Volumes tab</div>
-                            <div class="shortcut"><kbd>3</kbd> Calibration tab</div>
-                            <div class="shortcut"><kbd>4</kbd> Events tab</div>
-                            <div class="shortcut"><kbd>5</kbd> Tasks tab</div>
+                            <div class="shortcut"><kbd>1</kbd> Embryos tab</div>
+                            <div class="shortcut"><kbd>2</kbd> System tab</div>
+                            <div class="shortcut"><kbd>3</kbd> Live View tab</div>
+                            <div class="shortcut"><kbd>4</kbd> Setup tab</div>
                         </div>
                         <div class="shortcut-group">
                             <h4>3D Volume</h4>
@@ -228,6 +295,9 @@ const KeyboardShortcuts = {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize tooltip system
+    Tooltips.init();
+
     // Initialize theme manager
     ThemeManager.init();
 
@@ -237,17 +307,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Tab click handlers
     document.querySelectorAll('.tab').forEach(tab => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
-    });
-
-    // Embryo filter change handler
-    document.getElementById('embryo-filter').addEventListener('change', (e) => {
-        state.embryoFilter = e.target.value;
-        updateMainCount();
-        updateVolumesCount();
-        updateCalibrationCount();
-        renderRecentList();
-        if (state.tab === 'volumes') renderVolumesGallery();
-        if (state.tab === 'calibration') renderCalibrationGallery();
     });
 
     // Z-slider event listener

@@ -581,7 +581,8 @@ class VisualizationServer:
         self.manager = ConnectionManager()
 
         # Organized image storage
-        self.store = ImageStore(max_per_category=50)
+        # Use larger limit to keep more timelapse history in memory
+        self.store = ImageStore(max_per_category=500)
 
         # Timelapse state tracker for client sync
         self.timelapse_tracker = TimelapseStateTracker()
@@ -715,7 +716,9 @@ class VisualizationServer:
 
             # Return lightweight metadata (no base64 data)
             sequence = []
+            seen_uids = set()
             for img in images:
+                seen_uids.add(img.uid)
                 sequence.append({
                     "uid": img.uid,
                     "timepoint": img.metadata.get("timepoint"),
@@ -724,6 +727,38 @@ class VisualizationServer:
                     "shape": img.shape,
                     "embryo_id": img.metadata.get("embryo_id")
                 })
+
+            # Fallback to persistent DataStore for missing timepoints
+            if self.data_store and (len(sequence) == 0 or buffered_end is not None):
+                try:
+                    refs = self.data_store.query(
+                        data_type=data_type,
+                        embryo_id=embryo_id
+                    )
+                    for ref in refs:
+                        if ref.uid in seen_uids:
+                            continue
+                        tp = ref.metadata.get('timepoint')
+                        if tp is None:
+                            continue
+                        tp = int(tp)
+                        if tp < buffered_start:
+                            continue
+                        if buffered_end is not None and tp > buffered_end:
+                            continue
+                        seen_uids.add(ref.uid)
+                        sequence.append({
+                            "uid": ref.uid,
+                            "timepoint": tp,
+                            "timestamp": ref.metadata.get('timestamp', ''),
+                            "data_type": ref.data_type,
+                            "shape": ref.metadata.get('shape'),
+                            "embryo_id": embryo_id
+                        })
+                    # Re-sort by timepoint
+                    sequence.sort(key=lambda x: x.get('timepoint') or 0)
+                except Exception as e:
+                    logger.warning(f"DataStore fallback failed: {e}")
 
             return {
                 "embryo_id": embryo_id,
@@ -778,6 +813,14 @@ class VisualizationServer:
             image = self.store.get_image_by_uid(uid)
             if image:
                 return image.to_dict()
+            # Fallback to persistent DataStore
+            if self.data_store:
+                try:
+                    data = self.data_store.load(uid)
+                    if data is not None:
+                        return {"uid": uid, "data": "loaded_from_store"}
+                except Exception:
+                    pass
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
 
         @self.app.get("/api/images/{uid}/png")
@@ -787,6 +830,28 @@ class VisualizationServer:
             if image and image.base64_png:
                 png_bytes = base64.b64decode(image.base64_png)
                 return Response(content=png_bytes, media_type="image/png")
+            # Fallback to persistent DataStore
+            if self.data_store:
+                try:
+                    data = self.data_store.load(uid)
+                    if data is not None:
+                        import numpy as np
+                        from io import BytesIO
+                        from PIL import Image
+                        # Handle numpy array
+                        if isinstance(data, np.ndarray):
+                            # Normalize to uint8 if needed
+                            if data.dtype != np.uint8:
+                                data = ((data - data.min()) / (data.max() - data.min() + 1e-8) * 255).astype(np.uint8)
+                            # Handle 3D volumes - take middle slice or max projection
+                            if data.ndim == 3:
+                                data = np.max(data, axis=0)
+                            img = Image.fromarray(data)
+                            buf = BytesIO()
+                            img.save(buf, format='PNG')
+                            return Response(content=buf.getvalue(), media_type="image/png")
+                except Exception as e:
+                    logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
 
         @self.app.get("/api/volumes3d")

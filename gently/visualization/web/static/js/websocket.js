@@ -16,7 +16,6 @@ function connectWebSocket() {
         // Request initial data
         state.ws.send(JSON.stringify({type: 'get_embryos'}));
         state.ws.send(JSON.stringify({type: 'get_snapshots'}));
-        state.ws.send(JSON.stringify({type: 'get_volumes'}));
         state.ws.send(JSON.stringify({type: 'get_calibration'}));
     };
 
@@ -39,23 +38,22 @@ function connectWebSocket() {
 function handleMessage(msg) {
     if (msg.type === 'image') {
         handleNewImage(msg.data);
+        // Update latest frame preview in experiment strip
+        if (typeof ExperimentStrip !== 'undefined' && msg.data?.uid) {
+            ExperimentStrip.updateLatestFrame(msg.data.uid, msg.data.embryo_id);
+        }
     } else if (msg.type === 'volume_3d') {
         handleNew3DVolume(msg.data);
     } else if (msg.type === 'snapshots') {
         state.snapshots = msg.data || [];
         updateMainCount();
         renderRecentList();
-    } else if (msg.type === 'volumes') {
-        state.volumes = msg.data || [];
-        updateVolumesCount();
-        if (state.tab === 'volumes') renderVolumesGallery();
     } else if (msg.type === 'calibration') {
         state.calibration = msg.data || [];
         updateCalibrationCount();
         if (state.tab === 'calibration') renderCalibrationGallery();
     } else if (msg.type === 'embryos') {
         state.embryos = msg.data || [];
-        updateEmbryoFilter();
     } else if (msg.type === 'event') {
         // Add to events tab (full event data)
         handleFullEvent({
@@ -66,25 +64,30 @@ function handleMessage(msg) {
             event_id: msg.event_id || ''
         });
 
-        // Route timelapse/task events to TasksManager
-        if (typeof TasksManager !== 'undefined') {
+        // Route timelapse/embryo events to EmbryosManager
+        if (typeof EmbryosManager !== 'undefined') {
             if (msg.event_type === 'ACQUISITION_STARTED') {
-                TasksManager.handleAcquisitionStarted(msg.data);
+                EmbryosManager.handleAcquisitionStarted(msg.data);
             } else if (msg.event_type === 'ACQUISITION_COMPLETED') {
-                TasksManager.handleAcquisitionCompleted(msg.data);
+                EmbryosManager.handleAcquisitionCompleted(msg.data);
             } else if (msg.event_type === 'VOLUME_ACQUIRED') {
-                TasksManager.handleVolumeAcquired(msg.data);
+                EmbryosManager.handleVolumeAcquired(msg.data);
+                // Update latest frame with projection if available
+                const projUid = msg.data.projection_uid || msg.data.volume_uid;
+                if (typeof ExperimentStrip !== 'undefined' && projUid) {
+                    ExperimentStrip.updateLatestFrame(projUid, msg.data.embryo_id);
+                }
             } else if (msg.event_type === 'DETECTOR_EVALUATED') {
                 // All detector evaluations (with reasoning) - for reasoning panel
-                TasksManager.handleDetectorEvaluated(msg.data);
+                EmbryosManager.handleDetectorEvaluated(msg.data);
             } else if (msg.event_type === 'DETECTION_TRIGGERED') {
                 // Positive detection - update embryo status
-                TasksManager.handleDetectionTriggered(msg.data);
+                EmbryosManager.handleDetectionTriggered(msg.data);
             } else if (msg.event_type === 'STATUS_CHANGED') {
-                TasksManager.handleStatusChanged(msg.data);
+                EmbryosManager.handleStatusChanged(msg.data);
             } else if (msg.event_type === 'HATCHING_DETECTED') {
                 // Hatching is a positive detection
-                TasksManager.handleDetectionTriggered({
+                EmbryosManager.handleDetectionTriggered({
                     embryo_id: msg.data.embryo_id,
                     detector_name: 'hatching',
                     ...msg.data
@@ -115,8 +118,8 @@ function handleMessage(msg) {
         logEvent(msg.event_type, eventMsg);
     } else if (msg.type === 'timelapse_state') {
         // Server sending authoritative timelapse state on connect
-        if (typeof TasksManager !== 'undefined') {
-            TasksManager.reconcileWithServerState(msg.data);
+        if (typeof EmbryosManager !== 'undefined') {
+            EmbryosManager.reconcileWithServerState(msg.data);
         }
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));

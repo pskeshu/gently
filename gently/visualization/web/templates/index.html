@@ -4,19 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gently - Microscopy Visualization</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/css/main.css">
 </head>
 <body>
     <div class="header">
-        <h1>Gently Microscopy</h1>
-        <div class="status-bar">
-            <div class="status-item">
-                <span id="current-embryo" style="color: var(--accent-green); font-weight: 500;"></span>
+        <div class="header-left">
+            <h1>Gently Microscopy</h1>
+        </div>
+        <div class="header-right">
+            <!-- Detection alert -->
+            <div class="header-alert hidden" id="header-alert" onclick="ExperimentStrip.handleAlertClick()">
+                <span class="alert-badge" id="header-alert-badge">!</span>
+                <span class="alert-text" id="header-alert-text">New detection</span>
             </div>
-            <select class="embryo-filter" id="embryo-filter">
-                <option value="">All Embryos</option>
-            </select>
-            <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme">
+            <!-- Theme toggle -->
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme" data-tooltip="Toggle dark/light theme">
                 <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="5"></circle>
                     <line x1="12" y1="1" x2="12" y2="3"></line>
@@ -32,6 +35,7 @@
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                 </svg>
             </button>
+            <!-- Connection status -->
             <div class="status-item">
                 <span id="status-text">Connecting...</span>
                 <div class="status-dot" id="status-dot"></div>
@@ -40,21 +44,17 @@
     </div>
 
     <div class="tabs">
-        <div class="tab active" data-tab="main">
-            Live View
-            <span class="tab-badge" id="main-count">0</span>
-        </div>
-        <div class="tab" data-tab="tasks">
+        <div class="tab active" data-tab="embryos">
             Embryos
-            <span class="tab-badge" id="tasks-count">0</span>
+            <span class="tab-badge" id="embryos-count">0</span>
         </div>
         <div class="tab" data-tab="events">
-            Timeline
+            System
             <span class="tab-badge" id="events-count">0</span>
         </div>
-        <div class="tab" data-tab="volumes">
-            Volumes
-            <span class="tab-badge" id="volumes-count">0</span>
+        <div class="tab" data-tab="main">
+            Live View
+            <span class="tab-badge" id="main-count">0</span>
         </div>
         <div class="tab" data-tab="calibration">
             Setup
@@ -62,35 +62,8 @@
         </div>
     </div>
 
-    <!-- Global Experiment Status Strip -->
-    <div class="experiment-strip hidden" id="experiment-strip">
-        <div class="strip-section">
-            <span class="strip-indicator" id="strip-indicator"></span>
-            <span class="strip-value" id="strip-status">Not running</span>
-        </div>
-        <div class="strip-divider"></div>
-        <div class="strip-section">
-            <span class="strip-label">Duration</span>
-            <span class="strip-value" id="strip-duration">--:--</span>
-        </div>
-        <div class="strip-divider"></div>
-        <div class="strip-section">
-            <span class="strip-label">Embryos</span>
-            <span class="strip-value" id="strip-embryos">0</span>
-        </div>
-        <div class="strip-divider"></div>
-        <div class="strip-section">
-            <span class="strip-label">Next</span>
-            <span class="strip-countdown" id="strip-countdown">--:--</span>
-        </div>
-        <div class="strip-alert hidden" id="strip-alert" onclick="ExperimentStrip.handleAlertClick()">
-            <span class="alert-badge" id="strip-alert-badge">!</span>
-            <span class="strip-alert-text" id="strip-alert-text">New detection</span>
-        </div>
-    </div>
-
-    <!-- Main Tab -->
-    <div id="main-content" class="tab-content active">
+    <!-- Main Tab (Live View) -->
+    <div id="main-content" class="tab-content">
         <div class="main">
             <div class="viewer">
                 <div class="viewer-header">
@@ -151,13 +124,6 @@
                     <div class="event-log" id="event-log"></div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- Volumes Tab -->
-    <div id="volumes-content" class="tab-content">
-        <div class="gallery" id="volumes-gallery">
-            <div class="empty-state">No volume images yet</div>
         </div>
     </div>
 
@@ -232,11 +198,11 @@
         </div>
     </div>
 
-    <!-- Embryos Tab (formerly Tasks) -->
-    <div id="tasks-content" class="tab-content">
-        <div class="tasks-container">
-            <div class="tasks-header">
-                <h2 class="tasks-title">Embryo Monitoring</h2>
+    <!-- Embryos Tab (default landing page) -->
+    <div id="embryos-content" class="tab-content active">
+        <div class="embryos-container">
+            <div class="embryos-header">
+                <h2 class="embryos-title">Embryo Monitoring</h2>
                 <div class="timelapse-status" id="timelapse-status">
                     <span class="status-indicator" id="timelapse-indicator"></span>
                     <span class="status-text" id="timelapse-status-text">No active timelapse</span>
@@ -272,16 +238,16 @@
                 </div>
             </div>
 
-            <div class="tasks-summary" id="tasks-summary">
+            <div class="embryos-summary" id="embryos-summary">
                 <!-- Summary rendered dynamically -->
             </div>
 
-            <div class="tasks-body">
+            <div class="embryos-body">
                 <!-- Left sidebar: Embryo list (~25%) -->
                 <div class="embryo-list" id="embryo-list">
                     <div class="embryo-list-header">Embryos</div>
                     <div class="embryo-cards" id="embryo-cards">
-                        <div class="empty-state" id="tasks-empty">No active timelapse tasks</div>
+                        <div class="empty-state" id="embryos-empty">No active timelapse</div>
                     </div>
                 </div>
 
@@ -301,26 +267,26 @@
         <div class="lightbox-container">
             <div class="lightbox-header">
                 <span class="lightbox-title" id="lightbox-title">Image</span>
-                <span class="lightbox-position" id="lightbox-position">1 of 1</span>
                 <button class="lightbox-close" id="lightbox-close" aria-label="Close lightbox">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="18" y1="6" x2="6" y2="18"></line>
                         <line x1="6" y1="6" x2="18" y2="18"></line>
                     </svg>
                 </button>
             </div>
             <div class="lightbox-main">
-                <button class="lightbox-nav lightbox-prev" id="lightbox-prev" aria-label="Previous image">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="lightbox-nav" id="lightbox-prev" aria-label="Previous image" data-tooltip="Previous (←)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="15,18 9,12 15,6"></polyline>
                     </svg>
                 </button>
                 <div class="lightbox-image-wrapper" id="lightbox-image-wrapper">
                     <img id="lightbox-image" src="" alt="Lightbox image">
                     <div class="lightbox-zoom-indicator" id="lightbox-zoom-indicator">100%</div>
+                    <span class="lightbox-position" id="lightbox-position">1 of 1</span>
                 </div>
-                <button class="lightbox-nav lightbox-next" id="lightbox-next" aria-label="Next image">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="lightbox-nav" id="lightbox-next" aria-label="Next image" data-tooltip="Next (→)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="9,18 15,12 9,6"></polyline>
                     </svg>
                 </button>
@@ -344,7 +310,9 @@
     <script src="/static/js/viewer.js"></script>
     <script src="/static/js/gallery.js"></script>
     <script src="/static/js/events.js"></script>
-    <script src="/static/js/tasks.js"></script>
+    <script src="/static/js/embryos.js"></script>
+    <script src="/static/js/experiment-strip.js"></script>
+    <script src="/static/js/narrative.js"></script>
     <script src="/static/js/app.js"></script>
 </body>
 </html>

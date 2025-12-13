@@ -1,9 +1,9 @@
 /**
- * Tasks Tab - Timelapse Task Tracking
+ * Embryos Tab - Timelapse Task Tracking
  * Displays active timelapse tasks with per-embryo breakdown
  */
 
-const TasksManager = {
+const EmbryosManager = {
     // Session ID for tracking experiment boundaries
     // When session_id changes, all state is cleared (new experiment)
     currentSessionId: null,
@@ -34,9 +34,20 @@ const TasksManager = {
     // Filter state for detection panel
     detectionFilter: 'all',  // 'all', 'detections', 'high-confidence'
 
-    // Number of items to show in expanded ranges
-    rangeLoadLimit: 10,  // Initial items to show
+    // Number of items to show in expanded ranges (high number = show all)
+    rangeLoadLimit: 500,
     rangeLoadMore: {},  // range key -> number of items loaded
+
+    // Expanded range item states (for inline expansion within ranges)
+    expandedRangeItems: {},  // "{rangeKey}-{timepoint}" -> true/false
+
+    // Detail panel state
+    currentDetailItem: null,  // Currently viewed item in detail panel
+    detailPanelVisible: false,
+
+    // Badge state for new detection notifications
+    newDetectionCount: 0,  // Count of NEW detections since user last viewed
+    lastSeenDetectionTime: null,  // When user last viewed the Embryos tab
 
     countdownInterval: null,
     storageKey: 'gently-tasks-state',
@@ -46,10 +57,14 @@ const TasksManager = {
         this.loadState();
         // Load detection agreements
         this.loadAgreements();
+        // Load badge state (new detection count)
+        this.loadBadgeState();
         // Start countdown update timer
         this.startCountdownUpdates();
         // Initial render
         this.render();
+        // Update badge on init
+        this.updateDetectionBadge();
     },
 
     // ==========================================
@@ -124,7 +139,7 @@ const TasksManager = {
             }
 
             console.log('Restored tasks state:', this.state.status, Object.keys(this.state.embryos).length, 'embryos', 'session:', this.currentSessionId);
-            this.updateTasksCount();
+            this.updateEmbryosCount();
         } catch (err) {
             console.warn('Failed to load tasks state:', err);
         }
@@ -189,7 +204,7 @@ const TasksManager = {
             this.selectedEmbryoId = Object.keys(this.state.embryos)[0];
         }
 
-        this.updateTasksCount();
+        this.updateEmbryosCount();
         this.render();
         this.saveState();
     },
@@ -210,6 +225,10 @@ const TasksManager = {
         this.expandedRanges = {};
         this.detectionFilter = 'all';
         this.rangeLoadMore = {};
+        // Clear badge state for new session
+        this.newDetectionCount = 0;
+        this.lastSeenDetectionTime = null;
+        this.saveBadgeState();
     },
 
     // ==========================================
@@ -244,7 +263,7 @@ const TasksManager = {
             };
         });
 
-        this.updateTasksCount();
+        this.updateEmbryosCount();
         this.render();
         this.saveState();
     },
@@ -284,7 +303,7 @@ const TasksManager = {
         embryo.timepoints = newTimepoints;
         embryo.lastAcquired = new Date();
 
-        this.updateTasksCount();
+        this.updateEmbryosCount();
         this.updateEmbryoCard(embryoId);
         this.updateSummary();
         this.saveState();
@@ -368,6 +387,9 @@ const TasksManager = {
             embryo.completionReason = 'Comma stage detected';
         }
 
+        // Increment the new detection badge count
+        this.incrementDetectionBadge();
+
         this.updateEmbryoCard(embryoId);
         this.saveState();
     },
@@ -398,6 +420,8 @@ const TasksManager = {
         this.renderSummary();
         this.renderEmbryoCards();
         this.renderReasoningPanel();
+        // Show first-run hints after a short delay to let the UI settle
+        setTimeout(() => this.showFirstRunHints(), 500);
     },
 
     renderStatusBadge() {
@@ -427,7 +451,7 @@ const TasksManager = {
     },
 
     renderSummary() {
-        const summaryEl = document.getElementById('tasks-summary');
+        const summaryEl = document.getElementById('embryos-summary');
         if (!summaryEl) return;
 
         const embryos = Object.values(this.state.embryos);
@@ -448,7 +472,7 @@ const TasksManager = {
             </div>
             <div class="summary-stat">
                 <span class="stat-value">${active}</span>
-                <span class="stat-label">Active Embryos</span>
+                <span class="stat-label">Active</span>
             </div>
             <div class="summary-stat">
                 <span class="stat-value">${completed}</span>
@@ -460,14 +484,44 @@ const TasksManager = {
                 <span class="stat-label">Duration</span>
             </div>
             ` : ''}
+            ${active > 0 ? `
+            <div class="summary-stat">
+                <span class="stat-value" id="summary-next-countdown">${this.getNextCountdown()}</span>
+                <span class="stat-label">Next</span>
+            </div>
+            ` : ''}
         `;
     },
 
+    getNextCountdown() {
+        const embryos = Object.values(this.state.embryos);
+        const activeEmbryos = embryos.filter(e => !e.isComplete);
+        if (activeEmbryos.length === 0) return '--:--';
+
+        let minSeconds = Infinity;
+        activeEmbryos.forEach(embryo => {
+            if (embryo.lastAcquired) {
+                const elapsed = (Date.now() - new Date(embryo.lastAcquired).getTime()) / 1000;
+                const remaining = Math.max(0, embryo.intervalSeconds - elapsed);
+                minSeconds = Math.min(minSeconds, remaining);
+            } else if (embryo.intervalSeconds) {
+                minSeconds = Math.min(minSeconds, embryo.intervalSeconds);
+            }
+        });
+
+        if (minSeconds === Infinity) return '--:--';
+        return this.formatCountdown(Math.floor(minSeconds));
+    },
+
     updateSummary() {
-        // Quick update just for the duration
+        // Quick update for duration and countdown
         const durationEl = document.getElementById('summary-duration');
         if (durationEl && this.state.startedAt) {
             durationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
+        }
+        const countdownEl = document.getElementById('summary-next-countdown');
+        if (countdownEl) {
+            countdownEl.textContent = this.getNextCountdown();
         }
         // Update stats
         this.renderSummary();
@@ -480,7 +534,9 @@ const TasksManager = {
         const embryos = Object.values(this.state.embryos);
 
         if (embryos.length === 0) {
-            container.innerHTML = '<div class="empty-state">No active timelapse tasks</div>';
+            // Use smart empty state based on experiment status
+            const emptyType = this.state.status === 'RUNNING' ? 'waiting-first' : 'no-embryos';
+            container.innerHTML = this.renderSmartEmptyState(emptyType);
             return;
         }
 
@@ -519,19 +575,6 @@ const TasksManager = {
         // Calculate progress percentage
         const maxTimepoints = this.getMaxTimepoints(embryo);
         const progressPct = maxTimepoints > 0 ? Math.min(100, (embryo.timepoints / maxTimepoints) * 100) : 0;
-
-        // Detection counts for badge
-        const reasoning = this.detectionReasoning[embryo.embryoId] || [];
-        const positiveCount = reasoning.filter(r => r.detected).length;
-        const totalCount = reasoning.length;
-
-        // Show positive detections prominently, or total evaluations if none
-        let detectionBadge = '';
-        if (positiveCount > 0) {
-            detectionBadge = `<span class="reasoning-count" style="background: var(--accent-green);" title="${positiveCount} positive detection${positiveCount > 1 ? 's' : ''}">${positiveCount} detected</span>`;
-        } else if (totalCount > 0) {
-            detectionBadge = `<span class="reasoning-count" title="${totalCount} detection evaluations">${totalCount}</span>`;
-        }
 
         // Calculate countdown
         let countdownHtml = '';
@@ -594,7 +637,7 @@ const TasksManager = {
         // Play button for viewing all timepoints as video
         const hasTimepoints = embryo.timepoints > 0;
         const playButton = hasTimepoints ? `
-            <button class="embryo-play-btn" onclick="event.stopPropagation(); TasksManager.playEmbryoTimelapse('${embryo.embryoId}')" title="Play all timepoints">
+            <button class="embryo-play-btn" onclick="event.stopPropagation(); EmbryosManager.playEmbryoTimelapse('${embryo.embryoId}')" data-tooltip="Play timelapse video">
                 <span class="play-icon">▶</span>
             </button>
         ` : '';
@@ -604,7 +647,6 @@ const TasksManager = {
                 <div class="embryo-header">
                     <div class="embryo-header-left">
                         <span class="embryo-name">${embryo.embryoId}</span>
-                        ${detectionBadge}
                         ${playButton}
                     </div>
                     <span class="embryo-status ${status}">
@@ -653,12 +695,21 @@ const TasksManager = {
 
         // If no embryo selected or no embryos at all
         if (!this.selectedEmbryoId || !this.state.embryos[this.selectedEmbryoId]) {
-            panel.innerHTML = `
-                <div class="reasoning-empty">
-                    <div class="reasoning-empty-icon">&#x1F50D;</div>
-                    <div class="reasoning-empty-text">Select an embryo to view detection history</div>
-                </div>
-            `;
+            // Show contextual empty state
+            const hasEmbryos = Object.keys(this.state.embryos).length > 0;
+            if (hasEmbryos) {
+                panel.innerHTML = `
+                    <div class="reasoning-empty">
+                        <div class="reasoning-empty-icon">&#x1F441;</div>
+                        <div class="reasoning-empty-text">Select an embryo to view its detection analysis</div>
+                        <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                            Click on any embryo card in the left panel
+                        </div>
+                    </div>
+                `;
+            } else {
+                panel.innerHTML = this.renderSmartEmptyState('no-embryos');
+            }
             return;
         }
 
@@ -679,46 +730,27 @@ const TasksManager = {
         // Build quick jump badges for positive detections
         const quickJumpsHtml = positiveDetections.length > 0
             ? positiveDetections.map(d => `
-                <span class="quick-jump-badge" onclick="TasksManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Jump to detection">
+                <span class="quick-jump-badge" onclick="EmbryosManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Jump to detection">
                     <span class="detector-icon">${this.getDetectorIcon(d.detector_name)}</span>
                     ${this.formatDetectorName(d.detector_name)} @ T${d.timepoint}
                 </span>
             `).join('')
             : '<span style="font-size: 0.8rem; color: var(--text-muted);">No positive detections yet</span>';
 
-        // Build filter buttons with counts
-        const filterButtonsHtml = `
-            <div class="detection-filter-group">
-                <button class="filter-btn ${this.detectionFilter === 'all' ? 'active' : ''}"
-                        onclick="TasksManager.setDetectionFilter('all')">
-                    All<span class="count">${totalEvaluations}</span>
-                </button>
-                <button class="filter-btn ${this.detectionFilter === 'detections' ? 'active' : ''}"
-                        onclick="TasksManager.setDetectionFilter('detections')">
-                    Detected<span class="count">${positiveDetections.length}</span>
-                </button>
-                <button class="filter-btn ${this.detectionFilter === 'high-confidence' ? 'active' : ''}"
-                        onclick="TasksManager.setDetectionFilter('high-confidence')">
-                    High Conf<span class="count">${highConfidence.length}</span>
-                </button>
+        // Build empty state if no evaluations
+        const emptyStateHtml = totalEvaluations === 0 ? `
+            <div class="no-detections">
+                <div class="no-detections-icon">&#x1F9EC;</div>
+                <div class="no-detections-text">No detection evaluations yet</div>
+                <div class="no-detections-hint">
+                    Click on evaluation dots above to view VLM analysis details.
+                </div>
+            </div>
+        ` : `
+            <div class="eval-hint">
+                <span>Click on any evaluation dot above to view the full VLM analysis</span>
             </div>
         `;
-
-        // Build detection list based on filter
-        let detectionListHtml = '';
-        if (totalEvaluations === 0) {
-            detectionListHtml = `
-                <div class="no-detections">
-                    <div class="no-detections-icon">&#x1F9EC;</div>
-                    <div class="no-detections-text">No detection evaluations yet</div>
-                    <div class="no-detections-hint">
-                        Detector reasoning will appear here as each timepoint is analyzed.
-                    </div>
-                </div>
-            `;
-        } else {
-            detectionListHtml = this.renderDetectionListWithCollapse(reasoning);
-        }
 
         panel.innerHTML = `
             <div class="reasoning-header">
@@ -745,14 +777,15 @@ const TasksManager = {
                     ${quickJumpsHtml}
                 </div>
             </div>
-            ${totalEvaluations > 0 ? this.renderTimelineSparkline(reasoning, embryo.timepoints) : ''}
-            <div class="detection-controls">
-                ${filterButtonsHtml}
-            </div>
-            <div class="detection-list-container" id="detection-list-container">
-                ${detectionListHtml}
-            </div>
+            ${this.renderTimelineSparkline(reasoning, embryo.timepoints)}
+            ${emptyStateHtml}
+            <div class="inline-detail-container" id="inline-detail-container"></div>
         `;
+
+        // Re-render current detail if one was open
+        if (this.currentDetailItem) {
+            this.renderInlineDetail(this.currentDetailItem);
+        }
     },
 
     // Render detections with range collapse for "not detected" sequences
@@ -810,6 +843,8 @@ const TasksManager = {
             <span class="count">${sorted.length} total</span>
         </div>`;
 
+        let firstNegativeRangeAutoExpanded = false;
+
         groups.forEach((group, groupIdx) => {
             if (group.type === 'positive') {
                 // Already rendered above in positive section, just show a marker
@@ -826,7 +861,14 @@ const TasksManager = {
             } else {
                 // Collapsed range of "not detected" items
                 const rangeKey = `range-${groupIdx}`;
-                const isExpanded = this.expandedRanges[rangeKey] || false;
+
+                // Auto-expand first negative range so user sees evaluations immediately
+                let isExpanded = this.expandedRanges[rangeKey];
+                if (isExpanded === undefined && !firstNegativeRangeAutoExpanded) {
+                    isExpanded = true;
+                    firstNegativeRangeAutoExpanded = true;
+                }
+                isExpanded = isExpanded || false;
                 const items = group.items;
                 const startTp = items[items.length - 1].timepoint ?? '?';
                 const endTp = items[0].timepoint ?? '?';
@@ -835,7 +877,7 @@ const TasksManager = {
                     : `Timepoints ${endTp} - ${startTp}`;
 
                 html += `
-                    <div class="collapsed-range ${isExpanded ? 'expanded' : ''}" onclick="TasksManager.toggleRange('${rangeKey}')">
+                    <div class="collapsed-range ${isExpanded ? 'expanded' : ''}" onclick="EmbryosManager.toggleRange('${rangeKey}')">
                         <span class="range-indicator"></span>
                         <span class="range-label"><strong>${rangeLabel}</strong>: No detections</span>
                         <span class="range-count">${items.length} evaluation${items.length > 1 ? 's' : ''}</span>
@@ -880,30 +922,141 @@ const TasksManager = {
         return groups;
     },
 
-    // Render items inside an expanded range
+    // Render items inside an expanded range with thumbnails, confidence dots, and inline expansion
     renderRangeItems(items, rangeKey) {
         const loadedCount = this.rangeLoadMore[rangeKey] || this.rangeLoadLimit;
         const visibleItems = items.slice(0, loadedCount);
         const hasMore = items.length > loadedCount;
 
-        let html = visibleItems.map(item => `
-            <div class="detection-row-compact" onclick="TasksManager.showDetectionDetail('${item.detector_name}', ${item.timepoint})">
-                <span class="tp-badge">T${item.timepoint ?? '?'}</span>
-                <span class="detector-name">${this.formatDetectorName(item.detector_name)}</span>
-                <span class="result">Not detected</span>
-                ${item.confidence ? `<span class="confidence ${item.confidence.toLowerCase()}">${item.confidence}</span>` : ''}
-            </div>
-        `).join('');
+        // Get all items in this embryo for interest score calculation
+        const allReasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+
+        let html = visibleItems.map(item => {
+            const itemKey = `${rangeKey}-${item.timepoint}`;
+            const isExpanded = this.expandedRangeItems[itemKey] || false;
+            const imageUid = item.projection_uid || item.volume_uid;
+            const isInteresting = this.calculateInterestScore(item, allReasoning) > 0.5;
+
+            return `
+                <div class="detection-row-compact ${isExpanded ? 'expanded' : ''} ${isInteresting ? 'flagged' : ''}"
+                     data-range="${rangeKey}" data-timepoint="${item.timepoint}">
+                    <div class="compact-row-header" onclick="EmbryosManager.toggleRangeItem('${rangeKey}', ${item.timepoint})">
+                        ${imageUid
+                            ? `<img class="compact-thumbnail" src="/api/images/${imageUid}/png" alt="T${item.timepoint}" loading="lazy" />`
+                            : '<div class="compact-thumbnail-placeholder"></div>'}
+                        <span class="tp-badge">T${item.timepoint ?? '?'}</span>
+                        <span class="detector-name">${this.formatDetectorName(item.detector_name)}</span>
+                        <span class="result">Not detected</span>
+                        ${this.renderConfidenceDots(item.confidence)}
+                        ${isInteresting ? '<span class="interest-flag" title="Near detection boundary">&#x2691;</span>' : ''}
+                        <span class="row-affordance">&#x22EF;</span>
+                        <span class="row-chevron">&#x25B8;</span>
+                    </div>
+                    ${isExpanded ? this.renderInlineExpansion(item) : ''}
+                </div>
+            `;
+        }).join('');
 
         if (hasMore) {
             html += `
-                <button class="load-more-btn" onclick="event.stopPropagation(); TasksManager.loadMoreInRange('${rangeKey}', ${items.length})">
+                <button class="load-more-btn" onclick="event.stopPropagation(); EmbryosManager.loadMoreInRange('${rangeKey}', ${items.length})">
                     Load more (${items.length - loadedCount} remaining)
                 </button>
             `;
         }
 
         return html;
+    },
+
+    // Toggle expansion of an individual item within a range
+    toggleRangeItem(rangeKey, timepoint) {
+        const itemKey = `${rangeKey}-${timepoint}`;
+        this.expandedRangeItems[itemKey] = !this.expandedRangeItems[itemKey];
+
+        const row = document.querySelector(`.detection-row-compact[data-range="${rangeKey}"][data-timepoint="${timepoint}"]`);
+        if (row) {
+            row.classList.toggle('expanded', this.expandedRangeItems[itemKey]);
+
+            // Re-render the row content
+            const allReasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+            const item = allReasoning.find(r => r.timepoint === timepoint);
+            if (item) {
+                const expansionContainer = row.querySelector('.inline-expansion');
+                if (this.expandedRangeItems[itemKey] && !expansionContainer) {
+                    // Add expansion
+                    row.insertAdjacentHTML('beforeend', this.renderInlineExpansion(item));
+                } else if (!this.expandedRangeItems[itemKey] && expansionContainer) {
+                    // Remove expansion
+                    expansionContainer.remove();
+                }
+            }
+        }
+    },
+
+    // Render inline expansion with thumbnail and truncated reasoning
+    renderInlineExpansion(item) {
+        const imageUid = item.projection_uid || item.volume_uid;
+        const reasoning = item.reasoning || 'No reasoning provided';
+        const truncatedReasoning = reasoning.length > 250
+            ? reasoning.substring(0, 250) + '...'
+            : reasoning;
+
+        return `
+            <div class="inline-expansion">
+                <div class="expansion-content">
+                    ${imageUid ? `
+                        <img class="expansion-image"
+                             src="/api/images/${imageUid}/png"
+                             alt="T${item.timepoint}"
+                             onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint})" />
+                    ` : '<div class="expansion-image-placeholder">No image</div>'}
+                    <div class="expansion-text">
+                        <div class="expansion-reasoning">${this.escapeHtml(truncatedReasoning)}</div>
+                        <button class="expansion-link" onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint})">
+                            View full analysis &#x2192;
+                        </button>
+                    </div>
+                </div>
+            </div>
+        `;
+    },
+
+    // Render confidence level as dots (5-dot scale)
+    renderConfidenceDots(confidence) {
+        const level = confidence?.toLowerCase() || 'unknown';
+        const filled = level === 'high' ? 4 : level === 'medium' ? 3 : level === 'low' ? 1 : 2;
+
+        let dots = '';
+        for (let i = 0; i < 5; i++) {
+            dots += `<span class="confidence-dot ${i < filled ? 'filled' : ''}"></span>`;
+        }
+        return `<div class="confidence-dots" title="${confidence || 'Unknown'} confidence">${dots}</div>`;
+    },
+
+    // Calculate interest score for flagging "interesting" negatives
+    calculateInterestScore(item, allItems) {
+        if (!item || item.detected) return 0;
+
+        let score = 0;
+
+        // Find nearest positive detection
+        const positives = allItems.filter(i => i.detected);
+        if (positives.length > 0) {
+            const distances = positives.map(p => Math.abs((p.timepoint || 0) - (item.timepoint || 0)));
+            const nearestDistance = Math.min(...distances);
+
+            // Within 3 timepoints of a detection
+            if (nearestDistance <= 3) {
+                score += 0.4 * (1 - nearestDistance / 3);
+            }
+        }
+
+        // High confidence negative (VLM was very sure it wasn't detected)
+        if (item.confidence?.toLowerCase() === 'high') {
+            score += 0.3;
+        }
+
+        return score;
     },
 
     // Toggle a collapsed range
@@ -932,35 +1085,169 @@ const TasksManager = {
         this.renderReasoningPanel();
     },
 
-    // Scroll to a specific detection
+    // Scroll to a specific detection - now opens detail panel directly
     scrollToDetection(timepoint, detectorName) {
-        // Set filter to "all" to ensure the detection is visible
-        this.detectionFilter = 'all';
-        this.renderReasoningPanel();
-
-        // Find and scroll to the detection card
-        setTimeout(() => {
-            const container = document.getElementById('detection-list-container');
-            if (container) {
-                // Look for the positive detection card with matching timepoint
-                const cards = container.querySelectorAll('.detection-card.positive-highlight');
-                cards.forEach(card => {
-                    if (card.textContent.includes(`T${timepoint}`) && card.textContent.includes(this.formatDetectorName(detectorName))) {
-                        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        // Add a brief highlight effect
-                        card.style.animation = 'none';
-                        card.offsetHeight; // Trigger reflow
-                        card.style.animation = 'highlightPulse 1s ease-out';
-                    }
-                });
-            }
-        }, 100);
+        this.openDetailPanel(detectorName, timepoint);
     },
 
-    // Show detail for a compact row (placeholder for future enhancement)
+    // Show detail for a compact row (legacy - redirects to openDetailPanel)
     showDetectionDetail(detectorName, timepoint) {
-        console.log(`Show detail for ${detectorName} at timepoint ${timepoint}`);
-        // Could open a modal or expand inline - for now, just log
+        this.openDetailPanel(detectorName, timepoint);
+    },
+
+    // Open the detail panel inline in the reasoning panel
+    openDetailPanel(detectorName, timepoint) {
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        const item = reasoning.find(r =>
+            r.detector_name === detectorName && r.timepoint === timepoint
+        );
+
+        if (!item) {
+            console.warn(`Detail panel: item not found for ${detectorName} at T${timepoint}`);
+            return;
+        }
+
+        this.currentDetailItem = item;
+        this.detailPanelVisible = true;
+
+        this.renderInlineDetail(item);
+    },
+
+    // Render detail content inline in the reasoning panel
+    renderInlineDetail(item) {
+        const container = document.getElementById('inline-detail-container');
+        if (!container) return;
+
+        container.innerHTML = this.renderDetailPanel(item);
+        container.classList.add('visible');
+
+        // Scroll the detail into view
+        container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    },
+
+    // Render the detail panel content
+    renderDetailPanel(item) {
+        const imageUid = item.projection_uid || item.volume_uid;
+        const reasoning = item.reasoning || 'No reasoning provided';
+
+        // Linkify timepoints in reasoning
+        const linkedReasoning = this.linkifyTimepoints(reasoning, this.selectedEmbryoId, {
+            detectionPoint: item.detected ? item.timepoint : null,
+            reasoningText: reasoning
+        });
+
+        // Build metadata for lightbox
+        const lightboxMeta = {
+            embryo_id: this.selectedEmbryoId,
+            timepoint: item.timepoint,
+            data_type: 'Volume Projection',
+            shape: item.shape || ''
+        };
+        const metaJson = JSON.stringify(lightboxMeta).replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+        // Build image HTML - will be loaded async if UID not available
+        const imageHtml = imageUid
+            ? `<img src="/api/images/${imageUid}/png"
+                    alt="T${item.timepoint}"
+                    onclick="Lightbox.openByUid && Lightbox.openByUid('${imageUid}', ${metaJson})" />`
+            : `<div class="detail-image-loading" id="detail-image-placeholder"
+                    data-embryo="${this.selectedEmbryoId}"
+                    data-timepoint="${item.timepoint}">Loading image...</div>`;
+
+        // Fetch image async if no UID
+        if (!imageUid) {
+            this.fetchDetailImage(this.selectedEmbryoId, item.timepoint);
+        }
+
+        return `
+            <div class="detail-panel-header">
+                <span class="detail-title">T${item.timepoint} - ${this.formatDetectorName(item.detector_name)}</span>
+                <button class="detail-close" onclick="EmbryosManager.closeDetailPanel()">&times;</button>
+            </div>
+            <div class="detail-image-container">
+                ${imageHtml}
+            </div>
+            <div class="detail-verdict ${item.detected ? 'detected' : ''}">
+                ${item.detected ? 'DETECTED' : 'Not detected'} - ${item.confidence || 'Unknown'} confidence
+            </div>
+            <div class="detail-reasoning">
+                <div class="reasoning-label">VLM Analysis</div>
+                <div class="reasoning-text">${linkedReasoning}</div>
+            </div>
+            <div class="detail-actions">
+                <button class="detail-nav" onclick="EmbryosManager.navigateDetail(-1)">&#x2190; Previous</button>
+                <button class="detail-nav" onclick="EmbryosManager.navigateDetail(1)">Next &#x2192;</button>
+            </div>
+        `;
+    },
+
+    // Fetch image for detail panel using sequence API
+    // Tries multiple data types as fallbacks
+    async fetchDetailImage(embryoId, timepoint) {
+        const placeholder = document.getElementById('detail-image-placeholder');
+        if (!placeholder) return;
+
+        // Try these data types in order of preference
+        const dataTypes = ['volume_projection', 'volume', 'image'];
+
+        for (const dataType of dataTypes) {
+            try {
+                const resp = await fetch(`/api/sequence/${embryoId}?start=${timepoint}&end=${timepoint}&data_type=${dataType}&buffer_percent=0`);
+                const data = await resp.json();
+
+                if (data.sequence && data.sequence.length > 0) {
+                    const imgData = data.sequence[0];
+                    const uid = imgData.uid;
+                    // Build metadata for lightbox
+                    const meta = {
+                        embryo_id: embryoId,
+                        timepoint: timepoint,
+                        data_type: dataType,
+                        shape: imgData.shape ? `${imgData.shape[0]}x${imgData.shape[1]}` : ''
+                    };
+                    const metaJson = JSON.stringify(meta).replace(/"/g, '&quot;');
+                    placeholder.outerHTML = `<img src="/api/images/${uid}/png"
+                                                  alt="T${timepoint}"
+                                                  onclick="Lightbox.openByUid && Lightbox.openByUid('${uid}', ${metaJson})" />`;
+                    return; // Success - exit
+                }
+            } catch (err) {
+                console.warn(`Failed to fetch ${dataType} for T${timepoint}:`, err);
+            }
+        }
+
+        // All types failed
+        placeholder.outerHTML = '<div class="no-image">No image available for this timepoint</div>';
+    },
+
+    // Close the detail panel
+    closeDetailPanel() {
+        const container = document.getElementById('inline-detail-container');
+        if (container) {
+            container.classList.remove('visible');
+            container.innerHTML = '';
+        }
+        this.detailPanelVisible = false;
+        this.currentDetailItem = null;
+    },
+
+    // Navigate to previous/next item in detail panel
+    navigateDetail(direction) {
+        if (!this.currentDetailItem) return;
+
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        const currentIdx = reasoning.findIndex(r =>
+            r.detector_name === this.currentDetailItem.detector_name &&
+            r.timepoint === this.currentDetailItem.timepoint
+        );
+
+        if (currentIdx === -1) return;
+
+        const newIdx = currentIdx + direction;
+        if (newIdx >= 0 && newIdx < reasoning.length) {
+            const newItem = reasoning[newIdx];
+            this.openDetailPanel(newItem.detector_name, newItem.timepoint);
+        }
     },
 
     // Get icon for detector type
@@ -1017,7 +1304,7 @@ const TasksManager = {
                 // For negative detections, make reasoning collapsible
                 reasoningHtml = `
                     <button class="reasoning-toggle ${reasoningExpanded ? 'expanded' : ''}"
-                            onclick="event.stopPropagation(); TasksManager.toggleReasoning('${index}')">
+                            onclick="event.stopPropagation(); EmbryosManager.toggleReasoning('${index}')">
                         <span class="chevron">&#x25B6;</span>
                         ${reasoningExpanded ? 'Hide' : 'Show'} VLM reasoning
                     </button>
@@ -1049,7 +1336,7 @@ const TasksManager = {
                 ${reasoningHtml}
                 ${hasImage ? `
                     <div class="detection-image-section">
-                        <button class="toggle-image-btn" onclick="event.stopPropagation(); TasksManager.toggleImage('${index}', '${imageUid}')">
+                        <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
                             <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
                             ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
                         </button>
@@ -1072,14 +1359,17 @@ const TasksManager = {
         return `
             <div class="vlm-actions">
                 <button class="vlm-action-btn agree ${agreedClass}"
-                        onclick="event.stopPropagation(); TasksManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, true)">
+                        onclick="event.stopPropagation(); EmbryosManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, true)"
+                        data-tooltip="Confirm this detection is correct">
                     ${agreement === true ? '&#x2714; Agreed' : 'I Agree'}
                 </button>
                 <button class="vlm-action-btn disagree ${disagreedClass}"
-                        onclick="event.stopPropagation(); TasksManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, false)">
+                        onclick="event.stopPropagation(); EmbryosManager.markAgreement('${detection.detector_name}', ${detection.timepoint}, false)"
+                        data-tooltip="Mark this detection as incorrect">
                     ${agreement === false ? '&#x2718; Disagreed' : 'I Disagree'}
                 </button>
-                <button class="vlm-action-btn" onclick="event.stopPropagation(); TasksManager.compareDetection('${detection.detector_name}', ${detection.timepoint})">
+                <button class="vlm-action-btn" onclick="event.stopPropagation(); EmbryosManager.compareDetection('${detection.detector_name}', ${detection.timepoint})"
+                        data-tooltip="Compare with previous timepoint">
                     Compare
                 </button>
             </div>
@@ -1126,6 +1416,203 @@ const TasksManager = {
         }
     },
 
+    // ==========================================
+    // Badge State Management
+    // ==========================================
+
+    // Load badge state from localStorage
+    loadBadgeState() {
+        try {
+            const saved = localStorage.getItem('gently-badge-state');
+            if (saved) {
+                const data = JSON.parse(saved);
+                this.newDetectionCount = data.newDetectionCount || 0;
+                this.lastSeenDetectionTime = data.lastSeenDetectionTime
+                    ? new Date(data.lastSeenDetectionTime)
+                    : null;
+            }
+        } catch (e) {
+            console.warn('Failed to load badge state:', e);
+        }
+    },
+
+    // Save badge state to localStorage
+    saveBadgeState() {
+        try {
+            const data = {
+                newDetectionCount: this.newDetectionCount,
+                lastSeenDetectionTime: this.lastSeenDetectionTime
+                    ? this.lastSeenDetectionTime.toISOString()
+                    : null
+            };
+            localStorage.setItem('gently-badge-state', JSON.stringify(data));
+        } catch (e) {
+            console.warn('Failed to save badge state:', e);
+        }
+    },
+
+    // Update the detection badge - applies .has-new class when there are new detections
+    updateDetectionBadge() {
+        const badge = document.getElementById('embryos-count');
+        if (!badge) return;
+
+        if (this.newDetectionCount > 0) {
+            badge.textContent = this.newDetectionCount;
+            badge.classList.add('has-new');
+            badge.title = `${this.newDetectionCount} new detection${this.newDetectionCount > 1 ? 's' : ''} since last viewed`;
+        } else {
+            // Show active embryo count when no new detections
+            const activeCount = Object.values(this.state.embryos).filter(e => !e.isComplete).length;
+            badge.textContent = activeCount;
+            badge.classList.remove('has-new');
+            badge.title = `${activeCount} active embryo${activeCount !== 1 ? 's' : ''}`;
+        }
+    },
+
+    // Clear the detection badge - called when user views the Embryos tab
+    clearDetectionBadge() {
+        this.newDetectionCount = 0;
+        this.lastSeenDetectionTime = new Date();
+        this.saveBadgeState();
+        this.updateDetectionBadge();
+    },
+
+    // Increment detection count for a new positive detection
+    incrementDetectionBadge() {
+        this.newDetectionCount++;
+        this.saveBadgeState();
+        this.updateDetectionBadge();
+    },
+
+    // ==========================================
+    // First-Run Contextual Hints
+    // ==========================================
+
+    /**
+     * Show a first-run hint if it hasn't been dismissed
+     * @param {string} key - Unique key for this hint
+     * @param {string} title - Hint title
+     * @param {string} message - Hint message
+     * @param {string} targetSelector - CSS selector for where to insert the hint
+     */
+    showFirstRunHint(key, title, message, targetSelector) {
+        // Check if already dismissed
+        if (localStorage.getItem(`gently-hint-${key}`)) return;
+
+        const target = document.querySelector(targetSelector);
+        if (!target) return;
+
+        // Don't show if already showing a hint here
+        if (target.querySelector('.first-run-hint')) return;
+
+        const hint = document.createElement('div');
+        hint.className = 'first-run-hint';
+        hint.innerHTML = `
+            <div class="hint-header">
+                <span class="hint-icon">&#x1F4A1;</span>
+                <span class="hint-title">${title}</span>
+            </div>
+            <div class="hint-message">${message}</div>
+            <div class="hint-actions">
+                <button class="hint-dismiss" onclick="EmbryosManager.dismissHint('${key}')">Got it</button>
+            </div>
+        `;
+
+        target.insertAdjacentElement('afterbegin', hint);
+    },
+
+    /**
+     * Dismiss a hint and save to localStorage
+     * @param {string} key - Hint key to dismiss
+     */
+    dismissHint(key) {
+        localStorage.setItem(`gently-hint-${key}`, 'true');
+        const hint = document.querySelector('.first-run-hint');
+        if (hint) {
+            hint.style.animation = 'hintSlideOut 0.2s ease forwards';
+            setTimeout(() => hint.remove(), 200);
+        }
+    },
+
+    // ==========================================
+    // Smart Empty States
+    // ==========================================
+
+    /**
+     * Render a smart empty state with contextual messaging
+     * @param {string} type - Type of empty state
+     * @returns {string} HTML for the empty state
+     */
+    renderSmartEmptyState(type) {
+        const states = {
+            'no-embryos': {
+                icon: '&#x1F52C;',  // Microscope
+                title: 'No embryos yet',
+                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Setup tab.',
+                action: { label: 'Go to Setup', tab: 'calibration' }
+            },
+            'no-detections': {
+                icon: '&#x1F441;',  // Eye
+                title: 'No detections yet',
+                message: 'The AI will analyze each timepoint and notify you when developmental events are detected. Typical first detection: 2-4 hours after start.',
+                action: null
+            },
+            'experiment-idle': {
+                icon: '&#x23F8;',  // Pause
+                title: 'Experiment not running',
+                message: 'No active timelapse. Configure and start an experiment to begin automated embryo monitoring.',
+                action: { label: 'Setup Experiment', tab: 'calibration' }
+            },
+            'waiting-first': {
+                icon: '&#x23F3;',  // Hourglass
+                title: 'Waiting for first acquisition',
+                message: 'The timelapse has started. The first volume should arrive shortly.',
+                action: null
+            }
+        };
+
+        const state = states[type] || states['no-embryos'];
+
+        const actionHtml = state.action
+            ? `<button class="empty-action" onclick="switchTab('${state.action.tab}')">${state.action.label}</button>`
+            : '';
+
+        return `
+            <div class="smart-empty-state">
+                <div class="empty-icon">${state.icon}</div>
+                <div class="empty-title">${state.title}</div>
+                <div class="empty-message">${state.message}</div>
+                ${actionHtml}
+            </div>
+        `;
+    },
+
+    /**
+     * Show appropriate first-run hints based on current state
+     */
+    showFirstRunHints() {
+        // Hint for the embryo list
+        if (!localStorage.getItem('gently-hint-embryos') && Object.keys(this.state.embryos).length > 0) {
+            this.showFirstRunHint(
+                'embryos',
+                'Welcome to Embryo Monitoring',
+                'This is where you\'ll track your experiment progress. Each embryo card shows acquisition status and AI-detected events. Click an embryo to see detailed detection reasoning.',
+                '.embryo-list'
+            );
+        }
+
+        // Hint for detection panel when there are detections
+        const hasDetections = Object.values(this.detectionReasoning).some(r => r && r.length > 0);
+        if (!localStorage.getItem('gently-hint-detections') && hasDetections) {
+            this.showFirstRunHint(
+                'detections',
+                'AI Detection Analysis',
+                'The AI evaluates each timepoint for developmental events. Positive detections are highlighted. Click "View full analysis" to see the AI\'s reasoning with the actual image.',
+                '.reasoning-panel'
+            );
+        }
+    },
+
     // Compare detection to previous timepoint (placeholder for future enhancement)
     compareDetection(detectorName, timepoint) {
         console.log(`Compare detection: ${detectorName} at T${timepoint} vs T${timepoint - 1}`);
@@ -1137,12 +1624,9 @@ const TasksManager = {
 
     // Render a timeline sparkline showing detection distribution
     renderTimelineSparkline(reasoning, totalTimepoints) {
-        if (!reasoning || reasoning.length === 0 || totalTimepoints <= 0) {
+        if (!reasoning || reasoning.length === 0) {
             return '';
         }
-
-        // Find max timepoint for scaling
-        const maxTp = Math.max(totalTimepoints, ...reasoning.map(r => r.timepoint || 0));
 
         // Group by timepoint and determine status
         const timepoints = {};
@@ -1163,34 +1647,38 @@ const TasksManager = {
             }
         });
 
-        // Generate timeline points
-        let pointsHtml = '';
-        Object.entries(timepoints).forEach(([tp, data]) => {
-            const position = (parseInt(tp) / maxTp) * 100;
+        // Sort timepoints and generate dots
+        const sortedTps = Object.keys(timepoints).map(Number).sort((a, b) => a - b);
+
+        let dotsHtml = sortedTps.map(tp => {
+            const data = timepoints[tp];
             const isPositive = data.detected;
-            const className = isPositive ? 'positive' : '';
+            const confClass = data.confidence || 'low';
+            const className = isPositive ? 'positive' : confClass;
             const title = isPositive
                 ? `T${tp}: DETECTED`
                 : `T${tp}: Not detected (${data.confidence})`;
 
-            pointsHtml += `<div class="timeline-point ${className}"
-                               style="left: ${position}%"
-                               title="${title}"
-                               onclick="TasksManager.scrollToDetection(${tp}, '')"></div>`;
-        });
+            // Find the detector name for this timepoint
+            const detectorName = reasoning.find(r => r.timepoint === tp)?.detector_name || '';
+            return `<div class="eval-dot ${className}"
+                         title="${title}"
+                         onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
+                        <span class="eval-dot-label">T${tp}</span>
+                    </div>`;
+        }).join('');
 
-        // Labels for timeline
-        const midTp = Math.floor(maxTp / 2);
+        const evalCount = sortedTps.length;
+        const positiveCount = sortedTps.filter(tp => timepoints[tp].detected).length;
 
         return `
-            <div class="detection-timeline">
-                <div class="timeline-track">
-                    ${pointsHtml}
+            <div class="evaluation-dots">
+                <div class="eval-dots-header">
+                    <span class="eval-dots-title">Evaluations</span>
+                    <span class="eval-dots-count">${evalCount} checked${positiveCount > 0 ? `, ${positiveCount} detected` : ''}</span>
                 </div>
-                <div class="timeline-labels">
-                    <span>T1</span>
-                    <span>T${midTp}</span>
-                    <span>T${maxTp}</span>
+                <div class="eval-dots-track">
+                    ${dotsHtml}
                 </div>
             </div>
         `;
@@ -1323,15 +1811,15 @@ const TasksManager = {
      * Create a clickable timepoint link element
      */
     createTimepointLink(text, embryoId, start, end, context = {}) {
-        const { detectionPoint, reasoningText } = context;
+        const { detectionPoint } = context;
+        // Note: reasoningText is NOT included in onclick to avoid bloated HTML and parsing issues
 
-        // Build the onclick handler parameters
+        // Build the onclick handler parameters (minimal - no long text)
         const params = {
             embryoId,
             start,
             end,
-            detectionPoint: detectionPoint ?? null,
-            reasoningText: reasoningText ?? null
+            detectionPoint: detectionPoint ?? null
         };
 
         // Escape for use in onclick attribute
@@ -1341,8 +1829,8 @@ const TasksManager = {
                       data-start="${start}"
                       data-end="${end}"
                       data-embryo="${embryoId}"
-                      onclick="TasksManager.playTimepointRange(${paramsStr})"
-                      title="Click to play T${start}${end !== start ? '-T' + end : ''}">${text}</span>`;
+                      onclick="EmbryosManager.playTimepointRange(${paramsStr})"
+                      title="Click to play timepoint ${start}${end !== start ? '-' + end : ''}">${text}</span>`;
     },
 
     /**
@@ -1352,11 +1840,16 @@ const TasksManager = {
         const { embryoId, start, end, detectionPoint, reasoningText } = params;
 
         if (typeof TimepointPlayer !== 'undefined') {
-            await TimepointPlayer.openSequence(embryoId, start, end, {
+            // For single timepoints, add context window of 5 frames before/after
+            const contextWindow = 5;
+            const actualStart = (start === end) ? Math.max(0, start - contextWindow) : start;
+            const actualEnd = (start === end) ? end + contextWindow : end;
+
+            await TimepointPlayer.openSequence(embryoId, actualStart, actualEnd, {
                 vlmRange: { start, end },
-                detectionPoint,
+                detectionPoint: detectionPoint ?? start,  // Highlight the clicked timepoint
                 reasoningText,
-                bufferPercent: 0.2  // 20% buffer on each side
+                bufferPercent: 0.15
             });
         } else {
             console.warn('TimepointPlayer not available');
@@ -1558,12 +2051,10 @@ const TasksManager = {
         }
     },
 
-    updateTasksCount() {
-        const badge = document.getElementById('tasks-count');
-        if (badge) {
-            const activeCount = Object.values(this.state.embryos).filter(e => !e.isComplete).length;
-            badge.textContent = activeCount;
-        }
+    updateEmbryosCount() {
+        // Use the new detection badge system which handles both
+        // new detection notifications and active embryo counts
+        this.updateDetectionBadge();
     },
 
     // Reset state (e.g., when starting fresh)
@@ -1575,390 +2066,12 @@ const TasksManager = {
             totalTimepoints: 0,
             baseInterval: 120
         };
-        this.updateTasksCount();
+        this.updateEmbryosCount();
         this.render();
-    }
-};
-
-/**
- * Global Experiment Status Strip Manager
- * Shows persistent experiment status at a glance
- */
-const ExperimentStrip = {
-    lastCheck: null,  // Track when user last viewed
-    newDetections: [],  // Detections since last check
-
-    init() {
-        // Load last check time from localStorage
-        const saved = localStorage.getItem('gently-last-check');
-        if (saved) {
-            this.lastCheck = new Date(saved);
-        }
-        this.update();
-    },
-
-    update() {
-        const strip = document.getElementById('experiment-strip');
-        if (!strip) return;
-
-        const state = TasksManager.state;
-        const embryoCount = Object.keys(state.embryos).length;
-
-        // Show/hide strip based on whether there's an experiment
-        if (embryoCount === 0 && state.status === 'IDLE') {
-            strip.classList.add('hidden');
-            return;
-        }
-        strip.classList.remove('hidden');
-
-        // Update status indicator
-        const indicator = document.getElementById('strip-indicator');
-        const statusText = document.getElementById('strip-status');
-        if (indicator && statusText) {
-            indicator.className = 'strip-indicator ' + state.status.toLowerCase();
-            statusText.textContent = this.formatStatus(state.status);
-        }
-
-        // Update duration
-        const durationEl = document.getElementById('strip-duration');
-        if (durationEl && state.startedAt) {
-            durationEl.textContent = TasksManager.formatDuration(Date.now() - state.startedAt.getTime());
-        }
-
-        // Update embryo count
-        const embryosEl = document.getElementById('strip-embryos');
-        if (embryosEl) {
-            const activeCount = Object.values(state.embryos).filter(e => !e.isComplete).length;
-            const totalCount = embryoCount;
-            embryosEl.textContent = `${activeCount}/${totalCount}`;
-        }
-
-        // Update next countdown
-        const countdownEl = document.getElementById('strip-countdown');
-        if (countdownEl) {
-            const nextSeconds = this.getNextAcquisitionSeconds();
-            countdownEl.textContent = nextSeconds > 0 ? TasksManager.formatCountdown(nextSeconds) : '--:--';
-        }
-
-        // Update detection alert
-        this.updateDetectionAlert();
-    },
-
-    getNextAcquisitionSeconds() {
-        const embryos = Object.values(TasksManager.state.embryos);
-        const activeEmbryos = embryos.filter(e => !e.isComplete);
-        if (activeEmbryos.length === 0) return 0;
-
-        // Find the next acquisition (minimum countdown)
-        let minSeconds = Infinity;
-        activeEmbryos.forEach(embryo => {
-            if (embryo.lastAcquired) {
-                const elapsed = (Date.now() - new Date(embryo.lastAcquired).getTime()) / 1000;
-                const remaining = Math.max(0, embryo.intervalSeconds - elapsed);
-                minSeconds = Math.min(minSeconds, remaining);
-            }
-        });
-
-        return minSeconds === Infinity ? 0 : Math.floor(minSeconds);
-    },
-
-    formatStatus(status) {
-        switch (status) {
-            case 'RUNNING': return 'Running';
-            case 'PAUSED': return 'Paused';
-            case 'COMPLETED': return 'Completed';
-            case 'FAILED': return 'Failed';
-            default: return 'Idle';
-        }
-    },
-
-    updateDetectionAlert() {
-        const alert = document.getElementById('strip-alert');
-        if (!alert) return;
-
-        // Count positive detections across all embryos
-        let totalDetections = 0;
-        let latestDetection = null;
-
-        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
-            const positives = reasoning.filter(r => r.detected);
-            totalDetections += positives.length;
-
-            positives.forEach(d => {
-                if (!latestDetection || new Date(d.timestamp) > new Date(latestDetection.timestamp)) {
-                    latestDetection = { ...d, embryoId };
-                }
-            });
-        });
-
-        if (totalDetections === 0) {
-            alert.classList.add('hidden');
-            return;
-        }
-
-        alert.classList.remove('hidden');
-        alert.classList.toggle('success', totalDetections > 0);
-
-        const badge = document.getElementById('strip-alert-badge');
-        const text = document.getElementById('strip-alert-text');
-
-        if (badge) badge.textContent = totalDetections;
-        if (text && latestDetection) {
-            text.textContent = `${TasksManager.formatDetectorName(latestDetection.detector_name)} detected`;
-        }
-    },
-
-    handleAlertClick() {
-        // Switch to Tasks tab and select the embryo with the latest detection
-        switchTab('tasks');
-
-        // Find embryo with most recent detection
-        let latestDetection = null;
-        let latestEmbryoId = null;
-
-        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
-            const positives = reasoning.filter(r => r.detected);
-            positives.forEach(d => {
-                if (!latestDetection || new Date(d.timestamp) > new Date(latestDetection.timestamp)) {
-                    latestDetection = d;
-                    latestEmbryoId = embryoId;
-                }
-            });
-        });
-
-        if (latestEmbryoId) {
-            TasksManager.selectEmbryo(latestEmbryoId);
-        }
-    },
-
-    markChecked() {
-        this.lastCheck = new Date();
-        localStorage.setItem('gently-last-check', this.lastCheck.toISOString());
-        this.newDetections = [];
-        this.updateDetectionAlert();
-    }
-};
-
-/**
- * Narrative Summary Manager
- * Manages AI-generated experiment summaries
- */
-const NarrativeManager = {
-    isLoading: false,
-    lastNarrative: null,
-    isCollapsed: false,
-
-    init() {
-        // Load collapsed state from localStorage
-        const collapsed = localStorage.getItem('gently-narrative-collapsed');
-        this.isCollapsed = collapsed === 'true';
-        this.applyCollapseState();
-    },
-
-    toggle() {
-        this.isCollapsed = !this.isCollapsed;
-        localStorage.setItem('gently-narrative-collapsed', this.isCollapsed.toString());
-        this.applyCollapseState();
-    },
-
-    applyCollapseState() {
-        const panel = document.getElementById('narrative-panel');
-        if (panel) {
-            panel.classList.toggle('collapsed', this.isCollapsed);
-        }
-    },
-
-    async refresh() {
-        if (this.isLoading) return;
-
-        this.isLoading = true;
-        this.showLoading(true);
-
-        try {
-            const response = await fetch('/api/narrative');
-            if (response.ok) {
-                const narrative = await response.json();
-                this.lastNarrative = narrative;
-                this.renderNarrative(narrative);
-            } else {
-                this.renderError('Failed to generate summary');
-            }
-        } catch (error) {
-            console.error('Failed to fetch narrative:', error);
-            this.renderError('Connection error');
-        } finally {
-            this.isLoading = false;
-            this.showLoading(false);
-        }
-    },
-
-    async showSinceLastCheck() {
-        if (this.isLoading) return;
-
-        const lastCheck = ExperimentStrip.lastCheck;
-        if (!lastCheck) {
-            this.renderLocalSummary();
-            return;
-        }
-
-        this.isLoading = true;
-        this.showLoading(true);
-
-        try {
-            const response = await fetch(`/api/narrative?since=${lastCheck.toISOString()}`);
-            if (response.ok) {
-                const narrative = await response.json();
-                this.lastNarrative = narrative;
-                this.renderNarrative(narrative);
-            } else {
-                this.renderLocalSummary();
-            }
-        } catch (error) {
-            this.renderLocalSummary();
-        } finally {
-            this.isLoading = false;
-            this.showLoading(false);
-            ExperimentStrip.markChecked();
-        }
-    },
-
-    renderLocalSummary() {
-        // Generate a simple local summary when API isn't available
-        const state = TasksManager.state;
-        const embryoCount = Object.keys(state.embryos).length;
-
-        if (embryoCount === 0) {
-            this.updateNarrativeUI({
-                status: 'normal',
-                headline: 'No Active Experiment',
-                details: ['Start a timelapse to see AI-generated summaries here.']
-            });
-            return;
-        }
-
-        const activeCount = Object.values(state.embryos).filter(e => !e.isComplete).length;
-        const completedCount = Object.values(state.embryos).filter(e => e.isComplete).length;
-
-        // Count detections
-        let totalDetections = 0;
-        let detectionDetails = [];
-        Object.entries(TasksManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
-            const positives = reasoning.filter(r => r.detected);
-            totalDetections += positives.length;
-            positives.forEach(d => {
-                detectionDetails.push(`${embryoId}: ${TasksManager.formatDetectorName(d.detector_name)} at T${d.timepoint}`);
-            });
-        });
-
-        const details = [];
-        if (activeCount > 0) details.push(`${activeCount} embryo${activeCount !== 1 ? 's' : ''} actively imaging`);
-        if (completedCount > 0) details.push(`${completedCount} embryo${completedCount !== 1 ? 's' : ''} completed`);
-        details.push(`${state.totalTimepoints} total timepoints acquired`);
-
-        if (detectionDetails.length > 0) {
-            details.push(`${totalDetections} positive detection${totalDetections !== 1 ? 's' : ''}: ${detectionDetails.slice(0, 3).join(', ')}${detectionDetails.length > 3 ? '...' : ''}`);
-        }
-
-        const status = totalDetections > 0 ? 'notable' :
-                      completedCount > 0 ? 'normal' : 'normal';
-
-        const headline = totalDetections > 0 ?
-            `${totalDetections} Detection${totalDetections !== 1 ? 's' : ''} Found` :
-            completedCount > 0 ?
-            `${completedCount}/${embryoCount} Embryos Complete` :
-            'Experiment In Progress';
-
-        this.updateNarrativeUI({ status, headline, details });
-    },
-
-    renderNarrative(narrative) {
-        this.updateNarrativeUI({
-            status: narrative.status || 'normal',
-            headline: narrative.headline || 'Experiment Summary',
-            summary: narrative.summary,
-            details: narrative.details || []
-        });
-    },
-
-    renderError(message) {
-        this.updateNarrativeUI({
-            status: 'attention',
-            headline: 'Summary Unavailable',
-            details: [message, 'Showing local summary instead.']
-        });
-        // Fall back to local summary
-        setTimeout(() => this.renderLocalSummary(), 2000);
-    },
-
-    updateNarrativeUI({ status, headline, summary, details }) {
-        // Update badge
-        const badge = document.getElementById('narrative-badge');
-        if (badge) {
-            badge.className = `narrative-status-badge ${status}`;
-            badge.innerHTML = status === 'normal' ? '&#x2714;' :
-                             status === 'notable' ? '&#x1F514;' : '&#x26A0;';
-        }
-
-        // Update headline
-        const headlineEl = document.getElementById('narrative-headline');
-        if (headlineEl) headlineEl.textContent = headline;
-
-        // Update meta
-        const metaEl = document.getElementById('narrative-meta');
-        if (metaEl) metaEl.textContent = `Updated ${new Date().toLocaleTimeString()}`;
-
-        // Update body
-        const bodyEl = document.getElementById('narrative-body');
-        if (bodyEl) {
-            let html = '';
-
-            if (summary) {
-                html += `
-                    <div class="narrative-section">
-                        <div class="narrative-section-title">Summary</div>
-                        <p class="narrative-text">${this.escapeHtml(summary)}</p>
-                    </div>
-                `;
-            }
-
-            if (details && details.length > 0) {
-                html += `
-                    <div class="narrative-section">
-                        <div class="narrative-section-title">Details</div>
-                        <ul class="narrative-bullets">
-                            ${details.map(d => `<li>${this.escapeHtml(d)}</li>`).join('')}
-                        </ul>
-                    </div>
-                `;
-            }
-
-            bodyEl.innerHTML = html || '<p class="narrative-text">No summary available.</p>';
-        }
-    },
-
-    showLoading(show) {
-        const loading = document.getElementById('narrative-loading');
-        const body = document.getElementById('narrative-body');
-        if (loading) loading.style.display = show ? 'flex' : 'none';
-        if (body) body.style.display = show ? 'none' : 'block';
-    },
-
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
     }
 };
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
-    TasksManager.init();
-    ExperimentStrip.init();
-    NarrativeManager.init();
-
-    // Update experiment strip every second
-    setInterval(() => ExperimentStrip.update(), 1000);
-
-    // Generate initial narrative summary
-    setTimeout(() => NarrativeManager.renderLocalSummary(), 500);
+    EmbryosManager.init();
 });

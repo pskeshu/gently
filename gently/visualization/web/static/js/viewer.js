@@ -195,9 +195,10 @@ function handleNewImage(data) {
         const eventType = ANALYSIS_TYPES.includes(dataType) ? 'analysis' : 'calibration';
         logEvent(eventType, `${dataType}${embryoId ? ' ' + embryoId : ''}`);
     } else if (VOLUME_TYPES.includes(dataType)) {
-        state.volumes.push(data);
-        updateVolumesCount();
-        if (state.tab === 'volumes') renderVolumesGallery();
+        // Volume images go to snapshots (Gallery tab removed)
+        state.snapshots.push(data);
+        updateMainCount();
+        renderRecentList();
         logEvent('volume', `${dataType}${embryoId ? ' ' + embryoId : ''}`);
     } else {
         state.snapshots.push(data);
@@ -209,7 +210,6 @@ function handleNewImage(data) {
     // Update embryo list if new
     if (embryoId && !state.embryos.includes(embryoId)) {
         state.embryos.push(embryoId);
-        updateEmbryoFilter();
     }
 
     // Show on main viewer if main tab
@@ -237,7 +237,6 @@ function displayImage(data) {
     }
 
     const embryoId = data.metadata?.embryo_id || '-';
-    document.getElementById('current-embryo').textContent = embryoId !== '-' ? embryoId : '';
     document.getElementById('info-embryo').textContent = embryoId;
     document.getElementById('info-type').textContent = data.data_type;
     document.getElementById('info-shape').textContent = data.shape ? data.shape.join(' x ') : '-';
@@ -255,8 +254,7 @@ function show3DVolume(uid) {
 }
 
 function showInModal(uid, source) {
-    const list = source === 'volumes' ? state.volumes : state.calibration;
-    const img = list.find(i => i.uid === uid);
+    const img = state.calibration.find(i => i.uid === uid);
     if (img) displayImage(img);
     // Switch to main tab to show the image
     switchTab('main');
