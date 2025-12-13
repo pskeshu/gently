@@ -1487,8 +1487,8 @@ class DiSPIMVolumeScanner:
 
                 # Collect images
                 images = []
-                # Timeout calculation: ~50ms per slice (includes SPIM cycle + overhead) with 2x safety margin
-                timeout_s = self._num_slices * 0.05 * 2  # Conservative timeout
+                # Timeout calculation: ~100ms per slice (includes SPIM cycle + overhead) with 2x safety margin
+                timeout_s = self._num_slices * 0.10 * 2  # Conservative timeout
                 start_time = time.time()
 
                 while self.core.getRemainingImageCount() > 0 or self.core.isSequenceRunning():
