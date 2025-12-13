@@ -2572,6 +2572,7 @@ kbd {
     font-size: 0.75rem;
     color: var(--text-muted);
     margin-top: 0.5rem;
+    padding-left: 1rem;
     font-style: italic;
 }
 
