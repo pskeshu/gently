@@ -569,6 +569,484 @@ async def _fine_focus_sweep(
     return result_dict, total_exposures
 
 
+# ============================================================================
+# FAST CALIBRATION ALGORITHM (Vision-Guided)
+# ============================================================================
+
+async def hybrid_focus_selection(
+    images: List[np.ndarray],
+    offsets: List[float],
+    claude_vision,
+    copilot,
+    embryo_id: str,
+    fft_confidence_threshold: float = 0.85
+) -> Tuple[int, str, float]:
+    """
+    Two-stage focus selection: FFT first, Vision if ambiguous.
+
+    Stage 1: FFT bandpass scoring (instant, ~10ms)
+    Stage 2: Vision API only if FFT is ambiguous (>85% score similarity)
+
+    Parameters
+    ----------
+    images : List[np.ndarray]
+        Focus images at different offsets
+    offsets : List[float]
+        Piezo offsets in µm for each image
+    claude_vision : AsyncClaudeClient
+        Vision API client
+    copilot : MicroscopyCopilot
+        For viz server access
+    embryo_id : str
+        Embryo identifier for logging
+    fft_confidence_threshold : float
+        If second-best score is below this ratio of best, use FFT
+
+    Returns
+    -------
+    tuple
+        (best_idx, method, confidence_ratio)
+        method is 'fft' or 'vision'
+    """
+    from gently.analysis.core import calculate_focus_score
+
+    # Stage 1: FFT scoring (instant)
+    scores = [calculate_focus_score(img, 'fft_bandpass') for img in images]
+    max_score = max(scores)
+    best_idx = scores.index(max_score)
+
+    # Check FFT confidence
+    score_ratios = [s / max_score if max_score > 0 else 0 for s in scores]
+    sorted_ratios = sorted(score_ratios, reverse=True)
+    second_best_ratio = sorted_ratios[1] if len(sorted_ratios) > 1 else 0
+
+    confidence_ratio = 1.0 / second_best_ratio if second_best_ratio > 0 else float('inf')
+
+    if second_best_ratio < fft_confidence_threshold:
+        # FFT is confident - best is >15% better than second
+        print(f"    FFT confident: position {best_idx} (ratio {confidence_ratio:.2f})")
+        return best_idx, 'fft', confidence_ratio
+
+    # Stage 2: FFT ambiguous - ask Vision
+    print(f"    FFT ambiguous (ratio {confidence_ratio:.2f}), consulting Vision...")
+
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+    from gently.analysis.core import create_focus_montage
+
+    # Create montage
+    labels = [chr(ord('A') + i) for i in range(len(images))]
+    montage = create_focus_montage(images, labels=labels, offsets=offsets)
+
+    # Save to temp file
+    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+        montage_path = Path(f.name)
+        Image.fromarray(montage).save(montage_path)
+
+    try:
+        # Call Vision API
+        vision_idx, vision_label, reasoning = await claude_vision.select_best_focus(
+            montage_path, offsets, labels
+        )
+        print(f"    Vision selected: {vision_label} ({reasoning})")
+
+        # Push montage to viz server
+        if copilot.viz_server:
+            copilot.push_viz(
+                array=montage,
+                uid=f"focus_montage_{embryo_id}",
+                data_type="focus_montage",
+                metadata={
+                    'embryo_id': embryo_id,
+                    'offsets': offsets,
+                    'fft_scores': scores,
+                    'vision_pick': vision_label,
+                    'reasoning': reasoning,
+                }
+            )
+
+        return vision_idx, 'vision', None
+
+    finally:
+        # Clean up temp file
+        try:
+            montage_path.unlink()
+        except Exception:
+            pass
+
+
+async def binary_edge_search(
+    client,
+    claude_vision,
+    direction: str,
+    copilot,
+    embryo_id: str,
+    piezo_heuristic: float,
+    max_range: float = 0.25,
+    num_iterations: int = 4
+) -> Tuple[float, int]:
+    """
+    Binary search for embryo edge in 4 steps.
+
+    Instead of linear sweep (10-20 exposures), uses binary search
+    to find embryo edge in 4-5 exposures.
+
+    Parameters
+    ----------
+    client : QueueServerClient
+        Microscope client
+    claude_vision : AsyncClaudeClient
+        Vision API client
+    direction : str
+        'top' (negative galvo) or 'bottom' (positive galvo)
+    copilot : MicroscopyCopilot
+        For viz server and state
+    embryo_id : str
+        Embryo identifier
+    piezo_heuristic : float
+        Expected piezo position at galvo=0
+    max_range : float
+        Maximum galvo range to search
+    num_iterations : int
+        Number of binary search steps
+
+    Returns
+    -------
+    tuple
+        (edge_galvo, num_exposures)
+    """
+    import tempfile
+    from pathlib import Path
+    from PIL import Image
+
+    # Helper to select best camera view
+    def select_best_view(image: np.ndarray) -> np.ndarray:
+        if image.ndim != 2:
+            return image
+        h, w = image.shape
+        if w < 100:
+            return image
+        mid_x = w // 2
+        left_view = image[:, :mid_x]
+        right_view = image[:, mid_x:]
+        if np.mean(left_view) >= np.mean(right_view):
+            return left_view
+        return right_view
+
+    sign = -1 if direction == 'top' else 1
+    low, high = 0.0, max_range * sign
+    last_visible = 0.0
+    exposures = 0
+
+    print(f"    Binary edge search ({direction}): range 0 to {high:.3f}°")
+
+    for i in range(num_iterations):
+        mid = (low + high) / 2
+
+        # Calculate piezo position using heuristic slope
+        HEURISTIC_SLOPE = 100.0  # µm/degree
+        piezo = piezo_heuristic + HEURISTIC_SLOPE * mid
+
+        # Capture image
+        result = await client.capture_lightsheet_image(
+            piezo_position=float(piezo),
+            galvo_position=float(mid)
+        )
+        exposures += 1
+
+        if not result.get('success') or result.get('image') is None:
+            # Assume not visible on failure
+            high = mid if sign > 0 else low
+            low = mid if sign < 0 else high
+            continue
+
+        img = select_best_view(result['image'])
+
+        # Check visibility with Vision
+        img_norm = ((img - img.min()) / (img.max() - img.min() + 1e-8) * 255).astype(np.uint8)
+
+        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
+            temp_path = Path(f.name)
+            Image.fromarray(img_norm).save(temp_path)
+
+        try:
+            visible, feature_score, desc = await claude_vision.detect_embryo_presence(temp_path)
+        finally:
+            try:
+                temp_path.unlink()
+            except Exception:
+                pass
+
+        print(f"      iter {i+1}: galvo={mid:.3f}°, visible={visible}, features={feature_score}")
+
+        if visible:
+            last_visible = mid
+            # Embryo visible, search further out
+            if sign > 0:
+                low = mid
+            else:
+                high = mid
+        else:
+            # Gone too far, search back
+            if sign > 0:
+                high = mid
+            else:
+                low = mid
+
+    return last_visible, exposures
+
+
+async def fast_calibrate_embryo(
+    embryo_id: str,
+    context: Dict,
+    z_buffer_um: float = 25.0
+) -> Tuple[bool, str, int]:
+    """
+    Vision-guided fast calibration using session slope.
+
+    For first embryo: Full bootstrap calibration to establish slope
+    For subsequent: Only find offset using hybrid FFT+Vision focus selection
+
+    Reduces exposures from 60-80 to 8-15 per embryo.
+
+    Parameters
+    ----------
+    embryo_id : str
+        Embryo to calibrate
+    context : Dict
+        Tool context with copilot and client
+    z_buffer_um : float
+        Z padding above/below embryo for volume acquisition
+
+    Returns
+    -------
+    tuple
+        (success, message, total_exposures)
+    """
+    from gently.claude_client import AsyncClaudeClient
+
+    copilot = context.get('copilot')
+    client = context.get('client')
+
+    if not copilot:
+        return False, "Error: No copilot context", 0
+
+    if not client or not getattr(client, 'is_connected', False):
+        return False, f"Error: Not connected to microscope server", 0
+
+    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    if err:
+        return False, err, 0
+
+    # Get session prior
+    session_prior = copilot.calibration_prior
+
+    # Initialize Claude Vision client
+    claude_vision = AsyncClaudeClient()
+
+    total_exposures = 0
+    HEURISTIC_SLOPE = 100.0  # Default µm/degree
+
+    print(f"\n=== FAST CALIBRATION: {embryo_id} ===")
+
+    # Check if this is bootstrap (first embryo) or fast mode
+    is_bootstrap = not session_prior.is_ready_for_fast_calibration()
+
+    if is_bootstrap:
+        print(f"  Mode: BOOTSTRAP (establishing session slope)")
+    else:
+        print(f"  Mode: FAST (using session slope {session_prior.slope_um_per_deg:.2f} µm/°)")
+
+    # --- STEP 1: Binary Edge Detection ---
+    print(f"\n  Step 1: Binary edge detection...")
+
+    # Start with heuristic piezo at galvo=0
+    piezo_heuristic = session_prior.offset_um if session_prior.num_calibrations > 0 else 0.0
+
+    galvo_top, exp_top = await binary_edge_search(
+        client, claude_vision, 'top', copilot, embryo_id, piezo_heuristic
+    )
+    total_exposures += exp_top
+
+    galvo_bottom, exp_bottom = await binary_edge_search(
+        client, claude_vision, 'bottom', copilot, embryo_id, piezo_heuristic
+    )
+    total_exposures += exp_bottom
+
+    print(f"  Edges detected: top={galvo_top:.3f}°, bottom={galvo_bottom:.3f}°")
+
+    # Validate edges
+    if galvo_top >= galvo_bottom:
+        return False, f"Invalid edges: top {galvo_top:.3f}° >= bottom {galvo_bottom:.3f}°", total_exposures
+
+    galvo_center = (galvo_top + galvo_bottom) / 2
+    galvo_extent = galvo_bottom - galvo_top
+
+    # --- STEP 2: Focus at Center Position ---
+    print(f"\n  Step 2: Focus at center (galvo={galvo_center:.3f}°)...")
+
+    # Use session slope or heuristic
+    slope = session_prior.slope_um_per_deg if session_prior.is_ready_for_fast_calibration() else HEURISTIC_SLOPE
+    piezo_expected = slope * galvo_center + session_prior.offset_um
+
+    # Capture 3-point focus grid (±2µm)
+    focus_offsets = [-2.0, 0.0, 2.0]
+    focus_images = []
+
+    # Helper to select best view
+    def select_best_view(image: np.ndarray) -> np.ndarray:
+        if image.ndim != 2:
+            return image
+        h, w = image.shape
+        if w < 100:
+            return image
+        mid_x = w // 2
+        left_view = image[:, :mid_x]
+        right_view = image[:, mid_x:]
+        if np.mean(left_view) >= np.mean(right_view):
+            return left_view
+        return right_view
+
+    for offset in focus_offsets:
+        result = await client.capture_lightsheet_image(
+            piezo_position=float(piezo_expected + offset),
+            galvo_position=float(galvo_center)
+        )
+        total_exposures += 1
+
+        if result.get('success') and result.get('image') is not None:
+            img = select_best_view(result['image'])
+            focus_images.append(img)
+        else:
+            focus_images.append(np.zeros((100, 100), dtype=np.uint8))
+
+    # --- STEP 3: Hybrid Focus Selection ---
+    print(f"\n  Step 3: Hybrid focus selection...")
+
+    best_idx, method, confidence = await hybrid_focus_selection(
+        focus_images, focus_offsets, claude_vision, copilot, embryo_id
+    )
+
+    embryo_offset = focus_offsets[best_idx]
+    piezo_center = piezo_expected + embryo_offset
+
+    print(f"  Selected: offset {embryo_offset:+.1f}µm via {method}")
+
+    # --- STEP 4: Refinement if Edge Picked ---
+    if best_idx in [0, len(focus_offsets) - 1]:
+        print(f"\n  Step 4: Refining (edge position picked)...")
+
+        # Extend search in direction of edge
+        if best_idx == 0:
+            extend_offsets = [-3.0, -4.0]
+        else:
+            extend_offsets = [3.0, 4.0]
+
+        for ext_offset in extend_offsets:
+            result = await client.capture_lightsheet_image(
+                piezo_position=float(piezo_expected + ext_offset),
+                galvo_position=float(galvo_center)
+            )
+            total_exposures += 1
+
+            if result.get('success') and result.get('image') is not None:
+                img = select_best_view(result['image'])
+                focus_images.append(img)
+                focus_offsets.append(ext_offset)
+
+        # Re-run hybrid selection
+        best_idx, method, confidence = await hybrid_focus_selection(
+            focus_images, focus_offsets, claude_vision, copilot, embryo_id
+        )
+        embryo_offset = focus_offsets[best_idx]
+        piezo_center = piezo_expected + embryo_offset
+        print(f"  Refined: offset {embryo_offset:+.1f}µm via {method}")
+    else:
+        print(f"\n  Step 4: Skipped (center position picked)")
+
+    # --- STEP 5: Bootstrap - Establish Session Slope ---
+    if is_bootstrap:
+        print(f"\n  Step 5: Bootstrap - calibrating second position for slope...")
+
+        # Pick second position 30% away from center
+        galvo_second = galvo_center + 0.3 * galvo_extent
+        piezo_expected_second = HEURISTIC_SLOPE * galvo_second + session_prior.offset_um
+
+        # Capture 3-point focus grid at second position
+        focus_images_2 = []
+        for offset in [-2.0, 0.0, 2.0]:
+            result = await client.capture_lightsheet_image(
+                piezo_position=float(piezo_expected_second + offset),
+                galvo_position=float(galvo_second)
+            )
+            total_exposures += 1
+
+            if result.get('success') and result.get('image') is not None:
+                img = select_best_view(result['image'])
+                focus_images_2.append(img)
+            else:
+                focus_images_2.append(np.zeros((100, 100), dtype=np.uint8))
+
+        best_idx_2, _, _ = await hybrid_focus_selection(
+            focus_images_2, [-2.0, 0.0, 2.0], claude_vision, copilot, embryo_id
+        )
+        piezo_second = piezo_expected_second + [-2.0, 0.0, 2.0][best_idx_2]
+
+        # Calculate slope from two points
+        calibrated_slope = (piezo_second - piezo_center) / (galvo_second - galvo_center)
+        calibrated_offset = piezo_center - calibrated_slope * galvo_center
+
+        # Lock session slope
+        session_prior.lock_session_slope(calibrated_slope, 0.85, embryo_id)
+        print(f"  Session slope locked: {calibrated_slope:.2f} µm/° (bootstrap embryo: {embryo_id})")
+    else:
+        # Fast mode - use session slope, calculate offset
+        calibrated_slope = session_prior.slope_um_per_deg
+        calibrated_offset = piezo_center - calibrated_slope * galvo_center
+
+    # --- STEP 6: Store Calibration ---
+    embryo.calibration = {
+        'slope_um_per_deg': calibrated_slope,
+        'offset_um': calibrated_offset,
+        'galvo_top_deg': galvo_top,
+        'galvo_bottom_deg': galvo_bottom,
+        'galvo_calib_top_deg': galvo_center,
+        'galvo_calib_bottom_deg': galvo_center + 0.3 * galvo_extent if is_bootstrap else galvo_center,
+        'piezo_calib_top_um': piezo_center,
+        'piezo_calib_bottom_um': piezo_center if not is_bootstrap else piezo_center + calibrated_slope * 0.3 * galvo_extent,
+        'r_squared': 0.85,  # Assumed for Vision-based selection
+        'method': 'fast_vision_guided',
+        'bootstrap': is_bootstrap,
+        'timestamp': datetime.now().isoformat(),
+    }
+
+    # Calculate volume parameters
+    extent_um = galvo_extent * calibrated_slope
+    total_range_um = extent_um + 2 * z_buffer_um
+    recommended_slices = max(30, min(150, int(total_range_um / 0.5)))  # 0.5µm per slice
+
+    embryo.calibration['volume_params'] = {
+        'piezo_start_um': calibrated_offset + calibrated_slope * galvo_top - z_buffer_um,
+        'piezo_end_um': calibrated_offset + calibrated_slope * galvo_bottom + z_buffer_um,
+        'total_range_um': total_range_um,
+        'recommended_slices': recommended_slices,
+    }
+
+    copilot._save_state()
+
+    msg = f"""✓ Fast calibration complete for {embryo_id}
+  Mode: {'BOOTSTRAP' if is_bootstrap else 'FAST'}
+  Slope: {calibrated_slope:.2f} µm/°
+  Offset: {calibrated_offset:.2f} µm
+  Edges: {galvo_top:.3f}° to {galvo_bottom:.3f}° ({galvo_extent:.3f}° extent)
+  Total exposures: {total_exposures}
+  Recommended slices: {recommended_slices}"""
+
+    print(f"\n{msg}")
+    return True, msg, total_exposures
+
+
 @tool(
     name="calibrate_embryo",
     description="""Run full piezo-galvo calibration for a specific embryo using Claude vision.

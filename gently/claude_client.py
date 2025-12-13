@@ -539,6 +539,137 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
         except Exception as e:
             return "REJECT", f"Claude API error: {str(e)}"
 
+    async def select_best_focus(
+        self,
+        montage_path: Path,
+        offsets: list[float],
+        labels: Optional[list[str]] = None
+    ) -> Tuple[int, str, str]:
+        """
+        Select the best-focused image from a montage using Vision.
+
+        Used by hybrid focus selection when FFT scores are ambiguous.
+        Claude Vision analyzes the montage and picks the sharpest image.
+
+        Parameters
+        ----------
+        montage_path : Path
+            Path to montage image showing focus positions side-by-side
+        offsets : list[float]
+            Piezo offsets in µm for each image position
+        labels : list[str], optional
+            Labels for each position (e.g., ['A', 'B', 'C'])
+
+        Returns
+        -------
+        int
+            Index of best-focused image (0-based)
+        str
+            Label of selected position (e.g., 'B')
+        str
+            Brief reasoning for selection
+
+        Examples
+        --------
+        >>> client = AsyncClaudeClient()
+        >>> idx, label, reason = await client.select_best_focus(
+        ...     Path("focus_montage.png"),
+        ...     offsets=[-2.0, 0.0, 2.0]
+        ... )
+        >>> print(f"Best focus at position {label} (offset {offsets[idx]}µm)")
+        """
+        montage_path = Path(montage_path)
+
+        if not montage_path.exists():
+            return 1, 'B', f"Montage file not found, defaulting to center"
+
+        # Default labels
+        if labels is None:
+            labels = [chr(ord('A') + i) for i in range(len(offsets))]
+
+        # Build offset description for prompt
+        offset_desc = ", ".join(
+            f"{labels[i]}={offsets[i]:+.1f}µm" for i in range(len(offsets))
+        )
+
+        prompt = f"""You are an expert microscopist comparing focus quality in embryo images.
+
+This montage shows the same embryo at different focus positions (piezo offsets):
+{offset_desc}
+
+YOUR TASK:
+Select which position shows the SHARPEST focus with:
+- Clearest cell membrane boundaries
+- Most distinct nuclear structures
+- Best overall image clarity and contrast
+
+RESPOND FORMAT:
+Line 1: Just the letter ({', '.join(labels)})
+Line 2: Brief reasoning (1 sentence)
+
+Example:
+B
+Center position shows sharpest nuclear boundaries with maximum contrast."""
+
+        # Encode image
+        image_data = self.encode_image(montage_path)
+        media_type = 'image/png'
+
+        try:
+            response = await asyncio.wait_for(
+                self.client.messages.create(
+                    model=self.model,
+                    max_tokens=100,
+                    messages=[{
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": media_type,
+                                    "data": image_data
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": prompt
+                            }
+                        ]
+                    }]
+                ),
+                timeout=self.timeout
+            )
+
+            # Parse response
+            response_text = response.content[0].text.strip()
+            lines = response_text.split('\n', 1)
+
+            # Extract selected label (first non-empty character that's a valid label)
+            selected = None
+            for char in lines[0].upper():
+                if char in labels:
+                    selected = char
+                    break
+
+            if selected is None:
+                # Default to center if can't parse
+                selected = labels[len(labels) // 2]
+
+            # Get index
+            idx = labels.index(selected)
+            reasoning = lines[1].strip() if len(lines) > 1 else "No reasoning provided"
+
+            return idx, selected, reasoning
+
+        except asyncio.TimeoutError:
+            # Default to center on timeout
+            center_idx = len(offsets) // 2
+            return center_idx, labels[center_idx], f"Claude API timeout, defaulting to center"
+        except Exception as e:
+            center_idx = len(offsets) // 2
+            return center_idx, labels[center_idx], f"Claude API error: {str(e)}, defaulting to center"
+
 
 # ============================================================================
 # SYNCHRONOUS WRAPPER FOR BACKWARDS COMPATIBILITY

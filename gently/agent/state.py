@@ -88,6 +88,37 @@ class CalibrationPrior:
     # Timestamp for staleness checking
     last_updated: Optional[datetime] = None
 
+    # Fast calibration: lock slope after first embryo bootstrap
+    session_slope_locked: bool = False
+    bootstrap_embryo_id: Optional[str] = None  # Which embryo established the slope
+
+    def lock_session_slope(self, slope: float, r_squared: float, embryo_id: str):
+        """
+        Lock the session slope after first embryo bootstrap calibration.
+
+        Once locked, subsequent embryos will use this slope and only
+        calibrate their individual offset.
+
+        Parameters
+        ----------
+        slope : float
+            Calibrated slope from bootstrap embryo (µm/deg)
+        r_squared : float
+            Fit quality from bootstrap calibration
+        embryo_id : str
+            ID of the embryo used for bootstrap
+        """
+        self.slope_um_per_deg = slope
+        self.r_squared_mean = r_squared
+        self.session_slope_locked = True
+        self.bootstrap_embryo_id = embryo_id
+        self.num_calibrations = 1
+        self.last_updated = datetime.now()
+
+    def is_ready_for_fast_calibration(self) -> bool:
+        """Check if session slope is locked and ready for fast per-embryo calibration."""
+        return self.session_slope_locked and self.r_squared_mean >= 0.75
+
     def update_from_calibration(
         self,
         slope: float,
@@ -168,6 +199,8 @@ class CalibrationPrior:
             'typical_extent_deg': self.typical_extent_deg,
             'extent_std_deg': self.extent_std_deg,
             'last_updated': self.last_updated.isoformat() if self.last_updated else None,
+            'session_slope_locked': self.session_slope_locked,
+            'bootstrap_embryo_id': self.bootstrap_embryo_id,
         }
 
     @classmethod
@@ -184,6 +217,8 @@ class CalibrationPrior:
             offset_max=data.get('offset_max', 20.0),
             typical_extent_deg=data.get('typical_extent_deg', 0.3),
             extent_std_deg=data.get('extent_std_deg', 0.1),
+            session_slope_locked=data.get('session_slope_locked', False),
+            bootstrap_embryo_id=data.get('bootstrap_embryo_id'),
         )
         if data.get('last_updated'):
             prior.last_updated = datetime.fromisoformat(data['last_updated'])
@@ -247,6 +282,11 @@ class EmbryoState:
 
     custom_classifications: Dict = field(default_factory=dict)
     # User-defined: {"first_cleavage": {detected: bool, timepoint: 42}}
+
+    # Verification round tracking (for consecutive confirmation)
+    pending_verification: bool = False  # True when detection fired, awaiting verification
+    consecutive_detection_count: int = 0  # Must reach 5 consecutive verified detections to stop
+    last_detection_round: Optional[int] = None  # Round when detection was last verified
 
     # Detection results from detector system
     detection_results: Dict[str, List[Dict]] = field(default_factory=dict)
@@ -802,6 +842,9 @@ class EmbryoState:
             'exposure_count': self.exposure_count,
             'total_exposure_ms': self.total_exposure_ms,
             'hatching_status': self.hatching_status,
+            'pending_verification': self.pending_verification,
+            'consecutive_detection_count': self.consecutive_detection_count,
+            'last_detection_round': self.last_detection_round,
             'recent_analyses': {
                 'morphology': self.morphology_history[-5:] if self.morphology_history else [],
                 'fluorescence': self.fluorescence_history[-5:] if self.fluorescence_history else [],
