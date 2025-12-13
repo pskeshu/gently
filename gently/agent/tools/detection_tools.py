@@ -233,7 +233,7 @@ async def edit_embryos(
         um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py
 
         for embryo_id, embryo_state in copilot.experiment.embryos.items():
-            if embryo_state.skip:
+            if embryo_state.should_skip:
                 continue  # Don't show skipped embryos
 
             pos = embryo_state.stage_position or {}
