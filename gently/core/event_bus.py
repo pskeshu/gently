@@ -51,6 +51,12 @@ class EventType(Enum):
     DETECTION_TRIGGERED = auto()  # Emitted only when detected=True (positive detection)
     HATCHING_DETECTED = auto()
 
+    # Verification events (multi-strategy verification for detections)
+    VERIFICATION_STARTED = auto()       # Verification round begins for embryo
+    VERIFICATION_STRATEGY = auto()      # Individual strategy result (adversarial, temporal, etc.)
+    VERIFICATION_PROGRESS = auto()      # Progress update (e.g., "3/5 strategies complete")
+    VERIFICATION_COMPLETED = auto()     # Final verification result with consensus
+
     # CV Subagent events
     SEGMENTATION_COMPLETED = auto()
     STAGE_DETECTED = auto()

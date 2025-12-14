@@ -1922,7 +1922,10 @@ kbd {
 
 /* Completion Info */
 .completion-info {
-    padding: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
     background: rgba(74, 222, 128, 0.1);
     border-radius: 8px;
     border: 1px solid rgba(74, 222, 128, 0.2);
@@ -1932,10 +1935,10 @@ kbd {
     font-size: 0.85rem;
     color: var(--accent-green);
     font-weight: 500;
-    margin-bottom: 0.25rem;
 }
 
-.completion-duration {
+/* Per-embryo imaging duration in progress stats */
+.imaging-duration {
     font-size: 0.8rem;
     color: var(--text-muted);
 }
@@ -4917,4 +4920,309 @@ kbd {
     background: var(--accent);
     color: white;
     border-color: var(--accent);
+}
+
+/* ========================================
+   VERIFICATION STATUS UI
+   Real-time verification progress display
+   ======================================== */
+
+/* Verification status in embryo card */
+.verification-status {
+    background: var(--bg-dark);
+    border-radius: 8px;
+    padding: 0.75rem;
+    margin-top: 0.75rem;
+    border: 1px solid var(--border);
+}
+
+.verification-status.running {
+    border-color: var(--accent-orange);
+    background: linear-gradient(135deg, rgba(251, 146, 60, 0.08), rgba(251, 146, 60, 0.03));
+    animation: pulse-border 2s ease-in-out infinite;
+}
+
+.verification-status.passed {
+    border-color: var(--accent-green);
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.08), rgba(74, 222, 128, 0.03));
+}
+
+.verification-status.failed {
+    border-color: var(--accent-red);
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.08), rgba(239, 68, 68, 0.03));
+}
+
+.verification-status.summary {
+    border-color: var(--accent);
+    background: rgba(96, 165, 250, 0.05);
+}
+
+@keyframes pulse-border {
+    0%, 100% { border-color: var(--accent-orange); }
+    50% { border-color: rgba(251, 146, 60, 0.4); }
+}
+
+.verification-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.verification-icon {
+    font-size: 1rem;
+}
+
+.verification-label {
+    font-weight: 600;
+    color: var(--text);
+}
+
+.verification-count {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.verification-progress {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+}
+
+.verification-progress-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-hover);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.verification-progress-fill {
+    height: 100%;
+    background: var(--accent-orange);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+.verification-progress-text {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    min-width: 28px;
+}
+
+.verification-strategies {
+    display: flex;
+    gap: 0.35rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.strategy-icon {
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    font-size: 0.65rem;
+    font-weight: 600;
+}
+
+.strategy-icon.pending {
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.strategy-icon.passed {
+    background: rgba(74, 222, 128, 0.2);
+    color: var(--accent-green);
+}
+
+.strategy-icon.failed {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--accent-red);
+}
+
+.verification-detail {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+}
+
+/* Verification section in reasoning panel */
+.verification-section {
+    margin-bottom: 1.5rem;
+}
+
+.verification-section .section-header {
+    margin-bottom: 0.75rem;
+}
+
+/* Verification card in reasoning panel */
+.verification-card {
+    border-left: 4px solid var(--accent);
+}
+
+.verification-card.started {
+    border-left-color: var(--accent-orange);
+    background: linear-gradient(135deg, rgba(251, 146, 60, 0.05), transparent);
+}
+
+.verification-card.passed {
+    border-left-color: var(--accent-green);
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.05), transparent);
+}
+
+.verification-card.failed {
+    border-left-color: var(--accent-red);
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.05), transparent);
+}
+
+.detector-badge.verification {
+    background: rgba(139, 92, 246, 0.15);
+    color: var(--accent-purple);
+}
+
+.detection-result.verification-started {
+    color: var(--accent-orange);
+}
+
+.consecutive-badge {
+    font-size: 0.7rem;
+    padding: 0.15rem 0.5rem;
+    border-radius: 10px;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+}
+
+.consecutive-badge.passed {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+}
+
+.consecutive-badge.failed {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--accent-red);
+}
+
+.verification-info {
+    margin-top: 0.5rem;
+}
+
+.verification-strategies-detail {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 0.35rem;
+    margin-top: 0.75rem;
+    padding: 0.5rem;
+    background: var(--bg-dark);
+    border-radius: 6px;
+}
+
+.strategy-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    padding: 0.25rem 0.5rem;
+    border-radius: 4px;
+}
+
+.strategy-row.passed {
+    color: var(--accent-green);
+}
+
+.strategy-row.failed {
+    color: var(--accent-red);
+}
+
+.strategy-row .strategy-icon {
+    font-size: 0.8rem;
+}
+
+.strategy-row .strategy-name {
+    font-weight: 500;
+}
+
+.verification-ensemble {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+}
+
+.ensemble-label {
+    color: var(--text-muted);
+}
+
+.ensemble-votes {
+    font-weight: 600;
+    color: var(--accent);
+    font-family: 'SF Mono', 'Consolas', monospace;
+}
+
+.verification-reasoning {
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    line-height: 1.4;
+}
+
+.verification-reasoning .reasoning-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-right: 0.35rem;
+}
+
+.verification-reasoning .reasoning-text {
+    color: var(--text);
+}
+
+.verification-duration {
+    margin-top: 0.5rem;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+
+/* Verification dots in evaluation timeline */
+.eval-dot.verification-passed {
+    background: linear-gradient(135deg, var(--accent-purple), #a855f7);
+    border: 2px solid var(--accent-green);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.4);
+}
+
+.eval-dot.verification-passed:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(139, 92, 246, 0.6);
+}
+
+.eval-dot.verification-failed {
+    background: linear-gradient(135deg, var(--accent-purple), #a855f7);
+    border: 2px solid var(--accent-red);
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.3);
+}
+
+.eval-dot.verification-failed:hover {
+    transform: scale(1.3);
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.5);
+}
+
+/* Separator between detection dots and verification dots */
+.eval-dots-separator {
+    display: inline-block;
+    width: 2px;
+    height: 16px;
+    background: var(--border);
+    margin: 0 6px;
+    vertical-align: middle;
+    border-radius: 1px;
+}
+
+/* Verification dot label */
+.eval-dot.verification-passed .eval-dot-label,
+.eval-dot.verification-failed .eval-dot-label {
+    font-weight: 700;
+    color: white;
 }

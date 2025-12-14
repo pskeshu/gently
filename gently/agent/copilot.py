@@ -543,6 +543,8 @@ Write a brief status summary. Examples:
                 detection_queue=self.detection_queue,
                 on_volume_callback=self.on_volume_acquired,
             )
+            # Wire up copilot for verification round callbacks
+            self.timelapse_orchestrator.set_copilot(self)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
@@ -1934,69 +1936,38 @@ Write a brief status summary. Examples:
             # that gets presented to user next time they interact
 
         elif detector.actions.mode == DetectionMode.AUTO:
-            # For critical actions (stop_timelapse), verify detection first
+            # For critical actions (stop_timelapse), use verification round pattern
             if detector.actions.stop_timelapse:
-                # Run challenger/verifier agent
-                logger.info(f"[VERIFIER] Running verification for {detector.name} detection on {embryo_id}")
+                # Mark embryo for verification round instead of immediate verification
+                # The verification round will acquire a fresh volume and run full verification
+                # with global error context, then update consecutive_detection_count
+                logger.info(
+                    f"[DETECTOR] {detector.name} detected on {embryo_id} - marking for verification round"
+                )
 
-                try:
-                    verification = await self.detection_verifier.verify(
-                        detector=detector,
-                        embryo_state=embryo,
-                        original_result=result,
-                        timepoint=result.timepoint or 0,
-                    )
+                embryo.pending_verification = True
 
-                    # Log verification result
-                    self._emit_event(EventType.DETECTION_TRIGGERED, {
-                        'detector_name': detector.name,
-                        'embryo_id': embryo_id,
-                        'action': 'verification_completed',
-                        'verification': verification.to_dict(),
-                    })
+                # Record the detection in embryo state
+                embryo.add_detection_result(detector.name, {
+                    'detected': True,
+                    'confidence': result.confidence.value if result.confidence else None,
+                    'timepoint': result.timepoint,
+                    'reasoning': result.reasoning,
+                    'verified': False,  # Will be verified in verification round
+                })
 
-                    if not verification.consensus:
-                        # Verification failed - downgrade to RECOMMEND mode
-                        logger.warning(
-                            f"[VERIFIER] Verification failed for {detector.name}: {verification.consensus_reasoning}"
-                        )
-                        # Show user the disagreement instead of auto-acting
-                        print(f"\n[VERIFICATION FAILED] {detector.name} detection on {embryo_id}")
-                        print(f"  Consensus: {verification.consensus_reasoning}")
-                        print(f"  Please manually verify and use /stop_timelapse if confirmed.\n")
+                self._emit_event(EventType.DETECTION_TRIGGERED, {
+                    'detector_name': detector.name,
+                    'embryo_id': embryo_id,
+                    'action': 'pending_verification',
+                    'consecutive_count': embryo.consecutive_detection_count,
+                })
 
-                        self._emit_event(EventType.DETECTION_TRIGGERED, {
-                            'detector_name': detector.name,
-                            'embryo_id': embryo_id,
-                            'action': 'verification_failed',
-                            'reason': verification.consensus_reasoning,
-                        })
-                        return  # Don't proceed with auto-action
-
-                    # Verification passed - mark detection as verified and proceed with stop
-                    logger.info(f"[VERIFIER] Verification passed for {detector.name}, proceeding with stop")
-
-                    # Mark the detection as verified in embryo state
-                    # This allows StopCondition.until_hatching() to also recognize verified detections
-                    embryo.mark_detection_verified(detector.name, result.timepoint)
-
-                except Exception as e:
-                    logger.error(f"[VERIFIER] Verification error: {e}")
-                    # On error, fall back to RECOMMEND mode rather than auto-stop
-                    print(f"\n[VERIFICATION ERROR] Could not verify {detector.name} detection: {e}")
-                    print(f"  Please manually verify and use /stop_timelapse if confirmed.\n")
-                    return
-
-                # Verified - stop timelapse
-                if self.timelapse_orchestrator:
-                    logger.info(f"[AUTO-ACTION] Stopping timelapse for {embryo_id} due to verified {detector.name} detection")
-                    await self.timelapse_orchestrator.stop_embryo(embryo_id, reason=f"{detector.name} detected (verified)")
-                    self._emit_event(EventType.DETECTION_TRIGGERED, {
-                        'detector_name': detector.name,
-                        'embryo_id': embryo_id,
-                        'action': 'stopped_timelapse',
-                        'verified': True,
-                    })
+                # The verification round will:
+                # 1. Acquire fresh verification volume
+                # 2. Run full verification with global error context
+                # 3. Update consecutive_detection_count
+                # 4. Stop embryo when count reaches 5
 
             # Apply parameter changes (non-critical, no verification needed)
             if detector.actions.parameter_changes:
@@ -2026,4 +1997,228 @@ Write a brief status summary. Examples:
         results = await self.detection_queue.run_detectors(embryo, timepoint)
 
         return results
+
+    async def verify_detection_with_context(
+        self,
+        embryo_id: str,
+        volume: np.ndarray,
+        detector_name: str,
+        global_error_context: str = "",
+    ) -> dict:
+        """
+        Verify a detection with fresh volume and global error context.
+
+        This is called by the verification round in the timelapse orchestrator
+        after a detection has been marked as pending.
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo being verified
+        volume : np.ndarray
+            Fresh verification volume
+        detector_name : str
+            Name of detector to verify (e.g., 'hatching')
+        global_error_context : str
+            Compiled error log from GlobalErrorLog
+
+        Returns
+        -------
+        dict
+            {'verified': bool, 'reason': str}
+        """
+        from .detector import DetectionResult, ConfidenceLevel
+
+        embryo = self.experiment.embryos.get(embryo_id)
+        if not embryo:
+            return {'verified': False, 'reason': 'Embryo not found'}
+
+        detector = self.detector_registry.get(detector_name)
+        if not detector:
+            return {'verified': False, 'reason': f'Detector {detector_name} not found'}
+
+        try:
+            # First, check if the image is blank (hardware error indicator)
+            is_blank = await self.check_blank_image(volume, embryo_id)
+            if is_blank:
+                logger.warning(f"[VERIFICATION] Blank image detected for {embryo_id} - possible hardware error")
+                return {
+                    'verified': False,
+                    'reason': 'Blank image detected - possible hardware error'
+                }
+
+            # Create max projection for analysis
+            max_proj = np.max(volume, axis=0) if volume.ndim == 3 else volume
+
+            # Convert to base64 for API
+            import io
+            import base64
+            from PIL import Image
+
+            # Normalize and convert to 8-bit
+            if max_proj.max() > 0:
+                normalized = (max_proj / max_proj.max() * 255).astype(np.uint8)
+            else:
+                normalized = max_proj.astype(np.uint8)
+
+            img = Image.fromarray(normalized)
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            b64_image = base64.b64encode(buffer.getvalue()).decode()
+
+            # Create a temporary image record for the embryo state
+            temp_image = ImageRecord(
+                timepoint=embryo.timepoints_acquired,
+                timestamp=datetime.now(),
+                max_projection_b64=b64_image,
+            )
+
+            # Preserve original images and APPEND temp image for temporal comparison
+            # The temporal check needs previous images to compare against current
+            original_images = list(embryo.recent_images)  # Deep-ish copy of list
+            embryo.recent_images = original_images + [temp_image]
+
+            # Create a detection result for verification
+            original_result = DetectionResult(
+                detected=True,
+                confidence=ConfidenceLevel.HIGH,
+                reasoning="Detection pending verification",
+                timepoint=embryo.timepoints_acquired,
+            )
+
+            try:
+                # Run verification with hardware context
+                verification = await self.detection_verifier.verify_with_context(
+                    detector=detector,
+                    embryo_state=embryo,
+                    original_result=original_result,
+                    timepoint=embryo.timepoints_acquired,
+                    global_error_context=global_error_context,
+                )
+            finally:
+                # Always restore original images, even on exception
+                embryo.recent_images = original_images
+
+            # Emit verification event
+            self._emit_event(EventType.DETECTION_TRIGGERED, {
+                'detector_name': detector_name,
+                'embryo_id': embryo_id,
+                'action': 'verification_round_complete',
+                'verification': verification.to_dict(),
+            })
+
+            if verification.consensus:
+                logger.info(f"[VERIFICATION] {embryo_id} verification PASSED: {verification.consensus_reasoning}")
+                return {
+                    'verified': True,
+                    'reason': verification.consensus_reasoning
+                }
+            else:
+                logger.info(f"[VERIFICATION] {embryo_id} verification FAILED: {verification.consensus_reasoning}")
+                return {
+                    'verified': False,
+                    'reason': verification.consensus_reasoning
+                }
+
+        except Exception as e:
+            logger.error(f"[VERIFICATION] Error verifying {embryo_id}: {e}")
+            return {
+                'verified': False,
+                'reason': f'Verification error: {str(e)}'
+            }
+
+    async def check_blank_image(
+        self,
+        volume: np.ndarray,
+        embryo_id: str,
+    ) -> bool:
+        """
+        Check if an image appears blank using Claude Vision.
+
+        Blank images can indicate hardware errors (acquisition timeout, camera failure)
+        and should trigger a false positive alert for hatching detection.
+
+        Parameters
+        ----------
+        volume : np.ndarray
+            Volume or image to check
+        embryo_id : str
+            Embryo ID for context
+
+        Returns
+        -------
+        bool
+            True if image appears blank/empty
+        """
+        try:
+            # Create max projection if needed
+            max_proj = np.max(volume, axis=0) if volume.ndim == 3 else volume
+
+            # Quick numerical check first (obvious blanks)
+            if np.std(max_proj) < 1.0 or np.max(max_proj) < 10:
+                logger.warning(f"[BLANK_CHECK] {embryo_id}: Numerical check indicates blank image")
+                return True
+
+            # Convert to base64 for Claude Vision
+            import io
+            import base64
+            from PIL import Image
+
+            if max_proj.max() > 0:
+                normalized = (max_proj / max_proj.max() * 255).astype(np.uint8)
+            else:
+                return True  # All zeros = blank
+
+            img = Image.fromarray(normalized)
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            b64_image = base64.b64encode(buffer.getvalue()).decode()
+
+            # Use Haiku for fast blank detection
+            prompt = """Look at this microscopy image. Is this a VALID microscopy image or a BLANK/CORRUPTED image?
+
+A BLANK or CORRUPTED image shows:
+- Mostly uniform gray/black with no structure
+- No visible biological features
+- Static noise only
+- Hardware artifacts (stripes, patterns) without actual sample
+
+A VALID image shows:
+- Visible biological structure (embryo, cells, etc.)
+- Even if the embryo is small or faint, there should be clear structure
+
+Respond with ONLY: VALID or BLANK"""
+
+            response = await asyncio.to_thread(
+                self.claude.messages.create,
+                model="claude-haiku-4-5-20251001",
+                max_tokens=10,
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64_image
+                            }
+                        }
+                    ]
+                }]
+            )
+
+            result = response.content[0].text.strip().upper()
+            is_blank = "BLANK" in result
+
+            if is_blank:
+                logger.warning(f"[BLANK_CHECK] {embryo_id}: Claude Vision detected blank image")
+
+            return is_blank
+
+        except Exception as e:
+            logger.error(f"[BLANK_CHECK] Error checking {embryo_id}: {e}")
+            # On error, don't assume blank
+            return False
 

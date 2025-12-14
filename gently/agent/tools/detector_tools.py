@@ -212,8 +212,11 @@ def enable_preset_detector(
     existing = copilot.detector_registry.get(preset)
     if existing:
         existing.enabled = True
+        # Ensure preset critical settings are applied (mode and stop_timelapse)
+        existing.actions.mode = DetectionMode(action_mode)
+        existing.actions.stop_timelapse = preset_data.get('stop_timelapse', False)
         copilot.detector_registry.save()
-        return f"Enabled existing '{preset}' detector"
+        return f"Enabled existing '{preset}' detector (mode={action_mode}, stop_timelapse={existing.actions.stop_timelapse})"
 
     # Create detector from preset
     conditions = DetectorConditions(min_timepoint=min_timepoint)

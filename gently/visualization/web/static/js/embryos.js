@@ -86,6 +86,9 @@ const EmbryosManager = {
             };
             // Convert Date objects in embryos
             Object.values(toSave.embryos).forEach(e => {
+                if (e.firstAcquired instanceof Date) {
+                    e.firstAcquired = e.firstAcquired.toISOString();
+                }
                 if (e.lastAcquired instanceof Date) {
                     e.lastAcquired = e.lastAcquired.toISOString();
                 }
@@ -124,6 +127,9 @@ const EmbryosManager = {
 
             // Restore Date objects in embryos
             Object.values(this.state.embryos).forEach(e => {
+                if (e.firstAcquired && typeof e.firstAcquired === 'string') {
+                    e.firstAcquired = new Date(e.firstAcquired);
+                }
                 if (e.lastAcquired && typeof e.lastAcquired === 'string') {
                     e.lastAcquired = new Date(e.lastAcquired);
                 }
@@ -185,6 +191,7 @@ const EmbryosManager = {
                 timepoints: embryoData.timepoints || 0,
                 isComplete: embryoData.is_complete || false,
                 completionReason: null,
+                firstAcquired: embryoData.first_acquired ? new Date(embryoData.first_acquired) : null,
                 lastAcquired: embryoData.last_acquired ? new Date(embryoData.last_acquired) : null,
                 detections: embryoData.detections || {},
                 errorCount: 0,
@@ -256,6 +263,7 @@ const EmbryosManager = {
                 timepoints: 0,
                 isComplete: false,
                 completionReason: null,
+                firstAcquired: null,
                 lastAcquired: null,
                 detections: {},
                 errorCount: 0,
@@ -281,6 +289,7 @@ const EmbryosManager = {
                 timepoints: 0,
                 isComplete: false,
                 completionReason: null,
+                firstAcquired: null,
                 lastAcquired: null,
                 detections: {},
                 errorCount: 0,
@@ -301,7 +310,11 @@ const EmbryosManager = {
             this.state.totalTimepoints += (newTimepoints - embryo.timepoints);
         }
         embryo.timepoints = newTimepoints;
-        embryo.lastAcquired = new Date();
+        const now = new Date();
+        if (!embryo.firstAcquired) {
+            embryo.firstAcquired = now;
+        }
+        embryo.lastAcquired = now;
 
         this.updateEmbryosCount();
         this.updateEmbryoCard(embryoId);
@@ -409,6 +422,111 @@ const EmbryosManager = {
             this.state.status = data.status;
             this.render();
         }
+    },
+
+    // ==========================================
+    // Verification Event Handlers
+    // ==========================================
+
+    handleVerificationStarted(data) {
+        const embryoId = data.embryo_id;
+        const embryo = this.state.embryos[embryoId];
+        if (!embryo) return;
+
+        embryo.verification = {
+            status: 'running',
+            consecutive_count: data.consecutive_count || 0,
+            required_count: data.required_count || 5,
+            strategies_complete: 0,
+            total_strategies: 5,
+            strategies: {}
+        };
+
+        // Add to detection reasoning as a verification event
+        if (!this.detectionReasoning[embryoId]) {
+            this.detectionReasoning[embryoId] = [];
+        }
+        this.detectionReasoning[embryoId].push({
+            type: 'verification_started',
+            detector_name: data.detector_name || 'hatching',
+            timepoint: data.round_number,
+            consecutive_count: data.consecutive_count,
+            required_count: data.required_count,
+            timestamp: new Date().toISOString()
+        });
+
+        this.updateEmbryoCard(embryoId);
+        this.saveState();
+    },
+
+    handleVerificationStrategy(data) {
+        const embryoId = data.embryo_id;
+        const embryo = this.state.embryos[embryoId];
+        if (!embryo || !embryo.verification) return;
+
+        // Update strategy result
+        embryo.verification.strategies[data.strategy] = {
+            passed: data.passed,
+            summary: data.summary
+        };
+
+        this.updateEmbryoCard(embryoId);
+    },
+
+    handleVerificationProgress(data) {
+        const embryoId = data.embryo_id;
+        const embryo = this.state.embryos[embryoId];
+        if (!embryo || !embryo.verification) return;
+
+        embryo.verification.strategies_complete = data.strategies_complete;
+        embryo.verification.total_strategies = data.total_strategies;
+
+        this.updateEmbryoCard(embryoId);
+    },
+
+    handleVerificationCompleted(data) {
+        const embryoId = data.embryo_id;
+        const embryo = this.state.embryos[embryoId];
+        if (!embryo) return;
+
+        // Update verification state
+        embryo.verification = {
+            status: 'completed',
+            consensus: data.consensus,
+            reasoning: data.reasoning,
+            strategies: data.strategies,
+            ensemble_votes: data.ensemble_votes,
+            duration_seconds: data.duration_seconds
+        };
+
+        // Update consecutive count
+        if (data.consensus) {
+            embryo.consecutive_verified = (embryo.consecutive_verified || 0) + 1;
+        } else {
+            embryo.consecutive_verified = 0;
+        }
+
+        // Add to detection reasoning
+        if (!this.detectionReasoning[embryoId]) {
+            this.detectionReasoning[embryoId] = [];
+        }
+        this.detectionReasoning[embryoId].push({
+            type: 'verification_completed',
+            detector_name: data.detector_name || 'hatching',
+            consensus: data.consensus,
+            reasoning: data.reasoning,
+            strategies: data.strategies,
+            ensemble_votes: data.ensemble_votes,
+            duration_seconds: data.duration_seconds,
+            consecutive_verified: embryo.consecutive_verified,
+            timestamp: new Date().toISOString()
+        });
+
+        this.updateEmbryoCard(embryoId);
+        if (this.selectedEmbryoId === embryoId) {
+            this.renderReasoningPanel();
+        }
+        this.saveState();
     },
 
     // ==========================================
@@ -615,15 +733,18 @@ const EmbryosManager = {
             `;
         }
 
+        // Verification status (shows during/after verification rounds)
+        let verificationHtml = '';
+        if (embryo.verification || embryo.consecutive_verified > 0) {
+            verificationHtml = this.renderVerificationStatus(embryo);
+        }
+
         // Completion or error info
         let completionHtml = '';
         if (embryo.isComplete) {
-            const duration = embryo.lastAcquired && this.state.startedAt ?
-                this.formatDuration(embryo.lastAcquired.getTime() - this.state.startedAt.getTime()) : '';
             completionHtml = `
                 <div class="completion-info">
-                    <div class="completion-reason">${embryo.completionReason || 'Completed'}</div>
-                    ${duration ? `<div class="completion-duration">Duration: ${duration}</div>` : ''}
+                    <span class="completion-reason">${embryo.completionReason || 'Completed'}</span>
                 </div>
             `;
         } else if (embryo.lastError) {
@@ -666,18 +787,104 @@ const EmbryosManager = {
                     </div>
                     <div class="progress-stats">
                         <span class="timepoints">${embryo.timepoints}${maxTimepoints > 0 ? ' / ' + maxTimepoints : ''} timepoints</span>
-                        <span class="elapsed">${embryo.lastAcquired ? this.formatDuration(Date.now() - (this.state.startedAt?.getTime() || Date.now())) : ''}</span>
+                        <span class="imaging-duration">${this.getEmbryoImagingDuration(embryo)}</span>
                     </div>
                 </div>
 
                 ${countdownHtml}
                 ${detectionsHtml}
+                ${verificationHtml}
                 ${completionHtml}
             </div>
         `;
     },
 
+    // Render verification status for embryo card
+    renderVerificationStatus(embryo) {
+        const v = embryo.verification;
+        const consecutiveCount = embryo.consecutive_verified || 0;
+        const requiredCount = v?.required_count || 5;
+
+        // If verification is running
+        if (v && v.status === 'running') {
+            const strategiesComplete = v.strategies_complete || 0;
+            const totalStrategies = v.total_strategies || 5;
+            const progressPct = (strategiesComplete / totalStrategies) * 100;
+
+            // Build strategy status icons
+            const strategies = v.strategies || {};
+            const strategyIcons = ['adversarial', 'independent', 'temporal', 'ensemble', 'hardware_context']
+                .map(name => {
+                    if (strategies[name] !== undefined) {
+                        return strategies[name].passed
+                            ? `<span class="strategy-icon passed" title="${name}: passed">✓</span>`
+                            : `<span class="strategy-icon failed" title="${name}: failed">✗</span>`;
+                    }
+                    return `<span class="strategy-icon pending" title="${name}: pending">○</span>`;
+                }).join('');
+
+            return `
+                <div class="verification-status running">
+                    <div class="verification-header">
+                        <span class="verification-icon">🔍</span>
+                        <span class="verification-label">Verifying...</span>
+                        <span class="verification-count">(${consecutiveCount}/${requiredCount})</span>
+                    </div>
+                    <div class="verification-progress">
+                        <div class="verification-progress-bar">
+                            <div class="verification-progress-fill" style="width: ${progressPct}%"></div>
+                        </div>
+                        <span class="verification-progress-text">${strategiesComplete}/${totalStrategies}</span>
+                    </div>
+                    <div class="verification-strategies">
+                        ${strategyIcons}
+                    </div>
+                </div>
+            `;
+        }
+
+        // If verification completed (show result)
+        if (v && v.status === 'completed') {
+            const passed = v.consensus;
+            const icon = passed ? '✓' : '✗';
+            const statusClass = passed ? 'passed' : 'failed';
+            const statusText = passed ? 'Verified' : 'Failed';
+
+            return `
+                <div class="verification-status ${statusClass}">
+                    <div class="verification-header">
+                        <span class="verification-icon">${icon}</span>
+                        <span class="verification-label">${statusText}</span>
+                        <span class="verification-count">(${consecutiveCount}/${requiredCount} consecutive)</span>
+                    </div>
+                    ${v.ensemble_votes ? `<div class="verification-detail">Ensemble: ${v.ensemble_votes}</div>` : ''}
+                </div>
+            `;
+        }
+
+        // If we have consecutive count but no active verification
+        if (consecutiveCount > 0) {
+            return `
+                <div class="verification-status summary">
+                    <div class="verification-header">
+                        <span class="verification-icon">🔍</span>
+                        <span class="verification-label">Verified</span>
+                        <span class="verification-count">${consecutiveCount}/${requiredCount} consecutive</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        return '';
+    },
+
     selectEmbryo(embryoId) {
+        // Clear per-embryo UI state when switching embryos
+        if (this.selectedEmbryoId !== embryoId) {
+            this.currentDetailItem = null;
+            this.expandedImages = {};
+        }
+
         this.selectedEmbryoId = embryoId;
 
         // Update card selection styles
@@ -790,8 +997,17 @@ const EmbryosManager = {
 
     // Render detections with range collapse for "not detected" sequences
     renderDetectionListWithCollapse(reasoning) {
-        // Sort by timepoint descending (newest first)
-        const sorted = [...reasoning].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
+        // Separate verification events from regular detections
+        const verificationEvents = reasoning.filter(r => r.type === 'verification_started' || r.type === 'verification_completed');
+        const detectionEvents = reasoning.filter(r => !r.type || (!r.type.startsWith('verification_')));
+
+        // Sort by timepoint/timestamp descending (newest first)
+        const sorted = [...detectionEvents].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
+        const sortedVerifications = [...verificationEvents].sort((a, b) => {
+            const timeA = a.timestamp ? new Date(a.timestamp).getTime() : 0;
+            const timeB = b.timestamp ? new Date(b.timestamp).getTime() : 0;
+            return timeB - timeA;
+        });
 
         // Apply filter
         let filtered = sorted;
@@ -803,7 +1019,7 @@ const EmbryosManager = {
 
         // If showing only detections, render them directly without collapse
         if (this.detectionFilter !== 'all') {
-            if (filtered.length === 0) {
+            if (filtered.length === 0 && sortedVerifications.length === 0) {
                 return `
                     <div class="detection-empty-filtered">
                         <div class="icon">&#x1F50E;</div>
@@ -812,7 +1028,12 @@ const EmbryosManager = {
                     </div>
                 `;
             }
-            return filtered.map((r, idx) => this.renderDetectionCard(r, idx, true)).join('');
+            let html = filtered.map((r, idx) => this.renderDetectionCard(r, idx, true)).join('');
+            // Also show verification events in filtered view
+            if (sortedVerifications.length > 0) {
+                html += sortedVerifications.map((v, idx) => this.renderVerificationCard(v, `ver-${idx}`)).join('');
+            }
+            return html;
         }
 
         // For "all" view, use range collapse
@@ -821,7 +1042,22 @@ const EmbryosManager = {
 
         let html = '';
 
-        // First, render positive detections section if any exist
+        // First, render verification section if any exist
+        if (sortedVerifications.length > 0) {
+            const completedVerifications = sortedVerifications.filter(v => v.type === 'verification_completed');
+            html += `
+                <div class="verification-section">
+                    <div class="section-header">
+                        <span class="icon">🔍</span>
+                        <span class="title">Verification Rounds</span>
+                        <span class="count">${completedVerifications.length} completed</span>
+                    </div>
+                    ${sortedVerifications.map((v, idx) => this.renderVerificationCard(v, `ver-${idx}`)).join('')}
+                </div>
+            `;
+        }
+
+        // Then, render positive detections section if any exist
         const positiveDetections = sorted.filter(r => r.detected);
         if (positiveDetections.length > 0) {
             html += `
@@ -1376,6 +1612,94 @@ const EmbryosManager = {
         `;
     },
 
+    // Render a verification event card for the reasoning panel
+    renderVerificationCard(verification, index) {
+        const isCompleted = verification.type === 'verification_completed';
+        const timestamp = verification.timestamp ? new Date(verification.timestamp).toLocaleTimeString() : '';
+
+        if (verification.type === 'verification_started') {
+            return `
+                <div class="detection-card verification-card started" data-timepoint="${verification.timepoint}">
+                    <div class="detection-card-header">
+                        <div class="detection-meta">
+                            <span class="detector-badge verification">🔍 Verification</span>
+                            <span class="detection-result verification-started">Started</span>
+                        </div>
+                        <div class="detection-timing">
+                            <span class="timepoint-badge">Round ${verification.timepoint}</span>
+                            <span class="detection-time">${timestamp}</span>
+                        </div>
+                    </div>
+                    <div class="verification-info">
+                        <span class="consecutive-badge">${verification.consecutive_count}/${verification.required_count} consecutive</span>
+                    </div>
+                </div>
+            `;
+        }
+
+        // verification_completed
+        const passed = verification.consensus;
+        const strategies = verification.strategies || {};
+        const strategyNames = ['adversarial', 'independent', 'temporal', 'ensemble', 'hardware_context'];
+
+        const strategyRows = strategyNames.map(name => {
+            const result = strategies[name];
+            if (result === undefined || result === null) return '';
+            const icon = result ? '✓' : '✗';
+            const statusClass = result ? 'passed' : 'failed';
+            const label = name.replace('_', ' ').replace(/\b\w/g, c => c.toUpperCase());
+            return `
+                <div class="strategy-row ${statusClass}">
+                    <span class="strategy-icon">${icon}</span>
+                    <span class="strategy-name">${label}</span>
+                </div>
+            `;
+        }).filter(Boolean).join('');
+
+        return `
+            <div class="detection-card verification-card ${passed ? 'passed' : 'failed'}" data-timepoint="${verification.timepoint}">
+                <div class="detection-card-header">
+                    <div class="detection-meta">
+                        <span class="detector-badge verification">🔍 Verification</span>
+                        <span class="detection-result ${passed ? 'positive' : 'negative'}">
+                            ${passed ? 'PASSED' : 'FAILED'}
+                        </span>
+                    </div>
+                    <div class="detection-timing">
+                        <span class="consecutive-badge ${passed ? 'passed' : 'failed'}">
+                            ${verification.consecutive_verified}/${5} consecutive
+                        </span>
+                        <span class="detection-time">${timestamp}</span>
+                    </div>
+                </div>
+
+                <div class="verification-strategies-detail">
+                    ${strategyRows}
+                </div>
+
+                ${verification.ensemble_votes ? `
+                    <div class="verification-ensemble">
+                        <span class="ensemble-label">Ensemble:</span>
+                        <span class="ensemble-votes">${verification.ensemble_votes}</span>
+                    </div>
+                ` : ''}
+
+                ${verification.reasoning ? `
+                    <div class="verification-reasoning">
+                        <span class="reasoning-label">Consensus:</span>
+                        <span class="reasoning-text">${verification.reasoning}</span>
+                    </div>
+                ` : ''}
+
+                ${verification.duration_seconds ? `
+                    <div class="verification-duration">
+                        Completed in ${verification.duration_seconds.toFixed(1)}s
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    },
+
     // Track user agreement/disagreement with detections
     detectionAgreements: {},  // key: "{detector}-{timepoint}" -> true/false
 
@@ -1628,12 +1952,16 @@ const EmbryosManager = {
             return '';
         }
 
-        // Group by timepoint and determine status
+        // Separate verification events from regular detections
+        const verificationEvents = reasoning.filter(r => r.type === 'verification_completed');
+        const detectionEvents = reasoning.filter(r => !r.type || !r.type.startsWith('verification_'));
+
+        // Group regular detections by timepoint
         const timepoints = {};
-        reasoning.forEach(r => {
+        detectionEvents.forEach(r => {
             const tp = r.timepoint ?? 0;
             if (!timepoints[tp]) {
-                timepoints[tp] = { detected: false, confidence: 'low' };
+                timepoints[tp] = { detected: false, confidence: 'low', type: 'detection' };
             }
             if (r.detected) {
                 timepoints[tp].detected = true;
@@ -1647,10 +1975,34 @@ const EmbryosManager = {
             }
         });
 
-        // Sort timepoints and generate dots
-        const sortedTps = Object.keys(timepoints).map(Number).sort((a, b) => a - b);
+        // Add verification events as special timepoints
+        verificationEvents.forEach((v, idx) => {
+            // Use a special key for verifications (negative numbers to sort before)
+            const verKey = `v${idx}`;
+            timepoints[verKey] = {
+                type: 'verification',
+                passed: v.consensus,
+                consecutiveCount: v.consecutive_verified || 0,
+                timestamp: v.timestamp
+            };
+        });
 
-        let dotsHtml = sortedTps.map(tp => {
+        // Sort: regular timepoints first, then verifications by timestamp
+        const regularTps = Object.keys(timepoints)
+            .filter(k => !k.startsWith('v'))
+            .map(Number)
+            .sort((a, b) => a - b);
+
+        const verificationTps = Object.keys(timepoints)
+            .filter(k => k.startsWith('v'))
+            .sort((a, b) => {
+                const timeA = new Date(timepoints[a].timestamp).getTime();
+                const timeB = new Date(timepoints[b].timestamp).getTime();
+                return timeA - timeB;
+            });
+
+        // Generate dots for regular timepoints
+        let dotsHtml = regularTps.map(tp => {
             const data = timepoints[tp];
             const isPositive = data.detected;
             const confClass = data.confidence || 'low';
@@ -1660,7 +2012,7 @@ const EmbryosManager = {
                 : `T${tp}: Not detected (${data.confidence})`;
 
             // Find the detector name for this timepoint
-            const detectorName = reasoning.find(r => r.timepoint === tp)?.detector_name || '';
+            const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || '';
             return `<div class="eval-dot ${className}"
                          title="${title}"
                          onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
@@ -1668,17 +2020,40 @@ const EmbryosManager = {
                     </div>`;
         }).join('');
 
-        const evalCount = sortedTps.length;
-        const positiveCount = sortedTps.filter(tp => timepoints[tp].detected).length;
+        // Generate dots for verification events (distinct purple color)
+        const verificationDotsHtml = verificationTps.map((key, idx) => {
+            const data = timepoints[key];
+            const passed = data.passed;
+            const className = passed ? 'verification-passed' : 'verification-failed';
+            const title = passed
+                ? `Verification ${idx + 1}: PASSED (${data.consecutiveCount}/5)`
+                : `Verification ${idx + 1}: FAILED`;
+
+            return `<div class="eval-dot ${className}"
+                         title="${title}">
+                        <span class="eval-dot-label">V${idx + 1}</span>
+                    </div>`;
+        }).join('');
+
+        const evalCount = regularTps.length;
+        const positiveCount = regularTps.filter(tp => timepoints[tp].detected).length;
+        const verificationCount = verificationTps.length;
+        const passedCount = verificationTps.filter(k => timepoints[k].passed).length;
+
+        // Build count text
+        let countText = `${evalCount} checked`;
+        if (positiveCount > 0) countText += `, ${positiveCount} detected`;
+        if (verificationCount > 0) countText += `, ${passedCount}/${verificationCount} verified`;
 
         return `
             <div class="evaluation-dots">
                 <div class="eval-dots-header">
                     <span class="eval-dots-title">Evaluations</span>
-                    <span class="eval-dots-count">${evalCount} checked${positiveCount > 0 ? `, ${positiveCount} detected` : ''}</span>
+                    <span class="eval-dots-count">${countText}</span>
                 </div>
                 <div class="eval-dots-track">
                     ${dotsHtml}
+                    ${verificationDotsHtml ? `<span class="eval-dots-separator"></span>${verificationDotsHtml}` : ''}
                 </div>
             </div>
         `;
@@ -2049,6 +2424,16 @@ const EmbryosManager = {
         } else {
             return `${seconds}s`;
         }
+    },
+
+    getEmbryoImagingDuration(embryo) {
+        // Show per-embryo imaging duration (time from first to last acquisition)
+        if (!embryo.firstAcquired) {
+            return '';
+        }
+        const endTime = embryo.isComplete ? embryo.lastAcquired : new Date();
+        const durationMs = endTime.getTime() - embryo.firstAcquired.getTime();
+        return this.formatDuration(durationMs);
     },
 
     updateEmbryosCount() {

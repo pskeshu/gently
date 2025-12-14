@@ -30,7 +30,8 @@ const VOLUME_TYPES = ['volume', 'volume_projection', 'z_stack', 'timelapse'];
 
 // UI Update functions
 function updateMainCount() {
-    document.getElementById('main-count').textContent = state.snapshots.length;
+    const el = document.getElementById('main-count');
+    if (el) el.textContent = state.snapshots.length;
 }
 
 function updateCalibrationCount() {

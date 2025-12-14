@@ -991,8 +991,8 @@ const TimepointPlayer = {
 
         if (!track || this.sequence.length === 0) return;
 
-        const firstTp = this.sequence[0].timepoint;
-        const lastTp = this.sequence[this.sequence.length - 1].timepoint;
+        const firstTp = this.sequence[0]?.timepoint ?? 0;
+        const lastTp = this.sequence[this.sequence.length - 1]?.timepoint ?? 0;
         const range = lastTp - firstTp;
 
         // VLM range highlight

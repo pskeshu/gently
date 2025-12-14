@@ -15,12 +15,13 @@ import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
 
 from .detector import Detector, DetectionResult, ConfidenceLevel
 from .state import EmbryoState
+from ..core import EventType, get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +65,15 @@ class EnsembleResult:
 
 
 @dataclass
+class HardwareContextResult:
+    """Result of hardware context analysis strategy"""
+    suspicious: bool  # True if hardware errors could have caused false positive
+    concerns: List[str]  # Specific concerns identified
+    reasoning: str
+    raw_response: str
+
+
+@dataclass
 class VerificationResult:
     """Combined result of all verification strategies"""
     original_detected: bool
@@ -74,6 +84,7 @@ class VerificationResult:
     independent: IndependentResult
     temporal: TemporalResult
     ensemble: Optional[EnsembleResult] = None  # Only for hatching detection
+    hardware_context: Optional[HardwareContextResult] = None  # Only when errors present
 
     # Consensus
     consensus: bool = False
@@ -116,6 +127,12 @@ class VerificationResult:
                 'agreement_ratio': self.ensemble.agreement_ratio,
                 'consensus_detected': self.ensemble.consensus_detected,
             }
+        if self.hardware_context:
+            result['hardware_context'] = {
+                'suspicious': self.hardware_context.suspicious,
+                'concerns': self.hardware_context.concerns,
+                'reasoning': self.hardware_context.reasoning,
+            }
         return result
 
 
@@ -134,6 +151,7 @@ class DetectionVerifier:
         ensemble_model: str = "claude-haiku-4-5-20251001",
         ensemble_size: int = 50,
         ensemble_threshold: float = 0.70,
+        event_bus=None,
     ):
         """
         Parameters
@@ -148,12 +166,20 @@ class DetectionVerifier:
             Number of parallel calls for ensemble voting (default: 50)
         ensemble_threshold : float
             Agreement ratio required for ensemble consensus (default: 0.70 = 70%)
+        event_bus : EventBus, optional
+            Event bus for emitting verification events to viz server
         """
         self.claude = claude_client
         self.model = model
         self.ensemble_model = ensemble_model
         self.ensemble_size = ensemble_size
         self.ensemble_threshold = ensemble_threshold
+        self._event_bus = event_bus or get_event_bus()
+
+    def _emit_event(self, event_type: EventType, data: Dict):
+        """Emit event to viz server"""
+        if self._event_bus:
+            self._event_bus.publish(event_type, data)
 
     async def verify(
         self,
@@ -232,6 +258,377 @@ class DetectionVerifier:
         )
 
         return result
+
+    async def verify_with_context(
+        self,
+        detector: Detector,
+        embryo_state: EmbryoState,
+        original_result: DetectionResult,
+        timepoint: int,
+        global_error_context: str = "",
+    ) -> VerificationResult:
+        """
+        Run all verification strategies including hardware context analysis.
+
+        This is the enhanced verification that includes cross-embryo error correlation.
+
+        Parameters
+        ----------
+        detector : Detector
+            The detector that fired
+        embryo_state : EmbryoState
+            Current embryo state with recent images
+        original_result : DetectionResult
+            The original detection result to verify
+        timepoint : int
+            Current timepoint number
+        global_error_context : str
+            Compiled error log from GlobalErrorLog.compile_for_verification()
+
+        Returns
+        -------
+        VerificationResult
+            Combined verification result with consensus
+        """
+        start_time = datetime.now()
+
+        # Run all strategies in parallel for speed
+        adversarial_task = self._run_adversarial(
+            detector, embryo_state, original_result, timepoint
+        )
+        independent_task = self._run_independent(
+            detector, embryo_state, timepoint
+        )
+        temporal_task = self._run_temporal_check(
+            detector, embryo_state, timepoint
+        )
+
+        # For hatching detection, also run ensemble voting
+        ensemble_result = None
+        hardware_result = None
+
+        if detector.name == 'hatching':
+            ensemble_task = self._run_ensemble_hatching(embryo_state)
+
+            # Run hardware context analysis if there are errors
+            if global_error_context and "No hardware errors" not in global_error_context:
+                hardware_task = self._run_hardware_context_analysis(
+                    global_error_context, embryo_state.id
+                )
+                adversarial, independent, temporal, ensemble_result, hardware_result = await asyncio.gather(
+                    adversarial_task, independent_task, temporal_task, ensemble_task, hardware_task
+                )
+            else:
+                adversarial, independent, temporal, ensemble_result = await asyncio.gather(
+                    adversarial_task, independent_task, temporal_task, ensemble_task
+                )
+        else:
+            adversarial, independent, temporal = await asyncio.gather(
+                adversarial_task, independent_task, temporal_task
+            )
+
+        # Emit strategy result events for viz server
+        embryo_id = embryo_state.id
+        strategies_complete = 0
+        total_strategies = 3 + (1 if ensemble_result else 0) + (1 if hardware_result else 0)
+
+        # Adversarial result
+        strategies_complete += 1
+        self._emit_event(EventType.VERIFICATION_STRATEGY, {
+            'embryo_id': embryo_id,
+            'detector_name': detector.name,
+            'strategy': 'adversarial',
+            'passed': not adversarial.found_counter_evidence,
+            'summary': f"Counter-evidence: {'YES - ' + ', '.join(adversarial.concerns) if adversarial.found_counter_evidence else 'None found'}",
+            'confidence': adversarial.confidence_in_original.value if adversarial.confidence_in_original else None,
+        })
+        self._emit_event(EventType.VERIFICATION_PROGRESS, {
+            'embryo_id': embryo_id,
+            'strategies_complete': strategies_complete,
+            'total_strategies': total_strategies,
+        })
+
+        # Independent result
+        strategies_complete += 1
+        self._emit_event(EventType.VERIFICATION_STRATEGY, {
+            'embryo_id': embryo_id,
+            'detector_name': detector.name,
+            'strategy': 'independent',
+            'passed': independent.detected,
+            'summary': f"Independent detection: {'YES' if independent.detected else 'NO'} - {independent.key_evidence}",
+            'confidence': independent.confidence.value if independent.confidence else None,
+        })
+        self._emit_event(EventType.VERIFICATION_PROGRESS, {
+            'embryo_id': embryo_id,
+            'strategies_complete': strategies_complete,
+            'total_strategies': total_strategies,
+        })
+
+        # Temporal result
+        strategies_complete += 1
+        self._emit_event(EventType.VERIFICATION_STRATEGY, {
+            'embryo_id': embryo_id,
+            'detector_name': detector.name,
+            'strategy': 'temporal',
+            'passed': temporal.change_detected,
+            'summary': f"Change detected: {'YES' if temporal.change_detected else 'NO'} - {temporal.description}",
+            'confidence': temporal.confidence.value if temporal.confidence else None,
+        })
+        self._emit_event(EventType.VERIFICATION_PROGRESS, {
+            'embryo_id': embryo_id,
+            'strategies_complete': strategies_complete,
+            'total_strategies': total_strategies,
+        })
+
+        # Ensemble result (if applicable)
+        if ensemble_result:
+            strategies_complete += 1
+            self._emit_event(EventType.VERIFICATION_STRATEGY, {
+                'embryo_id': embryo_id,
+                'detector_name': detector.name,
+                'strategy': 'ensemble',
+                'passed': ensemble_result.consensus_detected,
+                'summary': f"Ensemble vote: {ensemble_result.votes_yes}/{ensemble_result.total_votes} YES ({ensemble_result.agreement_ratio*100:.0f}%)",
+                'votes_yes': ensemble_result.votes_yes,
+                'votes_no': ensemble_result.votes_no,
+                'total_votes': ensemble_result.total_votes,
+            })
+            self._emit_event(EventType.VERIFICATION_PROGRESS, {
+                'embryo_id': embryo_id,
+                'strategies_complete': strategies_complete,
+                'total_strategies': total_strategies,
+            })
+
+        # Hardware context result (if applicable)
+        if hardware_result:
+            strategies_complete += 1
+            self._emit_event(EventType.VERIFICATION_STRATEGY, {
+                'embryo_id': embryo_id,
+                'detector_name': detector.name,
+                'strategy': 'hardware_context',
+                'passed': not hardware_result.suspicious,
+                'summary': f"Hardware errors suspicious: {'YES - ' + ', '.join(hardware_result.concerns) if hardware_result.suspicious else 'No'}",
+                'reasoning': hardware_result.reasoning,
+            })
+            self._emit_event(EventType.VERIFICATION_PROGRESS, {
+                'embryo_id': embryo_id,
+                'strategies_complete': strategies_complete,
+                'total_strategies': total_strategies,
+            })
+
+        # Determine consensus (with hardware context)
+        consensus, reasoning = self._evaluate_consensus_with_hardware(
+            original_result, adversarial, independent, temporal, ensemble_result, hardware_result
+        )
+
+        duration = (datetime.now() - start_time).total_seconds()
+
+        result = VerificationResult(
+            original_detected=original_result.detected,
+            original_confidence=original_result.confidence,
+            adversarial=adversarial,
+            independent=independent,
+            temporal=temporal,
+            ensemble=ensemble_result,
+            hardware_context=hardware_result,
+            consensus=consensus,
+            consensus_reasoning=reasoning,
+            verification_duration_seconds=duration,
+        )
+
+        logger.info(
+            f"Verification (with context) complete for {detector.name}: "
+            f"consensus={consensus}, duration={duration:.2f}s"
+            + (f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES" if ensemble_result else "")
+            + (f", hardware_suspicious={hardware_result.suspicious}" if hardware_result else "")
+        )
+
+        # Emit VERIFICATION_COMPLETED event with full summary
+        self._emit_event(EventType.VERIFICATION_COMPLETED, {
+            'embryo_id': embryo_id,
+            'detector_name': detector.name,
+            'consensus': consensus,
+            'reasoning': reasoning,
+            'duration_seconds': duration,
+            'strategies': {
+                'adversarial': not adversarial.found_counter_evidence,
+                'independent': independent.detected,
+                'temporal': temporal.change_detected,
+                'ensemble': ensemble_result.consensus_detected if ensemble_result else None,
+                'hardware_context': (not hardware_result.suspicious) if hardware_result else None,
+            },
+            'ensemble_votes': f"{ensemble_result.votes_yes}/{ensemble_result.total_votes}" if ensemble_result else None,
+        })
+
+        return result
+
+    async def _run_hardware_context_analysis(
+        self,
+        global_error_context: str,
+        embryo_id: str,
+    ) -> HardwareContextResult:
+        """
+        Analyze if hardware errors could have caused a false positive detection.
+
+        Uses Haiku to analyze the global error log and determine if any errors
+        could have affected the detection for this embryo.
+
+        Parameters
+        ----------
+        global_error_context : str
+            Compiled error log from GlobalErrorLog
+        embryo_id : str
+            The embryo being verified
+
+        Returns
+        -------
+        HardwareContextResult
+            Analysis result
+        """
+        try:
+            prompt = f"""You are analyzing hardware error context for a microscopy detection verification.
+
+GLOBAL ERROR LOG:
+{global_error_context}
+
+DETECTION: Hatching detected for {embryo_id}
+
+QUESTION: Could any of these hardware errors have caused a FALSE POSITIVE detection?
+
+Consider these correlations:
+- Stage positioning errors could cause wrong embryo to be imaged
+- Acquisition timeouts could cause partial/blank images (blank images look like empty FOV = hatched)
+- Camera errors could produce corrupted data
+- Errors on OTHER embryos in the same round could indicate systemic issues (stage drift, hardware instability)
+- Multiple errors in quick succession suggests hardware problems
+
+If ANY errors occurred that could have affected the image quality or positioning for {embryo_id}, report as SUSPICIOUS.
+
+Respond in EXACTLY this format:
+SUSPICIOUS: [YES/NO]
+CONCERNS: [list specific concerns, separated by semicolons]
+REASONING: [brief explanation of your analysis]
+"""
+
+            response = await asyncio.to_thread(
+                self.claude.messages.create,
+                model=self.ensemble_model,  # Use Haiku for speed
+                max_tokens=300,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            response_text = response.content[0].text
+            return self._parse_hardware_context_response(response_text)
+
+        except Exception as e:
+            logger.error(f"Hardware context analysis failed: {e}")
+            return HardwareContextResult(
+                suspicious=True,  # Be conservative on error
+                concerns=[f"Analysis error: {str(e)}"],
+                reasoning="Could not analyze hardware context due to error",
+                raw_response="",
+            )
+
+    def _parse_hardware_context_response(self, response: str) -> HardwareContextResult:
+        """Parse hardware context analysis response"""
+        suspicious = False
+        concerns = []
+        reasoning = ""
+
+        for line in response.split('\n'):
+            line = line.strip()
+            if line.startswith('SUSPICIOUS:'):
+                value = line.split(':', 1)[1].strip().upper()
+                suspicious = value == 'YES'
+            elif line.startswith('CONCERNS:'):
+                concerns_str = line.split(':', 1)[1].strip()
+                concerns = [c.strip() for c in concerns_str.split(';') if c.strip()]
+            elif line.startswith('REASONING:'):
+                reasoning = line.split(':', 1)[1].strip()
+
+        return HardwareContextResult(
+            suspicious=suspicious,
+            concerns=concerns,
+            reasoning=reasoning,
+            raw_response=response,
+        )
+
+    def _evaluate_consensus_with_hardware(
+        self,
+        original: DetectionResult,
+        adversarial: AdversarialResult,
+        independent: IndependentResult,
+        temporal: TemporalResult,
+        ensemble: Optional[EnsembleResult] = None,
+        hardware_context: Optional[HardwareContextResult] = None,
+    ) -> tuple[bool, str]:
+        """
+        Evaluate consensus across all verification strategies including hardware context.
+
+        Returns (consensus_reached, reasoning)
+        """
+        # Count agreements
+        agreements = 0
+        disagreements = []
+        total_strategies = 3  # Base: adversarial, independent, temporal
+
+        # Check adversarial: should NOT find strong counter-evidence
+        if not adversarial.found_counter_evidence:
+            agreements += 1
+        else:
+            disagreements.append(f"Adversarial found counter-evidence: {', '.join(adversarial.concerns[:2])}")
+
+        # Check independent: should also detect
+        if independent.detected:
+            agreements += 1
+        else:
+            disagreements.append(f"Independent analysis did not detect: {independent.key_evidence}")
+
+        # Check temporal: should see change
+        if temporal.change_detected:
+            agreements += 1
+        else:
+            disagreements.append(f"No temporal change detected: {temporal.description}")
+
+        # Check ensemble (if available, for hatching detection)
+        if ensemble is not None:
+            total_strategies += 1
+            if ensemble.consensus_detected:
+                agreements += 1
+            else:
+                disagreements.append(
+                    f"Ensemble voting disagrees: {ensemble.votes_yes}/{ensemble.total_votes} YES "
+                    f"({ensemble.agreement_ratio:.0%}), threshold is {self.ensemble_threshold:.0%}"
+                )
+
+        # Check hardware context (if available)
+        if hardware_context is not None:
+            total_strategies += 1
+            if not hardware_context.suspicious:
+                agreements += 1
+            else:
+                disagreements.append(
+                    f"Hardware context suspicious: {hardware_context.reasoning}; "
+                    f"Concerns: {', '.join(hardware_context.concerns[:2])}"
+                )
+
+        # Consensus requires all strategies to agree
+        consensus = agreements == total_strategies
+
+        if consensus:
+            parts = ["no counter-evidence found", "independent analysis confirms", "temporal change observed"]
+            if ensemble:
+                parts.append(f"ensemble confirms ({ensemble.votes_yes}/{ensemble.total_votes} YES)")
+            if hardware_context:
+                parts.append("no hardware error concerns")
+            reasoning = f"All verification strategies agree ({total_strategies}/{total_strategies}): " + ", ".join(parts)
+        else:
+            reasoning = (
+                f"Verification disagreement ({agreements}/{total_strategies} agree): "
+                f"{'; '.join(disagreements)}"
+            )
+
+        return consensus, reasoning
 
     async def _run_adversarial(
         self,

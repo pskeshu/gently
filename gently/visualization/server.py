@@ -391,6 +391,7 @@ class TimelapseStateTracker:
                     "interval_seconds": self.base_interval,
                     "timepoints": 0,
                     "is_complete": False,
+                    "first_acquired": None,
                     "last_acquired": None,
                     "detections": {}
                 }
@@ -407,6 +408,7 @@ class TimelapseStateTracker:
                         "interval_seconds": self.base_interval,
                         "timepoints": 0,
                         "is_complete": False,
+                        "first_acquired": None,
                         "last_acquired": None,
                         "detections": {}
                     }
@@ -415,8 +417,11 @@ class TimelapseStateTracker:
                         self.status = "RUNNING"
                         self.started_at = datetime.now().isoformat()
 
+                now = datetime.now().isoformat()
                 self.embryos[eid]["timepoints"] = data.get("timepoint", 0) + 1
-                self.embryos[eid]["last_acquired"] = datetime.now().isoformat()
+                if self.embryos[eid]["first_acquired"] is None:
+                    self.embryos[eid]["first_acquired"] = now
+                self.embryos[eid]["last_acquired"] = now
                 self.total_timepoints += 1
 
         elif event_type == "ACQUISITION_COMPLETED":
@@ -453,6 +458,55 @@ class TimelapseStateTracker:
                 }
                 if detector_name == "hatching":
                     self.embryos[eid]["is_complete"] = True
+
+        elif event_type == "VERIFICATION_STARTED":
+            # Verification round started for embryo
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["verification"] = {
+                    "status": "running",
+                    "consecutive_count": data.get("consecutive_count", 0),
+                    "required_count": data.get("required_count", 5),
+                    "strategies_complete": 0,
+                    "total_strategies": 5,
+                    "strategies": {},
+                }
+
+        elif event_type == "VERIFICATION_STRATEGY":
+            # Individual strategy result
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos and "verification" in self.embryos[eid]:
+                strategy = data.get("strategy")
+                self.embryos[eid]["verification"]["strategies"][strategy] = {
+                    "passed": data.get("passed"),
+                    "summary": data.get("summary"),
+                }
+
+        elif event_type == "VERIFICATION_PROGRESS":
+            # Progress update
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos and "verification" in self.embryos[eid]:
+                self.embryos[eid]["verification"]["strategies_complete"] = data.get("strategies_complete", 0)
+                self.embryos[eid]["verification"]["total_strategies"] = data.get("total_strategies", 5)
+
+        elif event_type == "VERIFICATION_COMPLETED":
+            # Final verification result
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["verification"] = {
+                    "status": "completed",
+                    "consensus": data.get("consensus"),
+                    "reasoning": data.get("reasoning"),
+                    "strategies": data.get("strategies", {}),
+                    "ensemble_votes": data.get("ensemble_votes"),
+                    "duration_seconds": data.get("duration_seconds"),
+                }
+                # Update consecutive count display
+                if data.get("consensus"):
+                    current = self.embryos[eid].get("consecutive_verified", 0)
+                    self.embryos[eid]["consecutive_verified"] = current + 1
+                else:
+                    self.embryos[eid]["consecutive_verified"] = 0
 
         elif event_type == "STATUS_CHANGED":
             if data.get("status"):

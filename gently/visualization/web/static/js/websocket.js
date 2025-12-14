@@ -92,6 +92,14 @@ function handleMessage(msg) {
                     detector_name: 'hatching',
                     ...msg.data
                 });
+            } else if (msg.event_type === 'VERIFICATION_STARTED') {
+                EmbryosManager.handleVerificationStarted(msg.data);
+            } else if (msg.event_type === 'VERIFICATION_STRATEGY') {
+                EmbryosManager.handleVerificationStrategy(msg.data);
+            } else if (msg.event_type === 'VERIFICATION_PROGRESS') {
+                EmbryosManager.handleVerificationProgress(msg.data);
+            } else if (msg.event_type === 'VERIFICATION_COMPLETED') {
+                EmbryosManager.handleVerificationCompleted(msg.data);
             }
         }
 
