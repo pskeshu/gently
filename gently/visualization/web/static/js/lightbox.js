@@ -993,10 +993,10 @@ const TimepointPlayer = {
 
         const firstTp = this.sequence[0]?.timepoint ?? 0;
         const lastTp = this.sequence[this.sequence.length - 1]?.timepoint ?? 0;
-        const range = lastTp - firstTp;
+        const range = lastTp - firstTp || 1;  // Avoid division by zero for single timepoint
 
         // VLM range highlight
-        if (vlmRangeEl && this.vlmRange) {
+        if (vlmRangeEl && this.vlmRange && this.vlmRange.start != null && this.vlmRange.end != null) {
             const startPct = ((this.vlmRange.start - firstTp) / range) * 100;
             const endPct = ((this.vlmRange.end - firstTp) / range) * 100;
             vlmRangeEl.style.left = `${Math.max(0, startPct)}%`;
@@ -1022,10 +1022,14 @@ const TimepointPlayer = {
 
         // Labels
         if (labelsEl) {
+            const vlmStartLabel = (this.vlmRange && this.vlmRange.start != null)
+                ? `<span class="timeline-label" style="left: ${((this.vlmRange.start - firstTp) / range) * 100}%">T${this.vlmRange.start}</span>` : '';
+            const vlmEndLabel = (this.vlmRange && this.vlmRange.end != null)
+                ? `<span class="timeline-label" style="left: ${((this.vlmRange.end - firstTp) / range) * 100}%">T${this.vlmRange.end}</span>` : '';
             labelsEl.innerHTML = `
                 <span class="timeline-label" style="left: 0">T${firstTp}</span>
-                ${this.vlmRange ? `<span class="timeline-label" style="left: ${((this.vlmRange.start - firstTp) / range) * 100}%">T${this.vlmRange.start}</span>` : ''}
-                ${this.vlmRange ? `<span class="timeline-label" style="left: ${((this.vlmRange.end - firstTp) / range) * 100}%">T${this.vlmRange.end}</span>` : ''}
+                ${vlmStartLabel}
+                ${vlmEndLabel}
                 <span class="timeline-label" style="left: 100%">T${lastTp}</span>
             `;
         }

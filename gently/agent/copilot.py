@@ -2151,6 +2151,9 @@ Write a brief status summary. Examples:
             True if image appears blank/empty
         """
         try:
+            # Squeeze out single-element dimensions (e.g., (1, 1, 512, 2048) -> (512, 2048))
+            volume = np.squeeze(volume)
+
             # Create max projection if needed
             max_proj = np.max(volume, axis=0) if volume.ndim == 3 else volume
 
