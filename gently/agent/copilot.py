@@ -1694,16 +1694,62 @@ Write a brief status summary. Examples:
         # Store image
         record = self.image_manager.store_volume(embryo, timepoint, volume)
 
-        # Push to viz server
+        # Push to viz server with dual-view projection (top + side)
         if self.viz_server and volume is not None:
             try:
-                # Select View A if 4D (Views, Z, Y, X)
-                vol = volume[0] if volume.ndim == 4 else volume
-                max_proj = np.max(vol, axis=0)
+                from PIL import Image
+
+                # Extract View A if 4D (Views, Z, Y, X)
+                view_a = volume[0] if volume.ndim == 4 else volume
+
+                # Handle 3D volumes
+                if view_a.ndim == 3:
+                    z_depth, height, width = view_a.shape
+
+                    # Check if width contains dual-view (diSPIM format: X = 2*width)
+                    if width > height * 2:
+                        view_a = view_a[:, :, :width // 2]
+
+                    # TOP projection: max along Z
+                    top_proj = np.max(view_a, axis=0)
+                    # SIDE projection: max along Y
+                    side_proj = np.max(view_a, axis=1)
+
+                    # Normalize
+                    def _normalize(img):
+                        img = img.astype(np.float32)
+                        if img.max() > img.min():
+                            img = (img - img.min()) / (img.max() - img.min()) * 255
+                        return img.astype(np.uint8)
+
+                    top_norm = _normalize(top_proj)
+                    side_norm = _normalize(side_proj)
+
+                    # Rotate side view 90° clockwise (Z, X) -> (X, Z)
+                    side_rotated = np.rot90(side_norm, k=-1)
+
+                    # Scale side to match top height
+                    target_height = top_norm.shape[0]
+                    new_width = max(150, int(side_rotated.shape[1] * target_height / side_rotated.shape[0]))
+                    side_pil = Image.fromarray(side_rotated).resize(
+                        (new_width, target_height), Image.Resampling.LANCZOS
+                    )
+                    side_scaled = np.array(side_pil)
+
+                    # Combine: TOP | separator | SIDE
+                    separator = np.ones((target_height, 4), dtype=np.uint8) * 128
+                    dual_projection = np.concatenate([top_norm, separator, side_scaled], axis=1)
+                else:
+                    # 2D - use as-is
+                    dual_projection = view_a.astype(np.float32)
+                    if dual_projection.max() > dual_projection.min():
+                        dual_projection = (dual_projection - dual_projection.min()) / (dual_projection.max() - dual_projection.min()) * 255
+                    dual_projection = dual_projection.astype(np.uint8)
+
                 # Use proper UID from DataStore, fallback to constructed if None
                 viz_uid = record.projection_uid or f"volume_{embryo_id}_t{timepoint:04d}"
                 self.push_viz(
-                    array=max_proj,
+                    array=dual_projection,
                     uid=viz_uid,
                     data_type="volume_projection",
                     metadata={
@@ -1712,6 +1758,7 @@ Write a brief status summary. Examples:
                         'shape': list(volume.shape),
                         'projection_uid': record.projection_uid,
                         'volume_uid': record.volume_uid,
+                        'projection_type': 'dual_view',  # top + side MIP from View A
                     }
                 )
             except Exception as e:

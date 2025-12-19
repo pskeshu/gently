@@ -393,7 +393,8 @@ class TimelapseStateTracker:
                     "is_complete": False,
                     "first_acquired": None,
                     "last_acquired": None,
-                    "detections": {}
+                    "detections": {},
+                    "current_stage": None,  # Updated by perception system
                 }
                 self.detection_reasoning[eid] = []
 
@@ -410,7 +411,8 @@ class TimelapseStateTracker:
                         "is_complete": False,
                         "first_acquired": None,
                         "last_acquired": None,
-                        "detections": {}
+                        "detections": {},
+                        "current_stage": None,  # Updated by perception system
                     }
                     self.detection_reasoning[eid] = []
                     if self.status == "IDLE":
@@ -430,22 +432,29 @@ class TimelapseStateTracker:
                 embryo["is_complete"] = True
 
         elif event_type == "DETECTOR_EVALUATED":
-            # All detector evaluations (with reasoning) - populates reasoning panel
+            # All detector/perception evaluations (with reasoning) - populates reasoning panel
             eid = data.get("embryo_id")
             if eid:
                 detection = {
                     "detector_name": data.get("detector_name", "unknown"),
-                    "detected": data.get("detected", False),
+                    "detected": data.get("detected", data.get("is_hatching", False)),
                     "confidence": data.get("confidence"),
                     "reasoning": data.get("reasoning"),
                     "timepoint": data.get("timepoint"),
                     "volume_uid": data.get("volume_uid"),
                     "projection_uid": data.get("projection_uid"),
-                    "timestamp": datetime.now().isoformat()
+                    "timestamp": datetime.now().isoformat(),
+                    # Perception-specific fields
+                    "stage": data.get("stage"),
+                    "is_hatching": data.get("is_hatching", False),
                 }
                 if eid not in self.detection_reasoning:
                     self.detection_reasoning[eid] = []
                 self.detection_reasoning[eid].append(detection)
+
+                # Update embryo's current stage if perception result
+                if data.get("stage") and eid in self.embryos:
+                    self.embryos[eid]["current_stage"] = data.get("stage")
 
         elif event_type in ("DETECTION_TRIGGERED", "HATCHING_DETECTED"):
             # Positive detection events - update embryo status

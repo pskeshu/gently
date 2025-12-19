@@ -1246,7 +1246,8 @@ class TimelapseOrchestrator:
         """
         Run perception on acquired volume.
 
-        Creates a dual-view projection image and sends to VLM for stage classification.
+        Creates a dual-view projection image (top + side MIPs from View A)
+        and sends to VLM for stage classification.
 
         Parameters
         ----------
@@ -1255,7 +1256,10 @@ class TimelapseOrchestrator:
         timepoint : int
             Current timepoint number
         volume : ndarray
-            3D volume data (Z, Y, X)
+            Volume data - can be:
+            - 4D: (Views, Z, Y, X) - uses View A (index 0)
+            - 3D: (Z, Y, X) - may have dual-view in X dimension
+            - 2D: (Y, X) - single projection
         embryo_state : EmbryoAcquisitionState
             Current acquisition state
         """
@@ -1265,35 +1269,56 @@ class TimelapseOrchestrator:
             from io import BytesIO
             from PIL import Image
 
-            # Create dual-view projection (top + side)
-            if volume.ndim == 3:
-                # MIP along Z (top view) and MIP along Y (side view)
-                top_view = np.max(volume, axis=0)
-                side_view = np.max(volume, axis=1)
+            # Normalize helper
+            def normalize(img):
+                img = img.astype(np.float32)
+                if img.max() > img.min():
+                    img = (img - img.min()) / (img.max() - img.min()) * 255
+                return img.astype(np.uint8)
 
-                # Normalize to 0-255
-                def normalize(img):
-                    img = img.astype(np.float32)
-                    if img.max() > img.min():
-                        img = (img - img.min()) / (img.max() - img.min()) * 255
-                    return img.astype(np.uint8)
+            # Handle 4D volumes: extract View A (first view)
+            if volume.ndim == 4:
+                # Shape: (Views, Z, Y, X)
+                view_a = volume[0]  # Extract View A -> (Z, Y, X)
+            else:
+                view_a = volume
 
-                top_norm = normalize(top_view)
-                side_norm = normalize(side_view)
+            # Handle 3D volumes
+            if view_a.ndim == 3:
+                z_depth, height, width = view_a.shape
 
-                # Resize side view to match top view height
-                top_h, top_w = top_norm.shape
-                side_h, side_w = side_norm.shape
+                # Check if width contains dual-view data (X = 2*width, views side-by-side)
+                # diSPIM format has width roughly 4x height when dual-view
+                if width > height * 2:
+                    # Extract View A (left half)
+                    view_a = view_a[:, :, :width // 2]
 
-                # Scale side view
-                scale = top_h / side_h
-                new_side_w = int(side_w * scale)
-                side_pil = Image.fromarray(side_norm).resize((new_side_w, top_h), Image.Resampling.BILINEAR)
-                side_resized = np.array(side_pil)
+                # TOP projection: max along Z axis (looking down at embryo)
+                top_proj = np.max(view_a, axis=0)
 
-                # Concatenate horizontally with separator
-                separator = np.ones((top_h, 10), dtype=np.uint8) * 128
-                combined = np.hstack([top_norm, separator, side_resized])
+                # SIDE projection: max along Y axis (looking from side)
+                side_proj = np.max(view_a, axis=1)
+
+                top_norm = normalize(top_proj)
+                side_norm = normalize(side_proj)
+
+                # Rotate side view 90° clockwise so Z becomes horizontal
+                # (Z, X) -> (X, Z) after rotation
+                side_rotated = np.rot90(side_norm, k=-1)
+
+                # Scale side view to match top view height
+                target_height = top_norm.shape[0]
+                # Make side view at least 150px wide for visibility
+                new_width = max(150, int(side_rotated.shape[1] * target_height / side_rotated.shape[0]))
+                side_pil = Image.fromarray(side_rotated).resize(
+                    (new_width, target_height), Image.Resampling.LANCZOS
+                )
+                side_scaled = np.array(side_pil)
+
+                # Concatenate horizontally: TOP | separator | SIDE
+                sep_width = 4
+                separator = np.ones((target_height, sep_width), dtype=np.uint8) * 128
+                combined = np.concatenate([top_norm, separator, side_scaled], axis=1)
 
                 # Encode as JPEG base64
                 pil_img = Image.fromarray(combined)
@@ -1301,13 +1326,9 @@ class TimelapseOrchestrator:
                 pil_img.save(buffer, format='JPEG', quality=85)
                 image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
 
-            elif volume.ndim == 2:
-                # Single 2D image
-                img = volume.astype(np.float32)
-                if img.max() > img.min():
-                    img = (img - img.min()) / (img.max() - img.min()) * 255
-                img = img.astype(np.uint8)
-
+            elif view_a.ndim == 2:
+                # Single 2D image - use as-is
+                img = normalize(view_a)
                 pil_img = Image.fromarray(img)
                 buffer = BytesIO()
                 pil_img.save(buffer, format='JPEG', quality=85)
