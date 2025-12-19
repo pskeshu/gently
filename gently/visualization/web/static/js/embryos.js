@@ -546,6 +546,7 @@ const EmbryosManager = {
         const statusEl = document.getElementById('timelapse-status');
         const textEl = document.getElementById('timelapse-status-text');
         const durationEl = document.getElementById('timelapse-duration');
+        const sessionIdEl = document.getElementById('session-id');
 
         if (!statusEl) return;
 
@@ -556,6 +557,7 @@ const EmbryosManager = {
             statusEl.classList.add('idle');
             textEl.textContent = 'No active timelapse';
             durationEl.textContent = '';
+            if (sessionIdEl) sessionIdEl.textContent = '';
         } else {
             statusEl.classList.add(this.state.status.toLowerCase());
             textEl.textContent = this.state.status === 'RUNNING' ? 'Running' :
@@ -564,6 +566,11 @@ const EmbryosManager = {
 
             if (this.state.startedAt) {
                 durationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
+            }
+
+            // Display session ID
+            if (sessionIdEl && this.currentSessionId) {
+                sessionIdEl.textContent = this.currentSessionId;
             }
         }
     },

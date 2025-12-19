@@ -275,45 +275,10 @@ class ImageManager:
         max_proj = extract_view_a_and_max_project(volume)
         b64_image, size_kb = compress_image_for_api(max_proj)
 
-        # Store in DataStore with lineage tracking
+        # UIDs for tracking (DataStore storage removed to avoid duplicate writes)
+        # The viz server handles None UIDs gracefully with fallback IDs
         volume_uid = None
         projection_uid = None
-
-        if self.data_store is not None:
-            try:
-                # Store volume with metadata
-                volume_ref = self.data_store.store(
-                    data=volume,
-                    data_type="volume",
-                    metadata={
-                        'embryo_id': embryo_id,
-                        'timepoint': timepoint,
-                        'shape': list(volume.shape),
-                        'dtype': str(volume.dtype),
-                        'volume_path': str(volume_path),
-                    }
-                )
-                volume_uid = volume_ref.uid
-                logger.debug(f"Stored volume with UID: {volume_uid[:8]}")
-
-                # Store max projection with parent lineage
-                projection_ref = self.data_store.store(
-                    data=max_proj,
-                    data_type="image",
-                    metadata={
-                        'embryo_id': embryo_id,
-                        'timepoint': timepoint,
-                        'projection_type': 'max_z',
-                        'shape': list(max_proj.shape),
-                        'b64_size_kb': size_kb,
-                    },
-                    parent_uid=volume_uid,  # Lineage: projection derives from volume
-                )
-                projection_uid = projection_ref.uid
-                logger.debug(f"Stored projection with UID: {projection_uid[:8]} (parent: {volume_uid[:8]})")
-
-            except Exception as e:
-                logger.warning(f"DataStore storage failed, continuing with file-only: {e}")
 
         # Create record with UIDs
         record = ImageRecord(
