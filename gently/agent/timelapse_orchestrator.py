@@ -349,7 +349,7 @@ class TimelapseOrchestrator:
         self,
         microscope_client,
         experiment_state,
-        detection_queue=None,
+        perception_manager=None,
         on_volume_callback: Optional[Callable] = None,
     ):
         """
@@ -359,14 +359,14 @@ class TimelapseOrchestrator:
             Client for hardware control
         experiment_state : ExperimentState
             Shared experiment state
-        detection_queue : DetectionQueue, optional
-            For running detectors on acquired volumes
+        perception_manager : PerceptionManager, optional
+            VLM-based perception system for stage classification
         on_volume_callback : callable, optional
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
         """
         self.client = microscope_client
         self.experiment = experiment_state
-        self.detection_queue = detection_queue
+        self.perception_manager = perception_manager
         self.on_volume_callback = on_volume_callback
 
         # Event bus for status updates
@@ -395,14 +395,8 @@ class TimelapseOrchestrator:
         self._interval_rules: List[IntervalRule] = []
         self._applied_rules: Dict[str, Set[str]] = {}  # embryo_id -> set of applied rule names
 
-        # Callbacks for detection results
-        self._detection_callbacks: Dict[str, Callable] = {}
-
         # Global error log for cross-embryo hardware error correlation
         self.global_error_log = GlobalErrorLog()
-
-        # Verification round configuration
-        self._required_consecutive_verifications = 5  # Must pass 5 consecutive times to stop
 
     async def start(
         self,
@@ -593,12 +587,6 @@ class TimelapseOrchestrator:
                     await self._acquire_embryo(embryo_state, round_time=round_time)
                     await asyncio.sleep(0.5)
 
-                # === VERIFICATION PHASE ===
-                # After each round, run verification for embryos with pending detections
-                embryos_to_verify = self._get_embryos_pending_verification()
-                if embryos_to_verify and not self._stop_requested:
-                    await self._run_verification_round(embryos_to_verify, target_round)
-
         except asyncio.CancelledError:
             logger.info("Timelapse cancelled")
             self._status = TimelapseStatus.IDLE
@@ -687,6 +675,7 @@ class TimelapseOrchestrator:
                 # to avoid duplicate events and include more metadata
 
                 # Callback for volume/image processing
+                volume_data = None
                 if self.on_volume_callback:
                     # Get data - 'volume' for volume mode, 'image' for snap mode
                     data = result.get('volume') if acquisition_mode == 'volume' else result.get('image')
@@ -698,11 +687,21 @@ class TimelapseOrchestrator:
                         # For snap mode (2D), add Z dimension so store_volume works
                         if acquisition_mode == 'snap' and data.ndim == 2:
                             data = data[np.newaxis, ...]  # Add Z dimension: (Y,X) -> (1,Y,X)
+                        volume_data = data
                         await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,
                             data
                         )
+
+                # Run perception on acquired volume
+                if self.perception_manager and volume_data is not None:
+                    await self._run_perception(
+                        embryo_id=embryo_id,
+                        timepoint=embryo_state.timepoints_acquired,
+                        volume=volume_data,
+                        embryo_state=embryo_state,
+                    )
 
                 # Check stop condition
                 await self._check_stop_condition(embryo_state)
@@ -792,50 +791,42 @@ class TimelapseOrchestrator:
                 return f"reached {cond.value}h duration"
 
         elif cond.condition_type == StopConditionType.HATCHING:
-            # NOTE: Primary stopping mechanism is the verification round system.
-            # When detector fires with AUTO mode + stop_timelapse:
-            #   1. Embryo is marked pending_verification
-            #   2. Verification round acquires fresh volume and runs multi-strategy verification
-            #   3. After 5 consecutive verified detections, embryo.is_complete = True
-            #
-            # This stop condition serves as a fallback for:
-            #   - Legacy hatching_status (set manually)
-            #   - Detections marked verified through other paths
-            #
-            # The 5-consecutive-verification system replaces confirmation timepoints.
+            # Check perception system for hatching/hatched status
+            if self.perception_manager:
+                session = self.perception_manager.get_session(embryo_state.embryo_id)
+                if session and session.is_complete():
+                    return "hatching complete (perception)"
+
+            # Fallback: check legacy hatching_status (for manual marking)
             embryo = self.experiment.embryos.get(embryo_state.embryo_id)
             if embryo:
-                # Check hatching_status (legacy manual marking)
                 hatched_via_status = embryo.hatching_status.get('hatched', False)
-                # Check detection_results (require verified to prevent false positives)
-                hatched_via_detector = embryo.was_detected('hatching', require_verified=True)
-
-                if hatched_via_status or hatched_via_detector:
-                    # Stop immediately - verification already happened via verification round
-                    # or this is a legacy manual marking
-                    return "hatching detected (verified)"
+                if hatched_via_status:
+                    return "hatching detected (manual)"
 
         elif cond.condition_type == StopConditionType.COMMA_STAGE:
-            # Check if comma stage was detected
-            embryo = self.experiment.embryos.get(embryo_state.embryo_id)
-            if embryo:
-                # Use the was_detected helper from EmbryoState
-                if embryo.was_detected('comma') or embryo.was_detected('comma_stage'):
-                    # First time detecting comma - record the timepoint
-                    if embryo_state.detection_triggered_at is None:
-                        embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
-                        embryo_state.detection_type = "comma_stage"
-                        logger.info(
-                            f"Comma stage detected for {embryo_state.embryo_id} at t{embryo_state.timepoints_acquired}, "
-                            f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
-                        )
+            # Check perception system for comma stage
+            if self.perception_manager:
+                session = self.perception_manager.get_session(embryo_state.embryo_id)
+                if session:
+                    current_stage = session.get_current_stage()
+                    # Comma or later stages (embryo has passed comma)
+                    if current_stage in ('comma', '1.5fold', '2fold', '3fold', 'hatched'):
+                        # First time detecting comma - record the timepoint
+                        if embryo_state.detection_triggered_at is None:
+                            embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
+                            embryo_state.detection_type = "comma_stage"
+                            logger.info(
+                                f"Comma stage detected for {embryo_state.embryo_id} at t{embryo_state.timepoints_acquired}, "
+                                f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
+                            )
 
-                    # Check if we've acquired enough confirmation timepoints
-                    timepoints_since_detection = embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
-                    if timepoints_since_detection >= cond.confirm_timepoints:
-                        if cond.confirm_timepoints > 0:
-                            return f"comma stage detected + {cond.confirm_timepoints} confirmation timepoints"
-                        return "comma stage detected"
+                        # Check if we've acquired enough confirmation timepoints
+                        timepoints_since_detection = embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                        if timepoints_since_detection >= cond.confirm_timepoints:
+                            if cond.confirm_timepoints > 0:
+                                return f"comma stage detected + {cond.confirm_timepoints} confirmation timepoints"
+                            return f"comma stage detected (current: {current_stage})"
 
         return None
 
@@ -1236,49 +1227,6 @@ class TimelapseOrchestrator:
                     'new_interval': rule.new_interval_seconds,
                 })
 
-    def on_detection_result(
-        self,
-        embryo_id: str,
-        detector_name: str,
-        result: Dict
-    ):
-        """
-        Handle detection result from detector system
-
-        Called by copilot when a detector fires. Can trigger
-        stop conditions or interval adjustments.
-
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo that was analyzed
-        detector_name : str
-            Name of detector that fired
-        result : dict
-            Detection result
-        """
-        if embryo_id not in self._embryo_states:
-            return
-
-        estate = self._embryo_states[embryo_id]
-
-        # Check interval adjustment rules first (if detected)
-        if result.get('detected'):
-            self._check_interval_rules(
-                embryo_id=embryo_id,
-                detector_name=detector_name,
-            )
-
-        # NOTE: Detection-based stop conditions (hatching, comma_stage) are now handled
-        # by the verification round system in copilot.py and _run_verification_round().
-        # Do NOT stop embryos here - wait for verification to complete.
-        # The verification round will set is_complete=True after 5 consecutive verified detections.
-        if detector_name == 'hatching' and result.get('detected'):
-            logger.info(f"{embryo_id}: hatching detected - pending verification (NOT stopping yet)")
-
-        elif detector_name == 'comma_stage' and result.get('detected'):
-            logger.info(f"{embryo_id}: comma stage detected - pending verification (NOT stopping yet)")
-
     def _emit_event(self, event_type: EventType, data: Dict):
         """Emit event to event bus"""
         self._event_bus.publish(
@@ -1287,217 +1235,124 @@ class TimelapseOrchestrator:
             source="timelapse_orchestrator",
         )
 
-    def _get_embryos_pending_verification(self) -> List[str]:
+    async def _run_perception(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        volume,
+        embryo_state: EmbryoAcquisitionState,
+    ):
         """
-        Get list of embryo IDs that have pending verification.
+        Run perception on acquired volume.
 
-        These are embryos where a detection (e.g., hatching) was fired
-        but not yet verified through the verification round process.
-
-        Returns
-        -------
-        List[str]
-            Embryo IDs with pending verification
-        """
-        pending = []
-        for embryo_id in self._embryo_states:
-            embryo = self.experiment.embryos.get(embryo_id)
-            if embryo:
-                if embryo.pending_verification:
-                    pending.append(embryo_id)
-                    logger.info(f"[VERIFY] {embryo_id} has pending_verification=True")
-            else:
-                logger.warning(f"[VERIFY] {embryo_id} not found in experiment.embryos")
-
-        if not pending:
-            # Debug: show which embryos have detection results
-            for embryo_id in self._embryo_states:
-                embryo = self.experiment.embryos.get(embryo_id)
-                if embryo and embryo.detection_results:
-                    logger.debug(f"[VERIFY] {embryo_id} has detections but pending_verification={embryo.pending_verification}")
-
-        return pending
-
-    async def _run_verification_round(self, embryo_ids: List[str], round_number: int):
-        """
-        Run verification round for embryos with pending detections.
-
-        This is a separate phase after the normal acquisition round:
-        1. Acquire fresh verification volume for each embryo
-        2. Compile global error context (cross-embryo correlation)
-        3. Run full verification pipeline (adversarial, ensemble, hardware context)
-        4. Update consecutive detection count based on result
-
-        When an embryo reaches 5 consecutive verified detections, it is stopped.
+        Creates a dual-view projection image and sends to VLM for stage classification.
 
         Parameters
         ----------
-        embryo_ids : List[str]
-            Embryo IDs to verify
-        round_number : int
-            Current round number
+        embryo_id : str
+            Embryo identifier
+        timepoint : int
+            Current timepoint number
+        volume : ndarray
+            3D volume data (Z, Y, X)
+        embryo_state : EmbryoAcquisitionState
+            Current acquisition state
         """
-        if not embryo_ids:
-            return
+        try:
+            import numpy as np
+            import base64
+            from io import BytesIO
+            from PIL import Image
 
-        logger.info(f"=== VERIFICATION ROUND for {len(embryo_ids)} embryo(s) ===")
+            # Create dual-view projection (top + side)
+            if volume.ndim == 3:
+                # MIP along Z (top view) and MIP along Y (side view)
+                top_view = np.max(volume, axis=0)
+                side_view = np.max(volume, axis=1)
 
-        # Compile global error context for this round
-        error_context = self.global_error_log.compile_for_verification(round_number)
-        if "No hardware errors" not in error_context:
-            logger.info(f"Hardware context available:\n{error_context}")
+                # Normalize to 0-255
+                def normalize(img):
+                    img = img.astype(np.float32)
+                    if img.max() > img.min():
+                        img = (img - img.min()) / (img.max() - img.min()) * 255
+                    return img.astype(np.uint8)
 
-        for embryo_id in embryo_ids:
-            if self._stop_requested:
-                break
+                top_norm = normalize(top_view)
+                side_norm = normalize(side_view)
 
-            embryo = self.experiment.embryos.get(embryo_id)
-            if not embryo:
-                continue
+                # Resize side view to match top view height
+                top_h, top_w = top_norm.shape
+                side_h, side_w = side_norm.shape
 
-            embryo_state = self._embryo_states.get(embryo_id)
-            if not embryo_state or embryo_state.is_complete:
-                continue
+                # Scale side view
+                scale = top_h / side_h
+                new_side_w = int(side_w * scale)
+                side_pil = Image.fromarray(side_norm).resize((new_side_w, top_h), Image.Resampling.BILINEAR)
+                side_resized = np.array(side_pil)
 
-            logger.info(f"Acquiring verification volume for {embryo_id}")
+                # Concatenate horizontally with separator
+                separator = np.ones((top_h, 10), dtype=np.uint8) * 128
+                combined = np.hstack([top_norm, separator, side_resized])
 
-            # Emit VERIFICATION_STARTED event
-            self._emit_event(EventType.VERIFICATION_STARTED, {
+                # Encode as JPEG base64
+                pil_img = Image.fromarray(combined)
+                buffer = BytesIO()
+                pil_img.save(buffer, format='JPEG', quality=85)
+                image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+
+            elif volume.ndim == 2:
+                # Single 2D image
+                img = volume.astype(np.float32)
+                if img.max() > img.min():
+                    img = (img - img.min()) / (img.max() - img.min()) * 255
+                img = img.astype(np.uint8)
+
+                pil_img = Image.fromarray(img)
+                buffer = BytesIO()
+                pil_img.save(buffer, format='JPEG', quality=85)
+                image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+            else:
+                logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
+                return
+
+            # Run perception
+            result = await self.perception_manager.process_image(
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                image_b64=image_b64,
+            )
+
+            # Emit perception event for viz server
+            self._emit_event(EventType.DETECTOR_EVALUATED, {
                 'embryo_id': embryo_id,
-                'round_number': round_number,
-                'consecutive_count': embryo.consecutive_detection_count,
-                'required_count': self._required_consecutive_verifications,
-                'detector_name': 'hatching',
+                'timepoint': timepoint,
+                'detector_name': 'perception',
+                'stage': result.stage,
+                'is_hatching': result.is_hatching,
+                'confidence': result.confidence,
+                'reasoning': result.reasoning,
             })
 
-            try:
-                # 1. Move to embryo and acquire fresh volume
-                pos = embryo.stage_position
-                if pos and pos.get('x') is not None:
-                    await self.client.move_to_position(pos['x'], pos['y'])
+            # Check for hatching event
+            if result.is_hatching:
+                self._emit_event(EventType.HATCHING_DETECTED, {
+                    'embryo_id': embryo_id,
+                    'timepoint': timepoint,
+                    'stage': result.stage,
+                    'confidence': result.confidence,
+                })
 
-                # Get calibration parameters
-                cal = embryo.calibration or {}
-                galvo_amplitude = cal.get('galvo_amplitude', 0.5)
-                galvo_center = cal.get('galvo_center', 0.0)
-                piezo_amplitude = cal.get('piezo_amplitude', 25.0)
-                piezo_center = cal.get('piezo_center', 50.0)
+            # Check interval rules based on stage
+            self._check_interval_rules(
+                embryo_id=embryo_id,
+                stage=result.stage,
+            )
 
-                result = await self.client.acquire_volume(
-                    num_slices=embryo.num_slices,
-                    exposure_ms=embryo.exposure_ms,
-                    galvo_amplitude=galvo_amplitude,
-                    galvo_center=galvo_center,
-                    piezo_amplitude=piezo_amplitude,
-                    piezo_center=piezo_center,
-                )
+            logger.info(
+                f"[{embryo_id}] T{timepoint}: stage={result.stage}, "
+                f"hatching={result.is_hatching}, confidence={result.confidence:.0%}"
+            )
 
-                if not result.get('success'):
-                    # Verification acquisition failed - log and reset consecutive count
-                    self.global_error_log.log_error(
-                        round_number=round_number,
-                        embryo_id=embryo_id,
-                        timepoint=embryo.timepoints_acquired,
-                        error_type="verification_acquisition_failed",
-                        message=result.get('error', 'Unknown error')
-                    )
-                    embryo.consecutive_detection_count = 0
-                    embryo.pending_verification = False
-                    logger.warning(f"{embryo_id}: Verification acquisition failed, resetting consecutive count")
-                    continue
-
-                # 2. Run full verification via copilot (if available)
-                verification_passed = False
-
-                if self.on_volume_callback and hasattr(self, '_copilot') and self._copilot:
-                    # Use copilot's verification system
-                    import numpy as np
-                    volume_data = result.get('volume')
-                    if volume_data is not None:
-                        if not isinstance(volume_data, np.ndarray):
-                            volume_data = np.array(volume_data)
-
-                        # Run verification through copilot with error context
-                        verification_result = await self._copilot.verify_detection_with_context(
-                            embryo_id=embryo_id,
-                            volume=volume_data,
-                            detector_name='hatching',
-                            global_error_context=error_context
-                        )
-                        verification_passed = verification_result.get('verified', False)
-
-                        if not verification_passed:
-                            logger.info(
-                                f"{embryo_id}: Verification FAILED - {verification_result.get('reason', 'unknown')}"
-                            )
-                else:
-                    # No copilot available - mark as passed for now
-                    # This allows the system to work without full integration
-                    verification_passed = True
-                    logger.info(f"{embryo_id}: No copilot available, defaulting to pass")
-
-                # 3. Update consecutive count
-                if verification_passed:
-                    embryo.consecutive_detection_count += 1
-                    embryo.last_detection_round = round_number
-                    logger.info(
-                        f"{embryo_id}: Verified ({embryo.consecutive_detection_count}/"
-                        f"{self._required_consecutive_verifications} consecutive)"
-                    )
-                else:
-                    embryo.consecutive_detection_count = 0
-                    logger.warning(f"{embryo_id}: Verification failed, consecutive count reset to 0")
-
-                # 4. Check if ready to stop (5 consecutive verifications)
-                if embryo.consecutive_detection_count >= self._required_consecutive_verifications:
-                    logger.info(
-                        f"{embryo_id}: {self._required_consecutive_verifications} consecutive verifications - STOPPING"
-                    )
-                    embryo_state.is_complete = True
-                    embryo_state.completion_reason = (
-                        f"hatching verified ({self._required_consecutive_verifications} consecutive)"
-                    )
-                    embryo.pending_verification = False
-
-                    # Mark the detection as verified in embryo state
-                    # This ensures was_detected('hatching', require_verified=True) returns True
-                    embryo.mark_detection_verified('hatching')
-
-                    self._emit_event(EventType.HATCHING_DETECTED, {
-                        'embryo_id': embryo_id,
-                        'timepoint': embryo.timepoints_acquired,
-                        'detector_name': 'hatching',
-                        'consecutive_verifications': self._required_consecutive_verifications,
-                        'verified': True,
-                    })
-                else:
-                    # Keep pending_verification True to check again next round
-                    embryo.pending_verification = embryo.consecutive_detection_count > 0
-
-            except Exception as e:
-                # Log exception and reset consecutive count
-                self.global_error_log.log_error(
-                    round_number=round_number,
-                    embryo_id=embryo_id,
-                    timepoint=embryo.timepoints_acquired if embryo else 0,
-                    error_type="verification_exception",
-                    message=str(e),
-                    exception=e
-                )
-                if embryo:
-                    embryo.consecutive_detection_count = 0
-                    embryo.pending_verification = False
-                logger.error(f"{embryo_id}: Verification exception: {e}")
-
-        logger.info("=== VERIFICATION ROUND COMPLETE ===")
-
-    def set_copilot(self, copilot):
-        """
-        Set reference to copilot for verification callbacks.
-
-        Parameters
-        ----------
-        copilot : Copilot
-            The copilot instance
-        """
-        self._copilot = copilot
+        except Exception as e:
+            logger.error(f"Perception failed for {embryo_id}: {e}")
+            # Don't raise - perception failure shouldn't stop acquisition
