@@ -685,6 +685,7 @@ body {
 }
 
 .event-type-badge.cv { background: rgba(124, 58, 237, 0.2); color: #a371f7; }
+.event-type-badge.perception { background: rgba(192, 132, 252, 0.2); color: #c084fc; }
 .event-type-badge.analysis { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
 .event-type-badge.acquisition { background: rgba(88, 166, 255, 0.2); color: var(--accent); }
 .event-type-badge.session { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
@@ -2617,6 +2618,102 @@ kbd {
     box-shadow: 0 0 10px rgba(74, 222, 128, 0.5);
 }
 
+/* Stage-colored eval dots for perception system */
+.eval-dot.stage-early {
+    background: linear-gradient(135deg, rgba(248, 250, 252, 0.2) 0%, rgba(226, 232, 240, 0.2) 100%);
+    border-color: #e2e8f0;
+}
+
+.eval-dot.stage-bean {
+    background: linear-gradient(135deg, rgba(254, 243, 199, 0.25) 0%, rgba(252, 211, 77, 0.2) 100%);
+    border-color: #fcd34d;
+}
+
+.eval-dot.stage-comma {
+    background: linear-gradient(135deg, rgba(254, 215, 170, 0.25) 0%, rgba(251, 146, 60, 0.2) 100%);
+    border-color: #fb923c;
+}
+
+.eval-dot.stage-15fold {
+    background: linear-gradient(135deg, rgba(191, 219, 254, 0.25) 0%, rgba(96, 165, 250, 0.2) 100%);
+    border-color: #60a5fa;
+}
+
+.eval-dot.stage-2fold {
+    background: linear-gradient(135deg, rgba(167, 139, 250, 0.2) 0%, rgba(139, 92, 246, 0.2) 100%);
+    border-color: #a78bfa;
+}
+
+.eval-dot.stage-3fold {
+    background: linear-gradient(135deg, rgba(192, 132, 252, 0.2) 0%, rgba(168, 85, 247, 0.2) 100%);
+    border-color: #c084fc;
+}
+
+.eval-dot.stage-pretzel {
+    background: linear-gradient(135deg, rgba(244, 114, 182, 0.2) 0%, rgba(236, 72, 153, 0.2) 100%);
+    border-color: #f472b6;
+}
+
+.eval-dot.stage-hatching,
+.eval-dot.stage-hatched {
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.2) 0%, rgba(34, 197, 94, 0.2) 100%);
+    border-color: var(--accent-green);
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.3);
+}
+
+.eval-dot.hatching {
+    animation: hatchingPulse 1.5s ease-in-out infinite;
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+}
+
+@keyframes hatchingPulse {
+    0%, 100% {
+        transform: scale(1);
+        box-shadow: 0 0 8px rgba(74, 222, 128, 0.5);
+    }
+    50% {
+        transform: scale(1.1);
+        box-shadow: 0 0 15px rgba(74, 222, 128, 0.7);
+    }
+}
+
+/* Stage eval dot with icon */
+.eval-dot .eval-dot-icon {
+    font-size: 0.65rem;
+    line-height: 1;
+}
+
+.eval-dot:hover .eval-dot-icon {
+    transform: scale(1.2);
+}
+
+/* Stage value in summary strip */
+.stage-stat .stage-value {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+}
+
+.stage-stat .stage-icon {
+    font-size: 1rem;
+}
+
+/* Quick jump badges for stage transitions */
+.quick-jump-badge.stage-jump {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.15) 0%, rgba(192, 132, 252, 0.15) 100%);
+    border-color: rgba(192, 132, 252, 0.3);
+}
+
+.quick-jump-badge.stage-jump:hover {
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.25) 0%, rgba(192, 132, 252, 0.25) 100%);
+    border-color: rgba(192, 132, 252, 0.5);
+}
+
+.quick-jump-badge .stage-icon {
+    font-size: 0.85rem;
+}
+
 .eval-hint {
     font-size: 0.75rem;
     color: var(--text-muted);
@@ -4239,6 +4336,17 @@ kbd {
 .context-verdict.detected {
     color: var(--accent-green);
     background: rgba(74, 222, 128, 0.1);
+}
+
+.context-verdict.hatching {
+    color: var(--accent-green);
+    background: rgba(74, 222, 128, 0.15);
+    animation: hatchingPulse 1.5s ease-in-out infinite;
+}
+
+.context-verdict.stage {
+    color: #c084fc;
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.1) 0%, rgba(192, 132, 252, 0.1) 100%);
 }
 
 .context-reasoning {

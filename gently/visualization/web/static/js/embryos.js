@@ -993,29 +993,61 @@ const EmbryosManager = {
         const positiveDetections = reasoning.filter(r => r.detected);
         const highConfidence = reasoning.filter(r => r.confidence?.toLowerCase() === 'high');
 
+        // Check if this is perception data (has stage field)
+        const isPerceptionData = reasoning.some(r => r.stage);
+
+        // Get stage progression for perception data
+        let stageTransitions = [];
+        let currentStage = null;
+        if (isPerceptionData) {
+            const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+            sorted.forEach(r => {
+                if (r.stage && r.stage !== currentStage) {
+                    stageTransitions.push({
+                        stage: r.stage,
+                        timepoint: r.timepoint,
+                        detector_name: r.detector_name || 'perception'
+                    });
+                    currentStage = r.stage;
+                }
+            });
+            // Get latest stage
+            currentStage = sorted.length > 0 ? sorted[sorted.length - 1].stage : null;
+        }
+
         // Embryo info header
         const statusIcon = embryo.isComplete ? '&#x2714;' :
                           embryo.lastError ? '&#x2718;' : '&#x25CF;';
         const statusClass = embryo.isComplete ? 'complete' :
                            embryo.lastError ? 'error' : 'running';
 
-        // Build quick jump badges for positive detections
-        const quickJumpsHtml = positiveDetections.length > 0
-            ? positiveDetections.map(d => `
+        // Build quick jump badges (stage transitions for perception, positive detections for legacy)
+        let quickJumpsHtml;
+        if (isPerceptionData && stageTransitions.length > 0) {
+            quickJumpsHtml = stageTransitions.map(t => `
+                <span class="quick-jump-badge stage-jump" onclick="EmbryosManager.scrollToDetection(${t.timepoint}, '${t.detector_name}')" title="Jump to ${this.formatStageName(t.stage)}">
+                    <span class="stage-icon">${this.getStageIcon(t.stage)}</span>
+                    ${this.formatStageName(t.stage)} @ T${t.timepoint}
+                </span>
+            `).join('');
+        } else if (positiveDetections.length > 0) {
+            quickJumpsHtml = positiveDetections.map(d => `
                 <span class="quick-jump-badge" onclick="EmbryosManager.scrollToDetection(${d.timepoint}, '${d.detector_name}')" title="Jump to detection">
                     <span class="detector-icon">${this.getDetectorIcon(d.detector_name)}</span>
                     ${this.formatDetectorName(d.detector_name)} @ T${d.timepoint}
                 </span>
-            `).join('')
-            : '<span style="font-size: 0.8rem; color: var(--text-muted);">No positive detections yet</span>';
+            `).join('');
+        } else {
+            quickJumpsHtml = '<span style="font-size: 0.8rem; color: var(--text-muted);">No stage transitions yet</span>';
+        }
 
         // Build empty state if no evaluations
         const emptyStateHtml = totalEvaluations === 0 ? `
             <div class="no-detections">
                 <div class="no-detections-icon">&#x1F9EC;</div>
-                <div class="no-detections-text">No detection evaluations yet</div>
+                <div class="no-detections-text">No stage evaluations yet</div>
                 <div class="no-detections-hint">
-                    Click on evaluation dots above to view VLM analysis details.
+                    Stage analysis will appear here as the embryo develops.
                 </div>
             </div>
         ` : `
@@ -1037,10 +1069,24 @@ const EmbryosManager = {
                 </div>
             </div>
             <div class="detection-summary-strip">
-                <div class="detection-summary-stat">
-                    <span class="stat-value ${positiveDetections.length > 0 ? 'has-detections' : ''}">${positiveDetections.length}</span>
-                    <span class="stat-label">Detections</span>
-                </div>
+                ${isPerceptionData ? `
+                    <div class="detection-summary-stat stage-stat">
+                        <span class="stat-value stage-value">
+                            ${currentStage ? `<span class="stage-icon">${this.getStageIcon(currentStage)}</span>` : ''}
+                            ${currentStage ? this.formatStageName(currentStage) : 'Unknown'}
+                        </span>
+                        <span class="stat-label">Current Stage</span>
+                    </div>
+                    <div class="detection-summary-stat">
+                        <span class="stat-value ${stageTransitions.length > 0 ? 'has-detections' : ''}">${stageTransitions.length}</span>
+                        <span class="stat-label">Transitions</span>
+                    </div>
+                ` : `
+                    <div class="detection-summary-stat">
+                        <span class="stat-value ${positiveDetections.length > 0 ? 'has-detections' : ''}">${positiveDetections.length}</span>
+                        <span class="stat-label">Detections</span>
+                    </div>
+                `}
                 <div class="detection-summary-stat">
                     <span class="stat-value">${totalEvaluations}</span>
                     <span class="stat-label">Evaluations</span>
@@ -2018,25 +2064,40 @@ const EmbryosManager = {
         alert(msg);
     },
 
-    // Render a timeline sparkline showing detection distribution
+    // Render a timeline sparkline showing detection/perception distribution
     renderTimelineSparkline(reasoning, totalTimepoints) {
         if (!reasoning || reasoning.length === 0) {
             return '';
         }
 
-        // Separate verification events from regular detections
+        // Separate verification events from regular detections/perceptions
         const verificationEvents = reasoning.filter(r => r.type === 'verification_completed');
         const detectionEvents = reasoning.filter(r => !r.type || !r.type.startsWith('verification_'));
 
-        // Group regular detections by timepoint
+        // Check if this is perception data (has stage field)
+        const isPerceptionData = detectionEvents.some(r => r.stage);
+
+        // Group by timepoint
         const timepoints = {};
         detectionEvents.forEach(r => {
             const tp = r.timepoint ?? 0;
             if (!timepoints[tp]) {
-                timepoints[tp] = { detected: false, confidence: 'low', type: 'detection' };
+                timepoints[tp] = {
+                    detected: false,
+                    confidence: 'low',
+                    type: 'detection',
+                    stage: null,
+                    is_hatching: false
+                };
             }
-            if (r.detected) {
+            if (r.detected || r.is_hatching) {
                 timepoints[tp].detected = true;
+            }
+            if (r.stage) {
+                timepoints[tp].stage = r.stage;
+            }
+            if (r.is_hatching) {
+                timepoints[tp].is_hatching = true;
             }
             // Keep highest confidence
             const confOrder = { 'high': 3, 'medium': 2, 'low': 1 };
@@ -2049,7 +2110,6 @@ const EmbryosManager = {
 
         // Add verification events as special timepoints
         verificationEvents.forEach((v, idx) => {
-            // Use a special key for verifications (negative numbers to sort before)
             const verKey = `v${idx}`;
             timepoints[verKey] = {
                 type: 'verification',
@@ -2076,6 +2136,26 @@ const EmbryosManager = {
         // Generate dots for regular timepoints
         let dotsHtml = regularTps.map(tp => {
             const data = timepoints[tp];
+            const stage = data.stage;
+            const isHatching = data.is_hatching;
+
+            // For perception data, use stage-based coloring
+            if (isPerceptionData && stage) {
+                const stageClass = `stage-${stage.toLowerCase().replace('.', '')}`;
+                const stageIcon = this.getStageIcon(stage);
+                const title = isHatching
+                    ? `T${tp}: ${this.formatStageName(stage)} - HATCHING!`
+                    : `T${tp}: ${this.formatStageName(stage)}`;
+
+                const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || 'perception';
+                return `<div class="eval-dot ${stageClass} ${isHatching ? 'hatching' : ''}"
+                             title="${title}"
+                             onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
+                            <span class="eval-dot-icon">${stageIcon}</span>
+                        </div>`;
+            }
+
+            // Legacy detection behavior
             const isPositive = data.detected;
             const confClass = data.confidence || 'low';
             const className = isPositive ? 'positive' : confClass;
@@ -2083,7 +2163,6 @@ const EmbryosManager = {
                 ? `T${tp}: DETECTED`
                 : `T${tp}: Not detected (${data.confidence})`;
 
-            // Find the detector name for this timepoint
             const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || '';
             return `<div class="eval-dot ${className}"
                          title="${title}"
@@ -2112,9 +2191,18 @@ const EmbryosManager = {
         const verificationCount = verificationTps.length;
         const passedCount = verificationTps.filter(k => timepoints[k].passed).length;
 
+        // Count stage transitions for perception data
+        const uniqueStages = [...new Set(regularTps.map(tp => timepoints[tp].stage).filter(Boolean))];
+        const hatchingCount = regularTps.filter(tp => timepoints[tp].is_hatching).length;
+
         // Build count text
         let countText = `${evalCount} checked`;
-        if (positiveCount > 0) countText += `, ${positiveCount} detected`;
+        if (isPerceptionData) {
+            if (uniqueStages.length > 0) countText += `, ${uniqueStages.length} stages`;
+            if (hatchingCount > 0) countText += `, hatching detected`;
+        } else {
+            if (positiveCount > 0) countText += `, ${positiveCount} detected`;
+        }
         if (verificationCount > 0) countText += `, ${passedCount}/${verificationCount} verified`;
 
         return `
@@ -2284,7 +2372,7 @@ const EmbryosManager = {
      * Handle click on a timepoint link - opens video player
      */
     async playTimepointRange(params) {
-        const { embryoId, start, end, detectionPoint, reasoningText } = params;
+        const { embryoId, start, end, detectionPoint, reasoningText, stage, isHatching } = params;
 
         if (typeof TimepointPlayer !== 'undefined') {
             // For single timepoints, add context window of 5 frames before/after
@@ -2296,6 +2384,8 @@ const EmbryosManager = {
                 vlmRange: { start, end },
                 detectionPoint: detectionPoint ?? start,  // Highlight the clicked timepoint
                 reasoningText,
+                stage,
+                isHatching: isHatching || false,
                 bufferPercent: 0.15
             });
         } else {
@@ -2310,15 +2400,30 @@ const EmbryosManager = {
         if (typeof TimepointPlayer !== 'undefined') {
             // Get detection info if available
             const reasoning = this.detectionReasoning[embryoId] || [];
-            const positiveDetections = reasoning.filter(r => r.detected);
-            const latestDetection = positiveDetections.length > 0
-                ? positiveDetections[positiveDetections.length - 1]
-                : null;
+
+            // Check for perception data (has stage) or legacy detections
+            const hasPerceptionData = reasoning.some(r => r.stage);
+
+            let latestEvent = null;
+            if (hasPerceptionData) {
+                // Get latest stage info, prefer hatching
+                const hatchingEvent = reasoning.find(r => r.is_hatching);
+                const latestReasoning = reasoning.filter(r => r.stage).slice(-1)[0];
+                latestEvent = hatchingEvent || latestReasoning;
+            } else {
+                // Legacy: get latest positive detection
+                const positiveDetections = reasoning.filter(r => r.detected);
+                latestEvent = positiveDetections.length > 0
+                    ? positiveDetections[positiveDetections.length - 1]
+                    : null;
+            }
 
             await TimepointPlayer.openSequence(embryoId, 0, null, {
                 vlmRange: null,  // No specific VLM range for "play all"
-                detectionPoint: latestDetection?.timepoint ?? null,
-                reasoningText: latestDetection?.reasoning ?? null,
+                detectionPoint: latestEvent?.timepoint ?? null,
+                reasoningText: latestEvent?.reasoning ?? null,
+                stage: latestEvent?.stage ?? null,
+                isHatching: latestEvent?.is_hatching ?? false,
                 bufferPercent: 0  // No buffer for "play all"
             });
 

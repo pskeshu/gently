@@ -108,29 +108,39 @@ const ExperimentStrip = {
         const alert = document.getElementById('header-alert');
         if (!alert) return;
 
-        // Count NEW positive detections (since last check) across all embryos
-        let newDetectionCount = 0;
-        let latestDetection = null;
+        // Check if using perception system
+        let isPerception = false;
+        let newEventCount = 0;
+        let latestEvent = null;
+        let hatchingDetected = false;
 
         Object.entries(EmbryosManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
-            const positives = reasoning.filter(r => r.detected);
+            // Check for perception data (has stage field)
+            const hasStages = reasoning.some(r => r.stage);
+            if (hasStages) isPerception = true;
 
-            positives.forEach(d => {
-                const detectionTime = d.timestamp ? new Date(d.timestamp) : null;
-                // Only count as "new" if after lastCheck (or if no lastCheck set)
-                const isNew = !this.lastCheck || (detectionTime && detectionTime > this.lastCheck);
+            // For perception: count hatching events as notable
+            // For legacy: count detected events
+            const notableEvents = hasStages
+                ? reasoning.filter(r => r.is_hatching)
+                : reasoning.filter(r => r.detected);
+
+            notableEvents.forEach(d => {
+                const eventTime = d.timestamp ? new Date(d.timestamp) : null;
+                const isNew = !this.lastCheck || (eventTime && eventTime > this.lastCheck);
 
                 if (isNew) {
-                    newDetectionCount++;
+                    newEventCount++;
+                    if (d.is_hatching) hatchingDetected = true;
                 }
 
-                if (!latestDetection || (detectionTime && detectionTime > new Date(latestDetection.timestamp))) {
-                    latestDetection = { ...d, embryoId };
+                if (!latestEvent || (eventTime && eventTime > new Date(latestEvent.timestamp))) {
+                    latestEvent = { ...d, embryoId };
                 }
             });
         });
 
-        if (newDetectionCount === 0) {
+        if (newEventCount === 0) {
             alert.classList.add('hidden');
             return;
         }
@@ -140,9 +150,15 @@ const ExperimentStrip = {
         const badge = document.getElementById('header-alert-badge');
         const text = document.getElementById('header-alert-text');
 
-        if (badge) badge.textContent = newDetectionCount;
-        if (text && latestDetection) {
-            text.textContent = `${EmbryosManager.formatDetectorName(latestDetection.detector_name)} detected`;
+        if (badge) badge.textContent = newEventCount;
+        if (text && latestEvent) {
+            if (isPerception && hatchingDetected) {
+                text.textContent = 'Hatching detected!';
+            } else if (isPerception && latestEvent.stage) {
+                text.textContent = `Stage: ${EmbryosManager.formatStageName(latestEvent.stage)}`;
+            } else {
+                text.textContent = `${EmbryosManager.formatDetectorName(latestEvent.detector_name)} detected`;
+            }
         }
     },
 

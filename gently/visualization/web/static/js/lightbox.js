@@ -406,6 +406,8 @@ const TimepointPlayer = {
     vlmRange: null,         // {start: 73, end: 81}
     detectionPoint: null,   // Timepoint where detection occurred
     reasoningText: null,    // Original VLM text
+    stage: null,            // Current developmental stage (perception)
+    isHatching: false,      // Whether hatching was detected
 
     // Preloading
     preloadRadius: 5,       // Frames to preload ahead/behind
@@ -428,6 +430,8 @@ const TimepointPlayer = {
         this.vlmRange = options.vlmRange || {start, end};
         this.detectionPoint = options.detectionPoint || null;
         this.reasoningText = options.reasoningText || null;
+        this.stage = options.stage || null;
+        this.isHatching = options.isHatching || false;
 
         // Fetch sequence from server - try multiple data types
         const bufferPercent = options.bufferPercent || 0.15;
@@ -955,7 +959,16 @@ const TimepointPlayer = {
         const infoEl = document.getElementById('context-info');
 
         if (verdictEl) {
-            if (this.detectionPoint !== null) {
+            if (this.isHatching) {
+                verdictEl.textContent = `HATCHING at T${this.detectionPoint || '?'}`;
+                verdictEl.className = 'context-verdict detected hatching';
+            } else if (this.stage) {
+                // Perception system - show stage
+                const stageIcon = this.getStageIcon(this.stage);
+                const stageName = this.formatStageName(this.stage);
+                verdictEl.innerHTML = `${stageIcon} Stage: ${stageName}`;
+                verdictEl.className = 'context-verdict stage';
+            } else if (this.detectionPoint !== null) {
                 verdictEl.textContent = `DETECTED at T${this.detectionPoint}`;
                 verdictEl.className = 'context-verdict detected';
             } else if (this.reasoningText) {
@@ -1058,13 +1071,25 @@ const TimepointPlayer = {
         const container = document.querySelector('.lightbox-container');
         if (!container) return;
 
-        const detectorName = this.formatDetectorName(this.detectorName || 'hatching');
+        let toastText, toastIcon;
+
+        if (this.isHatching) {
+            toastIcon = '🐣';
+            toastText = `Hatching detected at T${this.detectionPoint}`;
+        } else if (this.stage) {
+            toastIcon = this.getStageIcon(this.stage);
+            toastText = `Stage: ${this.formatStageName(this.stage)}`;
+        } else {
+            const detectorName = this.formatDetectorName(this.detectorName || 'hatching');
+            toastIcon = '🔬';
+            toastText = `${detectorName} detected at T${this.detectionPoint}`;
+        }
 
         const toast = document.createElement('div');
         toast.className = 'detection-toast';
         toast.innerHTML = `
-            <span class="toast-icon">🔬</span>
-            <span class="toast-text">${detectorName} detected at T${this.detectionPoint}</span>
+            <span class="toast-icon">${toastIcon}</span>
+            <span class="toast-text">${toastText}</span>
             <span class="toast-hint">Click timeline marker for details</span>
             <button class="toast-dismiss" aria-label="Dismiss">&times;</button>
         `;
@@ -1081,6 +1106,37 @@ const TimepointPlayer = {
     formatDetectorName(name) {
         if (!name) return 'Detection';
         return name.charAt(0).toUpperCase() + name.slice(1).replace(/_/g, ' ');
+    },
+
+    getStageIcon(stage) {
+        const icons = {
+            'early': '🥚',
+            'bean': '🫘',
+            'comma': '🌙',
+            '1.5fold': '🔄',
+            '2fold': '🔁',
+            '3fold': '🔃',
+            'pretzel': '🥨',
+            'hatching': '🐣',
+            'hatched': '🐛',
+        };
+        return icons[stage?.toLowerCase()] || '🔬';
+    },
+
+    formatStageName(stage) {
+        if (!stage) return 'Unknown';
+        const names = {
+            'early': 'Early',
+            'bean': 'Bean',
+            'comma': 'Comma',
+            '1.5fold': '1.5-Fold',
+            '2fold': '2-Fold',
+            '3fold': '3-Fold',
+            'pretzel': 'Pretzel',
+            'hatching': 'Hatching',
+            'hatched': 'Hatched',
+        };
+        return names[stage.toLowerCase()] || stage;
     },
 
     showDetectionPanel() {

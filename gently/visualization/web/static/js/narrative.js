@@ -99,15 +99,33 @@ const NarrativeManager = {
         const activeCount = Object.values(state.embryos).filter(e => !e.isComplete).length;
         const completedCount = Object.values(state.embryos).filter(e => e.isComplete).length;
 
-        // Count detections
+        // Check if using perception system (has stage data) or legacy detectors
+        let isPerception = false;
+        const stageInfo = {};  // embryo_id -> current stage
+        const hatchingEmbryos = [];
+        const stageOrder = ['early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'pretzel', 'hatching', 'hatched'];
+
+        // Count stages or detections
         let totalDetections = 0;
         let detectionDetails = [];
+
         Object.entries(EmbryosManager.detectionReasoning).forEach(([embryoId, reasoning]) => {
-            const positives = reasoning.filter(r => r.detected);
-            totalDetections += positives.length;
-            positives.forEach(d => {
-                detectionDetails.push(`${embryoId}: ${EmbryosManager.formatDetectorName(d.detector_name)} at T${d.timepoint}`);
-            });
+            // Check for perception data
+            const stages = reasoning.map(r => r.stage).filter(Boolean);
+            if (stages.length > 0) {
+                isPerception = true;
+                stageInfo[embryoId] = stages[stages.length - 1];  // Latest stage
+                if (reasoning.some(r => r.is_hatching)) {
+                    hatchingEmbryos.push(embryoId);
+                }
+            } else {
+                // Legacy detection counting
+                const positives = reasoning.filter(r => r.detected);
+                totalDetections += positives.length;
+                positives.forEach(d => {
+                    detectionDetails.push(`${embryoId}: ${EmbryosManager.formatDetectorName(d.detector_name)} at T${d.timepoint}`);
+                });
+            }
         });
 
         const details = [];
@@ -115,18 +133,48 @@ const NarrativeManager = {
         if (completedCount > 0) details.push(`${completedCount} embryo${completedCount !== 1 ? 's' : ''} completed`);
         details.push(`${state.totalTimepoints} total timepoints acquired`);
 
-        if (detectionDetails.length > 0) {
+        let status, headline;
+
+        if (isPerception && Object.keys(stageInfo).length > 0) {
+            // Show stage distribution for perception
+            const stageCounts = {};
+            Object.values(stageInfo).forEach(stage => {
+                stageCounts[stage] = (stageCounts[stage] || 0) + 1;
+            });
+            const sortedStages = Object.entries(stageCounts)
+                .sort((a, b) => {
+                    const idxA = stageOrder.indexOf(a[0].toLowerCase());
+                    const idxB = stageOrder.indexOf(b[0].toLowerCase());
+                    return (idxA >= 0 ? idxA : 99) - (idxB >= 0 ? idxB : 99);
+                });
+            const stageSummary = sortedStages.map(([stage, count]) => `${count} ${stage}`).join(', ');
+            details.push(`Stages: ${stageSummary}`);
+
+            if (hatchingEmbryos.length > 0) {
+                details.push(`Hatching detected: ${hatchingEmbryos.join(', ')}`);
+                status = 'notable';
+                headline = `Hatching in ${hatchingEmbryos.length} Embryo${hatchingEmbryos.length !== 1 ? 's' : ''}`;
+            } else {
+                // Find most advanced stage
+                const maxStageIdx = Math.max(...Object.values(stageInfo).map(s => {
+                    const idx = stageOrder.indexOf(s.toLowerCase());
+                    return idx >= 0 ? idx : 0;
+                }));
+                const maxStage = stageOrder[maxStageIdx].replace('fold', '-fold');
+                status = 'normal';
+                headline = `Most Advanced: ${maxStage.charAt(0).toUpperCase() + maxStage.slice(1)}`;
+            }
+        } else if (detectionDetails.length > 0) {
             details.push(`${totalDetections} positive detection${totalDetections !== 1 ? 's' : ''}: ${detectionDetails.slice(0, 3).join(', ')}${detectionDetails.length > 3 ? '...' : ''}`);
+            status = 'notable';
+            headline = `${totalDetections} Detection${totalDetections !== 1 ? 's' : ''} Found`;
+        } else if (completedCount > 0) {
+            status = 'normal';
+            headline = `${completedCount}/${embryoCount} Embryos Complete`;
+        } else {
+            status = 'normal';
+            headline = 'Experiment In Progress';
         }
-
-        const status = totalDetections > 0 ? 'notable' :
-                      completedCount > 0 ? 'normal' : 'normal';
-
-        const headline = totalDetections > 0 ?
-            `${totalDetections} Detection${totalDetections !== 1 ? 's' : ''} Found` :
-            completedCount > 0 ?
-            `${completedCount}/${embryoCount} Embryos Complete` :
-            'Experiment In Progress';
 
         this.updateNarrativeUI({ status, headline, details });
     },

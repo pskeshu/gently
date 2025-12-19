@@ -20,6 +20,7 @@ const IMAGE_UID_FIELDS = ['volume_uid', 'image_uid', 'uid', 'visualization_uid',
 
 // Event type categories for badge styling
 const CV_EVENT_TYPES = ['CV_TASK_QUEUED', 'CV_TASK_COMPLETED', 'CV_TASK_FAILED', 'CV_AGENT_THINKING', 'CV_RESULT_READY'];
+const PERCEPTION_EVENT_TYPES = ['DETECTOR_EVALUATED', 'HATCHING_DETECTED', 'PERCEPTION_COMPLETED', 'STAGE_TRANSITION'];
 const ANALYSIS_EVENT_TYPES = ['SEGMENTATION_COMPLETED', 'STAGE_DETECTED', 'CELL_DIVISION_DETECTED', 'LINEAGE_UPDATED', 'ANOMALY_DETECTED'];
 const ACQUISITION_EVENT_TYPES = ['VOLUME_ACQUIRED', 'IMAGE_ACQUIRED', 'ACQUISITION_STARTED', 'ACQUISITION_COMPLETED'];
 const SESSION_EVENT_TYPES = ['SESSION_STARTED', 'SESSION_ENDED', 'SESSION_SAVED', 'SESSION_RESTORED'];
@@ -27,6 +28,7 @@ const ERROR_EVENT_TYPES = ['ERROR_OCCURRED', 'CV_TASK_FAILED', 'ACQUISITION_FAIL
 
 function getEventBadgeClass(eventType) {
     if (CV_EVENT_TYPES.includes(eventType)) return 'cv';
+    if (PERCEPTION_EVENT_TYPES.includes(eventType)) return 'perception';
     if (ANALYSIS_EVENT_TYPES.includes(eventType)) return 'analysis';
     if (ACQUISITION_EVENT_TYPES.includes(eventType)) return 'acquisition';
     if (SESSION_EVENT_TYPES.includes(eventType)) return 'session';
