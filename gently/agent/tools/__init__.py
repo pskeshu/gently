@@ -15,6 +15,7 @@ from . import session_tools
 from . import focus_tools
 from . import interaction_tools
 from . import cv_subagent_tools
+from . import detection_tools
 
 # Import tool registry utilities
 from ..tool_registry import get_tool_registry, ToolCategory

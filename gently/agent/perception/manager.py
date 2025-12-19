@@ -152,41 +152,10 @@ class PerceptionManager:
                 )
             self._emit_hatched_event(embryo_id, timepoint, result)
 
-        # Emit perception event
-        self._emit_perception_event(embryo_id, timepoint, result, session)
+        # Note: DETECTOR_EVALUATED event is emitted by timelapse_orchestrator
+        # to avoid duplicate events and ensure volume_uid is included
 
         return result
-
-    def _emit_perception_event(
-        self,
-        embryo_id: str,
-        timepoint: int,
-        result: PerceptionResult,
-        session: PerceptionSession,
-    ) -> None:
-        """Emit perception completed event."""
-        if not self._event_bus:
-            return
-
-        try:
-            from ...core import EventType
-
-            self._event_bus.publish(
-                EventType.DETECTOR_EVALUATED,
-                {
-                    "embryo_id": embryo_id,
-                    "timepoint": timepoint,
-                    "detector_name": "perception",
-                    "stage": result.stage,
-                    "is_hatching": result.is_hatching,
-                    "confidence": result.confidence,
-                    "reasoning": result.reasoning,
-                    "observations_count": len(session.observations),
-                },
-                source="perception_manager",
-            )
-        except Exception as e:
-            logger.debug(f"Failed to emit perception event: {e}")
 
     def _emit_hatching_event(
         self,

@@ -99,6 +99,9 @@ class MicroscopyCopilot:
             validator=PlanValidator()
         )
 
+        # Event bus for async messaging (must be before perception manager)
+        self._event_bus = get_event_bus()
+
         # Perception system (VLM-based stage classification)
         examples_path = Path(__file__).parent.parent / "examples" / "stages"
         self.perception_manager = PerceptionManager(
@@ -119,9 +122,6 @@ class MicroscopyCopilot:
         # Databroker (optional, for data catalog integration)
         # Get from client if available
         self.databroker = getattr(microscope_client, '_db', None) if microscope_client else None
-
-        # Event bus for async messaging (must be before perception manager)
-        self._event_bus = get_event_bus()
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
@@ -1773,9 +1773,6 @@ Write a brief status summary. Examples:
             'projection_uid': record.projection_uid,
             'shape': list(volume.shape),
         })
-
-        # Note: Perception (stage classification) is handled by timelapse orchestrator
-        # after volume acquisition, not here. See _run_perception() in orchestrator.
 
     def should_stop_experiment(self) -> bool:
         """Check if experiment should stop (e.g., all embryos hatched)"""

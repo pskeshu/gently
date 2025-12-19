@@ -20,7 +20,7 @@ from .example_store import ExampleStore
 logger = logging.getLogger(__name__)
 
 # Stages in order
-STAGES = ["early", "bean", "comma", "1.5fold", "2fold", "3fold", "hatched"]
+STAGES = ["early", "bean", "comma", "1.5fold", "2fold", "3fold", "hatching", "hatched"]
 
 
 class PerceptionEngine:
@@ -96,6 +96,7 @@ class PerceptionEngine:
 
         # Call VLM
         response = await self._call_claude(content)
+        logger.info(f"VLM raw response: {response[:300]}...")
 
         # Parse response
         result = self._parse_response(response)
@@ -103,7 +104,8 @@ class PerceptionEngine:
         logger.info(
             f"[{session.embryo_id}] T{timepoint}: "
             f"stage={result.stage}, hatching={result.is_hatching}, "
-            f"confidence={result.confidence:.0%}"
+            f"confidence={result.confidence:.0%}, "
+            f"reasoning={result.reasoning[:50] if result.reasoning else 'EMPTY'}..."
         )
 
         return result
@@ -228,15 +230,17 @@ Compare the current image to the reference examples above.
 
 Respond with JSON:
 {
-  "stage": "early" | "bean" | "comma" | "1.5fold" | "2fold" | "3fold" | "hatched",
+  "stage": "early" | "bean" | "comma" | "1.5fold" | "2fold" | "3fold" | "hatching" | "hatched",
   "is_hatching": true/false,
   "confidence": 0.0-1.0,
   "reasoning": "Brief explanation"
 }
 
 Notes:
-- is_hatching means the worm is actively emerging (breach visible, worm exiting)
-- For "hatched", the worm should be fully outside the shell
+- Stages progress: early → bean → comma → 1.5fold → 2fold → 3fold → hatching → hatched
+- "hatching" = worm actively emerging (breach visible, worm exiting)
+- "hatched" = worm fully outside the shell
+- is_hatching should be true when stage is "hatching"
 - Be honest about confidence - if uncertain, say so
 """
         })
@@ -266,17 +270,45 @@ Notes:
     def _parse_response(self, response: str) -> PerceptionResult:
         """Parse VLM response into PerceptionResult."""
         try:
-            # Extract JSON
-            json_match = re.search(r'\{[^{}]*\}', response, re.DOTALL)
+            # Try multiple JSON extraction strategies
+            data = None
+
+            # Strategy 1: Find JSON in code block (most reliable)
+            json_match = re.search(r'```json?\s*(.*?)\s*```', response, re.DOTALL)
             if json_match:
-                data = json.loads(json_match.group())
-            else:
-                # Try to find JSON in code block
-                json_match = re.search(r'```json?\s*(.*?)\s*```', response, re.DOTALL)
-                if json_match:
+                try:
                     data = json.loads(json_match.group(1))
-                else:
-                    raise ValueError("No JSON found in response")
+                except json.JSONDecodeError:
+                    pass
+
+            # Strategy 2: Find balanced braces (handles nested content)
+            if data is None:
+                start = response.find('{')
+                if start >= 0:
+                    depth = 0
+                    end = start
+                    for i, c in enumerate(response[start:], start):
+                        if c == '{':
+                            depth += 1
+                        elif c == '}':
+                            depth -= 1
+                            if depth == 0:
+                                end = i + 1
+                                break
+                    try:
+                        data = json.loads(response[start:end])
+                    except json.JSONDecodeError:
+                        pass
+
+            # Strategy 3: Try parsing the whole response
+            if data is None:
+                try:
+                    data = json.loads(response.strip())
+                except json.JSONDecodeError:
+                    pass
+
+            if data is None:
+                raise ValueError("No JSON found in response")
 
             stage = data.get("stage", "early")
             if stage not in STAGES:

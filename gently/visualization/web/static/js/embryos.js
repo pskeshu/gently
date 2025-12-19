@@ -52,6 +52,17 @@ const EmbryosManager = {
     countdownInterval: null,
     storageKey: 'gently-tasks-state',
 
+    // Helper to normalize confidence values (handles both numeric 0.95 and string "high")
+    normalizeConfidence(confidence) {
+        if (typeof confidence === 'number') {
+            return confidence >= 0.8 ? 'high' : confidence >= 0.5 ? 'medium' : 'low';
+        }
+        if (typeof confidence === 'string') {
+            return confidence.toLowerCase();
+        }
+        return 'unknown';
+    },
+
     init() {
         // Restore state from localStorage
         this.loadState();
@@ -194,6 +205,7 @@ const EmbryosManager = {
                 firstAcquired: embryoData.first_acquired ? new Date(embryoData.first_acquired) : null,
                 lastAcquired: embryoData.last_acquired ? new Date(embryoData.last_acquired) : null,
                 detections: embryoData.detections || {},
+                current_stage: embryoData.current_stage || null,  // Restore stage from server
                 errorCount: 0,
                 lastError: null
             };
@@ -991,7 +1003,12 @@ const EmbryosManager = {
         // Calculate statistics
         const totalEvaluations = reasoning.length;
         const positiveDetections = reasoning.filter(r => r.detected);
-        const highConfidence = reasoning.filter(r => r.confidence?.toLowerCase() === 'high');
+        // Handle both numeric confidence (perception: 0.95) and string confidence (legacy: "high")
+        const highConfidence = reasoning.filter(r => {
+            if (typeof r.confidence === 'number') return r.confidence >= 0.8;
+            if (typeof r.confidence === 'string') return r.confidence.toLowerCase() === 'high';
+            return false;
+        });
 
         // Check if this is perception data (has stage field)
         const isPerceptionData = reasoning.some(r => r.stage);
@@ -1125,7 +1142,7 @@ const EmbryosManager = {
         if (this.detectionFilter === 'detections') {
             filtered = sorted.filter(r => r.detected);
         } else if (this.detectionFilter === 'high-confidence') {
-            filtered = sorted.filter(r => r.confidence?.toLowerCase() === 'high');
+            filtered = sorted.filter(r => this.normalizeConfidence(r.confidence) === 'high');
         }
 
         // If showing only detections, render them directly without collapse
@@ -1281,7 +1298,8 @@ const EmbryosManager = {
         let html = visibleItems.map(item => {
             const itemKey = `${rangeKey}-${item.timepoint}`;
             const isExpanded = this.expandedRangeItems[itemKey] || false;
-            const imageUid = item.projection_uid || item.volume_uid;
+            const storedUid = item.projection_uid || item.volume_uid;
+            const imageUid = storedUid || `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
             const isInteresting = this.calculateInterestScore(item, allReasoning) > 0.5;
 
             return `
@@ -1342,7 +1360,8 @@ const EmbryosManager = {
 
     // Render inline expansion with thumbnail and truncated reasoning
     renderInlineExpansion(item) {
-        const imageUid = item.projection_uid || item.volume_uid;
+        const storedUid = item.projection_uid || item.volume_uid;
+        const imageUid = storedUid || `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
         const reasoning = item.reasoning || 'No reasoning provided';
         const truncatedReasoning = reasoning.length > 250
             ? reasoning.substring(0, 250) + '...'
@@ -1370,7 +1389,7 @@ const EmbryosManager = {
 
     // Render confidence level as dots (5-dot scale)
     renderConfidenceDots(confidence) {
-        const level = confidence?.toLowerCase() || 'unknown';
+        const level = this.normalizeConfidence(confidence);
         const filled = level === 'high' ? 4 : level === 'medium' ? 3 : level === 'low' ? 1 : 2;
 
         let dots = '';
@@ -1399,7 +1418,7 @@ const EmbryosManager = {
         }
 
         // High confidence negative (VLM was very sure it wasn't detected)
-        if (item.confidence?.toLowerCase() === 'high') {
+        if (this.normalizeConfidence(item.confidence) === 'high') {
             score += 0.3;
         }
 
@@ -1474,7 +1493,10 @@ const EmbryosManager = {
 
     // Render the detail panel content
     renderDetailPanel(item) {
-        const imageUid = item.projection_uid || item.volume_uid;
+        // Try stored UIDs first, then construct fallback pattern matching copilot
+        const storedUid = item.projection_uid || item.volume_uid;
+        const fallbackUid = `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
+        const imageUid = storedUid || fallbackUid;
         const reasoning = item.reasoning || 'No reasoning provided';
 
         // Linkify timepoints in reasoning
@@ -1615,7 +1637,7 @@ const EmbryosManager = {
         const timestamp = detection.timestamp ? new Date(detection.timestamp).toLocaleTimeString() : '';
 
         // Confidence styling
-        const confidenceClass = detection.confidence ? detection.confidence.toLowerCase() : '';
+        const confidenceClass = this.normalizeConfidence(detection.confidence);
 
         // Stage badge for perception results
         const isPerception = detection.detector_name === 'perception';
@@ -2099,12 +2121,20 @@ const EmbryosManager = {
             if (r.is_hatching) {
                 timepoints[tp].is_hatching = true;
             }
-            // Keep highest confidence
+            // Keep highest confidence - handle both numeric (0.95) and string ("high") values
             const confOrder = { 'high': 3, 'medium': 2, 'low': 1 };
             const existingConf = confOrder[timepoints[tp].confidence] || 0;
-            const newConf = confOrder[r.confidence?.toLowerCase()] || 0;
+            let newConfLevel;
+            if (typeof r.confidence === 'number') {
+                newConfLevel = r.confidence >= 0.8 ? 'high' : r.confidence >= 0.5 ? 'medium' : 'low';
+            } else if (typeof r.confidence === 'string') {
+                newConfLevel = r.confidence.toLowerCase();
+            } else {
+                newConfLevel = 'low';
+            }
+            const newConf = confOrder[newConfLevel] || 0;
             if (newConf > existingConf) {
-                timepoints[tp].confidence = r.confidence?.toLowerCase() || 'low';
+                timepoints[tp].confidence = newConfLevel;
             }
         });
 
@@ -2234,8 +2264,9 @@ const EmbryosManager = {
         if (previousEvals.length === 0) return '';
 
         const dots = previousEvals.reverse().map(e => {
-            const conf = e.confidence?.toLowerCase() || 'low';
-            return `<span class="context-dot ${conf}" title="T${e.timepoint}: ${e.confidence || 'Unknown'}"></span>`;
+            const conf = this.normalizeConfidence(e.confidence);
+            const confDisplay = typeof e.confidence === 'number' ? `${Math.round(e.confidence * 100)}%` : (e.confidence || 'Unknown');
+            return `<span class="context-dot ${conf}" title="T${e.timepoint}: ${confDisplay}"></span>`;
         }).join('');
 
         return `
