@@ -1126,27 +1126,27 @@ class TimelapseOrchestrator:
         self._interval_rules.append(rule)
         logger.info(f"Added interval rule: {rule.name}")
 
-    def add_speedup_on_detection(
+    def add_speedup_on_stage(
         self,
-        detector_name: str,
+        stage_name: str,
         new_interval_seconds: float = 30.0,
         embryo_ids: Optional[List[str]] = None,
     ):
         """
-        Add a rule to speed up imaging when a detector fires
+        Add a rule to speed up imaging when a stage is reached
 
         Parameters
         ----------
-        detector_name : str
-            Detector that triggers speedup (e.g., "pretzel", "comma")
+        stage_name : str
+            Stage that triggers speedup (e.g., "3fold", "pretzel", "comma")
         new_interval_seconds : float
-            New interval after detection
+            New interval after stage reached
         embryo_ids : list, optional
             Only apply to these embryos (None = all)
         """
         rule = IntervalRule(
-            name=f"speedup_on_{detector_name}",
-            trigger_detector=detector_name,
+            name=f"speedup_on_{stage_name}",
+            trigger_stage=stage_name,
             new_interval_seconds=new_interval_seconds,
             applies_to=embryo_ids,
             one_time=True,
@@ -1155,18 +1155,19 @@ class TimelapseOrchestrator:
 
     def add_pre_hatching_speedup(self, fast_interval: float = 30.0):
         """
-        Add automatic speedup when pretzel/3-fold stage is detected
+        Add automatic speedup when 3fold stage is detected
 
         This is a convenience method for the common "speed up near hatching" use case.
-        When the pretzel detector fires, the interval is reduced to capture hatching.
+        When the perception system detects 3fold stage, the interval is reduced to
+        capture hatching at higher temporal resolution.
 
         Parameters
         ----------
         fast_interval : float
-            Interval to use after pretzel detection (default 30s)
+            Interval to use after 3fold detection (default 30s)
         """
-        self.add_speedup_on_detection("pretzel", fast_interval)
-        logger.info(f"Added pre-hatching speedup: {fast_interval}s after pretzel detection")
+        self.add_speedup_on_stage("3fold", fast_interval)
+        logger.info(f"Added pre-hatching speedup: {fast_interval}s after 3fold detection")
 
     def _check_interval_rules(
         self,

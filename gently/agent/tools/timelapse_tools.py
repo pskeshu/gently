@@ -11,10 +11,6 @@ from ..tool_helpers import (
     require_copilot, get_embryo_or_error,
     require_timelapse_orchestrator, require_developmental_tracker
 )
-from ..detector import (
-    Detector, DetectorConditions, DetectorActions,
-    DetectionMode, ConfidenceLevel
-)
 
 
 @tool(
@@ -372,16 +368,16 @@ def add_stop_condition(
 
 @tool(
     name="add_interval_speedup_rule",
-    description="Add a rule to automatically speed up imaging when a detector fires (e.g., 'speed up to 30s when pretzel stage detected')",
+    description="Add a rule to automatically speed up imaging when a developmental stage is reached (e.g., 'speed up to 30s when 3fold stage detected')",
     category=ToolCategory.EXPERIMENT,
 )
 def add_interval_speedup_rule(
-    trigger_detector: str,
+    trigger_stage: str,
     new_interval_seconds: float = 30.0,
     embryo_ids: List[str] = None,
     context: Dict = None
 ) -> str:
-    """Add interval speedup rule"""
+    """Add interval speedup rule based on developmental stage"""
     copilot, err = require_copilot(context)
     if err:
         return err
@@ -390,13 +386,13 @@ def add_interval_speedup_rule(
     if err:
         return err
 
-    orchestrator.add_speedup_on_detection(
-        detector_name=trigger_detector,
+    orchestrator.add_speedup_on_stage(
+        stage_name=trigger_stage,
         new_interval_seconds=new_interval_seconds,
         embryo_ids=embryo_ids,
     )
 
-    msg = f"Added interval rule: speed up to {new_interval_seconds}s when '{trigger_detector}' detector fires"
+    msg = f"Added interval rule: speed up to {new_interval_seconds}s when '{trigger_stage}' stage is reached"
     if embryo_ids:
         msg += f" (for embryos: {', '.join(embryo_ids)})"
 
@@ -405,14 +401,14 @@ def add_interval_speedup_rule(
 
 @tool(
     name="enable_pre_hatching_speedup",
-    description="Enable automatic speedup when embryos approach hatching (triggers on pretzel/3-fold stage detection)",
+    description="Enable automatic speedup when embryos approach hatching (triggers when 3-fold stage is detected by the perception system)",
     category=ToolCategory.EXPERIMENT,
 )
 def enable_pre_hatching_speedup(
     fast_interval_seconds: float = 30.0,
     context: Dict = None
 ) -> str:
-    """Enable pre-hatching speedup"""
+    """Enable pre-hatching speedup based on developmental stage"""
     copilot, err = require_copilot(context)
     if err:
         return err
@@ -421,31 +417,13 @@ def enable_pre_hatching_speedup(
     if err:
         return err
 
-    # Enable pretzel detector if not already enabled
-    from ..detector_registry import get_detector_presets
-
-    presets = get_detector_presets()
-    if 'pretzel' in presets and not copilot.detector_registry.get('pretzel'):
-        preset_data = presets['pretzel']
-        detector = Detector(
-            name='pretzel',
-            description=preset_data['description'],
-            detection_prompt=preset_data['prompt'],
-            enabled=True,
-            conditions=DetectorConditions(),
-            actions=DetectorActions(mode=DetectionMode.AUTO),
-            use_temporal_context=True,
-            temporal_context_size=5,
-            confidence_threshold=ConfidenceLevel.MEDIUM,
-        )
-        copilot.detector_registry.add(detector)
-
+    # Add speedup rule for 3fold stage (uses perception system)
     orchestrator.add_pre_hatching_speedup(fast_interval_seconds)
 
     return (
         f"Enabled pre-hatching speedup:\n"
-        f"  - Pretzel detector enabled\n"
-        f"  - When pretzel (3-fold) detected, interval will change to {fast_interval_seconds}s\n"
+        f"  - Perception system will detect developmental stages\n"
+        f"  - When 3-fold stage detected, interval will change to {fast_interval_seconds}s\n"
         f"  - This helps capture hatching at high temporal resolution"
     )
 

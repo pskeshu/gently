@@ -8,9 +8,7 @@ All tools are automatically registered via the @tool decorator when imported.
 # Import all tool modules to register their tools
 from . import experiment_tools
 from . import hardware_tools
-from . import detector_tools
 from . import analysis_tools
-from . import detection_tools
 from . import data_tools
 from . import timelapse_tools
 from . import session_tools

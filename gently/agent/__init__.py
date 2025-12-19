@@ -8,9 +8,7 @@ from .copilot import MicroscopyCopilot
 from .state import EmbryoState, ExperimentState, ImageRecord
 from .plan_synthesis import PlanSynthesizer, PlanValidator
 from .image_manager import ImageManager
-from .detector import Detector, DetectionResult, DetectorConditions, DetectorActions, DetectionMode, ConfidenceLevel
-from .detector_registry import DetectorRegistry, get_detector_presets
-from .detection_queue import DetectionQueue
+from .perception import PerceptionManager, PerceptionResult, PerceptionSession
 from .rich_cli import run_rich_cli, RichCopilotCLI
 from .autocomplete import create_completer, CopilotCompleter
 from .device_factory import create_devices_from_mmcore
@@ -31,15 +29,10 @@ __all__ = [
     'PlanSynthesizer',
     'PlanValidator',
     'ImageManager',
-    'Detector',
-    'DetectionResult',
-    'DetectorConditions',
-    'DetectorActions',
-    'DetectionMode',
-    'ConfidenceLevel',
-    'DetectorRegistry',
-    'DetectionQueue',
-    'get_detector_presets',
+    # Perception system
+    'PerceptionManager',
+    'PerceptionResult',
+    'PerceptionSession',
     'run_rich_cli',
     'RichCopilotCLI',
     'create_completer',

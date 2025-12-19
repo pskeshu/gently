@@ -28,9 +28,7 @@ from .image_manager import ImageManager
 from .plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from .prompts import build_system_prompt, build_context_message
 from .tool_registry import get_tool_registry
-from .detector_registry import DetectorRegistry
-from .detection_queue import DetectionQueue
-from .detection_verifier import DetectionVerifier
+from .perception import PerceptionManager
 from .interaction_logger import InteractionLogger
 from .timelapse_orchestrator import TimelapseOrchestrator
 from .timeline import TimelineManager
@@ -101,23 +99,12 @@ class MicroscopyCopilot:
             validator=PlanValidator()
         )
 
-        # Detector system
-        self.detector_registry = DetectorRegistry(
-            storage_path=self.storage_path / "detector_registry.json"
-        )
-        self.detection_queue = DetectionQueue(
-            registry=self.detector_registry,
-            image_manager=self.image_manager,
+        # Perception system (VLM-based stage classification)
+        examples_path = Path(__file__).parent.parent / "examples" / "stages"
+        self.perception_manager = PerceptionManager(
             claude_client=self.claude,
-            model="claude-sonnet-4-5-20250929",  # Use Sonnet for faster/cheaper detection
-            on_detection_callback=self._on_detection_fired,
-            on_evaluation_callback=self._on_detection_evaluated
-        )
-
-        # Detection verifier (challenger agent for AUTO mode)
-        self.detection_verifier = DetectionVerifier(
-            claude_client=self.claude,
-            model="claude-opus-4-20250514"  # Use Opus for critical verification decisions
+            examples_path=examples_path,
+            event_bus=self._event_bus,
         )
 
         # Session management
@@ -133,12 +120,12 @@ class MicroscopyCopilot:
         # Get from client if available
         self.databroker = getattr(microscope_client, '_db', None) if microscope_client else None
 
+        # Event bus for async messaging (must be before perception manager)
+        self._event_bus = get_event_bus()
+
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
         self.choice_handler: Optional[Callable] = None  # For interactive choice UI
-
-        # Event bus for async messaging
-        self._event_bus = get_event_bus()
 
         # Interaction logger for structured logging (research data collection)
         self.interaction_logger: Optional[InteractionLogger] = None
@@ -540,11 +527,9 @@ Write a brief status summary. Examples:
             self.timelapse_orchestrator = TimelapseOrchestrator(
                 microscope_client=self.client,
                 experiment_state=self.experiment,
-                detection_queue=self.detection_queue,
+                perception_manager=self.perception_manager,
                 on_volume_callback=self.on_volume_acquired,
             )
-            # Wire up copilot for verification round callbacks
-            self.timelapse_orchestrator.set_copilot(self)
         except Exception as e:
             import logging
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
@@ -836,7 +821,6 @@ Write a brief status summary. Examples:
         self.session_manager.sync_from_copilot(
             conversation_history=self.conversation_history,
             experiment=self.experiment,
-            detector_registry=self.detector_registry,
             system_prompt=self.system_prompt,
         )
         return self.session_manager.save_session()
@@ -884,7 +868,6 @@ Write a brief status summary. Examples:
         self.session_manager.sync_from_copilot(
             conversation_history=self.conversation_history,
             experiment=self.experiment,
-            detector_registry=self.detector_registry,
             system_prompt=self.system_prompt,
         )
         # Trigger auto-save
@@ -1744,16 +1727,8 @@ Write a brief status summary. Examples:
             'shape': list(volume.shape),
         })
 
-        # Run detectors on newly acquired volume (non-blocking)
-        # This allows acquisition to continue while detectors run in background
-        asyncio.create_task(self._run_detectors_background(embryo_id, timepoint))
-
-    async def _run_detectors_background(self, embryo_id: str, timepoint: int):
-        """Run detectors in background - errors are logged but don't block acquisition"""
-        try:
-            await self.run_detectors_on_volume(embryo_id, timepoint)
-        except Exception as e:
-            logger.warning(f"Background detector error for {embryo_id} t{timepoint}: {e}")
+        # Note: Perception (stage classification) is handled by timelapse orchestrator
+        # after volume acquisition, not here. See _run_perception() in orchestrator.
 
     def should_stop_experiment(self) -> bool:
         """Check if experiment should stop (e.g., all embryos hatched)"""
@@ -1837,295 +1812,11 @@ Write a brief status summary. Examples:
 
         return min(e.interval_seconds for e in active_embryos)
 
-    # === Detector System Integration ===
-
-    async def _on_detection_evaluated(self, detector, embryo_id: str, result, embryo_state):
-        """
-        Callback for every detector evaluation (regardless of detected=True/False)
-
-        Emits DETECTOR_EVALUATED event with full reasoning for visualization.
-        """
-        # Look up the actual UID from the embryo's recent images
-        volume_uid = None
-        projection_uid = None
-        if result.timepoint is not None and embryo_state.recent_images:
-            # Find the ImageRecord for this timepoint
-            for img_record in embryo_state.recent_images:
-                if img_record.timepoint == result.timepoint:
-                    volume_uid = img_record.volume_uid
-                    projection_uid = img_record.projection_uid
-                    break
-            # Fallback to constructed if not found (shouldn't happen)
-            if projection_uid is None:
-                projection_uid = f"volume_{embryo_id}_t{result.timepoint:04d}"
-
-        # Emit event for ALL evaluations (this populates the reasoning panel)
-        self._emit_event(EventType.DETECTOR_EVALUATED, {
-            'detector_name': detector.name,
-            'embryo_id': embryo_id,
-            'detected': result.detected,
-            'confidence': result.confidence.value if result.confidence else None,
-            'timepoint': result.timepoint,
-            'reasoning': result.reasoning,
-            'volume_uid': volume_uid,
-            'projection_uid': projection_uid,
-        })
-
-    async def _on_detection_fired(self, detector, embryo_id: str, result):
-        """
-        Callback when a detector fires (detected=True with sufficient confidence)
-
-        Parameters
-        ----------
-        detector : Detector
-            Detector that fired
-        embryo_id : str
-            Embryo ID
-        result : DetectionResult
-            Detection result
-        """
-        from .detector import DetectionMode
-
-        # Get embryo
-        embryo = self.experiment.embryos.get(embryo_id)
-        if not embryo:
-            return
-
-        # Emit DETECTION_TRIGGERED for positive detections (detected=True)
-        # Note: DETECTOR_EVALUATED is emitted by _on_detection_evaluated for ALL evaluations
-        self._emit_event(EventType.DETECTION_TRIGGERED, {
-            'detector_name': detector.name,
-            'embryo_id': embryo_id,
-            'confidence': result.confidence.value if result.confidence else None,
-            'timepoint': result.timepoint,
-        })
-
-        # Emit specific event for hatching detection
-        if detector.name == 'hatching' and result.detected:
-            self._emit_event(EventType.HATCHING_DETECTED, {
-                'embryo_id': embryo_id,
-                'timepoint': result.timepoint,
-                'confidence': result.confidence.value if result.confidence else None,
-            })
-
-        # Notify timelapse orchestrator of detection result
-        if self.timelapse_orchestrator:
-            self.timelapse_orchestrator.on_detection_result(
-                embryo_id=embryo_id,
-                detector_name=detector.name,
-                result={
-                    'detected': result.detected,
-                    'confidence': result.confidence.value if result.confidence else None,
-                    'timepoint': result.timepoint,
-                }
-            )
-
-        # Handle based on action mode
-        if detector.actions.mode == DetectionMode.PASSIVE:
-            # Just log, no action
-            pass
-
-        elif detector.actions.mode == DetectionMode.RECOMMEND:
-            # Generate recommendation message
-            message = detector.actions.get_recommendation_message(detector.name, embryo_id)
-
-            # Add to conversation as a system message (or could trigger WebSocket notification)
-            print(f"\n[DETECTOR FIRED] {message}\n")
-
-            # Could also add to a pending recommendations queue
-            # that gets presented to user next time they interact
-
-        elif detector.actions.mode == DetectionMode.AUTO:
-            # For critical actions (stop_timelapse), use verification round pattern
-            if detector.actions.stop_timelapse:
-                # Mark embryo for verification round instead of immediate verification
-                # The verification round will acquire a fresh volume and run full verification
-                # with global error context, then update consecutive_detection_count
-                logger.info(
-                    f"[DETECTOR] {detector.name} detected on {embryo_id} - marking for verification round"
-                )
-
-                embryo.pending_verification = True
-
-                # Record the detection in embryo state
-                embryo.add_detection_result(detector.name, {
-                    'detected': True,
-                    'confidence': result.confidence.value if result.confidence else None,
-                    'timepoint': result.timepoint,
-                    'reasoning': result.reasoning,
-                    'verified': False,  # Will be verified in verification round
-                })
-
-                self._emit_event(EventType.DETECTION_TRIGGERED, {
-                    'detector_name': detector.name,
-                    'embryo_id': embryo_id,
-                    'action': 'pending_verification',
-                    'consecutive_count': embryo.consecutive_detection_count,
-                })
-
-                # The verification round will:
-                # 1. Acquire fresh verification volume
-                # 2. Run full verification with global error context
-                # 3. Update consecutive_detection_count
-                # 4. Stop embryo when count reaches 5
-
-            # Apply parameter changes (non-critical, no verification needed)
-            if detector.actions.parameter_changes:
-                for param, value in detector.actions.parameter_changes.items():
-                    if hasattr(embryo, param):
-                        setattr(embryo, param, value)
-                logger.info(f"[AUTO-ACTION] Applied changes to {embryo_id}: {detector.actions.parameter_changes}")
-
-    async def run_detectors_on_volume(self, embryo_id: str, timepoint: int):
-        """
-        Run all enabled detectors on a newly acquired volume
-
-        This should be called after each volume is acquired and stored.
-
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo ID
-        timepoint : int
-            Timepoint number
-        """
-        embryo = self.experiment.embryos.get(embryo_id)
-        if not embryo:
-            return
-
-        # Run detection queue
-        results = await self.detection_queue.run_detectors(embryo, timepoint)
-
-        return results
-
-    async def verify_detection_with_context(
-        self,
-        embryo_id: str,
-        volume: np.ndarray,
-        detector_name: str,
-        global_error_context: str = "",
-    ) -> dict:
-        """
-        Verify a detection with fresh volume and global error context.
-
-        This is called by the verification round in the timelapse orchestrator
-        after a detection has been marked as pending.
-
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo being verified
-        volume : np.ndarray
-            Fresh verification volume
-        detector_name : str
-            Name of detector to verify (e.g., 'hatching')
-        global_error_context : str
-            Compiled error log from GlobalErrorLog
-
-        Returns
-        -------
-        dict
-            {'verified': bool, 'reason': str}
-        """
-        from .detector import DetectionResult, ConfidenceLevel
-
-        embryo = self.experiment.embryos.get(embryo_id)
-        if not embryo:
-            return {'verified': False, 'reason': 'Embryo not found'}
-
-        detector = self.detector_registry.get(detector_name)
-        if not detector:
-            return {'verified': False, 'reason': f'Detector {detector_name} not found'}
-
-        try:
-            # First, check if the image is blank (hardware error indicator)
-            is_blank = await self.check_blank_image(volume, embryo_id)
-            if is_blank:
-                logger.warning(f"[VERIFICATION] Blank image detected for {embryo_id} - possible hardware error")
-                return {
-                    'verified': False,
-                    'reason': 'Blank image detected - possible hardware error'
-                }
-
-            # Create max projection for analysis
-            max_proj = np.max(volume, axis=0) if volume.ndim == 3 else volume
-
-            # Convert to base64 for API
-            import io
-            import base64
-            from PIL import Image
-
-            # Normalize and convert to 8-bit
-            if max_proj.max() > 0:
-                normalized = (max_proj / max_proj.max() * 255).astype(np.uint8)
-            else:
-                normalized = max_proj.astype(np.uint8)
-
-            img = Image.fromarray(normalized)
-            buffer = io.BytesIO()
-            img.save(buffer, format='PNG')
-            b64_image = base64.b64encode(buffer.getvalue()).decode()
-
-            # Create a temporary image record for the embryo state
-            temp_image = ImageRecord(
-                timepoint=embryo.timepoints_acquired,
-                timestamp=datetime.now(),
-                max_projection_b64=b64_image,
-            )
-
-            # Preserve original images and APPEND temp image for temporal comparison
-            # The temporal check needs previous images to compare against current
-            original_images = list(embryo.recent_images)  # Deep-ish copy of list
-            embryo.recent_images = original_images + [temp_image]
-
-            # Create a detection result for verification
-            original_result = DetectionResult(
-                detected=True,
-                confidence=ConfidenceLevel.HIGH,
-                reasoning="Detection pending verification",
-                timepoint=embryo.timepoints_acquired,
-            )
-
-            try:
-                # Run verification with hardware context
-                verification = await self.detection_verifier.verify_with_context(
-                    detector=detector,
-                    embryo_state=embryo,
-                    original_result=original_result,
-                    timepoint=embryo.timepoints_acquired,
-                    global_error_context=global_error_context,
-                )
-            finally:
-                # Always restore original images, even on exception
-                embryo.recent_images = original_images
-
-            # Emit verification event
-            self._emit_event(EventType.DETECTION_TRIGGERED, {
-                'detector_name': detector_name,
-                'embryo_id': embryo_id,
-                'action': 'verification_round_complete',
-                'verification': verification.to_dict(),
-            })
-
-            if verification.consensus:
-                logger.info(f"[VERIFICATION] {embryo_id} verification PASSED: {verification.consensus_reasoning}")
-                return {
-                    'verified': True,
-                    'reason': verification.consensus_reasoning
-                }
-            else:
-                logger.info(f"[VERIFICATION] {embryo_id} verification FAILED: {verification.consensus_reasoning}")
-                return {
-                    'verified': False,
-                    'reason': verification.consensus_reasoning
-                }
-
-        except Exception as e:
-            logger.error(f"[VERIFICATION] Error verifying {embryo_id}: {e}")
-            return {
-                'verified': False,
-                'reason': f'Verification error: {str(e)}'
-            }
+    # === Perception System Integration ===
+    # Perception is handled by the timelapse orchestrator's _run_perception() method.
+    # Events are emitted for viz server observability:
+    # - DETECTOR_EVALUATED: For each perception call with stage/confidence
+    # - HATCHING_DETECTED: When hatching is detected
 
     async def check_blank_image(
         self,
