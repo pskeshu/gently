@@ -129,8 +129,8 @@ class DiSPIMXYStage:
     """
 
     def __init__(self, name: str, core: pymmcore.CMMCore,
-                 x_limits: Tuple[float, float] = (600.0, 2200.0),
-                 y_limits: Tuple[float, float] = (-700.0, 2300.0)):
+                 x_limits: Tuple[float, float] = (500.0, 2500.0),
+                 y_limits: Tuple[float, float] = (-1000.0, 1000.0)):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky

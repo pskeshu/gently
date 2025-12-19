@@ -152,26 +152,20 @@
                 </div>
                 <select class="event-filter" id="event-type-filter">
                     <option value="">All Events</option>
-                    <optgroup label="CV Agent">
-                        <option value="CV_TASK_QUEUED">CV_TASK_QUEUED</option>
-                        <option value="CV_TASK_COMPLETED">CV_TASK_COMPLETED</option>
-                        <option value="CV_TASK_FAILED">CV_TASK_FAILED</option>
-                        <option value="CV_AGENT_THINKING">CV_AGENT_THINKING</option>
-                        <option value="CV_RESULT_READY">CV_RESULT_READY</option>
-                    </optgroup>
-                    <optgroup label="Analysis">
-                        <option value="SEGMENTATION_COMPLETED">SEGMENTATION_COMPLETED</option>
-                        <option value="STAGE_DETECTED">STAGE_DETECTED</option>
-                        <option value="CELL_DIVISION_DETECTED">CELL_DIVISION_DETECTED</option>
-                        <option value="ANOMALY_DETECTED">ANOMALY_DETECTED</option>
+                    <optgroup label="Perception">
+                        <option value="DETECTOR_EVALUATED">DETECTOR_EVALUATED</option>
+                        <option value="HATCHING_DETECTED">HATCHING_DETECTED</option>
                     </optgroup>
                     <optgroup label="Acquisition">
                         <option value="VOLUME_ACQUIRED">VOLUME_ACQUIRED</option>
-                        <option value="IMAGE_ACQUIRED">IMAGE_ACQUIRED</option>
+                        <option value="ACQUISITION_STARTED">ACQUISITION_STARTED</option>
+                        <option value="ACQUISITION_COMPLETED">ACQUISITION_COMPLETED</option>
+                        <option value="ACQUISITION_FAILED">ACQUISITION_FAILED</option>
                     </optgroup>
                     <optgroup label="Session">
                         <option value="SESSION_STARTED">SESSION_STARTED</option>
                         <option value="SESSION_RESTORED">SESSION_RESTORED</option>
+                        <option value="SESSION_SAVED">SESSION_SAVED</option>
                     </optgroup>
                 </select>
                 <select class="event-filter" id="event-source-filter">

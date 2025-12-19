@@ -114,8 +114,8 @@ Motorized stage for multi-position imaging.
 - Speed: ~5 mm/s
 
 **Limits:**
-- X: 600 - 2200 μm
-- Y: -700 - 2300 μm
+- X: 500 - 2500 μm
+- Y: -1000 - 1000 μm
 
 **Safety:** Always check positions are within limits to prevent collisions!
 
