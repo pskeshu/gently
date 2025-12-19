@@ -1927,6 +1927,45 @@ kbd {
     font-size: 0.9rem;
 }
 
+/* Current Stage Display (from perception system) */
+.current-stage {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 0.75rem;
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.15) 0%, rgba(192, 132, 252, 0.15) 100%);
+    border-radius: 8px;
+    border: 1px solid rgba(96, 165, 250, 0.3);
+    font-size: 0.9rem;
+}
+
+.current-stage .stage-icon {
+    font-size: 1.1rem;
+}
+
+.current-stage .stage-label {
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.current-stage .stage-value {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+/* Stage badge in detection cards */
+.stage-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.15rem 0.5rem;
+    background: linear-gradient(135deg, rgba(96, 165, 250, 0.2) 0%, rgba(192, 132, 252, 0.2) 100%);
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--accent);
+}
+
 /* Completion Info */
 .completion-info {
     display: flex;

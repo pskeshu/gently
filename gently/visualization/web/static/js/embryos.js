@@ -338,20 +338,28 @@ const EmbryosManager = {
     },
 
     handleDetectorEvaluated(data) {
-        // All detector evaluations (with reasoning) - populates reasoning panel
+        // All detector/perception evaluations (with reasoning) - populates reasoning panel
         const embryoId = data.embryo_id;
         const embryo = this.state.embryos[embryoId];
         if (!embryo) return;
 
         const detectorName = data.detector_name;
-        const detected = data.detected;
+        // Handle both legacy "detected" and perception "is_hatching"
+        const detected = data.detected ?? data.is_hatching ?? false;
+        const stage = data.stage;
 
         // Update detection status
         embryo.detections[detectorName] = {
             detected: detected,
             confidence: data.confidence,
-            timepoint: data.timepoint
+            timepoint: data.timepoint,
+            stage: stage,
         };
+
+        // Update current_stage if this is a perception result
+        if (detectorName === 'perception' && stage) {
+            embryo.current_stage = stage;
+        }
 
         // Store detection reasoning for the panel (avoid duplicates)
         if (!this.detectionReasoning[embryoId]) {
@@ -370,7 +378,10 @@ const EmbryosManager = {
                 timepoint: data.timepoint,
                 volume_uid: data.volume_uid,
                 projection_uid: data.projection_uid,
-                timestamp: new Date().toISOString()
+                timestamp: new Date().toISOString(),
+                // Perception-specific fields
+                stage: stage,
+                is_hatching: data.is_hatching,
             });
         }
 
@@ -720,9 +731,22 @@ const EmbryosManager = {
             `;
         }
 
-        // Detection status
+        // Current developmental stage (from perception system)
+        let stageHtml = '';
+        if (embryo.current_stage) {
+            const stageIcon = this.getStageIcon(embryo.current_stage);
+            stageHtml = `
+                <div class="current-stage">
+                    <span class="stage-icon">${stageIcon}</span>
+                    <span class="stage-label">Stage:</span>
+                    <span class="stage-value">${this.formatStageName(embryo.current_stage)}</span>
+                </div>
+            `;
+        }
+
+        // Detection status (legacy detectors)
         let detectionsHtml = '';
-        const detectorNames = Object.keys(embryo.detections);
+        const detectorNames = Object.keys(embryo.detections).filter(n => n !== 'perception');
         if (detectorNames.length > 0) {
             detectionsHtml = `
                 <div class="detection-status">
@@ -799,11 +823,45 @@ const EmbryosManager = {
                 </div>
 
                 ${countdownHtml}
+                ${stageHtml}
                 ${detectionsHtml}
                 ${verificationHtml}
                 ${completionHtml}
             </div>
         `;
+    },
+
+    // Get icon for developmental stage
+    getStageIcon(stage) {
+        const icons = {
+            'early': '🥚',
+            'bean': '🫘',
+            'comma': '🌙',
+            '1.5fold': '🔄',
+            '2fold': '🔁',
+            '3fold': '🔃',
+            'pretzel': '🥨',
+            'hatching': '🐣',
+            'hatched': '🐛',
+        };
+        return icons[stage?.toLowerCase()] || '🔬';
+    },
+
+    // Format stage name for display
+    formatStageName(stage) {
+        if (!stage) return 'Unknown';
+        const names = {
+            'early': 'Early',
+            'bean': 'Bean',
+            'comma': 'Comma',
+            '1.5fold': '1.5-Fold',
+            '2fold': '2-Fold',
+            '3fold': '3-Fold',
+            'pretzel': 'Pretzel',
+            'hatching': 'Hatching',
+            'hatched': 'Hatched',
+        };
+        return names[stage.toLowerCase()] || stage;
     },
 
     // Render verification status for embryo card
@@ -1513,6 +1571,12 @@ const EmbryosManager = {
         // Confidence styling
         const confidenceClass = detection.confidence ? detection.confidence.toLowerCase() : '';
 
+        // Stage badge for perception results
+        const isPerception = detection.detector_name === 'perception';
+        const stageHtml = detection.stage
+            ? `<span class="stage-badge" title="Developmental stage">${this.getStageIcon(detection.stage)} ${this.formatStageName(detection.stage)}</span>`
+            : '';
+
         // For positive detections, show context (confidence trend from previous timepoints)
         let contextHtml = '';
         if (detection.detected && isPositiveHighlight) {
@@ -1565,8 +1629,9 @@ const EmbryosManager = {
                 <div class="detection-card-header">
                     <div class="detection-meta">
                         <span class="detector-badge">${this.formatDetectorName(detection.detector_name)}</span>
+                        ${stageHtml}
                         <span class="detection-result ${detection.detected ? 'positive' : 'negative'}">
-                            ${detection.detected ? 'Detected' : 'Not detected'}
+                            ${isPerception ? (detection.is_hatching ? 'Hatching!' : '') : (detection.detected ? 'Detected' : 'Not detected')}
                         </span>
                         ${detection.confidence ? `<span class="confidence-badge ${confidenceClass}">${detection.confidence}</span>` : ''}
                     </div>
