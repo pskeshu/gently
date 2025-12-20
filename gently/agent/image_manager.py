@@ -155,9 +155,12 @@ def compress_image_for_api(image: np.ndarray, max_dimension: int = 800,
         if image.max() <= 1.0:
             image = (image * 255).astype(np.uint8)
         else:
-            # Normalize to range
-            img_min, img_max = image.min(), image.max()
+            # Use percentile-based contrast to ignore outliers (hot/dead pixels)
+            img_min = np.percentile(image, 1)
+            img_max = np.percentile(image, 99.5)
             if img_max > img_min:
+                # Clip to percentile range, then normalize
+                image = np.clip(image, img_min, img_max)
                 image = ((image - img_min) / (img_max - img_min) * 255).astype(np.uint8)
             else:
                 image = np.zeros_like(image, dtype=np.uint8)

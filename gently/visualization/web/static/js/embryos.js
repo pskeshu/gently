@@ -74,6 +74,10 @@ const EmbryosManager = {
         this.startCountdownUpdates();
         // Initial render
         this.render();
+        // Auto-open latest evaluation for selected embryo
+        if (this.selectedEmbryoId) {
+            this.openLatestDetail();
+        }
         // Update badge on init
         this.updateDetectionBadge();
     },
@@ -401,6 +405,8 @@ const EmbryosManager = {
         // Update reasoning panel if this embryo is selected
         if (this.selectedEmbryoId === embryoId) {
             this.renderReasoningPanel();
+            // Auto-open the latest evaluation's detail
+            this.openLatestDetail();
         }
         this.saveState();
     },
@@ -758,7 +764,7 @@ const EmbryosManager = {
 
         // Detection status (legacy detectors)
         let detectionsHtml = '';
-        const detectorNames = Object.keys(embryo.detections).filter(n => n !== 'perception');
+        const detectorNames = Object.keys(embryo.detections).filter(n => n !== 'perception' && n !== 'unknown');
         if (detectorNames.length > 0) {
             detectionsHtml = `
                 <div class="detection-status">
@@ -957,9 +963,10 @@ const EmbryosManager = {
 
     selectEmbryo(embryoId) {
         // Clear per-embryo UI state when switching embryos
-        if (this.selectedEmbryoId !== embryoId) {
-            this.currentDetailItem = null;
+        const isNewEmbryo = this.selectedEmbryoId !== embryoId;
+        if (isNewEmbryo) {
             this.expandedImages = {};
+            this.expandedRangeItems = {};
         }
 
         this.selectedEmbryoId = embryoId;
@@ -971,6 +978,22 @@ const EmbryosManager = {
 
         // Render reasoning panel
         this.renderReasoningPanel();
+
+        // Auto-open latest evaluation's detail for this embryo
+        if (isNewEmbryo) {
+            this.openLatestDetail();
+        }
+    },
+
+    // Open detail panel for the latest evaluation of the selected embryo
+    openLatestDetail() {
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        if (reasoning.length > 0) {
+            // Sort by timepoint descending to find latest
+            const sorted = [...reasoning].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
+            const latest = sorted[0];
+            this.openDetailPanel(latest.detector_name, latest.timepoint);
+        }
     },
 
     renderReasoningPanel() {
@@ -2449,13 +2472,22 @@ const EmbryosManager = {
                     : null;
             }
 
+            // Build stage data map (timepoint -> stage)
+            const stageData = {};
+            reasoning.forEach(r => {
+                if (r.timepoint !== undefined && r.stage) {
+                    stageData[r.timepoint] = r.stage;
+                }
+            });
+
             await TimepointPlayer.openSequence(embryoId, 0, null, {
                 vlmRange: null,  // No specific VLM range for "play all"
                 detectionPoint: latestEvent?.timepoint ?? null,
                 reasoningText: latestEvent?.reasoning ?? null,
                 stage: latestEvent?.stage ?? null,
                 isHatching: latestEvent?.is_hatching ?? false,
-                bufferPercent: 0  // No buffer for "play all"
+                bufferPercent: 0,  // No buffer for "play all"
+                stageData: stageData  // Per-timepoint stage info for timeline coloring
             });
 
             // Auto-play when opening from gallery

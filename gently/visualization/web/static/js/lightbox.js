@@ -432,6 +432,7 @@ const TimepointPlayer = {
         this.reasoningText = options.reasoningText || null;
         this.stage = options.stage || null;
         this.isHatching = options.isHatching || false;
+        this.stageData = options.stageData || {};  // Per-timepoint stage info
 
         // Fetch sequence from server - try multiple data types
         const bufferPercent = options.bufferPercent || 0.15;
@@ -818,7 +819,17 @@ const TimepointPlayer = {
         const infoShape = document.getElementById('lb-info-shape');
         const infoTime = document.getElementById('lb-info-time');
 
-        if (infoType) infoType.textContent = 'Timelapse';
+        // Show stage for current timepoint if available
+        const currentStage = this.stageData[frame.timepoint];
+        if (infoType) {
+            if (currentStage) {
+                const stageIcon = this.getStageIcon(currentStage);
+                const stageName = this.formatStageName(currentStage);
+                infoType.textContent = `${stageIcon} ${stageName}`;
+            } else {
+                infoType.textContent = 'Timelapse';
+            }
+        }
         if (infoEmbryo) infoEmbryo.textContent = this.embryoId || '-';
         if (infoShape) infoShape.textContent = `Frame ${index + 1} of ${this.sequence.length}`;
         if (infoTime) {
@@ -996,6 +1007,92 @@ const TimepointPlayer = {
         this.renderTimeline();
     },
 
+    // Stage color mapping
+    stageColors: {
+        'early': '#6b7280',      // gray
+        'bean': '#8b5cf6',       // violet
+        'comma': '#3b82f6',      // blue
+        '1.5fold': '#06b6d4',    // cyan
+        '2fold': '#10b981',      // emerald
+        '3fold': '#22c55e',      // green
+        'hatching': '#f59e0b',   // amber
+        'hatched': '#ef4444',    // red
+    },
+
+    renderStageSegments(track, firstTp, range) {
+        /**
+         * Render colored segments on timeline based on VLM stage per timepoint
+         * Creates contiguous segments for each developmental stage
+         */
+        // Remove any existing stage segments
+        track.querySelectorAll('.timeline-stage-segment').forEach(el => el.remove());
+
+        if (!this.stageData || Object.keys(this.stageData).length === 0) return;
+
+        // Build contiguous segments from stageData
+        // Group consecutive timepoints with the same stage
+        const segments = [];
+        let currentSegment = null;
+
+        // Sort sequence by timepoint to ensure correct order
+        const sortedSeq = [...this.sequence].sort((a, b) => a.timepoint - b.timepoint);
+
+        for (const frame of sortedSeq) {
+            const tp = frame.timepoint;
+            const stage = this.stageData[tp];
+
+            if (!stage) {
+                // No stage data for this timepoint - close current segment
+                if (currentSegment) {
+                    segments.push(currentSegment);
+                    currentSegment = null;
+                }
+                continue;
+            }
+
+            if (currentSegment && currentSegment.stage === stage) {
+                // Extend current segment
+                currentSegment.endTp = tp;
+            } else {
+                // Close previous segment and start new one
+                if (currentSegment) {
+                    segments.push(currentSegment);
+                }
+                currentSegment = { stage, startTp: tp, endTp: tp };
+            }
+        }
+
+        // Don't forget the last segment
+        if (currentSegment) {
+            segments.push(currentSegment);
+        }
+
+        // Render each segment as a colored div
+        for (const seg of segments) {
+            const color = this.stageColors[seg.stage.toLowerCase()] || '#6b7280';
+            const startPct = ((seg.startTp - firstTp) / range) * 100;
+            const endPct = ((seg.endTp - firstTp) / range) * 100;
+            // Add small margin for segment visibility (at least 1% width)
+            const width = Math.max(1, endPct - startPct);
+
+            const segmentEl = document.createElement('div');
+            segmentEl.className = 'timeline-stage-segment';
+            segmentEl.style.cssText = `
+                position: absolute;
+                left: ${startPct}%;
+                width: ${width}%;
+                height: 100%;
+                background-color: ${color};
+                opacity: 0.4;
+                pointer-events: none;
+                z-index: 0;
+            `;
+            segmentEl.title = `${seg.stage}: T${seg.startTp}-T${seg.endTp}`;
+
+            track.appendChild(segmentEl);
+        }
+    },
+
     renderTimeline() {
         const track = document.getElementById('timeline-track');
         const labelsEl = document.getElementById('timeline-labels');
@@ -1007,6 +1104,9 @@ const TimepointPlayer = {
         const firstTp = this.sequence[0]?.timepoint ?? 0;
         const lastTp = this.sequence[this.sequence.length - 1]?.timepoint ?? 0;
         const range = lastTp - firstTp || 1;  // Avoid division by zero for single timepoint
+
+        // Render stage segments on timeline
+        this.renderStageSegments(track, firstTp, range);
 
         // VLM range highlight
         if (vlmRangeEl && this.vlmRange && this.vlmRange.start != null && this.vlmRange.end != null) {

@@ -328,7 +328,6 @@ class RichCopilotCLI:
         try:
             # Get experiment state
             experiment = self.copilot.experiment
-            detector_registry = self.copilot.detector_registry
 
             status_lines = []
 
@@ -374,11 +373,13 @@ class RichCopilotCLI:
             active_embryos = sum(1 for e in experiment.embryos.values() if not getattr(e, 'skip', False))
             status_lines.append(Text(f"Embryos: {active_embryos}/{embryo_count}", style=theme.info))
 
-            # Detector count
-            all_detectors = detector_registry.list_all()
-            enabled_detectors = len([d for d in all_detectors if d.enabled])
-            total_detectors = len(all_detectors)
-            status_lines.append(Text(f"Detectors: {enabled_detectors}/{total_detectors}", style=theme.info))
+            # Perception system status
+            perception_mgr = getattr(self.copilot, 'perception_manager', None)
+            if perception_mgr:
+                session_count = len(perception_mgr.sessions)
+                status_lines.append(Text(f"Perception: {session_count} sessions active", style=theme.info))
+            else:
+                status_lines.append(Text(f"Perception: not initialized", style=theme.muted))
 
             # Last imaging time - find most recent across all embryos
             last_imaging = "Never"
@@ -1178,7 +1179,7 @@ class RichCopilotCLI:
         table.add_column("Status", justify="center")
         table.add_column("Last Imaging", style=theme.info)
         table.add_column("Exposures", style=theme.warning)
-        table.add_column("Detections", style=theme.success)
+        table.add_column("Stage", style=theme.success)
 
         for embryo_id, embryo in embryos.items():
             # XY position
@@ -1215,14 +1216,13 @@ class RichCopilotCLI:
             else:
                 exposure_str = "0"
 
-            # Detections
-            detections = []
-            if hasattr(embryo, 'detection_results'):
-                for detector_name in embryo.detection_results.keys():
-                    if embryo.was_detected(detector_name):
-                        detections.append(detector_name)
-
-            detections_str = ", ".join(detections) if detections else "None"
+            # Perception stage info
+            perception_mgr = getattr(self.copilot, 'perception_manager', None)
+            stage_str = "-"
+            if perception_mgr:
+                session = perception_mgr.get_session(embryo_id)
+                if session:
+                    stage_str = session.get_current_stage() or "-"
 
             table.add_row(
                 embryo_id,
@@ -1230,7 +1230,7 @@ class RichCopilotCLI:
                 Text(status, style=status_style),
                 last_time,
                 exposure_str,
-                detections_str,
+                stage_str,
             )
 
         self.console.print(table)
@@ -1342,30 +1342,29 @@ class RichCopilotCLI:
                 hatch_lines.append(f"[{theme.muted}]Not hatched[/]")
             sections.append(("Hatching", hatch_lines))
 
-        # === Detection Results ===
-        if embryo.detection_results:
-            det_lines = []
-            for detector_name, results in embryo.detection_results.items():
-                count = len(results)
-                detected = any(r.get('detected', False) for r in results)
-                latest = results[-1] if results else {}
+        # === Perception Results ===
+        perception_mgr = getattr(self.copilot, 'perception_manager', None)
+        if perception_mgr:
+            session = perception_mgr.get_session(embryo.id)
+            if session and session.observations:
+                perc_lines = []
+                current_stage = session.get_current_stage() or "unknown"
+                perc_lines.append(f"[{theme.success}]Current Stage:[/] {current_stage}")
+                perc_lines.append(f"[{theme.secondary}]Observations:[/] {len(session.observations)}")
 
-                # Status indicator
-                if detected:
-                    status_icon = f"[{theme.success}]✓[/]"
-                else:
-                    status_icon = f"[{theme.muted}]○[/]"
-
-                det_lines.append(f"{status_icon} [{theme.info}]{detector_name}[/] ({count} runs)")
-
-                # Show latest result summary
-                if latest:
-                    latest_detected = latest.get('detected', False)
-                    latest_conf = latest.get('confidence', 'N/A')
-                    det_lines.append(f"    Latest: detected={latest_detected}, confidence={latest_conf}")
-            sections.append(("Detection Results", det_lines))
+                # Show last few observations
+                recent = session.get_recent_observations(3)
+                if recent:
+                    perc_lines.append(f"[{theme.secondary}]Recent:[/]")
+                    for obs in recent:
+                        conf_pct = f"{obs.confidence:.0%}" if obs.confidence else "?"
+                        hatching = " (hatching)" if obs.is_hatching else ""
+                        perc_lines.append(f"    T{obs.timepoint}: {obs.stage} [{conf_pct}]{hatching}")
+                sections.append(("Perception", perc_lines))
+            else:
+                sections.append(("Perception", [f"[{theme.muted}]No observations yet[/]"]))
         else:
-            sections.append(("Detection Results", [f"[{theme.muted}]No detections run[/]"]))
+            sections.append(("Perception", [f"[{theme.muted}]Perception not initialized[/]"]))
 
         # === Focus History ===
         if hasattr(embryo, 'focus_history') and embryo.focus_history:
@@ -1551,9 +1550,17 @@ class RichCopilotCLI:
             return False  # Handled, continue loop
 
         elif cmd == '/detectors':
-            # List detectors
-            detectors = self.copilot.detector_registry.list_all()
-            self.print_detector_table(detectors)
+            # Show perception system status (replaces old detector registry)
+            theme = get_theme()
+            perception_mgr = getattr(self.copilot, 'perception_manager', None)
+            if perception_mgr and perception_mgr.sessions:
+                self.console.print(f"[{theme.info}]Perception Sessions:[/]")
+                for embryo_id, session in perception_mgr.sessions.items():
+                    stage = session.get_current_stage() or "unknown"
+                    obs_count = len(session.observations)
+                    self.console.print(f"  {embryo_id}: stage={stage}, {obs_count} observations")
+            else:
+                self.console.print(f"[{theme.muted}]No active perception sessions[/]")
             return False  # Handled, continue loop
 
         elif cmd.startswith('/embryos'):

@@ -543,8 +543,8 @@ body {
 }
 
 .z-slider {
-    -webkit-appearance: slider-vertical;
-    writing-mode: bt-lr;
+    writing-mode: vertical-lr;
+    direction: rtl;
     width: 20px;
     flex: 1;
     min-height: 200px;

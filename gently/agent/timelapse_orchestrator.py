@@ -1360,6 +1360,7 @@ class TimelapseOrchestrator:
                 self._emit_event(EventType.HATCHING_DETECTED, {
                     'embryo_id': embryo_id,
                     'timepoint': timepoint,
+                    'detector_name': 'hatching',
                     'stage': result.stage,
                     'confidence': result.confidence,
                 })
