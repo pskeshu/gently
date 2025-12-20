@@ -194,46 +194,37 @@
     <!-- Embryos Tab (default landing page) -->
     <div id="embryos-content" class="tab-content active">
         <div class="embryos-container">
-            <div class="embryos-header">
-                <h2 class="embryos-title">Embryo Monitoring</h2>
-                <div class="timelapse-status" id="timelapse-status">
-                    <span class="status-indicator" id="timelapse-indicator"></span>
-                    <span class="status-text" id="timelapse-status-text">No active timelapse</span>
-                    <span class="timelapse-duration" id="timelapse-duration"></span>
-                    <span class="session-id" id="session-id"></span>
-                </div>
-            </div>
-
-            <!-- Narrative Summary Panel -->
-            <div class="narrative-panel" id="narrative-panel">
-                <div class="narrative-header" onclick="NarrativeManager.toggle()">
-                    <div class="narrative-status-badge normal" id="narrative-badge">&#x2714;</div>
-                    <div class="narrative-title">
-                        <div class="headline" id="narrative-headline">Experiment Summary</div>
-                        <div class="meta" id="narrative-meta">Updated just now</div>
-                    </div>
-                    <span class="narrative-toggle">&#x25BC;</span>
-                </div>
-                <div class="narrative-content" id="narrative-content">
-                    <div class="narrative-loading" id="narrative-loading" style="display: none;">
-                        <div class="spinner"></div>
-                        <span>Generating summary...</span>
-                    </div>
-                    <div id="narrative-body">
-                        <div class="narrative-section">
-                            <div class="narrative-section-title">Status</div>
-                            <p class="narrative-text" id="narrative-status-text">No active experiment. Start a timelapse to see AI-generated summaries here.</p>
+            <div class="embryos-header-panel" id="embryos-header-panel">
+                <div class="embryos-header-bar" onclick="EmbryosManager.toggleHeaderPanel()">
+                    <div class="header-left">
+                        <h2 class="embryos-title">Embryo Monitoring</h2>
+                        <div class="timelapse-status" id="timelapse-status">
+                            <span class="status-indicator" id="timelapse-indicator"></span>
+                            <span class="status-text" id="timelapse-status-text">No active timelapse</span>
                         </div>
                     </div>
-                    <div class="narrative-actions">
-                        <button class="narrative-action-btn" onclick="NarrativeManager.refresh()">Refresh Summary</button>
-                        <button class="narrative-action-btn" onclick="NarrativeManager.showSinceLastCheck()">Since Last Check</button>
+                    <div class="header-stats" id="header-stats">
+                        <!-- Stats rendered dynamically -->
+                    </div>
+                    <span class="header-toggle">&#x25BC;</span>
+                </div>
+                <div class="header-dropdown" id="header-dropdown">
+                    <div class="narrative-content" id="narrative-content">
+                        <div class="narrative-loading" id="narrative-loading" style="display: none;">
+                            <div class="spinner"></div>
+                            <span>Generating summary...</span>
+                        </div>
+                        <div id="narrative-body">
+                            <div class="narrative-section">
+                                <p class="narrative-text" id="narrative-status-text">No active experiment. Start a timelapse to see AI-generated summaries here.</p>
+                            </div>
+                        </div>
+                        <div class="narrative-actions">
+                            <button class="narrative-action-btn" onclick="NarrativeManager.refresh()">Refresh Summary</button>
+                            <button class="narrative-action-btn" onclick="NarrativeManager.showSinceLastCheck()">Since Last Check</button>
+                        </div>
                     </div>
                 </div>
-            </div>
-
-            <div class="embryos-summary" id="embryos-summary">
-                <!-- Summary rendered dynamically -->
             </div>
 
             <div class="embryos-body">

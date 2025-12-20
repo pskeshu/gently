@@ -6,26 +6,9 @@
 const NarrativeManager = {
     isLoading: false,
     lastNarrative: null,
-    isCollapsed: false,
 
     init() {
-        // Load collapsed state from localStorage
-        const collapsed = localStorage.getItem('gently-narrative-collapsed');
-        this.isCollapsed = collapsed === 'true';
-        this.applyCollapseState();
-    },
-
-    toggle() {
-        this.isCollapsed = !this.isCollapsed;
-        localStorage.setItem('gently-narrative-collapsed', this.isCollapsed.toString());
-        this.applyCollapseState();
-    },
-
-    applyCollapseState() {
-        const panel = document.getElementById('narrative-panel');
-        if (panel) {
-            panel.classList.toggle('collapsed', this.isCollapsed);
-        }
+        // Narrative toggle now handled by EmbryosManager.toggleHeaderPanel()
     },
 
     async refresh() {

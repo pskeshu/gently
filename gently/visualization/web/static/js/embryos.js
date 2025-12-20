@@ -70,6 +70,8 @@ const EmbryosManager = {
         this.loadAgreements();
         // Load badge state (new detection count)
         this.loadBadgeState();
+        // Load header panel state
+        this.loadHeaderPanelState();
         // Start countdown update timer
         this.startCountdownUpdates();
         // Initial render
@@ -80,6 +82,33 @@ const EmbryosManager = {
         }
         // Update badge on init
         this.updateDetectionBadge();
+        // Apply header panel state
+        this.applyHeaderPanelState();
+    },
+
+    // Header panel collapse state
+    headerPanelExpanded: false,
+
+    toggleHeaderPanel() {
+        this.headerPanelExpanded = !this.headerPanelExpanded;
+        this.applyHeaderPanelState();
+        // Save preference
+        try {
+            localStorage.setItem('embryos-header-expanded', this.headerPanelExpanded);
+        } catch (e) {}
+    },
+
+    applyHeaderPanelState() {
+        const panel = document.getElementById('embryos-header-panel');
+        if (panel) {
+            panel.classList.toggle('expanded', this.headerPanelExpanded);
+        }
+    },
+
+    loadHeaderPanelState() {
+        try {
+            this.headerPanelExpanded = localStorage.getItem('embryos-header-expanded') === 'true';
+        } catch (e) {}
     },
 
     // ==========================================
@@ -574,10 +603,8 @@ const EmbryosManager = {
     renderStatusBadge() {
         const statusEl = document.getElementById('timelapse-status');
         const textEl = document.getElementById('timelapse-status-text');
-        const durationEl = document.getElementById('timelapse-duration');
-        const sessionIdEl = document.getElementById('session-id');
 
-        if (!statusEl) return;
+        if (!statusEl || !textEl) return;
 
         // Remove all status classes
         statusEl.classList.remove('running', 'paused', 'completed', 'idle');
@@ -585,61 +612,48 @@ const EmbryosManager = {
         if (this.state.status === 'IDLE' || Object.keys(this.state.embryos).length === 0) {
             statusEl.classList.add('idle');
             textEl.textContent = 'No active timelapse';
-            durationEl.textContent = '';
-            if (sessionIdEl) sessionIdEl.textContent = '';
         } else {
             statusEl.classList.add(this.state.status.toLowerCase());
             textEl.textContent = this.state.status === 'RUNNING' ? 'Running' :
                                  this.state.status === 'PAUSED' ? 'Paused' :
                                  this.state.status === 'COMPLETED' ? 'Completed' : this.state.status;
-
-            if (this.state.startedAt) {
-                durationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
-            }
-
-            // Display session ID
-            if (sessionIdEl && this.currentSessionId) {
-                sessionIdEl.textContent = this.currentSessionId;
-            }
         }
     },
 
     renderSummary() {
-        const summaryEl = document.getElementById('embryos-summary');
-        if (!summaryEl) return;
+        const statsEl = document.getElementById('header-stats');
+        if (!statsEl) return;
 
         const embryos = Object.values(this.state.embryos);
         if (embryos.length === 0) {
-            summaryEl.classList.add('hidden');
+            statsEl.innerHTML = '';
             return;
         }
-
-        summaryEl.classList.remove('hidden');
 
         const active = embryos.filter(e => !e.isComplete).length;
         const completed = embryos.filter(e => e.isComplete).length;
 
-        summaryEl.innerHTML = `
-            <div class="summary-stat">
+        statsEl.innerHTML = `
+            <div class="header-stat">
                 <span class="stat-value">${this.state.totalTimepoints}</span>
-                <span class="stat-label">Total Timepoints</span>
+                <span class="stat-label">TP</span>
             </div>
-            <div class="summary-stat">
+            <div class="header-stat">
                 <span class="stat-value">${active}</span>
                 <span class="stat-label">Active</span>
             </div>
-            <div class="summary-stat">
+            <div class="header-stat">
                 <span class="stat-value">${completed}</span>
-                <span class="stat-label">Completed</span>
+                <span class="stat-label">Done</span>
             </div>
             ${this.state.startedAt ? `
-            <div class="summary-stat">
+            <div class="header-stat">
                 <span class="stat-value" id="summary-duration">${this.formatDuration(Date.now() - this.state.startedAt.getTime())}</span>
-                <span class="stat-label">Duration</span>
+                <span class="stat-label">Dur</span>
             </div>
             ` : ''}
             ${active > 0 ? `
-            <div class="summary-stat">
+            <div class="header-stat">
                 <span class="stat-value" id="summary-next-countdown">${this.getNextCountdown()}</span>
                 <span class="stat-label">Next</span>
             </div>
