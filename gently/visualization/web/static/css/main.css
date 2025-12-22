@@ -1738,6 +1738,10 @@ kbd {
     background: var(--accent-green);
 }
 
+.timelapse-status.stopped .status-indicator {
+    background: var(--accent-orange);
+}
+
 .timelapse-status .status-text {
     color: var(--text);
     font-weight: 500;
@@ -4947,6 +4951,210 @@ kbd {
     line-height: 1.65;
     color: var(--text);
     white-space: pre-wrap;
+}
+
+/* Verdict layout for stage + confidence */
+.detail-verdict {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.verdict-stage {
+    font-weight: 700;
+    font-size: 1rem;
+    text-transform: uppercase;
+}
+
+.verdict-confidence {
+    font-weight: 400;
+    font-size: 0.85rem;
+    opacity: 0.8;
+}
+
+/* Transitional indicator */
+.detail-transitional {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: auto;
+}
+
+.transitional-badge {
+    background: var(--accent-orange);
+    color: white;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.transitional-stages {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Observed Features Section */
+.detail-observed-features {
+    padding: 0.75rem 1.25rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-observed-features .reasoning-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+}
+
+.features-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1rem;
+}
+
+.feature-item {
+    font-size: 0.8rem;
+    color: var(--text);
+}
+
+.feature-label {
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+/* Contrastive Reasoning Section */
+.detail-contrastive {
+    padding: 0.75rem 1.25rem;
+    background: var(--bg-hover);
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-contrastive .reasoning-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent-purple);
+    margin-bottom: 0.5rem;
+}
+
+.contrastive-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+
+.contrastive-item {
+    font-size: 0.8rem;
+    line-height: 1.4;
+    color: var(--text);
+}
+
+.contrastive-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-right: 0.3rem;
+}
+
+/* Reasoning Trace Section (interleaved reasoning with tool calls) */
+.detail-reasoning-trace {
+    padding: 0.75rem 1.25rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+}
+
+.detail-reasoning-trace .reasoning-label {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent-orange);
+    margin-bottom: 0.5rem;
+}
+
+.trace-tool-count {
+    font-size: 0.65rem;
+    padding: 0.15rem 0.4rem;
+    background: var(--accent-orange);
+    color: var(--bg);
+    border-radius: 10px;
+    font-weight: 500;
+    text-transform: none;
+}
+
+.trace-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.trace-step {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.4rem 0.6rem;
+    border-radius: 6px;
+    background: var(--bg-hover);
+    border-left: 3px solid var(--border);
+}
+
+.trace-step.trace-temporal_context {
+    border-left-color: var(--accent-cyan, #17a2b8);
+    background: rgba(23, 162, 184, 0.05);
+}
+
+.trace-step.trace-temporal_context.arrest-warning {
+    border-left-color: var(--error);
+    background: rgba(220, 53, 69, 0.08);
+}
+
+.trace-step.trace-initial_analysis {
+    border-left-color: var(--accent);
+}
+
+.trace-step.trace-tool_call {
+    border-left-color: var(--accent-orange);
+    background: rgba(255, 165, 0, 0.05);
+}
+
+.trace-step.trace-tool_result {
+    border-left-color: var(--accent-purple);
+    background: rgba(155, 89, 182, 0.05);
+}
+
+.trace-step.trace-final_decision {
+    border-left-color: var(--success);
+    background: rgba(46, 204, 113, 0.05);
+}
+
+.trace-icon {
+    font-size: 0.9rem;
+    flex-shrink: 0;
+}
+
+.trace-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.trace-content {
+    width: 100%;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+    margin-top: 0.2rem;
+    padding-left: 1.5rem;
 }
 
 .detail-actions {

@@ -1086,6 +1086,17 @@ class TimelapseOrchestrator:
 
         self._status = TimelapseStatus.IDLE
 
+        # Emit stop event for viz server and other listeners
+        get_event_bus().publish(
+            EventType.ACQUISITION_STOPPED,
+            {
+                "reason": reason,
+                "total_timepoints": self._total_timepoints,
+                "embryo_count": len(self._embryo_states),
+            },
+            source="timelapse_orchestrator"
+        )
+
         return f"Timelapse stopped (reason: {reason}). Acquired {self._total_timepoints} total timepoints."
 
     async def pause(self) -> str:
@@ -1345,7 +1356,7 @@ class TimelapseOrchestrator:
             )
 
             # Emit perception event for viz server
-            self._emit_event(EventType.DETECTOR_EVALUATED, {
+            event_data = {
                 'embryo_id': embryo_id,
                 'timepoint': timepoint,
                 'detector_name': 'perception',
@@ -1353,7 +1364,39 @@ class TimelapseOrchestrator:
                 'is_hatching': result.is_hatching,
                 'confidence': result.confidence,
                 'reasoning': result.reasoning,
-            })
+                'is_transitional': result.is_transitional,
+                'transition_between': result.transition_between,
+            }
+
+            # Add observed features if available
+            if result.observed_features:
+                event_data['observed_features'] = {
+                    'shape': result.observed_features.shape,
+                    'curvature': result.observed_features.curvature,
+                    'shell_status': result.observed_features.shell_status,
+                    'body_segments': result.observed_features.body_segments_visible,
+                    'emergence': result.observed_features.emergence,
+                }
+
+            # Add contrastive reasoning if available
+            if result.contrastive_reasoning:
+                event_data['contrastive_reasoning'] = {
+                    'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
+                    'why_not_next': result.contrastive_reasoning.why_not_next_stage,
+                }
+
+            # Add reasoning trace if available (from interleaved reasoning)
+            if result.reasoning_trace:
+                event_data['reasoning_trace'] = result.reasoning_trace.to_dict()
+
+            # Add temporal analysis if available (for detecting arrested/stalled embryos)
+            session = self.perception_manager.sessions.get(embryo_id)
+            if session:
+                temporal = session.compute_temporal_analysis()
+                if temporal:
+                    event_data['temporal_analysis'] = temporal.to_dict()
+
+            self._emit_event(EventType.DETECTOR_EVALUATED, event_data)
 
             # Check for hatching event
             if result.is_hatching:

@@ -1,0 +1,14 @@
+{
+  "stage": "pretzel",
+  "description": "Tightly coiled embryo with 2-3 body segments visible inside intact eggshell",
+  "examples": {
+    "example_001.jpg": "Compact elongated embryo with internal coiling visible, body folded within intact shell boundary",
+    "example_002.jpg": "Clear pretzel configuration - multiple body segments stacked, side view shows vertical coiling within shell",
+    "example_003.jpg": "Tight coil with visible internal folding pattern, shell outline clearly visible, embryo fills shell",
+    "example_004.jpg": "Compact coiled embryo with internal structure visible, shell intact, mottled appearance from overlapping segments",
+    "example_005.jpg": "Tightly coiled with dark central region where body overlaps, dense packing within shell",
+    "example_006.jpg": "Maximally compacted pretzel, elongated shell with tight internal coiling, excellent example",
+    "example_007.jpg": "Late pretzel - coiled embryo inside intact shell, dark central region from body overlap, no emergence",
+    "example_008.jpg": "Coiled embryo filling shell, intact shell boundary, dense internal packing"
+  }
+}

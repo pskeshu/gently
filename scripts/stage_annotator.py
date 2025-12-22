@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 # Configuration
 GENTLY_PATH = Path("D:/Gently")
 EXAMPLES_PATH = Path(__file__).parent.parent / "gently" / "examples" / "stages"
-STAGES = ["early", "bean", "comma", "1.5fold", "2fold", "3fold", "hatched"]
+STAGES = ["early", "comma", "1.5fold", "pretzel", "hatching", "hatched"]
 
 
 def normalize_image(img: np.ndarray) -> np.ndarray:
@@ -334,12 +334,11 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
 
         <div class="controls">
             <button class="stage-btn" data-stage="early" onclick="label('early')">1: Early</button>
-            <button class="stage-btn" data-stage="bean" onclick="label('bean')">2: Bean</button>
-            <button class="stage-btn" data-stage="comma" onclick="label('comma')">3: Comma</button>
-            <button class="stage-btn" data-stage="1.5fold" onclick="label('1.5fold')">4: 1.5-Fold</button>
-            <button class="stage-btn" data-stage="2fold" onclick="label('2fold')">5: 2-Fold</button>
-            <button class="stage-btn" data-stage="3fold" onclick="label('3fold')">6: 3-Fold</button>
-            <button class="stage-btn" data-stage="hatched" onclick="label('hatched')">7: Hatched</button>
+            <button class="stage-btn" data-stage="comma" onclick="label('comma')">2: Comma</button>
+            <button class="stage-btn" data-stage="1.5fold" onclick="label('1.5fold')">3: 1.5-Fold</button>
+            <button class="stage-btn" data-stage="pretzel" onclick="label('pretzel')">4: Pretzel</button>
+            <button class="stage-btn" data-stage="hatching" onclick="label('hatching')">5: Hatching</button>
+            <button class="stage-btn" data-stage="hatched" onclick="label('hatched')">6: Hatched</button>
             <button class="stage-btn" data-stage="" onclick="label('')">0: Clear</button>
         </div>
 
@@ -348,9 +347,9 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         </div>
 
         <p class="keyboard-hint">
-            <strong>How to use:</strong> Navigate to where a stage STARTS, then press the stage key (1-7).<br>
+            <strong>How to use:</strong> Navigate to where a stage STARTS, then press the stage key (1-6).<br>
             All images from that point until the next marked stage will be labeled automatically.<br>
-            Keys: 1-7 = mark stage start, 0 = clear mark, A/D or Arrows = navigate, S = save
+            Keys: 1-6 = mark stage start, 0 = clear mark, A/D or Arrows = navigate, S = save
         </p>
 
         <div id="stage-markers" style="margin-top: 15px; padding: 10px; background: #222; border-radius: 6px;">
@@ -367,16 +366,15 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         // Stage markers: index -> stage name (marks where a stage STARTS)
         let stageMarkers = {};
 
-        const STAGES = ['early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'hatched'];
+        const STAGES = ['early', 'comma', '1.5fold', 'pretzel', 'hatching', 'hatched'];
 
         // Color map for each stage (vibrant, distinguishable colors)
         const STAGE_COLORS = {
             'early': '#E91E63',    // Pink
-            'bean': '#9C27B0',     // Purple
             'comma': '#3F51B5',    // Indigo
             '1.5fold': '#00BCD4',  // Cyan
-            '2fold': '#4CAF50',    // Green
-            '3fold': '#FF9800',    // Orange
+            'pretzel': '#4CAF50',  // Green
+            'hatching': '#FF9800', // Orange
             'hatched': '#F44336'   // Red
         };
 
@@ -615,8 +613,8 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'SELECT') return;
 
-            if (e.key >= '0' && e.key <= '7') {
-                const stages = ['', 'early', 'bean', 'comma', '1.5fold', '2fold', '3fold', 'hatched'];
+            if (e.key >= '0' && e.key <= '6') {
+                const stages = ['', 'early', 'comma', '1.5fold', 'pretzel', 'hatching', 'hatched'];
                 setMarker(stages[parseInt(e.key)]);
             } else if (e.key === 'a' || e.key === 'ArrowLeft') {
                 prev();

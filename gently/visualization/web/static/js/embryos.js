@@ -9,7 +9,7 @@ const EmbryosManager = {
     currentSessionId: null,
 
     state: {
-        status: 'IDLE', // IDLE, RUNNING, PAUSED, COMPLETED, FAILED
+        status: 'IDLE', // IDLE, RUNNING, PAUSED, COMPLETED, STOPPED, FAILED
         startedAt: null,
         embryos: {},  // embryo_id -> EmbryoTaskState
         totalTimepoints: 0,
@@ -427,6 +427,15 @@ const EmbryosManager = {
                 // Perception-specific fields
                 stage: stage,
                 is_hatching: data.is_hatching,
+                // New structured perception fields
+                is_transitional: data.is_transitional,
+                transition_between: data.transition_between,
+                observed_features: data.observed_features,
+                contrastive_reasoning: data.contrastive_reasoning,
+                // Interleaved reasoning trace (tool calls + reasoning steps)
+                reasoning_trace: data.reasoning_trace,
+                // Temporal analysis for detecting arrested/stalled embryos
+                temporal_analysis: data.temporal_analysis,
             });
         }
 
@@ -616,7 +625,8 @@ const EmbryosManager = {
             statusEl.classList.add(this.state.status.toLowerCase());
             textEl.textContent = this.state.status === 'RUNNING' ? 'Running' :
                                  this.state.status === 'PAUSED' ? 'Paused' :
-                                 this.state.status === 'COMPLETED' ? 'Completed' : this.state.status;
+                                 this.state.status === 'COMPLETED' ? 'Completed' :
+                                 this.state.status === 'STOPPED' ? 'Stopped' : this.state.status;
         }
     },
 
@@ -1565,6 +1575,124 @@ const EmbryosManager = {
             this.fetchDetailImage(this.selectedEmbryoId, item.timepoint);
         }
 
+        // Build observed features section if available
+        let observedFeaturesHtml = '';
+        if (item.observed_features) {
+            const f = item.observed_features;
+            observedFeaturesHtml = `
+                <div class="detail-observed-features">
+                    <div class="reasoning-label">Observed Features</div>
+                    <div class="features-grid">
+                        ${f.shape ? `<span class="feature-item"><span class="feature-label">Shape:</span> ${this.escapeHtml(f.shape)}</span>` : ''}
+                        ${f.curvature ? `<span class="feature-item"><span class="feature-label">Curvature:</span> ${this.escapeHtml(f.curvature)}</span>` : ''}
+                        ${f.shell_status ? `<span class="feature-item"><span class="feature-label">Shell:</span> ${this.escapeHtml(f.shell_status)}</span>` : ''}
+                        ${f.body_segments ? `<span class="feature-item"><span class="feature-label">Segments:</span> ${this.escapeHtml(f.body_segments)}</span>` : ''}
+                        ${f.emergence ? `<span class="feature-item"><span class="feature-label">Emergence:</span> ${this.escapeHtml(f.emergence)}</span>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Build contrastive reasoning section if available
+        let contrastiveHtml = '';
+        if (item.contrastive_reasoning) {
+            const c = item.contrastive_reasoning;
+            contrastiveHtml = `
+                <div class="detail-contrastive">
+                    <div class="reasoning-label">Contrastive Reasoning</div>
+                    <div class="contrastive-grid">
+                        ${c.why_not_previous ? `<div class="contrastive-item"><span class="contrastive-label">Not previous stage:</span> ${this.escapeHtml(c.why_not_previous)}</div>` : ''}
+                        ${c.why_not_next ? `<div class="contrastive-item"><span class="contrastive-label">Not next stage:</span> ${this.escapeHtml(c.why_not_next)}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Build transitional indicator if applicable
+        let transitionalHtml = '';
+        if (item.is_transitional && item.transition_between) {
+            const stages = item.transition_between.map(s => this.formatStageName(s)).join(' → ');
+            transitionalHtml = `
+                <div class="detail-transitional">
+                    <span class="transitional-badge">TRANSITIONAL</span>
+                    <span class="transitional-stages">${stages}</span>
+                </div>
+            `;
+        }
+
+        // Build reasoning trace section if available (interleaved reasoning with tool calls)
+        let reasoningTraceHtml = '';
+        if (item.reasoning_trace && item.reasoning_trace.steps && item.reasoning_trace.steps.length > 0) {
+            const steps = item.reasoning_trace.steps;
+            const toolCalls = item.reasoning_trace.total_tool_calls || 0;
+
+            let stepsHtml = steps.map(step => {
+                // Add arrest-warning class if content mentions arrest
+                const hasArrestWarning = step.content && step.content.includes('ARREST WARNING');
+                const stepClass = `trace-step trace-${step.step_type}${hasArrestWarning ? ' arrest-warning' : ''}`;
+                let icon = '';
+                let label = '';
+
+                switch (step.step_type) {
+                    case 'temporal_context':
+                        icon = '⏱';
+                        label = 'Temporal';
+                        break;
+                    case 'initial_analysis':
+                        icon = '🔍';
+                        label = 'Analysis';
+                        break;
+                    case 'tool_call':
+                        icon = '🔧';
+                        label = step.tool_name === 'view_previous_timepoint'
+                            ? `Request T-${step.tool_input?.offset || '?'}`
+                            : `Request ${step.tool_input?.stage || '?'} ref`;
+                        break;
+                    case 'tool_result':
+                        icon = '📷';
+                        label = step.tool_result_summary || 'Result';
+                        break;
+                    case 'final_decision':
+                        icon = '✓';
+                        label = 'Decision';
+                        break;
+                    default:
+                        icon = '•';
+                        label = step.step_type;
+                }
+
+                // Truncate long content
+                const content = step.content && step.content.length > 200
+                    ? step.content.substring(0, 200) + '...'
+                    : (step.content || '');
+
+                return `
+                    <div class="${stepClass}">
+                        <span class="trace-icon">${icon}</span>
+                        <span class="trace-label">${label}</span>
+                        ${content ? `<div class="trace-content">${this.escapeHtml(content)}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+
+            reasoningTraceHtml = `
+                <div class="detail-reasoning-trace">
+                    <div class="reasoning-label">
+                        Reasoning Trace
+                        ${toolCalls > 0 ? `<span class="trace-tool-count">${toolCalls} tool call${toolCalls > 1 ? 's' : ''}</span>` : ''}
+                    </div>
+                    <div class="trace-steps">
+                        ${stepsHtml}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Format confidence display
+        const confDisplay = typeof item.confidence === 'number'
+            ? `${Math.round(item.confidence * 100)}%`
+            : (item.confidence || 'Unknown');
+
         return `
             <div class="detail-panel-header">
                 <span class="detail-title">T${item.timepoint} - ${this.formatDetectorName(item.detector_name)}</span>
@@ -1574,10 +1702,15 @@ const EmbryosManager = {
                 ${imageHtml}
             </div>
             <div class="detail-verdict ${item.detected ? 'detected' : ''}">
-                ${item.detected ? 'DETECTED' : 'Not detected'} - ${item.confidence || 'Unknown'} confidence
+                <span class="verdict-stage">${item.stage ? this.formatStageName(item.stage) : (item.detected ? 'DETECTED' : 'Not detected')}</span>
+                <span class="verdict-confidence">${confDisplay} confidence</span>
+                ${transitionalHtml}
             </div>
+            ${observedFeaturesHtml}
+            ${contrastiveHtml}
+            ${reasoningTraceHtml}
             <div class="detail-reasoning">
-                <div class="reasoning-label">VLM Analysis</div>
+                <div class="reasoning-label">VLM Summary</div>
                 <div class="reasoning-text">${linkedReasoning}</div>
             </div>
             <div class="detail-actions">

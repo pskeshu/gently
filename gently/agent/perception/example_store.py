@@ -12,6 +12,8 @@ import logging
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from .stages import STAGES
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,29 +25,24 @@ class ExampleStore:
     examples/
         stages/
             early/
-                example_001.jpg
+            bean/
             comma/
-                example_001.jpg
-            pretzel/
-                example_001.jpg
+            1.5fold/
+            2fold/
             3fold/
-                example_001.jpg
             hatching/
-                example_001.jpg
             hatched/
-                example_001.jpg
         anomalies/
             dead_embryo/
-                example_001.jpg
             blank_technical/
-                example_001.jpg
             blank_biological/
-                example_001.jpg
         metadata.json
+
+    Stage definitions are imported from stages.py (single source of truth).
     """
 
-    # Supported developmental stages
-    STAGES = ["early", "comma", "pretzel", "3fold", "hatching", "hatched"]
+    # Supported developmental stages (imported from stages.py)
+    STAGES = STAGES  # Re-export for backwards compatibility
 
     # Supported anomaly types
     ANOMALY_TYPES = ["dead_embryo", "blank_technical", "blank_biological"]
@@ -64,6 +61,7 @@ class ExampleStore:
         # Cache loaded examples to avoid repeated disk I/O
         self._stage_cache: Dict[str, List[str]] = {}  # stage -> list of b64 images
         self._anomaly_cache: Dict[str, List[str]] = {}
+        self._stage_metadata_cache: Dict[str, Dict] = {}  # stage -> metadata dict
 
         # Load metadata if exists
         self.metadata = self._load_metadata()
@@ -134,6 +132,78 @@ class ExampleStore:
 
         self._stage_cache[stage] = examples
         logger.info(f"Loaded {len(examples)} examples for stage '{stage}'")
+
+    def _load_stage_metadata(self, stage: str) -> Dict:
+        """Load metadata.json from a stage folder"""
+        if stage in self._stage_metadata_cache:
+            return self._stage_metadata_cache[stage]
+
+        stage_dir = self.stages_path / stage
+        metadata_path = stage_dir / "metadata.json"
+
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r") as f:
+                    metadata = json.load(f)
+                    self._stage_metadata_cache[stage] = metadata
+                    return metadata
+            except Exception as e:
+                logger.warning(f"Failed to load stage metadata for {stage}: {e}")
+
+        self._stage_metadata_cache[stage] = {}
+        return {}
+
+    def get_stage_examples_with_descriptions(
+        self,
+        stage: str,
+        max_examples: int = 3,
+    ) -> List[Dict[str, str]]:
+        """
+        Get example images with their descriptions for a developmental stage.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name (early, comma, pretzel, etc.)
+        max_examples : int
+            Maximum number of examples to return
+
+        Returns
+        -------
+        List[Dict[str, str]]
+            List of dicts with 'image' (base64) and 'description' keys
+        """
+        # Load examples
+        if stage not in self._stage_cache:
+            self._load_stage_examples(stage)
+
+        examples_b64 = self._stage_cache.get(stage, [])[:max_examples]
+
+        # Load metadata
+        metadata = self._load_stage_metadata(stage)
+        example_descriptions = metadata.get("examples", {})
+
+        # Build result with descriptions
+        result = []
+        stage_dir = self.stages_path / stage
+
+        # Get sorted filenames to match with b64 images
+        image_files = sorted(stage_dir.glob("example_*.jpg"))[:max_examples]
+
+        for i, (b64, img_path) in enumerate(zip(examples_b64, image_files)):
+            description = example_descriptions.get(img_path.name, "")
+            result.append({
+                "image": b64,
+                "description": description,
+                "filename": img_path.name,
+            })
+
+        return result
+
+    def get_stage_description(self, stage: str) -> str:
+        """Get the overall description for a stage from metadata"""
+        metadata = self._load_stage_metadata(stage)
+        return metadata.get("description", "")
 
     def get_anomaly_examples(
         self,

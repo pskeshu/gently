@@ -1,0 +1,12 @@
+{
+  "stage": "early",
+  "description": "Gastrulation through early morphogenesis - oval shape, grainy cellular texture, no clear C-curve yet",
+  "examples": {
+    "example_001.jpg": "Oval embryo with visible individual cell nuclei as bright spots, relatively uniform distribution, no bending or curvature",
+    "example_002.jpg": "Slightly elongated oval, grainy cellular texture, beginning of asymmetric mass distribution on one side",
+    "example_003.jpg": "TRANSITIONAL early-to-comma: elongated with slight curvature beginning to form, borderline classification",
+    "example_004.jpg": "Oval shape with visible cells, slight asymmetry with one side denser/brighter, still compact",
+    "example_005.jpg": "Elongated oval with relatively uniform texture, slight elongation but no clear curve yet",
+    "example_006.jpg": "TRANSITIONAL early-to-comma: visible curvature and bulge forming, elongated beyond typical early stage"
+  }
+}

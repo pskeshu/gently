@@ -1,0 +1,10 @@
+{
+  "stage": "hatching",
+  "description": "Shell breached with worm actively pushing out - part inside, part outside shell",
+  "examples": {
+    "example_001.jpg": "Active hatching - shell disrupted at bottom, worm body extending beyond shell boundary, irregular outline indicates breach",
+    "example_002.jpg": "Clear partial emergence - irregular shape with worm portion extending beyond original shell boundary",
+    "example_003.jpg": "TRANSITIONAL pretzel-to-hatching: coiled embryo with irregular shell shape, may be early breach starting",
+    "example_004.jpg": "EXCELLENT hatching example - clear L-shaped emergence with elongated worm body extending upward, coiled portion still in shell"
+  }
+}

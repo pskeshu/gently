@@ -1,0 +1,12 @@
+{
+  "stage": "comma",
+  "description": "Clear C-curve or comma shape with body axis established, head/tail distinguishable",
+  "examples": {
+    "example_001.jpg": "Clear C-curve with pronounced ventral indent, body elongated and curved, distinct head/tail ends",
+    "example_002.jpg": "Very clear comma shape with pronounced bend, two distinct lobes visible in side view, excellent example",
+    "example_003.jpg": "Elongated with moderate curvature, less pronounced C-shape than others, early comma",
+    "example_004.jpg": "Clear C-shaped embryo with visible body axis bending, head region distinguishable",
+    "example_005.jpg": "Pronounced comma curve with clear ventral notch, elongated body with distinct curvature",
+    "example_006.jpg": "TRANSITIONAL comma-to-1.5fold: clear curvature but more elongated, starting to show folding characteristics"
+  }
+}

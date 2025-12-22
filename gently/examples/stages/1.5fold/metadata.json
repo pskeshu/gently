@@ -1,0 +1,12 @@
+{
+  "stage": "1.5fold",
+  "description": "Body starting to fold back on itself, embryo ~1.5x shell length, partial fold visible",
+  "examples": {
+    "example_001.jpg": "TRANSITIONAL comma-to-1.5fold: elongated oval with internal differentiation, curved but not yet showing clear fold",
+    "example_002.jpg": "Elongated with hook-like shape forming at one end, body starting to curve back on itself",
+    "example_003.jpg": "Clear folding visible - two distinct body regions overlapping, body elongated and doubling back",
+    "example_004.jpg": "Two distinct lobes visible in top view, body clearly folding, partial overlap of segments",
+    "example_005.jpg": "Elongated embryo with internal folding visible, kidney-bean shape with fold forming",
+    "example_006.jpg": "TRANSITIONAL 1.5fold-to-pretzel: elongated with fold, side view shows curved stacked structure"
+  }
+}

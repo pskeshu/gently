@@ -6,6 +6,11 @@ Simple VLM-based perception: show reference examples, show current image, ask wh
 
 from .session import (
     Observation,
+    ObservedFeatures,
+    ContrastiveReasoning,
+    ReasoningStep,
+    ReasoningTrace,
+    TemporalAnalysis,
     PerceptionSession,
     PerceptionResult,
 )
@@ -15,6 +20,11 @@ from .manager import PerceptionManager, process_volume
 
 __all__ = [
     "Observation",
+    "ObservedFeatures",
+    "ContrastiveReasoning",
+    "ReasoningStep",
+    "ReasoningTrace",
+    "TemporalAnalysis",
     "PerceptionSession",
     "PerceptionResult",
     "ExampleStore",

@@ -127,6 +127,8 @@ class PerceptionManager:
             is_hatching=result.is_hatching,
             confidence=result.confidence,
             reasoning=result.reasoning,
+            is_transitional=result.is_transitional,
+            transition_between=result.transition_between,
         )
 
         # Handle hatching events

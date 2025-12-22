@@ -431,6 +431,10 @@ class TimelapseStateTracker:
             for embryo in self.embryos.values():
                 embryo["is_complete"] = True
 
+        elif event_type == "ACQUISITION_STOPPED":
+            self.status = "STOPPED"
+            # Don't mark embryos as complete - they were stopped, not finished
+
         elif event_type == "DETECTOR_EVALUATED":
             # All detector/perception evaluations (with reasoning) - populates reasoning panel
             eid = data.get("embryo_id")
