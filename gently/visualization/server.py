@@ -78,6 +78,15 @@ VOLUME_3D_TYPES = {
 
 
 @dataclass
+class ClientInfo:
+    """Information about a connected WebSocket client for presence tracking"""
+    client_id: str
+    name: str
+    color: str  # Hex color for avatar background
+    connected_at: str
+
+
+@dataclass
 class Volume3DData:
     """Container for 3D volume data with segmentation overlay"""
     uid: str
@@ -544,22 +553,108 @@ class TimelapseStateTracker:
 
 
 class ConnectionManager:
-    """Manages WebSocket connections for broadcasting updates"""
+    """Manages WebSocket connections for broadcasting updates with presence tracking"""
+
+    # Colors for avatar backgrounds (pleasant, distinct colors)
+    AVATAR_COLORS = [
+        '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8',
+        '#ff922b', '#20c997', '#748ffc', '#f06595', '#69db7c',
+        '#ffa94d', '#9775fa', '#38d9a9', '#e599f7', '#74c0fc'
+    ]
 
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: Dict[WebSocket, ClientInfo] = {}
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket):
+    def _generate_color(self, client_id: str) -> str:
+        """Generate consistent color from client_id"""
+        hash_val = sum(ord(c) for c in client_id)
+        return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
+
+    async def connect(self, websocket: WebSocket, client_id: str = None, name: str = None):
         await websocket.accept()
+
+        # Generate defaults if not provided
+        if not client_id:
+            import uuid
+            client_id = str(uuid.uuid4())[:8]
+        if not name:
+            name = f"Anonymous {client_id[:4]}"
+
+        client_info = ClientInfo(
+            client_id=client_id,
+            name=name,
+            color=self._generate_color(client_id),
+            connected_at=datetime.now().isoformat()
+        )
+
         async with self._lock:
-            self.active_connections.add(websocket)
-        logger.info(f"WebSocket connected. Total: {len(self.active_connections)}")
+            self.active_connections[websocket] = client_info
+        logger.info(f"WebSocket connected: {name} ({client_id}). Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to all clients
+        await self.broadcast_presence()
 
     async def disconnect(self, websocket: WebSocket):
         async with self._lock:
-            self.active_connections.discard(websocket)
-        logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+            client_info = self.active_connections.pop(websocket, None)
+        if client_info:
+            logger.info(f"WebSocket disconnected: {client_info.name}. Total: {len(self.active_connections)}")
+        else:
+            logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to remaining clients
+        await self.broadcast_presence()
+
+    async def update_client_name(self, websocket: WebSocket, name: str):
+        """Update a client's display name"""
+        async with self._lock:
+            if websocket in self.active_connections:
+                old_info = self.active_connections[websocket]
+                self.active_connections[websocket] = ClientInfo(
+                    client_id=old_info.client_id,
+                    name=name,
+                    color=old_info.color,
+                    connected_at=old_info.connected_at
+                )
+        await self.broadcast_presence()
+
+    def get_client_info(self, websocket: WebSocket) -> Optional[ClientInfo]:
+        """Get client info for a websocket"""
+        return self.active_connections.get(websocket)
+
+    async def broadcast_presence(self):
+        """Broadcast current presence list to all clients"""
+        if not self.active_connections:
+            return
+
+        # Deduplicate by client_id (same user in multiple tabs = one avatar)
+        async with self._lock:
+            seen_clients = {}
+            for ws, info in self.active_connections.items():
+                # Keep the most recent entry for each client_id
+                seen_clients[info.client_id] = {
+                    'client_id': info.client_id,
+                    'name': info.name,
+                    'color': info.color
+                }
+            clients_list = list(seen_clients.values())
+
+        # Send personalized presence to each client (with is_you flag)
+        for ws, info in list(self.active_connections.items()):
+            try:
+                personalized = []
+                for client in clients_list:
+                    personalized.append({
+                        **client,
+                        'is_you': client['client_id'] == info.client_id
+                    })
+                await ws.send_json({
+                    'type': 'presence',
+                    'clients': personalized
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send presence to client: {e}")
 
     async def broadcast(self, message: Dict):
         """Broadcast message to all connected clients"""
@@ -568,16 +663,17 @@ class ConnectionManager:
 
         message_json = json.dumps(message)
         async with self._lock:
-            disconnected = set()
-            for connection in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections.keys():
                 try:
                     await connection.send_text(message_json)
                 except Exception as e:
                     logger.warning(f"Failed to send to websocket: {e}")
-                    disconnected.add(connection)
+                    disconnected.append(connection)
 
             # Remove disconnected clients
-            self.active_connections -= disconnected
+            for conn in disconnected:
+                self.active_connections.pop(conn, None)
 
     async def send_image(self, image_data: ImageData):
         """Send image data to all connected clients"""
@@ -1035,6 +1131,7 @@ class VisualizationServer:
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint for real-time updates"""
+            # Connect with temporary defaults - client will send 'join' message with real info
             await self.manager.connect(websocket)
             try:
                 # Send current status on connect
@@ -1128,6 +1225,34 @@ class VisualizationServer:
 
             elif msg_type == "pong":
                 pass  # Client responding to ping
+
+            # Presence-related messages
+            elif msg_type == "join":
+                # Client joining with identity info
+                client_id = data.get("client_id")
+                name = data.get("name")
+                if client_id:
+                    # Update the client's info
+                    async with self.manager._lock:
+                        if websocket in self.manager.active_connections:
+                            old_info = self.manager.active_connections[websocket]
+                            self.manager.active_connections[websocket] = ClientInfo(
+                                client_id=client_id,
+                                name=name or old_info.name,
+                                color=self.manager._generate_color(client_id),
+                                connected_at=old_info.connected_at
+                            )
+                    await self.manager.broadcast_presence()
+
+            elif msg_type == "set_name":
+                # Client updating their display name
+                name = data.get("name")
+                if name:
+                    await self.manager.update_client_name(websocket, name)
+
+            elif msg_type == "get_presence":
+                # Client requesting current presence list
+                await self.manager.broadcast_presence()
 
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON received: {message[:100]}")

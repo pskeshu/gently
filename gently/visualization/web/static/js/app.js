@@ -154,6 +154,160 @@ const Tooltips = {
 };
 
 /**
+ * Presence Manager - Collaborative presence like Google Docs
+ */
+const PresenceManager = {
+    clientId: null,
+    name: null,
+    clients: [],
+
+    // Animal names for anonymous users
+    ANIMALS: [
+        'Koala', 'Penguin', 'Fox', 'Owl', 'Panda', 'Tiger', 'Dolphin',
+        'Eagle', 'Bear', 'Wolf', 'Rabbit', 'Deer', 'Otter', 'Falcon',
+        'Hedgehog', 'Badger', 'Lynx', 'Seal', 'Raven', 'Crane', 'Gecko',
+        'Meerkat', 'Lemur', 'Toucan', 'Sloth', 'Jaguar', 'Pelican', 'Moose'
+    ],
+
+    init() {
+        // Load or generate client ID
+        this.clientId = localStorage.getItem('gently-client-id');
+        if (!this.clientId) {
+            this.clientId = this.generateId();
+            localStorage.setItem('gently-client-id', this.clientId);
+        }
+
+        // Load saved name or generate anonymous name
+        this.name = localStorage.getItem('gently-user-name');
+        if (!this.name) {
+            this.name = this.getAnonymousName();
+        }
+    },
+
+    generateId() {
+        return 'xxxx-xxxx'.replace(/x/g, () =>
+            Math.floor(Math.random() * 16).toString(16)
+        );
+    },
+
+    getAnonymousName() {
+        // Use client ID to pick a consistent animal
+        const hash = this.clientId.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const animal = this.ANIMALS[hash % this.ANIMALS.length];
+        return `Anonymous ${animal}`;
+    },
+
+    sendJoin() {
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+                type: 'join',
+                client_id: this.clientId,
+                name: this.name
+            }));
+        }
+    },
+
+    handlePresenceUpdate(clients) {
+        this.clients = clients;
+        this.render();
+    },
+
+    render() {
+        const container = document.getElementById('presence-container');
+        if (!container) return;
+
+        // Clear existing
+        container.innerHTML = '';
+
+        // Sort: put "you" first
+        const sorted = [...this.clients].sort((a, b) => {
+            if (a.is_you) return -1;
+            if (b.is_you) return 1;
+            return 0;
+        });
+
+        // Render avatars (max 5 visible, then +N)
+        const maxVisible = 5;
+        const visible = sorted.slice(0, maxVisible);
+        const overflow = sorted.length - maxVisible;
+
+        visible.forEach(client => {
+            const avatar = document.createElement('div');
+            avatar.className = 'presence-avatar' + (client.is_you ? ' is-you' : '');
+            avatar.style.backgroundColor = client.color;
+            avatar.textContent = this.getInitials(client.name);
+            avatar.setAttribute('data-tooltip', client.is_you ? `${client.name} (you)` : client.name);
+
+            // Click on your own avatar to change name
+            if (client.is_you) {
+                avatar.style.cursor = 'pointer';
+                avatar.addEventListener('click', () => this.showNamePrompt());
+            }
+
+            container.appendChild(avatar);
+        });
+
+        // Show overflow count
+        if (overflow > 0) {
+            const more = document.createElement('div');
+            more.className = 'presence-overflow';
+            more.textContent = `+${overflow}`;
+            more.setAttribute('data-tooltip', `${overflow} more viewer${overflow > 1 ? 's' : ''}`);
+            container.appendChild(more);
+        }
+    },
+
+    getInitials(name) {
+        if (!name) return '?';
+        // For "Anonymous X", use animal initial
+        if (name.startsWith('Anonymous ')) {
+            return name.split(' ')[1]?.[0] || 'A';
+        }
+        // Otherwise use first letter of each word (max 2)
+        const words = name.trim().split(/\s+/);
+        if (words.length === 1) {
+            return words[0][0].toUpperCase();
+        }
+        return (words[0][0] + words[1][0]).toUpperCase();
+    },
+
+    setName(name) {
+        if (!name || name.trim() === '') return;
+
+        this.name = name.trim();
+        localStorage.setItem('gently-user-name', this.name);
+
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+            state.ws.send(JSON.stringify({
+                type: 'set_name',
+                name: this.name
+            }));
+        }
+    },
+
+    showNamePrompt() {
+        const current = this.name;
+        const isAnonymous = current.startsWith('Anonymous ');
+
+        const newName = prompt(
+            'Enter your display name (or leave blank for anonymous):',
+            isAnonymous ? '' : current
+        );
+
+        if (newName === null) return; // Cancelled
+
+        if (newName.trim() === '') {
+            // Reset to anonymous
+            localStorage.removeItem('gently-user-name');
+            this.name = this.getAnonymousName();
+            this.setName(this.name);
+        } else {
+            this.setName(newName);
+        }
+    }
+};
+
+/**
  * Theme Manager - Dark/Light mode toggle
  */
 const ThemeManager = {
@@ -296,6 +450,9 @@ const KeyboardShortcuts = {
 
 // Event listeners
 document.addEventListener('DOMContentLoaded', () => {
+    // Initialize presence manager (before WebSocket so ID is ready)
+    PresenceManager.init();
+
     // Initialize tooltip system
     Tooltips.init();
 
