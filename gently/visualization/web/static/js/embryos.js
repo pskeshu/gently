@@ -203,6 +203,20 @@ const EmbryosManager = {
     // Server State Reconciliation
     // ==========================================
 
+    // Update the session ID link in the header
+    updateSessionIdLink() {
+        const link = document.getElementById('session-id-link');
+        if (!link) return;
+
+        if (this.currentSessionId) {
+            link.textContent = this.currentSessionId;
+            link.href = `/review?session=${this.currentSessionId}`;
+        } else {
+            link.textContent = '';
+            link.href = '/review';
+        }
+    },
+
     reconcileWithServerState(serverState) {
         const serverSessionId = serverState.session_id;
         // Clear state if: server has new session ID, OR server is IDLE/fresh and client has stale data
@@ -218,6 +232,7 @@ const EmbryosManager = {
 
         // Update session ID
         this.currentSessionId = serverSessionId;
+        this.updateSessionIdLink();
 
         // Server state is authoritative - replace everything
         this.state.status = serverState.status || 'IDLE';

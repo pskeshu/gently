@@ -372,10 +372,17 @@ class TimelapseStateTracker:
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
-        if event_type == "ACQUISITION_STARTED":
-            # Generate new session ID for this experiment
-            import uuid
-            self.session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        if event_type == "SESSION_STARTED":
+            # Capture session ID from copilot
+            self.session_id = data.get("session_id")
+
+        elif event_type == "SESSION_RESTORED":
+            # Capture session ID when copilot resumes a session
+            self.session_id = data.get("session_id")
+
+        elif event_type == "ACQUISITION_STARTED":
+            # Use session_id from prior SESSION_STARTED/SESSION_RESTORED event
+            # (session_id should already be set before acquisition starts)
             self.status = "RUNNING"
             self.started_at = datetime.now().isoformat()
             self.base_interval = data.get("interval_seconds", 120)
@@ -713,6 +720,7 @@ class VisualizationServer:
         port: int = 8080,
         data_store=None,
         event_bus=None,
+        sessions_dir: str = "D:/Gently/sessions",
     ):
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -724,6 +732,7 @@ class VisualizationServer:
         self.port = port
         self.data_store = data_store
         self.event_bus = event_bus
+        self.sessions_dir = Path(sessions_dir)
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -775,6 +784,49 @@ class VisualizationServer:
                 "index.html",
                 {"request": request}
             )
+
+        @self.app.get("/review", response_class=HTMLResponse)
+        async def review_page(request: Request):
+            """Serve the session review page"""
+            return self.templates.TemplateResponse(
+                "review.html",
+                {"request": request}
+            )
+
+        @self.app.get("/api/sessions")
+        async def list_sessions():
+            """List available sessions with metadata"""
+            sessions = []
+            if self.sessions_dir.exists():
+                for path in self.sessions_dir.glob("*.json"):
+                    try:
+                        with open(path) as f:
+                            data = json.load(f)
+                        sessions.append({
+                            'session_id': data.get('session_id', path.stem),
+                            'name': data.get('name', path.stem),
+                            'created_at': data.get('created_at', ''),
+                            'last_active': data.get('last_active', ''),
+                            'embryo_count': len(data.get('embryo_states', {})),
+                            'description': data.get('description', '')
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to read session {path}: {e}")
+            # Sort by created_at descending (newest first)
+            sessions.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            return {'sessions': sessions}
+
+        @self.app.get("/api/sessions/{session_id}")
+        async def get_session(session_id: str):
+            """Get full session state for review"""
+            path = self.sessions_dir / f"{session_id}.json"
+            if not path.exists():
+                raise HTTPException(status_code=404, detail="Session not found")
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to load session: {e}")
 
         @self.app.get("/api/status")
         async def get_status():
@@ -1248,6 +1300,10 @@ class VisualizationServer:
     def _subscribe_to_events(self):
         """Subscribe to EventBus for automatic updates - broadcasts ALL events"""
 
+        # Initialize timelapse tracker from event history
+        # This catches SESSION_STARTED/SESSION_RESTORED that happened before we subscribed
+        self._init_from_event_history()
+
         async def on_event_async(event):
             """Async handler for all events - broadcasts to WebSocket clients"""
             event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
@@ -1263,10 +1319,36 @@ class VisualizationServer:
                 event_id=event.event_id
             )
 
+            # For session events, also broadcast updated timelapse_state so clients can sync
+            if event_type_str in ("SESSION_STARTED", "SESSION_RESTORED"):
+                await self.manager.broadcast({
+                    "type": "timelapse_state",
+                    "data": self.timelapse_tracker.to_dict()
+                })
+
         # Subscribe to ALL events using wildcard with async handler
         self.event_bus.subscribe_async("*", on_event_async)
 
         logger.info("Subscribed to ALL event types via wildcard")
+
+    def _init_from_event_history(self):
+        """Initialize timelapse tracker state from event bus history"""
+        if not self.event_bus:
+            return
+
+        try:
+            # Get recent history and replay relevant events to build current state
+            history = self.event_bus.get_history(limit=500)
+
+            # Process events in chronological order (history is newest-first)
+            for event in reversed(history):
+                event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
+                self.timelapse_tracker.handle_event(event_type_str, event.data)
+
+            if self.timelapse_tracker.session_id:
+                logger.info(f"Initialized timelapse state from history: session={self.timelapse_tracker.session_id}, status={self.timelapse_tracker.status}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize from event history: {e}")
 
     def _array_to_image_data(
         self,

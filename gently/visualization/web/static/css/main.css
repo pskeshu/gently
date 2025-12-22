@@ -113,6 +113,26 @@ body {
     gap: 1.5rem;
 }
 
+.session-id-link {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 4px 10px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.session-id-link:hover {
+    color: var(--accent);
+    background: var(--bg-dark);
+}
+
+.session-id-link:empty {
+    display: none;
+}
+
 .header h1 {
     color: var(--accent);
     font-size: 1.25rem;
