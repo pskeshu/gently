@@ -169,10 +169,9 @@ class EmbryoImageCache:
 
 
 class ImageStore:
-    """Organized storage for images by type and embryo"""
+    """Organized storage for images by type and embryo (unlimited)"""
 
-    def __init__(self, max_per_category: int = 50):
-        self.max_per_category = max_per_category
+    def __init__(self):
         self._embryo_caches: Dict[str, EmbryoImageCache] = {}
         self._global_images: List[ImageData] = []  # Images without embryo_id
         self._calibration_images: List[ImageData] = []  # Global calibration
@@ -194,32 +193,22 @@ class ImageStore:
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.calibration.append(image)
-                self._trim_list(cache.calibration)
             else:
                 self._calibration_images.append(image)
-                self._trim_list(self._calibration_images)
 
         elif data_type in VOLUME_TYPES:
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.volumes.append(image)
-                self._trim_list(cache.volumes)
             else:
                 self._volume_images.append(image)
-                self._trim_list(self._volume_images)
         else:
             # General snapshot/other
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.snapshots.append(image)
-                self._trim_list(cache.snapshots)
             else:
                 self._global_images.append(image)
-                self._trim_list(self._global_images)
-
-    def _trim_list(self, lst: List):
-        while len(lst) > self.max_per_category:
-            lst.pop(0)
 
     def get_all_calibration(self, embryo_id: Optional[str] = None) -> List[ImageData]:
         """Get calibration images, optionally filtered by embryo"""
@@ -739,9 +728,8 @@ class VisualizationServer:
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
 
-        # Organized image storage
-        # Use larger limit to keep more timelapse history in memory
-        self.store = ImageStore(max_per_category=500)
+        # Organized image storage (unlimited)
+        self.store = ImageStore()
 
         # Timelapse state tracker for client sync
         self.timelapse_tracker = TimelapseStateTracker()
