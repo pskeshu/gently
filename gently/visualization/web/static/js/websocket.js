@@ -13,6 +13,11 @@ function connectWebSocket() {
         document.getElementById('status-dot').classList.add('connected');
         logEvent('system', 'Connected to server');
 
+        // Send join message with presence info
+        if (typeof PresenceManager !== 'undefined') {
+            PresenceManager.sendJoin();
+        }
+
         // Request initial data
         state.ws.send(JSON.stringify({type: 'get_embryos'}));
         state.ws.send(JSON.stringify({type: 'get_snapshots'}));
@@ -131,5 +136,10 @@ function handleMessage(msg) {
         }
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
+    } else if (msg.type === 'presence') {
+        // Update presence display
+        if (typeof PresenceManager !== 'undefined') {
+            PresenceManager.handlePresenceUpdate(msg.clients);
+        }
     }
 }

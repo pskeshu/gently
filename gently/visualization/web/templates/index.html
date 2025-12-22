@@ -11,12 +11,17 @@
     <div class="header">
         <div class="header-left">
             <h1>Gently Microscopy</h1>
+            <a href="/review" class="session-id-link" id="session-id-link" title="View in Session Review"></a>
         </div>
         <div class="header-right">
             <!-- Detection alert -->
             <div class="header-alert hidden" id="header-alert" onclick="ExperimentStrip.handleAlertClick()">
                 <span class="alert-badge" id="header-alert-badge">!</span>
                 <span class="alert-text" id="header-alert-text">New detection</span>
+            </div>
+            <!-- Presence indicators -->
+            <div class="presence-container" id="presence-container">
+                <!-- Avatars rendered by PresenceManager -->
             </div>
             <!-- Theme toggle -->
             <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme" data-tooltip="Toggle dark/light theme">
@@ -56,18 +61,25 @@
             Live View
         </div>
         <div class="tab" data-tab="calibration">
-            Setup
+            Calibration
             <span class="tab-badge" id="calibration-count">0</span>
         </div>
     </div>
 
     <!-- Main Tab (Live View) -->
     <div id="main-content" class="tab-content">
-        <div class="main">
-            <div class="viewer">
+        <div class="live-view">
+            <!-- Main viewer area -->
+            <div class="live-viewer">
                 <div class="viewer-header">
-                    <span class="image-title" id="image-info">No image selected</span>
-                    <span class="image-title" id="image-time"></span>
+                    <div class="viewer-info" id="viewer-info" style="display: none;">
+                        <span class="info-embryo" id="info-embryo"></span>
+                        <span class="info-separator">·</span>
+                        <span class="info-type" id="info-type"></span>
+                        <span class="info-separator">·</span>
+                        <span class="info-uid" id="info-uid"></span>
+                    </div>
+                    <span class="info-time" id="image-time"></span>
                 </div>
                 <div class="viewer-with-slider">
                     <div class="image-container" id="main-image-container">
@@ -97,44 +109,30 @@
                     </div>
                 </div>
             </div>
-
-            <div class="sidebar">
-                <div class="panel">
-                    <div class="panel-title">Image Info</div>
-                    <div class="info-grid">
-                        <span class="info-label">Embryo</span>
-                        <span class="info-value accent" id="info-embryo">-</span>
-                        <span class="info-label">Type</span>
-                        <span class="info-value" id="info-type">-</span>
-                        <span class="info-label">Shape</span>
-                        <span class="info-value" id="info-shape">-</span>
-                        <span class="info-label">UID</span>
-                        <span class="info-value" id="info-uid">-</span>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">Recent Images</div>
-                    <div id="recent-list" style="max-height: 200px; overflow-y: auto;"></div>
-                </div>
-
-                <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                    <div class="panel-title">Event Log</div>
-                    <div class="event-log" id="event-log"></div>
-                </div>
+            <!-- Bottom strip: Recent images -->
+            <div class="recent-strip" id="recent-strip">
+                <div class="recent-strip-inner" id="recent-list"></div>
             </div>
         </div>
     </div>
 
     <!-- Calibration Tab -->
     <div id="calibration-content" class="tab-content">
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; flex-shrink: 0;">3D Segmentations</div>
-        <div class="gallery" id="volumes3d-gallery" style="max-height: 200px; min-height: 80px; flex-shrink: 0;">
-            <div class="empty-state">No 3D segmentations yet</div>
-        </div>
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; border-top: 1px solid var(--border); flex-shrink: 0;">Calibration Images</div>
-        <div class="gallery" id="calibration-gallery">
-            <div class="empty-state">No calibration images yet</div>
+        <div class="calibration-container">
+            <!-- Left sidebar: Embryo list -->
+            <div class="calibration-sidebar" id="calibration-sidebar">
+                <div class="calibration-sidebar-header">Embryos</div>
+                <div class="calibration-embryo-cards" id="calibration-embryo-cards">
+                    <div class="empty-state-small">No calibration images yet</div>
+                </div>
+            </div>
+            <!-- Right panel: Images for selected embryo -->
+            <div class="calibration-panel" id="calibration-panel">
+                <div class="calibration-empty">
+                    <div class="calibration-empty-icon">&#x1F4F7;</div>
+                    <div class="calibration-empty-text">Select an embryo to view calibration images</div>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -284,6 +282,14 @@
                     <span class="lb-info-item"><span class="info-label">Shape</span> <span id="lb-info-shape">-</span></span>
                     <span class="lb-info-item"><span class="info-label">Time</span> <span id="lb-info-time">-</span></span>
                 </div>
+                <button class="lightbox-download" id="lightbox-download" onclick="Lightbox.downloadCurrent()" title="Download raw TIF (D)">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="7 10 12 15 17 10"></polyline>
+                        <line x1="12" y1="15" x2="12" y2="3"></line>
+                    </svg>
+                    Download TIF
+                </button>
             </div>
             <div class="lightbox-thumbnail-strip" id="lightbox-thumbnails">
                 <!-- Thumbnails rendered dynamically -->

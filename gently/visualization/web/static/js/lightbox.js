@@ -98,6 +98,11 @@ const Lightbox = {
                     e.preventDefault();
                     this.handleZoomDelta(-0.25);
                     break;
+                case 'd':
+                case 'D':
+                    e.preventDefault();
+                    this.downloadCurrent();
+                    break;
             }
         });
 
@@ -384,6 +389,25 @@ const Lightbox = {
             this.els.image.style.transform =
                 `translate(${this.zoom.offsetX}px, ${this.zoom.offsetY}px) scale(${this.zoom.scale})`;
         }
+    },
+
+    downloadCurrent() {
+        // Get UID of currently displayed image
+        const currentImg = this.imageList[this.currentIndex];
+        const uid = currentImg?.uid;
+
+        if (!uid) {
+            console.warn('Lightbox: No UID available for current image');
+            return;
+        }
+
+        // Trigger download
+        const link = document.createElement('a');
+        link.href = `/api/download/${uid}`;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     }
 };
 
@@ -577,6 +601,9 @@ const TimepointPlayer = {
             </div>
             <div class="controls-right">
                 <span class="frame-counter" id="frame-counter">T0 / 0</span>
+                <button class="ctrl-btn ctrl-download" id="ctrl-download" title="Download current frame TIF (D)">
+                    <span class="ctrl-icon">⬇</span>
+                </button>
             </div>
         `;
         container.appendChild(controls);
@@ -626,6 +653,9 @@ const TimepointPlayer = {
         document.getElementById('context-panel-close')?.addEventListener('click', () => {
             document.getElementById('video-context-panel')?.classList.add('collapsed');
         });
+
+        // Download current frame
+        document.getElementById('ctrl-download')?.addEventListener('click', () => this.downloadCurrentFrame());
     },
 
     bindVideoKeys() {
@@ -1299,6 +1329,23 @@ const TimepointPlayer = {
         if (this._videoKeyHandler) {
             document.removeEventListener('keydown', this._videoKeyHandler);
         }
+    },
+
+    // Download current frame as TIF
+    downloadCurrentFrame() {
+        const frame = this.sequence[this.currentIndex];
+        if (!frame || !frame.uid) {
+            console.warn('TimepointPlayer: No UID available for current frame');
+            return;
+        }
+
+        // Trigger download
+        const link = document.createElement('a');
+        link.href = `/api/download/${frame.uid}`;
+        link.download = '';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     },
 
     // Convenience method for playing all timepoints of an embryo

@@ -203,6 +203,20 @@ const EmbryosManager = {
     // Server State Reconciliation
     // ==========================================
 
+    // Update the session ID link in the header
+    updateSessionIdLink() {
+        const link = document.getElementById('session-id-link');
+        if (!link) return;
+
+        if (this.currentSessionId) {
+            link.textContent = this.currentSessionId;
+            link.href = `/review?session=${this.currentSessionId}`;
+        } else {
+            link.textContent = '';
+            link.href = '/review';
+        }
+    },
+
     reconcileWithServerState(serverState) {
         const serverSessionId = serverState.session_id;
         // Clear state if: server has new session ID, OR server is IDLE/fresh and client has stale data
@@ -218,6 +232,7 @@ const EmbryosManager = {
 
         // Update session ID
         this.currentSessionId = serverSessionId;
+        this.updateSessionIdLink();
 
         // Server state is authoritative - replace everything
         this.state.status = serverState.status || 'IDLE';
@@ -1715,6 +1730,7 @@ const EmbryosManager = {
             </div>
             <div class="detail-actions">
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(-1)">&#x2190; Previous</button>
+                ${imageUid ? `<button class="detail-download" onclick="EmbryosManager.downloadTif('${imageUid}')" title="Download raw TIF">&#x2B73; Download TIF</button>` : ''}
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(1)">Next &#x2192;</button>
             </div>
         `;
@@ -1787,6 +1803,21 @@ const EmbryosManager = {
             const newItem = reasoning[newIdx];
             this.openDetailPanel(newItem.detector_name, newItem.timepoint);
         }
+    },
+
+    // Download raw TIF file
+    downloadTif(uid) {
+        if (!uid) {
+            console.warn('No UID available for download');
+            return;
+        }
+        // Trigger download via hidden link
+        const link = document.createElement('a');
+        link.href = `/api/download/${uid}`;
+        link.download = ''; // Let server set filename via Content-Disposition
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     },
 
     // Get icon for detector type
@@ -2182,8 +2213,8 @@ const EmbryosManager = {
             'no-embryos': {
                 icon: '&#x1F52C;',  // Microscope
                 title: 'No embryos yet',
-                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Setup tab.',
-                action: { label: 'Go to Setup', tab: 'calibration' }
+                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Calibration tab.',
+                action: { label: 'Go to Calibration', tab: 'calibration' }
             },
             'no-detections': {
                 icon: '&#x1F441;',  // Eye
@@ -2195,7 +2226,7 @@ const EmbryosManager = {
                 icon: '&#x23F8;',  // Pause
                 title: 'Experiment not running',
                 message: 'No active timelapse. Configure and start an experiment to begin automated embryo monitoring.',
-                action: { label: 'Setup Experiment', tab: 'calibration' }
+                action: { label: 'Go to Calibration', tab: 'calibration' }
             },
             'waiting-first': {
                 icon: '&#x23F3;',  // Hourglass

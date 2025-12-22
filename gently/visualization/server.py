@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Optional imports
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-    from fastapi.responses import HTMLResponse, JSONResponse, Response
+    from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     from fastapi.middleware.cors import CORSMiddleware
@@ -75,6 +75,15 @@ ANALYSIS_TYPES = {
 VOLUME_3D_TYPES = {
     'segmentation_3d'
 }
+
+
+@dataclass
+class ClientInfo:
+    """Information about a connected WebSocket client for presence tracking"""
+    client_id: str
+    name: str
+    color: str  # Hex color for avatar background
+    connected_at: str
 
 
 @dataclass
@@ -160,10 +169,9 @@ class EmbryoImageCache:
 
 
 class ImageStore:
-    """Organized storage for images by type and embryo"""
+    """Organized storage for images by type and embryo (unlimited)"""
 
-    def __init__(self, max_per_category: int = 50):
-        self.max_per_category = max_per_category
+    def __init__(self):
         self._embryo_caches: Dict[str, EmbryoImageCache] = {}
         self._global_images: List[ImageData] = []  # Images without embryo_id
         self._calibration_images: List[ImageData] = []  # Global calibration
@@ -185,32 +193,22 @@ class ImageStore:
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.calibration.append(image)
-                self._trim_list(cache.calibration)
             else:
                 self._calibration_images.append(image)
-                self._trim_list(self._calibration_images)
 
         elif data_type in VOLUME_TYPES:
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.volumes.append(image)
-                self._trim_list(cache.volumes)
             else:
                 self._volume_images.append(image)
-                self._trim_list(self._volume_images)
         else:
             # General snapshot/other
             if embryo_id:
                 cache = self._get_embryo_cache(embryo_id)
                 cache.snapshots.append(image)
-                self._trim_list(cache.snapshots)
             else:
                 self._global_images.append(image)
-                self._trim_list(self._global_images)
-
-    def _trim_list(self, lst: List):
-        while len(lst) > self.max_per_category:
-            lst.pop(0)
 
     def get_all_calibration(self, embryo_id: Optional[str] = None) -> List[ImageData]:
         """Get calibration images, optionally filtered by embryo"""
@@ -374,10 +372,17 @@ class TimelapseStateTracker:
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
-        if event_type == "ACQUISITION_STARTED":
-            # Generate new session ID for this experiment
-            import uuid
-            self.session_id = f"exp_{datetime.now().strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}"
+        if event_type == "SESSION_STARTED":
+            # Capture session ID from copilot
+            self.session_id = data.get("session_id")
+
+        elif event_type == "SESSION_RESTORED":
+            # Capture session ID when copilot resumes a session
+            self.session_id = data.get("session_id")
+
+        elif event_type == "ACQUISITION_STARTED":
+            # Use session_id from prior SESSION_STARTED/SESSION_RESTORED event
+            # (session_id should already be set before acquisition starts)
             self.status = "RUNNING"
             self.started_at = datetime.now().isoformat()
             self.base_interval = data.get("interval_seconds", 120)
@@ -548,22 +553,108 @@ class TimelapseStateTracker:
 
 
 class ConnectionManager:
-    """Manages WebSocket connections for broadcasting updates"""
+    """Manages WebSocket connections for broadcasting updates with presence tracking"""
+
+    # Colors for avatar backgrounds (pleasant, distinct colors)
+    AVATAR_COLORS = [
+        '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8',
+        '#ff922b', '#20c997', '#748ffc', '#f06595', '#69db7c',
+        '#ffa94d', '#9775fa', '#38d9a9', '#e599f7', '#74c0fc'
+    ]
 
     def __init__(self):
-        self.active_connections: Set[WebSocket] = set()
+        self.active_connections: Dict[WebSocket, ClientInfo] = {}
         self._lock = asyncio.Lock()
 
-    async def connect(self, websocket: WebSocket):
+    def _generate_color(self, client_id: str) -> str:
+        """Generate consistent color from client_id"""
+        hash_val = sum(ord(c) for c in client_id)
+        return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
+
+    async def connect(self, websocket: WebSocket, client_id: str = None, name: str = None):
         await websocket.accept()
+
+        # Generate defaults if not provided
+        if not client_id:
+            import uuid
+            client_id = str(uuid.uuid4())[:8]
+        if not name:
+            name = f"Anonymous {client_id[:4]}"
+
+        client_info = ClientInfo(
+            client_id=client_id,
+            name=name,
+            color=self._generate_color(client_id),
+            connected_at=datetime.now().isoformat()
+        )
+
         async with self._lock:
-            self.active_connections.add(websocket)
-        logger.info(f"WebSocket connected. Total: {len(self.active_connections)}")
+            self.active_connections[websocket] = client_info
+        logger.info(f"WebSocket connected: {name} ({client_id}). Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to all clients
+        await self.broadcast_presence()
 
     async def disconnect(self, websocket: WebSocket):
         async with self._lock:
-            self.active_connections.discard(websocket)
-        logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+            client_info = self.active_connections.pop(websocket, None)
+        if client_info:
+            logger.info(f"WebSocket disconnected: {client_info.name}. Total: {len(self.active_connections)}")
+        else:
+            logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to remaining clients
+        await self.broadcast_presence()
+
+    async def update_client_name(self, websocket: WebSocket, name: str):
+        """Update a client's display name"""
+        async with self._lock:
+            if websocket in self.active_connections:
+                old_info = self.active_connections[websocket]
+                self.active_connections[websocket] = ClientInfo(
+                    client_id=old_info.client_id,
+                    name=name,
+                    color=old_info.color,
+                    connected_at=old_info.connected_at
+                )
+        await self.broadcast_presence()
+
+    def get_client_info(self, websocket: WebSocket) -> Optional[ClientInfo]:
+        """Get client info for a websocket"""
+        return self.active_connections.get(websocket)
+
+    async def broadcast_presence(self):
+        """Broadcast current presence list to all clients"""
+        if not self.active_connections:
+            return
+
+        # Deduplicate by client_id (same user in multiple tabs = one avatar)
+        async with self._lock:
+            seen_clients = {}
+            for ws, info in self.active_connections.items():
+                # Keep the most recent entry for each client_id
+                seen_clients[info.client_id] = {
+                    'client_id': info.client_id,
+                    'name': info.name,
+                    'color': info.color
+                }
+            clients_list = list(seen_clients.values())
+
+        # Send personalized presence to each client (with is_you flag)
+        for ws, info in list(self.active_connections.items()):
+            try:
+                personalized = []
+                for client in clients_list:
+                    personalized.append({
+                        **client,
+                        'is_you': client['client_id'] == info.client_id
+                    })
+                await ws.send_json({
+                    'type': 'presence',
+                    'clients': personalized
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send presence to client: {e}")
 
     async def broadcast(self, message: Dict):
         """Broadcast message to all connected clients"""
@@ -572,16 +663,17 @@ class ConnectionManager:
 
         message_json = json.dumps(message)
         async with self._lock:
-            disconnected = set()
-            for connection in self.active_connections:
+            disconnected = []
+            for connection in self.active_connections.keys():
                 try:
                     await connection.send_text(message_json)
                 except Exception as e:
                     logger.warning(f"Failed to send to websocket: {e}")
-                    disconnected.add(connection)
+                    disconnected.append(connection)
 
             # Remove disconnected clients
-            self.active_connections -= disconnected
+            for conn in disconnected:
+                self.active_connections.pop(conn, None)
 
     async def send_image(self, image_data: ImageData):
         """Send image data to all connected clients"""
@@ -632,6 +724,7 @@ class VisualizationServer:
         port: int = 8080,
         data_store=None,
         event_bus=None,
+        sessions_dir: str = "D:/Gently/sessions",
     ):
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -643,13 +736,13 @@ class VisualizationServer:
         self.port = port
         self.data_store = data_store
         self.event_bus = event_bus
+        self.sessions_dir = Path(sessions_dir)
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
 
-        # Organized image storage
-        # Use larger limit to keep more timelapse history in memory
-        self.store = ImageStore(max_per_category=500)
+        # Organized image storage (unlimited)
+        self.store = ImageStore()
 
         # Timelapse state tracker for client sync
         self.timelapse_tracker = TimelapseStateTracker()
@@ -695,6 +788,49 @@ class VisualizationServer:
                 "index.html",
                 {"request": request}
             )
+
+        @self.app.get("/review", response_class=HTMLResponse)
+        async def review_page(request: Request):
+            """Serve the session review page"""
+            return self.templates.TemplateResponse(
+                "review.html",
+                {"request": request}
+            )
+
+        @self.app.get("/api/sessions")
+        async def list_sessions():
+            """List available sessions with metadata"""
+            sessions = []
+            if self.sessions_dir.exists():
+                for path in self.sessions_dir.glob("*.json"):
+                    try:
+                        with open(path) as f:
+                            data = json.load(f)
+                        sessions.append({
+                            'session_id': data.get('session_id', path.stem),
+                            'name': data.get('name', path.stem),
+                            'created_at': data.get('created_at', ''),
+                            'last_active': data.get('last_active', ''),
+                            'embryo_count': len(data.get('embryo_states', {})),
+                            'description': data.get('description', '')
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to read session {path}: {e}")
+            # Sort by created_at descending (newest first)
+            sessions.sort(key=lambda x: x.get('created_at', ''), reverse=True)
+            return {'sessions': sessions}
+
+        @self.app.get("/api/sessions/{session_id}")
+        async def get_session(session_id: str):
+            """Get full session state for review"""
+            path = self.sessions_dir / f"{session_id}.json"
+            if not path.exists():
+                raise HTTPException(status_code=404, detail="Session not found")
+            try:
+                with open(path) as f:
+                    return json.load(f)
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to load session: {e}")
 
         @self.app.get("/api/status")
         async def get_status():
@@ -921,6 +1057,47 @@ class VisualizationServer:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
 
+        @self.app.get("/api/download/{uid}")
+        async def download_tif(uid: str):
+            """Download raw TIF file with proper filename"""
+            if not self.data_store:
+                raise HTTPException(status_code=503, detail="DataStore not available")
+
+            # Get the data reference for metadata
+            ref = self.data_store.get_reference(uid)
+            if not ref:
+                raise HTTPException(status_code=404, detail=f"Data {uid} not found")
+
+            # Find the actual file
+            file_path = self.data_store._find_data_file(uid)
+            if not file_path or not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File for {uid} not found on disk")
+
+            # Build a proper filename from metadata
+            # Format: {embryo_id}_{data_type}_t{timepoint}_{YYYYMMDD_HHMMSS}.tif
+            embryo_id = ref.metadata.get('embryo_id', 'unknown')
+            timepoint = ref.metadata.get('timepoint', ref.metadata.get('t', ''))
+            timestamp = ref.timestamp
+
+            # Sanitize embryo_id for filename (remove special chars)
+            safe_embryo = "".join(c if c.isalnum() or c in '-_' else '_' for c in str(embryo_id))
+
+            # Build filename parts
+            parts = [safe_embryo, ref.data_type]
+            if timepoint:
+                parts.append(f"t{timepoint:03d}" if isinstance(timepoint, int) else f"t{timepoint}")
+            parts.append(timestamp.strftime("%Y%m%d_%H%M%S"))
+
+            # Use original extension
+            ext = file_path.suffix or '.tif'
+            filename = "_".join(parts) + ext
+
+            return FileResponse(
+                path=str(file_path),
+                filename=filename,
+                media_type="image/tiff"
+            )
+
         @self.app.get("/api/volumes3d")
         async def list_volumes_3d():
             """Get list of 3D volumes (without heavy data)"""
@@ -1039,6 +1216,7 @@ class VisualizationServer:
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             """WebSocket endpoint for real-time updates"""
+            # Connect with temporary defaults - client will send 'join' message with real info
             await self.manager.connect(websocket)
             try:
                 # Send current status on connect
@@ -1133,11 +1311,43 @@ class VisualizationServer:
             elif msg_type == "pong":
                 pass  # Client responding to ping
 
+            # Presence-related messages
+            elif msg_type == "join":
+                # Client joining with identity info
+                client_id = data.get("client_id")
+                name = data.get("name")
+                if client_id:
+                    # Update the client's info
+                    async with self.manager._lock:
+                        if websocket in self.manager.active_connections:
+                            old_info = self.manager.active_connections[websocket]
+                            self.manager.active_connections[websocket] = ClientInfo(
+                                client_id=client_id,
+                                name=name or old_info.name,
+                                color=self.manager._generate_color(client_id),
+                                connected_at=old_info.connected_at
+                            )
+                    await self.manager.broadcast_presence()
+
+            elif msg_type == "set_name":
+                # Client updating their display name
+                name = data.get("name")
+                if name:
+                    await self.manager.update_client_name(websocket, name)
+
+            elif msg_type == "get_presence":
+                # Client requesting current presence list
+                await self.manager.broadcast_presence()
+
         except json.JSONDecodeError:
             logger.warning(f"Invalid JSON received: {message[:100]}")
 
     def _subscribe_to_events(self):
         """Subscribe to EventBus for automatic updates - broadcasts ALL events"""
+
+        # Initialize timelapse tracker from event history
+        # This catches SESSION_STARTED/SESSION_RESTORED that happened before we subscribed
+        self._init_from_event_history()
 
         async def on_event_async(event):
             """Async handler for all events - broadcasts to WebSocket clients"""
@@ -1154,10 +1364,36 @@ class VisualizationServer:
                 event_id=event.event_id
             )
 
+            # For session events, also broadcast updated timelapse_state so clients can sync
+            if event_type_str in ("SESSION_STARTED", "SESSION_RESTORED"):
+                await self.manager.broadcast({
+                    "type": "timelapse_state",
+                    "data": self.timelapse_tracker.to_dict()
+                })
+
         # Subscribe to ALL events using wildcard with async handler
         self.event_bus.subscribe_async("*", on_event_async)
 
         logger.info("Subscribed to ALL event types via wildcard")
+
+    def _init_from_event_history(self):
+        """Initialize timelapse tracker state from event bus history"""
+        if not self.event_bus:
+            return
+
+        try:
+            # Get recent history and replay relevant events to build current state
+            history = self.event_bus.get_history(limit=500)
+
+            # Process events in chronological order (history is newest-first)
+            for event in reversed(history):
+                event_type_str = event.event_type.name if hasattr(event.event_type, 'name') else str(event.event_type)
+                self.timelapse_tracker.handle_event(event_type_str, event.data)
+
+            if self.timelapse_tracker.session_id:
+                logger.info(f"Initialized timelapse state from history: session={self.timelapse_tracker.session_id}, status={self.timelapse_tracker.status}")
+        except Exception as e:
+            logger.warning(f"Failed to initialize from event history: {e}")
 
     def _array_to_image_data(
         self,

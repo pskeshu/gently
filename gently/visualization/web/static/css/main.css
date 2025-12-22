@@ -113,6 +113,26 @@ body {
     gap: 1.5rem;
 }
 
+.session-id-link {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 4px 10px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.session-id-link:hover {
+    color: var(--accent);
+    background: var(--bg-dark);
+}
+
+.session-id-link:empty {
+    display: none;
+}
+
 .header h1 {
     color: var(--accent);
     font-size: 1.25rem;
@@ -170,6 +190,52 @@ body {
     display: flex;
     align-items: center;
     gap: 1rem;
+}
+
+/* Presence indicators */
+.presence-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.presence-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: white;
+    cursor: default;
+    border: 2px solid transparent;
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.presence-avatar:hover {
+    transform: scale(1.1);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.presence-avatar.is-you {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--bg-dark);
+}
+
+.presence-overflow {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
 }
 
 .header-alert {
@@ -320,21 +386,20 @@ body {
     flex-direction: column;
 }
 
-/* Fix 3: Main grid fills available space */
-.main {
-    display: grid;
-    grid-template-columns: 1fr 280px;
+/* Live View - Clean full-width layout */
+.live-view {
+    display: flex;
+    flex-direction: column;
     flex: 1;
     min-height: 0;
     overflow: hidden;
 }
 
-/* Fix 4: Viewer fills grid cell */
-.viewer {
+.live-viewer {
+    flex: 1;
     padding: 1rem;
     display: flex;
     flex-direction: column;
-    gap: 1rem;
     min-height: 0;
     overflow: hidden;
 }
@@ -344,6 +409,106 @@ body {
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
+    margin-bottom: 0.75rem;
+}
+
+.viewer-info {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.85rem;
+}
+
+.viewer-info .info-embryo {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.viewer-info .info-type {
+    color: var(--text);
+}
+
+.viewer-info .info-uid {
+    color: var(--text-muted);
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', monospace;
+    font-size: 0.75rem;
+}
+
+.viewer-info .info-separator {
+    color: var(--text-muted);
+}
+
+.info-time {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Recent images bottom strip */
+.recent-strip {
+    height: 90px;
+    background: var(--bg-card);
+    border-top: 1px solid var(--border);
+    flex-shrink: 0;
+    overflow: hidden;
+}
+
+.recent-strip-inner {
+    display: flex;
+    gap: 8px;
+    padding: 10px 12px;
+    overflow-x: auto;
+    height: 100%;
+    align-items: center;
+}
+
+.recent-strip-item {
+    flex-shrink: 0;
+    width: 60px;
+    height: 60px;
+    border-radius: 6px;
+    overflow: hidden;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.recent-strip-item:hover {
+    border-color: var(--accent);
+    transform: scale(1.05);
+}
+
+.recent-strip-item.active {
+    border-color: var(--accent);
+}
+
+.recent-strip-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.recent-strip-empty {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    padding: 0 12px;
+}
+
+/* Legacy .main support (kept for compatibility) */
+.main {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.viewer {
+    flex: 1;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .image-title {
@@ -492,9 +657,183 @@ body {
     margin-top: 0.25rem;
 }
 
-/* Calibration full gallery */
+/* Calibration Tab - Two-column layout like Embryos tab */
 #calibration-content {
+    padding: 0;
+}
+
+.calibration-container {
+    display: flex;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* Left sidebar */
+.calibration-sidebar {
+    width: 240px;
+    min-width: 240px;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    display: flex;
     flex-direction: column;
+    overflow: hidden;
+}
+
+.calibration-sidebar-header {
+    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.calibration-embryo-cards {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+
+/* Embryo card in calibration sidebar */
+.calibration-embryo-card {
+    padding: 10px 12px;
+    background: var(--bg-hover);
+    border-radius: 8px;
+    cursor: pointer;
+    margin-bottom: 6px;
+    transition: all 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.calibration-embryo-card:hover {
+    background: var(--border);
+}
+
+.calibration-embryo-card.selected {
+    background: var(--accent);
+    color: white;
+    border-color: var(--accent-hover);
+}
+
+.calibration-embryo-card .card-name {
+    font-weight: 600;
+    font-size: 13px;
+}
+
+.calibration-embryo-card .card-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.calibration-embryo-card.selected .card-count {
+    color: rgba(255, 255, 255, 0.8);
+}
+
+/* 3D Segmentations section in panel */
+.calibration-3d-section {
+    margin-top: 24px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+
+.calibration-section-header {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.calibration-3d-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.calibration-3d-card {
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    min-width: 120px;
+}
+
+.calibration-3d-card:hover {
+    border-color: var(--accent-green);
+    background: var(--bg-hover);
+}
+
+.calibration-3d-card .card-cells {
+    color: var(--accent-green);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.calibration-3d-card .card-slices {
+    color: var(--text);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.calibration-3d-card .card-uid {
+    color: var(--text-muted);
+    font-size: 10px;
+    margin-top: 4px;
+}
+
+/* Right panel */
+.calibration-panel {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    background: var(--bg-dark);
+}
+
+.calibration-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    color: var(--text-muted);
+    gap: 12px;
+}
+
+.calibration-empty-icon {
+    font-size: 48px;
+    opacity: 0.5;
+}
+
+.calibration-empty-text {
+    font-size: 14px;
+}
+
+/* Image grid in right panel */
+.calibration-image-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 12px;
+}
+
+.calibration-panel-header {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+}
+
+.empty-state-small {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 12px;
 }
 
 .empty-state {
@@ -938,6 +1277,10 @@ body {
     padding: 0.5rem 0.85rem;
     margin-top: 0.75rem;
     flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
 }
 
 .lightbox-metadata {
@@ -969,6 +1312,31 @@ body {
 .lb-info-item .accent {
     color: #4ade80;
     font-weight: 500;
+}
+
+.lightbox-download {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.75rem;
+    background: rgba(74, 222, 128, 0.15);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+    border-radius: 6px;
+    color: #4ade80;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.lightbox-download:hover {
+    background: rgba(74, 222, 128, 0.25);
+    border-color: rgba(74, 222, 128, 0.5);
+    transform: translateY(-1px);
+}
+
+.lightbox-download svg {
+    flex-shrink: 0;
 }
 
 .lightbox-thumbnail-strip {
@@ -2919,6 +3287,23 @@ kbd {
     border-color: var(--accent);
 }
 
+.inline-detail-container .detail-download {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    background: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.inline-detail-container .detail-download:hover {
+    background: var(--accent-hover, #3a9ad9);
+    transform: translateY(-1px);
+}
+
 /* Collapsed Range - Groups "not detected" timepoints */
 .collapsed-range {
     display: flex;
@@ -4315,6 +4700,19 @@ kbd {
     background: var(--accent-purple);
     border-color: var(--accent-purple);
     color: white;
+}
+
+.ctrl-btn.ctrl-download {
+    background: rgba(74, 222, 128, 0.15);
+    border-color: rgba(74, 222, 128, 0.3);
+    color: #4ade80;
+    padding: 0.5rem 0.7rem;
+}
+
+.ctrl-btn.ctrl-download:hover {
+    background: rgba(74, 222, 128, 0.25);
+    border-color: rgba(74, 222, 128, 0.5);
+    color: #4ade80;
 }
 
 .ctrl-icon {
