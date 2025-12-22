@@ -369,6 +369,7 @@ class TimelapseStateTracker:
         self.total_timepoints = 0
         self.base_interval = 120
         self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
+        self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> file_path}
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
@@ -388,6 +389,7 @@ class TimelapseStateTracker:
             self.base_interval = data.get("interval_seconds", 120)
             self.embryos = {}
             self.detection_reasoning = {}
+            self.volume_paths = {}
             self.total_timepoints = 0
             for eid in data.get("embryo_ids", []):
                 self.embryos[eid] = {
@@ -425,11 +427,20 @@ class TimelapseStateTracker:
                         self.started_at = datetime.now().isoformat()
 
                 now = datetime.now().isoformat()
-                self.embryos[eid]["timepoints"] = data.get("timepoint", 0) + 1
+                # timepoint is already the count (timepoints_acquired), not 0-indexed
+                timepoint = data.get("timepoint", 1)
+                self.embryos[eid]["timepoints"] = timepoint
                 if self.embryos[eid]["first_acquired"] is None:
                     self.embryos[eid]["first_acquired"] = now
                 self.embryos[eid]["last_acquired"] = now
                 self.total_timepoints += 1
+
+                # Track volume file path for download
+                volume_path = data.get("volume_path")
+                if volume_path:
+                    if eid not in self.volume_paths:
+                        self.volume_paths[eid] = {}
+                    self.volume_paths[eid][timepoint] = volume_path
 
         elif event_type == "ACQUISITION_COMPLETED":
             self.status = "COMPLETED"
@@ -444,14 +455,21 @@ class TimelapseStateTracker:
             # All detector/perception evaluations (with reasoning) - populates reasoning panel
             eid = data.get("embryo_id")
             if eid:
+                timepoint = data.get("timepoint")
+                # Look up volume path for this timepoint
+                volume_path = None
+                if eid in self.volume_paths and timepoint in self.volume_paths.get(eid, {}):
+                    volume_path = self.volume_paths[eid][timepoint]
+
                 detection = {
                     "detector_name": data.get("detector_name", "unknown"),
                     "detected": data.get("detected", data.get("is_hatching", False)),
                     "confidence": data.get("confidence"),
                     "reasoning": data.get("reasoning"),
-                    "timepoint": data.get("timepoint"),
+                    "timepoint": timepoint,
                     "volume_uid": data.get("volume_uid"),
                     "projection_uid": data.get("projection_uid"),
+                    "volume_path": volume_path,  # TIF file path for download
                     "timestamp": datetime.now().isoformat(),
                     # Perception-specific fields
                     "stage": data.get("stage"),
@@ -1091,6 +1109,33 @@ class VisualizationServer:
             # Use original extension
             ext = file_path.suffix or '.tif'
             filename = "_".join(parts) + ext
+
+            return FileResponse(
+                path=str(file_path),
+                filename=filename,
+                media_type="image/tiff"
+            )
+
+        @self.app.get("/api/download/volume/{embryo_id}/{timepoint}")
+        async def download_volume_by_timepoint(embryo_id: str, timepoint: int):
+            """Download raw TIF file by embryo_id and timepoint"""
+            from pathlib import Path
+
+            # Look up volume path from state tracker
+            volume_path = None
+            if embryo_id in self.state_tracker.volume_paths:
+                volume_path = self.state_tracker.volume_paths[embryo_id].get(timepoint)
+
+            if not volume_path:
+                raise HTTPException(status_code=404, detail=f"Volume not found for {embryo_id} T{timepoint}")
+
+            file_path = Path(volume_path)
+            if not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File not found: {volume_path}")
+
+            # Build filename
+            safe_embryo = "".join(c if c.isalnum() or c in '-_' else '_' for c in str(embryo_id))
+            filename = f"{safe_embryo}_t{timepoint:03d}.tif"
 
             return FileResponse(
                 path=str(file_path),

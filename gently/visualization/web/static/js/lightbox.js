@@ -143,6 +143,131 @@ const Lightbox = {
     },
 
     /**
+     * Open lightbox with a sequence of images loaded by UID
+     * Enables left/right navigation through the sequence
+     */
+    openWithSequence(imageList, startIndex = 0, source = null) {
+        if (!imageList || imageList.length === 0) {
+            console.warn('Lightbox: no images to display');
+            return;
+        }
+
+        this.imageList = imageList;
+        this.currentIndex = Math.max(0, Math.min(startIndex, imageList.length - 1));
+        this.source = source;
+        this.isOpen = true;
+
+        this.els.overlay?.classList.add('active');
+        document.body.style.overflow = 'hidden';
+
+        this.resetZoom();
+        this.showImageByUid(this.currentIndex);
+        this.renderThumbnailsByUid();
+
+        // Show nav buttons for multi-image sequences
+        if (this.els.prevBtn) this.els.prevBtn.style.display = imageList.length > 1 ? '' : 'none';
+        if (this.els.nextBtn) this.els.nextBtn.style.display = imageList.length > 1 ? '' : 'none';
+        if (this.els.thumbnails) this.els.thumbnails.style.display = imageList.length > 1 ? '' : 'none';
+    },
+
+    showImageByUid(index) {
+        const img = this.imageList[index];
+        if (!img) return;
+
+        // Load image from API by UID
+        if (this.els.image && img.uid) {
+            this.els.image.classList.add('transitioning');
+            this.els.image.src = `/api/images/${img.uid}/png`;
+            setTimeout(() => {
+                this.els.image.classList.remove('transitioning');
+            }, 150);
+        }
+
+        // Update info - use timepoint from metadata if available
+        const timepoint = img.metadata?.timepoint;
+        const title = timepoint !== undefined ? `T${timepoint}` : (img.data_type || 'Image');
+        if (this.els.title) this.els.title.textContent = title;
+        if (this.els.position) this.els.position.textContent = `${index + 1} of ${this.imageList.length}`;
+
+        // Update info panel
+        if (this.els.infoType) this.els.infoType.textContent = img.data_type || '-';
+        if (this.els.infoEmbryo) this.els.infoEmbryo.textContent = img.metadata?.embryo_id || '-';
+        if (this.els.infoShape) {
+            const shape = img.shape || img.metadata?.shape;
+            this.els.infoShape.textContent = Array.isArray(shape) ? shape.join(' x ') : (shape || '-');
+        }
+        if (this.els.infoTime) {
+            if (timepoint !== undefined) {
+                this.els.infoTime.textContent = `T${timepoint}`;
+            } else if (img.timestamp) {
+                this.els.infoTime.textContent = new Date(img.timestamp).toLocaleTimeString();
+            } else {
+                this.els.infoTime.textContent = '-';
+            }
+        }
+
+        // Update nav button states
+        if (this.els.prevBtn) this.els.prevBtn.disabled = index === 0;
+        if (this.els.nextBtn) this.els.nextBtn.disabled = index === this.imageList.length - 1;
+    },
+
+    renderThumbnailsByUid() {
+        if (!this.els.thumbnails) return;
+
+        this.els.thumbnails.innerHTML = '';
+
+        // Show subset of thumbnails centered on current
+        const visible = 9;
+        const half = Math.floor(visible / 2);
+        let start = Math.max(0, this.currentIndex - half);
+        let end = Math.min(this.imageList.length, start + visible);
+
+        if (end - start < visible) {
+            start = Math.max(0, end - visible);
+        }
+
+        for (let i = start; i < end; i++) {
+            const img = this.imageList[i];
+            const thumb = document.createElement('div');
+            thumb.className = `lightbox-thumb ${i === this.currentIndex ? 'active' : ''}`;
+            thumb.dataset.index = i;
+
+            // Load thumbnail from API
+            if (img.uid) {
+                thumb.innerHTML = `<img src="/api/images/${img.uid}/png" alt="T${img.metadata?.timepoint ?? i}">`;
+            } else {
+                thumb.innerHTML = `<span class="thumb-placeholder">T${img.metadata?.timepoint ?? i}</span>`;
+            }
+
+            thumb.addEventListener('click', () => this.goToByUid(i));
+            this.els.thumbnails.appendChild(thumb);
+        }
+    },
+
+    goToByUid(index) {
+        if (index < 0 || index >= this.imageList.length) return;
+
+        this.currentIndex = index;
+        this.resetZoom();
+        this.showImageByUid(index);
+
+        // Update thumbnail highlight
+        const thumbs = this.els.thumbnails?.querySelectorAll('.lightbox-thumb');
+        if (thumbs) {
+            let needsRerender = true;
+            thumbs.forEach((thumb) => {
+                const i = parseInt(thumb.dataset.index);
+                const isActive = i === this.currentIndex;
+                thumb.classList.toggle('active', isActive);
+                if (isActive) needsRerender = false;
+            });
+            if (needsRerender) {
+                this.renderThumbnailsByUid();
+            }
+        }
+    },
+
+    /**
      * Open lightbox with a single image by UID
      * Nav buttons will be hidden since there's only one image
      */
@@ -237,8 +362,28 @@ const Lightbox = {
 
         this.currentIndex = index;
         this.resetZoom();
-        this.showImage(index);
-        this.updateThumbnailHighlight();
+
+        // Use UID-based loading for reasoning panel sequences
+        if (this.source === 'reasoning') {
+            this.showImageByUid(index);
+            // Update thumbnail highlight for UID-based thumbnails
+            const thumbs = this.els.thumbnails?.querySelectorAll('.lightbox-thumb');
+            if (thumbs) {
+                let needsRerender = true;
+                thumbs.forEach((thumb) => {
+                    const i = parseInt(thumb.dataset.index);
+                    const isActive = i === this.currentIndex;
+                    thumb.classList.toggle('active', isActive);
+                    if (isActive) needsRerender = false;
+                });
+                if (needsRerender) {
+                    this.renderThumbnailsByUid();
+                }
+            }
+        } else {
+            this.showImage(index);
+            this.updateThumbnailHighlight();
+        }
     },
 
     showImage(index) {

@@ -103,7 +103,8 @@ class MicroscopyCopilot:
         self._event_bus = get_event_bus()
 
         # Perception system (VLM-based stage classification)
-        examples_path = Path(__file__).parent.parent / "examples" / "stages"
+        # Note: examples_path should NOT include /stages - ExampleStore adds it
+        examples_path = Path(__file__).parent.parent / "examples"
         self.perception_manager = PerceptionManager(
             claude_client=self.claude,
             examples_path=examples_path,
@@ -1771,6 +1772,7 @@ Write a brief status summary. Examples:
             'timepoint': timepoint,
             'volume_uid': record.volume_uid,
             'projection_uid': record.projection_uid,
+            'volume_path': record.volume_path,  # TIF file path for download
             'shape': list(volume.shape),
         })
 

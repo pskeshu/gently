@@ -232,7 +232,7 @@ class PerceptionEngine:
                 # Record final decision
                 trace.add_step(ReasoningStep(
                     step_type="final_decision",
-                    content=text_response[:500],  # Truncate for storage
+                    content=text_response,
                 ))
 
                 # Parse and return
@@ -245,10 +245,10 @@ class PerceptionEngine:
                 assistant_content = []
                 for block in response.content:
                     if block.type == "text":
-                        # Record initial analysis
+                        # Record initial analysis (full content)
                         trace.add_step(ReasoningStep(
                             step_type="initial_analysis",
-                            content=block.text[:500],
+                            content=block.text,
                         ))
                         assistant_content.append({
                             "type": "text",
@@ -387,10 +387,13 @@ class PerceptionEngine:
                 max_tokens=8000,
                 system=(
                     "You are an expert microscopy perception system analyzing C. elegans "
-                    "embryo development. You have access to tools that let you request "
-                    "additional context when uncertain about a classification. Use tools "
-                    "judiciously - only when genuinely uncertain and additional context "
-                    "would help. When confident, provide your classification directly."
+                    "embryo development. You have access to tools for reference comparison.\n\n"
+                    "IMPORTANT PRINCIPLES:\n"
+                    "1. DESCRIBE FIRST: Always describe what you actually see BEFORE classifying\n"
+                    "2. EMBRACE TRANSITIONS: If features suggest a transitional state, SAY SO\n"
+                    "3. USE TOOLS PROACTIVELY: Use tools for ANY borderline or transitional case\n"
+                    "4. CALIBRATE CONFIDENCE: Hedging words (slight, subtle, beginning) = lower confidence (0.5-0.7)\n\n"
+                    "Development is a SPECTRUM, not discrete jumps. Trust your observations over expectations."
                 ),
                 tools=PERCEPTION_TOOLS,
                 messages=messages,
@@ -518,7 +521,34 @@ TEMPORAL CONTEXT:
 - Expected duration: {temporal.expected_duration_min or 'N/A'} minutes
 - Overtime ratio: {temporal.overtime_ratio:.1f}x (>2x is unusual, >3x is concerning)
 - Observations at this stage: {temporal.observations_in_current_stage}
+- Last confidence: {temporal.last_confidence:.0%}
 """
+            # Add transitional state info
+            if temporal.is_currently_transitional:
+                trans_str = " -> ".join(temporal.transition_between) if temporal.transition_between else "unknown"
+                temporal_text += f"""
+TRANSITIONAL STATE DETECTED:
+- Last observation was transitional between: {trans_str}
+- Consecutive transitional observations: {temporal.consecutive_transitional_count}
+"""
+
+            # Add tool use hints
+            if temporal.suggest_tool_use:
+                reasons = []
+                if temporal.is_currently_transitional:
+                    reasons.append("currently transitional")
+                if temporal.last_confidence < 0.7:
+                    reasons.append(f"low confidence ({temporal.last_confidence:.0%})")
+                if temporal.observations_in_current_stage <= 2:
+                    reasons.append("early in stage")
+                if temporal.consecutive_transitional_count >= 3:
+                    reasons.append(f"stuck transitional ({temporal.consecutive_transitional_count} obs)")
+
+                temporal_text += f"""
+TOOL USE RECOMMENDED: {', '.join(reasons)}
+Consider using view_reference_example to compare against known stage references.
+"""
+
             if temporal.is_potentially_arrested:
                 temporal_text += f"""
 WARNING - POTENTIAL DEVELOPMENTAL ARREST:
@@ -585,28 +615,44 @@ Respond with JSON:
   "reasoning": "Brief explanation grounded in observed features"
 }
 
-KEY DISCRIMINATORS:
-- EARLY vs COMMA: Does it have a clear C-curve? No curve = early, clear curve = comma
-- COMMA vs 1.5FOLD: Is body folding back on itself? Just curved = comma, folding back = 1.5fold
-- 1.5FOLD vs PRETZEL: How tight is the coil? Partial fold = 1.5fold, tight coil filling shell = pretzel
-- PRETZEL vs HATCHING: Is shell intact? Intact = pretzel, breached with part outside = hatching
-- HATCHING vs HATCHED: Is any part still in shell? Part inside = hatching, fully out = hatched
-- ANY STAGE vs ARRESTED: Is there visible progression over time? If embryo looks identical across many
-  timepoints with NO morphological change, and/or shows degradation/fragmentation/abnormal texture,
-  classify as "arrested". Only use if TEMPORAL CONTEXT shows significant overtime.
+MORPHOLOGICAL SPECTRUM (development is continuous, not discrete jumps):
+
+Shape progression: oval -> elongated -> curved -> folded -> tightly coiled -> elongated worm
+Curvature: none -> subtle hint -> slight -> moderate C-curve -> pronounced -> folded back -> coiled
+
+TRANSITIONAL INDICATORS (use is_transitional=true when you see these):
+- EARLY -> COMMA: Subtle elongation beginning, hint of asymmetry, one end slightly narrowing
+- COMMA -> 1.5FOLD: C-curve deepening, body starting to turn back on itself
+- 1.5FOLD -> PRETZEL: Fold becoming tighter, second bend forming
+- PRETZEL -> HATCHING: Shell boundary becoming irregular, possible breach
+
+ARREST DETECTION:
+If TEMPORAL CONTEXT shows significant overtime (>2x expected) AND you see:
+- No morphological change from previous observations
+- Degradation, fragmentation, or abnormal texture
+Then classify as "arrested"
+
+IMPORTANT: If you see features that fall BETWEEN stages (e.g., elongating but not yet curved),
+USE is_transitional=true and transition_between=["early", "comma"] with confidence 0.5-0.7.
+Do NOT force a binary classification when the embryo is transitioning.
 
 IMPORTANT: Describe what you ACTUALLY SEE, not what you expect based on previous observations.
 
-TOOLS AVAILABLE (use if uncertain):
-If you are uncertain about the classification, you can request additional context:
+TOOLS AVAILABLE (use proactively for better accuracy):
 
-1. view_previous_timepoint - See how the embryo looked at an earlier timepoint to assess progression
-   Use when: You're unsure if there's been a stage transition, or need to compare morphology changes
+1. view_reference_example - Compare against a known reference image
+   USE FOR: Any transitional appearance, borderline cases, first few timepoints of a session
 
-2. view_reference_example - See a reference example of a specific stage
-   Use when: You want to directly compare the current embryo against a known example
+2. view_previous_timepoint - See how the embryo looked before
+   USE FOR: Detecting progression, confirming stage changes, arrest assessment
 
-Only use tools when genuinely uncertain. If the classification is clear, proceed directly to the JSON response.
+WHEN TO USE TOOLS:
+- You see transitional features (slight curve, beginning fold, etc.)
+- Confidence would be <0.8 without additional context
+- This is a borderline case between two stages
+- You want to verify your assessment with a reference
+
+DON'T SKIP TOOLS just because you have a preliminary guess. Reference comparison improves accuracy.
 """
         })
 
@@ -735,8 +781,11 @@ Only use tools when genuinely uncertain. If the classification is clear, proceed
 
             # Determine is_hatching from stage
             is_hatching = (stage == "hatching")
-            confidence = float(data.get("confidence", 0.5))
+            raw_confidence = float(data.get("confidence", 0.5))
             reasoning = data.get("reasoning", "")
+
+            # Calibrate confidence based on hedging language and transitional status
+            confidence = self._calibrate_confidence(raw_confidence, reasoning, is_transitional)
 
             if is_transitional and transition_between:
                 logger.info(f"TRANSITIONAL between {transition_between}")
@@ -765,3 +814,55 @@ Only use tools when genuinely uncertain. If the classification is clear, proceed
                 reasoning=f"Parse error: {e}",
                 should_stop=False,
             )
+
+    def _calibrate_confidence(
+        self,
+        raw_confidence: float,
+        reasoning: str,
+        is_transitional: bool,
+    ) -> float:
+        """
+        Calibrate confidence based on hedging language and transitional status.
+
+        Reduces confidence when the VLM uses hedging words (indicating uncertainty)
+        or when the observation is marked as transitional.
+
+        Parameters
+        ----------
+        raw_confidence : float
+            Original confidence from VLM (0.0-1.0)
+        reasoning : str
+            VLM's reasoning text to check for hedging
+        is_transitional : bool
+            Whether this is a transitional observation
+
+        Returns
+        -------
+        float
+            Calibrated confidence (0.3-1.0)
+        """
+        HEDGING_WORDS = [
+            "subtle", "slight", "beginning", "partial", "maybe", "hint",
+            "possibly", "appears to", "seems", "might", "could be",
+            "starting to", "early signs", "not quite", "borderline",
+        ]
+
+        reasoning_lower = reasoning.lower()
+        hedging_count = sum(1 for word in HEDGING_WORDS if word in reasoning_lower)
+
+        # Apply penalty for hedging language
+        penalty = min(0.25, hedging_count * 0.06)
+
+        # Additional penalty for transitional observations
+        if is_transitional:
+            penalty += 0.10
+
+        calibrated = max(0.3, raw_confidence - penalty)
+
+        if penalty > 0:
+            logger.debug(
+                f"Confidence calibration: {raw_confidence:.2f} -> {calibrated:.2f} "
+                f"(hedging={hedging_count}, transitional={is_transitional})"
+            )
+
+        return calibrated

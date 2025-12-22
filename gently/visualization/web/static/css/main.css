@@ -5555,6 +5555,73 @@ kbd {
     padding-left: 1.5rem;
 }
 
+.trace-content-full {
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.trace-expand-btn {
+    display: inline-block;
+    margin-top: 0.3rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.7rem;
+    color: var(--accent);
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.trace-expand-btn:hover {
+    background: var(--accent);
+    color: var(--bg);
+}
+
+/* Markdown content in reasoning trace */
+.trace-content.markdown .md-content {
+    line-height: 1.5;
+}
+
+.trace-content.markdown .md-content p {
+    margin: 0;
+}
+
+.trace-content.markdown .md-h2 {
+    font-weight: 600;
+    color: var(--text);
+    margin: 0.6rem 0 0.3rem 0;
+    font-size: 0.8rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.2rem;
+}
+
+.trace-content.markdown .md-h2:first-child {
+    margin-top: 0;
+}
+
+.trace-content.markdown .md-h3 {
+    font-weight: 600;
+    color: var(--text);
+    margin: 0.4rem 0 0.2rem 0;
+    font-size: 0.75rem;
+}
+
+.trace-content.markdown .md-list {
+    margin: 0.3rem 0;
+    padding-left: 1.2rem;
+    list-style: disc;
+}
+
+.trace-content.markdown .md-list li {
+    margin: 0.15rem 0;
+}
+
+.trace-content.markdown strong {
+    color: var(--text);
+    font-weight: 600;
+}
+
 .detail-actions {
     display: flex;
     gap: 0.5rem;

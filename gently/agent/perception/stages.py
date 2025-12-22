@@ -198,6 +198,78 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
 }
 
 
+# Transition zones between stages
+# Used for detecting transitional states and setting expectations for temporal analysis
+TRANSITION_ZONES: Dict[str, Dict[str, Any]] = {
+    "early_to_comma": {
+        "from_stage": "early",
+        "to_stage": "comma",
+        "key_features": [
+            "subtle elongation beginning",
+            "slight asymmetry developing",
+            "hint of curvature forming",
+            "one end beginning to narrow",
+        ],
+        "duration_typical_min": 15,  # shorter than full stage
+        "description": "Embryo elongating, beginning to develop characteristic C-curve",
+    },
+    "comma_to_1.5fold": {
+        "from_stage": "comma",
+        "to_stage": "1.5fold",
+        "key_features": [
+            "C-curve deepening",
+            "body starting to extend beyond egg width",
+            "beginning to turn back on itself",
+            "elongation becoming more pronounced",
+        ],
+        "duration_typical_min": 15,
+        "description": "Curve becoming fold, body extending beyond shell diameter",
+    },
+    "1.5fold_to_pretzel": {
+        "from_stage": "1.5fold",
+        "to_stage": "pretzel",
+        "key_features": [
+            "fold becoming tighter",
+            "second bend forming",
+            "body coiling more compactly",
+            "approaching maximum compaction",
+        ],
+        "duration_typical_min": 20,
+        "description": "Partial fold tightening into coiled pretzel configuration",
+    },
+    "pretzel_to_hatching": {
+        "from_stage": "pretzel",
+        "to_stage": "hatching",
+        "key_features": [
+            "shell boundary becoming irregular",
+            "possible weakening of shell visible",
+            "increased movement/twitching",
+            "pressure against shell apparent",
+        ],
+        "duration_typical_min": 10,
+        "description": "Coiled embryo preparing to breach shell",
+    },
+}
+
+
+def get_transition_zone(from_stage: str, to_stage: str) -> Dict[str, Any]:
+    """Get transition zone info between two stages."""
+    key = f"{from_stage}_to_{to_stage}"
+    return TRANSITION_ZONES.get(key, {})
+
+
+def get_adjacent_stages(stage: str) -> tuple:
+    """Get the previous and next stages for a given stage."""
+    ordered = DevelopmentalStage.ordered_values()
+    try:
+        idx = ordered.index(stage)
+        prev_stage = ordered[idx - 1] if idx > 0 else None
+        next_stage = ordered[idx + 1] if idx < len(ordered) - 1 else None
+        return prev_stage, next_stage
+    except ValueError:
+        return None, None
+
+
 def get_stage_description(stage: str) -> str:
     """Get a brief description for a stage."""
     descriptions = {

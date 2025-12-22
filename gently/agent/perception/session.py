@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from .stages import STAGES, STAGE_CRITERIA, DevelopmentalStage
+from .stages import STAGES, STAGE_CRITERIA, TRANSITION_ZONES, DevelopmentalStage
 
 
 @dataclass
@@ -56,6 +56,13 @@ class TemporalAnalysis:
     arrest_confidence: float  # 0.0-1.0, higher = more likely arrested
     arrest_reason: Optional[str]  # Human-readable explanation
 
+    # Transitional state tracking
+    is_currently_transitional: bool = False  # Last observation was transitional
+    consecutive_transitional_count: int = 0  # How many transitional observations in a row
+    transition_between: Optional[List[str]] = None  # Current transition if any
+    last_confidence: float = 1.0  # Confidence of last observation
+    suggest_tool_use: bool = False  # Hint that tool use would be helpful
+
     def to_dict(self) -> Dict[str, Any]:
         return {
             "current_stage": self.current_stage,
@@ -69,6 +76,11 @@ class TemporalAnalysis:
             "is_potentially_arrested": self.is_potentially_arrested,
             "arrest_confidence": round(self.arrest_confidence, 2),
             "arrest_reason": self.arrest_reason,
+            "is_currently_transitional": self.is_currently_transitional,
+            "consecutive_transitional_count": self.consecutive_transitional_count,
+            "transition_between": self.transition_between,
+            "last_confidence": round(self.last_confidence, 2),
+            "suggest_tool_use": self.suggest_tool_use,
         }
 
 
@@ -256,6 +268,38 @@ class PerceptionSession:
                 arrest_reason = f"No progression for {observations_at_stage} consecutive observations"
             arrest_confidence = max(arrest_confidence, 0.8)
 
+        # Compute transitional state tracking
+        last_obs = self.observations[-1] if self.observations else None
+        is_transitional = last_obs.is_transitional if last_obs else False
+        transition_between = last_obs.transition_between if last_obs else None
+        last_confidence = last_obs.confidence if last_obs else 1.0
+
+        # Count consecutive transitional observations
+        consecutive_transitional = 0
+        for obs in reversed(self.observations):
+            if obs.is_transitional:
+                consecutive_transitional += 1
+            else:
+                break
+
+        # Determine if we should suggest tool use
+        suggest_tool_use = False
+        if is_transitional:
+            suggest_tool_use = True  # Always suggest for transitional
+        elif last_confidence < 0.7:
+            suggest_tool_use = True  # Low confidence needs reference
+        elif observations_at_stage <= 2:
+            suggest_tool_use = True  # Early in a stage, good to verify
+        elif consecutive_transitional >= 3:
+            suggest_tool_use = True  # Stuck in transitional state
+
+        # Stricter arrest detection for stuck transitions (>45 min is concerning)
+        if consecutive_transitional >= 10:
+            if not is_arrested:
+                is_arrested = True
+                arrest_reason = f"Stuck in transitional state for {consecutive_transitional} observations"
+            arrest_confidence = max(arrest_confidence, 0.6)
+
         return TemporalAnalysis(
             current_stage=current_stage,
             time_in_current_stage_min=time_in_stage,
@@ -268,6 +312,11 @@ class PerceptionSession:
             is_potentially_arrested=is_arrested,
             arrest_confidence=arrest_confidence,
             arrest_reason=arrest_reason,
+            is_currently_transitional=is_transitional,
+            consecutive_transitional_count=consecutive_transitional,
+            transition_between=transition_between,
+            last_confidence=last_confidence,
+            suggest_tool_use=suggest_tool_use,
         )
 
     def to_dict(self) -> Dict[str, Any]:

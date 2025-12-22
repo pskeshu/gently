@@ -363,7 +363,8 @@ const EmbryosManager = {
         }
 
         const embryo = this.state.embryos[embryoId];
-        const newTimepoints = (data.timepoint !== undefined) ? data.timepoint + 1 : embryo.timepoints + 1;
+        // data.timepoint is already the count (timepoints_acquired), not 0-indexed
+        const newTimepoints = (data.timepoint !== undefined) ? data.timepoint : embryo.timepoints + 1;
 
         // Only update totalTimepoints if this is actually a new timepoint
         if (newTimepoints > embryo.timepoints) {
@@ -1577,10 +1578,11 @@ const EmbryosManager = {
         const metaJson = JSON.stringify(lightboxMeta).replace(/'/g, "\\'").replace(/"/g, '&quot;');
 
         // Build image HTML - will be loaded async if UID not available
+        // Use openTimepointInLightbox for navigation through all timepoints
         const imageHtml = imageUid
             ? `<img src="/api/images/${imageUid}/png"
                     alt="T${item.timepoint}"
-                    onclick="Lightbox.openByUid && Lightbox.openByUid('${imageUid}', ${metaJson})" />`
+                    onclick="EmbryosManager.openTimepointInLightbox('${this.selectedEmbryoId}', ${item.timepoint})" />`
             : `<div class="detail-image-loading" id="detail-image-placeholder"
                     data-embryo="${this.selectedEmbryoId}"
                     data-timepoint="${item.timepoint}">Loading image...</div>`;
@@ -1676,16 +1678,29 @@ const EmbryosManager = {
                         label = step.step_type;
                 }
 
-                // Truncate long content
-                const content = step.content && step.content.length > 200
-                    ? step.content.substring(0, 200) + '...'
-                    : (step.content || '');
+                // Show preview with expand option for long content
+                const fullContent = step.content || '';
+                const isLong = fullContent.length > 200;
+                const previewContent = isLong ? fullContent.substring(0, 200) + '...' : fullContent;
+                const contentId = `trace-content-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+                // Use markdown rendering for analysis and decision steps
+                const useMarkdown = step.step_type === 'final_decision' || step.step_type === 'initial_analysis';
+                const renderFn = useMarkdown ? this.renderMarkdown.bind(this) : this.escapeHtml.bind(this);
 
                 return `
                     <div class="${stepClass}">
                         <span class="trace-icon">${icon}</span>
                         <span class="trace-label">${label}</span>
-                        ${content ? `<div class="trace-content">${this.escapeHtml(content)}</div>` : ''}
+                        ${fullContent ? `
+                            <div class="trace-content ${isLong ? 'expandable' : ''} ${useMarkdown ? 'markdown' : ''}" id="${contentId}">
+                                <div class="trace-content-preview">${useMarkdown ? renderFn(previewContent) : this.escapeHtml(previewContent)}</div>
+                                ${isLong ? `
+                                    <div class="trace-content-full" style="display: none;">${renderFn(fullContent)}</div>
+                                    <button class="trace-expand-btn" onclick="EmbryosManager.toggleTraceContent('${contentId}')">Show more</button>
+                                ` : ''}
+                            </div>
+                        ` : ''}
                     </div>
                 `;
             }).join('');
@@ -1730,7 +1745,7 @@ const EmbryosManager = {
             </div>
             <div class="detail-actions">
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(-1)">&#x2190; Previous</button>
-                ${imageUid ? `<button class="detail-download" onclick="EmbryosManager.downloadTif('${imageUid}')" title="Download raw TIF">&#x2B73; Download TIF</button>` : ''}
+                <button class="detail-download" onclick="EmbryosManager.downloadVolume('${this.selectedEmbryoId}', ${item.timepoint})" title="Download raw TIF">&#x2B73; Download TIF</button>
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(1)">Next &#x2192;</button>
             </div>
         `;
@@ -1753,17 +1768,10 @@ const EmbryosManager = {
                 if (data.sequence && data.sequence.length > 0) {
                     const imgData = data.sequence[0];
                     const uid = imgData.uid;
-                    // Build metadata for lightbox
-                    const meta = {
-                        embryo_id: embryoId,
-                        timepoint: timepoint,
-                        data_type: dataType,
-                        shape: imgData.shape ? `${imgData.shape[0]}x${imgData.shape[1]}` : ''
-                    };
-                    const metaJson = JSON.stringify(meta).replace(/"/g, '&quot;');
+                    // Use openTimepointInLightbox for navigation through all timepoints
                     placeholder.outerHTML = `<img src="/api/images/${uid}/png"
                                                   alt="T${timepoint}"
-                                                  onclick="Lightbox.openByUid && Lightbox.openByUid('${uid}', ${metaJson})" />`;
+                                                  onclick="EmbryosManager.openTimepointInLightbox('${embryoId}', ${timepoint})" />`;
                     return; // Success - exit
                 }
             } catch (err) {
@@ -1805,7 +1813,7 @@ const EmbryosManager = {
         }
     },
 
-    // Download raw TIF file
+    // Download raw TIF file by UID (legacy)
     downloadTif(uid) {
         if (!uid) {
             console.warn('No UID available for download');
@@ -1814,6 +1822,21 @@ const EmbryosManager = {
         // Trigger download via hidden link
         const link = document.createElement('a');
         link.href = `/api/download/${uid}`;
+        link.download = ''; // Let server set filename via Content-Disposition
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    },
+
+    // Download raw TIF file by embryo_id and timepoint
+    downloadVolume(embryoId, timepoint) {
+        if (!embryoId || timepoint === undefined) {
+            console.warn('Missing embryo_id or timepoint for download');
+            return;
+        }
+        // Trigger download via hidden link
+        const link = document.createElement('a');
+        link.href = `/api/download/volume/${encodeURIComponent(embryoId)}/${timepoint}`;
         link.download = ''; // Let server set filename via Content-Disposition
         document.body.appendChild(link);
         link.click();
@@ -2516,10 +2539,53 @@ const EmbryosManager = {
         }
     },
 
+    // Toggle trace content expand/collapse
+    toggleTraceContent(contentId) {
+        const container = document.getElementById(contentId);
+        if (!container) return;
+
+        const preview = container.querySelector('.trace-content-preview');
+        const full = container.querySelector('.trace-content-full');
+        const btn = container.querySelector('.trace-expand-btn');
+
+        if (preview && full && btn) {
+            const isExpanded = full.style.display !== 'none';
+            preview.style.display = isExpanded ? 'block' : 'none';
+            full.style.display = isExpanded ? 'none' : 'block';
+            btn.textContent = isExpanded ? 'Show more' : 'Show less';
+        }
+    },
+
     escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    },
+
+    // Simple markdown renderer for reasoning trace
+    renderMarkdown(text) {
+        if (!text) return '';
+
+        // Escape HTML first
+        let html = this.escapeHtml(text);
+
+        // Headers: ## Header -> <div class="md-h2">
+        html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
+        html = html.replace(/^### (.+)$/gm, '<div class="md-h3">$1</div>');
+
+        // Bold: **text** -> <strong>
+        html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+
+        // Bullet points: - item or * item -> list items
+        // Group consecutive bullets into a list
+        html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+        html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="md-list">$&</ul>');
+
+        // Line breaks for readability
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = html.replace(/\n/g, '<br>');
+
+        return `<div class="md-content"><p>${html}</p></div>`;
     },
 
     /**
@@ -2871,6 +2937,43 @@ const EmbryosManager = {
         };
         this.updateEmbryosCount();
         this.render();
+    },
+
+    // Open lightbox for a timepoint with navigation through all timepoints for this embryo
+    openTimepointInLightbox(embryoId, timepoint) {
+        const reasoning = this.detectionReasoning[embryoId] || [];
+        if (reasoning.length === 0) return;
+
+        // Sort by timepoint to ensure correct order
+        const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+
+        // Build image list for Lightbox
+        const imageList = sorted.map(item => {
+            const uid = item.projection_uid || item.volume_uid ||
+                        `volume_${embryoId}_t${String(item.timepoint).padStart(4, '0')}`;
+            return {
+                uid: uid,
+                base64_png: null,  // Will be loaded via src
+                data_type: item.stage ? `Stage: ${this.formatStageName(item.stage)}` : 'Volume Projection',
+                metadata: {
+                    embryo_id: embryoId,
+                    timepoint: item.timepoint,
+                    shape: item.shape || ''
+                },
+                // Include for info panel display
+                shape: item.shape ? (Array.isArray(item.shape) ? item.shape : []) : [],
+                timestamp: item.timestamp
+            };
+        });
+
+        // Find the index of the clicked timepoint
+        const startIndex = sorted.findIndex(item => item.timepoint === timepoint);
+        const index = startIndex >= 0 ? startIndex : 0;
+
+        // Open lightbox with full list and navigation
+        if (imageList.length > 0 && typeof Lightbox !== 'undefined') {
+            Lightbox.openWithSequence(imageList, index, 'reasoning');
+        }
     }
 };
 
