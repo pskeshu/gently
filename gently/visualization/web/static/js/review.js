@@ -60,13 +60,26 @@ const ReviewApp = {
 
     renderSessionList() {
         const list = document.getElementById('session-list');
+        const filterCheckbox = document.getElementById('filter-with-content');
+        const filterWithContent = filterCheckbox ? filterCheckbox.checked : true;
+
+        // Filter sessions based on checkbox
+        let filtered = this.sessions;
+        if (filterWithContent) {
+            filtered = this.sessions.filter(s => s.embryo_count > 0);
+        }
 
         if (this.sessions.length === 0) {
             list.innerHTML = '<div class="no-sessions">No sessions found</div>';
             return;
         }
 
-        list.innerHTML = this.sessions.map(s => `
+        if (filtered.length === 0) {
+            list.innerHTML = `<div class="no-sessions">No sessions with content<br><small>${this.sessions.length} empty session${this.sessions.length !== 1 ? 's' : ''} hidden</small></div>`;
+            return;
+        }
+
+        list.innerHTML = filtered.map(s => `
             <div class="session-item" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
                 <div class="session-name">${this.escapeHtml(s.name || s.session_id)}</div>
                 <div class="session-meta">

@@ -62,16 +62,9 @@ function switchTab(tabName) {
 }
 
 function logEvent(type, message) {
-    const log = document.getElementById('event-log');
-    const div = document.createElement('div');
-    div.className = 'event-item';
-    // CV events get special styling
-    const isCvEvent = type.startsWith('CV_') || type === 'SEGMENTATION_COMPLETED' || type === 'STAGE_DETECTED';
-    const typeClass = isCvEvent ? 'event-type cv-event' : 'event-type';
-    div.innerHTML = `<span class="event-time">${new Date().toLocaleTimeString()}</span>
-                    <span class="${typeClass}">${type}</span>: ${message}`;
-    log.insertBefore(div, log.firstChild);
-    while (log.children.length > 50) log.removeChild(log.lastChild);
+    // Event log panel was removed - this function is now a no-op
+    // Events are tracked in state.allEvents and shown in the Events tab
+    console.debug(`[${type}] ${message}`);
 }
 
 /**
@@ -418,6 +411,7 @@ const KeyboardShortcuts = {
                             <div class="shortcut"><kbd>Esc</kbd> Close lightbox</div>
                             <div class="shortcut"><kbd>+</kbd> <kbd>-</kbd> Zoom in/out</div>
                             <div class="shortcut"><kbd>0</kbd> Reset zoom</div>
+                            <div class="shortcut"><kbd>D</kbd> Download raw TIF</div>
                         </div>
                         <div class="shortcut-group">
                             <h4>Events</h4>

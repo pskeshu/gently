@@ -1597,6 +1597,7 @@ const EmbryosManager = {
             </div>
             <div class="detail-actions">
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(-1)">&#x2190; Previous</button>
+                ${imageUid ? `<button class="detail-download" onclick="EmbryosManager.downloadTif('${imageUid}')" title="Download raw TIF">&#x2B73; Download TIF</button>` : ''}
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(1)">Next &#x2192;</button>
             </div>
         `;
@@ -1669,6 +1670,21 @@ const EmbryosManager = {
             const newItem = reasoning[newIdx];
             this.openDetailPanel(newItem.detector_name, newItem.timepoint);
         }
+    },
+
+    // Download raw TIF file
+    downloadTif(uid) {
+        if (!uid) {
+            console.warn('No UID available for download');
+            return;
+        }
+        // Trigger download via hidden link
+        const link = document.createElement('a');
+        link.href = `/api/download/${uid}`;
+        link.download = ''; // Let server set filename via Content-Disposition
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
     },
 
     // Get icon for detector type

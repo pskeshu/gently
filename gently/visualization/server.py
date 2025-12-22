@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # Optional imports
 try:
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
-    from fastapi.responses import HTMLResponse, JSONResponse, Response
+    from fastapi.responses import HTMLResponse, JSONResponse, Response, FileResponse
     from fastapi.staticfiles import StaticFiles
     from fastapi.templating import Jinja2Templates
     from fastapi.middleware.cors import CORSMiddleware
@@ -1052,6 +1052,47 @@ class VisualizationServer:
                 except Exception as e:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
+
+        @self.app.get("/api/download/{uid}")
+        async def download_tif(uid: str):
+            """Download raw TIF file with proper filename"""
+            if not self.data_store:
+                raise HTTPException(status_code=503, detail="DataStore not available")
+
+            # Get the data reference for metadata
+            ref = self.data_store.get_reference(uid)
+            if not ref:
+                raise HTTPException(status_code=404, detail=f"Data {uid} not found")
+
+            # Find the actual file
+            file_path = self.data_store._find_data_file(uid)
+            if not file_path or not file_path.exists():
+                raise HTTPException(status_code=404, detail=f"File for {uid} not found on disk")
+
+            # Build a proper filename from metadata
+            # Format: {embryo_id}_{data_type}_t{timepoint}_{YYYYMMDD_HHMMSS}.tif
+            embryo_id = ref.metadata.get('embryo_id', 'unknown')
+            timepoint = ref.metadata.get('timepoint', ref.metadata.get('t', ''))
+            timestamp = ref.timestamp
+
+            # Sanitize embryo_id for filename (remove special chars)
+            safe_embryo = "".join(c if c.isalnum() or c in '-_' else '_' for c in str(embryo_id))
+
+            # Build filename parts
+            parts = [safe_embryo, ref.data_type]
+            if timepoint:
+                parts.append(f"t{timepoint:03d}" if isinstance(timepoint, int) else f"t{timepoint}")
+            parts.append(timestamp.strftime("%Y%m%d_%H%M%S"))
+
+            # Use original extension
+            ext = file_path.suffix or '.tif'
+            filename = "_".join(parts) + ext
+
+            return FileResponse(
+                path=str(file_path),
+                filename=filename,
+                media_type="image/tiff"
+            )
 
         @self.app.get("/api/volumes3d")
         async def list_volumes_3d():

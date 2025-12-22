@@ -151,7 +151,10 @@ function display3DVolume(data) {
     // Load the slice
     loadZSlice(data.uid, state.currentZ);
 
-    // Update image info
+    // Show viewer info and update
+    const viewerInfo = document.getElementById('viewer-info');
+    if (viewerInfo) viewerInfo.style.display = 'flex';
+
     document.getElementById('info-type').textContent = `3D Seg · ${data.num_cells} cells`;
     document.getElementById('info-uid').textContent = data.uid.slice(0, 12) + '...';
     document.getElementById('info-embryo').textContent = data.metadata?.embryo_id || '-';
@@ -227,11 +230,13 @@ function displayImage(data) {
 
     const img = document.getElementById('main-image');
     const placeholder = document.getElementById('placeholder');
+    const viewerInfo = document.getElementById('viewer-info');
 
     if (data.base64_png) {
         img.src = 'data:image/png;base64,' + data.base64_png;
         img.style.display = 'block';
         placeholder.style.display = 'none';
+        if (viewerInfo) viewerInfo.style.display = 'flex';
     }
 
     const embryoId = data.metadata?.embryo_id || '-';

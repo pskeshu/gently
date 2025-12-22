@@ -51,6 +51,33 @@
     color: var(--text);
 }
 
+.sidebar-filter {
+    padding: 8px 16px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-dark);
+}
+
+.filter-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    user-select: none;
+}
+
+.filter-toggle input[type="checkbox"] {
+    width: 14px;
+    height: 14px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+.filter-toggle:hover {
+    color: var(--text);
+}
+
 .session-list {
     flex: 1;
     overflow-y: auto;

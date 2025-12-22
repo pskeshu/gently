@@ -39,6 +39,12 @@
                     </svg>
                 </button>
             </div>
+            <div class="sidebar-filter">
+                <label class="filter-toggle">
+                    <input type="checkbox" id="filter-with-content" checked onchange="ReviewApp.renderSessionList()">
+                    <span>Only with content</span>
+                </label>
+            </div>
             <div class="session-list" id="session-list">
                 <div class="loading">Loading sessions...</div>
             </div>
