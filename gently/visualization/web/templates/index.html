@@ -61,18 +61,25 @@
             Live View
         </div>
         <div class="tab" data-tab="calibration">
-            Setup
+            Calibration
             <span class="tab-badge" id="calibration-count">0</span>
         </div>
     </div>
 
     <!-- Main Tab (Live View) -->
     <div id="main-content" class="tab-content">
-        <div class="main">
-            <div class="viewer">
+        <div class="live-view">
+            <!-- Main viewer area -->
+            <div class="live-viewer">
                 <div class="viewer-header">
-                    <span class="image-title" id="image-info">No image selected</span>
-                    <span class="image-title" id="image-time"></span>
+                    <div class="viewer-info">
+                        <span class="info-embryo" id="info-embryo">-</span>
+                        <span class="info-separator">·</span>
+                        <span class="info-type" id="info-type">-</span>
+                        <span class="info-separator">·</span>
+                        <span class="info-uid" id="info-uid">-</span>
+                    </div>
+                    <span class="info-time" id="image-time"></span>
                 </div>
                 <div class="viewer-with-slider">
                     <div class="image-container" id="main-image-container">
@@ -102,44 +109,30 @@
                     </div>
                 </div>
             </div>
-
-            <div class="sidebar">
-                <div class="panel">
-                    <div class="panel-title">Image Info</div>
-                    <div class="info-grid">
-                        <span class="info-label">Embryo</span>
-                        <span class="info-value accent" id="info-embryo">-</span>
-                        <span class="info-label">Type</span>
-                        <span class="info-value" id="info-type">-</span>
-                        <span class="info-label">Shape</span>
-                        <span class="info-value" id="info-shape">-</span>
-                        <span class="info-label">UID</span>
-                        <span class="info-value" id="info-uid">-</span>
-                    </div>
-                </div>
-
-                <div class="panel">
-                    <div class="panel-title">Recent Images</div>
-                    <div id="recent-list" style="max-height: 200px; overflow-y: auto;"></div>
-                </div>
-
-                <div class="panel" style="flex: 1; display: flex; flex-direction: column; overflow: hidden;">
-                    <div class="panel-title">Event Log</div>
-                    <div class="event-log" id="event-log"></div>
-                </div>
+            <!-- Bottom strip: Recent images -->
+            <div class="recent-strip" id="recent-strip">
+                <div class="recent-strip-inner" id="recent-list"></div>
             </div>
         </div>
     </div>
 
     <!-- Calibration Tab -->
     <div id="calibration-content" class="tab-content">
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; flex-shrink: 0;">3D Segmentations</div>
-        <div class="gallery" id="volumes3d-gallery" style="max-height: 200px; min-height: 80px; flex-shrink: 0;">
-            <div class="empty-state">No 3D segmentations yet</div>
-        </div>
-        <div style="padding: 0.5rem 1rem; color: var(--accent); font-weight: 500; border-top: 1px solid var(--border); flex-shrink: 0;">Calibration Images</div>
-        <div class="gallery" id="calibration-gallery">
-            <div class="empty-state">No calibration images yet</div>
+        <div class="calibration-container">
+            <!-- Left sidebar: Embryo list -->
+            <div class="calibration-sidebar" id="calibration-sidebar">
+                <div class="calibration-sidebar-header">Embryos</div>
+                <div class="calibration-embryo-cards" id="calibration-embryo-cards">
+                    <div class="empty-state-small">No calibration images yet</div>
+                </div>
+            </div>
+            <!-- Right panel: Images for selected embryo -->
+            <div class="calibration-panel" id="calibration-panel">
+                <div class="calibration-empty">
+                    <div class="calibration-empty-icon">&#x1F4F7;</div>
+                    <div class="calibration-empty-text">Select an embryo to view calibration images</div>
+                </div>
+            </div>
         </div>
     </div>
 

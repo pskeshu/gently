@@ -2064,8 +2064,8 @@ const EmbryosManager = {
             'no-embryos': {
                 icon: '&#x1F52C;',  // Microscope
                 title: 'No embryos yet',
-                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Setup tab.',
-                action: { label: 'Go to Setup', tab: 'calibration' }
+                message: 'Start a timelapse acquisition to begin tracking embryos. Configure your experiment in the Calibration tab.',
+                action: { label: 'Go to Calibration', tab: 'calibration' }
             },
             'no-detections': {
                 icon: '&#x1F441;',  // Eye
@@ -2077,7 +2077,7 @@ const EmbryosManager = {
                 icon: '&#x23F8;',  // Pause
                 title: 'Experiment not running',
                 message: 'No active timelapse. Configure and start an experiment to begin automated embryo monitoring.',
-                action: { label: 'Setup Experiment', tab: 'calibration' }
+                action: { label: 'Go to Calibration', tab: 'calibration' }
             },
             'waiting-first': {
                 icon: '&#x23F3;',  // Hourglass

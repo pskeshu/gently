@@ -351,7 +351,7 @@ const KeyboardShortcuts = {
         '1': () => switchTab('embryos'),     // Embryos
         '2': () => switchTab('events'),      // System
         '3': () => switchTab('main'),        // Live View
-        '4': () => switchTab('calibration'), // Setup
+        '4': () => switchTab('calibration'), // Calibration
         'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
@@ -406,7 +406,7 @@ const KeyboardShortcuts = {
                             <div class="shortcut"><kbd>1</kbd> Embryos tab</div>
                             <div class="shortcut"><kbd>2</kbd> System tab</div>
                             <div class="shortcut"><kbd>3</kbd> Live View tab</div>
-                            <div class="shortcut"><kbd>4</kbd> Setup tab</div>
+                            <div class="shortcut"><kbd>4</kbd> Calibration tab</div>
                         </div>
                         <div class="shortcut-group">
                             <h4>3D Volume</h4>

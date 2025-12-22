@@ -121,7 +121,7 @@ function handleNew3DVolume(data) {
     // Update counts and galleries
     updateCalibrationCount();
     if (state.tab === 'calibration') {
-        render3DVolumesGallery();
+        CalibrationManager.render();
     }
 
     // Auto-display the new 3D volume
@@ -152,11 +152,9 @@ function display3DVolume(data) {
     loadZSlice(data.uid, state.currentZ);
 
     // Update image info
-    document.getElementById('info-type').textContent = '3D Segmentation';
-    document.getElementById('info-shape').textContent = data.shape.join(' x ');
-    document.getElementById('info-uid').textContent = data.uid.slice(0, 16) + '...';
+    document.getElementById('info-type').textContent = `3D Seg · ${data.num_cells} cells`;
+    document.getElementById('info-uid').textContent = data.uid.slice(0, 12) + '...';
     document.getElementById('info-embryo').textContent = data.metadata?.embryo_id || '-';
-    document.getElementById('image-info').textContent = `3D Seg: ${data.num_cells} cells`;
     document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
 }
 
@@ -239,10 +237,11 @@ function displayImage(data) {
     const embryoId = data.metadata?.embryo_id || '-';
     document.getElementById('info-embryo').textContent = embryoId;
     document.getElementById('info-type').textContent = data.data_type;
-    document.getElementById('info-shape').textContent = data.shape ? data.shape.join(' x ') : '-';
-    document.getElementById('info-uid').textContent = data.uid.slice(0, 16) + '...';
-    document.getElementById('image-info').textContent = data.data_type;
+    document.getElementById('info-uid').textContent = data.uid.slice(0, 12) + '...';
     document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
+
+    // Update recent strip to show active state
+    renderRecentList();
 }
 
 function show3DVolume(uid) {
