@@ -15,17 +15,18 @@ class DevelopmentalStage(str, Enum):
     Stages are ordered chronologically from fertilization to hatching.
     String values match what the VLM returns and what's used in file paths.
 
-    Simplified stages:
-    - "bean" removed (too brief, merged into early)
-    - "2fold"/"3fold" merged into "pretzel" (hard to distinguish)
+    Full stage progression:
+    early → bean → comma → 1.5fold → 2fold → pretzel → hatching → hatched
 
     Special states:
     - "arrested" is not part of normal progression (dead/arrested embryo)
     """
     EARLY = "early"           # Gastrulation through early morphogenesis, oval shape
+    BEAN = "bean"             # Elongated oval, "bean-shaped", pre-comma curvature
     COMMA = "comma"           # Clear C-shape, head/tail distinguishable
     FOLD_1_5 = "1.5fold"      # Elongation, ~1.5x eggshell length
-    PRETZEL = "pretzel"       # Tight coil, 2-3 body segments (formerly 2fold/3fold)
+    FOLD_2 = "2fold"          # Body folded back twice, between 1.5fold and pretzel
+    PRETZEL = "pretzel"       # Tight coil, 3+ body segments (formerly 3fold)
     HATCHING = "hatching"     # Active emergence, shell breach visible
     HATCHED = "hatched"       # Fully emerged L1 larva
     ARRESTED = "arrested"     # Dead or developmentally arrested embryo (special state)
@@ -34,8 +35,8 @@ class DevelopmentalStage(str, Enum):
     def ordered_list(cls) -> List["DevelopmentalStage"]:
         """Return stages in developmental order."""
         return [
-            cls.EARLY, cls.COMMA, cls.FOLD_1_5,
-            cls.PRETZEL, cls.HATCHING, cls.HATCHED
+            cls.EARLY, cls.BEAN, cls.COMMA, cls.FOLD_1_5,
+            cls.FOLD_2, cls.PRETZEL, cls.HATCHING, cls.HATCHED
         ]
 
     @classmethod
@@ -101,15 +102,30 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
             "oval/elliptical shape",
             "grainy texture with many visible nuclei",
             "uniform or slightly asymmetric cellular mass",
-            "compact, no clear C-curve yet",
-            "may have subtle elongation but no pronounced bend",
+            "compact, no clear elongation yet",
+            "round to slightly oval, no pronounced axis",
         ],
         "NOT_if": [
-            "clear C-curve or comma shape",
-            "pronounced ventral bend",
-            "elongation beyond oval",
+            "elongated bean-like shape",
+            "clear axis of elongation",
+            "any hint of curvature or C-shape",
         ],
-        "typical_duration_min": 90,  # includes former bean stage
+        "typical_duration_min": 60,  # until bean stage
+    },
+    "bean": {
+        "features": [
+            "elongated oval, 'bean-shaped' appearance",
+            "clear axis of elongation established",
+            "slightly asymmetric - one end may be narrower",
+            "pre-comma curvature - hint of bend but not C-shaped",
+            "smooth outline, no tight curvature yet",
+        ],
+        "NOT_if": [
+            "still round/spherical (that's early)",
+            "clear C-curve or comma shape (that's comma)",
+            "pronounced ventral bend",
+        ],
+        "typical_duration_min": 30,
     },
     "comma": {
         "features": [
@@ -119,38 +135,55 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
             "body axis clearly established",
         ],
         "NOT_if": [
-            "no clear bend (that's early)",
+            "no clear bend, just elongated (that's bean)",
             "elongation beyond eggshell (that's 1.5fold)",
-            "still oval/round shape",
+            "still oval/round shape (that's early)",
         ],
-        "typical_duration_min": 45,
+        "typical_duration_min": 30,
     },
     "1.5fold": {
         "features": [
             "elongated ~1.5x eggshell length",
             "embryo clearly longer than egg width",
             "body starting to fold back on itself",
-            "partial fold visible",
+            "one fold/bend visible, tail beginning to turn back",
         ],
         "NOT_if": [
             "fits within egg diameter (that's comma)",
-            "tight coil with 2-3 segments (that's pretzel)",
+            "two clear folds visible (that's 2fold)",
+            "tight coil with 3 segments (that's pretzel)",
         ],
-        "typical_duration_min": 40,
+        "typical_duration_min": 30,
+    },
+    "2fold": {
+        "features": [
+            "body folded back on itself twice",
+            "two clear bends/folds visible",
+            "~2x eggshell length when straightened",
+            "more compaction than 1.5fold, less than pretzel",
+            "head and tail both curving inward",
+        ],
+        "NOT_if": [
+            "only one fold visible (that's 1.5fold)",
+            "tight pretzel coil with 3+ segments (that's pretzel)",
+            "body extending beyond shell (that's hatching)",
+        ],
+        "typical_duration_min": 45,
     },
     "pretzel": {
         "features": [
             "tightly coiled pretzel-like shape",
-            "2-3 body segments visible",
+            "3 or more body segments visible",
             "maximum compaction within shell",
             "may show occasional twitching",
+            "often called '3fold' - three folds/bends",
         ],
         "NOT_if": [
-            "only partial fold (that's 1.5fold)",
+            "only two folds visible (that's 2fold)",
             "any part outside shell (that's hatching)",
             "shell breach visible",
         ],
-        "typical_duration_min": 110,  # combined 2fold + 3fold duration
+        "typical_duration_min": 60,
     },
     "hatching": {
         "features": [
@@ -201,17 +234,29 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
 # Transition zones between stages
 # Used for detecting transitional states and setting expectations for temporal analysis
 TRANSITION_ZONES: Dict[str, Dict[str, Any]] = {
-    "early_to_comma": {
+    "early_to_bean": {
         "from_stage": "early",
-        "to_stage": "comma",
+        "to_stage": "bean",
         "key_features": [
             "subtle elongation beginning",
-            "slight asymmetry developing",
-            "hint of curvature forming",
-            "one end beginning to narrow",
+            "shape becoming oval rather than round",
+            "axis of elongation emerging",
+            "one end may start to look slightly different",
         ],
-        "duration_typical_min": 15,  # shorter than full stage
-        "description": "Embryo elongating, beginning to develop characteristic C-curve",
+        "duration_typical_min": 10,
+        "description": "Embryo transitioning from round to elongated oval shape",
+    },
+    "bean_to_comma": {
+        "from_stage": "bean",
+        "to_stage": "comma",
+        "key_features": [
+            "curvature beginning to form",
+            "hint of C-shape emerging",
+            "ventral side starting to indent",
+            "asymmetry becoming more pronounced",
+        ],
+        "duration_typical_min": 10,
+        "description": "Bean shape developing into characteristic C-curve",
     },
     "comma_to_1.5fold": {
         "from_stage": "comma",
@@ -222,20 +267,32 @@ TRANSITION_ZONES: Dict[str, Dict[str, Any]] = {
             "beginning to turn back on itself",
             "elongation becoming more pronounced",
         ],
-        "duration_typical_min": 15,
+        "duration_typical_min": 10,
         "description": "Curve becoming fold, body extending beyond shell diameter",
     },
-    "1.5fold_to_pretzel": {
+    "1.5fold_to_2fold": {
         "from_stage": "1.5fold",
+        "to_stage": "2fold",
+        "key_features": [
+            "first fold tightening",
+            "second bend beginning to form",
+            "tail curving back further",
+            "body becoming more compact",
+        ],
+        "duration_typical_min": 15,
+        "description": "Single fold developing into double fold",
+    },
+    "2fold_to_pretzel": {
+        "from_stage": "2fold",
         "to_stage": "pretzel",
         "key_features": [
-            "fold becoming tighter",
-            "second bend forming",
-            "body coiling more compactly",
-            "approaching maximum compaction",
+            "third fold forming",
+            "body coiling tighter",
+            "maximum compaction approaching",
+            "pretzel-like configuration emerging",
         ],
-        "duration_typical_min": 20,
-        "description": "Partial fold tightening into coiled pretzel configuration",
+        "duration_typical_min": 15,
+        "description": "Double fold tightening into triple-fold pretzel",
     },
     "pretzel_to_hatching": {
         "from_stage": "pretzel",
@@ -273,10 +330,12 @@ def get_adjacent_stages(stage: str) -> tuple:
 def get_stage_description(stage: str) -> str:
     """Get a brief description for a stage."""
     descriptions = {
-        "early": "Gastrulation through early morphogenesis, oval shape, no clear C-curve",
+        "early": "Gastrulation through early morphogenesis, round to oval shape",
+        "bean": "Elongated oval, bean-shaped, pre-comma curvature",
         "comma": "Clear C-shaped curve with established body axis",
-        "1.5fold": "Elongation beginning, embryo ~1.5x shell length",
-        "pretzel": "Tightly coiled, 2-3 body segments visible",
+        "1.5fold": "Elongation beginning, embryo ~1.5x shell length, one fold",
+        "2fold": "Body folded twice, more compact than 1.5fold",
+        "pretzel": "Tightly coiled, 3+ body segments visible (3fold)",
         "hatching": "Active emergence through shell breach",
         "hatched": "Fully emerged L1 larva",
         "arrested": "Development arrested - dead or stalled embryo",

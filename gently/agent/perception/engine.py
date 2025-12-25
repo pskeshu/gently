@@ -155,7 +155,7 @@ PERCEPTION_TOOLS = [
             "properties": {
                 "stage": {
                     "type": "string",
-                    "enum": ["early", "comma", "1.5fold", "pretzel", "hatching", "hatched"],
+                    "enum": ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"],
                     "description": "The developmental stage to view an example of",
                 },
                 "reason": {
@@ -645,25 +645,38 @@ Your task: Identify the developmental stage and whether hatching is occurring.
 DEVELOPMENTAL STAGES (in order):
 
 EARLY (gastrulation through early morphogenesis):
-- Oval/elliptical shape, relatively uniform cellular mass
+- Round to oval shape, relatively uniform cellular mass
 - Grainy texture showing many individual cells (~100+ cell stage)
-- No clear C-curve yet (may have subtle asymmetry)
-- Side view shows compact, rounded or slightly elongated blob
+- No clear elongation or curvature yet
+- Compact blob, no pronounced axis
+
+BEAN:
+- Elongated oval, "bean-shaped" appearance
+- Clear axis of elongation established
+- Slightly asymmetric - one end may be narrower
+- Pre-comma curvature - hint of bend but not C-shaped
 
 COMMA:
-- Clear elongation - distinctly longer shape
-- Pronounced bend/curve forming C-shape
-- Body axis now established, head/tail distinguishable
+- Clear C-curve or comma shape
+- Pronounced ventral bend
+- Body axis established, head/tail distinguishable
 - Side view shows curvature
 
 1.5-FOLD:
 - Embryo starting to fold back on itself
 - Body clearly longer than egg width
-- Partial fold - about 1.5x original length folded
+- One fold/bend visible, tail beginning to turn back
+- ~1.5x shell length when straightened
 
-PRETZEL:
+2-FOLD:
+- Body folded back on itself twice
+- Two clear bends/folds visible
+- More compact than 1.5fold, less than pretzel
+- ~2x shell length when straightened
+
+PRETZEL (also called 3-fold):
 - Tightly coiled "pretzel" shape
-- 2-3 body segments visible
+- 3 or more body segments visible
 - Maximum compaction within eggshell
 - Twitching/movement may be visible
 
@@ -819,7 +832,7 @@ Respond with JSON:
     "why_not_previous_stage": "feature that rules out earlier stage",
     "why_not_next_stage": "feature missing for later stage"
   },
-  "stage": "early" | "comma" | "1.5fold" | "pretzel" | "hatching" | "hatched" | "arrested",
+  "stage": "early" | "bean" | "comma" | "1.5fold" | "2fold" | "pretzel" | "hatching" | "hatched" | "arrested",
   "is_transitional": true/false,
   "transition_between": ["stage1", "stage2"] or null,
   "confidence": 0.0-1.0,
@@ -832,9 +845,11 @@ Shape progression: oval -> elongated -> curved -> folded -> tightly coiled -> el
 Curvature: none -> subtle hint -> slight -> moderate C-curve -> pronounced -> folded back -> coiled
 
 TRANSITIONAL INDICATORS (use is_transitional=true when you see these):
-- EARLY -> COMMA: Subtle elongation beginning, hint of asymmetry, one end slightly narrowing
+- EARLY -> BEAN: Subtle elongation beginning, shape becoming oval
+- BEAN -> COMMA: Curvature beginning to form, hint of C-shape emerging
 - COMMA -> 1.5FOLD: C-curve deepening, body starting to turn back on itself
-- 1.5FOLD -> PRETZEL: Fold becoming tighter, second bend forming
+- 1.5FOLD -> 2FOLD: First fold tightening, second bend beginning to form
+- 2FOLD -> PRETZEL: Third fold forming, body coiling tighter
 - PRETZEL -> HATCHING: Shell boundary becoming irregular, possible breach
 
 ARREST DETECTION:
