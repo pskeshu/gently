@@ -2515,6 +2515,121 @@ kbd {
     gap: 0.5rem;
 }
 
+/* ==========================================
+   Minimal Embryo Card (sleek design)
+   ========================================== */
+.embryo-card.minimal {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 14px;
+    margin: 6px 8px;
+    background: var(--bg-hover);
+    border-radius: 10px;
+    border: 1px solid transparent;
+    border-left: 3px solid var(--accent-green);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.embryo-card.minimal:hover {
+    background: var(--border);
+    transform: translateX(2px);
+}
+
+.embryo-card.minimal.selected {
+    background: rgba(96, 165, 250, 0.1);
+    border-color: var(--accent);
+    border-left-color: var(--accent);
+}
+
+.embryo-card.minimal.complete {
+    border-left-color: var(--accent-purple);
+}
+
+.embryo-card.minimal.paused {
+    border-left-color: var(--accent-orange);
+}
+
+.embryo-card.minimal.error {
+    border-left-color: #f85149;
+}
+
+.embryo-card.minimal .card-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.embryo-card.minimal .card-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text);
+    margin-bottom: 4px;
+}
+
+.embryo-card.minimal .card-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.embryo-card.minimal .card-stage {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.embryo-card.minimal .card-separator {
+    opacity: 0.5;
+}
+
+.embryo-card.minimal .card-tp {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Big prominent play button */
+.embryo-card.minimal .card-play-btn {
+    width: 44px;
+    height: 44px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-hover) 100%);
+    border: none;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+    flex-shrink: 0;
+    margin-left: 12px;
+    box-shadow: 0 2px 8px rgba(96, 165, 250, 0.3);
+}
+
+.embryo-card.minimal .card-play-btn:hover {
+    transform: scale(1.08);
+    box-shadow: 0 4px 16px rgba(96, 165, 250, 0.5);
+}
+
+.embryo-card.minimal .card-play-btn:active {
+    transform: scale(0.95);
+}
+
+.embryo-card.minimal .card-play-btn .play-icon {
+    color: white;
+    font-size: 16px;
+    margin-left: 2px; /* Visual centering for play triangle */
+}
+
+/* Completed embryos get a different play button style */
+.embryo-card.minimal.complete .card-play-btn {
+    background: linear-gradient(135deg, var(--accent-purple) 0%, #9333ea 100%);
+    box-shadow: 0 2px 8px rgba(168, 85, 247, 0.3);
+}
+
+.embryo-card.minimal.complete .card-play-btn:hover {
+    box-shadow: 0 4px 16px rgba(168, 85, 247, 0.5);
+}
 
 .reasoning-count {
     background: var(--accent);
@@ -5620,6 +5735,17 @@ kbd {
 .trace-content.markdown strong {
     color: var(--text);
     font-weight: 600;
+}
+
+.trace-content.markdown .md-json-note {
+    display: inline-block;
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-style: italic;
+    background: var(--surface);
+    padding: 0.15rem 0.4rem;
+    border-radius: 3px;
+    margin: 0.3rem 0;
 }
 
 .detail-actions {

@@ -209,17 +209,9 @@ def create_timelapse_video(
 
                 # Add timestamp if requested
                 if add_timestamps:
-                    # Extract timestamp from filename
-                    parts = vol_path.stem.split("_")
-                    if len(parts) >= 4:
-                        ts_str = f"{parts[2]}_{parts[3]}"
-                        try:
-                            ts = datetime.strptime(ts_str, "%Y%m%d_%H%M%S")
-                            timestamp = ts.strftime("%Y-%m-%d %H:%M:%S")
-                        except ValueError:
-                            timestamp = f"t={i}"
-                    else:
-                        timestamp = f"t={i}"
+                    # Simple timepoint label: T=1, T=2, ...
+                    timepoint = i + 1  # 1-indexed
+                    timestamp = f"T={timepoint}"
 
                     if embryo_id:
                         timestamp = f"{embryo_id} | {timestamp}"

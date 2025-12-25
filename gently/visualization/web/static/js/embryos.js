@@ -19,6 +19,9 @@ const EmbryosManager = {
     // Detection reasoning cache (per-embryo)
     detectionReasoning: {},  // embryo_id -> list of detection results with reasoning
 
+    // Track if we've reconciled with server (prevents showing stale cached data)
+    hasReconciledWithServer: false,
+
     // Currently selected embryo for detail view
     selectedEmbryoId: null,
 
@@ -74,12 +77,10 @@ const EmbryosManager = {
         this.loadHeaderPanelState();
         // Start countdown update timer
         this.startCountdownUpdates();
-        // Initial render
+        // Initial render (reasoning will show loading until server reconciles)
         this.render();
-        // Auto-open latest evaluation for selected embryo
-        if (this.selectedEmbryoId) {
-            this.openLatestDetail();
-        }
+        // Don't auto-open detail until we've reconciled with server
+        // (prevents showing stale cached data from previous session)
         // Update badge on init
         this.updateDetectionBadge();
         // Apply header panel state
@@ -272,6 +273,7 @@ const EmbryosManager = {
         }
 
         this.updateEmbryosCount();
+        this.hasReconciledWithServer = true;  // Mark as reconciled - safe to show reasoning data
         this.render();
         this.saveState();
     },
@@ -296,6 +298,10 @@ const EmbryosManager = {
         this.newDetectionCount = 0;
         this.lastSeenDetectionTime = null;
         this.saveBadgeState();
+        // Also clear localStorage to prevent stale data on refresh
+        this.clearSavedState();
+        // Reset reconciliation flag (will be set true when we get fresh server state)
+        this.hasReconciledWithServer = false;
     },
 
     // ==========================================
@@ -750,8 +756,40 @@ const EmbryosManager = {
         });
     },
 
-    // Full embryo card for sidebar (with selection support)
+    // Minimal embryo card for sidebar (with selection support)
     renderEmbryoCard(embryo) {
+        const status = embryo.isComplete ? 'complete' :
+                       embryo.lastError ? 'error' :
+                       this.state.status === 'PAUSED' ? 'paused' : 'running';
+
+        const isSelected = this.selectedEmbryoId === embryo.embryoId;
+
+        // Stage info
+        const stageIcon = embryo.current_stage ? this.getStageIcon(embryo.current_stage) : '🔬';
+        const stageName = embryo.current_stage ? this.formatStageName(embryo.current_stage) : 'Acquiring';
+
+        // Timepoint display
+        const tpDisplay = `${embryo.timepoints} TP`;
+
+        return `
+            <div class="embryo-card minimal ${status} ${isSelected ? 'selected' : ''}" data-embryo-id="${embryo.embryoId}">
+                <div class="card-info">
+                    <div class="card-name">${embryo.embryoId}</div>
+                    <div class="card-meta">
+                        <span class="card-stage">${stageIcon} ${stageName}</span>
+                        <span class="card-separator">·</span>
+                        <span class="card-tp">${tpDisplay}</span>
+                    </div>
+                </div>
+                <button class="card-play-btn" onclick="event.stopPropagation(); EmbryosManager.playEmbryoTimelapse('${embryo.embryoId}')" title="Play timelapse">
+                    <span class="play-icon">▶</span>
+                </button>
+            </div>
+        `;
+    },
+
+    // Legacy full embryo card (keeping for reference, not used)
+    renderEmbryoCardFull(embryo) {
         const status = embryo.isComplete ? 'complete' :
                        embryo.lastError ? 'error' :
                        this.state.status === 'PAUSED' ? 'paused' : 'running';
@@ -1039,6 +1077,20 @@ const EmbryosManager = {
     renderReasoningPanel() {
         const panel = document.getElementById('reasoning-panel');
         if (!panel) return;
+
+        // Show loading state until we've reconciled with server (prevents stale cached data)
+        if (!this.hasReconciledWithServer) {
+            panel.innerHTML = `
+                <div class="reasoning-empty">
+                    <div class="reasoning-empty-icon">&#x23F3;</div>
+                    <div class="reasoning-empty-text">Connecting to server...</div>
+                    <div style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.5rem;">
+                        Syncing with experiment data
+                    </div>
+                </div>
+            `;
+            return;
+        }
 
         // If no embryo selected or no embryos at all
         if (!this.selectedEmbryoId || !this.state.embryos[this.selectedEmbryoId]) {
@@ -2566,8 +2618,73 @@ const EmbryosManager = {
     renderMarkdown(text) {
         if (!text) return '';
 
-        // Escape HTML first
-        let html = this.escapeHtml(text);
+        // Helper to extract useful info from JSON content
+        const extractJsonSummary = (jsonContent) => {
+            const stageMatch = jsonContent.match(/"stage"\s*:\s*"([^"]+)"/);
+            if (stageMatch) {
+                return `**Classification: ${stageMatch[1]}**`;
+            }
+            const confMatch = jsonContent.match(/"confidence"\s*:\s*([\d.]+)/);
+            if (confMatch) {
+                return `[Confidence: ${Math.round(parseFloat(confMatch[1]) * 100)}%]`;
+            }
+            return null;
+        };
+
+        // Handle JSON code blocks - collapse them but keep a summary
+        // Complete blocks: ```json ... ```
+        let processedText = text.replace(/```json\s*([\s\S]*?)```/g, (match, jsonContent) => {
+            const summary = extractJsonSummary(jsonContent);
+            return summary ? `\n${summary}\n` : '';
+        });
+
+        // Incomplete JSON blocks (no closing ```) - extract what we can
+        processedText = processedText.replace(/```json\s*([\s\S]*)$/g, (match, jsonContent) => {
+            const summary = extractJsonSummary(jsonContent);
+            return summary ? `\n${summary}\n` : '';
+        });
+
+        // Handle raw JSON objects embedded in text (VLM outputs JSON without code blocks)
+        // Find JSON objects that contain stage classification using balanced brace matching
+        const findJsonObjects = (text) => {
+            const results = [];
+            let i = 0;
+            while (i < text.length) {
+                if (text[i] === '{') {
+                    let braceCount = 1;
+                    let j = i + 1;
+                    while (j < text.length && braceCount > 0) {
+                        if (text[j] === '{') braceCount++;
+                        if (text[j] === '}') braceCount--;
+                        j++;
+                    }
+                    if (braceCount === 0) {
+                        const jsonStr = text.slice(i, j);
+                        // Only process if it contains a stage field
+                        if (jsonStr.includes('"stage"')) {
+                            results.push({ start: i, end: j, content: jsonStr });
+                        }
+                    }
+                    i = j;
+                } else {
+                    i++;
+                }
+            }
+            return results;
+        };
+
+        // Replace JSON objects from end to start (to preserve indices)
+        const jsonObjects = findJsonObjects(processedText);
+        for (let i = jsonObjects.length - 1; i >= 0; i--) {
+            const obj = jsonObjects[i];
+            const summary = extractJsonSummary(obj.content);
+            if (summary) {
+                processedText = processedText.slice(0, obj.start) + `\n\n${summary}\n` + processedText.slice(obj.end);
+            }
+        }
+
+        // Escape HTML
+        let html = this.escapeHtml(processedText);
 
         // Headers: ## Header -> <div class="md-h2">
         html = html.replace(/^## (.+)$/gm, '<div class="md-h2">$1</div>');
@@ -2580,6 +2697,9 @@ const EmbryosManager = {
         // Group consecutive bullets into a list
         html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul class="md-list">$&</ul>');
+
+        // Style bracketed notes
+        html = html.replace(/\[([^\]]+)\]/g, '<span class="md-json-note">[$1]</span>');
 
         // Line breaks for readability
         html = html.replace(/\n\n/g, '</p><p>');

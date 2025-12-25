@@ -278,10 +278,27 @@ class ImageManager:
         max_proj = extract_view_a_and_max_project(volume)
         b64_image, size_kb = compress_image_for_api(max_proj)
 
-        # UIDs for tracking (DataStore storage removed to avoid duplicate writes)
-        # The viz server handles None UIDs gracefully with fallback IDs
+        # Store projection to DataStore for fast retrieval by viz server
         volume_uid = None
         projection_uid = None
+
+        if self.data_store is not None:
+            try:
+                proj_ref = self.data_store.store(
+                    data=max_proj,
+                    data_type="volume_projection",
+                    metadata={
+                        'embryo_id': embryo_id,
+                        'timepoint': timepoint,
+                        'shape': max_proj.shape,
+                        'dtype': str(max_proj.dtype),
+                    },
+                    parent_uid=volume_uid,
+                )
+                projection_uid = proj_ref.uid
+                logger.debug(f"Stored projection with UID: {projection_uid[:8]}")
+            except Exception as e:
+                logger.warning(f"Failed to store projection to DataStore: {e}")
 
         # Create record with UIDs
         record = ImageRecord(

@@ -374,8 +374,14 @@ class TimelapseStateTracker:
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
         if event_type == "SESSION_STARTED":
-            # Capture session ID from copilot
+            # New session - clear all state from previous session
             self.session_id = data.get("session_id")
+            self.status = "IDLE"
+            self.started_at = None
+            self.embryos = {}
+            self.detection_reasoning = {}
+            self.volume_paths = {}
+            self.total_timepoints = 0
 
         elif event_type == "SESSION_RESTORED":
             # Capture session ID when copilot resumes a session
@@ -474,6 +480,12 @@ class TimelapseStateTracker:
                     # Perception-specific fields
                     "stage": data.get("stage"),
                     "is_hatching": data.get("is_hatching", False),
+                    # Full reasoning trace from VLM (for detail panel)
+                    "reasoning_trace": data.get("reasoning_trace"),
+                    "is_transitional": data.get("is_transitional"),
+                    "transition_between": data.get("transition_between"),
+                    "observed_features": data.get("observed_features"),
+                    "shape": data.get("shape"),
                 }
                 if eid not in self.detection_reasoning:
                     self.detection_reasoning[eid] = []
@@ -1037,7 +1049,7 @@ class VisualizationServer:
             # Fallback to persistent DataStore
             if self.data_store:
                 try:
-                    data = self.data_store.load(uid)
+                    data = self.data_store.retrieve(uid)
                     if data is not None:
                         return {"uid": uid, "data": "loaded_from_store"}
                 except Exception:
@@ -1046,15 +1058,21 @@ class VisualizationServer:
 
         @self.app.get("/api/images/{uid}/png")
         async def get_image_png(uid: str):
-            """Get image as PNG"""
+            """Get image as PNG (cached - images are immutable)"""
+            # Cache headers - images are immutable so cache aggressively
+            cache_headers = {
+                "Cache-Control": "public, max-age=86400, immutable",  # 24 hours
+                "ETag": f'"{uid}"',
+            }
+
             image = self.store.get_image_by_uid(uid)
             if image and image.base64_png:
                 png_bytes = base64.b64decode(image.base64_png)
-                return Response(content=png_bytes, media_type="image/png")
+                return Response(content=png_bytes, media_type="image/png", headers=cache_headers)
             # Fallback to persistent DataStore
             if self.data_store:
                 try:
-                    data = self.data_store.load(uid)
+                    data = self.data_store.retrieve(uid)
                     if data is not None:
                         import numpy as np
                         from io import BytesIO
@@ -1070,7 +1088,7 @@ class VisualizationServer:
                             img = Image.fromarray(data)
                             buf = BytesIO()
                             img.save(buf, format='PNG')
-                            return Response(content=buf.getvalue(), media_type="image/png")
+                            return Response(content=buf.getvalue(), media_type="image/png", headers=cache_headers)
                 except Exception as e:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
@@ -1123,8 +1141,8 @@ class VisualizationServer:
 
             # Look up volume path from state tracker
             volume_path = None
-            if embryo_id in self.state_tracker.volume_paths:
-                volume_path = self.state_tracker.volume_paths[embryo_id].get(timepoint)
+            if embryo_id in self.timelapse_tracker.volume_paths:
+                volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
 
             if not volume_path:
                 raise HTTPException(status_code=404, detail=f"Volume not found for {embryo_id} T{timepoint}")
