@@ -219,6 +219,9 @@ class ImageManager:
         self.history_length = history_length
         self._data_store = data_store
 
+        # Index mapping (embryo_id, timepoint) -> volume_path for fast retrieval
+        self._volume_index: Dict[tuple, Path] = {}
+
     def set_session(self, session_id: str) -> None:
         """
         Set the current session, updating storage path to session subdirectory
@@ -270,9 +273,12 @@ class ImageManager:
 
         # Save full volume to disk with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        volume_filename = f"{embryo_id}_{timestamp}.tif"
+        volume_filename = f"{embryo_id}_t{timepoint:04d}_{timestamp}.tif"
         volume_path = self.storage_path / volume_filename
         tifffile.imwrite(str(volume_path), volume, compression='zlib')
+
+        # Index for retrieval by (embryo_id, timepoint)
+        self._volume_index[(embryo_id, timepoint)] = volume_path
 
         # Generate max projection for Claude Vision
         max_proj = extract_view_a_and_max_project(volume)
@@ -364,6 +370,88 @@ class ImageManager:
     def load_volume(self, image_record: ImageRecord) -> np.ndarray:
         """Load full volume from disk"""
         return tifffile.imread(image_record.volume_path)
+
+    def load_volume_by_embryo_timepoint(
+        self, embryo_id: str, timepoint: int
+    ) -> Optional[np.ndarray]:
+        """
+        Load volume by embryo ID and timepoint.
+
+        This is the universal volume accessor used by perception, viz server,
+        and any other component that needs to load a volume.
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo identifier
+        timepoint : int
+            Timepoint number
+
+        Returns
+        -------
+        np.ndarray or None
+            The volume data, or None if not found
+        """
+        # Check index first (fast path)
+        key = (embryo_id, timepoint)
+        if key in self._volume_index:
+            volume_path = self._volume_index[key]
+            if volume_path.exists():
+                try:
+                    return tifffile.imread(str(volume_path))
+                except Exception as e:
+                    logger.warning(f"Failed to load volume {volume_path}: {e}")
+                    return None
+
+        # Fallback: scan storage directory for matching file
+        # Pattern: {embryo_id}_t{timepoint:04d}_*.tif
+        pattern = f"{embryo_id}_t{timepoint:04d}_*.tif"
+        matches = list(self.storage_path.glob(pattern))
+
+        if matches:
+            # Use most recent if multiple matches
+            volume_path = sorted(matches)[-1]
+            self._volume_index[key] = volume_path  # Cache for next time
+            try:
+                return tifffile.imread(str(volume_path))
+            except Exception as e:
+                logger.warning(f"Failed to load volume {volume_path}: {e}")
+                return None
+
+        logger.debug(f"No volume found for {embryo_id} at timepoint {timepoint}")
+        return None
+
+    def get_volume_path(self, embryo_id: str, timepoint: int) -> Optional[Path]:
+        """
+        Get the file path for a volume (for download/streaming).
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo identifier
+        timepoint : int
+            Timepoint number
+
+        Returns
+        -------
+        Path or None
+            Path to volume file, or None if not found
+        """
+        key = (embryo_id, timepoint)
+        if key in self._volume_index:
+            path = self._volume_index[key]
+            if path.exists():
+                return path
+
+        # Fallback: scan for file
+        pattern = f"{embryo_id}_t{timepoint:04d}_*.tif"
+        matches = list(self.storage_path.glob(pattern))
+        if matches:
+            path = sorted(matches)[-1]
+            self._volume_index[key] = path
+            return path
+
+        return None
 
     # ===== UID-based retrieval methods =====
 

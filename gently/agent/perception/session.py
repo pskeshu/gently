@@ -7,7 +7,9 @@ Just: what did the VLM see at each timepoint?
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
+
+import numpy as np
 
 from .stages import STAGES, STAGE_CRITERIA, TRANSITION_ZONES, DevelopmentalStage
 

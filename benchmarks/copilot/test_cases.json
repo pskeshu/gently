@@ -3,41 +3,11 @@
   "description": "Tool calling accuracy benchmarks for Microscopy Copilot",
   "test_cases": [
     {
-      "id": "stage_classification_precise",
-      "query": "What stage is embryo 1 at? I need an accurate count.",
-      "expected_tool": "cv_analyze",
-      "expected_params": {
-        "embryo_id": "embryo_1",
-        "intent_contains": ["stage", "classify"]
-      },
-      "tags": ["cv_subagent", "stage_classification"]
-    },
-    {
       "id": "stage_classification_quick",
       "query": "Quick check - roughly what stage is embryo 2?",
       "expected_tool": ["view_image", "query_embryo_status"],
       "notes": "Quick check shouldn't need full CV analysis",
       "tags": ["quick_check", "stage"]
-    },
-    {
-      "id": "cell_counting",
-      "query": "How many cells does embryo 1 have?",
-      "expected_tool": "cv_analyze",
-      "expected_params": {
-        "embryo_id": "embryo_1",
-        "intent_contains": ["count", "cell"]
-      },
-      "tags": ["cv_subagent", "cell_counting"]
-    },
-    {
-      "id": "division_tracking",
-      "query": "Track cell divisions in embryo 1 over the last 5 timepoints",
-      "expected_tool": "cv_analyze",
-      "expected_params": {
-        "embryo_id": "embryo_1",
-        "intent_contains": ["track", "division"]
-      },
-      "tags": ["cv_subagent", "tracking"]
     },
     {
       "id": "start_timelapse",
@@ -86,26 +56,10 @@
       "tags": ["acquisition"]
     },
     {
-      "id": "detect_anomalies",
-      "query": "Check if there's anything abnormal with embryo 2's development",
-      "expected_tool": "cv_analyze",
-      "expected_params": {
-        "embryo_id": "embryo_2",
-        "intent_contains": ["anomal", "abnormal"]
-      },
-      "tags": ["cv_subagent", "anomaly"]
-    },
-    {
       "id": "list_embryos",
       "query": "What embryos do we have?",
       "expected_tool": ["list_embryos", "query_embryo_status"],
       "tags": ["discovery"]
-    },
-    {
-      "id": "cv_service_check",
-      "query": "Is the CV service running?",
-      "expected_tool": "cv_service_status",
-      "tags": ["status", "cv_subagent"]
     }
   ]
 }

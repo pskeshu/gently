@@ -6,13 +6,18 @@ No probability distributions, no tiered models, no complex parsing.
 """
 
 import asyncio
+import base64
+import io
 import json
 import logging
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
+import numpy as np
+from PIL import Image
+from scipy import ndimage
 
 from .session import (
     Observation,
@@ -27,6 +32,84 @@ from .example_store import ExampleStore
 from .stages import STAGES
 
 logger = logging.getLogger(__name__)
+
+
+def render_volume_view(
+    volume: np.ndarray,
+    rotation_x: float = 0,
+    rotation_y: float = 0,
+    threshold: float = 0.2,
+) -> str:
+    """
+    Render a 3D volume from a specific viewing angle using alpha compositing.
+
+    This produces a depth-aware view similar to the 3D viewer, where you can
+    see the embryo's shape and structure, not just a flat max projection.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        3D volume (Z, Y, X)
+    rotation_x : float
+        Rotation around X axis in degrees (-90 to 90)
+    rotation_y : float
+        Rotation around Y axis in degrees (-180 to 180)
+    threshold : float
+        Intensity threshold for transparency (0-1)
+
+    Returns
+    -------
+    str
+        Base64-encoded JPEG image
+    """
+    # Handle 4D volumes (Views, Z, Y, X) - take first view
+    if volume.ndim == 4:
+        volume = volume[0]
+
+    # Normalize to 0-1
+    vol = volume.astype(np.float32)
+    p1, p99 = np.percentile(vol, [1, 99])
+    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+    # Apply rotations
+    if rotation_y != 0:
+        vol = ndimage.rotate(vol, rotation_y, axes=(0, 2), reshape=False, order=1)
+    if rotation_x != 0:
+        vol = ndimage.rotate(vol, rotation_x, axes=(0, 1), reshape=False, order=1)
+
+    # Alpha composite from back to front (same as Three.js stacked slices)
+    z_depth = vol.shape[0]
+    result = np.zeros(vol.shape[1:], dtype=np.float32)
+    accumulated_alpha = np.zeros_like(result)
+
+    for z in range(z_depth):
+        slice_val = vol[z]
+        # Alpha based on intensity above threshold
+        alpha = np.clip((slice_val - threshold) / (1 - threshold + 1e-8), 0, 1) * 0.3
+
+        # Front-to-back compositing
+        result += slice_val * alpha * (1 - accumulated_alpha)
+        accumulated_alpha += alpha * (1 - accumulated_alpha)
+
+    # Normalize result to 0-255
+    if result.max() > 0:
+        result = (result / result.max() * 255).astype(np.uint8)
+    else:
+        result = result.astype(np.uint8)
+
+    # Convert to JPEG base64
+    pil_image = Image.fromarray(result)
+
+    # Resize if too large (max 800px)
+    max_dim = 800
+    if max(pil_image.size) > max_dim:
+        scale = max_dim / max(pil_image.size)
+        new_size = (int(pil_image.size[0] * scale), int(pil_image.size[1] * scale))
+        pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
+
+    buffer = io.BytesIO()
+    pil_image.save(buffer, format='JPEG', quality=85)
+    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 # Tool definitions for interleaved reasoning
 PERCEPTION_TOOLS = [
@@ -83,6 +166,47 @@ PERCEPTION_TOOLS = [
             "required": ["stage", "reason"],
         },
     },
+    {
+        "name": "view_embryo",
+        "description": (
+            "View the embryo's 3D volume from a specific angle. This renders a depth-aware view "
+            "that shows the embryo's shape and structure (not a flat projection). Use this when:\n"
+            "- You need to see the embryo's 3D morphology from a different perspective\n"
+            "- The default top-down view doesn't clearly show folding or coiling\n"
+            "- You want to verify if a structure is real or an imaging artifact\n"
+            "- You need to see head-tail orientation or body segments\n\n"
+            "Example inputs:\n"
+            "- {\"rotation_x\": 45, \"rotation_y\": 0, \"reason\": \"Check if apparent fold is real\"}\n"
+            "- {\"rotation_x\": 0, \"rotation_y\": 90, \"reason\": \"View from side to assess coiling\"}\n"
+            "- {\"rotation_x\": 30, \"rotation_y\": 45, \"reason\": \"Get angled view to see body shape\"}"
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "rotation_x": {
+                    "type": "number",
+                    "description": "Rotation around X axis in degrees (-90 to 90). 0 = top-down, positive = tilt forward",
+                    "minimum": -90,
+                    "maximum": 90,
+                },
+                "rotation_y": {
+                    "type": "number",
+                    "description": "Rotation around Y axis in degrees (-180 to 180). 0 = front view, 90 = side view",
+                    "minimum": -180,
+                    "maximum": 180,
+                },
+                "timepoint": {
+                    "type": "integer",
+                    "description": "Timepoint to view (optional, defaults to current). Use to compare with previous timepoints.",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "Brief explanation of why you need this viewing angle",
+                },
+            },
+            "required": ["reason"],
+        },
+    },
 ]
 
 
@@ -100,8 +224,23 @@ class PerceptionEngine:
         claude_client: anthropic.Anthropic,
         example_store: Optional[ExampleStore] = None,
         examples_path: Optional[Path] = None,
+        volume_accessor: Optional[Callable[[str, int], Optional[np.ndarray]]] = None,
     ):
+        """
+        Parameters
+        ----------
+        claude_client : anthropic.Anthropic
+            Anthropic client for API calls
+        example_store : ExampleStore, optional
+            Pre-loaded example store
+        examples_path : Path, optional
+            Path to examples directory
+        volume_accessor : callable, optional
+            Function (embryo_id, timepoint) -> volume array for 3D viewing.
+            If provided, enables the view_embryo tool.
+        """
         self.claude = claude_client
+        self.volume_accessor = volume_accessor
 
         # Load examples if provided
         if example_store:
@@ -113,6 +252,11 @@ class PerceptionEngine:
 
         # Cache loaded examples (with descriptions)
         self._examples_cache: Optional[Dict[str, List[Dict]]] = None
+
+        # Temporary state during perceive() call
+        self._current_volume: Optional[np.ndarray] = None
+        self._current_embryo_id: Optional[str] = None
+        self._current_timepoint: Optional[int] = None
 
     def _load_all_examples(self) -> Dict[str, List[Dict]]:
         """Load all stage examples with descriptions (cached)."""
@@ -138,12 +282,13 @@ class PerceptionEngine:
         image_b64: str,
         session: PerceptionSession,
         timepoint: int,
+        volume: Optional[np.ndarray] = None,
     ) -> PerceptionResult:
         """
         Perceive the current image using interleaved reasoning.
 
         The VLM can request additional context (previous timepoints, reference
-        examples) via tool use when uncertain about the classification.
+        examples, 3D views) via tool use when uncertain about the classification.
 
         Parameters
         ----------
@@ -153,6 +298,9 @@ class PerceptionEngine:
             Session with previous observations
         timepoint : int
             Current timepoint number
+        volume : np.ndarray, optional
+            Current 3D volume for view_embryo tool. If provided, enables
+            3D viewing from arbitrary angles.
 
         Returns
         -------
@@ -162,26 +310,37 @@ class PerceptionEngine:
         # Store current image for potential future reference
         session.store_image(timepoint, image_b64)
 
-        # Build initial prompt
-        content = self._build_prompt(image_b64, session, timepoint)
+        # Set up temporary state for tool access
+        self._current_volume = volume
+        self._current_embryo_id = session.embryo_id
+        self._current_timepoint = timepoint
 
-        # Run interleaved reasoning loop with tool use
-        result, trace = await self._run_reasoning_loop(
-            content=content,
-            session=session,
-            timepoint=timepoint,
-        )
+        try:
+            # Build initial prompt
+            content = self._build_prompt(image_b64, session, timepoint)
 
-        # Attach reasoning trace to result
-        result.reasoning_trace = trace
+            # Run interleaved reasoning loop with tool use
+            result, trace = await self._run_reasoning_loop(
+                content=content,
+                session=session,
+                timepoint=timepoint,
+            )
 
-        logger.info(
-            f"[{session.embryo_id}] T{timepoint}: "
-            f"stage={result.stage}, hatching={result.is_hatching}, "
-            f"confidence={result.confidence:.0%}, "
-            f"tool_calls={trace.total_tool_calls}, "
-            f"reasoning={result.reasoning[:50] if result.reasoning else 'EMPTY'}..."
-        )
+            # Attach reasoning trace to result
+            result.reasoning_trace = trace
+
+            logger.info(
+                f"[{session.embryo_id}] T{timepoint}: "
+                f"stage={result.stage}, hatching={result.is_hatching}, "
+                f"confidence={result.confidence:.0%}, "
+                f"tool_calls={trace.total_tool_calls}, "
+                f"reasoning={result.reasoning[:50] if result.reasoning else 'EMPTY'}..."
+            )
+        finally:
+            # Clear temporary state to release memory
+            self._current_volume = None
+            self._current_embryo_id = None
+            self._current_timepoint = None
 
         return result
 
@@ -372,6 +531,58 @@ class PerceptionEngine:
             else:
                 content = [{"type": "text", "text": f"No reference example available for stage: {stage}"}]
                 summary = f"No {stage} reference"
+                return content, summary, None, None
+
+        elif tool_name == "view_embryo":
+            rotation_x = tool_input.get("rotation_x", 0)
+            rotation_y = tool_input.get("rotation_y", 0)
+            target_tp = tool_input.get("timepoint", self._current_timepoint)
+            reason = tool_input.get("reason", "")
+
+            # Get the volume
+            vol = None
+            if target_tp == self._current_timepoint and self._current_volume is not None:
+                vol = self._current_volume
+            elif self.volume_accessor is not None and self._current_embryo_id is not None:
+                vol = self.volume_accessor(self._current_embryo_id, target_tp)
+
+            if vol is not None:
+                logger.info(
+                    f"Tool: Rendering 3D view at rotation_x={rotation_x}, "
+                    f"rotation_y={rotation_y}, timepoint={target_tp}"
+                )
+
+                # Render the view
+                rendered_b64 = render_volume_view(vol, rotation_x, rotation_y)
+
+                content = [
+                    {
+                        "type": "text",
+                        "text": (
+                            f"Here is a 3D rendered view of the embryo at T{target_tp} "
+                            f"(rotation_x={rotation_x}°, rotation_y={rotation_y}°). "
+                            f"Requested because: {reason}"
+                        ),
+                    },
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": rendered_b64,
+                        },
+                    },
+                ]
+                summary = f"3D view at rx={rotation_x}, ry={rotation_y}"
+                return content, summary, target_tp, "volume_view"
+            else:
+                content = [
+                    {
+                        "type": "text",
+                        "text": f"3D volume not available for timepoint {target_tp}. Volume viewing requires volume data to be passed to perceive().",
+                    }
+                ]
+                summary = "Volume not available"
                 return content, summary, None, None
 
         else:

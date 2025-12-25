@@ -647,14 +647,6 @@ Write a brief status summary. Examples:
             )
             await self.viz_server.start()
             logger.info(f"Visualization server started at http://localhost:{port}")
-
-            # Wire up CV subagent's segmentation module to push results to viz
-            try:
-                from ..cv_subagent.tools.segmentation import set_viz_server
-                set_viz_server(self.viz_server)
-                logger.info("CV subagent segmentation wired to viz server")
-            except ImportError:
-                logger.debug("CV subagent not available for viz server wiring")
         except ImportError as e:
             logger.warning(f"FastAPI not available for viz server: {e}")
             self.viz_server = None
@@ -665,13 +657,6 @@ Write a brief status summary. Examples:
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
         if self.viz_server is not None:
-            # Clear CV subagent segmentation reference
-            try:
-                from ..cv_subagent.tools.segmentation import set_viz_server
-                set_viz_server(None)
-            except ImportError:
-                pass
-
             await self.viz_server.stop()
             self.viz_server = None
             logger.info("Visualization server stopped")

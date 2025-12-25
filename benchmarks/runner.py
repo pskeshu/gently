@@ -1,10 +1,10 @@
 """
 Benchmark Runner
 
-CLI for running benchmarks against copilot and CV subagent.
+CLI for running benchmarks against copilot.
 
 Usage:
-    python -m benchmarks.runner copilot --tags cv_subagent
+    python -m benchmarks.runner copilot --tags timelapse
     python -m benchmarks.runner compare before.json after.json
 """
 
