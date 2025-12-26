@@ -562,6 +562,237 @@ def projection_three_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     return combined, "Three-view: [XY|YZ] top, [XZ] bottom - axes aligned"
 
 
+def render_volume_rotated_v2(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
+                              threshold: float = 0.12) -> np.ndarray:
+    """
+    Render volume by actually rotating it in 3D, then projecting.
+    Uses scipy.ndimage.rotate for true 3D rotation.
+    """
+    from scipy.ndimage import rotate
+
+    # Normalize volume
+    vol = volume.astype(np.float32)
+    p1, p99 = np.percentile(vol, [1, 99])
+    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+    # Convert angles from radians to degrees
+    angle_y_deg = np.degrees(angle_y)
+    angle_x_deg = np.degrees(angle_x)
+
+    # Rotate around Y axis (rotation in XZ plane, axis 1 is Y)
+    # axes=(2, 0) means rotate in the X-Z plane
+    rotated = rotate(vol, angle_y_deg, axes=(2, 0), reshape=False, order=1, mode='constant', cval=0)
+
+    # Rotate around X axis (rotation in YZ plane)
+    # axes=(1, 0) means rotate in the Y-Z plane
+    rotated = rotate(rotated, angle_x_deg, axes=(1, 0), reshape=False, order=1, mode='constant', cval=0)
+
+    # Now do alpha-blended projection along Z (front to back would be back to front after rotation)
+    z_depth, height, width = rotated.shape
+
+    result = np.zeros((height, width, 3), dtype=np.float32)
+
+    # Back-to-front compositing
+    for z in range(z_depth):
+        slice_img = rotated[z]
+
+        # Compute alpha based on threshold
+        alpha = np.clip((slice_img - threshold) * 2, 0, 1)
+
+        # Composite
+        for c in range(3):
+            result[:, :, c] = slice_img * alpha + result[:, :, c] * (1 - alpha)
+
+    # Convert to uint8
+    result = (np.clip(result, 0, 1) * 255).astype(np.uint8)
+
+    return result
+
+
+def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
+                           threshold: float = 0.12, num_slices: int = 48,
+                           perspective: float = 0.4) -> np.ndarray:
+    """
+    Render volume from a rotated viewpoint with parallax and perspective.
+
+    Simulates the 3D viewer by shifting and scaling slices based on rotation,
+    creating depth through parallax and perspective foreshortening.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        3D volume (Z, Y, X)
+    angle_y : float
+        Rotation around Y axis in radians (horizontal spin)
+    angle_x : float
+        Rotation around X axis in radians (vertical tilt)
+    threshold : float
+        Intensity threshold for transparency (0-1)
+    num_slices : int
+        Number of slices to composite
+    perspective : float
+        Perspective strength (0 = orthographic, higher = more perspective)
+
+    Returns
+    -------
+    np.ndarray
+        RGB image (H, W, 3) uint8
+    """
+    # Normalize volume to 0-1
+    vol = volume.astype(np.float32)
+    p1, p99 = np.percentile(vol, [1, 99])
+    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+    z_depth, height, width = vol.shape
+
+    # Calculate the z-scale factor (exaggerate depth like in 3D viewer)
+    z_scale = (z_depth / width) * 3.0
+
+    # Output canvas size (larger to accommodate shifts and scaling)
+    margin = int(max(width, height) * 0.5)
+    out_h = height + 2 * margin
+    out_w = width + 2 * margin
+    center_y, center_x = out_h // 2, out_w // 2
+
+    # Initialize output
+    result = np.zeros((out_h, out_w, 3), dtype=np.float32)
+
+    # Compute rotation components
+    sin_y, cos_y = np.sin(angle_y), np.cos(angle_y)
+    sin_x, cos_x = np.sin(angle_x), np.cos(angle_x)
+
+    # Sample slices - sort by depth after rotation for proper compositing
+    slice_data_list = []
+    for i in range(num_slices):
+        z_idx = int(i * z_depth / num_slices)
+        z_pos = (i / num_slices - 0.5) * z_scale  # Normalized z position
+
+        # Apply rotation to get the projected depth and shifts
+        rotated_z = z_pos * cos_y
+        shift_x = z_pos * sin_y * width * 1.2  # Horizontal parallax (increased for more depth)
+
+        # Apply X rotation (tilt)
+        shift_y = -rotated_z * sin_x * height * 1.0  # Vertical parallax (increased for more depth)
+        depth_after_rotation = rotated_z * cos_x
+
+        # Perspective scale: closer slices are larger, further are smaller
+        # Increase perspective effect for more 3D depth
+        perspective_scale = 1.0 + (depth_after_rotation * perspective * 1.5 / z_scale)
+        perspective_scale = np.clip(perspective_scale, 0.5, 1.5)
+
+        slice_data_list.append({
+            'z_idx': z_idx,
+            'shift_x': shift_x,
+            'shift_y': shift_y,
+            'depth': depth_after_rotation,
+            'scale': perspective_scale,
+        })
+
+    # Sort by depth (back to front for proper alpha compositing)
+    slice_data_list.sort(key=lambda s: s['depth'])
+
+    # Composite slices
+    for slice_info in slice_data_list:
+        z_idx = slice_info['z_idx']
+        shift_x = slice_info['shift_x']
+        shift_y = slice_info['shift_y']
+        scale = slice_info['scale']
+
+        # Get slice
+        slice_img = vol[z_idx, :, :]
+
+        # Apply slight blur for smoothness
+        slice_img = ndimage.gaussian_filter(slice_img, sigma=0.5)
+
+        # Compute alpha - match Three.js formula: (val - threshold) * 2, capped at 1
+        alpha = np.clip((slice_img - threshold) * 2, 0, 1)
+
+        # Scale the slice for perspective effect
+        if abs(scale - 1.0) > 0.01:
+            new_h = int(height * scale)
+            new_w = int(width * scale)
+            pil_slice = PIL_Image.fromarray((slice_img * 255).astype(np.uint8))
+            pil_alpha = PIL_Image.fromarray((alpha * 255).astype(np.uint8))
+            pil_slice = pil_slice.resize((new_w, new_h), PIL_Image.Resampling.BILINEAR)
+            pil_alpha = pil_alpha.resize((new_w, new_h), PIL_Image.Resampling.BILINEAR)
+            slice_img = np.array(pil_slice).astype(np.float32) / 255
+            alpha = np.array(pil_alpha).astype(np.float32) / 255
+            curr_h, curr_w = new_h, new_w
+        else:
+            curr_h, curr_w = height, width
+
+        # Calculate paste position (centered, then shifted)
+        y_start = center_y - curr_h // 2 + int(shift_y)
+        x_start = center_x - curr_w // 2 + int(shift_x)
+
+        # Bounds checking
+        src_y_start = max(0, -y_start)
+        src_x_start = max(0, -x_start)
+        dst_y_start = max(0, y_start)
+        dst_x_start = max(0, x_start)
+
+        src_y_end = min(curr_h, out_h - y_start)
+        src_x_end = min(curr_w, out_w - x_start)
+        dst_y_end = dst_y_start + (src_y_end - src_y_start)
+        dst_x_end = dst_x_start + (src_x_end - src_x_start)
+
+        if dst_y_end <= dst_y_start or dst_x_end <= dst_x_start:
+            continue
+
+        # Get the slice region
+        src_slice = slice_img[src_y_start:src_y_end, src_x_start:src_x_end]
+        src_alpha = alpha[src_y_start:src_y_end, src_x_start:src_x_end]
+
+        # Alpha composite
+        for c in range(3):
+            result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] = (
+                src_slice * src_alpha +
+                result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] * (1 - src_alpha)
+            )
+
+    # Crop to content (remove empty margins)
+    gray = np.mean(result, axis=2)
+    rows = np.any(gray > 0.01, axis=1)
+    cols = np.any(gray > 0.01, axis=0)
+    if np.any(rows) and np.any(cols):
+        y_min, y_max = np.where(rows)[0][[0, -1]]
+        x_min, x_max = np.where(cols)[0][[0, -1]]
+        # Add small padding
+        pad = 15
+        y_min = max(0, y_min - pad)
+        y_max = min(out_h, y_max + pad)
+        x_min = max(0, x_min - pad)
+        x_max = min(out_w, x_max + pad)
+        result = result[y_min:y_max, x_min:x_max]
+
+    # Convert to uint8
+    result = (np.clip(result, 0, 1) * 255).astype(np.uint8)
+
+    return result
+
+
+def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
+    """
+    Single 3D perspective view for testing.
+
+    Returns:
+        (image, description) tuple
+    """
+    if volume.ndim != 3:
+        return normalize_image(volume), "2D input"
+
+    # Single test view matching 3D viewer defaults
+    # JS threshold 0.30 (slider=30) compares against 0-255, so 30/255=0.12 in 0-1 space
+    js_threshold = 0.30  # What user sees in 3D viewer
+    py_threshold = js_threshold * 100 / 255  # Convert to 0-1 scale: 0.118
+
+    # Negate angle_y to match Three.js coordinate convention
+    view = render_volume_rotated(volume, angle_y=-0.50, angle_x=-0.50, threshold=py_threshold, perspective=0.5)
+
+    # Flip vertically to match Three.js Y-axis convention
+    view = np.flipud(view)
+
+    return view, f"threshold: {js_threshold:.2f}, angle_y: 0.50, angle_x: -0.50, angle_z: 0.00"
 
 
 # Registry of available projection methods
@@ -571,6 +802,7 @@ PROJECTION_METHODS = {
     'multi_slice': projection_multi_slice,
     'subvolume': projection_subvolume,
     'three_view': projection_three_view,
+    'spin_3d': projection_spin_3d,
 }
 
 
@@ -634,6 +866,8 @@ class SessionManager:
 
             bounds = compute_crop_bounds(vol, padding=20)
             self._crop_bounds[self.current_embryo] = bounds
+            print(f"[ROI] Computed crop bounds for {self.current_embryo}: {bounds}")
+            print(f"[ROI] Original volume shape: {vol.shape}, cropped region: {bounds[1]-bounds[0]}x{bounds[3]-bounds[2]}")
 
         return self._crop_bounds[self.current_embryo]
 
@@ -657,7 +891,9 @@ class SessionManager:
 
             # Get stable crop bounds for this embryo
             crop_bounds = self._get_crop_bounds()
-            self._volume_cache[cache_key] = load_volume(volumes[idx], crop_bounds)
+            vol = load_volume(volumes[idx], crop_bounds)
+            print(f"[ROI] Loaded volume {idx}: shape={vol.shape}, bounds={crop_bounds}")
+            self._volume_cache[cache_key] = vol
 
         return self._volume_cache[cache_key]
 
@@ -767,6 +1003,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         sm = self.session_manager
         volume = sm.get_current_volume()
         z_depth = volume.shape[0] if volume is not None and volume.ndim == 3 else 0
+        crop_bounds = sm._crop_bounds.get(sm.current_embryo) if sm.current_embryo else None
         self.send_json({
             "session": sm.session_path.name,
             "embryos": sm.embryo_list,
@@ -776,6 +1013,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             "methods": list(PROJECTION_METHODS.keys()),
             "active_methods": ExplorerHandler.current_methods,
             "z_depth": z_depth,
+            "crop_bounds": crop_bounds,
         })
 
     def send_zslice(self, z: int):
@@ -1029,6 +1267,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             <div class="info-item">Session: <span class="info-value" id="session">-</span></div>
             <div class="info-item">Embryo: <span class="info-value" id="embryo">-</span></div>
             <div class="info-item">Volume: <span class="info-value" id="volume-shape">-</span></div>
+            <div class="info-item">ROI: <span class="info-value" id="crop-bounds">-</span></div>
             <div class="info-item">File: <span class="info-value" id="filename">-</span></div>
         </div>
 
@@ -1056,12 +1295,18 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         <div class="projection-card" id="viewer3d-card">
             <div class="projection-header">
                 <div class="projection-title">3D Volume</div>
-                <div class="projection-desc">Drag to rotate | Scroll to zoom | Threshold: <input type="range" id="thresh3d" min="0" max="100" value="30" style="width:80px;vertical-align:middle;"></div>
+                <div class="projection-desc">
+                    Drag: X/Y | Shift+Drag: Z | Scroll: zoom |
+                    Threshold: <input type="range" id="thresh3d" min="0" max="100" value="30" style="width:80px;vertical-align:middle;">
+                    <span id="thresh-display" style="font-family:monospace;color:#58a6ff;min-width:35px;display:inline-block;">0.30</span>
+                    | <span id="angle-display" style="font-family:monospace;color:#58a6ff;">angle_y: 0.00, angle_x: 0.00, angle_z: 0.00</span>
+                    <button id="copy-angles-btn" onclick="copyAngles()" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer;background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">Copy</button>
+                </div>
             </div>
             <div id="viewer3d" style="height:400px;background:#000;"></div>
         </div>
 
-        <p class="keyboard-hint">Keyboard: ← → or A/D to navigate, 1-5 to toggle methods</p>
+        <p class="keyboard-hint">Keyboard: ← → or A/D to navigate, 1-6 to toggle methods</p>
     </div>
 
     <script>
@@ -1094,6 +1339,15 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             state.activeMethods = data.active_methods;
 
             document.getElementById('session').textContent = data.session;
+
+            // Display crop bounds if available
+            if (data.crop_bounds) {
+                const [yMin, yMax, xMin, xMax] = data.crop_bounds;
+                document.getElementById('crop-bounds').textContent =
+                    `Y:${yMin}-${yMax} X:${xMin}-${xMax} (${yMax-yMin}×${xMax-xMin})`;
+            } else {
+                document.getElementById('crop-bounds').textContent = 'none';
+            }
 
             // Populate embryo selector
             const select = document.getElementById('embryo-select');
@@ -1148,10 +1402,14 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             data.projections.forEach(proj => {
                 const card = document.createElement('div');
                 card.className = 'projection-card';
+                const descId = 'desc-' + proj.method;
                 card.innerHTML = `
                     <div class="projection-header">
                         <div class="projection-title">${proj.method}</div>
-                        <div class="projection-desc">${proj.description}</div>
+                        <div class="projection-desc">
+                            <span id="${descId}">${proj.description}</span>
+                            <button onclick="copyText('${descId}')" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer;background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">Copy</button>
+                        </div>
                     </div>
                     <div class="projection-image">
                         <img src="data:image/jpeg;base64,${proj.data}" alt="${proj.method}">
@@ -1216,6 +1474,26 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             }
         });
 
+        function copyAngles() {
+            const threshVal = document.getElementById('thresh-display').textContent;
+            const angleText = document.getElementById('angle-display').textContent;
+            const fullText = 'threshold: ' + threshVal + ', ' + angleText;
+            navigator.clipboard.writeText(fullText).then(() => {
+                const btn = document.getElementById('copy-angles-btn');
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1000);
+            });
+        }
+
+        function copyText(elementId) {
+            const text = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => { btn.textContent = 'Copy'; }, 1000);
+            });
+        }
+
         // Initial load
         fetchStatus();
     </script>
@@ -1229,7 +1507,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         let prevMouse3d = { x: 0, y: 0 };
         let viewer3dInitialized = false;
         let savedRotation = { x: -0.5, y: 0.5 };  // Default angled view
-        let savedZoom = 2.5;
+        let savedZoom = 0.9;  // Zoomed in to match spin_3d scale
 
         async function load3DVolume() {
             const resp = await fetch('/api/volume');
@@ -1324,7 +1602,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
 
             scene3d = new THREE.Scene();
             camera3d = new THREE.PerspectiveCamera(50, w / h, 0.1, 100);
-            camera3d.position.z = 2.5;
+            camera3d.position.z = savedZoom;  // Match spin_3d scale
 
             renderer3d = new THREE.WebGLRenderer({ antialias: true });
             renderer3d.setSize(w, h);
@@ -1335,6 +1613,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             sliceGroup = new THREE.Group();
             sliceGroup.rotation.x = savedRotation.x;
             sliceGroup.rotation.y = savedRotation.y;
+            sliceGroup.rotation.z = 0;  // Explicitly set to 0
             scene3d.add(sliceGroup);
             buildSlices3d(32, 30);
 
@@ -1382,7 +1661,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             axesGroup.add(labelZ);
 
             document.getElementById('thresh3d').addEventListener('input', (e) => {
-                buildSlices3d(32, parseInt(e.target.value));
+                const threshVal = parseInt(e.target.value);
+                buildSlices3d(32, threshVal);
+                document.getElementById('thresh-display').textContent = (threshVal / 100).toFixed(2);
             });
 
             renderer3d.domElement.addEventListener('mousedown', (e) => {
@@ -1392,13 +1673,25 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             window.addEventListener('mouseup', () => isDragging3d = false);
             renderer3d.domElement.addEventListener('mousemove', (e) => {
                 if (!isDragging3d) return;
-                sliceGroup.rotation.y += (e.clientX - prevMouse3d.x) * 0.01;
-                sliceGroup.rotation.x += (e.clientY - prevMouse3d.y) * 0.01;
+                if (e.shiftKey) {
+                    // Shift+drag: rotate around Z axis
+                    sliceGroup.rotation.z += (e.clientX - prevMouse3d.x) * 0.01;
+                } else {
+                    // Normal drag: rotate around X and Y
+                    sliceGroup.rotation.y += (e.clientX - prevMouse3d.x) * 0.01;
+                    sliceGroup.rotation.x += (e.clientY - prevMouse3d.y) * 0.01;
+                }
                 savedRotation.x = sliceGroup.rotation.x;
                 savedRotation.y = sliceGroup.rotation.y;
                 // Sync axes orientation with volume
                 axesGroup.rotation.x = sliceGroup.rotation.x;
                 axesGroup.rotation.y = sliceGroup.rotation.y;
+                axesGroup.rotation.z = sliceGroup.rotation.z;
+                // Update angle display (including z rotation)
+                document.getElementById('angle-display').textContent =
+                    'angle_y: ' + sliceGroup.rotation.y.toFixed(2) +
+                    ', angle_x: ' + sliceGroup.rotation.x.toFixed(2) +
+                    ', angle_z: ' + sliceGroup.rotation.z.toFixed(2);
                 prevMouse3d = { x: e.clientX, y: e.clientY };
             });
             renderer3d.domElement.addEventListener('wheel', (e) => {
@@ -1410,6 +1703,12 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             // Initialize axes rotation to match saved rotation
             axesGroup.rotation.x = savedRotation.x;
             axesGroup.rotation.y = savedRotation.y;
+
+            // Initialize angle display
+            document.getElementById('angle-display').textContent =
+                'angle_y: ' + savedRotation.y.toFixed(2) +
+                ', angle_x: ' + savedRotation.x.toFixed(2) +
+                ', angle_z: ' + sliceGroup.rotation.z.toFixed(2);
 
             function animate3d() {
                 requestAnimationFrame(animate3d);
