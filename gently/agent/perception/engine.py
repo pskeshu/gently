@@ -503,6 +503,23 @@ class PerceptionEngine:
             # Call Claude with tools
             response = await self._call_claude_with_tools(messages)
 
+            # Extract thinking content if present (extended thinking)
+            thinking_content = None
+            for block in response.content:
+                if block.type == "thinking":
+                    thinking_content = block.thinking
+                    # Log thinking summary for debugging
+                    thinking_preview = thinking_content[:500] if thinking_content else ""
+                    logger.debug(f"Extended thinking: {thinking_preview}...")
+                    break
+
+            # Record thinking in trace if present
+            if thinking_content:
+                trace.add_step(ReasoningStep(
+                    step_type="thinking",
+                    content=thinking_content[:2000],  # Truncate for storage
+                ))
+
             # Check if we got a final response (no tool use)
             if response.stop_reason == "end_turn":
                 # Extract text response
@@ -1225,38 +1242,6 @@ DON'T SKIP TOOLS just because you have a preliminary guess. Reference comparison
             })
 
         return content
-
-    async def _call_claude(self, content: List[Dict]) -> str:
-        """Call Claude API with extended thinking enabled."""
-        try:
-            response = await asyncio.to_thread(
-                self.claude.messages.create,
-                model=self.MODEL,
-                max_tokens=16000,  # Extended thinking requires higher max_tokens
-                thinking={
-                    "type": "enabled",
-                    "budget_tokens": 8000,  # Allow thorough reasoning for stage classification
-                },
-                messages=[{"role": "user", "content": content}],
-            )
-
-            # With extended thinking, response has thinking blocks followed by text
-            text_response = ""
-            thinking_summary = ""
-
-            for block in response.content:
-                if block.type == "thinking":
-                    # Log thinking for debugging (truncated)
-                    thinking_summary = block.thinking[:200] if block.thinking else ""
-                    logger.debug(f"VLM thinking: {thinking_summary}...")
-                elif block.type == "text":
-                    text_response = block.text
-
-            return text_response
-
-        except Exception as e:
-            logger.error(f"Claude API call failed: {e}")
-            raise
 
     def _parse_response(self, response: str) -> PerceptionResult:
         """Parse VLM response into PerceptionResult."""
