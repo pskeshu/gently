@@ -786,13 +786,10 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     js_threshold = 0.30  # What user sees in 3D viewer
     py_threshold = js_threshold * 100 / 255  # Convert to 0-1 scale: 0.118
 
-    # Negate angle_y to match Three.js coordinate convention
-    view = render_volume_rotated(volume, angle_y=-0.50, angle_x=-0.50, threshold=py_threshold, perspective=0.5)
+    # Angles calibrated to match 3D volume viewer
+    view = render_volume_rotated(volume, angle_y=-0.05, angle_x=0.21, threshold=py_threshold, perspective=0.5)
 
-    # Flip vertically to match Three.js Y-axis convention
-    view = np.flipud(view)
-
-    return view, f"threshold: {js_threshold:.2f}, angle_y: 0.50, angle_x: -0.50, angle_z: 0.00"
+    return view, f"threshold: {js_threshold:.2f}, angle_y: -0.05, angle_x: 0.21, angle_z: 0.00"
 
 
 # Registry of available projection methods
@@ -1614,6 +1611,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             sliceGroup.rotation.x = savedRotation.x;
             sliceGroup.rotation.y = savedRotation.y;
             sliceGroup.rotation.z = 0;  // Explicitly set to 0
+            sliceGroup.scale.y = -1;  // Flip Y to match dual_view orientation
             scene3d.add(sliceGroup);
             buildSlices3d(32, 30);
 
