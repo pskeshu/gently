@@ -404,6 +404,8 @@ class PerceptionEngine:
         session: PerceptionSession,
         timepoint: int,
         volume: Optional[np.ndarray] = None,
+        top_image_b64: Optional[str] = None,
+        side_image_b64: Optional[str] = None,
     ) -> PerceptionResult:
         """
         Perceive the current image using interleaved reasoning.
@@ -414,7 +416,7 @@ class PerceptionEngine:
         Parameters
         ----------
         image_b64 : str
-            Base64-encoded current image
+            Base64-encoded current image (combined view for backward compatibility)
         session : PerceptionSession
             Session with previous observations
         timepoint : int
@@ -422,6 +424,11 @@ class PerceptionEngine:
         volume : np.ndarray, optional
             Current 3D volume for view_embryo tool. If provided, enables
             3D viewing from arbitrary angles.
+        top_image_b64 : str, optional
+            Base64-encoded TOP view image (looking down). If provided along with
+            side_image_b64, sends views as separate images for better analysis.
+        side_image_b64 : str, optional
+            Base64-encoded SIDE view image (looking from front).
 
         Returns
         -------
@@ -438,8 +445,12 @@ class PerceptionEngine:
         self._current_image_b64 = image_b64  # For verification subagents
 
         try:
-            # Build initial prompt
-            content = self._build_prompt(image_b64, session, timepoint)
+            # Build initial prompt - use separate images if available
+            content = self._build_prompt(
+                image_b64, session, timepoint,
+                top_image_b64=top_image_b64,
+                side_image_b64=side_image_b64
+            )
 
             # Run interleaved reasoning loop with tool use
             result, trace = await self._run_reasoning_loop(
@@ -963,25 +974,48 @@ class PerceptionEngine:
         image_b64: str,
         session: PerceptionSession,
         timepoint: int = 0,
+        top_image_b64: Optional[str] = None,
+        side_image_b64: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Build the perception prompt."""
         content = []
+
+        # Determine if using separate images
+        use_separate_images = top_image_b64 is not None and side_image_b64 is not None
 
         # Get available previous timepoints for context
         available_tps = session.get_available_timepoints()
         prev_available = [tp for tp in available_tps if tp < timepoint]
 
-        # 1. Instructions
+        # 1. Instructions - different text depending on image format
+        if use_separate_images:
+            image_format_text = """You will receive TWO SEPARATE IMAGES of the same embryo:
+1. TOP VIEW - Looking down at the embryo from above (max projection along Z axis)
+2. SIDE VIEW - Looking at the embryo from the front (max projection along Y axis)
+
+CRITICAL: Analyze BOTH views carefully. They show the SAME embryo from different angles.
+- TOP view: Best for seeing end asymmetry, ventral indentation, overall outline shape
+- SIDE view: Best for seeing height profile, depth curvature, body thickness"""
+        else:
+            image_format_text = """Each image shows TWO VIEWS stacked vertically:
+- UPPER panel: TOP view (looking down at the embryo from above)
+- LOWER panel: SIDE view (looking at the embryo from the front/side)
+
+Use BOTH views together for accurate 3D morphology assessment:
+- TOP view: Best for seeing end asymmetry, ventral indentation, overall outline shape
+- SIDE view: Best for seeing height profile, depth curvature, body thickness"""
+
         content.append({
             "type": "text",
             "text": f"""You are analyzing a C. elegans embryo in microscopy images.
 Current timepoint: T{timepoint}
 
-Each image shows TWO VIEWS side-by-side:
-- LEFT: TOP view (looking down at the embryo)
-- RIGHT: SIDE view (looking at the embryo from the side)
+{image_format_text}
 
-Both views together give you 3D information about the embryo's morphology.
+ANATOMICAL ORIENTATION:
+- Head/tail axis runs LEFT-RIGHT in both views
+- End asymmetry = one end tapered, other rounded (look in TOP view)
+- Ventral indentation = concave curve along one EDGE of the body (TOP view)
 
 Your task: Identify the developmental stage and whether hatching is occurring.
 
@@ -989,25 +1023,30 @@ DEVELOPMENTAL STAGES (in order):
 
 EARLY (gastrulation through early morphogenesis):
 - Elongated oval shape - already has ~2:1 aspect ratio (NOT round)
-- SYMMETRIC ENDS - both ends appear similar, rounded
+- SYMMETRIC ENDS - both ends appear similar, rounded (KEY FEATURE)
 - Cells appear uniformly distributed throughout
 - Grainy texture with many individual cells visible (~100+ cell stage)
 - No clear body axis organization yet
+- BOTH edges of the oval are CONVEX (curved outward) - no concave edges
 - ALWAYS compare against early reference before classifying as bean
 
 BEAN (ventral enclosure beginning):
-- Elongated oval with ASYMMETRIC ENDS
-- KEY FEATURE: Beginning of a protrusion - one end starts to narrow/taper
+- Elongated oval with ASYMMETRIC ENDS (KEY FEATURE)
+- One end starts to narrow/taper (head), other end stays rounded (tail)
 - Head end appears slightly narrower than tail end
 - Cells beginning to organize along body axis
 - More pronounced elongation than early (~2.5:1 aspect ratio)
-- Pre-comma curvature - hint of bend but not C-shaped
+- BOTH edges still CONVEX - no ventral indentation yet
+- May have slight bend along body axis, but NO concave edge
 
-COMMA:
-- Clear C-curve or comma shape
-- Pronounced ventral bend
-- Body axis established, head/tail distinguishable
-- Side view shows curvature
+COMMA (ventral enclosure progressing):
+- KEY FEATURE: Ventral indentation - one edge starts to curve INWARD (becomes concave)
+- Look at the TOP view: trace along BOTH long edges of the embryo
+- Bean: both edges curve OUTWARD (like a kidney bean shape)
+- Comma: one edge is FLAT or curves INWARD (the indentation)
+- The indentation may be subtle at first - look for any edge that is NOT convex
+- Early comma: slight flattening or inward curve on one edge
+- Late comma: pronounced C-shape with clear concave edge
 
 1.5-FOLD:
 - Embryo starting to fold back on itself
@@ -1130,19 +1169,47 @@ WARNING - POTENTIAL DEVELOPMENTAL ARREST:
 """
             content.append({"type": "text", "text": temporal_text})
 
-        # 4. Current image
-        content.append({
-            "type": "text",
-            "text": "\nCURRENT IMAGE TO ANALYZE:"
-        })
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": image_b64,
-            }
-        })
+        # 4. Current image(s)
+        if use_separate_images:
+            # Send TOP and SIDE as separate images with labels
+            content.append({
+                "type": "text",
+                "text": "\n=== CURRENT EMBRYO TO ANALYZE ===\n\n**TOP VIEW** (looking down from above):"
+            })
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": top_image_b64,
+                }
+            })
+            content.append({
+                "type": "text",
+                "text": "\n**SIDE VIEW** (looking from front):"
+            })
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": side_image_b64,
+                }
+            })
+        else:
+            # Send combined image (backward compatible)
+            content.append({
+                "type": "text",
+                "text": "\nCURRENT IMAGE TO ANALYZE:"
+            })
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": image_b64,
+                }
+            })
 
         # 5. Output format - force explicit morphological description before classification
         content.append({
@@ -1152,7 +1219,8 @@ CRITICAL: Do NOT jump to a classification. Follow this process:
 
 STEP 1 - DESCRIBE what you see in the CURRENT IMAGE:
 - What is the overall shape? (oval, curved, folded, coiled, elongated worm)
-- Is there a C-curve? How pronounced?
+- Are the ENDS symmetric (both rounded) or asymmetric (one tapered, one rounded)?
+- In TOP view: Is there a ventral indentation/concave edge along one side?
 - Is the shell intact or breached?
 - Can you see body segments? How many?
 - Is any part of the embryo OUTSIDE the shell boundary?
@@ -1170,7 +1238,7 @@ Respond with JSON:
 {
   "observed_features": {
     "shape": "describe the actual shape you see",
-    "curvature": "none/slight/pronounced C-curve/folded/tightly coiled",
+    "curvature": "both edges convex (early/bean) / one edge flat or inward (comma) / folded back (1.5fold+) / tightly coiled (pretzel)",
     "shell_status": "intact oval boundary / irregular boundary / breached / absent",
     "body_segments_visible": "none/1/2/3/coiled mass",
     "emergence": "none / partial (part outside shell) / complete (fully out)"
@@ -1192,9 +1260,12 @@ Shape progression: oval -> elongated -> curved -> folded -> tightly coiled -> el
 Curvature: none -> subtle hint -> slight -> moderate C-curve -> pronounced -> folded back -> coiled
 
 TRANSITIONAL INDICATORS (use is_transitional=true when you see these):
-- EARLY -> BEAN: End asymmetry appearing, one end starting to taper/narrow (beginning of protrusion)
-- BEAN -> COMMA: Curvature beginning to form, hint of C-shape emerging
-- COMMA -> 1.5FOLD: C-curve deepening, body starting to turn back on itself
+- EARLY -> BEAN: End asymmetry appearing, one end starting to taper/narrow (but edges still convex)
+- BEAN -> COMMA: One edge becoming FLAT or curving INWARD
+  * Bean: BOTH edges curve OUTWARD (convex) - like a kidney bean
+  * Comma: ONE edge is FLAT or curves INWARD - trace the edge and check if it bulges out or not
+  * Look carefully in TOP view at both long edges - is one edge straighter or indented?
+- COMMA -> 1.5FOLD: Indentation deepening into clear bend, body starting to turn back on itself
 - 1.5FOLD -> 2FOLD: First fold tightening, second bend beginning to form
 - 2FOLD -> PRETZEL: Third fold forming, body coiling tighter
 - PRETZEL -> HATCHING: Shell boundary becoming irregular, possible breach
@@ -1225,10 +1296,18 @@ WHEN TO USE TOOLS:
 - This is a borderline case between two stages
 - You want to verify your assessment with a reference
 
-CRITICAL FOR T0 (first timepoint):
-- ALWAYS compare against EARLY reference before concluding any other stage
-- Most embryos start in early stage - don't skip to bean/comma without reference comparison
-- Request view_reference_example for "early" AND your suspected stage
+CRITICAL FOR EARLY TIMEPOINTS (T0-T30):
+- ALWAYS compare against EARLY reference before concluding bean or comma
+- Most embryos are still in early stage during early timepoints
+- Don't jump to comma just because you see slight curvature
+- The key question: Are BOTH edges still CONVEX? If yes, it's early or bean, NOT comma
+
+CRITICAL FOR BEAN vs COMMA:
+- Trace BOTH long edges of the embryo in TOP view
+- Bean: BOTH edges curve OUTWARD (bulge out) - kidney bean shape
+- Comma: ONE edge is FLAT or curves INWARD (doesn't bulge out)
+- Key test: Does the edge bulge outward? If YES for both = bean. If NO for one = comma
+- Early comma may have subtle indentation - look for any edge that isn't convex
 
 DON'T SKIP TOOLS just because you have a preliminary guess. Reference comparison improves accuracy.
 """

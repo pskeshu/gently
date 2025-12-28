@@ -3,6 +3,8 @@ Few-shot example storage for stage classification.
 
 Manages reference images organized by developmental stage and anomaly type.
 Examples are loaded from disk and base64-encoded for inclusion in VLM prompts.
+
+Also supports loading 3D volumes for reference examples when available.
 """
 
 import base64
@@ -10,7 +12,9 @@ import io
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
+
+import numpy as np
 
 from .stages import STAGES
 
@@ -62,6 +66,7 @@ class ExampleStore:
         self._stage_cache: Dict[str, List[str]] = {}  # stage -> list of b64 images
         self._anomaly_cache: Dict[str, List[str]] = {}
         self._stage_metadata_cache: Dict[str, Dict] = {}  # stage -> metadata dict
+        self._volume_cache: Dict[str, Optional[np.ndarray]] = {}  # stage -> volume
 
         # Load metadata if exists
         self.metadata = self._load_metadata()
@@ -188,7 +193,12 @@ class ExampleStore:
         stage_dir = self.stages_path / stage
 
         # Get sorted filenames to match with b64 images
-        image_files = sorted(stage_dir.glob("example_*.jpg"))[:max_examples]
+        # Match the same patterns as _load_stage_examples
+        image_files = []
+        image_patterns = ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"]
+        for pattern in image_patterns:
+            image_files.extend(sorted(stage_dir.glob(pattern)))
+        image_files = sorted(image_files)[:max_examples]
 
         for i, (b64, img_path) in enumerate(zip(examples_b64, image_files)):
             description = example_descriptions.get(img_path.name, "")
@@ -459,4 +469,112 @@ class ExampleStore:
         """Clear all cached examples (force reload from disk)"""
         self._stage_cache.clear()
         self._anomaly_cache.clear()
+        self._volume_cache.clear()
         logger.info("Cleared example cache")
+
+    # ==========================================================================
+    # Volume support for 3D viewing of reference examples
+    # ==========================================================================
+
+    def get_stage_volume(self, stage: str, timepoint: Optional[int] = None) -> Optional[np.ndarray]:
+        """
+        Get the 3D volume for a stage reference example.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name (early, comma, pretzel, etc.)
+        timepoint : int, optional
+            Specific timepoint to load. If None, loads first available.
+
+        Returns
+        -------
+        np.ndarray or None
+            3D volume array (Z, Y, X) if available, None otherwise
+        """
+        cache_key = f"{stage}_{timepoint}" if timepoint else stage
+
+        if cache_key not in self._volume_cache:
+            self._load_stage_volume(stage, timepoint)
+
+        return self._volume_cache.get(cache_key)
+
+    def _load_stage_volume(self, stage: str, timepoint: Optional[int] = None) -> None:
+        """Load and cache volume for a stage"""
+        stage_dir = self.stages_path / stage
+        volumes_dir = stage_dir / "volumes"
+        cache_key = f"{stage}_{timepoint}" if timepoint else stage
+
+        # Try new format: volumes/T{timepoint}.npz
+        if volumes_dir.exists():
+            if timepoint is not None:
+                volume_path = volumes_dir / f"T{timepoint:03d}.npz"
+            else:
+                # Get first available volume
+                npz_files = sorted(volumes_dir.glob("T*.npz"))
+                if npz_files:
+                    volume_path = npz_files[0]
+                else:
+                    logger.debug(f"No volume files in {volumes_dir}")
+                    self._volume_cache[cache_key] = None
+                    return
+
+            if volume_path.exists():
+                try:
+                    data = np.load(volume_path)
+                    volume = data["volume"]
+                    self._volume_cache[cache_key] = volume
+                    logger.info(f"Loaded volume for stage '{stage}' from {volume_path.name}: shape={volume.shape}")
+                    return
+                except Exception as e:
+                    logger.warning(f"Failed to load volume {volume_path}: {e}")
+
+        # Fallback: try old format volume.npz
+        old_volume_path = stage_dir / "volume.npz"
+        if old_volume_path.exists():
+            try:
+                data = np.load(old_volume_path)
+                volume = data["volume"]
+                self._volume_cache[cache_key] = volume
+                logger.info(f"Loaded volume for stage '{stage}' (legacy): shape={volume.shape}")
+                return
+            except Exception as e:
+                logger.warning(f"Failed to load legacy volume for stage '{stage}': {e}")
+
+        self._volume_cache[cache_key] = None
+
+    def has_volume(self, stage: str) -> bool:
+        """Check if a stage has a 3D volume available."""
+        stage_dir = self.stages_path / stage
+        volumes_dir = stage_dir / "volumes"
+
+        # Check new format
+        if volumes_dir.exists() and list(volumes_dir.glob("T*.npz")):
+            return True
+        # Check old format
+        return (stage_dir / "volume.npz").exists()
+
+    def list_stages_with_volumes(self) -> List[str]:
+        """List all stages that have 3D volumes available."""
+        return [stage for stage in self.STAGES if self.has_volume(stage)]
+
+    def get_stage_volume_metadata(self, stage: str) -> Optional[Dict]:
+        """
+        Get metadata for a stage's volume.
+
+        Returns
+        -------
+        Dict or None
+            Metadata dict with stage info, timepoint, shape, etc.
+        """
+        stage_dir = self.stages_path / stage
+        metadata_path = stage_dir / "metadata.json"
+
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, "r") as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Failed to load volume metadata for {stage}: {e}")
+
+        return None

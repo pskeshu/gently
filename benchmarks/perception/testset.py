@@ -38,7 +38,9 @@ class TestCase:
 
     embryo_id: str
     timepoint: int
-    image_b64: str
+    image_b64: str  # Combined view (for backward compatibility)
+    top_image_b64: Optional[str]  # TOP view only
+    side_image_b64: Optional[str]  # SIDE view only
     volume: Optional[np.ndarray]
     ground_truth_stage: Optional[str]
 
@@ -105,39 +107,126 @@ def _normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> n
     return (img * 255).astype(np.uint8)
 
 
-def _create_dual_view_image(volume: np.ndarray) -> str:
-    """Create dual-view (top + side) image from volume, return base64."""
+def _create_dual_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
+    """Create dual-view (TOP above, SIDE below) image from volume, return base64.
+
+    Matches the projection_explorer format:
+    - TOP: max projection along Z (looking down, X-Y plane)
+    - SIDE: max projection along Y (looking from front, X-Z plane)
+    - Combined vertically with TOP on top, SIDE below
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        3D volume array (Z, Y, X)
+    max_dim : int
+        Maximum dimension in pixels (default 1500 to stay under API limits)
+    """
     _ensure_dependencies()
 
-    # Top view (Z max projection)
+    z_depth, height, width = volume.shape
+
+    # TOP: max along Z (axis 0) -> shape (Y, X) - looking down
     top_proj = np.max(volume, axis=0)
 
-    # Side view (Y max projection)
+    # SIDE: max along Y (axis 1) -> shape (Z, X) - looking from front
     side_proj = np.max(volume, axis=1)
 
     # Normalize
     top_norm = _normalize_image(top_proj)
     side_norm = _normalize_image(side_proj)
 
-    # Combine side-by-side
-    h_top, w_top = top_norm.shape
-    h_side, w_side = side_norm.shape
+    # Scale side view to match top width and make Z dimension visible
+    # (matching projection_explorer logic)
+    target_width = top_norm.shape[1]
+    side_new_h = max(height // 3, int(z_depth * 3))
 
-    # Resize side view to match top view height
     side_pil = PIL_Image.fromarray(side_norm)
-    new_width = int(w_side * h_top / h_side)
-    side_resized = side_pil.resize((new_width, h_top), PIL_Image.Resampling.LANCZOS)
-    side_arr = np.array(side_resized)
+    side_scaled = side_pil.resize((target_width, side_new_h), PIL_Image.Resampling.LANCZOS)
+    side_arr = np.array(side_scaled)
 
-    # Combine
-    combined = np.concatenate([top_norm, side_arr], axis=1)
+    # Create separator (gray line between views)
+    sep = np.ones((3, target_width), dtype=np.uint8) * 128
+
+    # Combine vertically: TOP on top, SIDE below
+    combined = np.concatenate([top_norm, sep, side_arr], axis=0)
+
+    # Convert to PIL for final processing
+    pil_img = PIL_Image.fromarray(combined)
+
+    # Resize if too large (API limit is 8000px, use smaller for safety/performance)
+    if max(pil_img.size) > max_dim:
+        scale = max_dim / max(pil_img.size)
+        new_size = (int(pil_img.size[0] * scale), int(pil_img.size[1] * scale))
+        pil_img = pil_img.resize(new_size, PIL_Image.Resampling.LANCZOS)
 
     # Convert to JPEG base64
-    pil_img = PIL_Image.fromarray(combined)
     buffer = io.BytesIO()
     pil_img.save(buffer, format="JPEG", quality=90)
 
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+
+def _create_separate_view_images(volume: np.ndarray, max_dim: int = 1000) -> Tuple[str, str]:
+    """Create separate TOP and SIDE view images from volume, return base64 tuple.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        3D volume array (Z, Y, X)
+    max_dim : int
+        Maximum dimension in pixels
+
+    Returns
+    -------
+    Tuple[str, str]
+        (top_image_b64, side_image_b64)
+    """
+    _ensure_dependencies()
+
+    z_depth, height, width = volume.shape
+
+    # TOP: max along Z (axis 0) -> shape (Y, X) - looking down
+    top_proj = np.max(volume, axis=0)
+
+    # SIDE: max along Y (axis 1) -> shape (Z, X) - looking from front
+    side_proj = np.max(volume, axis=1)
+
+    # Normalize
+    top_norm = _normalize_image(top_proj)
+    side_norm = _normalize_image(side_proj)
+
+    # Scale side view to make Z dimension more visible
+    target_width = top_norm.shape[1]
+    side_new_h = max(height // 3, int(z_depth * 3))
+
+    side_pil = PIL_Image.fromarray(side_norm)
+    side_scaled = side_pil.resize((target_width, side_new_h), PIL_Image.Resampling.LANCZOS)
+
+    # Create PIL images
+    top_pil = PIL_Image.fromarray(top_norm)
+
+    # Resize if too large
+    if max(top_pil.size) > max_dim:
+        scale = max_dim / max(top_pil.size)
+        new_size = (int(top_pil.size[0] * scale), int(top_pil.size[1] * scale))
+        top_pil = top_pil.resize(new_size, PIL_Image.Resampling.LANCZOS)
+
+    if max(side_scaled.size) > max_dim:
+        scale = max_dim / max(side_scaled.size)
+        new_size = (int(side_scaled.size[0] * scale), int(side_scaled.size[1] * scale))
+        side_scaled = side_scaled.resize(new_size, PIL_Image.Resampling.LANCZOS)
+
+    # Convert to JPEG base64
+    top_buffer = io.BytesIO()
+    top_pil.save(top_buffer, format="JPEG", quality=90)
+    top_b64 = base64.b64encode(top_buffer.getvalue()).decode("utf-8")
+
+    side_buffer = io.BytesIO()
+    side_scaled.save(side_buffer, format="JPEG", quality=90)
+    side_b64 = base64.b64encode(side_buffer.getvalue()).decode("utf-8")
+
+    return top_b64, side_b64
 
 
 class OfflineTestset:
@@ -221,13 +310,15 @@ class OfflineTestset:
             # Load volume
             volume = _load_volume(vol_path) if self.load_volumes else None
 
-            # Create dual-view image
+            # Create images
             if volume is not None:
                 image_b64 = _create_dual_view_image(volume)
+                top_b64, side_b64 = _create_separate_view_images(volume)
             else:
                 # Load just for image if not loading full volumes
                 temp_vol = _load_volume(vol_path)
                 image_b64 = _create_dual_view_image(temp_vol)
+                top_b64, side_b64 = _create_separate_view_images(temp_vol)
                 del temp_vol
 
             # Get ground truth
@@ -237,6 +328,8 @@ class OfflineTestset:
                 embryo_id=embryo_id,
                 timepoint=timepoint,
                 image_b64=image_b64,
+                top_image_b64=top_b64,
+                side_image_b64=side_b64,
                 volume=volume,
                 ground_truth_stage=gt_stage,
             )

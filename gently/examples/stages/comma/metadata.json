@@ -1,12 +1,39 @@
 {
   "stage": "comma",
-  "description": "Clear C-curve or comma shape with body axis established, head/tail distinguishable",
-  "examples": {
-    "example_001.jpg": "Clear C-curve with pronounced ventral indent, body elongated and curved, distinct head/tail ends",
-    "example_002.jpg": "Very clear comma shape with pronounced bend, two distinct lobes visible in side view, excellent example",
-    "example_003.jpg": "Elongated with moderate curvature, less pronounced C-shape than others, early comma",
-    "example_004.jpg": "Clear C-shaped embryo with visible body axis bending, head region distinguishable",
-    "example_005.jpg": "Pronounced comma curve with clear ventral notch, elongated body with distinct curvature",
-    "example_006.jpg": "TRANSITIONAL comma-to-1.5fold: clear curvature but more elongated, starting to show folding characteristics"
-  }
+  "timepoints": [
+    40,
+    42,
+    44
+  ],
+  "volumes": [
+    {
+      "timepoint": 40,
+      "filename": "T040.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 42,
+      "filename": "T042.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 44,
+      "filename": "T044.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
 }

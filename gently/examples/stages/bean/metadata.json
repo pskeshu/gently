@@ -1,14 +1,14 @@
 {
-  "stage": "1.5fold",
+  "stage": "bean",
   "timepoints": [
-    47,
-    52,
-    57
+    34,
+    36,
+    38
   ],
   "volumes": [
     {
-      "timepoint": 47,
-      "filename": "T047.npz",
+      "timepoint": 34,
+      "filename": "T034.npz",
       "shape": [
         50,
         512,
@@ -16,8 +16,8 @@
       ]
     },
     {
-      "timepoint": 52,
-      "filename": "T052.npz",
+      "timepoint": 36,
+      "filename": "T036.npz",
       "shape": [
         50,
         512,
@@ -25,8 +25,8 @@
       ]
     },
     {
-      "timepoint": 57,
-      "filename": "T057.npz",
+      "timepoint": 38,
+      "filename": "T038.npz",
       "shape": [
         50,
         512,

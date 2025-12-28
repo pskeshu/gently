@@ -147,6 +147,31 @@ HTML_TEMPLATE = """
         .trace-step.tool_call { border-color: #2196f3; background: #e3f2fd; }
         .trace-step.tool_result { border-color: #4caf50; background: #e8f5e9; }
         .trace-step.final_decision { border-color: #ff9800; background: #fff3e0; }
+        .trace-step.verification_requested { border-color: #9c27b0; background: #f3e5f5; }
+        .trace-step.verification_subagent { border-color: #673ab7; background: #ede7f6; }
+        .trace-step.verification_result { border-color: #e91e63; background: #fce4ec; }
+
+        .verification-badge {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 500;
+            background: #9c27b0;
+            color: white;
+            margin-left: 5px;
+        }
+
+        .phase-indicator {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.75em;
+            font-weight: 500;
+            background: #607d8b;
+            color: white;
+            margin-left: 5px;
+        }
 
         .expand-btn {
             cursor: pointer;
@@ -308,6 +333,8 @@ def generate_embryo_section(embryo_id: str, predictions: List[Dict]) -> str:
         # Details column with expand button
         tool_calls = pred.get("tool_calls", 0)
         is_transitional = pred.get("is_transitional", False)
+        verification_triggered = pred.get("verification_triggered", False)
+        phase_count = pred.get("phase_count", 1)
 
         details = []
         if tool_calls > 0:
@@ -317,8 +344,16 @@ def generate_embryo_section(embryo_id: str, predictions: List[Dict]) -> str:
 
         details_str = ", ".join(details) if details else ""
 
+        # Add verification and phase badges
+        badges = ""
+        if verification_triggered:
+            badges += '<span class="verification-badge">verified</span>'
+        if phase_count > 1:
+            badges += f'<span class="phase-indicator">{phase_count}-phase</span>'
+
         rows.append(f'''<div>
             {details_str}
+            {badges}
             <span class="expand-btn" onclick="toggleTrace('{row_id}')">
                 [show trace]
             </span>
@@ -376,6 +411,29 @@ def format_reasoning_trace(trace: Optional[Dict]) -> str:
                 <div class="trace-step final_decision">
                     <strong>Final Decision:</strong><br>
                     {content[:500]}...
+                </div>
+            ''')
+        elif step_type == "verification_requested":
+            html_parts.append(f'''
+                <div class="trace-step verification_requested">
+                    <strong>Verification Requested:</strong><br>
+                    {content}
+                </div>
+            ''')
+        elif step_type == "verification_subagent":
+            tool_input = step.get("tool_input", {})
+            summary = step.get("tool_result_summary", content)
+            html_parts.append(f'''
+                <div class="trace-step verification_subagent">
+                    <strong>Subagent:</strong> {tool_input.get("stage_a", "?")} vs {tool_input.get("stage_b", "?")}<br>
+                    Result: {summary}
+                </div>
+            ''')
+        elif step_type == "verification_result":
+            html_parts.append(f'''
+                <div class="trace-step verification_result">
+                    <strong>Verification Result:</strong><br>
+                    {content}
                 </div>
             ''')
 

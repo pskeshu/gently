@@ -379,6 +379,85 @@ class ObservedFeatures:
     emergence: str = ""
 
 
+# ============================================================================
+# Multi-Phase Perception-Cognition Data Structures
+# ============================================================================
+
+
+@dataclass
+class CandidateStage:
+    """A candidate stage from Phase 1 perception with evidence."""
+
+    stage: str
+    confidence: float  # 0.0-1.0
+    evidence_for: List[str] = field(default_factory=list)
+    evidence_against: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stage": self.stage,
+            "confidence": round(self.confidence, 3),
+            "evidence_for": self.evidence_for,
+            "evidence_against": self.evidence_against,
+        }
+
+
+@dataclass
+class StageComparison:
+    """A comparison request between two stages for verification."""
+
+    stage_a: str
+    stage_b: str
+    reason: str  # Why this comparison is needed
+    use_3d: bool = False  # Whether to include 3D views
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stage_a": self.stage_a,
+            "stage_b": self.stage_b,
+            "reason": self.reason,
+            "use_3d": self.use_3d,
+        }
+
+
+@dataclass
+class SubagentResult:
+    """Result from a verification subagent comparing two stages."""
+
+    preferred_stage: str  # Either stage_a or stage_b
+    confidence: float  # 0.5-1.0 (0.5 = uncertain, 1.0 = very confident)
+    evidence_for_preferred: List[str] = field(default_factory=list)
+    evidence_against_other: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "preferred_stage": self.preferred_stage,
+            "confidence": round(self.confidence, 3),
+            "evidence_for_preferred": self.evidence_for_preferred,
+            "evidence_against_other": self.evidence_against_other,
+        }
+
+
+@dataclass
+class VerificationAggregation:
+    """Aggregated results from all verification subagents."""
+
+    stage_votes: Dict[str, float]  # stage -> weighted vote total
+    winning_stage: str
+    aggregated_confidence: float  # Final confidence after aggregation
+    subagents_agree: bool  # Whether all subagents preferred same stage
+    should_override_initial: bool  # Whether verification changed the result
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "stage_votes": {k: round(v, 3) for k, v in self.stage_votes.items()},
+            "winning_stage": self.winning_stage,
+            "aggregated_confidence": round(self.aggregated_confidence, 3),
+            "subagents_agree": self.subagents_agree,
+            "should_override_initial": self.should_override_initial,
+        }
+
+
 @dataclass
 class ContrastiveReasoning:
     """Why this is NOT adjacent stages."""
@@ -441,6 +520,82 @@ class ReasoningTrace:
 
 
 @dataclass
+class PhaseTrace:
+    """Trace of a single phase in the perception pipeline."""
+
+    phase_name: str  # "perception", "cognition", "verification"
+    started_at: datetime = field(default_factory=datetime.now)
+    completed_at: Optional[datetime] = None
+    steps: List[ReasoningStep] = field(default_factory=list)
+    duration_ms: Optional[float] = None
+
+    def complete(self) -> None:
+        self.completed_at = datetime.now()
+        self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "phase_name": self.phase_name,
+            "started_at": self.started_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "steps": [s.to_dict() for s in self.steps],
+            "duration_ms": round(self.duration_ms, 1) if self.duration_ms else None,
+        }
+
+
+@dataclass
+class SubagentTrace:
+    """Trace of a verification subagent execution."""
+
+    comparison: StageComparison
+    result: Optional[SubagentResult] = None
+    steps: List[ReasoningStep] = field(default_factory=list)
+    started_at: datetime = field(default_factory=datetime.now)
+    completed_at: Optional[datetime] = None
+    duration_ms: Optional[float] = None
+    error: Optional[str] = None  # If subagent failed
+
+    def complete(self) -> None:
+        self.completed_at = datetime.now()
+        self.duration_ms = (self.completed_at - self.started_at).total_seconds() * 1000
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "comparison": self.comparison.to_dict(),
+            "result": self.result.to_dict() if self.result else None,
+            "steps": [s.to_dict() for s in self.steps],
+            "started_at": self.started_at.isoformat(),
+            "completed_at": self.completed_at.isoformat() if self.completed_at else None,
+            "duration_ms": round(self.duration_ms, 1) if self.duration_ms else None,
+            "error": self.error,
+        }
+
+
+@dataclass
+class MultiPhaseReasoningTrace:
+    """Complete trace of the multi-phase perception-cognition process."""
+
+    perception_phase: Optional[PhaseTrace] = None
+    cognition_phase: Optional[PhaseTrace] = None
+    verification_phase: Optional[PhaseTrace] = None
+    subagent_traces: List[SubagentTrace] = field(default_factory=list)
+    aggregation: Optional[VerificationAggregation] = None
+    total_api_calls: int = 1  # Primary + subagents
+    total_duration_ms: Optional[float] = None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "perception_phase": self.perception_phase.to_dict() if self.perception_phase else None,
+            "cognition_phase": self.cognition_phase.to_dict() if self.cognition_phase else None,
+            "verification_phase": self.verification_phase.to_dict() if self.verification_phase else None,
+            "subagent_traces": [s.to_dict() for s in self.subagent_traces],
+            "aggregation": self.aggregation.to_dict() if self.aggregation else None,
+            "total_api_calls": self.total_api_calls,
+            "total_duration_ms": round(self.total_duration_ms, 1) if self.total_duration_ms else None,
+        }
+
+
+@dataclass
 class PerceptionResult:
     """Result from a single perception call."""
 
@@ -460,3 +615,10 @@ class PerceptionResult:
 
     # For automation
     should_stop: bool = False  # True if hatched
+
+    # Multi-phase perception-cognition fields
+    verification_triggered: bool = False  # Whether verification subagents were spawned
+    verification_result: Optional[VerificationAggregation] = None  # Aggregated verification
+    candidate_stages: Optional[List[CandidateStage]] = None  # Candidates from Phase 1
+    multi_phase_trace: Optional[MultiPhaseReasoningTrace] = None  # Full multi-phase trace
+    phase_count: int = 1  # Number of phases executed (1, 2, or 3)

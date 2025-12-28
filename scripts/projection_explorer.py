@@ -773,7 +773,9 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
 
 def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     """
-    Single 3D perspective view for testing.
+    Multiple 3D perspective views from different angles.
+
+    Shows a 2x3 grid of views rotating around the volume.
 
     Returns:
         (image, description) tuple
@@ -781,15 +783,53 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     if volume.ndim != 3:
         return normalize_image(volume), "2D input"
 
-    # Single test view matching 3D viewer defaults
     # JS threshold 0.30 (slider=30) compares against 0-255, so 30/255=0.12 in 0-1 space
-    js_threshold = 0.30  # What user sees in 3D viewer
-    py_threshold = js_threshold * 100 / 255  # Convert to 0-1 scale: 0.118
+    js_threshold = 0.30
+    py_threshold = js_threshold * 100 / 255  # ~0.118
 
-    # Angles calibrated to match 3D volume viewer
-    view = render_volume_rotated(volume, angle_y=-0.05, angle_x=0.21, threshold=py_threshold, perspective=0.5)
+    # Base tilt angle (calibrated to match 3D viewer)
+    base_tilt = 0.21  # angle_x
 
-    return view, f"threshold: {js_threshold:.2f}, angle_y: -0.05, angle_x: 0.21, angle_z: 0.00"
+    # Different rotation angles around Y axis (horizontal spin)
+    # 6 views: front, 60°, 120°, 180° (back), 240°, 300°
+    angles_y = [-0.05, 0.5, 1.0, 1.57, 2.1, 2.6]
+    labels = ["front", "60°", "120°", "back", "240°", "300°"]
+
+    views = []
+    for angle_y in angles_y:
+        view = render_volume_rotated(
+            volume,
+            angle_y=angle_y,
+            angle_x=base_tilt,
+            threshold=py_threshold,
+            perspective=0.5
+        )
+        views.append(view)
+
+    # Arrange in 2x3 grid
+    # Resize views to same size
+    target_h = max(v.shape[0] for v in views)
+    target_w = max(v.shape[1] for v in views)
+
+    padded = []
+    for v in views:
+        h, w = v.shape[:2]
+        pad_h = (target_h - h) // 2
+        pad_w = (target_w - w) // 2
+        if v.ndim == 3:
+            p = np.zeros((target_h, target_w, 3), dtype=v.dtype)
+            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+        else:
+            p = np.zeros((target_h, target_w), dtype=v.dtype)
+            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+        padded.append(p)
+
+    # Create 2x3 grid
+    row1 = np.hstack(padded[0:3])
+    row2 = np.hstack(padded[3:6])
+    grid = np.vstack([row1, row2])
+
+    return grid, f"6 views, threshold: {js_threshold:.2f}, tilt: {base_tilt:.2f}"
 
 
 # Registry of available projection methods
@@ -1279,6 +1319,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
                 <input type="range" class="slider" id="slider" min="0" max="100" value="0" oninput="debouncedGoto(this.value)">
                 <button onclick="next()">Next →</button>
                 <span class="position" id="position">0 / 0</span>
+                <span class="stage-label" id="stage-label" style="margin-left:12px;padding:2px 8px;background:#238636;border-radius:4px;font-weight:bold;"></span>
             </div>
         </div>
 
@@ -1311,8 +1352,53 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             idx: 0,
             total: 0,
             methods: [],
-            activeMethods: []
+            activeMethods: [],
+            currentEmbryo: null
         };
+
+        // Ground truth stage transitions (from biologist annotations)
+        const GROUND_TRUTH = {
+            "embryo_1": {"early": 0, "bean": 43, "comma": 49, "1.5fold": 55, "2fold": 70, "pretzel": 90},
+            "embryo_2": {"early": 0, "bean": 33, "comma": 39, "1.5fold": 45, "2fold": 60, "pretzel": 80},
+            "embryo_3": {"early": 0, "bean": 27, "comma": 33, "1.5fold": 39, "2fold": 50, "pretzel": 69},
+            "embryo_4": {"early": 0, "bean": 54, "comma": 60, "1.5fold": 69, "2fold": 77, "pretzel": 97}
+        };
+
+        const STAGE_ORDER = ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"];
+        const STAGE_COLORS = {
+            "early": "#6e7681",
+            "bean": "#8b5cf6",
+            "comma": "#3b82f6",
+            "1.5fold": "#06b6d4",
+            "2fold": "#10b981",
+            "pretzel": "#f59e0b",
+            "hatching": "#ef4444",
+            "hatched": "#ec4899"
+        };
+
+        function getStageAtTimepoint(embryo, timepoint) {
+            const transitions = GROUND_TRUTH[embryo];
+            if (!transitions) return null;
+
+            let currentStage = "early";
+            for (const stage of STAGE_ORDER) {
+                if (transitions[stage] !== undefined && timepoint >= transitions[stage]) {
+                    currentStage = stage;
+                }
+            }
+            return currentStage;
+        }
+
+        function updateStageLabel() {
+            const label = document.getElementById('stage-label');
+            const stage = getStageAtTimepoint(state.currentEmbryo, state.idx);
+            if (stage) {
+                label.textContent = stage;
+                label.style.background = STAGE_COLORS[stage] || '#238636';
+            } else {
+                label.textContent = '';
+            }
+        }
 
         function showLoading(show) {
             document.getElementById('loading').classList.toggle('active', show);
@@ -1321,7 +1407,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         // Debounce slider to avoid flooding requests
         let debounceTimer = null;
         function debouncedGoto(idx) {
-            document.getElementById('position').textContent = (parseInt(idx) + 1) + ' / ' + state.total;
+            state.idx = parseInt(idx);
+            document.getElementById('position').textContent = (state.idx + 1) + ' / ' + state.total;
+            updateStageLabel();
             clearTimeout(debounceTimer);
             debounceTimer = setTimeout(() => gotoIdx(idx), 150);
         }
@@ -1384,6 +1472,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
 
             state.idx = data.idx;
             state.total = data.total;
+            state.currentEmbryo = data.embryo;
 
             document.getElementById('slider').max = data.total - 1;
             document.getElementById('slider').value = data.idx;
@@ -1391,6 +1480,7 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             document.getElementById('embryo').textContent = data.embryo;
             document.getElementById('filename').textContent = data.filename;
             document.getElementById('volume-shape').textContent = data.volume_shape.join(' × ');
+            updateStageLabel();
 
             // Update projections
             const container = document.getElementById('projections');

@@ -35,6 +35,7 @@ class BenchmarkConfig:
     enable_view_embryo: bool = True
     enable_view_reference: bool = True
     enable_view_previous: bool = True
+    enable_verification: bool = True  # Multi-phase verification with subagents
 
     # Test settings
     max_timepoints_per_embryo: Optional[int] = None
@@ -55,6 +56,7 @@ class BenchmarkConfig:
             "enable_view_embryo": self.enable_view_embryo,
             "enable_view_reference": self.enable_view_reference,
             "enable_view_previous": self.enable_view_previous,
+            "enable_verification": self.enable_verification,
             "max_timepoints_per_embryo": self.max_timepoints_per_embryo,
             "embryo_ids": self.embryo_ids,
             "system_prompt_override": self.system_prompt_override,
@@ -76,6 +78,12 @@ class PredictionResult:
     reasoning_trace: Optional[Dict[str, Any]]  # Serialized ReasoningTrace
     tool_calls: int
     tools_used: List[str]
+
+    # Multi-phase verification fields
+    verification_triggered: bool = False
+    phase_count: int = 1
+    verification_result: Optional[Dict[str, Any]] = None
+    candidate_stages: Optional[List[Dict[str, Any]]] = None
 
     @property
     def is_correct(self) -> bool:
@@ -111,6 +119,10 @@ class PredictionResult:
             "tools_used": self.tools_used,
             "is_correct": self.is_correct,
             "is_adjacent_correct": self.is_adjacent_correct,
+            "verification_triggered": self.verification_triggered,
+            "phase_count": self.phase_count,
+            "verification_result": self.verification_result,
+            "candidate_stages": self.candidate_stages,
         }
 
 
@@ -230,14 +242,18 @@ class PerceptionBenchmark:
 
         client = anthropic.Anthropic()
 
-        # Find examples path
-        examples_path = Path("gently/agent/perception/examples")
+        # Find examples path (ExampleStore expects parent of 'stages/' folder)
+        examples_path = Path("gently/examples")
         if not examples_path.exists():
-            examples_path = None
+            # Try alternate path
+            examples_path = Path("gently/agent/perception/examples")
+            if not examples_path.exists():
+                examples_path = None
 
         engine = PerceptionEngine(
             claude_client=client,
             examples_path=examples_path,
+            enable_verification=self.config.enable_verification,
         )
 
         self._engine = engine
@@ -290,6 +306,16 @@ class PerceptionBenchmark:
                 if perception_result.reasoning_trace:
                     trace_dict = perception_result.reasoning_trace.to_dict()
 
+                # Serialize verification result if present
+                verification_dict = None
+                if perception_result.verification_result:
+                    verification_dict = perception_result.verification_result.to_dict()
+
+                # Serialize candidate stages if present
+                candidates_list = None
+                if perception_result.candidate_stages:
+                    candidates_list = [c.to_dict() for c in perception_result.candidate_stages]
+
                 pred = PredictionResult(
                     timepoint=test_case.timepoint,
                     predicted_stage=perception_result.stage,
@@ -301,6 +327,10 @@ class PerceptionBenchmark:
                     reasoning_trace=trace_dict,
                     tool_calls=trace_dict.get("total_tool_calls", 0) if trace_dict else 0,
                     tools_used=trace_dict.get("tools_used", []) if trace_dict else [],
+                    verification_triggered=perception_result.verification_triggered,
+                    phase_count=perception_result.phase_count,
+                    verification_result=verification_dict,
+                    candidate_stages=candidates_list,
                 )
                 result.predictions.append(pred)
 
