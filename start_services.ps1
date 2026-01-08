@@ -5,22 +5,20 @@
 # This script starts all required services for the Gently system:
 #   1. Simple Server (Microscope API on port 60610)
 #   2. SAM Server (Segmentation model on port 18862)
-#   3. CV Subagent (Computer Vision analysis on port 8100)
 #
 # Note: Visualization Server is now started by the copilot automatically.
+# Note: Perception system runs within the copilot (no separate service).
 #
 # Run this before launching the copilot.
 #
 # Usage:
 #   .\start_services.ps1           # Start all services
 #   .\start_services.ps1 -NoSAM    # Skip SAM server
-#   .\start_services.ps1 -NoCV     # Skip CV subagent
 #
 # ===================================================================
 
 param(
     [switch]$NoSAM,
-    [switch]$NoCV,
     [switch]$NoPause
 )
 
@@ -59,7 +57,7 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ScriptDir
 
 # Step 1: Check/Activate virtual environment
-Write-Header "[1/4] Checking virtual environment..."
+Write-Header "[1/3] Checking virtual environment..."
 
 $VenvPath = Join-Path $ScriptDir "venv"
 $VenvActivate = Join-Path $VenvPath "Scripts\Activate.ps1"
@@ -75,7 +73,7 @@ if (Test-Path $VenvActivate) {
 }
 
 # Step 2: Check Micro-Manager connection
-Write-Header "[2/4] Checking Micro-Manager connection..."
+Write-Header "[2/3] Checking Micro-Manager connection..."
 
 try {
     $result = python -c "from client import get_mmc; core = get_mmc(); print('connected')" 2>&1
@@ -95,7 +93,7 @@ try {
 }
 
 # Step 3: Start services
-Write-Header "[3/4] Starting services..."
+Write-Header "[3/3] Starting services..."
 Write-Host ""
 
 $services = @()
@@ -122,28 +120,12 @@ if (-not $NoSAM) {
     ) -PassThru
     $services += @{Name="SAM Server"; Process=$samServer; Port=18862}
     Write-Success "SAM Server started (PID: $($samServer.Id))"
-
-    Start-Sleep -Seconds 2
 } else {
     Write-Info "Skipping SAM Server (-NoSAM flag)"
 }
 
-# Start CV Subagent (optional)
-if (-not $NoCV) {
-    Write-Host "  Starting CV Subagent..." -ForegroundColor White
-    $cvService = Start-Process powershell -ArgumentList @(
-        "-NoExit",
-        "-Command",
-        "Set-Location '$ScriptDir'; & '$VenvActivate'; python start_cv_service.py"
-    ) -PassThru
-    $services += @{Name="CV Subagent"; Process=$cvService; Port=8100}
-    Write-Success "CV Subagent started (PID: $($cvService.Id))"
-} else {
-    Write-Info "Skipping CV Subagent (-NoCV flag)"
-}
-
-# Step 4: Summary
-Write-Header "[4/4] Services Summary"
+# Services Summary
+Write-Header "Services Summary"
 Write-Host ""
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host "  Services running:" -ForegroundColor White
@@ -163,11 +145,9 @@ Write-Host "    Microscope API:     http://127.0.0.1:60610" -ForegroundColor Gra
 if (-not $NoSAM) {
     Write-Host "    SAM Server:         localhost:18862 (rpyc)" -ForegroundColor Gray
 }
-if (-not $NoCV) {
-    Write-Host "    CV Subagent:        http://localhost:8100" -ForegroundColor Gray
-}
 Write-Host ""
 Write-Host "  Note: Visualization Server starts with copilot (port 8080)" -ForegroundColor DarkGray
+Write-Host "  Note: Perception runs within the copilot (no separate service)" -ForegroundColor DarkGray
 Write-Host "======================================================================" -ForegroundColor Cyan
 Write-Host ""
 Write-Host "Close the service windows to stop individual services." -ForegroundColor Yellow
