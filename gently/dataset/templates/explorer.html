@@ -40,9 +40,13 @@
             <div class="sidebar">
                 <h2>Sessions</h2>
                 <div style="margin-bottom: 10px;">
-                    <label style="font-size: 0.9em; cursor: pointer;">
+                    <label style="font-size: 0.9em; cursor: pointer; display: block; margin-bottom: 5px;">
                         <input type="checkbox" id="filter-with-embryos" onchange="filterSessions()" checked>
                         With embryos only
+                    </label>
+                    <label style="font-size: 0.9em; cursor: pointer; display: block;">
+                        <input type="checkbox" id="filter-with-data" onchange="filterSessions()" checked>
+                        With data only
                     </label>
                 </div>
                 <div id="sessions-list">

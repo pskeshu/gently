@@ -47,10 +47,15 @@ async function loadSessions() {
 function renderSessions() {
     const container = document.getElementById('sessions-list');
     const filterWithEmbryos = document.getElementById('filter-with-embryos').checked;
+    const filterWithData = document.getElementById('filter-with-data').checked;
 
-    const filteredSessions = filterWithEmbryos
-        ? state.sessions.filter(s => s.embryo_count > 0)
-        : state.sessions;
+    let filteredSessions = state.sessions;
+    if (filterWithEmbryos) {
+        filteredSessions = filteredSessions.filter(s => s.embryo_count > 0);
+    }
+    if (filterWithData) {
+        filteredSessions = filteredSessions.filter(s => s.volume_count > 0);
+    }
 
     container.innerHTML = filteredSessions.map(s => {
         const date = s.created_at ? s.created_at.split('T')[0] : '';
@@ -59,7 +64,7 @@ function renderSessions() {
              onclick="selectSession('${s.session_id}')">
             <div><strong>${s.session_id}</strong></div>
             <div style="font-size: 0.8em; color: #888;">
-                ${date} | ${s.embryo_count} embryos
+                ${date} | ${s.embryo_count} embryos | ${s.volume_count || 0} vol
                 ${s.has_ground_truth ? '<span class="badge badge-gt">GT</span>' : ''}
             </div>
         </div>

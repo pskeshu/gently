@@ -859,7 +859,10 @@ class EmbryoDataset:
                 s.created_at,
                 COUNT(DISTINCT e.embryo_id) as embryo_count,
                 (SELECT COUNT(*) FROM ground_truth g
-                 WHERE g.session_id = s.session_id) as gt_count
+                 WHERE g.session_id = s.session_id) as gt_count,
+                (SELECT COUNT(*) FROM volumes v
+                 JOIN embryos e2 ON v.embryo_id = e2.embryo_id
+                 WHERE e2.session_id = s.session_id) as volume_count
             FROM sessions s
             LEFT JOIN embryos e ON s.session_id = e.session_id
             GROUP BY s.session_id
@@ -874,6 +877,7 @@ class EmbryoDataset:
                 "embryo_count": r[3],
                 "has_ground_truth": r[4] > 0,
                 "ground_truth_count": r[4],
+                "volume_count": r[5],
             }
             for r in rows
         ]
