@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embryo Dataset Explorer</title>
+    <link rel="stylesheet" href="/static/css/explorer.css">
+</head>
+<body>
+    <div class="container">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+            <h1 style="margin-bottom: 0;">Embryo Dataset Explorer</h1>
+            <div id="server-status" style="font-size: 0.9em;">Checking...</div>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-sessions">-</div>
+                <div class="stat-label">Sessions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-embryos">-</div>
+                <div class="stat-label">Embryos</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-volumes">-</div>
+                <div class="stat-label">Volumes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-images">-</div>
+                <div class="stat-label">Images</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-ground_truth">-</div>
+                <div class="stat-label">Ground Truth</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="sidebar">
+                <h2>Sessions</h2>
+                <div style="margin-bottom: 10px;">
+                    <label style="font-size: 0.9em; cursor: pointer;">
+                        <input type="checkbox" id="filter-with-embryos" onchange="filterSessions()" checked>
+                        With embryos only
+                    </label>
+                </div>
+                <div id="sessions-list">
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+
+            <div class="content">
+                <div id="content-area">
+                    <div class="info">Select a session to see embryos</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/explorer.js"></script>
+</body>
+</html>

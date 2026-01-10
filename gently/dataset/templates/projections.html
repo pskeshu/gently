@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Projections - {{embryo_id}} #{{index}}</title>
+    <link rel="stylesheet" href="/static/css/projections.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <div class="header">
+        <div>
+            <h1>Projections Viewer</h1>
+            <div class="info">
+                Session: {{session_id}} | Embryo: {{embryo_id}} | Index: #{{index}}
+            </div>
+        </div>
+        <a href="/" class="back-link">← Back to Explorer</a>
+    </div>
+
+    <div id="content">
+        <div class="loading">Loading projections...</div>
+    </div>
+
+    <script>
+        // These values are injected by the server
+        const SESSION = '{{session_id}}';
+        const EMBRYO = '{{embryo_id}}';
+        const INDEX = {{index}};
+    </script>
+    <script src="/static/js/projections.js"></script>
+</body>
+</html>
