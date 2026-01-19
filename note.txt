@@ -1,0 +1,13 @@
+Perception v4 Ideas
+===================
+
+1. Multiple Projections
+   - Show multiple views of the volume (XY, XZ, YZ max projections?)
+   - Different z-slices or focal planes
+   - Give the model more spatial context for classification
+
+2. Separate Perception and Cognition
+   - Perception: feature extraction from images (what do I see?)
+   - Cognition: reasoning and classification (what does it mean?)
+   - Cleaner architecture, potentially more interpretable
+   - Could allow different models/approaches for each stage

@@ -5762,6 +5762,11 @@ kbd {
     transform: scale(0.98);
 }
 
+.detail-view-3d {
+    flex: 0 0 auto;
+    padding: 0.6rem 1rem !important;
+}
+
 /* Responsive detail panel */
 @media (max-width: 600px) {
     .detection-detail-panel {

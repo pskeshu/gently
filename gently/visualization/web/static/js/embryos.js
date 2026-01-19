@@ -931,7 +931,7 @@ const EmbryosManager = {
     getStageIcon(stage) {
         const icons = {
             'early': '🥚',
-            'bean': '🫘',
+            'bean': '🌱',  // seedling - more compatible than bean emoji
             'comma': '🌙',
             '1.5fold': '🔄',
             '2fold': '🔁',
@@ -1979,11 +1979,6 @@ const EmbryosManager = {
                 </div>
                 ${contextHtml}
                 ${reasoningHtml}
-                <div class="detection-actions-row">
-                    <button class="view-more-btn" onclick="event.stopPropagation(); EmbryosManager.view3D('${this.selectedEmbryoId}', ${detection.timepoint})" title="Open 3D Volume Viewer">
-                        <span class="view-more-icon">&#x1F4D0;</span> View 3D
-                    </button>
-                </div>
                 ${hasImage ? `
                     <div class="detection-image-section">
                         <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
