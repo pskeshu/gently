@@ -1719,7 +1719,9 @@ Write a brief status summary. Examples:
                     three_view_img = three_view_img.astype(np.uint8)
 
                 # Use proper UID from DataStore, fallback to constructed if None
-                viz_uid = record.projection_uid or f"volume_{embryo_id}_t{timepoint:04d}"
+                # Include session_id in fallback to ensure uniqueness across sessions
+                session_prefix = f"{self.session_id[:8]}_" if self.session_id else ""
+                viz_uid = record.projection_uid or f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}"
                 self.push_viz(
                     array=three_view_img,
                     uid=viz_uid,
@@ -1743,6 +1745,7 @@ Write a brief status summary. Examples:
             'timepoint': timepoint,
             'volume_uid': record.volume_uid,
             'projection_uid': record.projection_uid,
+            'volume_path': record.volume_path,  # Disk path for direct file access
             'shape': list(volume.shape),
         })
 

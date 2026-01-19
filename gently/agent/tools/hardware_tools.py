@@ -1730,9 +1730,11 @@ async def acquire_volume(
                     if vol.ndim == 4:
                         vol = vol[0]  # View A
                     max_proj = np.max(vol, axis=0)
+                    # Include session_id in UID to ensure uniqueness across sessions
+                    session_prefix = f"{copilot.session_id[:8]}_" if copilot.session_id else ""
                     copilot.push_viz(
                         array=max_proj,
-                        uid=f"volume_{embryo_id}_t{timepoint:04d}",
+                        uid=f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}",
                         data_type="volume_projection",
                         metadata={
                             'embryo_id': embryo_id,

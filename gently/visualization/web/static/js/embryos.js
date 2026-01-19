@@ -1045,6 +1045,9 @@ const EmbryosManager = {
         if (isNewEmbryo) {
             this.expandedImages = {};
             this.expandedRangeItems = {};
+            // Clear detail panel state to prevent stale embryoId in timepoint links
+            this.currentDetailItem = null;
+            this.detailPanelVisible = false;
         }
 
         this.selectedEmbryoId = embryoId;
@@ -1797,6 +1800,11 @@ const EmbryosManager = {
         return `
             <div class="detail-panel-header">
                 <span class="detail-title">T${item.timepoint} - ${this.formatDetectorName(item.detector_name)}</span>
+                <button class="view-projections-btn header-projections-btn"
+                        onclick="ProjectionViewer.open('${this.selectedEmbryoId}', ${item.timepoint})"
+                        data-tooltip="View all projection types from the 3D volume">
+                    Projections
+                </button>
                 <button class="detail-close" onclick="EmbryosManager.closeDetailPanel()">&times;</button>
             </div>
             <div class="detail-image-container">
@@ -1981,10 +1989,16 @@ const EmbryosManager = {
                 ${reasoningHtml}
                 ${hasImage ? `
                     <div class="detection-image-section">
-                        <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
-                            <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
-                            ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
-                        </button>
+                        <div class="detection-image-actions">
+                            <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
+                                <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
+                                ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
+                            </button>
+                            <button class="view-projections-btn" onclick="event.stopPropagation(); ProjectionViewer.open('${this.selectedEmbryoId}', ${detection.timepoint})"
+                                    data-tooltip="View all projection types from the 3D volume">
+                                View All Projections
+                            </button>
+                        </div>
                         <div class="detection-image-container ${imageExpanded ? 'expanded' : ''}" id="detection-image-${index}">
                             ${imageExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}
                         </div>

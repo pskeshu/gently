@@ -375,6 +375,7 @@ class TimelapseStateTracker:
         self.base_interval = 120
         self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
         self.projection_uids: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> projection_uid}
+        self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> volume_path}
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
@@ -385,6 +386,8 @@ class TimelapseStateTracker:
             self.started_at = None
             self.embryos = {}
             self.detection_reasoning = {}
+            self.projection_uids = {}
+            self.volume_paths = {}
             self.total_timepoints = 0
 
         elif event_type == "SESSION_RESTORED":
@@ -399,6 +402,8 @@ class TimelapseStateTracker:
             self.base_interval = data.get("interval_seconds", 120)
             self.embryos = {}
             self.detection_reasoning = {}
+            self.projection_uids = {}
+            self.volume_paths = {}
             self.total_timepoints = 0
             for eid in data.get("embryo_ids", []):
                 self.embryos[eid] = {
@@ -450,6 +455,13 @@ class TimelapseStateTracker:
                     if eid not in self.projection_uids:
                         self.projection_uids[eid] = {}
                     self.projection_uids[eid][timepoint] = projection_uid
+
+                # Track volume path for direct file access (projection generation)
+                volume_path = data.get("volume_path")
+                if volume_path:
+                    if eid not in self.volume_paths:
+                        self.volume_paths[eid] = {}
+                    self.volume_paths[eid][timepoint] = volume_path
 
         elif event_type == "ACQUISITION_COMPLETED":
             self.status = "COMPLETED"
@@ -1135,6 +1147,191 @@ class VisualizationServer:
                 except Exception as e:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
+
+        @self.app.get("/api/projections/{embryo_id}/{timepoint}")
+        async def get_projections(embryo_id: str, timepoint: int, method: str = "all"):
+            """
+            Generate projections from volume file on disk.
+
+            Args:
+                embryo_id: Embryo identifier
+                timepoint: Timepoint number (1-indexed)
+                method: Projection method - 'all', 'three_view', 'dual_view', 'depth_colored', 'multi_slice'
+
+            Returns:
+                List of projections with method name, description, and base64 PNG data
+            """
+            import numpy as np
+            from io import BytesIO
+            from PIL import Image
+            import tifffile
+            from gently.agent.perception.projection import (
+                projection_three_view,
+                compute_crop_bounds,
+                apply_crop_bounds,
+            )
+
+            # Look up volume path
+            if embryo_id not in self.timelapse_tracker.volume_paths:
+                raise HTTPException(status_code=404, detail=f"No volumes for embryo {embryo_id}")
+
+            volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
+            if not volume_path:
+                raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
+
+            # Load volume from disk
+            try:
+                from pathlib import Path
+                path = Path(volume_path)
+                if not path.exists():
+                    raise HTTPException(status_code=404, detail=f"Volume file not found: {volume_path}")
+
+                vol = tifffile.imread(str(path))
+                vol = np.squeeze(vol)
+
+                # Handle dual-view format (diSPIM)
+                if vol.ndim == 3:
+                    z_depth, height, width = vol.shape
+                    if width > height * 2:
+                        vol = vol[:, :, :width // 2]
+
+                # Auto-crop to embryo region
+                bounds = compute_crop_bounds(vol)
+                vol = apply_crop_bounds(vol, bounds)
+
+                # Normalize to 0-1 float
+                vol = vol.astype(np.float32)
+                vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to load volume: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}")
+
+            # Define projection methods
+            def image_to_base64(img_array):
+                """Convert numpy array to base64 PNG"""
+                if img_array.dtype != np.uint8:
+                    img_array = (img_array * 255).astype(np.uint8)
+                img = Image.fromarray(img_array)
+                buf = BytesIO()
+                img.save(buf, format='PNG')
+                return base64.b64encode(buf.getvalue()).decode('utf-8')
+
+            PROJECTION_METHODS = {
+                'three_view': projection_three_view,
+            }
+
+            # Try to import additional projection methods from explorer
+            try:
+                from gently.dataset.explorer_server import (
+                    projection_dual_view,
+                    projection_depth_colored,
+                    projection_multi_slice,
+                    projection_spin_3d,
+                )
+                PROJECTION_METHODS.update({
+                    'dual_view': projection_dual_view,
+                    'depth_colored': projection_depth_colored,
+                    'multi_slice': projection_multi_slice,
+                    'spin_3d': projection_spin_3d,
+                })
+            except ImportError:
+                pass  # Explorer projections not available
+
+            projections = []
+
+            if method == "all":
+                for method_name, method_func in PROJECTION_METHODS.items():
+                    try:
+                        proj_img, desc = method_func(vol)
+                        projections.append({
+                            "method": method_name,
+                            "description": desc,
+                            "data": image_to_base64(proj_img),
+                        })
+                    except Exception as e:
+                        logger.warning(f"Projection {method_name} failed: {e}")
+            else:
+                if method not in PROJECTION_METHODS:
+                    raise HTTPException(status_code=400, detail=f"Unknown method: {method}. Available: {list(PROJECTION_METHODS.keys())}")
+                proj_img, desc = PROJECTION_METHODS[method](vol)
+                projections.append({
+                    "method": method,
+                    "description": desc,
+                    "data": image_to_base64(proj_img),
+                })
+
+            return {
+                "embryo_id": embryo_id,
+                "timepoint": timepoint,
+                "volume_shape": list(vol.shape),
+                "projections": projections,
+            }
+
+        @self.app.get("/api/volume-raw/{embryo_id}/{timepoint}")
+        async def get_volume_raw(embryo_id: str, timepoint: int):
+            """
+            Get raw volume data for 3D viewer.
+
+            Returns the volume as base64-encoded uint8 bytes with shape info.
+            """
+            import numpy as np
+            import tifffile
+            from gently.agent.perception.projection import (
+                compute_crop_bounds,
+                apply_crop_bounds,
+            )
+
+            # Look up volume path
+            if embryo_id not in self.timelapse_tracker.volume_paths:
+                raise HTTPException(status_code=404, detail=f"No volumes for embryo {embryo_id}")
+
+            volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
+            if not volume_path:
+                raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
+
+            try:
+                from pathlib import Path
+                path = Path(volume_path)
+                if not path.exists():
+                    raise HTTPException(status_code=404, detail=f"Volume file not found")
+
+                vol = tifffile.imread(str(path))
+                vol = np.squeeze(vol)
+
+                # Handle dual-view format (diSPIM)
+                if vol.ndim == 3:
+                    z_depth, height, width = vol.shape
+                    if width > height * 2:
+                        vol = vol[:, :, :width // 2]
+
+                # Auto-crop to embryo region
+                bounds = compute_crop_bounds(vol)
+                vol = apply_crop_bounds(vol, bounds)
+
+                # Normalize to uint8
+                vol = vol.astype(np.float32)
+                vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
+                vol_uint8 = (vol * 255).astype(np.uint8)
+
+                # Encode as base64
+                vol_bytes = vol_uint8.tobytes()
+                vol_b64 = base64.b64encode(vol_bytes).decode('utf-8')
+
+                return {
+                    "embryo_id": embryo_id,
+                    "timepoint": timepoint,
+                    "shape": list(vol_uint8.shape),
+                    "data": vol_b64,
+                }
+
+            except HTTPException:
+                raise
+            except Exception as e:
+                logger.error(f"Failed to load volume: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}")
 
         @self.app.get("/api/volumes3d")
         async def list_volumes_3d():
