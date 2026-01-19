@@ -107,13 +107,13 @@ def _normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> n
     return (img * 255).astype(np.uint8)
 
 
-def _create_dual_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
-    """Create dual-view (TOP above, SIDE below) image from volume, return base64.
+def _create_three_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
+    """Create three-view orthogonal projection from volume, return base64.
 
-    Matches the projection_explorer format:
-    - TOP: max projection along Z (looking down, X-Y plane)
-    - SIDE: max projection along Y (looking from front, X-Z plane)
-    - Combined vertically with TOP on top, SIDE below
+    Uses the shared projection utility to generate:
+    - XY (top-left): Looking down - best for shape, curvature, folding
+    - YZ (top-right): Looking from side - best for depth, body height
+    - XZ (bottom): Looking from front - best for symmetry, coiling
 
     Parameters
     ----------
@@ -124,35 +124,21 @@ def _create_dual_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
     """
     _ensure_dependencies()
 
-    z_depth, height, width = volume.shape
+    from gently.agent.perception.projection import (
+        projection_three_view,
+        compute_crop_bounds,
+        apply_crop_bounds,
+    )
 
-    # TOP: max along Z (axis 0) -> shape (Y, X) - looking down
-    top_proj = np.max(volume, axis=0)
+    # Auto-crop to embryo region
+    bounds = compute_crop_bounds(volume)
+    cropped = apply_crop_bounds(volume, bounds)
 
-    # SIDE: max along Y (axis 1) -> shape (Z, X) - looking from front
-    side_proj = np.max(volume, axis=1)
-
-    # Normalize
-    top_norm = _normalize_image(top_proj)
-    side_norm = _normalize_image(side_proj)
-
-    # Scale side view to match top width and make Z dimension visible
-    # (matching projection_explorer logic)
-    target_width = top_norm.shape[1]
-    side_new_h = max(height // 3, int(z_depth * 3))
-
-    side_pil = PIL_Image.fromarray(side_norm)
-    side_scaled = side_pil.resize((target_width, side_new_h), PIL_Image.Resampling.LANCZOS)
-    side_arr = np.array(side_scaled)
-
-    # Create separator (gray line between views)
-    sep = np.ones((3, target_width), dtype=np.uint8) * 128
-
-    # Combine vertically: TOP on top, SIDE below
-    combined = np.concatenate([top_norm, sep, side_arr], axis=0)
+    # Generate three-view projection
+    three_view_img, _ = projection_three_view(cropped)
 
     # Convert to PIL for final processing
-    pil_img = PIL_Image.fromarray(combined)
+    pil_img = PIL_Image.fromarray(three_view_img)
 
     # Resize if too large (API limit is 8000px, use smaller for safety/performance)
     if max(pil_img.size) > max_dim:
@@ -312,12 +298,12 @@ class OfflineTestset:
 
             # Create images
             if volume is not None:
-                image_b64 = _create_dual_view_image(volume)
+                image_b64 = _create_three_view_image(volume)
                 top_b64, side_b64 = _create_separate_view_images(volume)
             else:
                 # Load just for image if not loading full volumes
                 temp_vol = _load_volume(vol_path)
-                image_b64 = _create_dual_view_image(temp_vol)
+                image_b64 = _create_three_view_image(temp_vol)
                 top_b64, side_b64 = _create_separate_view_images(temp_vol)
                 del temp_vol
 

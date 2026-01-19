@@ -118,11 +118,19 @@ class PerceptionSession:
         reasoning: str = "",
         is_transitional: bool = False,
         transition_between: Optional[List[str]] = None,
+        timestamp: Optional[datetime] = None,
     ) -> None:
-        """Add a new observation."""
+        """Add a new observation.
+
+        Parameters
+        ----------
+        timestamp : datetime, optional
+            Custom timestamp for this observation. If None, uses datetime.now().
+            Useful for benchmarking to simulate real timelapse timing.
+        """
         obs = Observation(
             timepoint=timepoint,
-            timestamp=datetime.now(),
+            timestamp=timestamp or datetime.now(),
             stage=stage,
             is_hatching=is_hatching,
             confidence=confidence,

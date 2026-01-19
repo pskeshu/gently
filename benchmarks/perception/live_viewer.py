@@ -19,7 +19,7 @@ import logging
 import sys
 import webbrowser
 from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -108,35 +108,46 @@ HTML_PAGE = """
 
         .main-container {
             display: grid;
-            grid-template-columns: 1fr 400px;
-            gap: 20px;
-            padding: 20px;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto 1fr;
+            gap: 15px;
+            padding: 15px;
             height: calc(100vh - 70px);
         }
 
-        .left-panel {
+        .top-left {
+            display: flex;
+            gap: 15px;
+        }
+
+        .top-right {
             display: flex;
             flex-direction: column;
-            gap: 20px;
+            gap: 15px;
+        }
+
+        .trace-section {
+            grid-column: 1 / -1;
+            min-height: 300px;
         }
 
         .image-section {
             background: #16213e;
             border-radius: 8px;
-            padding: 15px;
-            flex: 0 0 auto;
+            padding: 12px;
+            flex: 1;
         }
 
         .image-section h2 {
-            font-size: 1em;
+            font-size: 0.95em;
             color: #e94560;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .image-container {
             background: #0f0f1a;
             border-radius: 4px;
-            min-height: 200px;
+            min-height: 150px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -145,7 +156,7 @@ HTML_PAGE = """
 
         .image-container img {
             max-width: 100%;
-            max-height: 400px;
+            max-height: 280px;
             object-fit: contain;
         }
 
@@ -168,17 +179,18 @@ HTML_PAGE = """
         .predictions-section {
             background: #16213e;
             border-radius: 8px;
-            padding: 15px;
+            padding: 12px;
             flex: 1;
             overflow: hidden;
             display: flex;
             flex-direction: column;
+            max-height: 280px;
         }
 
         .predictions-section h2 {
-            font-size: 1em;
+            font-size: 0.95em;
             color: #e94560;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .predictions-list {
@@ -188,11 +200,11 @@ HTML_PAGE = """
 
         .prediction-row {
             display: grid;
-            grid-template-columns: 60px 100px 100px 80px 1fr;
-            gap: 10px;
-            padding: 8px 10px;
+            grid-template-columns: 50px 80px 80px 50px 1fr;
+            gap: 8px;
+            padding: 6px 8px;
             border-bottom: 1px solid #0f3460;
-            font-size: 0.85em;
+            font-size: 0.8em;
             align-items: center;
         }
 
@@ -248,12 +260,6 @@ HTML_PAGE = """
             margin-left: 5px;
         }
 
-        .right-panel {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-        }
-
         .trace-section {
             background: #16213e;
             border-radius: 8px;
@@ -265,7 +271,7 @@ HTML_PAGE = """
         }
 
         .trace-section h2 {
-            font-size: 1em;
+            font-size: 1.1em;
             color: #e94560;
             margin-bottom: 10px;
         }
@@ -274,7 +280,8 @@ HTML_PAGE = """
             flex: 1;
             overflow-y: auto;
             font-family: 'Consolas', 'Monaco', monospace;
-            font-size: 0.8em;
+            font-size: 0.9em;
+            line-height: 1.5;
         }
 
         .trace-step {
@@ -339,36 +346,36 @@ HTML_PAGE = """
         .stats-section {
             background: #16213e;
             border-radius: 8px;
-            padding: 15px;
+            padding: 10px 12px;
         }
 
         .stats-section h2 {
-            font-size: 1em;
+            font-size: 0.9em;
             color: #e94560;
-            margin-bottom: 10px;
+            margin-bottom: 8px;
         }
 
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 10px;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 8px;
         }
 
         .stat-card {
             background: #0f3460;
-            padding: 10px;
+            padding: 8px;
             border-radius: 4px;
             text-align: center;
         }
 
         .stat-value {
-            font-size: 1.5em;
+            font-size: 1.2em;
             font-weight: bold;
             color: #e94560;
         }
 
         .stat-label {
-            font-size: 0.75em;
+            font-size: 0.7em;
             color: #888;
             margin-top: 2px;
         }
@@ -395,44 +402,30 @@ HTML_PAGE = """
     </div>
 
     <div class="main-container">
-        <div class="left-panel">
-            <div class="image-section">
-                <h2>Current Image</h2>
-                <div class="image-container" id="image-container">
-                    <div class="no-data">Waiting for images...</div>
-                </div>
-                <div class="image-info" id="image-info" style="display: none;">
-                    <div class="info-item">
-                        <span class="info-label">Embryo:</span>
-                        <span class="info-value" id="current-embryo">-</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Timepoint:</span>
-                        <span class="info-value" id="current-timepoint">-</span>
-                    </div>
-                    <div class="info-item">
-                        <span class="info-label">Ground Truth:</span>
-                        <span class="info-value" id="ground-truth">-</span>
-                    </div>
-                </div>
+        <!-- Top Left: Image -->
+        <div class="image-section">
+            <h2>Current Image</h2>
+            <div class="image-container" id="image-container">
+                <div class="no-data">Waiting for images...</div>
             </div>
-
-            <div class="predictions-section">
-                <h2>Predictions</h2>
-                <div class="predictions-list" id="predictions-list">
-                    <div class="prediction-row header">
-                        <div>Time</div>
-                        <div>Predicted</div>
-                        <div>Truth</div>
-                        <div>Conf</div>
-                        <div>Details</div>
-                    </div>
-                    <div class="no-data">No predictions yet</div>
+            <div class="image-info" id="image-info" style="display: none;">
+                <div class="info-item">
+                    <span class="info-label">Embryo:</span>
+                    <span class="info-value" id="current-embryo">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">T:</span>
+                    <span class="info-value" id="current-timepoint">-</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">GT:</span>
+                    <span class="info-value" id="ground-truth">-</span>
                 </div>
             </div>
         </div>
 
-        <div class="right-panel">
+        <!-- Top Right: Stats + Predictions -->
+        <div class="top-right">
             <div class="stats-section">
                 <h2>Statistics</h2>
                 <div class="stats-grid">
@@ -455,11 +448,26 @@ HTML_PAGE = """
                 </div>
             </div>
 
-            <div class="trace-section">
-                <h2>Reasoning Trace</h2>
-                <div class="trace-list" id="trace-list">
-                    <div class="no-data">Waiting for reasoning...</div>
+            <div class="predictions-section">
+                <h2>Predictions (click to view trace)</h2>
+                <div class="predictions-list" id="predictions-list">
+                    <div class="prediction-row header">
+                        <div>T</div>
+                        <div>Pred</div>
+                        <div>Truth</div>
+                        <div>Conf</div>
+                        <div>Details</div>
+                    </div>
+                    <div class="no-data">No predictions yet</div>
                 </div>
+            </div>
+        </div>
+
+        <!-- Bottom: Reasoning Trace (full width) -->
+        <div class="trace-section">
+            <h2>Reasoning Trace</h2>
+            <div class="trace-list" id="trace-list">
+                <div class="no-data">Waiting for reasoning...</div>
             </div>
         </div>
     </div>
@@ -544,22 +552,12 @@ HTML_PAGE = """
             const container = document.getElementById('image-container');
             const imgData = images[timepoint];
             if (imgData) {
-                // Use separate images if available
-                if (imgData.top && imgData.side) {
-                    container.innerHTML = `
-                        <div style="display: flex; gap: 10px; align-items: flex-start;">
-                            <div style="text-align: center;">
-                                <div style="color: #888; font-size: 12px; margin-bottom: 4px;">TOP VIEW</div>
-                                <img src="data:image/jpeg;base64,${imgData.top}" alt="TOP T${timepoint}" style="max-height: 350px;">
-                            </div>
-                            <div style="text-align: center;">
-                                <div style="color: #888; font-size: 12px; margin-bottom: 4px;">SIDE VIEW</div>
-                                <img src="data:image/jpeg;base64,${imgData.side}" alt="SIDE T${timepoint}" style="max-height: 350px;">
-                            </div>
-                        </div>`;
-                } else {
-                    container.innerHTML = `<img src="data:image/jpeg;base64,${imgData.combined}" alt="Embryo T${timepoint}">`;
-                }
+                // Display three-view combined image (XY+YZ+XZ orthogonal projections)
+                container.innerHTML = `
+                    <div style="text-align: center;">
+                        <div style="color: #888; font-size: 12px; margin-bottom: 4px;">THREE-VIEW (XY | YZ / XZ)</div>
+                        <img src="data:image/jpeg;base64,${imgData.combined}" alt="Three-View T${timepoint}" style="max-height: 450px;">
+                    </div>`;
                 // Also get embryoId and groundTruth from stored data if not provided
                 embryoId = embryoId || imgData.embryoId;
                 groundTruth = groundTruth || imgData.groundTruth;
@@ -782,7 +780,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 class LiveBenchmarkRunner:
     """
-    Benchmark runner with live websocket updates.
+    Benchmark runner with live websocket updates and trace persistence.
     """
 
     def __init__(
@@ -792,6 +790,7 @@ class LiveBenchmarkRunner:
         enable_verification: bool = True,
         start_timepoint: int = 0,
         max_timepoints: Optional[int] = None,
+        trace_dir: Optional[Path] = None,
     ):
         self.testset = testset
         self.embryo_id = embryo_id
@@ -803,6 +802,15 @@ class LiveBenchmarkRunner:
         self.correct_count = 0
         self.adjacent_count = 0
         self.verified_count = 0
+
+        # Trace persistence
+        self.run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.trace_dir = trace_dir or Path("benchmarks/results/traces")
+        self.run_dir = self.trace_dir / f"{self.run_id}_{embryo_id}"
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        self.traces: Dict[int, List[Dict]] = {}  # timepoint -> trace steps
+
+        logger.info(f"Trace persistence enabled: {self.run_dir}")
 
     async def run(self):
         """Run the benchmark with live updates."""
@@ -906,6 +914,9 @@ class LiveBenchmarkRunner:
             self.predictions.append(pred_msg)
             await broadcast(pred_msg)
 
+            # Save trace for this timepoint
+            self._save_timepoint_trace(test_case.timepoint, result, test_case, is_correct, is_adjacent)
+
             # Send updated stats
             total = len(self.predictions)
             await broadcast({
@@ -916,7 +927,12 @@ class LiveBenchmarkRunner:
                 "verified": self.verified_count,
             })
 
-            # Add observation to session
+            # Add observation to session with simulated timestamp
+            # Typical diSPIM acquisition interval is ~4 minutes per timepoint
+            simulated_timestamp = datetime.now() - timedelta(
+                minutes=(self.max_timepoints or 100) * 4
+            ) + timedelta(minutes=test_case.timepoint * 4)
+
             session.add_observation(
                 timepoint=test_case.timepoint,
                 stage=result.stage,
@@ -925,7 +941,11 @@ class LiveBenchmarkRunner:
                 reasoning=result.reasoning,
                 is_transitional=result.is_transitional,
                 transition_between=result.transition_between,
+                timestamp=simulated_timestamp,
             )
+
+        # Save run summary
+        self._save_run_summary()
 
         # Complete
         benchmark_state["status"] = "complete"
@@ -937,29 +957,76 @@ class LiveBenchmarkRunner:
 
         # We need to hook into the reasoning trace
         # For now, run perception and stream the trace after
+        # Use only the combined three-view image (don't pass separate top/side)
         result = await engine.perceive(
             image_b64=test_case.image_b64,
             session=session,
             timepoint=test_case.timepoint,
             volume=test_case.volume,
-            top_image_b64=test_case.top_image_b64,
-            side_image_b64=test_case.side_image_b64,
         )
 
-        # Stream trace steps
+        # Initialize trace storage for this timepoint
+        self.traces[test_case.timepoint] = []
+
+        # Stream and store trace steps
         if result.reasoning_trace:
             for step in result.reasoning_trace.steps:
-                await broadcast({
-                    "type": "trace_step",
+                trace_step = {
                     "step_type": step.step_type,
                     "content": step.content,
                     "tool_name": step.tool_name,
                     "tool_input": step.tool_input,
                     "tool_result_summary": step.tool_result_summary,
-                })
+                }
+                self.traces[test_case.timepoint].append(trace_step)
+
+                await broadcast({"type": "trace_step", **trace_step})
                 await asyncio.sleep(0.1)  # Small delay for visual effect
 
         return result
+
+    def _save_timepoint_trace(self, timepoint: int, result, test_case, is_correct: bool, is_adjacent: bool):
+        """Save trace for a single timepoint to disk."""
+        trace_data = {
+            "timepoint": timepoint,
+            "embryo_id": self.embryo_id,
+            "ground_truth": test_case.ground_truth_stage,
+            "predicted": result.stage,
+            "confidence": result.confidence,
+            "is_correct": is_correct,
+            "is_adjacent": is_adjacent,
+            "verification_triggered": result.verification_triggered,
+            "phase_count": result.phase_count,
+            "reasoning": result.reasoning,
+            "trace_steps": self.traces.get(timepoint, []),
+        }
+
+        trace_path = self.run_dir / f"T{timepoint:03d}.json"
+        with open(trace_path, "w") as f:
+            json.dump(trace_data, f, indent=2, default=str)
+
+    def _save_run_summary(self):
+        """Save overall run summary."""
+        total = len(self.predictions)
+        summary = {
+            "run_id": self.run_id,
+            "embryo_id": self.embryo_id,
+            "start_timepoint": self.start_timepoint,
+            "max_timepoints": self.max_timepoints,
+            "total_predictions": total,
+            "correct_count": self.correct_count,
+            "adjacent_count": self.adjacent_count,
+            "verified_count": self.verified_count,
+            "accuracy": self.correct_count / total if total > 0 else 0,
+            "adjacent_accuracy": self.adjacent_count / total if total > 0 else 0,
+            "predictions": self.predictions,
+        }
+
+        summary_path = self.run_dir / "summary.json"
+        with open(summary_path, "w") as f:
+            json.dump(summary, f, indent=2, default=str)
+
+        logger.info(f"Run summary saved: {summary_path}")
 
 
 async def run_benchmark_background(
@@ -1071,6 +1138,10 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
 
+    # Trace directory
+    trace_dir = Path("benchmarks/results/traces")
+    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     print(f"\n{'='*60}")
     print("Perception Benchmark Live Viewer")
     print(f"{'='*60}")
@@ -1079,6 +1150,7 @@ def main():
     print(f"Start timepoint: T{args.start_timepoint}")
     print(f"Max timepoints: {args.max_timepoints or 'all'}")
     print(f"Verification: {'disabled' if args.no_verification else 'enabled'}")
+    print(f"Traces: {trace_dir / f'{run_id}_{args.embryo}'}")
     print(f"URL: http://localhost:{args.port}")
     print(f"{'='*60}\n")
 
