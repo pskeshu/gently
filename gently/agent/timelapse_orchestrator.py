@@ -1319,16 +1319,13 @@ class TimelapseOrchestrator:
         """
         try:
             import numpy as np
-            import base64
-            from io import BytesIO
-            from PIL import Image
-
-            # Normalize helper
-            def normalize(img):
-                img = img.astype(np.float32)
-                if img.max() > img.min():
-                    img = (img - img.min()) / (img.max() - img.min()) * 255
-                return img.astype(np.uint8)
+            from .perception.projection import (
+                projection_three_view,
+                compute_crop_bounds,
+                apply_crop_bounds,
+                image_to_base64,
+                normalize_image,
+            )
 
             # Handle 4D volumes: extract View A (first view)
             if volume.ndim == 4:
@@ -1347,46 +1344,18 @@ class TimelapseOrchestrator:
                     # Extract View A (left half)
                     view_a = view_a[:, :, :width // 2]
 
-                # TOP projection: max along Z axis (looking down at embryo)
-                top_proj = np.max(view_a, axis=0)
+                # Auto-crop to embryo region
+                bounds = compute_crop_bounds(view_a)
+                cropped = apply_crop_bounds(view_a, bounds)
 
-                # SIDE projection: max along Y axis (looking from side)
-                side_proj = np.max(view_a, axis=1)
-
-                top_norm = normalize(top_proj)
-                side_norm = normalize(side_proj)
-
-                # Rotate side view 90° clockwise so Z becomes horizontal
-                # (Z, X) -> (X, Z) after rotation
-                side_rotated = np.rot90(side_norm, k=-1)
-
-                # Scale side view to match top view height
-                target_height = top_norm.shape[0]
-                # Make side view at least 150px wide for visibility
-                new_width = max(150, int(side_rotated.shape[1] * target_height / side_rotated.shape[0]))
-                side_pil = Image.fromarray(side_rotated).resize(
-                    (new_width, target_height), Image.Resampling.LANCZOS
-                )
-                side_scaled = np.array(side_pil)
-
-                # Concatenate horizontally: TOP | separator | SIDE
-                sep_width = 4
-                separator = np.ones((target_height, sep_width), dtype=np.uint8) * 128
-                combined = np.concatenate([top_norm, separator, side_scaled], axis=1)
-
-                # Encode as JPEG base64
-                pil_img = Image.fromarray(combined)
-                buffer = BytesIO()
-                pil_img.save(buffer, format='JPEG', quality=85)
-                image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                # Generate three-view projection
+                three_view_img, _ = projection_three_view(cropped)
+                image_b64 = image_to_base64(three_view_img)
 
             elif view_a.ndim == 2:
                 # Single 2D image - use as-is
-                img = normalize(view_a)
-                pil_img = Image.fromarray(img)
-                buffer = BytesIO()
-                pil_img.save(buffer, format='JPEG', quality=85)
-                image_b64 = base64.b64encode(buffer.getvalue()).decode('utf-8')
+                img = normalize_image(view_a)
+                image_b64 = image_to_base64(img)
             else:
                 logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
                 return

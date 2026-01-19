@@ -126,14 +126,28 @@ class ExampleStore:
             return
 
         examples = []
-        image_patterns = ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"]
 
-        for pattern in image_patterns:
-            for img_path in sorted(stage_dir.glob(pattern)):
-                b64 = self._load_and_encode_image(img_path)
-                if b64:
-                    examples.append(b64)
-                    logger.debug(f"Loaded example: {img_path.name}")
+        # Prefer three_view.jpg if available (new three-view format)
+        three_view_path = stage_dir / "three_view.jpg"
+        if three_view_path.exists():
+            b64 = self._load_and_encode_image(three_view_path)
+            if b64:
+                examples.append(b64)
+                logger.debug(f"Loaded three_view example for {stage}")
+
+        # Fallback to legacy patterns if no three_view
+        if not examples:
+            image_patterns = ["*.jpg", "*.jpeg", "*.png", "*.tif", "*.tiff"]
+
+            for pattern in image_patterns:
+                for img_path in sorted(stage_dir.glob(pattern)):
+                    # Skip three_view files (already handled above)
+                    if img_path.name.startswith("three_view"):
+                        continue
+                    b64 = self._load_and_encode_image(img_path)
+                    if b64:
+                        examples.append(b64)
+                        logger.debug(f"Loaded example: {img_path.name}")
 
         self._stage_cache[stage] = examples
         logger.info(f"Loaded {len(examples)} examples for stage '{stage}'")

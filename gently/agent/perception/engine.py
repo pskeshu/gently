@@ -327,7 +327,7 @@ class PerceptionEngine:
     Just: show examples, show image, ask what stage.
     """
 
-    MODEL = "claude-sonnet-4-5-20250929"
+    MODEL = "claude-opus-4-5-20251101"
 
     def __init__(
         self,
@@ -950,16 +950,20 @@ class PerceptionEngine:
                 self.claude.messages.create,
                 model=self.MODEL,
                 max_tokens=8000,
-                system=(
-                    "You are an expert microscopy perception system analyzing C. elegans "
-                    "embryo development. You have access to tools for reference comparison.\n\n"
-                    "IMPORTANT PRINCIPLES:\n"
-                    "1. DESCRIBE FIRST: Always describe what you actually see BEFORE classifying\n"
-                    "2. EMBRACE TRANSITIONS: If features suggest a transitional state, SAY SO\n"
-                    "3. USE TOOLS PROACTIVELY: Use tools for ANY borderline or transitional case\n"
-                    "4. CALIBRATE CONFIDENCE: Hedging words (slight, subtle, beginning) = lower confidence (0.5-0.7)\n\n"
-                    "Development is a SPECTRUM, not discrete jumps. Trust your observations over expectations."
-                ),
+                system=[{
+                    "type": "text",
+                    "text": (
+                        "You are an expert microscopy perception system analyzing C. elegans "
+                        "embryo development. You have access to tools for reference comparison.\n\n"
+                        "IMPORTANT PRINCIPLES:\n"
+                        "1. DESCRIBE FIRST: Always describe what you actually see BEFORE classifying\n"
+                        "2. EMBRACE TRANSITIONS: If features suggest a transitional state, SAY SO\n"
+                        "3. USE TOOLS PROACTIVELY: Use tools for ANY borderline or transitional case\n"
+                        "4. CALIBRATE CONFIDENCE: Hedging words (slight, subtle, beginning) = lower confidence (0.5-0.7)\n\n"
+                        "Development is a SPECTRUM, not discrete jumps. Trust your observations over expectations."
+                    ),
+                    "cache_control": {"type": "ephemeral"}
+                }],
                 tools=PERCEPTION_TOOLS,
                 messages=messages,
             )
@@ -997,13 +1001,20 @@ CRITICAL: Analyze BOTH views carefully. They show the SAME embryo from different
 - TOP view: Best for seeing end asymmetry, ventral indentation, overall outline shape
 - SIDE view: Best for seeing height profile, depth curvature, body thickness"""
         else:
-            image_format_text = """Each image shows TWO VIEWS stacked vertically:
-- UPPER panel: TOP view (looking down at the embryo from above)
-- LOWER panel: SIDE view (looking at the embryo from the front/side)
+            image_format_text = """Each image shows THREE ORTHOGONAL VIEWS:
 
-Use BOTH views together for accurate 3D morphology assessment:
-- TOP view: Best for seeing end asymmetry, ventral indentation, overall outline shape
-- SIDE view: Best for seeing height profile, depth curvature, body thickness"""
+┌─────────┬─────────┐
+│   XY    │   YZ    │  (TOP ROW)
+├─────────┴─────────┤
+│        XZ         │  (BOTTOM ROW)
+└───────────────────┘
+
+- XY (top-left): Looking DOWN at embryo - Best for end asymmetry, ventral indentation, overall outline shape, folding pattern
+- YZ (top-right): Looking from SIDE - Best for body height/thickness, depth curvature, dorsal-ventral profile
+- XZ (bottom): Looking from FRONT - Best for left-right symmetry, coiling orientation, body width
+
+CRITICAL: Analyze ALL THREE views together for accurate 3D morphology assessment.
+The same embryo is shown from three perpendicular angles."""
 
         content.append({
             "type": "text",
@@ -1013,9 +1024,9 @@ Current timepoint: T{timepoint}
 {image_format_text}
 
 ANATOMICAL ORIENTATION:
-- Head/tail axis runs LEFT-RIGHT in both views
-- End asymmetry = one end tapered, other rounded (look in TOP view)
-- Ventral indentation = concave curve along one EDGE of the body (TOP view)
+- Head/tail axis runs LEFT-RIGHT in XY and XZ views
+- End asymmetry = one end tapered, other rounded (look in XY view)
+- Ventral indentation = concave curve along one EDGE of the body (XY view)
 
 Your task: Identify the developmental stage and whether hatching is occurring.
 

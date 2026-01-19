@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 
 # Subagent uses a faster, cheaper model for focused comparisons
-SUBAGENT_MODEL = "claude-haiku-3-5-20241022"
+SUBAGENT_MODEL = "claude-haiku-4-5-20251001"
 
 
 def render_volume_view(
