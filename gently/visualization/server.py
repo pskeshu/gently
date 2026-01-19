@@ -1077,14 +1077,29 @@ class VisualizationServer:
                         import numpy as np
                         from io import BytesIO
                         from PIL import Image
+                        from gently.agent.perception.projection import (
+                            projection_three_view,
+                            compute_crop_bounds,
+                            apply_crop_bounds,
+                        )
                         # Handle numpy array
                         if isinstance(data, np.ndarray):
+                            # Handle 4D volumes (Views, Z, Y, X) - take View A
+                            if data.ndim == 4:
+                                data = data[0]
+                            # Handle 3D volumes - generate three-view projection
+                            if data.ndim == 3:
+                                z_depth, height, width = data.shape
+                                # Handle dual-view format
+                                if width > height * 2:
+                                    data = data[:, :, :width // 2]
+                                # Auto-crop and project
+                                bounds = compute_crop_bounds(data)
+                                data = apply_crop_bounds(data, bounds)
+                                data, _ = projection_three_view(data)
                             # Normalize to uint8 if needed
                             if data.dtype != np.uint8:
                                 data = ((data - data.min()) / (data.max() - data.min() + 1e-8) * 255).astype(np.uint8)
-                            # Handle 3D volumes - take middle slice or max projection
-                            if data.ndim == 3:
-                                data = np.max(data, axis=0)
                             img = Image.fromarray(data)
                             buf = BytesIO()
                             img.save(buf, format='PNG')
@@ -1466,6 +1481,11 @@ class VisualizationServer:
         metadata: Optional[Dict] = None
     ) -> ImageData:
         """Convert numpy array to ImageData with base64 PNG"""
+        from gently.agent.perception.projection import (
+            projection_three_view,
+            compute_crop_bounds,
+            apply_crop_bounds,
+        )
 
         # Handle 4D arrays (Views, Z, Y, X) - select View A only
         if array.ndim == 4:
@@ -1477,8 +1497,16 @@ class VisualizationServer:
                 # It's an RGB(A) image
                 pass
             else:
-                # It's a volume (Z, H, W) - take max projection
-                array = np.max(array, axis=0)
+                # It's a volume (Z, H, W) - generate three-view projection
+                z_depth, height, width = array.shape
+                # Handle dual-view format (width > 2*height)
+                if width > height * 2:
+                    array = array[:, :, :width // 2]
+                # Auto-crop to embryo region
+                bounds = compute_crop_bounds(array)
+                array = apply_crop_bounds(array, bounds)
+                # Generate three-view projection
+                array, _ = projection_three_view(array)
 
         # Normalize to 0-255 (skip for RGB uint8 images)
         if array.dtype != np.uint8:

@@ -243,6 +243,62 @@ class VisualizationManager:
             }
         )
 
+    def show_three_view_projection(
+        self,
+        volume: np.ndarray,
+        title: str = "Three-View Projection",
+        metadata: Optional[Dict] = None,
+    ) -> VisualizationRequest:
+        """
+        Create and queue three-view orthogonal projection of a volume.
+
+        Generates XY (top), YZ (side), and XZ (front) views combined
+        into a single image for comprehensive 3D morphology assessment.
+
+        Parameters
+        ----------
+        volume : np.ndarray
+            3D volume (Z, Y, X)
+        title : str
+            Display title
+        metadata : dict, optional
+            Additional metadata
+
+        Returns
+        -------
+        VisualizationRequest
+            The queued request
+        """
+        from gently.agent.perception.projection import (
+            projection_three_view,
+            compute_crop_bounds,
+            apply_crop_bounds,
+        )
+
+        # Handle dual-view format
+        if volume.ndim == 3:
+            z_depth, height, width = volume.shape
+            if width > height * 2:
+                volume = volume[:, :, :width // 2]
+
+        # Auto-crop to embryo region
+        bounds = compute_crop_bounds(volume)
+        volume = apply_crop_bounds(volume, bounds)
+
+        # Generate three-view projection
+        three_view_img, description = projection_three_view(volume)
+
+        return self.show_image(
+            three_view_img,
+            title=title,
+            metadata={
+                'projection_type': 'three_view',
+                'description': description,
+                'original_shape': volume.shape,
+                **(metadata or {})
+            }
+        )
+
     def _enqueue(self, request: VisualizationRequest):
         """Add request to queue and process"""
         with self._lock:
