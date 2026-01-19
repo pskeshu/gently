@@ -133,6 +133,39 @@ body {
     display: none;
 }
 
+.session-id-container {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.session-copy-btn {
+    background: transparent;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--text-muted);
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: color 0.15s ease, background 0.15s ease;
+}
+
+.session-copy-btn:hover {
+    color: var(--accent);
+    background: var(--bg-hover);
+}
+
+.session-copy-btn.copied {
+    color: var(--accent-green);
+}
+
+/* Hide copy button when no session ID */
+.session-id-link:empty + .session-copy-btn {
+    display: none;
+}
+
 .header h1 {
     color: var(--accent);
     font-size: 1.25rem;

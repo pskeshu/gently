@@ -68,6 +68,31 @@ function logEvent(type, message) {
 }
 
 /**
+ * Copy session ID to clipboard
+ */
+function copySessionId() {
+    const sessionLink = document.getElementById('session-id-link');
+    const copyBtn = document.getElementById('session-copy-btn');
+
+    if (!sessionLink || !sessionLink.textContent) return;
+
+    const sessionId = sessionLink.textContent;
+
+    navigator.clipboard.writeText(sessionId).then(() => {
+        // Visual feedback - briefly show green checkmark state
+        copyBtn.classList.add('copied');
+        copyBtn.title = 'Copied!';
+
+        setTimeout(() => {
+            copyBtn.classList.remove('copied');
+            copyBtn.title = 'Copy session ID';
+        }, 1500);
+    }).catch(err => {
+        console.error('Failed to copy session ID:', err);
+    });
+}
+
+/**
  * Tooltip System - Shows helpful hints on hover
  */
 const Tooltips = {
