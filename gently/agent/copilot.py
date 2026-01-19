@@ -1742,7 +1742,6 @@ Write a brief status summary. Examples:
             'timepoint': timepoint,
             'volume_uid': record.volume_uid,
             'projection_uid': record.projection_uid,
-            'volume_path': record.volume_path,  # TIF file path for download
             'shape': list(volume.shape),
         })
 

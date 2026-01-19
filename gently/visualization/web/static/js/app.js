@@ -411,7 +411,6 @@ const KeyboardShortcuts = {
                             <div class="shortcut"><kbd>Esc</kbd> Close lightbox</div>
                             <div class="shortcut"><kbd>+</kbd> <kbd>-</kbd> Zoom in/out</div>
                             <div class="shortcut"><kbd>0</kbd> Reset zoom</div>
-                            <div class="shortcut"><kbd>D</kbd> Download raw TIF</div>
                         </div>
                         <div class="shortcut-group">
                             <h4>Events</h4>

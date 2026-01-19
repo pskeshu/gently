@@ -374,7 +374,6 @@ class TimelapseStateTracker:
         self.total_timepoints = 0
         self.base_interval = 120
         self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
-        self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> file_path}
         self.projection_uids: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> projection_uid}
 
     def handle_event(self, event_type: str, data: dict):
@@ -386,7 +385,6 @@ class TimelapseStateTracker:
             self.started_at = None
             self.embryos = {}
             self.detection_reasoning = {}
-            self.volume_paths = {}
             self.total_timepoints = 0
 
         elif event_type == "SESSION_RESTORED":
@@ -401,7 +399,6 @@ class TimelapseStateTracker:
             self.base_interval = data.get("interval_seconds", 120)
             self.embryos = {}
             self.detection_reasoning = {}
-            self.volume_paths = {}
             self.total_timepoints = 0
             for eid in data.get("embryo_ids", []):
                 self.embryos[eid] = {
@@ -447,13 +444,6 @@ class TimelapseStateTracker:
                 self.embryos[eid]["last_acquired"] = now
                 self.total_timepoints += 1
 
-                # Track volume file path for download
-                volume_path = data.get("volume_path")
-                if volume_path:
-                    if eid not in self.volume_paths:
-                        self.volume_paths[eid] = {}
-                    self.volume_paths[eid][timepoint] = volume_path
-
                 # Track projection UID for image lookup
                 projection_uid = data.get("projection_uid")
                 if projection_uid:
@@ -475,11 +465,8 @@ class TimelapseStateTracker:
             eid = data.get("embryo_id")
             if eid:
                 timepoint = data.get("timepoint")
-                # Look up volume path and projection UID for this timepoint
-                volume_path = None
+                # Look up projection UID for this timepoint
                 projection_uid = None
-                if eid in self.volume_paths and timepoint in self.volume_paths.get(eid, {}):
-                    volume_path = self.volume_paths[eid][timepoint]
                 if eid in self.projection_uids and timepoint in self.projection_uids.get(eid, {}):
                     projection_uid = self.projection_uids[eid][timepoint]
 
@@ -491,7 +478,6 @@ class TimelapseStateTracker:
                     "timepoint": timepoint,
                     "volume_uid": data.get("volume_uid"),
                     "projection_uid": data.get("projection_uid") or projection_uid,  # Use stored UID as fallback
-                    "volume_path": volume_path,  # TIF file path for download
                     "timestamp": datetime.now().isoformat(),
                     # Perception-specific fields
                     "stage": data.get("stage"),
@@ -1149,74 +1135,6 @@ class VisualizationServer:
                 except Exception as e:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
-
-        @self.app.get("/api/download/{uid}")
-        async def download_tif(uid: str):
-            """Download raw TIF file with proper filename"""
-            if not self.data_store:
-                raise HTTPException(status_code=503, detail="DataStore not available")
-
-            # Get the data reference for metadata
-            ref = self.data_store.get_reference(uid)
-            if not ref:
-                raise HTTPException(status_code=404, detail=f"Data {uid} not found")
-
-            # Find the actual file
-            file_path = self.data_store._find_data_file(uid)
-            if not file_path or not file_path.exists():
-                raise HTTPException(status_code=404, detail=f"File for {uid} not found on disk")
-
-            # Build a proper filename from metadata
-            # Format: {embryo_id}_{data_type}_t{timepoint}_{YYYYMMDD_HHMMSS}.tif
-            embryo_id = ref.metadata.get('embryo_id', 'unknown')
-            timepoint = ref.metadata.get('timepoint', ref.metadata.get('t', ''))
-            timestamp = ref.timestamp
-
-            # Sanitize embryo_id for filename (remove special chars)
-            safe_embryo = "".join(c if c.isalnum() or c in '-_' else '_' for c in str(embryo_id))
-
-            # Build filename parts
-            parts = [safe_embryo, ref.data_type]
-            if timepoint:
-                parts.append(f"t{timepoint:03d}" if isinstance(timepoint, int) else f"t{timepoint}")
-            parts.append(timestamp.strftime("%Y%m%d_%H%M%S"))
-
-            # Use original extension
-            ext = file_path.suffix or '.tif'
-            filename = "_".join(parts) + ext
-
-            return FileResponse(
-                path=str(file_path),
-                filename=filename,
-                media_type="image/tiff"
-            )
-
-        @self.app.get("/api/download/volume/{embryo_id}/{timepoint}")
-        async def download_volume_by_timepoint(embryo_id: str, timepoint: int):
-            """Download raw TIF file by embryo_id and timepoint"""
-            from pathlib import Path
-
-            # Look up volume path from state tracker
-            volume_path = None
-            if embryo_id in self.timelapse_tracker.volume_paths:
-                volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
-
-            if not volume_path:
-                raise HTTPException(status_code=404, detail=f"Volume not found for {embryo_id} T{timepoint}")
-
-            file_path = Path(volume_path)
-            if not file_path.exists():
-                raise HTTPException(status_code=404, detail=f"File not found: {volume_path}")
-
-            # Build filename
-            safe_embryo = "".join(c if c.isalnum() or c in '-_' else '_' for c in str(embryo_id))
-            filename = f"{safe_embryo}_t{timepoint:03d}.tif"
-
-            return FileResponse(
-                path=str(file_path),
-                filename=filename,
-                media_type="image/tiff"
-            )
 
         @self.app.get("/api/volumes3d")
         async def list_volumes_3d():

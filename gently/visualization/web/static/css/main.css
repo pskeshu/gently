@@ -1314,31 +1314,6 @@ body {
     font-weight: 500;
 }
 
-.lightbox-download {
-    display: flex;
-    align-items: center;
-    gap: 0.4rem;
-    padding: 0.4rem 0.75rem;
-    background: rgba(74, 222, 128, 0.15);
-    border: 1px solid rgba(74, 222, 128, 0.3);
-    border-radius: 6px;
-    color: #4ade80;
-    font-size: 0.8rem;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-}
-
-.lightbox-download:hover {
-    background: rgba(74, 222, 128, 0.25);
-    border-color: rgba(74, 222, 128, 0.5);
-    transform: translateY(-1px);
-}
-
-.lightbox-download svg {
-    flex-shrink: 0;
-}
-
 .lightbox-thumbnail-strip {
     display: flex;
     gap: 0.5rem;
@@ -3402,23 +3377,6 @@ kbd {
     border-color: var(--accent);
 }
 
-.inline-detail-container .detail-download {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
-    background: var(--accent);
-    border: 1px solid var(--accent);
-    border-radius: 4px;
-    color: white;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    white-space: nowrap;
-}
-
-.inline-detail-container .detail-download:hover {
-    background: var(--accent-hover, #3a9ad9);
-    transform: translateY(-1px);
-}
-
 /* Collapsed Range - Groups "not detected" timepoints */
 .collapsed-range {
     display: flex;
@@ -4815,19 +4773,6 @@ kbd {
     background: var(--accent-purple);
     border-color: var(--accent-purple);
     color: white;
-}
-
-.ctrl-btn.ctrl-download {
-    background: rgba(74, 222, 128, 0.15);
-    border-color: rgba(74, 222, 128, 0.3);
-    color: #4ade80;
-    padding: 0.5rem 0.7rem;
-}
-
-.ctrl-btn.ctrl-download:hover {
-    background: rgba(74, 222, 128, 0.25);
-    border-color: rgba(74, 222, 128, 0.5);
-    color: #4ade80;
 }
 
 .ctrl-icon {
