@@ -5582,9 +5582,9 @@ kbd {
     font-size: 0.65rem;
     padding: 0.15rem 0.4rem;
     background: var(--accent-orange);
-    color: var(--bg);
+    color: #1a1a1a;
     border-radius: 10px;
-    font-weight: 500;
+    font-weight: 600;
     text-transform: none;
 }
 
