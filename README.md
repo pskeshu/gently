@@ -130,11 +130,118 @@ Data is stored at `D:/Gently` with the following structure:
 ```
 D:/Gently/
 ├── data/
-│   ├── volume/YYYYMMDD/*.tif      # ImageJ compatible
-│   └── projection/YYYYMMDD/*.tif
-├── index/index.json
-└── sessions/
+│   ├── volume/YYYYMMDD/*.tif      # Raw 3D volumes (ImageJ compatible)
+│   ├── image/YYYYMMDD/*.tif       # 2D images
+│   └── volume_projection/         # Pre-computed projections
+├── images/{session_id}/           # Session-specific volumes
+│   └── {embryo_id}_{timestamp}.tif
+├── sessions/{session_id}.json     # Session metadata
+├── dataset.db                     # SQLite database index
+├── logs/                          # Application logs
+└── videos/                        # Exported videos
 ```
+
+### Database Schema (dataset.db)
+
+The SQLite database indexes all data and provides queryable access:
+
+| Table | Description |
+|-------|-------------|
+| `sessions` | Session metadata (session_id, created_at, embryo_count) |
+| `embryos` | Embryo records per session |
+| `volumes` | Volume file paths and metadata |
+| `images` | 2D image records |
+| `ground_truth` | Human-annotated developmental stage labels |
+| `perception_runs` | Benchmark run records |
+| `predictions` | Model predictions with reasoning traces |
+
+**Query examples:**
+```python
+import sqlite3
+conn = sqlite3.connect('D:/Gently/dataset.db')
+cur = conn.cursor()
+
+# List sessions with ground truth
+cur.execute('SELECT DISTINCT session_id FROM ground_truth')
+
+# Get embryo volumes for a session
+cur.execute('''
+    SELECT embryo_id, COUNT(*) as vol_count
+    FROM volumes WHERE session_id = ?
+    GROUP BY embryo_id
+''', ('59799c78',))
+
+# Get ground truth annotations
+cur.execute('''
+    SELECT embryo_id, stage, start_timepoint
+    FROM ground_truth WHERE session_id = ?
+    ORDER BY embryo_id, start_timepoint
+''', ('59799c78',))
+```
+
+### Finding Sessions with Ground Truth
+
+```python
+# Find sessions that have ground truth data
+import sqlite3
+conn = sqlite3.connect('D:/Gently/dataset.db')
+cur = conn.cursor()
+cur.execute('SELECT DISTINCT session_id FROM ground_truth')
+sessions_with_gt = [r[0] for r in cur.fetchall()]
+print(sessions_with_gt)  # e.g., ['59799c78']
+```
+
+Ground truth JSON files are also stored at: `benchmarks/data/ground_truth/{session_id}.json`
+
+## Running Perception Benchmarks
+
+The perception benchmark evaluates stage classification accuracy against ground truth.
+
+### Basic Usage
+
+```bash
+python -m benchmarks.perception.runner \
+    --session "D:/gently/images/{session_id}" \
+    --ground-truth benchmarks/data/ground_truth/{session_id}.json \
+    --output results.json \
+    -v
+```
+
+### Example with Session 59799c78
+
+```bash
+# Full benchmark (all 4 embryos, ~192 timepoints each)
+python -m benchmarks.perception.runner \
+    --session "D:/gently/images/59799c78" \
+    --ground-truth benchmarks/data/ground_truth/59799c78.json \
+    --output results_59799c78.json -v
+
+# Single embryo only
+python -m benchmarks.perception.runner \
+    --session "D:/gently/images/59799c78" \
+    --ground-truth benchmarks/data/ground_truth/59799c78.json \
+    --embryo embryo_1 \
+    --output results.json -v
+
+# Limit timepoints per embryo
+python -m benchmarks.perception.runner \
+    --session "D:/gently/images/59799c78" \
+    --ground-truth benchmarks/data/ground_truth/59799c78.json \
+    --max-timepoints 50 \
+    --output results.json -v
+```
+
+### Benchmark Options
+
+| Flag | Description |
+|------|-------------|
+| `--session` | Path to session directory containing TIF volumes |
+| `--ground-truth` | Path to ground truth JSON file |
+| `--output` | Path to save results JSON |
+| `--embryo` | Run specific embryo(s) only (repeatable) |
+| `--max-timepoints` | Limit timepoints per embryo |
+| `--description` | Add description to the benchmark run |
+| `-v, --verbose` | Enable verbose logging |
 
 ### Services
 - **Microscope Server**: localhost:18861 (rpyc)
