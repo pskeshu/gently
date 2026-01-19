@@ -145,71 +145,8 @@ PERCEPTION_TOOLS = [
             "required": ["offset", "reason"],
         },
     },
-    {
-        "name": "view_reference_example",
-        "description": (
-            "View a reference example image for a specific developmental stage. Use this when "
-            "you need to compare the current embryo's morphology against a known example of a "
-            "particular stage.\n\n"
-            "Example inputs:\n"
-            "- {\"stage\": \"comma\", \"reason\": \"Verifying if current curve matches comma stage\"}\n"
-            "- {\"stage\": \"pretzel\", \"reason\": \"Comparing coil tightness with known pretzel\"}"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "stage": {
-                    "type": "string",
-                    "enum": ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"],
-                    "description": "The developmental stage to view an example of",
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation of why you need to see this reference",
-                },
-            },
-            "required": ["stage", "reason"],
-        },
-    },
-    {
-        "name": "view_reference_example_3d",
-        "description": (
-            "View a reference example's 3D volume from a specific angle. Use this when you want to "
-            "compare the current embryo against a reference example from the SAME viewing angle. "
-            "This is especially useful when you've used view_embryo to see the current embryo from "
-            "a particular angle and want to compare it with what that stage should look like.\n\n"
-            "Example inputs:\n"
-            "- {\"stage\": \"comma\", \"rotation_x\": 45, \"rotation_y\": 0, \"reason\": \"Compare my 45° view with comma reference\"}\n"
-            "- {\"stage\": \"pretzel\", \"rotation_x\": 0, \"rotation_y\": 90, \"reason\": \"See pretzel from side for comparison\"}"
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "stage": {
-                    "type": "string",
-                    "enum": ["early", "bean", "comma", "1.5fold", "2fold", "pretzel"],
-                    "description": "The developmental stage to view a 3D example of",
-                },
-                "rotation_x": {
-                    "type": "number",
-                    "description": "Rotation around X axis in degrees (-90 to 90). 0 = top-down, positive = tilt forward",
-                    "minimum": -90,
-                    "maximum": 90,
-                },
-                "rotation_y": {
-                    "type": "number",
-                    "description": "Rotation around Y axis in degrees (-180 to 180). 0 = front view, 90 = side view",
-                    "minimum": -180,
-                    "maximum": 180,
-                },
-                "reason": {
-                    "type": "string",
-                    "description": "Brief explanation of why you need this 3D reference view",
-                },
-            },
-            "required": ["stage", "reason"],
-        },
-    },
+    # NOTE: view_reference_example removed - reference images are already included in the prompt
+    # NOTE: view_reference_example_3d removed - reference images are already included in the prompt
     {
         "name": "view_embryo",
         "description": (
@@ -686,70 +623,8 @@ class PerceptionEngine:
                 summary = f"T{timepoint - offset} not available"
                 return content, summary, None, None
 
-        elif tool_name == "view_reference_example":
-            stage = tool_input.get("stage", "early")
-            reason = tool_input.get("reason", "")
-
-            examples = self._load_all_examples()
-            if stage in examples and examples[stage]:
-                example = examples[stage][0]  # Get first example
-                logger.info(f"Tool: Providing reference example for {stage}")
-
-                content = [
-                    {"type": "text", "text": f"Here is a reference example of {stage.upper()} stage (requested because: {reason}):"},
-                ]
-                if example.get("description"):
-                    content.append({"type": "text", "text": f"Description: {example['description']}"})
-                content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": example["image"],
-                    }
-                })
-                summary = f"Showed {stage} reference"
-                return content, summary, None, f"reference_{stage}"
-            else:
-                content = [{"type": "text", "text": f"No reference example available for stage: {stage}"}]
-                summary = f"No {stage} reference"
-                return content, summary, None, None
-
-        elif tool_name == "view_reference_example_3d":
-            stage = tool_input.get("stage", "early")
-            rotation_x = tool_input.get("rotation_x", 0)
-            rotation_y = tool_input.get("rotation_y", 0)
-            reason = tool_input.get("reason", "")
-
-            # Load volume from example store
-            if self.example_store and self.example_store.has_volume(stage):
-                vol = self.example_store.get_stage_volume(stage)
-                if vol is not None:
-                    logger.info(f"Tool: Rendering {stage} reference at rx={rotation_x}, ry={rotation_y}")
-                    rendered_b64 = render_volume_view(vol, rotation_x, rotation_y)
-
-                    content = [
-                        {
-                            "type": "text",
-                            "text": f"3D view of {stage.upper()} reference example (rotation: x={rotation_x}°, y={rotation_y}°). Requested because: {reason}"
-                        },
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/jpeg",
-                                "data": rendered_b64,
-                            }
-                        }
-                    ]
-                    summary = f"Showed {stage} 3D reference at ({rotation_x}, {rotation_y})"
-                    return content, summary, None, f"reference_3d_{stage}"
-                else:
-                    content = [{"type": "text", "text": f"Failed to load 3D volume for stage: {stage}"}]
-                    return content, f"Failed {stage} 3D", None, None
-            else:
-                content = [{"type": "text", "text": f"No 3D volume available for stage: {stage}. Use view_reference_example for 2D reference."}]
-                return content, f"No {stage} 3D volume", None, None
+        # NOTE: view_reference_example and view_reference_example_3d handlers removed
+        # Reference images are already included in the prompt, no need for tools
 
         elif tool_name == "view_embryo":
             rotation_x = tool_input.get("rotation_x", 0)
@@ -943,6 +818,77 @@ class PerceptionEngine:
             should_stop=(aggregation.winning_stage == "hatched"),
         )
 
+    def _build_cached_system_prompt(self) -> List[Dict]:
+        """Build TEXT-ONLY system prompt for caching.
+
+        Note: Anthropic API only allows text in system prompts, not images.
+        Images (reference examples) must go in the user message.
+
+        Uses 1-hour TTL for caching across timelapse sessions.
+        """
+        return [{
+            "type": "text",
+            "text": """You are an expert microscopy perception system analyzing C. elegans embryo development.
+
+IMPORTANT PRINCIPLES:
+1. DESCRIBE FIRST: Always describe what you actually see BEFORE classifying
+2. EMBRACE TRANSITIONS: If features suggest a transitional state, SAY SO
+3. CALIBRATE CONFIDENCE: Hedging words (slight, subtle, beginning) = lower confidence (0.5-0.7)
+
+Development is a SPECTRUM, not discrete jumps. Trust your observations over expectations.
+
+IMAGE FORMAT - Each image shows THREE ORTHOGONAL VIEWS:
+┌─────────┬─────────┐
+│   XY    │   YZ    │  (TOP ROW)
+├─────────┴─────────┤
+│        XZ         │  (BOTTOM ROW)
+└───────────────────┘
+
+- XY (top-left): Looking DOWN - Best for end asymmetry, ventral indentation, folding
+- YZ (top-right): Looking from SIDE - Best for body height/thickness
+- XZ (bottom): Looking from FRONT - CRITICAL for early→bean transition (look for "peanut" or central constriction)
+
+**ALWAYS ANALYZE XZ VIEW**: The XZ view often shows bean-stage features (central constriction, "peanut" shape) BEFORE they're visible in XY. If XZ shows ANY central narrowing or figure-8 appearance, this suggests bean stage even if XY looks symmetric.
+
+DEVELOPMENTAL STAGES:
+
+EARLY: Elongated oval (~2:1), SYMMETRIC ENDS, both edges CONVEX, NO central constriction in XZ
+BEAN: Even SUBTLE end asymmetry OR central constriction/"peanut" shape in XZ view, edges still CONVEX
+COMMA: One edge FLAT or curves INWARD (ventral indentation). XZ shows side-by-side lobes (horizontal figure-8)
+1.5-FOLD: Body folding back. XZ shows STACKED horizontal layers (two parallel bands, one above the other)
+2-FOLD: Body doubled back completely. XZ shows TWO DISTINCT HORIZONTAL LINES with dark gap between
+PRETZEL: Tightly coiled, 3+ body segments visible as multiple stacked layers
+HATCHED: Worm exited shell
+
+CRITICAL FOR EARLY vs BEAN vs COMMA:
+- EARLY: Both ends symmetric AND both edges convex AND no central constriction in XZ
+- BEAN: ANY of these: subtle end tapering, central constriction in XZ, "peanut" shape - edges still convex
+- COMMA: One edge is flat or curves INWARD (not convex)
+
+CRITICAL FOR COMMA vs FOLD STAGES (examine XZ view carefully):
+- COMMA XZ: Lobes are SIDE-BY-SIDE horizontally (peanut/figure-8 from ventral indentation) - single body plane
+- 1.5FOLD/2FOLD XZ: Layers are STACKED VERTICALLY (parallel horizontal lines with gap) - body folded back on itself
+The difference is orientation: comma = horizontal constriction, fold = vertical stacking/layering
+
+EARLY→BEAN SENSITIVITY: Err on the side of detecting bean early. If you see ANY hint of:
+- One end slightly more tapered than the other
+- Central narrowing or "waist" in XZ view
+- Figure-8 or peanut appearance in any view
+Mark as TRANSITIONAL (early→bean) or BEAN with appropriate confidence.
+
+Respond with JSON:
+{
+  "observed_features": {"shape": "...", "curvature": "...", "shell_status": "...", "emergence": "..."},
+  "contrastive_reasoning": {"why_not_previous_stage": "...", "why_not_next_stage": "..."},
+  "stage": "early|bean|comma|1.5fold|2fold|pretzel|hatching|hatched|arrested",
+  "is_transitional": true/false,
+  "transition_between": ["stage1", "stage2"] or null,
+  "confidence": 0.0-1.0,
+  "reasoning": "Brief explanation"
+}""",
+            "cache_control": {"type": "ephemeral", "ttl": "1h"}
+        }]
+
     async def _call_claude_with_tools(self, messages: List[Dict]) -> Any:
         """Call Claude API with tools enabled for interleaved reasoning."""
         try:
@@ -950,23 +896,18 @@ class PerceptionEngine:
                 self.claude.messages.create,
                 model=self.MODEL,
                 max_tokens=8000,
-                system=[{
-                    "type": "text",
-                    "text": (
-                        "You are an expert microscopy perception system analyzing C. elegans "
-                        "embryo development. You have access to tools for reference comparison.\n\n"
-                        "IMPORTANT PRINCIPLES:\n"
-                        "1. DESCRIBE FIRST: Always describe what you actually see BEFORE classifying\n"
-                        "2. EMBRACE TRANSITIONS: If features suggest a transitional state, SAY SO\n"
-                        "3. USE TOOLS PROACTIVELY: Use tools for ANY borderline or transitional case\n"
-                        "4. CALIBRATE CONFIDENCE: Hedging words (slight, subtle, beginning) = lower confidence (0.5-0.7)\n\n"
-                        "Development is a SPECTRUM, not discrete jumps. Trust your observations over expectations."
-                    ),
-                    "cache_control": {"type": "ephemeral"}
-                }],
+                system=self._build_cached_system_prompt(),
                 tools=PERCEPTION_TOOLS,
                 messages=messages,
             )
+
+            # Log cache metrics
+            usage = response.usage
+            cache_read = getattr(usage, 'cache_read_input_tokens', 0) or 0
+            cache_create = getattr(usage, 'cache_creation_input_tokens', 0) or 0
+            if cache_read > 0 or cache_create > 0:
+                logger.info(f"Cache: read={cache_read:,} tokens, created={cache_create:,} tokens")
+
             return response
 
         except Exception as e:
@@ -981,132 +922,40 @@ class PerceptionEngine:
         top_image_b64: Optional[str] = None,
         side_image_b64: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Build the perception prompt."""
-        content = []
+        """Build the perception prompt.
 
-        # Determine if using separate images
-        use_separate_images = top_image_b64 is not None and side_image_b64 is not None
+        Structure for optimal caching:
+        1. Reference images (STATIC) - marked with cache_control for 1h TTL
+        2. Dynamic content (timepoint, observations, current image)
+
+        The reference images are identical across all timepoints, so they will
+        be cached and reused, dramatically reducing token costs.
+        """
+        content = []
 
         # Get available previous timepoints for context
         available_tps = session.get_available_timepoints()
         prev_available = [tp for tp in available_tps if tp < timepoint]
 
-        # 1. Instructions - different text depending on image format
-        if use_separate_images:
-            image_format_text = """You will receive TWO SEPARATE IMAGES of the same embryo:
-1. TOP VIEW - Looking down at the embryo from above (max projection along Z axis)
-2. SIDE VIEW - Looking at the embryo from the front (max projection along Y axis)
-
-CRITICAL: Analyze BOTH views carefully. They show the SAME embryo from different angles.
-- TOP view: Best for seeing end asymmetry, ventral indentation, overall outline shape
-- SIDE view: Best for seeing height profile, depth curvature, body thickness"""
-        else:
-            image_format_text = """Each image shows THREE ORTHOGONAL VIEWS:
-
-┌─────────┬─────────┐
-│   XY    │   YZ    │  (TOP ROW)
-├─────────┴─────────┤
-│        XZ         │  (BOTTOM ROW)
-└───────────────────┘
-
-- XY (top-left): Looking DOWN at embryo - Best for end asymmetry, ventral indentation, overall outline shape, folding pattern
-- YZ (top-right): Looking from SIDE - Best for body height/thickness, depth curvature, dorsal-ventral profile
-- XZ (bottom): Looking from FRONT - Best for left-right symmetry, coiling orientation, body width
-
-CRITICAL: Analyze ALL THREE views together for accurate 3D morphology assessment.
-The same embryo is shown from three perpendicular angles."""
-
+        # 1. Reference images (STATIC - will be cached across timepoints)
         content.append({
             "type": "text",
-            "text": f"""You are analyzing a C. elegans embryo in microscopy images.
-Current timepoint: T{timepoint}
-
-{image_format_text}
-
-ANATOMICAL ORIENTATION:
-- Head/tail axis runs LEFT-RIGHT in XY and XZ views
-- End asymmetry = one end tapered, other rounded (look in XY view)
-- Ventral indentation = concave curve along one EDGE of the body (XY view)
-
-Your task: Identify the developmental stage and whether hatching is occurring.
-
-DEVELOPMENTAL STAGES (in order):
-
-EARLY (gastrulation through early morphogenesis):
-- Elongated oval shape - already has ~2:1 aspect ratio (NOT round)
-- SYMMETRIC ENDS - both ends appear similar, rounded (KEY FEATURE)
-- Cells appear uniformly distributed throughout
-- Grainy texture with many individual cells visible (~100+ cell stage)
-- No clear body axis organization yet
-- BOTH edges of the oval are CONVEX (curved outward) - no concave edges
-- ALWAYS compare against early reference before classifying as bean
-
-BEAN (ventral enclosure beginning):
-- Elongated oval with ASYMMETRIC ENDS (KEY FEATURE)
-- One end starts to narrow/taper (head), other end stays rounded (tail)
-- Head end appears slightly narrower than tail end
-- Cells beginning to organize along body axis
-- More pronounced elongation than early (~2.5:1 aspect ratio)
-- BOTH edges still CONVEX - no ventral indentation yet
-- May have slight bend along body axis, but NO concave edge
-
-COMMA (ventral enclosure progressing):
-- KEY FEATURE: Ventral indentation - one edge starts to curve INWARD (becomes concave)
-- Look at the TOP view: trace along BOTH long edges of the embryo
-- Bean: both edges curve OUTWARD (like a kidney bean shape)
-- Comma: one edge is FLAT or curves INWARD (the indentation)
-- The indentation may be subtle at first - look for any edge that is NOT convex
-- Early comma: slight flattening or inward curve on one edge
-- Late comma: pronounced C-shape with clear concave edge
-
-1.5-FOLD:
-- Embryo starting to fold back on itself
-- Body clearly longer than egg width
-- One fold/bend visible, tail beginning to turn back
-- ~1.5x shell length when straightened
-
-2-FOLD:
-- Body folded back on itself twice
-- Two clear bends/folds visible
-- More compact than 1.5fold, less than pretzel
-- ~2x shell length when straightened
-
-PRETZEL (also called 3-fold):
-- Tightly coiled "pretzel" shape
-- 3 or more body segments visible
-- Maximum compaction within eggshell
-- Twitching/movement may be visible
-
-HATCHED:
-- Worm has exited the eggshell
-- Elongated worm-like body clearly visible
-- No longer contained in oval eggshell shape
-
-REFERENCE EXAMPLES:
-"""
+            "text": "REFERENCE EXAMPLES FOR EACH STAGE:"
         })
 
-        # 2. Reference examples for each stage
         examples = self._load_all_examples()
         for stage in STAGES:
             if stage in examples:
-                # Get stage description from metadata
                 stage_desc = ""
                 if self.example_store:
                     stage_desc = self.example_store.get_stage_description(stage)
 
-                header = f"\n{stage.upper()} stage"
+                header = f"\n{stage.upper()}"
                 if stage_desc:
                     header += f": {stage_desc}"
                 content.append({"type": "text", "text": header})
 
                 for example in examples[stage]:
-                    # Add description before each image if available
-                    if example.get("description"):
-                        content.append({
-                            "type": "text",
-                            "text": f"  - {example['description']}"
-                        })
                     content.append({
                         "type": "image",
                         "source": {
@@ -1116,12 +965,18 @@ REFERENCE EXAMPLES:
                         }
                     })
 
-        # Mark static content for caching (instructions + reference images)
-        # Dynamic content (observations, current image) follows - not cached
+        # Mark reference images for caching (1-hour TTL)
+        # Everything up to here is STATIC and will be cached across timepoints
         if content:
-            content[-1]["cache_control"] = {"type": "ephemeral"}
+            content[-1]["cache_control"] = {"type": "ephemeral", "ttl": "1h"}
 
-        # 3. Previous observations (last 3)
+        # 2. Dynamic content starts here (NOT cached)
+        content.append({
+            "type": "text",
+            "text": f"\n=== ANALYZE EMBRYO AT T{timepoint} ==="
+        })
+
+        # 2. Previous observations (last 3)
         recent = session.get_recent_observations(3)
         if recent:
             obs_text = "\nPREVIOUS OBSERVATIONS:\n"
@@ -1132,7 +987,7 @@ REFERENCE EXAMPLES:
                 obs_text += "\n"
             content.append({"type": "text", "text": obs_text})
 
-        # 3.5. Temporal context (for detecting arrested/dead embryos)
+        # 3. Temporal context (for detecting arrested/dead embryos)
         temporal = session.compute_temporal_analysis()
         if temporal:
             temporal_text = f"""
@@ -1141,51 +996,21 @@ TEMPORAL CONTEXT:
 - Time at this stage: {temporal.time_in_current_stage_min:.0f} minutes
 - Expected duration: {temporal.expected_duration_min or 'N/A'} minutes
 - Overtime ratio: {temporal.overtime_ratio:.1f}x (>2x is unusual, >3x is concerning)
-- Observations at this stage: {temporal.observations_in_current_stage}
-- Last confidence: {temporal.last_confidence:.0%}
 """
-            # Add transitional state info
-            if temporal.is_currently_transitional:
-                trans_str = " -> ".join(temporal.transition_between) if temporal.transition_between else "unknown"
-                temporal_text += f"""
-TRANSITIONAL STATE DETECTED:
-- Last observation was transitional between: {trans_str}
-- Consecutive transitional observations: {temporal.consecutive_transitional_count}
-"""
-
-            # Add tool use hints
-            if temporal.suggest_tool_use:
-                reasons = []
-                if temporal.is_currently_transitional:
-                    reasons.append("currently transitional")
-                if temporal.last_confidence < 0.7:
-                    reasons.append(f"low confidence ({temporal.last_confidence:.0%})")
-                if temporal.observations_in_current_stage <= 2:
-                    reasons.append("early in stage")
-                if temporal.consecutive_transitional_count >= 3:
-                    reasons.append(f"stuck transitional ({temporal.consecutive_transitional_count} obs)")
-
-                temporal_text += f"""
-TOOL USE RECOMMENDED: {', '.join(reasons)}
-Consider using view_reference_example to compare against known stage references.
-"""
-
             if temporal.is_potentially_arrested:
                 temporal_text += f"""
 WARNING - POTENTIAL DEVELOPMENTAL ARREST:
 - {temporal.arrest_reason}
-- If the embryo shows NO visible progression or morphological change compared to
-  previous timepoints, consider classifying as "arrested"
-- Look for signs of degradation, fragmentation, or abnormal texture
 """
             content.append({"type": "text", "text": temporal_text})
 
-        # 4. Current image(s)
+        # 4. Current image to analyze
+        use_separate_images = top_image_b64 is not None and side_image_b64 is not None
+
         if use_separate_images:
-            # Send TOP and SIDE as separate images with labels
             content.append({
                 "type": "text",
-                "text": "\n=== CURRENT EMBRYO TO ANALYZE ===\n\n**TOP VIEW** (looking down from above):"
+                "text": "\n=== CURRENT EMBRYO (T{}) ===\n\n**TOP VIEW**:".format(timepoint)
             })
             content.append({
                 "type": "image",
@@ -1197,7 +1022,7 @@ WARNING - POTENTIAL DEVELOPMENTAL ARREST:
             })
             content.append({
                 "type": "text",
-                "text": "\n**SIDE VIEW** (looking from front):"
+                "text": "\n**SIDE VIEW**:"
             })
             content.append({
                 "type": "image",
@@ -1208,10 +1033,10 @@ WARNING - POTENTIAL DEVELOPMENTAL ARREST:
                 }
             })
         else:
-            # Send combined image (backward compatible)
+            # Send combined three-view image
             content.append({
                 "type": "text",
-                "text": "\nCURRENT IMAGE TO ANALYZE:"
+                "text": f"\n=== CURRENT EMBRYO (T{timepoint}) ==="
             })
             content.append({
                 "type": "image",
@@ -1222,113 +1047,11 @@ WARNING - POTENTIAL DEVELOPMENTAL ARREST:
                 }
             })
 
-        # 5. Output format - force explicit morphological description before classification
-        content.append({
-            "type": "text",
-            "text": """
-CRITICAL: Do NOT jump to a classification. Follow this process:
-
-STEP 1 - DESCRIBE what you see in the CURRENT IMAGE:
-- What is the overall shape? (oval, curved, folded, coiled, elongated worm)
-- Are the ENDS symmetric (both rounded) or asymmetric (one tapered, one rounded)?
-- In TOP view: Is there a ventral indentation/concave edge along one side?
-- Is the shell intact or breached?
-- Can you see body segments? How many?
-- Is any part of the embryo OUTSIDE the shell boundary?
-
-STEP 2 - CONTRASTIVE REASONING:
-- Why is this NOT the previous stage? (what feature rules it out?)
-- Why is this NOT the next stage? (what feature is missing?)
-
-STEP 3 - CLASSIFY with appropriate confidence:
-- If clearly one stage: high confidence (0.8-1.0)
-- If transitional between stages: note this, medium confidence (0.5-0.7)
-- If uncertain: low confidence (<0.5)
-
-Respond with JSON:
-{
-  "observed_features": {
-    "shape": "describe the actual shape you see",
-    "curvature": "both edges convex (early/bean) / one edge flat or inward (comma) / folded back (1.5fold+) / tightly coiled (pretzel)",
-    "shell_status": "intact oval boundary / irregular boundary / breached / absent",
-    "body_segments_visible": "none/1/2/3/coiled mass",
-    "emergence": "none / partial (part outside shell) / complete (fully out)"
-  },
-  "contrastive_reasoning": {
-    "why_not_previous_stage": "feature that rules out earlier stage",
-    "why_not_next_stage": "feature missing for later stage"
-  },
-  "stage": "early" | "bean" | "comma" | "1.5fold" | "2fold" | "pretzel" | "hatching" | "hatched" | "arrested",
-  "is_transitional": true/false,
-  "transition_between": ["stage1", "stage2"] or null,
-  "confidence": 0.0-1.0,
-  "reasoning": "Brief explanation grounded in observed features"
-}
-
-MORPHOLOGICAL SPECTRUM (development is continuous, not discrete jumps):
-
-Shape progression: oval -> elongated -> curved -> folded -> tightly coiled -> elongated worm
-Curvature: none -> subtle hint -> slight -> moderate C-curve -> pronounced -> folded back -> coiled
-
-TRANSITIONAL INDICATORS (use is_transitional=true when you see these):
-- EARLY -> BEAN: End asymmetry appearing, one end starting to taper/narrow (but edges still convex)
-- BEAN -> COMMA: One edge becoming FLAT or curving INWARD
-  * Bean: BOTH edges curve OUTWARD (convex) - like a kidney bean
-  * Comma: ONE edge is FLAT or curves INWARD - trace the edge and check if it bulges out or not
-  * Look carefully in TOP view at both long edges - is one edge straighter or indented?
-- COMMA -> 1.5FOLD: Indentation deepening into clear bend, body starting to turn back on itself
-- 1.5FOLD -> 2FOLD: First fold tightening, second bend beginning to form
-- 2FOLD -> PRETZEL: Third fold forming, body coiling tighter
-- PRETZEL -> HATCHING: Shell boundary becoming irregular, possible breach
-
-ARREST DETECTION:
-If TEMPORAL CONTEXT shows significant overtime (>2x expected) AND you see:
-- No morphological change from previous observations
-- Degradation, fragmentation, or abnormal texture
-Then classify as "arrested"
-
-IMPORTANT: If you see features that fall BETWEEN stages (e.g., elongating but not yet curved),
-USE is_transitional=true and transition_between=["early", "comma"] with confidence 0.5-0.7.
-Do NOT force a binary classification when the embryo is transitioning.
-
-IMPORTANT: Describe what you ACTUALLY SEE, not what you expect based on previous observations.
-
-TOOLS AVAILABLE (use proactively for better accuracy):
-
-1. view_reference_example - Compare against a known reference image
-   USE FOR: Any transitional appearance, borderline cases, first few timepoints of a session
-
-2. view_previous_timepoint - See how the embryo looked before
-   USE FOR: Detecting progression, confirming stage changes, arrest assessment
-
-WHEN TO USE TOOLS:
-- You see transitional features (slight curve, beginning fold, etc.)
-- Confidence would be <0.8 without additional context
-- This is a borderline case between two stages
-- You want to verify your assessment with a reference
-
-CRITICAL FOR EARLY TIMEPOINTS (T0-T30):
-- ALWAYS compare against EARLY reference before concluding bean or comma
-- Most embryos are still in early stage during early timepoints
-- Don't jump to comma just because you see slight curvature
-- The key question: Are BOTH edges still CONVEX? If yes, it's early or bean, NOT comma
-
-CRITICAL FOR BEAN vs COMMA:
-- Trace BOTH long edges of the embryo in TOP view
-- Bean: BOTH edges curve OUTWARD (bulge out) - kidney bean shape
-- Comma: ONE edge is FLAT or curves INWARD (doesn't bulge out)
-- Key test: Does the edge bulge outward? If YES for both = bean. If NO for one = comma
-- Early comma may have subtle indentation - look for any edge that isn't convex
-
-DON'T SKIP TOOLS just because you have a preliminary guess. Reference comparison improves accuracy.
-"""
-        })
-
-        # Add note about available previous timepoints
+        # 5. Note about available previous timepoints (for view_previous_timepoint tool)
         if prev_available:
             content.append({
                 "type": "text",
-                "text": f"\n(Previous timepoint images available: T{', T'.join(map(str, prev_available[-5:]))})"
+                "text": f"(Previous timepoints available: T{', T'.join(map(str, prev_available[-5:]))})"
             })
 
         return content
