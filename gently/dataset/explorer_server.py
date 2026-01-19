@@ -479,6 +479,7 @@ class GroundTruthCreate(BaseModel):
     embryo_id: str
     stage: str
     start_timepoint: int
+    end_timepoint: Optional[int] = None
     annotator: Optional[str] = None
     notes: Optional[str] = None
 
@@ -734,10 +735,12 @@ class DatasetExplorer:
                 embryo_id=data.embryo_id,
                 stage=data.stage,
                 start_timepoint=data.start_timepoint,
+                end_timepoint=data.end_timepoint,
                 annotator=data.annotator,
                 notes=data.notes,
             )
-            return {"status": "ok", "message": f"Set {data.stage} @ t={data.start_timepoint}"}
+            end_str = f"-{data.end_timepoint}" if data.end_timepoint else ""
+            return {"status": "ok", "message": f"Set {data.stage} @ t={data.start_timepoint}{end_str}"}
 
         @app.delete("/api/ground_truth")
         async def delete_ground_truth(data: GroundTruthDelete):

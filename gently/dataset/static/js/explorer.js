@@ -9,6 +9,12 @@ let state = {
     timeline: null,
     selectedIndex: null,
     currentImage: null,
+    // Annotation state
+    annotationMode: null,  // null, 'selecting_start', 'selecting_end'
+    annotationStage: null,
+    annotationStart: null,
+    // Undo history
+    undoStack: [],
 };
 
 const STAGES = ['early', 'bean', 'comma', '1.5fold', '2fold', 'pretzel', 'hatching', 'hatched'];
@@ -22,6 +28,15 @@ async function api(endpoint) {
 async function apiPost(endpoint, data) {
     const res = await fetch('/api/' + endpoint, {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+    });
+    return res.json();
+}
+
+async function apiDelete(endpoint, data) {
+    const res = await fetch('/api/' + endpoint, {
+        method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
     });
@@ -80,6 +95,7 @@ async function selectSession(sessionId) {
     state.selectedSession = sessionId;
     state.selectedEmbryo = null;
     state.timeline = null;
+    clearAnnotationMode();
     renderSessions();
 
     const embryos = await api(`embryos?session_id=${sessionId}`);
@@ -122,6 +138,7 @@ function renderEmbryoGrid() {
 async function selectEmbryo(embryoId) {
     state.selectedEmbryo = embryoId;
     state.selectedIndex = null;
+    clearAnnotationMode();
 
     // Update embryo selection visually
     document.querySelectorAll('.embryo-card').forEach(el => {
@@ -141,27 +158,185 @@ function renderTimeline() {
     const container = document.getElementById('timeline-panel');
     if (!container) return;
 
+    // Build stage summary with ranges
+    let stageRanges = t.ground_truth.map(g => {
+        const endStr = g.end_timepoint ? `-${g.end_timepoint}` : '+';
+        return `${g.stage}(${g.start_timepoint}${endStr})`;
+    }).join(' → ');
+
     container.innerHTML = `
         <h2>${t.embryo_id}</h2>
 
         <div class="info">
             ${t.images.length} images |
-            GT: ${t.ground_truth.length > 0 ? t.ground_truth.map(g => g.stage).join(' -> ') : 'None'}
+            GT: ${stageRanges || 'None'}
         </div>
 
+        <div class="annotation-status" id="annotation-status"></div>
+
         <div class="timeline" id="timeline">
-            ${t.images.map((img, idx) => `
-                <div class="timeline-item stage-${(img.ground_truth_stage || 'unknown').replace('.', '_')} ${state.selectedIndex === idx ? 'selected' : ''}"
-                     onclick="selectIndex(${idx})"
+            ${t.images.map((img, idx) => {
+                const stageClass = (img.ground_truth_stage || 'unknown').replace('.', '_');
+                const isStart = state.annotationMode === 'selecting_end' && state.annotationStart === idx;
+                return `
+                <div class="timeline-item stage-${stageClass} ${state.selectedIndex === idx ? 'selected' : ''} ${isStart ? 'range-start' : ''}"
+                     onclick="handleTimelineClick(${idx})"
                      title="#${idx}: ${img.ground_truth_stage || 'unlabeled'}">
                 </div>
-            `).join('')}
+            `}).join('')}
         </div>
 
         <div class="image-viewer" id="image-viewer">
             <div class="info">Click a timeline dot to view image</div>
         </div>
     `;
+
+    updateAnnotationStatus();
+}
+
+function updateAnnotationStatus() {
+    const statusEl = document.getElementById('annotation-status');
+    if (!statusEl) return;
+
+    if (state.annotationMode === 'selecting_start') {
+        statusEl.innerHTML = `<div class="status-message selecting">Click timeline to set START of <strong>${state.annotationStage}</strong></div>`;
+        statusEl.style.display = 'block';
+    } else if (state.annotationMode === 'selecting_end') {
+        statusEl.innerHTML = `<div class="status-message selecting">Click timeline to set END of <strong>${state.annotationStage}</strong> (start: #${state.annotationStart})</div>`;
+        statusEl.style.display = 'block';
+    } else {
+        statusEl.style.display = 'none';
+    }
+}
+
+// Handle timeline click - either select image or set annotation range
+function handleTimelineClick(idx) {
+    if (state.annotationMode === 'selecting_start') {
+        // Set start point
+        state.annotationStart = idx;
+        state.annotationMode = 'selecting_end';
+        renderTimeline();
+        selectIndex(idx);
+    } else if (state.annotationMode === 'selecting_end') {
+        // Set end point and save annotation
+        const start = Math.min(state.annotationStart, idx);
+        const end = Math.max(state.annotationStart, idx);
+        saveAnnotation(state.annotationStage, start, end);
+        clearAnnotationMode();
+    } else {
+        // Normal selection
+        selectIndex(idx);
+    }
+}
+
+// Start annotation mode for a stage
+function startAnnotation(stage) {
+    state.annotationStage = stage;
+    state.annotationMode = 'selecting_start';
+    state.annotationStart = null;
+    updateAnnotationStatus();
+    renderImageViewer();
+}
+
+// Clear annotation mode
+function clearAnnotationMode() {
+    state.annotationMode = null;
+    state.annotationStage = null;
+    state.annotationStart = null;
+}
+
+// Save annotation to backend
+async function saveAnnotation(stage, start, end) {
+    // Save for undo
+    const prevGroundTruth = [...state.timeline.ground_truth];
+    state.undoStack.push({
+        type: 'annotation',
+        session_id: state.selectedSession,
+        embryo_id: state.selectedEmbryo,
+        previous: prevGroundTruth,
+    });
+
+    await apiPost('ground_truth', {
+        session_id: state.selectedSession,
+        embryo_id: state.selectedEmbryo,
+        stage: stage,
+        start_timepoint: start,
+        end_timepoint: end + 1,  // end is exclusive
+        annotator: 'web_explorer',
+    });
+
+    // Reload timeline
+    await selectEmbryo(state.selectedEmbryo);
+    if (state.selectedIndex !== null) {
+        await selectIndex(state.selectedIndex);
+    }
+
+    // Refresh stats
+    loadStats();
+}
+
+// Delete a stage annotation
+async function deleteAnnotation(stage) {
+    if (!confirm(`Delete ${stage} annotation?`)) return;
+
+    // Save for undo
+    const prevGroundTruth = [...state.timeline.ground_truth];
+    state.undoStack.push({
+        type: 'delete',
+        session_id: state.selectedSession,
+        embryo_id: state.selectedEmbryo,
+        previous: prevGroundTruth,
+    });
+
+    await apiDelete('ground_truth', {
+        session_id: state.selectedSession,
+        embryo_id: state.selectedEmbryo,
+        stage: stage,
+    });
+
+    // Reload timeline
+    await selectEmbryo(state.selectedEmbryo);
+    if (state.selectedIndex !== null) {
+        await selectIndex(state.selectedIndex);
+    }
+
+    loadStats();
+}
+
+// Undo last action
+async function undo() {
+    if (state.undoStack.length === 0) {
+        alert('Nothing to undo');
+        return;
+    }
+
+    const action = state.undoStack.pop();
+
+    // Delete all current ground truth for this embryo
+    await apiDelete('ground_truth', {
+        session_id: action.session_id,
+        embryo_id: action.embryo_id,
+    });
+
+    // Restore previous ground truth
+    for (const gt of action.previous) {
+        await apiPost('ground_truth', {
+            session_id: action.session_id,
+            embryo_id: action.embryo_id,
+            stage: gt.stage,
+            start_timepoint: gt.start_timepoint,
+            end_timepoint: gt.end_timepoint,
+            annotator: gt.annotator,
+        });
+    }
+
+    // Reload
+    await selectEmbryo(state.selectedEmbryo);
+    if (state.selectedIndex !== null) {
+        await selectIndex(state.selectedIndex);
+    }
+
+    loadStats();
 }
 
 // Select image by index
@@ -225,6 +400,28 @@ function renderImageViewer() {
         `;
     }
 
+    // Build existing annotations display
+    let existingAnnotations = '';
+    if (state.timeline && state.timeline.ground_truth.length > 0) {
+        existingAnnotations = `
+            <div style="margin-top: 15px;">
+                <h3 style="color: #888; margin-bottom: 8px;">Existing Annotations</h3>
+                ${state.timeline.ground_truth.map(gt => {
+                    const endStr = gt.end_timepoint ? `-${gt.end_timepoint-1}` : '+';
+                    const isCurrent = img.ground_truth_stage === gt.stage;
+                    return `
+                    <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 10px; background: ${isCurrent ? '#0f3460' : '#1a1a2e'}; border-radius: 5px; margin: 3px 0;">
+                        <span class="stage-${gt.stage.replace('.', '_')}" style="padding: 2px 8px; border-radius: 3px;">${gt.stage}</span>
+                        <span style="color: #888;">#${gt.start_timepoint}${endStr}</span>
+                        <button onclick="deleteAnnotation('${gt.stage}')" style="background: #e74c3c; border: none; color: white; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 0.8em;">Delete</button>
+                    </div>
+                `}).join('')}
+            </div>
+        `;
+    }
+
+    const isSelectingAnnotation = state.annotationMode !== null;
+
     viewer.innerHTML = `
         <div class="image-container">
             <div style="margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
@@ -234,7 +431,7 @@ function renderImageViewer() {
                     <span style="color: #666; font-size: 0.9em;"> ${img.timestamp || ''}</span>
                 </div>
                 <button onclick="openProjections()" style="padding: 5px 12px; background: #3498db; border: none; border-radius: 5px; color: #fff; cursor: pointer; font-size: 0.9em;">
-                    View More ->
+                    View More →
                 </button>
             </div>
             ${img.image_b64 ? `<img src="data:image/jpeg;base64,${img.image_b64}" alt="Image ${idx}">` : '<div class="info">Image not available</div>'}
@@ -242,19 +439,35 @@ function renderImageViewer() {
         </div>
 
         <div class="annotation-panel">
-            <h2>Set Stage Transition</h2>
-            <p class="info">Click to mark when this stage STARTS at index ${idx}</p>
-            ${STAGES.map(stage => `
-                <button class="stage-btn stage-${stage.replace('.', '_')} ${img.ground_truth_stage === stage ? 'active' : ''}"
-                        onclick="setGroundTruth('${stage}', ${idx})">
-                    ${stage}
-                </button>
-            `).join('')}
+            <h2>Annotate Stage</h2>
+            <p class="info">${isSelectingAnnotation ? 'Select range on timeline above' : 'Click a stage to set its range'}</p>
 
-            <div style="margin-top: 20px;">
-                <h2>Navigation</h2>
+            ${STAGES.map(stage => {
+                const existing = state.timeline?.ground_truth?.find(g => g.stage === stage);
+                const isActive = state.annotationStage === stage;
+                return `
+                <button class="stage-btn stage-${stage.replace('.', '_')} ${isActive ? 'active' : ''} ${existing ? 'has-annotation' : ''}"
+                        onclick="startAnnotation('${stage}')"
+                        ${isSelectingAnnotation && !isActive ? 'disabled' : ''}>
+                    ${stage} ${existing ? '✓' : ''}
+                </button>
+            `}).join('')}
+
+            ${isSelectingAnnotation ? `
+                <button class="stage-btn" style="background: #e74c3c; margin-top: 15px;" onclick="clearAnnotationMode(); renderImageViewer();">
+                    Cancel
+                </button>
+            ` : ''}
+
+            ${existingAnnotations}
+
+            <div style="margin-top: 20px; border-top: 1px solid #333; padding-top: 15px;">
+                <h3 style="color: #888; margin-bottom: 10px;">Actions</h3>
                 <button class="stage-btn" style="background: #555;" onclick="prevImage()">← Previous</button>
                 <button class="stage-btn" style="background: #555;" onclick="nextImage()">Next →</button>
+                <button class="stage-btn" style="background: #f39c12; margin-top: 10px;" onclick="undo()" ${state.undoStack.length === 0 ? 'disabled' : ''}>
+                    Undo (${state.undoStack.length})
+                </button>
             </div>
         </div>
     `;
@@ -263,24 +476,6 @@ function renderImageViewer() {
 function openProjections() {
     const url = `/projections/${state.selectedSession}/${state.selectedEmbryo}/${state.selectedIndex}`;
     window.open(url, '_blank');
-}
-
-// Set ground truth
-async function setGroundTruth(stage, idx) {
-    await apiPost('ground_truth', {
-        session_id: state.selectedSession,
-        embryo_id: state.selectedEmbryo,
-        stage: stage,
-        start_timepoint: idx,  // Using index as timepoint
-        annotator: 'web_explorer',
-    });
-
-    // Reload timeline
-    await selectEmbryo(state.selectedEmbryo);
-    await selectIndex(idx);
-
-    // Refresh stats
-    loadStats();
 }
 
 // Navigation
@@ -300,8 +495,27 @@ function nextImage() {
 
 // Keyboard navigation
 document.addEventListener('keydown', (e) => {
+    // Don't handle if in annotation mode
+    if (state.annotationMode) return;
+
     if (e.key === 'ArrowLeft') prevImage();
     if (e.key === 'ArrowRight') nextImage();
+    if (e.key === 'Escape') {
+        clearAnnotationMode();
+        renderImageViewer();
+    }
+    // Number keys for quick stage annotation
+    if (e.key >= '1' && e.key <= '8') {
+        const stageIdx = parseInt(e.key) - 1;
+        if (stageIdx < STAGES.length) {
+            startAnnotation(STAGES[stageIdx]);
+        }
+    }
+    // Ctrl+Z for undo
+    if (e.ctrlKey && e.key === 'z') {
+        e.preventDefault();
+        undo();
+    }
 });
 
 // Server status indicator

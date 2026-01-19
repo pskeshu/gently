@@ -477,6 +477,7 @@ class EmbryoDataset:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
+        end_timepoint: Optional[int] = None,
         annotator: Optional[str] = None,
         notes: Optional[str] = None,
     ):
@@ -493,6 +494,8 @@ class EmbryoDataset:
             Stage name (early, bean, comma, etc.)
         start_timepoint : int
             Timepoint when this stage starts
+        end_timepoint : int, optional
+            Timepoint when this stage ends (exclusive)
         annotator : str, optional
             Who made the annotation
         notes : str, optional
@@ -500,11 +503,12 @@ class EmbryoDataset:
         """
         self.conn.execute("""
             INSERT OR REPLACE INTO ground_truth
-            (session_id, embryo_id, stage, start_timepoint, annotator, notes)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """, (session_id, embryo_id, stage, start_timepoint, annotator, notes))
+            (session_id, embryo_id, stage, start_timepoint, end_timepoint, annotator, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (session_id, embryo_id, stage, start_timepoint, end_timepoint, annotator, notes))
         self.conn.commit()
-        logger.info(f"Set ground truth: {embryo_id} {stage} @ t={start_timepoint}")
+        end_str = f"-{end_timepoint}" if end_timepoint else ""
+        logger.info(f"Set ground truth: {embryo_id} {stage} @ t={start_timepoint}{end_str}")
 
     def delete_ground_truth(
         self,
@@ -543,7 +547,7 @@ class EmbryoDataset:
     ) -> List[Dict[str, Any]]:
         """Get all ground truth entries for an embryo."""
         rows = self.conn.execute("""
-            SELECT stage, start_timepoint, annotator, notes, created_at
+            SELECT stage, start_timepoint, end_timepoint, annotator, notes, created_at
             FROM ground_truth
             WHERE session_id = ? AND embryo_id = ?
             ORDER BY start_timepoint
@@ -553,9 +557,10 @@ class EmbryoDataset:
             {
                 "stage": r[0],
                 "start_timepoint": r[1],
-                "annotator": r[2],
-                "notes": r[3],
-                "created_at": r[4],
+                "end_timepoint": r[2],
+                "annotator": r[3],
+                "notes": r[4],
+                "created_at": r[5],
             }
             for r in rows
         ]

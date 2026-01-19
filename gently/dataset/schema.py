@@ -170,6 +170,7 @@ CREATE TABLE IF NOT EXISTS ground_truth (
     embryo_id TEXT NOT NULL,
     stage TEXT NOT NULL,  -- early, bean, comma, 1.5fold, 2fold, pretzel, hatching, hatched
     start_timepoint INTEGER NOT NULL,  -- Timepoint when this stage starts
+    end_timepoint INTEGER,  -- Timepoint when this stage ends (NULL = until next stage or end)
     annotator TEXT,
     notes TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -491,6 +492,42 @@ def migrate_to_v3(conn: sqlite3.Connection) -> bool:
 
     conn.commit()
     logger.info("Database migrated to v3 successfully")
+    return True
+
+
+def migrate_to_v4(conn: sqlite3.Connection) -> bool:
+    """
+    Migrate database from v3 to v4 (ground truth end_timepoint support).
+
+    Adds:
+    - end_timepoint column to ground_truth table
+
+    Safe to run multiple times (checks column existence).
+
+    Returns
+    -------
+    bool
+        True if migration was applied, False if already at v4
+    """
+    # Check if migration needed by looking for new column
+    cursor = conn.execute("PRAGMA table_info(ground_truth)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if 'end_timepoint' in columns:
+        logger.info("Database already at v4, no migration needed")
+        return False
+
+    # Apply migration
+    logger.info("Migrating database to v4 (ground truth end_timepoint)...")
+
+    try:
+        conn.execute("ALTER TABLE ground_truth ADD COLUMN end_timepoint INTEGER")
+    except sqlite3.OperationalError as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+
+    conn.commit()
+    logger.info("Database migrated to v4 successfully")
     return True
 
 
