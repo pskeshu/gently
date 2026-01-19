@@ -231,6 +231,8 @@ class VerificationEngine:
         initial_confidence: float,
         key_question: str,
         volume: Optional[np.ndarray] = None,
+        embryo_id: Optional[str] = None,
+        timepoint: Optional[int] = None,
     ) -> Tuple[VerificationAggregation, List[SubagentTrace]]:
         """
         Run parallel verification subagents.
@@ -249,6 +251,10 @@ class VerificationEngine:
             The key uncertainty being resolved
         volume : np.ndarray, optional
             3D volume for comparisons that need 3D views
+        embryo_id : str, optional
+            Embryo identifier for logging context
+        timepoint : int, optional
+            Timepoint for logging context
 
         Returns
         -------
@@ -264,6 +270,8 @@ class VerificationEngine:
                 initial_confidence=initial_confidence,
                 key_question=key_question,
                 volume=volume if comp.use_3d else None,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
             )
             for comp in comparisons
         ]
@@ -293,6 +301,8 @@ class VerificationEngine:
         initial_confidence: float,
         key_question: str,
         volume: Optional[np.ndarray] = None,
+        embryo_id: Optional[str] = None,
+        timepoint: Optional[int] = None,
     ) -> SubagentTrace:
         """
         Run a single verification subagent.
@@ -355,12 +365,15 @@ class VerificationEngine:
                 volume=volume,
                 trace=trace,
                 max_iterations=3,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
             )
 
             trace.result = result
 
         except Exception as e:
-            logger.error(f"Subagent failed for {comparison.stage_a} vs {comparison.stage_b}: {e}")
+            ctx = f"[{embryo_id}] T{timepoint}: " if embryo_id else ""
+            logger.error(f"{ctx}Subagent failed for {comparison.stage_a} vs {comparison.stage_b}: {e}")
             trace.error = str(e)
 
         trace.complete()
@@ -375,6 +388,8 @@ class VerificationEngine:
         volume: Optional[np.ndarray],
         trace: SubagentTrace,
         max_iterations: int = 3,
+        embryo_id: Optional[str] = None,
+        timepoint: Optional[int] = None,
     ) -> Optional[SubagentResult]:
         """Run the subagent's tool-use reasoning loop."""
 
@@ -459,7 +474,8 @@ class VerificationEngine:
 
                 messages.append({"role": "user", "content": tool_results})
 
-        logger.warning(f"Subagent max iterations reached for {comparison.stage_a} vs {comparison.stage_b}")
+        ctx = f"[{embryo_id}] T{timepoint}: " if embryo_id else ""
+        logger.warning(f"{ctx}Subagent max iterations reached for {comparison.stage_a} vs {comparison.stage_b}")
         return None
 
     def _handle_subagent_tool(

@@ -737,6 +737,8 @@ class PerceptionEngine:
             initial_confidence=initial_confidence,
             key_question=key_question,
             volume=self._current_volume,
+            embryo_id=self._current_embryo_id,
+            timepoint=self._current_timepoint,
         )
 
         # Record subagent results in trace
