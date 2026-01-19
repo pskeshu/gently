@@ -13,11 +13,15 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 import traceback
 
 from ..core import EventType, get_event_bus
 from .error_log import GlobalErrorLog
+
+if TYPE_CHECKING:
+    from ..dataset import EmbryoDataset
+    from ..dataset.trace_persister import TracePersister
 
 logger = logging.getLogger(__name__)
 
@@ -351,6 +355,8 @@ class TimelapseOrchestrator:
         experiment_state,
         perception_manager=None,
         on_volume_callback: Optional[Callable] = None,
+        dataset: Optional["EmbryoDataset"] = None,
+        session_id: Optional[str] = None,
     ):
         """
         Parameters
@@ -363,11 +369,20 @@ class TimelapseOrchestrator:
             VLM-based perception system for stage classification
         on_volume_callback : callable, optional
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
+        dataset : EmbryoDataset, optional
+            Dataset for trace persistence
+        session_id : str, optional
+            Session identifier for trace persistence
         """
         self.client = microscope_client
         self.experiment = experiment_state
         self.perception_manager = perception_manager
         self.on_volume_callback = on_volume_callback
+
+        # Trace persistence (optional)
+        self._dataset = dataset
+        self._session_id = session_id
+        self._trace_persister: Optional["TracePersister"] = None
 
         # Event bus for status updates
         self._event_bus = get_event_bus()
@@ -454,6 +469,17 @@ class TimelapseOrchestrator:
                 stop_condition=stop_cond,
                 timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
             )
+
+        # Initialize trace persister if dataset and session_id are available
+        if self._dataset and self._session_id:
+            from ..dataset.trace_persister import TracePersister
+            self._trace_persister = TracePersister(
+                dataset=self._dataset,
+                session_id=self._session_id,
+                trace_type='perception',
+                source='live',
+            )
+            logger.info(f"Trace persistence enabled: {self._trace_persister.trace_dir}")
 
         # Initialize round-based scheduling (global timing for all embryos)
         self._base_interval_seconds = base_interval_seconds
@@ -568,6 +594,12 @@ class TimelapseOrchestrator:
                 active_embryos = [e for e in self._embryo_states.values() if not e.is_complete]
                 if not active_embryos:
                     self._status = TimelapseStatus.COMPLETED
+
+                    # Complete trace persistence run
+                    if self._trace_persister:
+                        self._trace_persister.complete_run(status="completed")
+                        logger.info(f"Trace persistence completed: {self._trace_persister.get_trace_count()} traces")
+
                     self._emit_event(EventType.ACQUISITION_COMPLETED, {
                         'total_timepoints': self._total_timepoints,
                         'duration_minutes': (datetime.now() - self._started_at).total_seconds() / 60,
@@ -590,10 +622,16 @@ class TimelapseOrchestrator:
         except asyncio.CancelledError:
             logger.info("Timelapse cancelled")
             self._status = TimelapseStatus.IDLE
+            # Complete trace persistence on cancellation
+            if self._trace_persister:
+                self._trace_persister.complete_run(status="cancelled")
         except Exception as e:
             logger.error(f"Timelapse error: {e}\n{traceback.format_exc()}")
             self._status = TimelapseStatus.FAILED
             self._error_message = str(e)
+            # Complete trace persistence on failure
+            if self._trace_persister:
+                self._trace_persister.complete_run(status="failed", error_message=str(e))
             self._emit_event(EventType.ACQUISITION_FAILED, {
                 'error': str(e),
             })
@@ -1086,6 +1124,11 @@ class TimelapseOrchestrator:
 
         self._status = TimelapseStatus.IDLE
 
+        # Complete trace persistence run
+        if self._trace_persister:
+            self._trace_persister.complete_run(status="completed")
+            logger.info(f"Trace persistence completed: {self._trace_persister.get_trace_count()} traces")
+
         # Emit stop event for viz server and other listeners
         get_event_bus().publish(
             EventType.ACQUISITION_STOPPED,
@@ -1354,6 +1397,17 @@ class TimelapseOrchestrator:
                 timepoint=timepoint,
                 image_b64=image_b64,
             )
+
+            # Persist trace to database and file (if persister is available)
+            if self._trace_persister:
+                try:
+                    await self._trace_persister.store_trace(
+                        embryo_id=embryo_id,
+                        timepoint=timepoint,
+                        result=result,
+                    )
+                except Exception as persist_error:
+                    logger.warning(f"Failed to persist trace: {persist_error}")
 
             # Emit perception event for viz server
             event_data = {
