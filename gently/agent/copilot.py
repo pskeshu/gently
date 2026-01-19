@@ -530,6 +530,7 @@ Write a brief status summary. Examples:
                 experiment_state=self.experiment,
                 perception_manager=self.perception_manager,
                 on_volume_callback=self.on_volume_acquired,
+                session_id=self.session_id,
             )
         except Exception as e:
             import logging

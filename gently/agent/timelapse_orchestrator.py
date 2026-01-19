@@ -9,10 +9,12 @@ Manages background timelapse acquisition with:
 """
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 import traceback
 
@@ -20,8 +22,10 @@ from ..core import EventType, get_event_bus
 from .error_log import GlobalErrorLog
 
 if TYPE_CHECKING:
-    from ..dataset import EmbryoDataset
-    from ..dataset.trace_persister import TracePersister
+    pass
+
+# Default trace directory
+TRACE_BASE_PATH = Path("D:/Gently/traces")
 
 logger = logging.getLogger(__name__)
 
@@ -355,7 +359,6 @@ class TimelapseOrchestrator:
         experiment_state,
         perception_manager=None,
         on_volume_callback: Optional[Callable] = None,
-        dataset: Optional["EmbryoDataset"] = None,
         session_id: Optional[str] = None,
     ):
         """
@@ -369,20 +372,17 @@ class TimelapseOrchestrator:
             VLM-based perception system for stage classification
         on_volume_callback : callable, optional
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
-        dataset : EmbryoDataset, optional
-            Dataset for trace persistence
         session_id : str, optional
-            Session identifier for trace persistence
+            Session identifier for trace file storage
         """
         self.client = microscope_client
         self.experiment = experiment_state
         self.perception_manager = perception_manager
         self.on_volume_callback = on_volume_callback
 
-        # Trace persistence (optional)
-        self._dataset = dataset
+        # Trace file storage (writes JSON files to disk)
         self._session_id = session_id
-        self._trace_persister: Optional["TracePersister"] = None
+        self._trace_dir: Optional[Path] = None
 
         # Event bus for status updates
         self._event_bus = get_event_bus()
@@ -470,16 +470,11 @@ class TimelapseOrchestrator:
                 timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
             )
 
-        # Initialize trace persister if dataset and session_id are available
-        if self._dataset and self._session_id:
-            from ..dataset.trace_persister import TracePersister
-            self._trace_persister = TracePersister(
-                dataset=self._dataset,
-                session_id=self._session_id,
-                trace_type='perception',
-                source='live',
-            )
-            logger.info(f"Trace persistence enabled: {self._trace_persister.trace_dir}")
+        # Initialize trace directory for file-based persistence
+        if self._session_id:
+            self._trace_dir = TRACE_BASE_PATH / self._session_id
+            self._trace_dir.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Trace file storage enabled: {self._trace_dir}")
 
         # Initialize round-based scheduling (global timing for all embryos)
         self._base_interval_seconds = base_interval_seconds
@@ -595,10 +590,10 @@ class TimelapseOrchestrator:
                 if not active_embryos:
                     self._status = TimelapseStatus.COMPLETED
 
-                    # Complete trace persistence run
-                    if self._trace_persister:
-                        self._trace_persister.complete_run(status="completed")
-                        logger.info(f"Trace persistence completed: {self._trace_persister.get_trace_count()} traces")
+                    # Log trace file count
+                    if self._trace_dir:
+                        trace_count = len(list(self._trace_dir.glob("*.json")))
+                        logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
 
                     self._emit_event(EventType.ACQUISITION_COMPLETED, {
                         'total_timepoints': self._total_timepoints,
@@ -622,16 +617,10 @@ class TimelapseOrchestrator:
         except asyncio.CancelledError:
             logger.info("Timelapse cancelled")
             self._status = TimelapseStatus.IDLE
-            # Complete trace persistence on cancellation
-            if self._trace_persister:
-                self._trace_persister.complete_run(status="cancelled")
         except Exception as e:
             logger.error(f"Timelapse error: {e}\n{traceback.format_exc()}")
             self._status = TimelapseStatus.FAILED
             self._error_message = str(e)
-            # Complete trace persistence on failure
-            if self._trace_persister:
-                self._trace_persister.complete_run(status="failed", error_message=str(e))
             self._emit_event(EventType.ACQUISITION_FAILED, {
                 'error': str(e),
             })
@@ -1124,10 +1113,10 @@ class TimelapseOrchestrator:
 
         self._status = TimelapseStatus.IDLE
 
-        # Complete trace persistence run
-        if self._trace_persister:
-            self._trace_persister.complete_run(status="completed")
-            logger.info(f"Trace persistence completed: {self._trace_persister.get_trace_count()} traces")
+        # Log trace file count
+        if self._trace_dir:
+            trace_count = len(list(self._trace_dir.glob("*.json")))
+            logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
 
         # Emit stop event for viz server and other listeners
         get_event_bus().publish(
@@ -1367,16 +1356,12 @@ class TimelapseOrchestrator:
                 image_b64=image_b64,
             )
 
-            # Persist trace to database and file (if persister is available)
-            if self._trace_persister:
+            # Persist trace to JSON file (if trace directory is available)
+            if self._trace_dir:
                 try:
-                    await self._trace_persister.store_trace(
-                        embryo_id=embryo_id,
-                        timepoint=timepoint,
-                        result=result,
-                    )
+                    self._write_trace_file(embryo_id, timepoint, result)
                 except Exception as persist_error:
-                    logger.warning(f"Failed to persist trace: {persist_error}")
+                    logger.warning(f"Failed to write trace file: {persist_error}")
 
             # Emit perception event for viz server
             event_data = {
@@ -1445,3 +1430,81 @@ class TimelapseOrchestrator:
         except Exception as e:
             logger.error(f"Perception failed for {embryo_id}: {e}")
             # Don't raise - perception failure shouldn't stop acquisition
+
+    def _write_trace_file(self, embryo_id: str, timepoint: int, result) -> Path:
+        """
+        Write perception trace to JSON file.
+
+        File format: {embryo_id}_T{timepoint:04d}.json
+        Location: D:/Gently/traces/{session_id}/
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo identifier
+        timepoint : int
+            Timepoint number
+        result : PerceptionResult
+            Perception result with stage, confidence, and traces
+
+        Returns
+        -------
+        Path
+            Path to the written trace file
+        """
+        timestamp = datetime.now()
+
+        # Build trace data
+        trace_data = {
+            # Identifiers
+            "session_id": self._session_id,
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "timestamp": timestamp.isoformat(),
+
+            # Results
+            "predicted_stage": result.stage,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "is_hatching": getattr(result, 'is_hatching', False),
+            "is_transitional": getattr(result, 'is_transitional', False),
+            "transition_between": getattr(result, 'transition_between', None),
+        }
+
+        # Add observed features if available
+        if hasattr(result, 'observed_features') and result.observed_features:
+            trace_data["observed_features"] = {
+                'shape': result.observed_features.shape,
+                'curvature': result.observed_features.curvature,
+                'shell_status': result.observed_features.shell_status,
+                'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
+                'emergence': result.observed_features.emergence,
+            }
+
+        # Add contrastive reasoning if available
+        if hasattr(result, 'contrastive_reasoning') and result.contrastive_reasoning:
+            trace_data["contrastive_reasoning"] = {
+                'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
+                'why_not_next': result.contrastive_reasoning.why_not_next_stage,
+            }
+
+        # Add full reasoning trace if available
+        if hasattr(result, 'reasoning_trace') and result.reasoning_trace:
+            trace_data["reasoning_trace"] = result.reasoning_trace.to_dict()
+
+        # Add verification info if available
+        if hasattr(result, 'verification_triggered') and result.verification_triggered:
+            trace_data["verification"] = {
+                'triggered': True,
+                'result': result.verification_result.to_dict() if result.verification_result else None,
+            }
+
+        # Write JSON file
+        filename = f"{embryo_id}_T{timepoint:04d}.json"
+        file_path = self._trace_dir / filename
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            json.dump(trace_data, f, indent=2, ensure_ascii=False)
+
+        logger.debug(f"Wrote trace: {file_path.name}")
+        return file_path
