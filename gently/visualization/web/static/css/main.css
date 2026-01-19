@@ -6269,3 +6269,230 @@ kbd {
     font-weight: 700;
     color: white;
 }
+
+/* ========================================
+   PROJECTIONS 3D VIEWER MODAL
+   ======================================== */
+.projections-modal {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 10000;
+}
+
+.projections-modal.visible {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.projections-modal-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.85);
+}
+
+.projections-modal-content {
+    position: relative;
+    background: var(--bg-card);
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    max-width: 900px;
+    width: 90%;
+    max-height: 90vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.projections-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.5rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-hover);
+}
+
+.projections-modal-header h2 {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.projections-close-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0.25rem 0.5rem;
+    line-height: 1;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.projections-close-btn:hover {
+    background: var(--bg-dark);
+    color: var(--text);
+}
+
+.projections-modal-body {
+    padding: 1.5rem;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.projections-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3rem;
+    gap: 1rem;
+    color: var(--text-muted);
+}
+
+.projections-loading .loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.projections-error {
+    text-align: center;
+    padding: 2rem;
+    color: var(--accent-red, #ef4444);
+}
+
+.projections-controls {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--bg-dark);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+}
+
+.projections-controls .control-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.projections-controls label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.projections-controls input[type="range"] {
+    width: 100px;
+    accent-color: var(--accent);
+}
+
+.projections-controls #projections-thresh-display,
+.projections-controls #projections-angle-display {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    min-width: 40px;
+}
+
+.projections-controls .control-help {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+#projections-3d-container {
+    height: 500px;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#projections-3d-container canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* View More button in detection cards */
+.view-more-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.75rem;
+    margin-left: 0.5rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.view-more-btn:hover {
+    background: var(--bg-card);
+    border-color: var(--accent);
+    box-shadow: var(--shadow-glow);
+}
+
+.view-more-btn .view-more-icon {
+    font-size: 0.85rem;
+}
+
+body.modal-open {
+    overflow: hidden;
+}
+
+/* Toast notifications */
+.embryo-toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    padding: 0.75rem 1.5rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font-size: 0.85rem;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    z-index: 10001;
+    opacity: 0;
+    transition: all 0.3s ease;
+    pointer-events: none;
+}
+
+.embryo-toast.visible {
+    transform: translateX(-50%) translateY(0);
+    opacity: 1;
+}
+
+.embryo-toast.info {
+    border-color: var(--accent);
+}
+
+.embryo-toast.error {
+    border-color: var(--accent-red, #ef4444);
+    color: var(--accent-red, #ef4444);
+}

@@ -1686,10 +1686,14 @@ Write a brief status summary. Examples:
         # Store image
         record = self.image_manager.store_volume(embryo, timepoint, volume)
 
-        # Push to viz server with dual-view projection (top + side)
+        # Push to viz server with three-view projection (same as what Claude sees)
         if self.viz_server and volume is not None:
             try:
-                from PIL import Image
+                from gently.agent.perception.projection import (
+                    projection_three_view,
+                    compute_crop_bounds,
+                    apply_crop_bounds,
+                )
 
                 # Extract View A if 4D (Views, Z, Y, X)
                 view_a = volume[0] if volume.ndim == 4 else volume
@@ -1702,46 +1706,21 @@ Write a brief status summary. Examples:
                     if width > height * 2:
                         view_a = view_a[:, :, :width // 2]
 
-                    # TOP projection: max along Z
-                    top_proj = np.max(view_a, axis=0)
-                    # SIDE projection: max along Y
-                    side_proj = np.max(view_a, axis=1)
-
-                    # Normalize
-                    def _normalize(img):
-                        img = img.astype(np.float32)
-                        if img.max() > img.min():
-                            img = (img - img.min()) / (img.max() - img.min()) * 255
-                        return img.astype(np.uint8)
-
-                    top_norm = _normalize(top_proj)
-                    side_norm = _normalize(side_proj)
-
-                    # Rotate side view 90° clockwise (Z, X) -> (X, Z)
-                    side_rotated = np.rot90(side_norm, k=-1)
-
-                    # Scale side to match top height
-                    target_height = top_norm.shape[0]
-                    new_width = max(150, int(side_rotated.shape[1] * target_height / side_rotated.shape[0]))
-                    side_pil = Image.fromarray(side_rotated).resize(
-                        (new_width, target_height), Image.Resampling.LANCZOS
-                    )
-                    side_scaled = np.array(side_pil)
-
-                    # Combine: TOP | separator | SIDE
-                    separator = np.ones((target_height, 4), dtype=np.uint8) * 128
-                    dual_projection = np.concatenate([top_norm, separator, side_scaled], axis=1)
+                    # Auto-crop to embryo region and generate three-view projection
+                    bounds = compute_crop_bounds(view_a)
+                    cropped = apply_crop_bounds(view_a, bounds)
+                    three_view_img, _ = projection_three_view(cropped)
                 else:
-                    # 2D - use as-is
-                    dual_projection = view_a.astype(np.float32)
-                    if dual_projection.max() > dual_projection.min():
-                        dual_projection = (dual_projection - dual_projection.min()) / (dual_projection.max() - dual_projection.min()) * 255
-                    dual_projection = dual_projection.astype(np.uint8)
+                    # 2D - use as-is, normalize to uint8
+                    three_view_img = view_a.astype(np.float32)
+                    if three_view_img.max() > three_view_img.min():
+                        three_view_img = (three_view_img - three_view_img.min()) / (three_view_img.max() - three_view_img.min()) * 255
+                    three_view_img = three_view_img.astype(np.uint8)
 
                 # Use proper UID from DataStore, fallback to constructed if None
                 viz_uid = record.projection_uid or f"volume_{embryo_id}_t{timepoint:04d}"
                 self.push_viz(
-                    array=dual_projection,
+                    array=three_view_img,
                     uid=viz_uid,
                     data_type="volume_projection",
                     metadata={
@@ -1750,7 +1729,7 @@ Write a brief status summary. Examples:
                         'shape': list(volume.shape),
                         'projection_uid': record.projection_uid,
                         'volume_uid': record.volume_uid,
-                        'projection_type': 'dual_view',  # top + side MIP from View A
+                        'projection_type': 'three_view',  # XY (top), YZ (side), XZ (front)
                     }
                 )
             except Exception as e:

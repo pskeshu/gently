@@ -34,10 +34,99 @@ function openSnapshotsLightbox(index) {
  */
 const CalibrationManager = {
     selectedEmbryoId: null,
+    _lastImageCount: 0,  // Track for incremental updates
 
     render() {
         this.renderSidebar();
         this.renderPanel();
+        this._lastImageCount = state.calibration.length;
+    },
+
+    /**
+     * Incremental update when a single image is added
+     * Returns true if handled incrementally, false if full render needed
+     */
+    handleNewImage(newImage) {
+        const embryoId = newImage.metadata?.embryo_id || 'General';
+
+        // Update sidebar count for this embryo (or add new card)
+        const updated = this._updateSidebarCount(embryoId);
+        if (!updated) {
+            // New embryo - need to add card, do full sidebar render
+            this.renderSidebar();
+        }
+
+        // Only update panel if this embryo is selected
+        if (this.selectedEmbryoId === embryoId) {
+            this._prependImageToPanel(newImage);
+        }
+
+        this._lastImageCount = state.calibration.length;
+        return true;
+    },
+
+    /**
+     * Update just the count badge for an embryo card
+     */
+    _updateSidebarCount(embryoId) {
+        const cardsContainer = document.getElementById('calibration-embryo-cards');
+        if (!cardsContainer) return false;
+
+        const cards = cardsContainer.querySelectorAll('.calibration-embryo-card');
+        for (const card of cards) {
+            const nameEl = card.querySelector('.card-name');
+            if (nameEl && nameEl.textContent === embryoId) {
+                const countEl = card.querySelector('.card-count');
+                if (countEl) {
+                    // Count images for this embryo
+                    const count = state.calibration.filter(img =>
+                        (img.metadata?.embryo_id || 'General') === embryoId
+                    ).length;
+                    countEl.textContent = `${count} image${count !== 1 ? 's' : ''}`;
+                    return true;
+                }
+            }
+        }
+        return false;  // Card not found, need full render
+    },
+
+    /**
+     * Prepend a single image to the panel grid without full re-render
+     */
+    _prependImageToPanel(newImage) {
+        const grid = document.querySelector('#calibration-panel .calibration-image-grid');
+        if (!grid) {
+            // No grid yet, do full panel render
+            this.renderPanel();
+            return;
+        }
+
+        // Create new image element
+        const div = document.createElement('div');
+        div.className = 'gallery-item';
+        div.onclick = () => CalibrationManager.openLightbox(0);  // Newest is index 0
+        div.innerHTML = `
+            <img class="gallery-img" src="data:image/png;base64,${newImage.base64_png}" alt="${newImage.data_type}">
+            <div class="gallery-info">
+                <div class="gallery-type">${newImage.data_type}</div>
+                <div class="gallery-meta">${formatMeta(newImage.metadata)}</div>
+            </div>
+        `;
+
+        // Insert at beginning (newest first)
+        grid.insertBefore(div, grid.firstChild);
+
+        // Update onclick indices for existing items
+        const items = grid.querySelectorAll('.gallery-item');
+        items.forEach((item, idx) => {
+            item.onclick = () => CalibrationManager.openLightbox(idx);
+        });
+
+        // Remove excess items (keep last 50)
+        // Note: items is a static NodeList, so use grid.children.length for live count
+        while (grid.children.length > 50) {
+            grid.removeChild(grid.lastChild);
+        }
     },
 
     renderSidebar() {

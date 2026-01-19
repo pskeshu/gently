@@ -1992,6 +1992,9 @@ const EmbryosManager = {
                             <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
                             ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
                         </button>
+                        <button class="view-more-btn" onclick="event.stopPropagation(); EmbryosManager.view3D('${this.selectedEmbryoId}', ${detection.timepoint})" title="Open 3D Volume Viewer">
+                            <span class="view-more-icon">&#x1F4D0;</span> View 3D
+                        </button>
                         <div class="detection-image-container ${imageExpanded ? 'expanded' : ''}" id="detection-image-${index}">
                             ${imageExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}
                         </div>
@@ -2591,6 +2594,67 @@ const EmbryosManager = {
         }
     },
 
+    /**
+     * Open the 3D volume viewer for a detection
+     * Tries to find a matching 3D segmented volume for the given embryo/timepoint
+     */
+    async view3D(embryoId, timepoint) {
+        try {
+            // First, check if there are any 3D volumes available
+            const response = await fetch('/api/volumes3d');
+            const data = await response.json();
+
+            if (!data.volumes || data.volumes.length === 0) {
+                this.showToast('No 3D volumes available. Run segmentation to generate 3D data.', 'info');
+                return;
+            }
+
+            // Try to find a volume matching this embryo
+            let volumeUid = null;
+            const matchingVolumes = data.volumes.filter(v =>
+                v.metadata?.embryo_id === embryoId
+            );
+
+            if (matchingVolumes.length > 0) {
+                // Use the most recent matching volume
+                volumeUid = matchingVolumes[matchingVolumes.length - 1].uid;
+            } else if (data.volumes.length > 0) {
+                // Fallback to most recent volume
+                volumeUid = data.volumes[data.volumes.length - 1].uid;
+                this.showToast(`Showing most recent 3D volume (no match for ${embryoId})`, 'info');
+            }
+
+            if (volumeUid && typeof ProjectionsViewer !== 'undefined') {
+                ProjectionsViewer.open(volumeUid, embryoId, timepoint);
+            } else if (typeof ProjectionsViewer === 'undefined') {
+                console.error('ProjectionsViewer not loaded');
+                this.showToast('3D Viewer not available - refresh the page', 'error');
+            }
+        } catch (err) {
+            console.error('Failed to load 3D volumes:', err);
+            this.showToast('Failed to load 3D volumes', 'error');
+        }
+    },
+
+    /**
+     * Show a toast notification
+     */
+    showToast(message, type = 'info') {
+        // Simple toast implementation
+        let toast = document.getElementById('embryo-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'embryo-toast';
+            toast.className = 'embryo-toast';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.className = `embryo-toast ${type} visible`;
+        setTimeout(() => {
+            toast.classList.remove('visible');
+        }, 3000);
+    },
+
     // Toggle trace content expand/collapse
     toggleTraceContent(contentId) {
         const container = document.getElementById(contentId);
@@ -2872,6 +2936,11 @@ const EmbryosManager = {
             const newCard = document.createElement('div');
             newCard.innerHTML = this.renderEmbryoCard(embryo);
             const renderedCard = newCard.firstElementChild;
+
+            if (!renderedCard) {
+                console.warn('Failed to render embryo card for', embryoId);
+                return;
+            }
 
             if (wasSelected) {
                 renderedCard.classList.add('selected');

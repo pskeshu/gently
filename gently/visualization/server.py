@@ -232,13 +232,18 @@ class ImageStore:
         return sorted(all_vol, key=lambda x: x.timestamp)
 
     def get_all_snapshots(self, embryo_id: Optional[str] = None) -> List[ImageData]:
-        """Get snapshot images, optionally filtered by embryo"""
+        """Get snapshot images (including volume projections), optionally filtered by embryo"""
         if embryo_id:
             cache = self._embryo_caches.get(embryo_id)
-            return cache.snapshots if cache else []
-        all_snap = list(self._global_images)
+            if not cache:
+                return []
+            # Include both snapshots and volumes for the embryo
+            return sorted(cache.snapshots + cache.volumes, key=lambda x: x.timestamp)
+        # Include all snapshots and volumes
+        all_snap = list(self._global_images) + list(self._volume_images)
         for cache in self._embryo_caches.values():
             all_snap.extend(cache.snapshots)
+            all_snap.extend(cache.volumes)
         return sorted(all_snap, key=lambda x: x.timestamp)
 
     def get_embryo_ids(self) -> List[str]:
@@ -370,6 +375,7 @@ class TimelapseStateTracker:
         self.base_interval = 120
         self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
         self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> file_path}
+        self.projection_uids: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> projection_uid}
 
     def handle_event(self, event_type: str, data: dict):
         """Update state based on incoming event"""
@@ -448,6 +454,13 @@ class TimelapseStateTracker:
                         self.volume_paths[eid] = {}
                     self.volume_paths[eid][timepoint] = volume_path
 
+                # Track projection UID for image lookup
+                projection_uid = data.get("projection_uid")
+                if projection_uid:
+                    if eid not in self.projection_uids:
+                        self.projection_uids[eid] = {}
+                    self.projection_uids[eid][timepoint] = projection_uid
+
         elif event_type == "ACQUISITION_COMPLETED":
             self.status = "COMPLETED"
             for embryo in self.embryos.values():
@@ -462,10 +475,13 @@ class TimelapseStateTracker:
             eid = data.get("embryo_id")
             if eid:
                 timepoint = data.get("timepoint")
-                # Look up volume path for this timepoint
+                # Look up volume path and projection UID for this timepoint
                 volume_path = None
+                projection_uid = None
                 if eid in self.volume_paths and timepoint in self.volume_paths.get(eid, {}):
                     volume_path = self.volume_paths[eid][timepoint]
+                if eid in self.projection_uids and timepoint in self.projection_uids.get(eid, {}):
+                    projection_uid = self.projection_uids[eid][timepoint]
 
                 detection = {
                     "detector_name": data.get("detector_name", "unknown"),
@@ -474,7 +490,7 @@ class TimelapseStateTracker:
                     "reasoning": data.get("reasoning"),
                     "timepoint": timepoint,
                     "volume_uid": data.get("volume_uid"),
-                    "projection_uid": data.get("projection_uid"),
+                    "projection_uid": data.get("projection_uid") or projection_uid,  # Use stored UID as fallback
                     "volume_path": volume_path,  # TIF file path for download
                     "timestamp": datetime.now().isoformat(),
                     # Perception-specific fields
@@ -1066,13 +1082,39 @@ class VisualizationServer:
             }
 
             image = self.store.get_image_by_uid(uid)
+
+            # Fallback: If UID follows volume_EMBRYOID_tNNNN pattern, try looking up real UID
+            if not image and uid.startswith("volume_"):
+                import re
+                match = re.match(r"volume_(.+)_t(\d+)$", uid)
+                if match:
+                    embryo_id, timepoint_str = match.groups()
+                    timepoint = int(timepoint_str)
+                    # Look up real projection UID from timelapse tracker
+                    if embryo_id in self.timelapse_tracker.projection_uids:
+                        real_uid = self.timelapse_tracker.projection_uids[embryo_id].get(timepoint)
+                        if real_uid:
+                            image = self.store.get_image_by_uid(real_uid)
+
             if image and image.base64_png:
                 png_bytes = base64.b64decode(image.base64_png)
                 return Response(content=png_bytes, media_type="image/png", headers=cache_headers)
             # Fallback to persistent DataStore
             if self.data_store:
                 try:
+                    # Try with original UID first
                     data = self.data_store.retrieve(uid)
+                    # If not found and this is a fallback pattern, try with real UID
+                    if data is None and uid.startswith("volume_"):
+                        import re
+                        match = re.match(r"volume_(.+)_t(\d+)$", uid)
+                        if match:
+                            embryo_id, timepoint_str = match.groups()
+                            timepoint = int(timepoint_str)
+                            if embryo_id in self.timelapse_tracker.projection_uids:
+                                real_uid = self.timelapse_tracker.projection_uids[embryo_id].get(timepoint)
+                                if real_uid:
+                                    data = self.data_store.retrieve(real_uid)
                     if data is not None:
                         import numpy as np
                         from io import BytesIO
@@ -1208,6 +1250,35 @@ class VisualizationServer:
                 return Response(content=buffer.getvalue(), media_type="image/png")
 
             raise HTTPException(status_code=500, detail="PIL not available")
+
+        @self.app.get("/api/volume-data/{uid}")
+        async def get_volume_data_for_3d_viewer(uid: str):
+            """Get raw volume data as base64 for 3D viewer (projection viewer)"""
+            # First check if it's a 3D segmented volume
+            vol = self.store.get_volume_3d(uid)
+            if vol:
+                # Return the raw volume data (normalized to uint8)
+                volume = vol.volume
+                if volume.dtype != np.uint8:
+                    vmin, vmax = volume.min(), volume.max()
+                    if vmax > vmin:
+                        volume = ((volume - vmin) / (vmax - vmin) * 255).astype(np.uint8)
+                    else:
+                        volume = np.zeros(volume.shape, dtype=np.uint8)
+                return {
+                    "shape": list(volume.shape),
+                    "data": base64.b64encode(volume.tobytes()).decode('utf-8'),
+                    "uid": uid
+                }
+
+            # Check if it's a regular image with stored volume data
+            image = self.store.get_image_by_uid(uid)
+            if image and image.shape and len(image.shape) == 3:
+                # Try to retrieve the original volume from metadata or stored data
+                # For now, return error - volume data not stored for regular images
+                raise HTTPException(status_code=404, detail=f"Volume data for {uid} not available - only segmented volumes supported")
+
+            raise HTTPException(status_code=404, detail=f"Volume {uid} not found")
 
         @self.app.post("/api/volumes3d")
         async def push_volume_3d_http(request: Request):

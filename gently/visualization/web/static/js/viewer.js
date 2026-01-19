@@ -192,7 +192,10 @@ function handleNewImage(data) {
     if (CALIBRATION_TYPES.includes(dataType) || ANALYSIS_TYPES.includes(dataType)) {
         state.calibration.push(data);
         updateCalibrationCount();
-        if (state.tab === 'calibration') renderCalibrationGallery();
+        // Use incremental update instead of full gallery refresh
+        if (state.tab === 'calibration') {
+            CalibrationManager.handleNewImage(data);
+        }
         const eventType = ANALYSIS_TYPES.includes(dataType) ? 'analysis' : 'calibration';
         logEvent(eventType, `${dataType}${embryoId ? ' ' + embryoId : ''}`);
     } else if (VOLUME_TYPES.includes(dataType)) {
