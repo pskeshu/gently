@@ -743,6 +743,7 @@ Write a brief status summary. Examples:
                 position=embryo_data.get('stage_position', {}),
                 calibration=embryo_data.get('calibration', {}),
                 user_label=embryo_data.get('user_label'),
+                uid=embryo_data.get('uid'),  # Restore global UID
             )
             # Restore additional embryo state
             embryo = self.experiment.embryos[embryo_id]
@@ -1520,7 +1521,8 @@ Write a brief status summary. Examples:
             self.experiment.add_embryo(
                 embryo_id=embryo_id,
                 position=position,
-                calibration=calibration
+                calibration=calibration,
+                uid=embryo_data.get('uid'),  # Preserve UID if available
             )
 
         # Update system prompt with new embryos
@@ -1597,12 +1599,16 @@ Write a brief status summary. Examples:
                 position = embryo_data.get('stage_position', {})
                 calibration = embryo_data.get('calibration', {})
 
+                # Preserve source UID or generate backward-compatible UID
+                source_uid = embryo_data.get('uid') or f"{session_id}_{embryo_id}"
+
                 # Add embryo
                 self.experiment.add_embryo(
                     embryo_id=embryo_id,
                     position=position,
                     calibration=calibration,
                     user_label=embryo_data.get('user_label'),
+                    uid=source_uid,  # Preserve UID for cross-session tracking
                 )
 
                 # Restore additional state

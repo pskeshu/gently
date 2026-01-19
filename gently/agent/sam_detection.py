@@ -7,6 +7,7 @@ Returns embryo positions (pixel + stage coordinates) for calibration workflow.
 
 import time
 import json
+import uuid
 import numpy as np
 from pathlib import Path
 import cv2
@@ -369,6 +370,7 @@ class SAMEmbryoDetector:
 
                 embryos.append({
                     'embryo_id': f'embryo_{i + 1}',
+                    'uid': str(uuid.uuid4()),  # Global unique identifier for cross-session tracking
                     'pixel_x': float(cx),
                     'pixel_y': float(cy),
                     'bbox': (bx, by, bw, bh),  # Used by visualization functions

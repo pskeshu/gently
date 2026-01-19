@@ -624,6 +624,31 @@ class DatasetExplorer:
             raise HTTPException(status_code=404, detail="Embryo not found")
 
         # =====================================================================
+        # Cross-Session Embryo UID Endpoints
+        # =====================================================================
+
+        @app.get("/api/embryo_by_uid/{uid}")
+        async def get_embryo_by_uid(uid: str):
+            """Get all instances of an embryo across sessions by its UID."""
+            instances = self.dataset.get_embryo_by_uid(uid)
+            if not instances:
+                raise HTTPException(status_code=404, detail="Embryo UID not found")
+            return instances
+
+        @app.get("/api/embryo_timeline_by_uid/{uid}")
+        async def get_embryo_timeline_by_uid(uid: str):
+            """Get complete cross-session timeline for an embryo."""
+            timeline = self.dataset.get_embryo_timeline_by_uid(uid)
+            if not timeline.get("sessions"):
+                raise HTTPException(status_code=404, detail="Embryo UID not found")
+            return timeline
+
+        @app.get("/api/embryos_with_multiple_sessions")
+        async def get_embryos_with_multiple_sessions():
+            """Get embryos that appear in multiple sessions (imported)."""
+            return self.dataset.get_embryos_with_multiple_sessions()
+
+        # =====================================================================
         # Images
         # =====================================================================
 

@@ -571,9 +571,31 @@ class EmbryoDataset:
         model_name: Optional[str] = None,
         config: Optional[Dict] = None,
         description: Optional[str] = None,
+        trace_type: str = 'perception',
+        source: str = 'benchmark',
+        session_id: Optional[str] = None,
     ) -> int:
         """
         Create a new perception run record.
+
+        Parameters
+        ----------
+        name : str
+            Name for the run
+        perception_method : str
+            Method identifier (e.g., 'vlm_v1', 'vlm_v3')
+        model_name : str, optional
+            Model identifier
+        config : dict, optional
+            Full configuration as dict
+        description : str, optional
+            Human-readable description
+        trace_type : str
+            Type of traces ('perception', 'hatching_detector', etc.)
+        source : str
+            Origin of the run ('live', 'benchmark', 'replay')
+        session_id : str, optional
+            Link to live experiment session
 
         Returns
         -------
@@ -582,14 +604,18 @@ class EmbryoDataset:
         """
         cursor = self.conn.execute("""
             INSERT INTO perception_runs
-            (name, perception_method, model_name, config_json, description, status)
-            VALUES (?, ?, ?, ?, ?, 'running')
+            (name, perception_method, model_name, config_json, description, status,
+             trace_type, source, session_id)
+            VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
         """, (
             name,
             perception_method,
             model_name,
             json.dumps(config) if config else None,
             description,
+            trace_type,
+            source,
+            session_id,
         ))
         self.conn.commit()
         return cursor.lastrowid
@@ -608,6 +634,7 @@ class EmbryoDataset:
         observed_features: Optional[Dict] = None,
         reasoning_trace: Optional[Dict] = None,
         execution_time_ms: Optional[float] = None,
+        trace_file_path: Optional[str] = None,
     ) -> int:
         """
         Store a perception prediction.
@@ -683,19 +710,20 @@ class EmbryoDataset:
             ))
 
         # Store reasoning trace if provided
-        if reasoning_trace:
+        if reasoning_trace or trace_file_path:
             self.conn.execute("""
                 INSERT INTO reasoning_traces
                 (prediction_id, contrastive_reasoning, steps_json,
-                 tool_calls_json, tools_used_json, total_tool_calls)
-                VALUES (?, ?, ?, ?, ?, ?)
+                 tool_calls_json, tools_used_json, total_tool_calls, file_path)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 prediction_id,
-                reasoning_trace.get("contrastive_reasoning"),
-                json.dumps(reasoning_trace.get("steps", [])),
-                json.dumps(reasoning_trace.get("tool_calls", [])),
-                json.dumps(reasoning_trace.get("tools_used", [])),
-                reasoning_trace.get("total_tool_calls", 0),
+                reasoning_trace.get("contrastive_reasoning") if reasoning_trace else None,
+                json.dumps(reasoning_trace.get("steps", [])) if reasoning_trace else None,
+                json.dumps(reasoning_trace.get("tool_calls", [])) if reasoning_trace else None,
+                json.dumps(reasoning_trace.get("tools_used", [])) if reasoning_trace else None,
+                reasoning_trace.get("total_tool_calls", 0) if reasoning_trace else 0,
+                trace_file_path,
             ))
 
         self.conn.commit()
@@ -890,3 +918,456 @@ class EmbryoDataset:
         """).fetchall()
 
         return [dict(r) for r in rows]
+
+    # =========================================================================
+    # Trace Query Methods (for trace persistence system)
+    # =========================================================================
+
+    def get_traces_for_image(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        session_id: Optional[str] = None,
+        trace_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all traces for a specific image (embryo + timepoint).
+
+        Supports multiple trace versions per image through different runs.
+
+        Parameters
+        ----------
+        embryo_id : str
+            Embryo identifier
+        timepoint : int
+            Timepoint number
+        session_id : str, optional
+            Filter to specific session
+        trace_type : str, optional
+            Filter to specific trace type ('perception', 'hatching_detector', etc.)
+
+        Returns
+        -------
+        list of dict
+            Traces with prediction and run metadata
+        """
+        query = """
+            SELECT
+                p.id as prediction_id,
+                p.predicted_stage,
+                p.confidence,
+                p.reasoning,
+                p.timestamp,
+                pr.id as run_id,
+                pr.name as run_name,
+                pr.trace_type,
+                pr.source,
+                pr.session_id as run_session_id,
+                pr.perception_method,
+                rt.file_path,
+                rt.contrastive_reasoning,
+                rt.steps_json,
+                rt.total_tool_calls
+            FROM predictions p
+            JOIN perception_runs pr ON p.perception_run_id = pr.id
+            LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
+            WHERE p.embryo_id = ? AND p.timepoint = ?
+        """
+        params = [embryo_id, timepoint]
+
+        if session_id:
+            query += " AND pr.session_id = ?"
+            params.append(session_id)
+
+        if trace_type:
+            query += " AND pr.trace_type = ?"
+            params.append(trace_type)
+
+        query += " ORDER BY p.timestamp DESC"
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        return [
+            {
+                "prediction_id": r[0],
+                "predicted_stage": r[1],
+                "confidence": r[2],
+                "reasoning": r[3],
+                "timestamp": r[4],
+                "run_id": r[5],
+                "run_name": r[6],
+                "trace_type": r[7],
+                "source": r[8],
+                "run_session_id": r[9],
+                "perception_method": r[10],
+                "file_path": r[11],
+                "contrastive_reasoning": r[12],
+                "steps_json": r[13],
+                "total_tool_calls": r[14],
+            }
+            for r in rows
+        ]
+
+    def get_runs_for_session(
+        self,
+        session_id: str,
+        trace_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all perception runs for a session.
+
+        Parameters
+        ----------
+        session_id : str
+            Session identifier
+        trace_type : str, optional
+            Filter to specific trace type
+
+        Returns
+        -------
+        list of dict
+            Runs with metadata and prediction counts
+        """
+        query = """
+            SELECT
+                pr.id,
+                pr.name,
+                pr.description,
+                pr.perception_method,
+                pr.model_name,
+                pr.trace_type,
+                pr.source,
+                pr.status,
+                pr.created_at,
+                pr.completed_at,
+                COUNT(p.id) as prediction_count
+            FROM perception_runs pr
+            LEFT JOIN predictions p ON pr.id = p.perception_run_id
+            WHERE pr.session_id = ?
+        """
+        params = [session_id]
+
+        if trace_type:
+            query += " AND pr.trace_type = ?"
+            params.append(trace_type)
+
+        query += " GROUP BY pr.id ORDER BY pr.created_at DESC"
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        return [
+            {
+                "id": r[0],
+                "name": r[1],
+                "description": r[2],
+                "perception_method": r[3],
+                "model_name": r[4],
+                "trace_type": r[5],
+                "source": r[6],
+                "status": r[7],
+                "created_at": r[8],
+                "completed_at": r[9],
+                "prediction_count": r[10],
+            }
+            for r in rows
+        ]
+
+    def get_run_predictions(
+        self,
+        run_id: int,
+        embryo_id: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get all predictions for a run, optionally filtered by embryo.
+
+        Parameters
+        ----------
+        run_id : int
+            Perception run ID
+        embryo_id : str, optional
+            Filter to specific embryo
+
+        Returns
+        -------
+        list of dict
+            Predictions with trace info
+        """
+        query = """
+            SELECT
+                p.id,
+                p.embryo_id,
+                p.timepoint,
+                p.predicted_stage,
+                p.confidence,
+                p.reasoning,
+                p.ground_truth_stage,
+                p.is_correct,
+                p.timestamp,
+                rt.file_path
+            FROM predictions p
+            LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
+            WHERE p.perception_run_id = ?
+        """
+        params = [run_id]
+
+        if embryo_id:
+            query += " AND p.embryo_id = ?"
+            params.append(embryo_id)
+
+        query += " ORDER BY p.embryo_id, p.timepoint"
+
+        rows = self.conn.execute(query, params).fetchall()
+
+        return [
+            {
+                "id": r[0],
+                "embryo_id": r[1],
+                "timepoint": r[2],
+                "predicted_stage": r[3],
+                "confidence": r[4],
+                "reasoning": r[5],
+                "ground_truth_stage": r[6],
+                "is_correct": r[7],
+                "timestamp": r[8],
+                "file_path": r[9],
+            }
+            for r in rows
+        ]
+
+    # =========================================================================
+    # Cross-Session UID Methods
+    # =========================================================================
+
+    def get_embryo_by_uid(self, uid: str) -> List[Dict[str, Any]]:
+        """
+        Get all instances of an embryo across sessions by its UID.
+
+        Parameters
+        ----------
+        uid : str
+            Global unique identifier for the embryo
+
+        Returns
+        -------
+        list of dict
+            All embryo instances matching this UID across different sessions
+        """
+        rows = self.conn.execute("""
+            SELECT
+                e.embryo_id,
+                e.session_id,
+                e.embryo_uid,
+                e.nickname,
+                e.user_label,
+                e.stage_position_x,
+                e.stage_position_y,
+                e.calibration_json,
+                e.created_at,
+                s.name as session_name,
+                s.created_at as session_created_at,
+                (SELECT COUNT(*) FROM volumes v
+                 WHERE v.embryo_uid = e.embryo_uid AND v.session_id = e.session_id) as volume_count,
+                (SELECT COUNT(*) FROM images i
+                 WHERE i.embryo_uid = e.embryo_uid AND i.session_id = e.session_id) as image_count
+            FROM embryos e
+            LEFT JOIN sessions s ON e.session_id = s.session_id
+            WHERE e.embryo_uid = ?
+            ORDER BY e.created_at ASC
+        """, (uid,)).fetchall()
+
+        return [
+            {
+                "embryo_id": r[0],
+                "session_id": r[1],
+                "embryo_uid": r[2],
+                "nickname": r[3],
+                "user_label": r[4],
+                "stage_position_x": r[5],
+                "stage_position_y": r[6],
+                "calibration_json": r[7],
+                "created_at": r[8],
+                "session_name": r[9],
+                "session_created_at": r[10],
+                "volume_count": r[11],
+                "image_count": r[12],
+            }
+            for r in rows
+        ]
+
+    def iter_images_by_uid(
+        self,
+        uid: str,
+        load_image_data: bool = True,
+    ) -> Iterator[ImageData]:
+        """
+        Iterate through all images for an embryo across all sessions.
+
+        Parameters
+        ----------
+        uid : str
+            Global unique identifier for the embryo
+        load_image_data : bool
+            If True, load base64 image data
+
+        Yields
+        ------
+        ImageData
+            Image data for each timepoint across all sessions
+        """
+        # Query volumes with this embryo UID across all sessions
+        query = """
+            SELECT
+                v.uid as volume_uid,
+                v.embryo_id,
+                v.timepoint,
+                v.timestamp,
+                v.file_path as volume_path,
+                v.session_id,
+                v.shape_json,
+                i.uid as image_uid,
+                i.shape_json as image_shape
+            FROM volumes v
+            LEFT JOIN images i ON i.embryo_uid = v.embryo_uid
+                AND i.timepoint = v.timepoint
+                AND i.session_id = v.session_id
+            WHERE v.embryo_uid = ?
+            ORDER BY v.session_id, v.timestamp ASC
+        """
+
+        for row in self.conn.execute(query, (uid,)):
+            timepoint = row[2] or 0
+            embryo_id = row[1]
+            session_id = row[5]
+
+            # Get ground truth for this embryo instance
+            gt_map = self._get_ground_truth_map(embryo_id, session_id)
+
+            gt_stage = None
+            for stage, (start_tp, end_tp) in gt_map.items():
+                if start_tp <= timepoint <= end_tp:
+                    gt_stage = stage
+                    break
+
+            shape = None
+            if row[8]:
+                try:
+                    shape = tuple(json.loads(row[8]))
+                except:
+                    pass
+
+            img_data = ImageData(
+                uid=row[7] or row[0],
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                timestamp=row[3],
+                _volume_path=row[4],
+                session_id=session_id,
+                shape=shape,
+                ground_truth_stage=gt_stage,
+                _dataset=self if load_image_data else None,
+            )
+
+            yield img_data
+
+    def get_embryos_with_multiple_sessions(self) -> List[Dict[str, Any]]:
+        """
+        Get embryos that appear in multiple sessions (imported).
+
+        Returns
+        -------
+        list of dict
+            Embryo UIDs with session counts and details
+        """
+        rows = self.conn.execute("""
+            SELECT
+                embryo_uid,
+                COUNT(DISTINCT session_id) as session_count,
+                GROUP_CONCAT(DISTINCT session_id) as session_ids,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen,
+                (SELECT SUM(cnt) FROM (
+                    SELECT COUNT(*) as cnt FROM volumes v
+                    WHERE v.embryo_uid = e.embryo_uid
+                )) as total_volumes
+            FROM embryos e
+            WHERE embryo_uid IS NOT NULL
+            GROUP BY embryo_uid
+            HAVING COUNT(DISTINCT session_id) > 1
+            ORDER BY session_count DESC, first_seen ASC
+        """).fetchall()
+
+        return [
+            {
+                "embryo_uid": r[0],
+                "session_count": r[1],
+                "session_ids": r[2].split(",") if r[2] else [],
+                "first_seen": r[3],
+                "last_seen": r[4],
+                "total_volumes": r[5],
+            }
+            for r in rows
+        ]
+
+    def get_embryo_timeline_by_uid(self, uid: str) -> Dict[str, Any]:
+        """
+        Get complete cross-session timeline for an embryo.
+
+        Parameters
+        ----------
+        uid : str
+            Global unique identifier for the embryo
+
+        Returns
+        -------
+        dict
+            Timeline with sessions and image counts per session
+        """
+        # Get all instances
+        instances = self.get_embryo_by_uid(uid)
+
+        if not instances:
+            return {"error": "Embryo UID not found", "embryo_uid": uid}
+
+        # Build timeline per session
+        timeline = []
+        for instance in instances:
+            session_id = instance["session_id"]
+
+            # Get timepoint range and image count for this session
+            stats = self.conn.execute("""
+                SELECT
+                    MIN(v.timestamp) as first_timestamp,
+                    MAX(v.timestamp) as last_timestamp,
+                    COUNT(DISTINCT v.uid) as volume_count,
+                    MIN(v.timepoint) as min_timepoint,
+                    MAX(v.timepoint) as max_timepoint
+                FROM volumes v
+                WHERE v.embryo_uid = ? AND v.session_id = ?
+            """, (uid, session_id)).fetchone()
+
+            # Get ground truth stages for this session
+            gt_rows = self.conn.execute("""
+                SELECT stage, start_timepoint FROM ground_truth
+                WHERE embryo_id = ? AND session_id = ?
+                ORDER BY start_timepoint
+            """, (instance["embryo_id"], session_id)).fetchall()
+
+            timeline.append({
+                "session_id": session_id,
+                "session_name": instance["session_name"],
+                "embryo_id": instance["embryo_id"],
+                "first_timestamp": stats[0] if stats else None,
+                "last_timestamp": stats[1] if stats else None,
+                "volume_count": stats[2] if stats else 0,
+                "timepoint_range": (stats[3], stats[4]) if stats else (None, None),
+                "ground_truth_stages": [
+                    {"stage": gt[0], "start_timepoint": gt[1]} for gt in gt_rows
+                ],
+            })
+
+        return {
+            "embryo_uid": uid,
+            "total_sessions": len(instances),
+            "total_volumes": sum(t["volume_count"] for t in timeline),
+            "timeline": timeline,
+        }

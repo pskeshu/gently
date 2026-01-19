@@ -245,11 +245,14 @@ class DatasetAggregator:
         stage_pos = data.get("stage_position", {})
         calibration = data.get("calibration", {})
 
+        # Get UID from data, or generate backward-compatible UID
+        embryo_uid = data.get("uid") or f"{session_id}_{embryo_id}"
+
         self.conn.execute("""
             INSERT OR REPLACE INTO embryos
             (embryo_id, session_id, nickname, user_label,
-             stage_position_x, stage_position_y, calibration_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+             stage_position_x, stage_position_y, calibration_json, embryo_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             embryo_id,
             session_id,
@@ -258,6 +261,7 @@ class DatasetAggregator:
             stage_pos.get("x"),
             stage_pos.get("y"),
             json.dumps(calibration) if calibration else None,
+            embryo_uid,
         ))
 
     def aggregate_volumes(self, since: Optional[datetime] = None) -> Dict[str, int]:
@@ -358,21 +362,33 @@ class DatasetAggregator:
             tiff_path = meta_file.with_suffix(".tiff")
 
         metadata = data.get("metadata", {})
+        session_id = metadata.get("session_id")
+        embryo_id = metadata.get("embryo_id")
+
+        # Look up embryo_uid from embryos table, or generate backward-compatible UID
+        embryo_uid = None
+        if session_id and embryo_id:
+            result = self.conn.execute(
+                "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
+                (session_id, embryo_id)
+            ).fetchone()
+            embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
         self.conn.execute("""
             INSERT INTO volumes
-            (uid, session_id, embryo_id, timepoint, file_path, shape_json, dtype, timestamp, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (uid, session_id, embryo_id, timepoint, file_path, shape_json, dtype, timestamp, metadata_json, embryo_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             uid,
-            metadata.get("session_id"),
-            metadata.get("embryo_id"),
+            session_id,
+            embryo_id,
             metadata.get("timepoint"),
             str(tiff_path) if tiff_path.exists() else None,
             json.dumps(data.get("shape")),
             data.get("dtype"),
             data.get("timestamp"),
             json.dumps(metadata) if metadata else None,
+            embryo_uid,
         ))
 
         return True
@@ -413,10 +429,19 @@ class DatasetAggregator:
         if not timestamp_str:
             timestamp_str = datetime.fromtimestamp(tif_path.stat().st_mtime).isoformat()
 
+        # Look up embryo_uid from embryos table, or generate backward-compatible UID
+        embryo_uid = None
+        if session_id and embryo_id:
+            result = self.conn.execute(
+                "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
+                (session_id, embryo_id)
+            ).fetchone()
+            embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
+
         self.conn.execute("""
             INSERT INTO volumes
-            (uid, session_id, embryo_id, file_path, timestamp, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?)
+            (uid, session_id, embryo_id, file_path, timestamp, metadata_json, embryo_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """, (
             uid,
             session_id,
@@ -424,6 +449,7 @@ class DatasetAggregator:
             str(tif_path),
             timestamp_str,
             json.dumps({"source": "images_dir"}),
+            embryo_uid,
         ))
 
         return True
@@ -497,17 +523,28 @@ class DatasetAggregator:
             return False
 
         metadata = data.get("metadata", {})
+        session_id = metadata.get("session_id")
+        embryo_id = metadata.get("embryo_id")
+
+        # Look up embryo_uid from embryos table, or generate backward-compatible UID
+        embryo_uid = None
+        if session_id and embryo_id:
+            result = self.conn.execute(
+                "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
+                (session_id, embryo_id)
+            ).fetchone()
+            embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
         self.conn.execute("""
             INSERT INTO images
             (uid, parent_uid, session_id, embryo_id, timepoint, projection_type,
-             shape_json, dtype, b64_size_kb, timestamp, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             shape_json, dtype, b64_size_kb, timestamp, metadata_json, embryo_uid)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             uid,
             metadata.get("parent_uid"),
-            metadata.get("session_id"),
-            metadata.get("embryo_id"),
+            session_id,
+            embryo_id,
             metadata.get("timepoint"),
             metadata.get("projection_type"),
             json.dumps(data.get("shape")),
@@ -515,6 +552,7 @@ class DatasetAggregator:
             metadata.get("b64_size_kb"),
             data.get("timestamp"),
             json.dumps(metadata) if metadata else None,
+            embryo_uid,
         ))
 
         return True

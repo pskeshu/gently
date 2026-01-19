@@ -4,6 +4,7 @@ Embryo Detection Tools
 Tools for detecting and marking embryos in microscope images.
 """
 
+import uuid
 from typing import Dict
 from datetime import datetime
 from pathlib import Path
@@ -79,7 +80,8 @@ async def detect_embryos(
                 copilot.experiment.add_embryo(
                     embryo_id=emb['embryo_id'],
                     position=position,
-                    confidence=emb.get('confidence', 0.0)
+                    confidence=emb.get('confidence', 0.0),
+                    uid=emb.get('uid'),  # Preserve UID from detection
                 )
 
             if auto_calibrate and embryos:
@@ -172,7 +174,8 @@ async def manual_mark_embryos(
                 copilot.experiment.add_embryo(
                     embryo_id=new_id,
                     position=position,
-                    confidence=emb.get('confidence', 1.0)
+                    confidence=emb.get('confidence', 1.0),
+                    uid=str(uuid.uuid4()),  # Generate new UID for manually marked embryo
                 )
                 added_ids.append(new_id)
 
@@ -308,7 +311,8 @@ async def edit_embryos(
                     copilot.experiment.add_embryo(
                         embryo_id=emb_id,
                         position=position,
-                        confidence=emb.get('confidence', 1.0)
+                        confidence=emb.get('confidence', 1.0),
+                        uid=str(uuid.uuid4()),  # Generate new UID for embryo added via editor
                     )
 
                 new_ids.add(emb_id)

@@ -245,6 +245,7 @@ class EmbryoState:
 
     # Identity
     id: str  # "embryo_1"
+    uid: Optional[str] = None  # Global unique identifier for cross-session tracking
     nickname: Optional[str] = None  # Agent-assigned: "the fast one"
     user_label: Optional[str] = None  # User-provided: "control_1"
 
@@ -825,6 +826,7 @@ class EmbryoState:
         """Serialize for API responses"""
         return {
             'id': self.id,
+            'uid': self.uid,
             'nickname': self.nickname,
             'user_label': self.user_label,
             'stage_position': self.stage_position,
@@ -871,7 +873,7 @@ class ExperimentState:
 
     def add_embryo(self, embryo_id: str, position: Dict = None,
                    calibration: Dict = None, user_label: Optional[str] = None,
-                   confidence: float = 0.0):
+                   confidence: float = 0.0, uid: Optional[str] = None):
         """Register new embryo"""
         # Auto-start experiment when first embryo is added
         if self.start_time is None:
@@ -879,6 +881,7 @@ class ExperimentState:
 
         self.embryos[embryo_id] = EmbryoState(
             id=embryo_id,
+            uid=uid,
             stage_position=position or {},
             calibration=calibration or {},
             user_label=user_label,

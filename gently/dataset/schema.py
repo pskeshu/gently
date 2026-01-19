@@ -193,10 +193,16 @@ CREATE TABLE IF NOT EXISTS perception_runs (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     started_at TIMESTAMP,
     completed_at TIMESTAMP,
-    error_message TEXT
+    error_message TEXT,
+    -- Extended columns for trace persistence
+    trace_type TEXT DEFAULT 'perception',  -- 'perception', 'hatching_detector', etc.
+    source TEXT DEFAULT 'benchmark',  -- 'live', 'benchmark', 'replay'
+    session_id TEXT REFERENCES sessions(session_id)  -- Link to live session
 );
 CREATE INDEX IF NOT EXISTS idx_runs_status ON perception_runs(status);
 CREATE INDEX IF NOT EXISTS idx_runs_method ON perception_runs(perception_method);
+CREATE INDEX IF NOT EXISTS idx_runs_session ON perception_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_runs_trace_type ON perception_runs(trace_type);
 
 -- Predictions table (per-image results)
 CREATE TABLE IF NOT EXISTS predictions (
@@ -279,6 +285,9 @@ CREATE TABLE IF NOT EXISTS reasoning_traces (
     -- Raw response for debugging
     raw_response TEXT,
 
+    -- File-based storage (source of truth)
+    file_path TEXT,  -- Path to JSON file on disk
+
     FOREIGN KEY (prediction_id) REFERENCES predictions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_traces_pred ON reasoning_traces(prediction_id);
@@ -331,6 +340,158 @@ FROM perception_runs pr
 LEFT JOIN predictions p ON pr.id = p.perception_run_id
 GROUP BY pr.id;
 """
+
+
+MIGRATION_SQL_V2 = """
+-- Migration for trace persistence extensions (v1 -> v2)
+-- Add columns to perception_runs for trace type and session tracking
+ALTER TABLE perception_runs ADD COLUMN trace_type TEXT DEFAULT 'perception';
+ALTER TABLE perception_runs ADD COLUMN source TEXT DEFAULT 'benchmark';
+ALTER TABLE perception_runs ADD COLUMN session_id TEXT REFERENCES sessions(session_id);
+
+-- Add indexes for new columns
+CREATE INDEX IF NOT EXISTS idx_runs_session ON perception_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_runs_trace_type ON perception_runs(trace_type);
+
+-- Add file_path column to reasoning_traces for file-based storage
+ALTER TABLE reasoning_traces ADD COLUMN file_path TEXT;
+"""
+
+
+def migrate_to_v2(conn: sqlite3.Connection) -> bool:
+    """
+    Migrate database from v1 to v2 (trace persistence extensions).
+
+    Adds:
+    - trace_type, source, session_id columns to perception_runs
+    - file_path column to reasoning_traces
+
+    Safe to run multiple times (uses IF NOT EXISTS / checks columns).
+
+    Returns
+    -------
+    bool
+        True if migration was applied, False if already at v2
+    """
+    # Check if migration needed by looking for new columns
+    cursor = conn.execute("PRAGMA table_info(perception_runs)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if 'trace_type' in columns:
+        logger.info("Database already at v2, no migration needed")
+        return False
+
+    # Apply migration
+    logger.info("Migrating database to v2 (trace persistence extensions)...")
+
+    # Execute statements one at a time (ALTER TABLE doesn't work in executescript for SQLite)
+    statements = [
+        "ALTER TABLE perception_runs ADD COLUMN trace_type TEXT DEFAULT 'perception'",
+        "ALTER TABLE perception_runs ADD COLUMN source TEXT DEFAULT 'benchmark'",
+        "ALTER TABLE perception_runs ADD COLUMN session_id TEXT REFERENCES sessions(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_runs_session ON perception_runs(session_id)",
+        "CREATE INDEX IF NOT EXISTS idx_runs_trace_type ON perception_runs(trace_type)",
+    ]
+
+    # Check if file_path column exists in reasoning_traces
+    cursor = conn.execute("PRAGMA table_info(reasoning_traces)")
+    trace_columns = {row[1] for row in cursor.fetchall()}
+    if 'file_path' not in trace_columns:
+        statements.append("ALTER TABLE reasoning_traces ADD COLUMN file_path TEXT")
+
+    for stmt in statements:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+
+    conn.commit()
+    logger.info("Database migrated to v2 successfully")
+    return True
+
+
+def migrate_to_v3(conn: sqlite3.Connection) -> bool:
+    """
+    Migrate database from v2 to v3 (cross-session embryo tracking via UIDs).
+
+    Adds:
+    - embryo_uid column to embryos, volumes, images tables
+    - Index on embryo_uid for fast cross-session queries
+    - Backfills existing embryos with {session_id}_{embryo_id} UIDs
+
+    Safe to run multiple times (uses IF NOT EXISTS / checks columns).
+
+    Returns
+    -------
+    bool
+        True if migration was applied, False if already at v3
+    """
+    # Check if migration needed by looking for new column in embryos
+    cursor = conn.execute("PRAGMA table_info(embryos)")
+    columns = {row[1] for row in cursor.fetchall()}
+
+    if 'embryo_uid' in columns:
+        logger.info("Database already at v3, no migration needed")
+        return False
+
+    # Apply migration
+    logger.info("Migrating database to v3 (cross-session embryo tracking)...")
+
+    # Add embryo_uid columns to tables
+    statements = [
+        "ALTER TABLE embryos ADD COLUMN embryo_uid TEXT",
+        "ALTER TABLE volumes ADD COLUMN embryo_uid TEXT",
+        "ALTER TABLE images ADD COLUMN embryo_uid TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_embryos_uid ON embryos(embryo_uid)",
+        "CREATE INDEX IF NOT EXISTS idx_volumes_embryo_uid ON volumes(embryo_uid)",
+        "CREATE INDEX IF NOT EXISTS idx_images_embryo_uid ON images(embryo_uid)",
+    ]
+
+    for stmt in statements:
+        try:
+            conn.execute(stmt)
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+
+    conn.commit()
+
+    # Backfill existing embryos with {session_id}_{embryo_id} UIDs
+    logger.info("Backfilling existing embryos with UIDs...")
+    conn.execute("""
+        UPDATE embryos
+        SET embryo_uid = session_id || '_' || embryo_id
+        WHERE embryo_uid IS NULL
+    """)
+
+    # Backfill volumes
+    conn.execute("""
+        UPDATE volumes
+        SET embryo_uid = (
+            SELECT e.embryo_uid
+            FROM embryos e
+            WHERE e.session_id = volumes.session_id
+              AND e.embryo_id = volumes.embryo_id
+        )
+        WHERE embryo_uid IS NULL AND session_id IS NOT NULL AND embryo_id IS NOT NULL
+    """)
+
+    # Backfill images
+    conn.execute("""
+        UPDATE images
+        SET embryo_uid = (
+            SELECT e.embryo_uid
+            FROM embryos e
+            WHERE e.session_id = images.session_id
+              AND e.embryo_id = images.embryo_id
+        )
+        WHERE embryo_uid IS NULL AND session_id IS NOT NULL AND embryo_id IS NOT NULL
+    """)
+
+    conn.commit()
+    logger.info("Database migrated to v3 successfully")
+    return True
 
 
 def get_database_stats(conn: sqlite3.Connection) -> dict:
