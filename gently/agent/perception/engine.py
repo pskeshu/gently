@@ -865,10 +865,24 @@ CRITICAL FOR EARLY vs BEAN vs COMMA:
 - BEAN: ANY of these: subtle end tapering, central constriction in XZ, "peanut" shape - edges still convex
 - COMMA: One edge is flat or curves INWARD (not convex)
 
-CRITICAL FOR COMMA vs FOLD STAGES (examine XZ view carefully):
-- COMMA XZ: Lobes are SIDE-BY-SIDE horizontally (peanut/figure-8 from ventral indentation) - single body plane
-- 1.5FOLD/2FOLD XZ: Layers are STACKED VERTICALLY (parallel horizontal lines with gap) - body folded back on itself
-The difference is orientation: comma = horizontal constriction, fold = vertical stacking/layering
+CRITICAL FOR BEAN/COMMA vs FOLD STAGES (examine XZ view carefully):
+The XZ view shows two masses in BOTH bean/comma AND fold stages - the key is their VERTICAL ARRANGEMENT:
+
+BEAN/COMMA XZ: Two lobes at the SAME VERTICAL LEVEL
+- Lobes are side-by-side horizontally, spanning the same vertical range
+- This is the central constriction/"peanut" shape viewed from front
+- The dark region between lobes is VERTICAL (runs up-down between lobes)
+- Think: two balls sitting next to each other on a table
+
+1.5FOLD/2FOLD XZ: Two bands at DIFFERENT VERTICAL LEVELS
+- One band is clearly ABOVE the other (stacked)
+- The dark gap between them is HORIZONTAL (runs left-right between bands)
+- This shows body folded back on itself
+- Think: two pancakes stacked on top of each other
+
+TEST: In XZ view, ask "Are the two masses at the same height, or is one above the other?"
+- Same height → bean/comma (central constriction)
+- One above the other → fold (body doubled back)
 
 EARLY→BEAN SENSITIVITY: Err on the side of detecting bean early. If you see ANY hint of:
 - One end slightly more tapered than the other
