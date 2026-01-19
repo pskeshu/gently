@@ -1591,7 +1591,26 @@ const EmbryosManager = {
         this.currentDetailItem = item;
         this.detailPanelVisible = true;
 
+        // Highlight the selected eval dot
+        this.highlightEvalDot(timepoint, detectorName);
+
         this.renderInlineDetail(item);
+    },
+
+    // Highlight the currently selected eval dot in the timeline
+    highlightEvalDot(timepoint, detectorName) {
+        // Remove highlight from all dots
+        document.querySelectorAll('.eval-dot.active').forEach(dot => {
+            dot.classList.remove('active');
+        });
+
+        // Add highlight to the selected dot
+        const selectedDot = document.querySelector(
+            `.eval-dot[data-timepoint="${timepoint}"][data-detector="${detectorName}"]`
+        );
+        if (selectedDot) {
+            selectedDot.classList.add('active');
+        }
     },
 
     // Render detail content inline in the reasoning panel
@@ -1843,6 +1862,11 @@ const EmbryosManager = {
         }
         this.detailPanelVisible = false;
         this.currentDetailItem = null;
+
+        // Clear eval dot highlight
+        document.querySelectorAll('.eval-dot.active').forEach(dot => {
+            dot.classList.remove('active');
+        });
     },
 
     // Navigate to previous/next item in detail panel
@@ -2428,6 +2452,8 @@ const EmbryosManager = {
                 const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || 'perception';
                 return `<div class="eval-dot ${stageClass} ${isHatching ? 'hatching' : ''}"
                              title="${title}"
+                             data-timepoint="${tp}"
+                             data-detector="${detectorName}"
                              onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
                             <span class="eval-dot-icon">${stageIcon}</span>
                         </div>`;
@@ -2444,6 +2470,8 @@ const EmbryosManager = {
             const detectorName = detectionEvents.find(r => r.timepoint === tp)?.detector_name || '';
             return `<div class="eval-dot ${className}"
                          title="${title}"
+                         data-timepoint="${tp}"
+                         data-detector="${detectorName}"
                          onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
                         <span class="eval-dot-label">T${tp}</span>
                     </div>`;

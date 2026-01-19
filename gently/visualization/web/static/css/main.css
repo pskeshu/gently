@@ -3143,6 +3143,12 @@ kbd {
     z-index: 5;
 }
 
+.eval-dot.active {
+    transform: scale(1.15);
+    box-shadow: 0 0 0 2px var(--accent), 0 0 8px rgba(96, 165, 250, 0.4);
+    z-index: 10;
+}
+
 .eval-dot.low {
     background: var(--bg-hover);
 }
