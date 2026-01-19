@@ -1979,14 +1979,16 @@ const EmbryosManager = {
                 </div>
                 ${contextHtml}
                 ${reasoningHtml}
+                <div class="detection-actions-row">
+                    <button class="view-more-btn" onclick="event.stopPropagation(); EmbryosManager.view3D('${this.selectedEmbryoId}', ${detection.timepoint})" title="Open 3D Volume Viewer">
+                        <span class="view-more-icon">&#x1F4D0;</span> View 3D
+                    </button>
+                </div>
                 ${hasImage ? `
                     <div class="detection-image-section">
                         <button class="toggle-image-btn" onclick="event.stopPropagation(); EmbryosManager.toggleImage('${index}', '${imageUid}')">
                             <span class="toggle-icon">${imageExpanded ? '&#x25BC;' : '&#x25B6;'}</span>
                             ${imageExpanded ? 'Hide' : 'Show'} Volume Projection
-                        </button>
-                        <button class="view-more-btn" onclick="event.stopPropagation(); EmbryosManager.view3D('${this.selectedEmbryoId}', ${detection.timepoint})" title="Open 3D Volume Viewer">
-                            <span class="view-more-icon">&#x1F4D0;</span> View 3D
                         </button>
                         <div class="detection-image-container ${imageExpanded ? 'expanded' : ''}" id="detection-image-${index}">
                             ${imageExpanded ? `<img src="/api/images/${imageUid}/png" alt="Volume projection" class="detection-image" />` : ''}

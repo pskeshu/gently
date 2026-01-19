@@ -6418,13 +6418,21 @@ kbd {
     height: 100%;
 }
 
+/* Detection actions row */
+.detection-actions-row {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border);
+}
+
 /* View More button in detection cards */
 .view-more-btn {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
     padding: 0.4rem 0.75rem;
-    margin-left: 0.5rem;
     background: var(--bg-hover);
     border: 1px solid var(--border);
     border-radius: 6px;
