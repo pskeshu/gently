@@ -11,15 +11,18 @@ Usage:
     python -m gently.dataset serve --port 8765
 """
 
+import asyncio
 import base64
 import io
 import json
 import logging
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -473,6 +476,125 @@ PROJECTION_METHODS = {
 
 logger = logging.getLogger(__name__)
 
+
+# =============================================================================
+# Presence Tracking (Collaborative Feature)
+# =============================================================================
+
+@dataclass
+class ClientInfo:
+    """Information about a connected WebSocket client for presence tracking"""
+    client_id: str
+    name: str
+    color: str  # Hex color for avatar background
+    connected_at: str
+
+
+class ConnectionManager:
+    """Manages WebSocket connections for broadcasting updates with presence tracking"""
+
+    # Colors for avatar backgrounds (pleasant, distinct colors)
+    AVATAR_COLORS = [
+        '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8',
+        '#ff922b', '#20c997', '#748ffc', '#f06595', '#69db7c',
+        '#ffa94d', '#9775fa', '#38d9a9', '#e599f7', '#74c0fc'
+    ]
+
+    def __init__(self):
+        self.active_connections: Dict[WebSocket, ClientInfo] = {}
+        self._lock = asyncio.Lock()
+
+    def _generate_color(self, client_id: str) -> str:
+        """Generate consistent color from client_id"""
+        hash_val = sum(ord(c) for c in client_id)
+        return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
+
+    async def connect(self, websocket: WebSocket, client_id: str = None, name: str = None):
+        await websocket.accept()
+
+        # Generate defaults if not provided
+        if not client_id:
+            import uuid
+            client_id = str(uuid.uuid4())[:8]
+        if not name:
+            name = f"Anonymous {client_id[:4]}"
+
+        client_info = ClientInfo(
+            client_id=client_id,
+            name=name,
+            color=self._generate_color(client_id),
+            connected_at=datetime.now().isoformat()
+        )
+
+        async with self._lock:
+            self.active_connections[websocket] = client_info
+        logger.info(f"WebSocket connected: {name} ({client_id}). Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to all clients
+        await self.broadcast_presence()
+
+    async def disconnect(self, websocket: WebSocket):
+        async with self._lock:
+            client_info = self.active_connections.pop(websocket, None)
+        if client_info:
+            logger.info(f"WebSocket disconnected: {client_info.name}. Total: {len(self.active_connections)}")
+        else:
+            logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
+
+        # Broadcast updated presence to remaining clients
+        await self.broadcast_presence()
+
+    async def update_client_name(self, websocket: WebSocket, name: str):
+        """Update a client's display name"""
+        async with self._lock:
+            if websocket in self.active_connections:
+                old_info = self.active_connections[websocket]
+                self.active_connections[websocket] = ClientInfo(
+                    client_id=old_info.client_id,
+                    name=name,
+                    color=old_info.color,
+                    connected_at=old_info.connected_at
+                )
+        await self.broadcast_presence()
+
+    def get_client_info(self, websocket: WebSocket) -> Optional[ClientInfo]:
+        """Get client info for a websocket"""
+        return self.active_connections.get(websocket)
+
+    async def broadcast_presence(self):
+        """Broadcast current presence list to all clients"""
+        if not self.active_connections:
+            return
+
+        # Deduplicate by client_id (same user in multiple tabs = one avatar)
+        async with self._lock:
+            seen_clients = {}
+            for ws, info in self.active_connections.items():
+                # Keep the most recent entry for each client_id
+                seen_clients[info.client_id] = {
+                    'client_id': info.client_id,
+                    'name': info.name,
+                    'color': info.color
+                }
+            clients_list = list(seen_clients.values())
+
+        # Send personalized presence to each client (with is_you flag)
+        for ws, info in list(self.active_connections.items()):
+            try:
+                personalized = []
+                for client in clients_list:
+                    personalized.append({
+                        **client,
+                        'is_you': client['client_id'] == info.client_id
+                    })
+                await ws.send_json({
+                    'type': 'presence',
+                    'clients': personalized
+                })
+            except Exception as e:
+                logger.warning(f"Failed to send presence to client: {e}")
+
+
 # Pydantic models for API
 class GroundTruthCreate(BaseModel):
     session_id: str
@@ -519,6 +641,9 @@ class DatasetExplorer:
         self.base_dir = Path(__file__).parent
         self.templates_dir = self.base_dir / "templates"
         self.static_dir = self.base_dir / "static"
+
+        # Presence tracking for collaborative features
+        self.manager = ConnectionManager()
 
         self.app = FastAPI(
             title="Embryo Dataset Explorer",
@@ -640,7 +765,7 @@ class DatasetExplorer:
         async def get_embryo_timeline_by_uid(uid: str):
             """Get complete cross-session timeline for an embryo."""
             timeline = self.dataset.get_embryo_timeline_by_uid(uid)
-            if not timeline.get("sessions"):
+            if not timeline.get("timeline"):
                 raise HTTPException(status_code=404, detail="Embryo UID not found")
             return timeline
 
@@ -843,6 +968,126 @@ class DatasetExplorer:
             }
 
         # =====================================================================
+        # Perception Traces API (from JSON files)
+        # =====================================================================
+
+        @app.get("/api/trace/{session_id}/{embryo_id}/{timepoint}")
+        async def get_perception_trace(session_id: str, embryo_id: str, timepoint: int):
+            """Get perception trace from JSON file."""
+            # Look for trace file in traces directory
+            traces_dir = self.db_path.parent / "traces" / session_id
+            trace_file = traces_dir / f"{embryo_id}_T{timepoint:04d}.json"
+
+            if not trace_file.exists():
+                raise HTTPException(status_code=404, detail="Trace not found")
+
+            try:
+                trace_data = json.loads(trace_file.read_text(encoding="utf-8"))
+                return trace_data
+            except Exception as e:
+                logger.error(f"Failed to read trace file: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @app.get("/api/traces/{session_id}/{embryo_id}")
+        async def list_perception_traces(session_id: str, embryo_id: str):
+            """List available perception traces for an embryo."""
+            traces_dir = self.db_path.parent / "traces" / session_id
+            if not traces_dir.exists():
+                return []
+
+            traces = []
+            for trace_file in sorted(traces_dir.glob(f"{embryo_id}_T*.json")):
+                # Extract timepoint from filename
+                try:
+                    tp_str = trace_file.stem.split("_T")[-1]
+                    timepoint = int(tp_str)
+                    traces.append({"timepoint": timepoint, "file": trace_file.name})
+                except (ValueError, IndexError):
+                    continue
+
+            return traces
+
+        @app.get("/api/unified_timeline/{embryo_uid}")
+        async def get_unified_timeline(embryo_uid: str):
+            """Get unified timeline of all images across sessions for an embryo UID."""
+            # Get all volumes for this embryo UID
+            # Sort by session (using min timestamp per session) then by timepoint within session
+            conn = get_connection(self.db_path)
+            rows = conn.execute("""
+                SELECT
+                    v.uid,
+                    v.session_id,
+                    v.embryo_id,
+                    v.timepoint,
+                    v.timestamp,
+                    v.file_path,
+                    (SELECT MIN(v2.uid) FROM volumes v2 WHERE v2.session_id = v.session_id) as session_min_uid
+                FROM volumes v
+                WHERE v.embryo_uid = ?
+                ORDER BY session_min_uid ASC, v.uid ASC
+            """, (embryo_uid,)).fetchall()
+
+            if not rows:
+                conn.close()
+                raise HTTPException(status_code=404, detail="Embryo UID not found")
+
+            # Get ground truth for all session/embryo combinations
+            # Ground truth start_timepoint/end_timepoint are ROW INDICES, not v.timepoint!
+            session_embryos = set((r[1], r[2]) for r in rows)
+            gt_maps = {}
+            for session_id, embryo_id in session_embryos:
+                gt_rows = conn.execute("""
+                    SELECT stage, start_timepoint, end_timepoint
+                    FROM ground_truth
+                    WHERE session_id = ? AND embryo_id = ?
+                    ORDER BY start_timepoint
+                """, (session_id, embryo_id)).fetchall()
+                gt_maps[(session_id, embryo_id)] = gt_rows
+            conn.close()
+
+            # Build unified image list with ground truth based on row index within each session/embryo
+            images = []
+            session_embryo_counts = {}  # Track row index within each session/embryo
+
+            for idx, r in enumerate(rows):
+                session_id = r[1]
+                embryo_id = r[2]
+                key = (session_id, embryo_id)
+
+                # Get the row index within this session/embryo
+                row_idx = session_embryo_counts.get(key, 0)
+                session_embryo_counts[key] = row_idx + 1
+
+                # Look up ground truth using row index (not v.timepoint!)
+                gt_stage = None
+                for stage, start_tp, end_tp in gt_maps.get(key, []):
+                    # start_timepoint and end_timepoint are row indices
+                    if row_idx >= start_tp and (end_tp is None or row_idx < end_tp):
+                        gt_stage = stage
+                        break
+
+                images.append({
+                    "index": idx,
+                    "uid": r[0],
+                    "session_id": session_id,
+                    "embryo_id": embryo_id,
+                    "timepoint": r[3],
+                    "timestamp": r[4],
+                    "file_path": r[5],
+                    "ground_truth_stage": gt_stage,
+                })
+
+            # Get unique sessions
+            sessions = list(set(img["session_id"] for img in images))
+
+            return {
+                "embryo_uid": embryo_uid,
+                "total_images": len(images),
+                "sessions": sessions,
+                "images": images,
+            }
+
+        # =====================================================================
         # Projections API (for View More feature)
         # =====================================================================
 
@@ -939,6 +1184,51 @@ class DatasetExplorer:
         async def projections_page(session_id: str, embryo_id: str, index: int):
             """Serve the full projection viewer page."""
             return self._get_projections_html(session_id, embryo_id, index)
+
+        # =====================================================================
+        # WebSocket for Presence
+        # =====================================================================
+
+        @app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            """WebSocket endpoint for presence tracking."""
+            await self.manager.connect(websocket)
+            try:
+                while True:
+                    data = await websocket.receive_json()
+                    msg_type = data.get('type')
+
+                    if msg_type == 'join':
+                        # Client joining with ID and name
+                        client_id = data.get('client_id')
+                        name = data.get('name')
+                        # Update client info
+                        async with self.manager._lock:
+                            if websocket in self.manager.active_connections:
+                                old_info = self.manager.active_connections[websocket]
+                                self.manager.active_connections[websocket] = ClientInfo(
+                                    client_id=client_id or old_info.client_id,
+                                    name=name or old_info.name,
+                                    color=self.manager._generate_color(client_id or old_info.client_id),
+                                    connected_at=old_info.connected_at
+                                )
+                        await self.manager.broadcast_presence()
+
+                    elif msg_type == 'update_name':
+                        # Client updating their display name
+                        name = data.get('name')
+                        if name:
+                            await self.manager.update_client_name(websocket, name)
+
+                    elif msg_type == 'get_presence':
+                        # Client requesting current presence list
+                        await self.manager.broadcast_presence()
+
+            except WebSocketDisconnect:
+                await self.manager.disconnect(websocket)
+            except Exception as e:
+                logger.warning(f"WebSocket error: {e}")
+                await self.manager.disconnect(websocket)
 
     def _get_explorer_html(self) -> str:
         """Load and return the explorer HTML page from template."""

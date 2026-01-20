@@ -442,9 +442,12 @@ class EmbryoDataset:
         Get ground truth stage → (start_tp, end_tp) mapping.
 
         Returns dict like: {"early": (0, 42), "bean": (43, 48), ...}
+
+        Uses stored end_timepoint if available, otherwise calculates from
+        the start of the next stage.
         """
         query = """
-            SELECT stage, start_timepoint FROM ground_truth
+            SELECT stage, start_timepoint, end_timepoint FROM ground_truth
             WHERE embryo_id = ?
         """
         params = [embryo_id]
@@ -461,9 +464,12 @@ class EmbryoDataset:
             return {}
 
         gt_map = {}
-        for i, (stage, start_tp) in enumerate(rows):
-            # End timepoint is start of next stage - 1, or infinity
-            if i + 1 < len(rows):
+        for i, (stage, start_tp, stored_end_tp) in enumerate(rows):
+            # Use stored end_timepoint if available (exclusive, so subtract 1)
+            # Otherwise calculate from next stage's start
+            if stored_end_tp is not None:
+                end_tp = stored_end_tp - 1  # Convert exclusive to inclusive
+            elif i + 1 < len(rows):
                 end_tp = rows[i + 1][1] - 1
             else:
                 end_tp = 999999
@@ -846,6 +852,7 @@ class EmbryoDataset:
 
         # Load volume
         volume = tifffile.imread(volume_path)
+        volume = np.squeeze(volume)
 
         # Handle different shapes
         if volume.ndim == 4:
@@ -853,10 +860,18 @@ class EmbryoDataset:
             volume = volume[0]
 
         if volume.ndim == 3:
-            # [z, y, x] - max projection
+            z_depth, height, width = volume.shape
+            # Extract View A (left half) if dual-view format
+            if width > height * 1.5:
+                volume = volume[:, :, :width // 2]
+            # Max projection
             projection = np.max(volume, axis=0)
         else:
             projection = volume
+            # Extract View A if 2D dual-view
+            height, width = projection.shape
+            if width > height * 1.5:
+                projection = projection[:, :width // 2]
 
         # Normalize to 8-bit
         projection = projection.astype(np.float32)
@@ -894,8 +909,7 @@ class EmbryoDataset:
                 (SELECT COUNT(*) FROM ground_truth g
                  WHERE g.session_id = s.session_id) as gt_count,
                 (SELECT COUNT(*) FROM volumes v
-                 JOIN embryos e2 ON v.embryo_id = e2.embryo_id
-                 WHERE e2.session_id = s.session_id) as volume_count
+                 WHERE v.session_id = s.session_id) as volume_count
             FROM sessions s
             LEFT JOIN embryos e ON s.session_id = e.session_id
             GROUP BY s.session_id
@@ -1293,7 +1307,10 @@ class EmbryoDataset:
                 (SELECT SUM(cnt) FROM (
                     SELECT COUNT(*) as cnt FROM volumes v
                     WHERE v.embryo_uid = e.embryo_uid
-                )) as total_volumes
+                )) as total_volumes,
+                (SELECT COUNT(*) FROM ground_truth g
+                 JOIN embryos e2 ON g.session_id = e2.session_id AND g.embryo_id = e2.embryo_id
+                 WHERE e2.embryo_uid = e.embryo_uid) as gt_count
             FROM embryos e
             WHERE embryo_uid IS NOT NULL
             GROUP BY embryo_uid
@@ -1309,6 +1326,7 @@ class EmbryoDataset:
                 "first_seen": r[3],
                 "last_seen": r[4],
                 "total_volumes": r[5],
+                "has_ground_truth": r[6] > 0 if r[6] else False,
             }
             for r in rows
         ]
