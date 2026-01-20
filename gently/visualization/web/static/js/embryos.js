@@ -939,6 +939,8 @@ const EmbryosManager = {
             'pretzel': '🥨',
             'hatching': '🐣',
             'hatched': '🐛',
+            'arrested': '⏸️',
+            'no_object': '⬜',
         };
         return icons[stage?.toLowerCase()] || '🔬';
     },
@@ -956,6 +958,8 @@ const EmbryosManager = {
             'pretzel': 'Pretzel',
             'hatching': 'Hatching',
             'hatched': 'Hatched',
+            'arrested': 'Arrested',
+            'no_object': 'Empty',
         };
         return names[stage.toLowerCase()] || stage;
     },

@@ -1324,11 +1324,32 @@ class TimelapseOrchestrator:
         if embryo_state.no_object_since_timepoint is not None:
             timepoints_since_no_object = timepoint - embryo_state.no_object_since_timepoint
             if timepoints_since_no_object % self.NO_OBJECT_RECHECK_INTERVAL != 0:
+                # Calculate next recheck timepoint
+                next_recheck = embryo_state.no_object_since_timepoint + (
+                    (timepoints_since_no_object // self.NO_OBJECT_RECHECK_INTERVAL + 1)
+                    * self.NO_OBJECT_RECHECK_INTERVAL
+                )
+                timepoints_until_recheck = next_recheck - timepoint
+
                 logger.debug(
                     f"Skipping perception for {embryo_id} t={timepoint} "
                     f"(no_object since t={embryo_state.no_object_since_timepoint}, "
-                    f"next recheck at t={embryo_state.no_object_since_timepoint + ((timepoints_since_no_object // self.NO_OBJECT_RECHECK_INTERVAL + 1) * self.NO_OBJECT_RECHECK_INTERVAL)})"
+                    f"next recheck at t={next_recheck})"
                 )
+
+                # Emit skipped event for viz server
+                self._emit_event(EventType.DETECTOR_EVALUATED, {
+                    'embryo_id': embryo_id,
+                    'timepoint': timepoint,
+                    'detector_name': 'perception',
+                    'stage': 'no_object',
+                    'is_hatching': False,
+                    'confidence': 1.0,
+                    'reasoning': f"Skipped (empty field). Rechecking in {timepoints_until_recheck} timepoint{'s' if timepoints_until_recheck != 1 else ''}.",
+                    'is_transitional': False,
+                    'transition_between': None,
+                    'skipped': True,  # Flag to indicate this was skipped
+                })
                 return
             else:
                 logger.info(
