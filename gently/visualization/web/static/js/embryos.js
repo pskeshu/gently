@@ -3196,10 +3196,74 @@ const EmbryosManager = {
         if (imageList.length > 0 && typeof Lightbox !== 'undefined') {
             Lightbox.openWithSequence(imageList, index, 'reasoning');
         }
+    },
+
+    // Navigate to previous timepoint in detail panel
+    navigateToPrevTimepoint() {
+        if (!this.currentDetailItem || !this.selectedEmbryoId) return;
+
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        if (reasoning.length === 0) return;
+
+        // Sort by timepoint ascending
+        const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+
+        // Find current index
+        const currentIdx = sorted.findIndex(r =>
+            r.timepoint === this.currentDetailItem.timepoint &&
+            r.detector_name === this.currentDetailItem.detector_name
+        );
+
+        if (currentIdx > 0) {
+            const prevItem = sorted[currentIdx - 1];
+            this.openDetailPanel(prevItem.detector_name, prevItem.timepoint);
+        }
+    },
+
+    // Navigate to next timepoint in detail panel
+    navigateToNextTimepoint() {
+        if (!this.currentDetailItem || !this.selectedEmbryoId) return;
+
+        const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
+        if (reasoning.length === 0) return;
+
+        // Sort by timepoint ascending
+        const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+
+        // Find current index
+        const currentIdx = sorted.findIndex(r =>
+            r.timepoint === this.currentDetailItem.timepoint &&
+            r.detector_name === this.currentDetailItem.detector_name
+        );
+
+        if (currentIdx >= 0 && currentIdx < sorted.length - 1) {
+            const nextItem = sorted[currentIdx + 1];
+            this.openDetailPanel(nextItem.detector_name, nextItem.timepoint);
+        }
+    },
+
+    // Setup keyboard navigation
+    setupKeyboardNavigation() {
+        document.addEventListener('keydown', (e) => {
+            // Only handle if detail panel is visible and we're on the embryos tab
+            if (!this.detailPanelVisible || !this.currentDetailItem) return;
+
+            // Don't handle if user is typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                this.navigateToPrevTimepoint();
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                this.navigateToNextTimepoint();
+            }
+        });
     }
 };
 
 // Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
     EmbryosManager.init();
+    EmbryosManager.setupKeyboardNavigation();
 });
