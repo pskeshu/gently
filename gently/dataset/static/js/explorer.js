@@ -887,7 +887,7 @@ async function loadStats() {
     document.getElementById('stat-sessions').textContent = stats.sessions?.toLocaleString() || 0;
     document.getElementById('stat-embryos').textContent = stats.embryos?.toLocaleString() || 0;
     document.getElementById('stat-volumes').textContent = stats.volumes?.toLocaleString() || 0;
-    document.getElementById('stat-images').textContent = stats.images?.toLocaleString() || 0;
+    document.getElementById('stat-embryos_with_gt').textContent = stats.embryos_with_gt?.toLocaleString() || 0;
     document.getElementById('stat-ground_truth').textContent = stats.ground_truth?.toLocaleString() || 0;
 }
 

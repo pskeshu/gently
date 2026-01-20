@@ -554,6 +554,11 @@ def get_database_stats(conn: sqlite3.Connection) -> dict:
         "SELECT COUNT(DISTINCT session_id || embryo_id) FROM volumes"
     ).fetchone()[0]
 
+    # Count unique embryos with ground truth (more useful than annotation count)
+    stats['embryos_with_gt'] = conn.execute(
+        "SELECT COUNT(DISTINCT session_id || '|' || embryo_id) FROM ground_truth"
+    ).fetchone()[0]
+
     # Date range
     result = conn.execute(
         "SELECT MIN(timestamp), MAX(timestamp) FROM volumes"
