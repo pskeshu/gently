@@ -72,6 +72,7 @@ class PerceptionManager:
         embryo_id: str,
         timepoint: int,
         image_b64: str,
+        volume=None,
     ) -> PerceptionResult:
         """
         Process an image through the perception system.
@@ -84,6 +85,9 @@ class PerceptionManager:
             Current timepoint number
         image_b64 : str
             Base64-encoded image
+        volume : np.ndarray, optional
+            3D volume data for view_embryo tool. If provided, enables
+            rotated views during analysis.
 
         Returns
         -------
@@ -109,6 +113,7 @@ class PerceptionManager:
                 image_b64=image_b64,
                 session=session,
                 timepoint=timepoint,
+                volume=volume,
             )
         except Exception as e:
             logger.error(f"Perception failed for {embryo_id}: {e}")

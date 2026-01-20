@@ -345,6 +345,41 @@ const Lightbox = {
         if (this.els.thumbnails) this.els.thumbnails.style.display = '';
     },
 
+    /**
+     * Update the image list while lightbox is open (e.g., when new images arrive)
+     * Preserves current position if possible, re-renders thumbnails
+     */
+    updateImageList(newImageList) {
+        if (!this.isOpen || !newImageList || newImageList.length === 0) return;
+
+        // Find the UID of the currently displayed image to try to preserve position
+        const currentImage = this.imageList[this.currentIndex];
+        const currentUid = currentImage?.uid;
+
+        this.imageList = newImageList;
+
+        // Try to find the same image in the new list
+        if (currentUid) {
+            const newIndex = newImageList.findIndex(img => img.uid === currentUid);
+            if (newIndex >= 0) {
+                this.currentIndex = newIndex;
+            } else {
+                // Image no longer in list, clamp to valid range
+                this.currentIndex = Math.min(this.currentIndex, newImageList.length - 1);
+            }
+        } else {
+            this.currentIndex = Math.min(this.currentIndex, newImageList.length - 1);
+        }
+
+        // Update position display
+        if (this.els.position) {
+            this.els.position.textContent = `${this.currentIndex + 1} of ${this.imageList.length}`;
+        }
+
+        // Re-render thumbnails
+        this.renderThumbnails();
+    },
+
     navigate(direction) {
         const newIndex = this.currentIndex + direction;
         if (newIndex >= 0 && newIndex < this.imageList.length) {

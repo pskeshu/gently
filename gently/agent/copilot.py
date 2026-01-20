@@ -1749,6 +1749,12 @@ Write a brief status summary. Examples:
             'shape': list(volume.shape),
         })
 
+        # Return UIDs so orchestrator can include them in perception events
+        return {
+            'volume_uid': record.volume_uid,
+            'projection_uid': record.projection_uid,
+        }
+
     def should_stop_experiment(self) -> bool:
         """Check if experiment should stop (e.g., all embryos hatched)"""
         if not self.experiment.embryos:

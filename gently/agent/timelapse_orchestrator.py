@@ -703,6 +703,7 @@ class TimelapseOrchestrator:
 
                 # Callback for volume/image processing
                 volume_data = None
+                volume_uids = None  # Track UIDs from storage for perception events
                 if self.on_volume_callback:
                     # Get data - 'volume' for volume mode, 'image' for snap mode
                     data = result.get('volume') if acquisition_mode == 'volume' else result.get('image')
@@ -715,11 +716,14 @@ class TimelapseOrchestrator:
                         if acquisition_mode == 'snap' and data.ndim == 2:
                             data = data[np.newaxis, ...]  # Add Z dimension: (Y,X) -> (1,Y,X)
                         volume_data = data
-                        await self.on_volume_callback(
+                        # Callback may return UIDs from storage
+                        callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,
                             data
                         )
+                        if isinstance(callback_result, dict):
+                            volume_uids = callback_result
 
                 # Run perception on acquired volume
                 if self.perception_manager and volume_data is not None:
@@ -728,6 +732,7 @@ class TimelapseOrchestrator:
                         timepoint=embryo_state.timepoints_acquired,
                         volume=volume_data,
                         embryo_state=embryo_state,
+                        volume_uids=volume_uids,
                     )
 
                 # Check stop condition
@@ -1285,6 +1290,7 @@ class TimelapseOrchestrator:
         timepoint: int,
         volume,
         embryo_state: EmbryoAcquisitionState,
+        volume_uids: dict = None,
     ):
         """
         Run perception on acquired volume.
@@ -1349,11 +1355,12 @@ class TimelapseOrchestrator:
                 logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
                 return
 
-            # Run perception
+            # Run perception (pass view_a volume for view_embryo tool support)
             result = await self.perception_manager.process_image(
                 embryo_id=embryo_id,
                 timepoint=timepoint,
                 image_b64=image_b64,
+                volume=view_a,
             )
 
             # Persist trace to JSON file (if trace directory is available)
@@ -1375,6 +1382,11 @@ class TimelapseOrchestrator:
                 'is_transitional': result.is_transitional,
                 'transition_between': result.transition_between,
             }
+
+            # Include volume/projection UIDs for viz server image linking
+            if volume_uids:
+                event_data['volume_uid'] = volume_uids.get('volume_uid')
+                event_data['projection_uid'] = volume_uids.get('projection_uid')
 
             # Add observed features if available
             if result.observed_features:

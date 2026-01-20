@@ -1416,8 +1416,8 @@ const EmbryosManager = {
         let html = visibleItems.map(item => {
             const itemKey = `${rangeKey}-${item.timepoint}`;
             const isExpanded = this.expandedRangeItems[itemKey] || false;
-            const storedUid = item.projection_uid || item.volume_uid;
-            const imageUid = storedUid || `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
+            // Only use stored UIDs - don't guess with fallback patterns as they can match wrong datasets
+            const imageUid = item.projection_uid || item.volume_uid || null;
             const isInteresting = this.calculateInterestScore(item, allReasoning) > 0.5;
 
             return `
@@ -1478,8 +1478,8 @@ const EmbryosManager = {
 
     // Render inline expansion with thumbnail and truncated reasoning
     renderInlineExpansion(item) {
-        const storedUid = item.projection_uid || item.volume_uid;
-        const imageUid = storedUid || `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
+        // Only use stored UIDs - don't guess with fallback patterns as they can match wrong datasets
+        const imageUid = item.projection_uid || item.volume_uid || null;
         const reasoning = item.reasoning || 'No reasoning provided';
         const truncatedReasoning = reasoning.length > 250
             ? reasoning.substring(0, 250) + '...'
@@ -1630,10 +1630,8 @@ const EmbryosManager = {
 
     // Render the detail panel content
     renderDetailPanel(item) {
-        // Try stored UIDs first, then construct fallback pattern matching copilot
-        const storedUid = item.projection_uid || item.volume_uid;
-        const fallbackUid = `volume_${this.selectedEmbryoId}_t${String(item.timepoint).padStart(4, '0')}`;
-        const imageUid = storedUid || fallbackUid;
+        // Only use stored UIDs - don't guess with fallback patterns as they can match wrong datasets
+        const imageUid = item.projection_uid || item.volume_uid || null;
         const reasoning = item.reasoning || 'No reasoning provided';
 
         // Linkify timepoints in reasoning
@@ -1735,9 +1733,20 @@ const EmbryosManager = {
                         break;
                     case 'tool_call':
                         icon = '🔧';
-                        label = step.tool_name === 'view_previous_timepoint'
-                            ? `Request T-${step.tool_input?.offset || '?'}`
-                            : `Request ${step.tool_input?.stage || '?'} ref`;
+                        if (step.tool_name === 'view_previous_timepoint') {
+                            label = `View T-${step.tool_input?.offset || '?'}`;
+                        } else if (step.tool_name === 'view_embryo') {
+                            const rx = step.tool_input?.rotation_x || 0;
+                            const ry = step.tool_input?.rotation_y || 0;
+                            label = `View 3D (${rx}°, ${ry}°)`;
+                        } else if (step.tool_name === 'request_verification') {
+                            const numComparisons = step.tool_input?.comparisons?.length || 0;
+                            label = `Verify (${numComparisons} comparisons)`;
+                        } else if (step.tool_name === 'get_reference') {
+                            label = `Get ${step.tool_input?.stage || '?'} ref`;
+                        } else {
+                            label = step.tool_name || 'Tool call';
+                        }
                         break;
                     case 'tool_result':
                         icon = '📷';
@@ -1746,6 +1755,18 @@ const EmbryosManager = {
                     case 'final_decision':
                         icon = '✓';
                         label = 'Decision';
+                        break;
+                    case 'verification_requested':
+                        icon = '🔀';
+                        label = 'Verification';
+                        break;
+                    case 'verification_subagent':
+                        icon = '🤖';
+                        label = step.tool_result_summary || 'Subagent';
+                        break;
+                    case 'verification_result':
+                        icon = '📊';
+                        label = 'Aggregation';
                         break;
                     default:
                         icon = '•';

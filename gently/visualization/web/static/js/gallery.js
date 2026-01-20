@@ -61,6 +61,15 @@ const CalibrationManager = {
             this._prependImageToPanel(newImage);
         }
 
+        // Update lightbox if it's open and showing calibration images for this embryo
+        if (Lightbox.isOpen && Lightbox.source === 'calibration' && this.selectedEmbryoId === embryoId) {
+            const images = state.calibration.filter(img =>
+                (img.metadata?.embryo_id || 'General') === this.selectedEmbryoId
+            );
+            const displayList = images.slice(-50).reverse();
+            Lightbox.updateImageList(displayList);
+        }
+
         this._lastImageCount = state.calibration.length;
         return true;
     },

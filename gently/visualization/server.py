@@ -1311,9 +1311,15 @@ class VisualizationServer:
                 bounds = compute_crop_bounds(vol)
                 vol = apply_crop_bounds(vol, bounds)
 
-                # Normalize to uint8
+                # Normalize using percentile-based contrast stretching (like projection_explorer)
+                from scipy import ndimage
                 vol = vol.astype(np.float32)
-                vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
+                p1, p99 = np.percentile(vol, [1, 99])
+                vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+                # Apply Gaussian blur along Z axis to reduce banding at side views
+                vol = ndimage.gaussian_filter1d(vol, sigma=1.0, axis=0)
+
                 vol_uint8 = (vol * 255).astype(np.uint8)
 
                 # Encode as base64

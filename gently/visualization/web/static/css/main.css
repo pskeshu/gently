@@ -2251,6 +2251,12 @@ kbd {
     min-width: 35px;
 }
 
+.pv-3d-controls label:not(:first-child) {
+    margin-left: 1rem;
+    padding-left: 1rem;
+    border-left: 1px solid var(--border);
+}
+
 .pv-3d-info {
     padding: 0.5rem 1rem;
     font-size: 0.75rem;

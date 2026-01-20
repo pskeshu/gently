@@ -22,6 +22,8 @@ const ProjectionViewer = {
     isDragging: false,
     prevMouse: { x: 0, y: 0 },
     animationId: null,
+    contrast: 1.0,
+    threshold: 30,
 
     init() {
         // Create modal if it doesn't exist
@@ -65,6 +67,9 @@ const ProjectionViewer = {
                                     <label>Threshold:</label>
                                     <input type="range" id="pv-threshold" min="0" max="100" value="30">
                                     <span id="pv-threshold-val">0.30</span>
+                                    <label>Contrast:</label>
+                                    <input type="range" id="pv-contrast" min="50" max="300" value="100">
+                                    <span id="pv-contrast-val">1.0</span>
                                 </div>
                             </div>
                             <div class="pv-3d-info">
@@ -313,16 +318,28 @@ const ProjectionViewer = {
         this.sliceGroup.scale.y = -1;  // Flip Y to match orientation
         this.scene3d.add(this.sliceGroup);
 
-        this.buildSlices(32, 30);
+        this.threshold = 30;
+        this.contrast = 1.0;
+        this.buildSlices(32);
 
         // Threshold control
         const threshSlider = document.getElementById('pv-threshold');
         const threshDisplay = document.getElementById('pv-threshold-val');
 
         threshSlider.addEventListener('input', (e) => {
-            const threshVal = parseInt(e.target.value);
-            this.buildSlices(32, threshVal);
-            threshDisplay.textContent = (threshVal / 100).toFixed(2);
+            this.threshold = parseInt(e.target.value);
+            this.buildSlices(32);
+            threshDisplay.textContent = (this.threshold / 100).toFixed(2);
+        });
+
+        // Contrast control
+        const contrastSlider = document.getElementById('pv-contrast');
+        const contrastDisplay = document.getElementById('pv-contrast-val');
+
+        contrastSlider.addEventListener('input', (e) => {
+            this.contrast = parseInt(e.target.value) / 100;
+            this.buildSlices(32);
+            contrastDisplay.textContent = this.contrast.toFixed(1);
         });
 
         // Mouse controls
@@ -370,19 +387,22 @@ const ProjectionViewer = {
         animate();
     },
 
-    createSliceTexture(zIndex, threshold) {
+    createSliceTexture(zIndex, threshold, contrast) {
         const [zd, h, w] = this.volumeShape;
         const sliceSize = w * h;
         const offset = zIndex * sliceSize;
         const rgba = new Uint8Array(w * h * 4);
 
         for (let i = 0; i < sliceSize; i++) {
-            const val = this.volumeData[offset + i];
+            let val = this.volumeData[offset + i];
             if (val > threshold) {
+                // Apply contrast adjustment around midpoint
+                val = Math.round(((val - 128) * contrast) + 128);
+                val = Math.max(0, Math.min(255, val));
                 rgba[i * 4] = val;
                 rgba[i * 4 + 1] = val;
                 rgba[i * 4 + 2] = val;
-                rgba[i * 4 + 3] = Math.min(255, (val - threshold) * 2);
+                rgba[i * 4 + 3] = Math.min(255, (this.volumeData[offset + i] - threshold) * 2);
             } else {
                 rgba[i * 4 + 3] = 0;
             }
@@ -393,7 +413,7 @@ const ProjectionViewer = {
         return tex;
     },
 
-    buildSlices(numSlices, threshold) {
+    buildSlices(numSlices) {
         if (!this.volumeShape || !this.sliceGroup) return;
         const [zd, h, w] = this.volumeShape;
 
@@ -411,7 +431,7 @@ const ProjectionViewer = {
         for (let i = 0; i < numSlices; i++) {
             const zIndex = Math.floor(i * zd / numSlices);
             const zPos = (i / numSlices - 0.5) * zScale;
-            const tex = this.createSliceTexture(zIndex, threshold);
+            const tex = this.createSliceTexture(zIndex, this.threshold, this.contrast);
             const mat = new THREE.MeshBasicMaterial({
                 map: tex,
                 transparent: true,
