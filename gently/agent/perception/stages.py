@@ -30,6 +30,7 @@ class DevelopmentalStage(str, Enum):
     HATCHING = "hatching"     # Active emergence, shell breach visible
     HATCHED = "hatched"       # Fully emerged L1 larva
     ARRESTED = "arrested"     # Dead or developmentally arrested embryo (special state)
+    NO_OBJECT = "no_object"   # No embryo visible in field of view (special state)
 
     @classmethod
     def ordered_list(cls) -> List["DevelopmentalStage"]:
@@ -62,12 +63,12 @@ class DevelopmentalStage(str, Enum):
     @classmethod
     def all_valid_values(cls) -> List[str]:
         """Return all valid stage values including special states like 'arrested'."""
-        return cls.ordered_values() + ["arrested"]
+        return cls.ordered_values() + ["arrested", "no_object"]
 
     @classmethod
     def is_special_state(cls, stage: str) -> bool:
         """Check if this is a special state (not part of normal progression)."""
-        return stage == cls.ARRESTED.value
+        return stage in (cls.ARRESTED.value, cls.NO_OBJECT.value)
 
     @classmethod
     def compare(cls, stage_a: str, stage_b: str) -> int:
@@ -228,6 +229,21 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
         ],
         "typical_duration_min": None,  # special state, not part of normal progression
     },
+    "no_object": {
+        "features": [
+            "Empty field of view - no embryo or eggshell visible",
+            "Only background/substrate visible",
+            "May contain debris, dust particles, or imaging artifacts",
+            "No recognizable biological structure",
+            "Uniform or noisy background without distinct objects",
+        ],
+        "NOT_if": [
+            "Any recognizable embryo or eggshell present",
+            "Clear biological structure visible, even if unclear stage",
+            "Distinct oval or round object that could be an embryo",
+        ],
+        "typical_duration_min": None,  # special state, not part of normal progression
+    },
 }
 
 
@@ -339,6 +355,7 @@ def get_stage_description(stage: str) -> str:
         "hatching": "Active emergence through shell breach",
         "hatched": "Fully emerged L1 larva",
         "arrested": "Development arrested - dead or stalled embryo",
+        "no_object": "No embryo visible in field of view",
     }
     return descriptions.get(stage, "Unknown stage")
 

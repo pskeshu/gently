@@ -892,11 +892,13 @@ EARLY→BEAN SENSITIVITY: Err on the side of detecting bean early. If you see AN
 - Figure-8 or peanut appearance in any view
 Mark as TRANSITIONAL (early→bean) or BEAN with appropriate confidence.
 
+SPECIAL: If the field of view is EMPTY (no embryo, no eggshell, only background/debris), return "no_object".
+
 Respond with JSON:
 {
   "observed_features": {"shape": "...", "curvature": "...", "shell_status": "...", "emergence": "..."},
   "contrastive_reasoning": {"why_not_previous_stage": "...", "why_not_next_stage": "..."},
-  "stage": "early|bean|comma|1.5fold|2fold|pretzel|hatching|hatched|arrested",
+  "stage": "early|bean|comma|1.5fold|2fold|pretzel|hatching|hatched|arrested|no_object",
   "is_transitional": true/false,
   "transition_between": ["stage1", "stage2"] or null,
   "confidence": 0.0-1.0,

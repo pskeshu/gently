@@ -289,6 +289,8 @@ class EmbryoAcquisitionState:
     # Track when detection first occurred (for confirm_timepoints feature)
     detection_triggered_at: Optional[int] = None  # Timepoint when detection first fired
     detection_type: Optional[str] = None  # What was detected (hatching, comma, etc.)
+    # Track no_object state for skipping perception
+    no_object_since_timepoint: Optional[int] = None  # Timepoint when no_object was first returned
 
 
 class TimelapseStatus(Enum):
@@ -1284,6 +1286,9 @@ class TimelapseOrchestrator:
             source="timelapse_orchestrator",
         )
 
+    # How often to recheck embryos marked as no_object (in timepoints)
+    NO_OBJECT_RECHECK_INTERVAL = 10
+
     async def _run_perception(
         self,
         embryo_id: str,
@@ -1297,6 +1302,9 @@ class TimelapseOrchestrator:
 
         Creates a dual-view projection image (top + side MIPs from View A)
         and sends to VLM for stage classification.
+
+        If the embryo was previously marked as no_object, perception is skipped
+        except for periodic rechecks (every NO_OBJECT_RECHECK_INTERVAL timepoints).
 
         Parameters
         ----------
@@ -1312,6 +1320,21 @@ class TimelapseOrchestrator:
         embryo_state : EmbryoAcquisitionState
             Current acquisition state
         """
+        # Check if we should skip perception for no_object embryos
+        if embryo_state.no_object_since_timepoint is not None:
+            timepoints_since_no_object = timepoint - embryo_state.no_object_since_timepoint
+            if timepoints_since_no_object % self.NO_OBJECT_RECHECK_INTERVAL != 0:
+                logger.debug(
+                    f"Skipping perception for {embryo_id} t={timepoint} "
+                    f"(no_object since t={embryo_state.no_object_since_timepoint}, "
+                    f"next recheck at t={embryo_state.no_object_since_timepoint + ((timepoints_since_no_object // self.NO_OBJECT_RECHECK_INTERVAL + 1) * self.NO_OBJECT_RECHECK_INTERVAL)})"
+                )
+                return
+            else:
+                logger.info(
+                    f"Rechecking no_object embryo {embryo_id} at t={timepoint}"
+                )
+
         try:
             import numpy as np
             from .perception.projection import (
@@ -1362,6 +1385,23 @@ class TimelapseOrchestrator:
                 image_b64=image_b64,
                 volume=view_a,
             )
+
+            # Track no_object state for skipping future perception
+            if result.stage == "no_object":
+                if embryo_state.no_object_since_timepoint is None:
+                    embryo_state.no_object_since_timepoint = timepoint
+                    logger.info(
+                        f"Embryo {embryo_id} marked as no_object at t={timepoint}, "
+                        f"will skip perception until recheck at t={timepoint + self.NO_OBJECT_RECHECK_INTERVAL}"
+                    )
+            else:
+                # Object found - clear no_object state if it was set
+                if embryo_state.no_object_since_timepoint is not None:
+                    logger.info(
+                        f"Embryo {embryo_id} now has object (stage={result.stage}) at t={timepoint}, "
+                        f"resuming normal perception (was no_object since t={embryo_state.no_object_since_timepoint})"
+                    )
+                    embryo_state.no_object_since_timepoint = None
 
             # Persist trace to JSON file (if trace directory is available)
             if self._trace_dir:
