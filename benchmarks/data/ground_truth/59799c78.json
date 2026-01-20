@@ -1,0 +1,39 @@
+{
+  "session_id": "59799c78",
+  "annotator": "developmental biologist",
+  "notes": "Annotations from December 2024. Biologist noted: 'I did find it difficult just using the max projections alone, as sometimes the embryo would orient itself in a way that made it hard to determine the location of the nose or tail.'",
+  "transitions": {
+    "embryo_1": {
+      "early": 0,
+      "bean": 43,
+      "comma": 49,
+      "1.5fold": 55,
+      "2fold": 70,
+      "pretzel": 90
+    },
+    "embryo_2": {
+      "early": 0,
+      "bean": 33,
+      "comma": 39,
+      "1.5fold": 45,
+      "2fold": 60,
+      "pretzel": 80
+    },
+    "embryo_3": {
+      "early": 0,
+      "bean": 27,
+      "comma": 33,
+      "1.5fold": 39,
+      "2fold": 50,
+      "pretzel": 69
+    },
+    "embryo_4": {
+      "early": 0,
+      "bean": 54,
+      "comma": 60,
+      "1.5fold": 69,
+      "2fold": 77,
+      "pretzel": 97
+    }
+  }
+}

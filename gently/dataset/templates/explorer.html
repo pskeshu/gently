@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Embryo Dataset Explorer</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/explorer.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header-toolbar">
+            <h1>Embryo Dataset Explorer</h1>
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <!-- Presence indicators -->
+                <div class="presence-container" id="presence-container">
+                    <!-- Avatars rendered by PresenceManager -->
+                </div>
+                <div id="server-status" style="font-size: 0.9em;">Checking...</div>
+                <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode">
+                    <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="5"></circle>
+                        <line x1="12" y1="1" x2="12" y2="3"></line>
+                        <line x1="12" y1="21" x2="12" y2="23"></line>
+                        <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                        <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                        <line x1="1" y1="12" x2="3" y2="12"></line>
+                        <line x1="21" y1="12" x2="23" y2="12"></line>
+                        <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                        <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                    </svg>
+                    <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div class="stats" id="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="stat-sessions">-</div>
+                <div class="stat-label">Sessions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="stat-embryos">-</div>
+                <div class="stat-label">Embryos</div>
+            </div>
+            <div class="stat-card" title="3D volume timepoints (TIFF stacks)">
+                <div class="stat-value" id="stat-volumes">-</div>
+                <div class="stat-label">Timepoints</div>
+            </div>
+            <div class="stat-card" title="Embryos with stage annotations">
+                <div class="stat-value" id="stat-embryos_with_gt">-</div>
+                <div class="stat-label">Annotated</div>
+            </div>
+            <div class="stat-card" title="Total stage annotation records">
+                <div class="stat-value" id="stat-ground_truth">-</div>
+                <div class="stat-label">Annotations</div>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <div class="sidebar">
+                <!-- View tabs -->
+                <div style="display: flex; gap: 5px; margin-bottom: 15px;">
+                    <button class="tab-btn active" id="tab-sessions">Sessions</button>
+                    <button class="tab-btn" id="tab-embryos">By Embryo UID</button>
+                </div>
+
+                <!-- Sessions view -->
+                <div id="sessions-view">
+                    <div style="margin-bottom: 10px;">
+                        <label style="font-size: 0.9em; cursor: pointer; display: block; margin-bottom: 5px;">
+                            <input type="checkbox" id="filter-with-embryos" checked>
+                            With embryos only
+                        </label>
+                        <label style="font-size: 0.9em; cursor: pointer; display: block;">
+                            <input type="checkbox" id="filter-with-data" checked>
+                            With data only
+                        </label>
+                    </div>
+                    <div id="sessions-list">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+
+                <!-- Embryo UIDs view (cross-session) -->
+                <div id="embryos-view" style="display: none;">
+                    <div class="info" style="margin-bottom: 10px;">
+                        Embryos grouped by unique ID across sessions
+                    </div>
+                    <div id="embryo-uids-list">
+                        <div class="loading">Loading...</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="content">
+                <div id="content-area">
+                    <div class="info">Select a session to see embryos</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/explorer.js"></script>
+</body>
+</html>

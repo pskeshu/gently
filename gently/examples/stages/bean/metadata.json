@@ -1,0 +1,39 @@
+{
+  "stage": "bean",
+  "timepoints": [
+    34,
+    36,
+    38
+  ],
+  "volumes": [
+    {
+      "timepoint": 34,
+      "filename": "T034.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 36,
+      "filename": "T036.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 38,
+      "filename": "T038.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
+}

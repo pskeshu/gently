@@ -1,432 +1,880 @@
 """
-Gently DiSPIM Plans
-==================
+Gently DiSPIM Bluesky Plans
+===========================
 
 Device-agnostic Bluesky plans for DiSPIM microscopy workflows.
-Built using atomic plan stubs that compose into complex experimental procedures.
+All plans use Ophyd device interfaces - no direct mmcore calls.
 
-Autofocus serves as the "arrowhead" into the complete DiSPIM functionality,
-including calibration, embryo detection, and multi-embryo acquisition workflows.
+Organization:
+- Focus Analysis: FFT bandpass scoring, embryo ROI detection
+- Calibration Plans: Piezo-galvo calibration, focus sweeps
+- Embryo Detection: Interactive marking, automated centering
+- Volume Acquisition: Single volumes, time-lapse series
+- Multi-Embryo Workflows: Full end-to-end acquisition
 
-All plans are device-agnostic and use standard Bluesky plan stubs:
-    - bps.mv(device, position) 
-    - bps.trigger_and_read([detector])
-    - bps.stage(device) / bps.unstage(device)
+All plans use standard Bluesky plan stubs:
+    - bps.mv(device, value)      # Move and wait
+    - bps.trigger_and_read([dev]) # Acquire data
+    - bps.open_run() / bps.close_run() # Data collection boundaries
 """
 
 import time
-import logging
-from typing import Dict, List, Optional, Tuple, Generator, Any, Union
-from dataclasses import dataclass
 import numpy as np
-
-import bluesky.plans as bp
+import matplotlib.pyplot as plt
+from collections import OrderedDict
+from typing import Dict, List, Tuple, Optional
 import bluesky.plan_stubs as bps
+import bluesky.plans as bp
 import bluesky.preprocessors as bpp
-from bluesky import Msg
-from bluesky.utils import short_uid
+from pathlib import Path
+import json
+from datetime import datetime
 
 
-from .analysis.core import FocusAnalysisConfig
-from .analysis.focus import (
-    score_single_image, find_best_focus_position, analyze_focus_sweep,
-    create_focus_positions, print_focus_summary, FocusDataPoint, FocusSweepResult
-)
+# =======================
+# FOCUS ANALYSIS UTILITIES
+# =======================
 
-
-def focus_sweep_with_analysis(positioner, detector, positions: List[float],
-                             config: FocusAnalysisConfig, callback=None,
-                             metadata: Optional[Dict] = None) -> FocusSweepResult:
+def compute_fft_bandpass_score(image: np.ndarray,
+                                lower_cutoff: float = 0.025,
+                                upper_cutoff: float = 0.14,
+                                roi: Optional[Tuple[int, int, int, int]] = None) -> float:
     """
-    Atomic plan: Focus sweep with integrated analysis
+    Compute FFT bandpass focus score (ASI diSPIM OughtaFocus algorithm).
 
-    Pure device orchestration plan that:
-    1. Moves through positions
-    2. Captures images
-    3. Scores focus
-    4. Returns clean analysis result
+    Analyzes the power spectrum of spatial frequencies. Well-focused images
+    have more high-frequency content (sharp edges) than defocused images.
 
-    No complex logic, no detection algorithms - just device orchestration + analysis calls.
+    The default frequency band (2.5% - 14% of maximum) was empirically
+    determined by Bill Mohler (UConn) for light sheet microscopy.
 
     Parameters
     ----------
-    positioner : Ophyd positioner
-        Device to move for focusing
-    detector : Ophyd detector
-        Camera device for image capture
-    positions : List[float]
-        List of positions to sweep through
-    config : FocusAnalysisConfig
-        Focus analysis configuration
-    callback : callable, optional
-        Callback for live plotting (scan_type, position, score, image, roi)
-    metadata : Dict, optional
-        Additional metadata for the scan
+    image : np.ndarray
+        2D grayscale image
+    lower_cutoff : float
+        Lower frequency cutoff as fraction of max (default: 0.025 = 2.5%)
+    upper_cutoff : float
+        Upper frequency cutoff as fraction of max (default: 0.14 = 14%)
+    roi : Tuple[int, int, int, int], optional
+        ROI as (y_min, y_max, x_min, x_max) to crop before analysis
 
     Returns
     -------
-    FocusSweepResult
-        Analysis results from the sweep
+    float
+        Mean power in frequency band (higher = better focus)
     """
-    if len(positions) < 3:
-        raise ValueError(f"Need at least 3 positions for sweep, got {len(positions)}")
+    # Apply ROI cropping if provided
+    if roi is not None:
+        y_min, y_max, x_min, x_max = roi
+        image = image[y_min:y_max, x_min:x_max]
 
-    md = {
-        'plan_name': 'focus_sweep_with_analysis',
-        'positioner': positioner.name,
-        'detector': detector.name,
-        'positions': positions,
-        'config': config.__dict__
-    }
-    if metadata:
-        md.update(metadata)
+    # Ensure float for FFT
+    img_float = image.astype(np.float64)
 
-    # Data collection
-    sweep_data = []
+    # Compute 2D FFT and power spectrum
+    fft = np.fft.fft2(img_float)
+    fft_shifted = np.fft.fftshift(fft)  # Move DC to center
+    power_spectrum = np.abs(fft_shifted) ** 2
 
-    @bpp.run_decorator(md=md)
-    def inner():
-        nonlocal sweep_data
+    # Create frequency grid for bandpass mask
+    h, w = image.shape
+    cy, cx = h // 2, w // 2  # Center coordinates
 
-        for i, pos in enumerate(positions):
-            # Move to position
-            yield from bps.mv(positioner, pos)
-            actual_pos = yield from bps.rd(positioner)
+    # Create distance map from center
+    y, x = np.ogrid[:h, :w]
+    distance_from_center = np.sqrt((x - cx)**2 + (y - cy)**2)
 
-            # Capture image
-            yield from bps.trigger_and_read([detector, positioner],
-                                          name=f'focus_point_{i:03d}')
+    # Maximum frequency (corner distance)
+    max_freq = np.sqrt(cx**2 + cy**2)
 
-            # Get image data (clean, simple way)
-            image_data = yield from bps.rd(detector)
-            image = image_data[detector.name]['value']
+    # Normalized distance (0 at DC, 1 at corners)
+    normalized_distance = distance_from_center / max_freq
 
-            # Score image (clean function call)
-            score, roi = score_single_image(image, config, detect_roi=True)
+    # Create bandpass mask
+    bandpass_mask = (normalized_distance >= lower_cutoff) & (normalized_distance <= upper_cutoff)
 
-            # Store data point
-            sweep_data.append(FocusDataPoint(
-                position=actual_pos,
-                score=score,
-                image=image,
-                roi=roi
-            ))
+    # Compute mean power in band
+    masked_power = power_spectrum * bandpass_mask
 
-            print(f"Position {actual_pos:.2f} μm, focus score: {score:.2f}")
+    if np.sum(bandpass_mask) > 0:
+        mean_power = np.sum(masked_power) / np.sum(bandpass_mask)
+    else:
+        mean_power = 0.0
 
-            # Callback for live plotting
-            if callback:
-                callback(metadata.get('scan_type', 'focus'), actual_pos, score, image, roi)
-
-    # Execute the plan
-    yield from inner()
-
-    # Analyze collected data (pure function call)
-    result = analyze_focus_sweep(sweep_data, config)
-    return result
+    return mean_power
 
 
-@dataclass
-class AutofocusConfig:
-    """Configuration for autofocus operations"""
-    num_positions: int = 21
-    step_size_um: float = 0.5
-    algorithm: str = 'volath'  # 'volath', 'gradient', 'variance'
-    fit_function: str = 'gaussian'  # 'gaussian', 'parabolic', 'none'
-    minimum_r_squared: float = 0.75
-    center_at_current: bool = True
-    timeout_s: float = 60.0
-
-
-@dataclass
-class CalibrationConfig:
-    """Configuration for two-point calibration"""
-    point1_um: float = 25.0
-    point2_um: float = 75.0
-    autofocus_each_point: bool = True
-    autofocus_config: Optional[AutofocusConfig] = None
-
-
-# =============================================================================
-# ATOMIC PLANS - Device-Agnostic Building Blocks
-# =============================================================================
-
-def focus_sweep(positioner, positions: List[float], detector, 
-                metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+def detect_embryo_roi(image: np.ndarray,
+                       margin_fraction: float = 0.1,
+                       min_threshold_ratio: float = 1.15) -> Tuple[int, int, int, int]:
     """
-    Device-agnostic focus sweep - works with ANY positioner and detector
-    
-    This is the fundamental atomic plan that underlies all autofocus operations.
-    Can be used with piezo, galvo, xy_stage, focus_motor, etc.
-    
+    Detect embryo region and return bounding box ROI for focus analysis.
+
+    Uses adaptive thresholding to find embryo boundary and creates a bounding
+    box with specified margin. This ROI excludes empty background for more
+    accurate focus scoring.
+
     Parameters
     ----------
-    positioner : Ophyd positioner device
-        Any device that responds to bps.mv(positioner, position)
-    positions : List[float]
-        List of positions to sweep through
-    detector : Ophyd detector device
-        Any device that responds to bps.trigger_and_read([detector])
-    metadata : Dict, optional
-        Additional metadata for the scan
+    image : np.ndarray
+        2D grayscale image (single camera view)
+    margin_fraction : float
+        Fractional margin around embryo (default: 0.1 = 10%)
+    min_threshold_ratio : float
+        Minimum brightness ratio embryo:background (default: 1.15)
+
+    Returns
+    -------
+    Tuple[int, int, int, int]
+        ROI as (y_min, y_max, x_min, x_max) in pixels
     """
-    md = {
-        'plan_name': 'focus_sweep',
-        'positioner': positioner.name,
-        'detector': detector.name,
-        'positions': positions,
-        'num_positions': len(positions)
+    h, w = image.shape
+
+    # Calculate background from edge regions
+    edge_margin = min(50, h // 10, w // 10)
+    edge_pixels = np.concatenate([
+        image[:edge_margin, :].flatten(),
+        image[-edge_margin:, :].flatten(),
+        image[:, :edge_margin].flatten(),
+        image[:, -edge_margin:].flatten()
+    ])
+
+    background_level = np.median(edge_pixels)
+    threshold = background_level * min_threshold_ratio
+
+    # Create binary mask
+    mask = image > threshold
+
+    # Find bounding box of masked region
+    rows = np.any(mask, axis=1)
+    cols = np.any(mask, axis=0)
+
+    if not np.any(rows) or not np.any(cols):
+        # No embryo detected, return full image
+        return (0, h, 0, w)
+
+    y_min, y_max = np.where(rows)[0][[0, -1]]
+    x_min, x_max = np.where(cols)[0][[0, -1]]
+
+    # Add margin
+    y_margin = int((y_max - y_min) * margin_fraction)
+    x_margin = int((x_max - x_min) * margin_fraction)
+
+    y_min = max(0, y_min - y_margin)
+    y_max = min(h, y_max + y_margin)
+    x_min = max(0, x_min - x_margin)
+    x_max = min(w, x_max + x_margin)
+
+    return (y_min, y_max, x_min, x_max)
+
+
+def select_best_camera_view(image: np.ndarray) -> np.ndarray:
+    """
+    Select the better view from dual-view diSPIM image.
+
+    DiSPIM captures two views side-by-side. Returns the brighter view
+    (better signal) by splitting at midpoint and comparing mean intensity.
+
+    Note
+    ----
+    This function is for hardware-stitched images from a single camera device.
+    If using DiSPIMDualCamera, it already returns both views separately as
+    'image_a' and 'image_b', so you can choose which to use directly.
+
+    This is useful when:
+    - Using DiSPIMCamera (not DiSPIMDualCamera) during calibration
+    - Hardware returns stitched images
+    - You need to analyze just one view (e.g., for focus scoring)
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Full diSPIM image (both views side-by-side)
+
+    Returns
+    -------
+    np.ndarray
+        Single view (left or right half) with higher intensity
+    """
+    h, w = image.shape
+    mid_x = w // 2
+
+    left_view = image[:, :mid_x]
+    right_view = image[:, mid_x:]
+
+    left_intensity = np.mean(left_view)
+    right_intensity = np.mean(right_view)
+
+    if left_intensity >= right_intensity:
+        return left_view
+    else:
+        return right_view
+
+
+# ================================
+# STAGE POSITIONING PLAN STUBS
+# ================================
+
+def get_stage_position_plan(xy_stage):
+    """
+    Read XY stage position within a plan.
+
+    This is a plan stub that yields Bluesky messages to read the stage position.
+    Use this instead of direct device access within plans to maintain proper
+    message flow and enable databroker integration.
+
+    Parameters
+    ----------
+    xy_stage : DiSPIMXYStage
+        XY stage device
+
+    Yields
+    ------
+    Bluesky messages
+        Messages to read stage position
+
+    Returns
+    -------
+    np.ndarray
+        Current stage position as [x, y] in micrometers
+
+    Examples
+    --------
+    >>> current_pos = yield from get_stage_position_plan(xy_stage)
+    >>> print(f"Stage at: {current_pos}")
+    """
+    result = yield from bps.rd(xy_stage)
+    return result[xy_stage.name]['value']
+
+
+def move_to_pixel_plan(xy_stage,
+                       bottom_camera,
+                       pixel_x: float,
+                       pixel_y: float):
+    """
+    Move stage to center on pixel coordinates from bottom camera image.
+
+    This plan encapsulates the complete workflow of converting pixel coordinates
+    to stage coordinates (with X-axis inversion) and moving the stage to center
+    the feature. Uses the coordinate utilities from gently.coordinates.
+
+    Parameters
+    ----------
+    xy_stage : DiSPIMXYStage
+        XY stage device
+    bottom_camera : DiSPIMBottomCamera
+        Bottom camera device (provides effective_pixel_size)
+    pixel_x : float
+        Target pixel X coordinate
+    pixel_y : float
+        Target pixel Y coordinate
+
+    Yields
+    ------
+    Bluesky messages
+        Messages to read position and move stage
+
+    Returns
+    -------
+    np.ndarray
+        Final stage position as [x, y] in micrometers
+
+    Examples
+    --------
+    >>> # User clicked at pixel (1024, 1027)
+    >>> final_pos = yield from move_to_pixel_plan(
+    ...     xy_stage, bottom_camera, 1024, 1027
+    ... )
+    """
+    from .coordinates import pixel_displacement_to_stage_movement
+
+    # Get current position
+    current_pos = yield from get_stage_position_plan(xy_stage)
+
+    # Get image dimensions from camera (assuming square or known dimensions)
+    # For now, assume 2048x2048 based on typical PCO camera
+    image_center_x = 2048 / 2.0
+    image_center_y = 2048 / 2.0
+
+    # Calculate pixel offset from image center
+    pixel_offset_x = pixel_x - image_center_x
+    pixel_offset_y = pixel_y - image_center_y
+
+    # Convert pixel displacement to stage movement
+    dx, dy = pixel_displacement_to_stage_movement(
+        pixel_offset_x,
+        pixel_offset_y,
+        bottom_camera.effective_pixel_size
+    )
+
+    # Calculate target position
+    target_pos = current_pos + np.array([dx, dy])
+
+    # Move to target
+    yield from bps.mov(xy_stage, target_pos)
+
+    return target_pos
+
+
+def center_on_feature_plan(xy_stage,
+                           bottom_camera,
+                           image: np.ndarray,
+                           feature_detector_func):
+    """
+    Complete workflow: detect feature in image and center stage on it.
+
+    This plan combines feature detection with stage positioning. The feature
+    detector function should return pixel coordinates of the detected feature.
+
+    Parameters
+    ----------
+    xy_stage : DiSPIMXYStage
+        XY stage device
+    bottom_camera : DiSPIMBottomCamera
+        Bottom camera device
+    image : np.ndarray
+        Image containing feature to detect
+    feature_detector_func : callable
+        Function that takes image and returns (x, y) pixel coordinates
+
+    Yields
+    ------
+    Bluesky messages
+        Messages to move stage
+
+    Returns
+    -------
+    Dict
+        Dictionary with 'feature_pos' (pixel coords) and 'stage_pos' (final position)
+
+    Examples
+    --------
+    >>> def detect_brightest_spot(image):
+    ...     y, x = np.unravel_index(np.argmax(image), image.shape)
+    ...     return (x, y)
+    >>>
+    >>> result = yield from center_on_feature_plan(
+    ...     xy_stage, bottom_camera, image, detect_brightest_spot
+    ... )
+    """
+    # Detect feature in image
+    feature_x, feature_y = feature_detector_func(image)
+
+    # Move to center the feature
+    final_pos = yield from move_to_pixel_plan(
+        xy_stage, bottom_camera, feature_x, feature_y
+    )
+
+    return {
+        'feature_pos': (feature_x, feature_y),
+        'stage_pos': final_pos
     }
-    if metadata:
-        md.update(metadata)
-    
-    @bpp.run_decorator(md=md)
-    def inner():
-        for i, pos in enumerate(positions):
-            # Move positioner
-            yield from bps.mv(positioner, pos)
-            
-            # Acquire at this position
-            yield from bps.trigger_and_read([detector, positioner], 
-                                          name=f'focus_point_{i:03d}')
-    
-    yield from inner()
 
 
+# =======================
+# CALIBRATION PLANS
+# =======================
 
-def test_lightsheet(lightsheet_snap,
-                   sheet_width_deg: float = 2.0,
-                   y_position_deg: float = 0.0,
-                   metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+def focus_sweep_plan(lightsheet_snap,
+                     galvo_positions: List[float],
+                     roi_detection: bool = True,
+                     metadata: Optional[Dict] = None):
     """
-    Test light sheet acquisition - simple plan for testing SPIM mode
+    Perform focus sweep by moving galvo Y-offset and analyzing image quality.
 
-    Configures light sheet, triggers acquisition, and returns image.
-    Device-agnostic: works with any light sheet snap device.
+    This plan:
+    1. Iterates through galvo Y positions (light sheet vertical positions)
+    2. Captures image at each position using light sheet snap device
+    3. Analyzes focus quality using FFT bandpass scoring
+    4. Records images and scores
 
     Parameters
     ----------
     lightsheet_snap : DiSPIMLightSheetSnap
-        Light sheet snap device (scanner + camera)
-    sheet_width_deg : float
-        Light sheet width in degrees
-    y_position_deg : float
-        Y-axis position in degrees (Z-plane selection)
+        Light sheet snapshot device (scanner + camera)
+    galvo_positions : List[float]
+        List of galvo Y-axis offsets in degrees to sweep through
+    roi_detection : bool
+        Whether to detect embryo ROI for focus analysis (default: True)
     metadata : Dict, optional
-        Additional metadata
+        Additional metadata to include in run
 
     Yields
     ------
-    Msg
-        Bluesky messages
-
-    Example
-    -------
-    >>> from gently.devices import DiSPIMLightSheetSnap
-    >>> ls_snap = DiSPIMLightSheetSnap("Scanner:AB:33", "HamCam1", core)
-    >>> RE(test_lightsheet(ls_snap, sheet_width_deg=2.0, y_position_deg=0.0))
-    """
-
-    md = {
-        'plan_name': 'test_lightsheet',
-        'sheet_width_deg': sheet_width_deg,
-        'y_position_deg': y_position_deg
-    }
-    if metadata:
-        md.update(metadata)
-
-    @bpp.run_decorator(md=md)
-    def inner():
-        # Configure light sheet
-        lightsheet_snap.configure(
-            sheet_width_deg=sheet_width_deg,
-            y_position_deg=y_position_deg
-        )
-
-        print(f"Acquiring light sheet image: width={sheet_width_deg}°, Y={y_position_deg}°")
-
-        # Trigger and read (standard Bluesky pattern!)
-        yield from bps.trigger_and_read([lightsheet_snap], name='lightsheet_image')
-
-        print("Light sheet image acquired")
-
-    yield from inner()
-
-
-# =============================================================================
-# VOLUME ACQUISITION PLANS - Hardware-Triggered SPIM
-# =============================================================================
-
-def acquire_spim_volume(volume_scanner,
-                       num_slices: int = 100,
-                       exposure_ms: float = 5.0,
-                       slice_step_um: float = 1.0,
-                       metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
-    """
-    Acquire a hardware-triggered SPIM volume - atomic plan
-
-    Single volume acquisition using Tiger controller hardware triggering.
-    Device-agnostic: works with any DiSPIMVolumeScanner device.
-
-    This plan encapsulates the complete SPIM volume acquisition workflow:
-    - Camera configuration (PROGRESSIVE mode, EXTERNAL trigger)
-    - SPIM timing calculation
-    - Hardware-triggered acquisition
-    - 3D volume retrieval
-
-    Typical acquisition: 100 slices @ 59 fps (1.7 seconds total)
-
-    Parameters
-    ----------
-    volume_scanner : DiSPIMVolumeScanner
-        Volume scanner device (scanner + camera)
-    num_slices : int
-        Number of Z slices to acquire (default: 100)
-    exposure_ms : float
-        Camera exposure time in milliseconds (default: 5.0)
-    slice_step_um : float
-        Step size between slices in microns (default: 1.0)
-    metadata : Dict, optional
-        Additional metadata
-
-    Yields
-    ------
-    Msg
-        Bluesky messages
+    msg : Msg
+        Bluesky plan messages
 
     Returns
     -------
-    Volume data is stored in the Bluesky databroker with key 'volume_scanner'
-    Access via: run.primary.read()['volume_scanner']['value']
-
-    Example
-    -------
-    >>> from gently.devices import DiSPIMVolumeScanner
-    >>> vol_scanner = DiSPIMVolumeScanner("Scanner:AB:33", "HamCam1", core)
-    >>> RE(acquire_spim_volume(vol_scanner, num_slices=100, exposure_ms=5.0))
+    Dict
+        Results dictionary with positions, images, scores, and best focus info
     """
-
-    md = {
-        'plan_name': 'acquire_spim_volume',
-        'num_slices': num_slices,
-        'exposure_ms': exposure_ms,
-        'slice_step_um': slice_step_um,
-        'expected_volume_shape': f'({num_slices}, 2304, 2304)',
+    # Prepare storage for results
+    results = {
+        'galvo_positions': galvo_positions,
+        'images': [],
+        'focus_scores': [],
+        'rois': [],
+        'timestamp': time.time()
     }
+
+    # Open data collection run
+    _md = {'plan_name': 'focus_sweep'}
     if metadata:
-        md.update(metadata)
+        _md.update(metadata)
 
-    @bpp.run_decorator(md=md)
+    @bpp.run_decorator(md=_md)
     def inner():
-        # Configure volume scanner
-        volume_scanner.configure(
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            slice_step_um=slice_step_um
-        )
+        print(f"\n{'='*70}")
+        print(f"  FOCUS SWEEP: {len(galvo_positions)} positions")
+        print(f"  Galvo Y range: [{min(galvo_positions):.4f}, {max(galvo_positions):.4f}] deg")
+        print(f"  ROI detection: {'enabled' if roi_detection else 'disabled'}")
+        print(f"{'='*70}\n")
 
-        print(f"Acquiring SPIM volume: {num_slices} slices, {exposure_ms}ms exposure, {slice_step_um}μm step")
+        for idx, galvo_y in enumerate(galvo_positions):
+            print(f"  [{idx+1}/{len(galvo_positions)}] Galvo Y = {galvo_y:.4f} deg", end='... ')
 
-        # Trigger and read (standard Bluesky pattern!)
-        yield from bps.trigger_and_read([volume_scanner], name='spim_volume')
+            # Set galvo Y position
+            lightsheet_snap.set_y_position(galvo_y)
 
-        print(f"Volume acquired: {num_slices} slices")
+            # Capture image
+            yield from bps.trigger_and_read([lightsheet_snap])
+
+            # Get captured image from device
+            image_data = lightsheet_snap.read()[lightsheet_snap.camera.name]['value']
+
+            # Select best view if dual-camera
+            if image_data.shape[1] > image_data.shape[0] * 2:  # Heuristic for stitched image
+                image = select_best_camera_view(image_data)
+            else:
+                image = image_data
+
+            # Detect embryo ROI if enabled
+            if roi_detection:
+                roi = detect_embryo_roi(image)
+            else:
+                roi = None
+
+            # Compute focus score
+            focus_score = compute_fft_bandpass_score(image, roi=roi)
+
+            # Store results
+            results['images'].append(image)
+            results['focus_scores'].append(focus_score)
+            results['rois'].append(roi)
+
+            print(f"Score: {focus_score:.2e}")
 
     yield from inner()
 
+    # Analyze results
+    scores = np.array(results['focus_scores'])
+    best_idx = np.argmax(scores)
+    results['best_position'] = galvo_positions[best_idx]
+    results['best_score'] = scores[best_idx]
+    results['best_image'] = results['images'][best_idx]
 
-def multi_position_volume(volume_scanner,
-                         xy_stage,
-                         positions: List[Tuple[float, float]],
-                         num_slices: int = 100,
-                         exposure_ms: float = 5.0,
-                         slice_step_um: float = 1.0,
-                         metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    print(f"\n{'─'*70}")
+    print(f"  BEST FOCUS: Position {best_idx+1}/{len(galvo_positions)}")
+    print(f"  Galvo Y = {results['best_position']:.4f} deg")
+    print(f"  Score = {results['best_score']:.2e}")
+    print(f"{'─'*70}\n")
+
+    return results
+
+
+def calibrate_piezo_galvo_plan(lightsheet_snap,
+                                piezo_positions: List[float],
+                                initial_galvo_position: float = 0.0,
+                                search_range_deg: float = 0.02,
+                                n_sweep_points: int = 21,
+                                metadata: Optional[Dict] = None):
     """
-    Acquire SPIM volumes at multiple XY positions
+    Calibrate piezo-galvo synchronization using 2-point linear fit.
 
-    Device-agnostic plan for multi-position volume acquisition.
-    Works with any XY stage and volume scanner combination.
+    This plan performs the core piezo-galvo calibration:
+    1. For each piezo position, perform focus sweep to find best galvo Y
+    2. Build (piezo_position, galvo_position) pairs
+    3. Fit linear relationship: galvo_y = slope * piezo_z + offset
 
     Parameters
     ----------
-    volume_scanner : DiSPIMVolumeScanner
-        Volume scanner device
-    xy_stage : Ophyd XY stage device
-        XY positioning stage (must have .x and .y attributes)
-    positions : List[Tuple[float, float]]
-        List of (x, y) positions in microns
-    num_slices : int
-        Number of Z slices per volume (default: 100)
-    exposure_ms : float
-        Camera exposure time in milliseconds (default: 5.0)
-    slice_step_um : float
-        Step size between slices in microns (default: 1.0)
+    lightsheet_snap : DiSPIMLightSheetSnap
+        Light sheet snapshot device
+    piezo_positions : List[float]
+        Two or more piezo Z positions to calibrate (micrometers)
+    initial_galvo_position : float
+        Starting galvo Y position for first sweep (degrees)
+    search_range_deg : float
+        Search range around initial position (default: ±0.02 deg)
+    n_sweep_points : int
+        Number of positions in each focus sweep (default: 21)
     metadata : Dict, optional
         Additional metadata
 
     Yields
     ------
-    Msg
-        Bluesky messages
+    msg : Msg
+        Bluesky plan messages
 
-    Example
+    Returns
     -------
-    >>> positions = [(0, 0), (100, 0), (0, 100), (100, 100)]
-    >>> RE(multi_position_volume(vol_scanner, xy_stage, positions))
+    Dict
+        Calibration results with slope, offset, and fit quality
     """
-
-    md = {
-        'plan_name': 'multi_position_volume',
-        'num_positions': len(positions),
-        'positions': positions,
-        'num_slices': num_slices,
-        'exposure_ms': exposure_ms,
-        'slice_step_um': slice_step_um,
+    results = {
+        'piezo_positions': piezo_positions,
+        'galvo_positions': [],
+        'focus_scores': [],
+        'sweep_results': [],
+        'timestamp': time.time()
     }
+
+    _md = {'plan_name': 'calibrate_piezo_galvo'}
     if metadata:
-        md.update(metadata)
+        _md.update(metadata)
 
-    @bpp.run_decorator(md=md)
+    @bpp.run_decorator(md=_md)
     def inner():
-        # Configure volume scanner once
-        volume_scanner.configure(
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            slice_step_um=slice_step_um
-        )
+        print(f"\n{'='*70}")
+        print(f"  PIEZO-GALVO CALIBRATION")
+        print(f"  Piezo positions: {len(piezo_positions)}")
+        print(f"  Initial galvo: {initial_galvo_position:.4f} deg")
+        print(f"  Search range: ±{search_range_deg:.4f} deg")
+        print(f"{'='*70}\n")
 
-        print(f"Multi-position volume acquisition: {len(positions)} positions, {num_slices} slices each")
+        current_galvo_guess = initial_galvo_position
 
-        for i, (x, y) in enumerate(positions):
-            print(f"\nPosition {i+1}/{len(positions)}: ({x:.1f}, {y:.1f}) μm")
+        for piezo_idx, piezo_z in enumerate(piezo_positions):
+            print(f"\n[PIEZO {piezo_idx+1}/{len(piezo_positions)}] Z = {piezo_z:.2f} µm")
 
-            # Move to position
-            yield from bps.mv(xy_stage.x, x, xy_stage.y, y)
+            # Generate galvo sweep positions around current guess
+            galvo_sweep = np.linspace(
+                current_galvo_guess - search_range_deg,
+                current_galvo_guess + search_range_deg,
+                n_sweep_points
+            )
 
-            # Acquire volume at this position
-            yield from bps.trigger_and_read([volume_scanner, xy_stage],
-                                          name=f'volume_pos_{i:03d}')
+            # Perform focus sweep at this piezo position
+            sweep_results = yield from focus_sweep_plan(
+                lightsheet_snap,
+                galvo_sweep.tolist(),
+                roi_detection=True,
+                metadata={'piezo_position': piezo_z}
+            )
 
-            print(f"  Volume {i+1} acquired")
+            # Store results
+            best_galvo = sweep_results['best_position']
+            best_score = sweep_results['best_score']
 
-        print(f"\nCompleted {len(positions)} volumes")
+            results['galvo_positions'].append(best_galvo)
+            results['focus_scores'].append(best_score)
+            results['sweep_results'].append(sweep_results)
+
+            # Update guess for next iteration (assume roughly linear)
+            current_galvo_guess = best_galvo
+
+            print(f"  → Best galvo Y: {best_galvo:.6f} deg (score: {best_score:.2e})")
 
     yield from inner()
 
+    # Compute linear fit: galvo_y = slope * piezo_z + offset
+    piezo_array = np.array(piezo_positions)
+    galvo_array = np.array(results['galvo_positions'])
 
-def volume_timelapse(volume_scanner,
-                    num_timepoints: int,
-                    interval_s: float,
-                    num_slices: int = 100,
-                    exposure_ms: float = 5.0,
-                    slice_step_um: float = 1.0,
-                    metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+    # Linear regression
+    coeffs = np.polyfit(piezo_array, galvo_array, deg=1)
+    slope = coeffs[0]
+    offset = coeffs[1]
+
+    # Predicted values and residuals
+    galvo_predicted = slope * piezo_array + offset
+    residuals = galvo_array - galvo_predicted
+    rmse = np.sqrt(np.mean(residuals**2))
+
+    # Store calibration parameters
+    results['calibration'] = {
+        'slope': slope,
+        'offset': offset,
+        'rmse': rmse,
+        'equation': f"galvo_y = {slope:.6e} * piezo_z + {offset:.6f}"
+    }
+
+    print(f"\n{'='*70}")
+    print(f"  CALIBRATION RESULTS")
+    print(f"{'='*70}")
+    print(f"  Slope:  {slope:.6e} deg/µm")
+    print(f"  Offset: {offset:.6f} deg")
+    print(f"  RMSE:   {rmse:.6e} deg")
+    print(f"  Equation: galvo_y = {slope:.6e} * piezo_z + {offset:.6f}")
+    print(f"{'='*70}\n")
+
+    return results
+
+
+# =======================
+# EMBRYO DETECTION PLANS
+# =======================
+
+def mark_embryo_interactive_plan(bottom_camera,
+                                  xy_stage,
+                                  embryo_number: int,
+                                  metadata: Optional[Dict] = None):
     """
-    Acquire time-lapse SPIM volumes
+    Interactive plan for user to mark embryo position and center it.
 
-    Device-agnostic plan for time-lapse volume acquisition.
-    Captures volumes at regular intervals.
+    This plan:
+    1. Captures initial image from bottom camera
+    2. Displays image with matplotlib interface for user to click embryo
+    3. Moves XY stage to center the marked embryo
+    4. Captures confirmation image
+
+    Parameters
+    ----------
+    bottom_camera : DiSPIMBottomCamera
+        Bottom camera device with LED control and pixel calibration.
+        LED is automatically managed (on during capture, off after).
+    xy_stage : DiSPIMXYStage
+        XY stage device with coordinate conversion
+    embryo_number : int
+        Embryo number for display/tracking
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    msg : Msg
+        Bluesky plan messages
+
+    Returns
+    -------
+    Dict
+        Results with embryo position, stage position, and images
+    """
+    _md = {'plan_name': 'mark_embryo_interactive', 'embryo_number': embryo_number}
+    if metadata:
+        _md.update(metadata)
+
+    @bpp.run_decorator(md=_md)
+    def inner():
+        print(f"\n{'='*70}")
+        print(f"  MARKING EMBRYO #{embryo_number}")
+        print(f"{'='*70}\n")
+
+        # Capture initial image
+        print("  Capturing initial image...")
+        yield from bps.trigger_and_read([bottom_camera])
+        initial_image = bottom_camera.read()[bottom_camera.name]['value']
+
+        # Get current stage position
+        initial_stage_pos = xy_stage.read()[xy_stage.name]['value']
+        print(f"  Initial stage: ({initial_stage_pos[0]:.2f}, {initial_stage_pos[1]:.2f}) µm")
+
+        # Display interactive marking interface
+        print(f"\n  ⚡ INTERACTIVE MARKING - Please click on embryo #{embryo_number}")
+
+        from matplotlib.widgets import Button
+
+        # Create interactive figure
+        fig, ax = plt.subplots(figsize=(12, 10))
+        img_norm = (initial_image - initial_image.min()) / (initial_image.max() - initial_image.min())
+        ax.imshow(img_norm, cmap='gray')
+
+        # Draw center crosshair
+        h, w = initial_image.shape
+        ax.axvline(w/2, color='red', linestyle='--', linewidth=2, label='Center')
+        ax.axhline(h/2, color='red', linestyle='--', linewidth=2)
+
+        ax.set_title(f"Click on Embryo #{embryo_number}", fontsize=14, fontweight='bold')
+
+        # Storage for click
+        embryo_position = [None, None]
+
+        def onclick(event):
+            if event.inaxes == ax and event.button == 1:  # Left click
+                embryo_position[0] = event.xdata
+                embryo_position[1] = event.ydata
+                # Draw marker
+                ax.plot(event.xdata, event.ydata, 'o', color='lime',
+                       markersize=15, markeredgewidth=3, markeredgecolor='white')
+                fig.canvas.draw()
+                print(f"  ✓ Marked at pixel ({event.xdata:.0f}, {event.ydata:.0f})")
+
+        def on_done(event):
+            plt.close(fig)
+
+        # Connect handlers
+        cid = fig.canvas.mpl_connect('button_press_event', onclick)
+
+        # Add Done button
+        ax_done = plt.axes([0.81, 0.05, 0.1, 0.04])
+        btn_done = Button(ax_done, 'Done')
+        btn_done.on_clicked(on_done)
+
+        plt.show()
+
+        if embryo_position[0] is None:
+            print("  ⚠ No embryo marked!")
+            return {'success': False}
+
+        # Center the embryo (using plan stub for proper Bluesky message flow)
+        print(f"\n  Moving stage to center embryo...")
+        yield from move_to_pixel_plan(
+            xy_stage,
+            bottom_camera,
+            embryo_position[0],
+            embryo_position[1]
+        )
+
+        time.sleep(0.5)
+
+        # Capture confirmation image
+        print("  Capturing confirmation image...")
+        yield from bps.trigger_and_read([bottom_camera])
+        centered_image = bottom_camera.read()[bottom_camera.name]['value']
+
+        final_stage_pos = xy_stage.read()[xy_stage.name]['value']
+        print(f"  Final stage: ({final_stage_pos[0]:.2f}, {final_stage_pos[1]:.2f}) µm")
+
+        results['success'] = True
+        results['embryo_number'] = embryo_number
+        results['pixel_position'] = tuple(embryo_position)
+        results['initial_stage_position'] = initial_stage_pos
+        results['final_stage_position'] = final_stage_pos
+        results['initial_image'] = initial_image
+        results['centered_image'] = centered_image
+        results['timestamp'] = time.time()
+
+        print(f"  ✓ Embryo #{embryo_number} centered!")
+        print(f"{'='*70}\n")
+
+    results = {}
+    yield from inner()
+    return results
+
+
+# =======================
+# VOLUME ACQUISITION PLANS
+# =======================
+
+def acquire_single_volume_plan(volume_scanner,
+                                 num_slices: int = 100,
+                                 exposure_ms: float = 5.0,
+                                 galvo_amplitude: float = 0.5,
+                                 galvo_center: float = 0.0,
+                                 piezo_amplitude: float = 25.0,
+                                 piezo_center: float = 50.0,
+                                 laser_config: str = "488 and 561",
+                                 timing_params: Optional[Dict] = None,
+                                 metadata: Optional[Dict] = None):
+    """
+    Acquire a single hardware-triggered 3D volume.
+
+    Uses the DiSPIMVolumeScanner compound device to orchestrate synchronized
+    camera+scanner+piezo+laser acquisition.
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner compound device (must have laser_control configured)
+    num_slices : int
+        Number of Z slices (default: 100)
+    exposure_ms : float
+        Camera exposure in milliseconds (default: 5.0)
+    galvo_amplitude : float
+        Galvo Y-axis amplitude in degrees (default: 0.5)
+    galvo_center : float
+        Galvo Y-axis center offset in degrees (default: 0.0)
+    piezo_amplitude : float
+        Piezo amplitude in micrometers (default: 25.0)
+    piezo_center : float
+        Piezo center offset in micrometers (default: 50.0)
+    laser_config : str
+        Laser configuration name (default: "488 and 561").
+        Common options: "488 and 561", "488 only", "561 only"
+    timing_params : Dict, optional
+        Custom SPIM timing parameters
+    metadata : Dict, optional
+        Additional metadata
+
+    Yields
+    ------
+    msg : Msg
+        Bluesky plan messages
+
+    Returns
+    -------
+    Dict
+        Results with volume data
+    """
+    _md = {
+        'plan_name': 'acquire_single_volume',
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'galvo_amplitude': galvo_amplitude,
+        'galvo_center': galvo_center,
+        'piezo_amplitude': piezo_amplitude,
+        'piezo_center': piezo_center,
+        'laser_config': laser_config
+    }
+    if metadata:
+        _md.update(metadata)
+
+    results = {}
+
+    @bpp.run_decorator(md=_md)
+    def inner():
+        print(f"\n{'='*70}")
+        print(f"  VOLUME ACQUISITION")
+        print(f"  Slices: {num_slices}, Exposure: {exposure_ms} ms")
+        print(f"  Galvo: {galvo_amplitude:.3f} deg amplitude, {galvo_center:.4f} deg center")
+        print(f"  Piezo: {piezo_amplitude:.2f} µm amplitude, {piezo_center:.2f} µm center")
+        print(f"  Lasers: {laser_config}")
+        print(f"{'='*70}\n")
+
+        # Configure volume scanner
+        print("  Configuring hardware...")
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            galvo_amplitude=galvo_amplitude,
+            galvo_center=galvo_center,
+            piezo_amplitude=piezo_amplitude,
+            piezo_center=piezo_center,
+            timing_params=timing_params,
+            laser_config=laser_config
+        )
+
+        # Acquire volume
+        print("  Triggering acquisition...")
+        start_time = time.time()
+        yield from bps.trigger_and_read([volume_scanner])
+        elapsed = time.time() - start_time
+
+        # Get volume data
+        volume_data = volume_scanner.read()[volume_scanner.name]['value']
+
+        print(f"\n  ✓ Volume acquired!")
+        print(f"  Shape: {volume_data.shape}")
+        print(f"  Time: {elapsed:.2f} s")
+        print(f"{'='*70}\n")
+
+        results['volume'] = volume_data
+        results['shape'] = volume_data.shape
+        results['acquisition_time'] = elapsed
+        results['timestamp'] = time.time()
+
+    yield from inner()
+    return results
+
+
+def timelapse_volume_plan(volume_scanner,
+                           num_timepoints: int,
+                           interval_seconds: float,
+                           **volume_kwargs):
+    """
+    Acquire time-lapse series of 3D volumes.
 
     Parameters
     ----------
@@ -434,194 +882,176 @@ def volume_timelapse(volume_scanner,
         Volume scanner device
     num_timepoints : int
         Number of time points to acquire
-    interval_s : float
-        Time interval between acquisitions in seconds
-    num_slices : int
-        Number of Z slices per volume (default: 100)
-    exposure_ms : float
-        Camera exposure time in milliseconds (default: 5.0)
-    slice_step_um : float
-        Step size between slices in microns (default: 1.0)
-    metadata : Dict, optional
-        Additional metadata
+    interval_seconds : float
+        Time interval between acquisitions (seconds)
+    **volume_kwargs
+        Additional arguments passed to acquire_single_volume_plan
 
     Yields
     ------
-    Msg
-        Bluesky messages
+    msg : Msg
+        Bluesky plan messages
 
-    Example
+    Returns
     -------
-    >>> # Acquire 10 volumes, one every 30 seconds
-    >>> RE(volume_timelapse(vol_scanner, num_timepoints=10, interval_s=30.0))
+    Dict
+        Results with all volumes and timestamps
     """
-
-    md = {
-        'plan_name': 'volume_timelapse',
+    results = {
+        'volumes': [],
+        'timestamps': [],
         'num_timepoints': num_timepoints,
-        'interval_s': interval_s,
-        'num_slices': num_slices,
-        'exposure_ms': exposure_ms,
-        'slice_step_um': slice_step_um,
-        'total_duration_s': num_timepoints * interval_s,
+        'interval_seconds': interval_seconds
     }
-    if metadata:
-        md.update(metadata)
 
-    @bpp.run_decorator(md=md)
+    _md = {
+        'plan_name': 'timelapse_volume',
+        'num_timepoints': num_timepoints,
+        'interval_seconds': interval_seconds
+    }
+
+    @bpp.run_decorator(md=_md)
     def inner():
-        # Configure volume scanner once
-        volume_scanner.configure(
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            slice_step_um=slice_step_um
-        )
+        print(f"\n{'='*70}")
+        print(f"  TIME-LAPSE VOLUME ACQUISITION")
+        print(f"  Timepoints: {num_timepoints}")
+        print(f"  Interval: {interval_seconds} s")
+        print(f"{'='*70}\n")
 
-        print(f"Time-lapse acquisition: {num_timepoints} volumes, {interval_s}s interval")
-        print(f"Total duration: {num_timepoints * interval_s / 60:.1f} minutes")
-
-        start_time = time.time()
-
-        for t in range(num_timepoints):
-            # Calculate when this acquisition should happen
-            target_time = start_time + t * interval_s
-            current_time = time.time()
-
-            # Wait if we're ahead of schedule
-            if current_time < target_time:
-                wait_time = target_time - current_time
-                print(f"\nTimepoint {t+1}/{num_timepoints}: waiting {wait_time:.1f}s...")
-                time.sleep(wait_time)
-            else:
-                print(f"\nTimepoint {t+1}/{num_timepoints}:")
+        for tp in range(num_timepoints):
+            print(f"\n[TIMEPOINT {tp+1}/{num_timepoints}]")
 
             # Acquire volume
-            yield from bps.trigger_and_read([volume_scanner],
-                                          name=f'volume_t_{t:03d}')
+            vol_results = yield from acquire_single_volume_plan(
+                volume_scanner,
+                metadata={'timepoint': tp},
+                **volume_kwargs
+            )
 
-            elapsed = time.time() - start_time
-            print(f"  Volume {t+1} acquired (elapsed: {elapsed:.1f}s)")
+            results['volumes'].append(vol_results['volume'])
+            results['timestamps'].append(vol_results['timestamp'])
 
-        print(f"\nCompleted {num_timepoints} time-lapse volumes")
+            # Wait for next timepoint (except after last one)
+            if tp < num_timepoints - 1:
+                print(f"  Waiting {interval_seconds} s until next timepoint...")
+                yield from bps.sleep(interval_seconds)
+
+        print(f"\n{'='*70}")
+        print(f"  TIME-LAPSE COMPLETE")
+        print(f"  Total volumes: {len(results['volumes'])}")
+        print(f"{'='*70}\n")
 
     yield from inner()
+    return results
 
 
-def multi_position_volume_timelapse(volume_scanner,
-                                   xy_stage,
-                                   positions: List[Tuple[float, float]],
-                                   num_timepoints: int,
-                                   interval_s: float,
-                                   num_slices: int = 100,
-                                   exposure_ms: float = 5.0,
-                                   slice_step_um: float = 1.0,
-                                   metadata: Optional[Dict] = None) -> Generator[Msg, None, None]:
+# =======================
+# MULTI-EMBRYO WORKFLOWS
+# =======================
+
+def multi_embryo_calibration_workflow(bottom_camera,
+                                       xy_stage,
+                                       lightsheet_snap,
+                                       num_embryos: int,
+                                       calibration_params: Optional[Dict] = None):
     """
-    Acquire time-lapse SPIM volumes at multiple positions
+    Full multi-embryo calibration workflow.
 
-    Device-agnostic plan combining multi-position and time-lapse acquisition.
-    At each timepoint, visits all positions and acquires a volume.
+    For each embryo:
+    1. Mark embryo interactively
+    2. Center embryo with stage
+    3. Perform piezo-galvo calibration
+    4. Save calibration to database
 
     Parameters
     ----------
-    volume_scanner : DiSPIMVolumeScanner
-        Volume scanner device
-    xy_stage : Ophyd XY stage device
-        XY positioning stage (must have .x and .y attributes)
-    positions : List[Tuple[float, float]]
-        List of (x, y) positions in microns
-    num_timepoints : int
-        Number of time points to acquire
-    interval_s : float
-        Time interval between timepoint rounds in seconds
-    num_slices : int
-        Number of Z slices per volume (default: 100)
-    exposure_ms : float
-        Camera exposure time in milliseconds (default: 5.0)
-    slice_step_um : float
-        Step size between slices in microns (default: 1.0)
-    metadata : Dict, optional
-        Additional metadata
+    bottom_camera : DiSPIMBottomCamera
+        Bottom camera for embryo detection (must have LED control configured).
+        LED automatically managed during imaging.
+    xy_stage : DiSPIMXYStage
+        XY stage for positioning
+    lightsheet_snap : DiSPIMLightSheetSnap
+        Light sheet device for calibration
+    num_embryos : int
+        Number of embryos to calibrate
+    calibration_params : Dict, optional
+        Parameters for piezo-galvo calibration
 
     Yields
     ------
-    Msg
-        Bluesky messages
+    msg : Msg
+        Bluesky plan messages
 
-    Example
+    Returns
     -------
-    >>> positions = [(0, 0), (100, 0), (0, 100)]
-    >>> # Acquire 3 positions every 60 seconds, 10 times
-    >>> RE(multi_position_volume_timelapse(vol_scanner, xy_stage, positions,
-    ...                                   num_timepoints=10, interval_s=60.0))
+    Dict
+        Results with all embryo calibrations
     """
+    # Default calibration parameters
+    if calibration_params is None:
+        calibration_params = {
+            'piezo_positions': [40.0, 60.0],  # Two-point calibration
+            'search_range_deg': 0.02,
+            'n_sweep_points': 21
+        }
 
-    md = {
-        'plan_name': 'multi_position_volume_timelapse',
-        'num_positions': len(positions),
-        'positions': positions,
-        'num_timepoints': num_timepoints,
-        'interval_s': interval_s,
-        'num_slices': num_slices,
-        'exposure_ms': exposure_ms,
-        'slice_step_um': slice_step_um,
-        'total_volumes': len(positions) * num_timepoints,
+    results = {
+        'embryos': [],
+        'num_embryos': num_embryos,
+        'timestamp': time.time()
     }
-    if metadata:
-        md.update(metadata)
 
-    @bpp.run_decorator(md=md)
+    _md = {
+        'plan_name': 'multi_embryo_calibration_workflow',
+        'num_embryos': num_embryos
+    }
+
+    @bpp.run_decorator(md=_md)
     def inner():
-        # Configure volume scanner once
-        volume_scanner.configure(
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            slice_step_um=slice_step_um
-        )
+        print(f"\n{'#'*70}")
+        print(f"  MULTI-EMBRYO CALIBRATION WORKFLOW")
+        print(f"  Number of embryos: {num_embryos}")
+        print(f"{'#'*70}\n")
 
-        print(f"Multi-position time-lapse: {len(positions)} positions, {num_timepoints} timepoints")
-        print(f"Total volumes: {len(positions) * num_timepoints}")
+        for emb_num in range(1, num_embryos + 1):
+            print(f"\n{'#'*70}")
+            print(f"  EMBRYO {emb_num}/{num_embryos}")
+            print(f"{'#'*70}\n")
 
-        start_time = time.time()
+            # Mark and center embryo
+            marking_results = yield from mark_embryo_interactive_plan(
+                bottom_camera,
+                xy_stage,
+                embryo_number=emb_num
+            )
 
-        for t in range(num_timepoints):
-            # Calculate when this timepoint should start
-            target_time = start_time + t * interval_s
-            current_time = time.time()
+            if not marking_results.get('success', False):
+                print(f"  ⚠ Skipping embryo {emb_num}")
+                continue
 
-            # Wait if we're ahead of schedule
-            if current_time < target_time:
-                wait_time = target_time - current_time
-                print(f"\n{'='*60}")
-                print(f"Timepoint {t+1}/{num_timepoints}: waiting {wait_time:.1f}s...")
-                print(f"{'='*60}")
-                time.sleep(wait_time)
-            else:
-                print(f"\n{'='*60}")
-                print(f"Timepoint {t+1}/{num_timepoints}:")
-                print(f"{'='*60}")
+            # Perform calibration
+            calib_results = yield from calibrate_piezo_galvo_plan(
+                lightsheet_snap,
+                metadata={'embryo_number': emb_num},
+                **calibration_params
+            )
 
-            # Visit all positions
-            for i, (x, y) in enumerate(positions):
-                print(f"  Position {i+1}/{len(positions)}: ({x:.1f}, {y:.1f}) μm")
+            # Store results
+            embryo_data = {
+                'embryo_number': emb_num,
+                'marking': marking_results,
+                'calibration': calib_results,
+                'timestamp': time.time()
+            }
 
-                # Move to position
-                yield from bps.mv(xy_stage.x, x, xy_stage.y, y)
+            results['embryos'].append(embryo_data)
 
-                # Acquire volume
-                yield from bps.trigger_and_read([volume_scanner, xy_stage],
-                                              name=f'volume_t{t:03d}_p{i:03d}')
+            print(f"\n  ✓ Embryo {emb_num} calibration complete!")
 
-                print(f"    Volume acquired")
-
-            elapsed = time.time() - start_time
-            print(f"  Timepoint {t+1} complete (elapsed: {elapsed/60:.1f} min)")
-
-        print(f"\nCompleted {len(positions) * num_timepoints} total volumes")
+        print(f"\n{'#'*70}")
+        print(f"  WORKFLOW COMPLETE")
+        print(f"  Calibrated {len(results['embryos'])}/{num_embryos} embryos")
+        print(f"{'#'*70}\n")
 
     yield from inner()
-
-
-if __name__ == "__main__":
-    # Example usage
-    logging.basicConfig(level=logging.INFO)
+    return results

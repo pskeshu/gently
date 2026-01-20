@@ -1,0 +1,49 @@
+{
+  "stage": "early",
+  "timepoints": [
+    5,
+    12,
+    20,
+    28
+  ],
+  "volumes": [
+    {
+      "timepoint": 5,
+      "filename": "T005.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 12,
+      "filename": "T012.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 20,
+      "filename": "T020.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 28,
+      "filename": "T028.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
+}

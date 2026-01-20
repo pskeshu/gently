@@ -1,0 +1,65 @@
+{
+  "version": "1.0",
+  "description": "Tool calling accuracy benchmarks for Microscopy Copilot",
+  "test_cases": [
+    {
+      "id": "stage_classification_quick",
+      "query": "Quick check - roughly what stage is embryo 2?",
+      "expected_tool": ["view_image", "query_embryo_status"],
+      "notes": "Quick check shouldn't need full CV analysis",
+      "tags": ["quick_check", "stage"]
+    },
+    {
+      "id": "start_timelapse",
+      "query": "Start a timelapse on all embryos until they hatch",
+      "expected_tool": "start_adaptive_timelapse",
+      "expected_params": {
+        "stop_condition": "hatching"
+      },
+      "tags": ["timelapse", "hatching"]
+    },
+    {
+      "id": "embryo_status",
+      "query": "What's happening with embryo 3?",
+      "expected_tool": "query_embryo_status",
+      "expected_params": {
+        "embryo_id": "embryo_3"
+      },
+      "tags": ["status"]
+    },
+    {
+      "id": "stop_imaging",
+      "query": "Stop imaging embryo 2, it's dead",
+      "expected_tool": "stop_timelapse_embryo",
+      "expected_params": {
+        "embryo_id": "embryo_2"
+      },
+      "tags": ["timelapse", "control"]
+    },
+    {
+      "id": "adjust_interval",
+      "query": "Speed up imaging for embryo 1 to every 30 seconds",
+      "expected_tool": "modify_timelapse_embryo",
+      "expected_params": {
+        "embryo_id": "embryo_1",
+        "interval_seconds": 30
+      },
+      "tags": ["timelapse", "control"]
+    },
+    {
+      "id": "capture_volume",
+      "query": "Capture a volume of embryo 1",
+      "expected_tool": "acquire_volume",
+      "expected_params": {
+        "embryo_id": "embryo_1"
+      },
+      "tags": ["acquisition"]
+    },
+    {
+      "id": "list_embryos",
+      "query": "What embryos do we have?",
+      "expected_tool": ["list_embryos", "query_embryo_status"],
+      "tags": ["discovery"]
+    }
+  ]
+}

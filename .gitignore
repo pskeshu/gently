@@ -69,3 +69,98 @@ config.yml
 
 # Napari/Qt
 *.qss
+
+# Node.js / Frontend
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/node_modules/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# GUI outputs
+multi_embryo_volumes/
+embryo_calibration.db
+
+# Test artifacts and temporary data
+calibration_session_*/
+calibration_images/
+calibration_images_embryo/
+calibration_videos/
+detection_results/
+experiment_data/
+galvo_range_test/
+microscope_images/
+scan_images/
+test_line_images/
+timelapse_volumes/
+x_offset_centering/
+y_offset_centering/
+y_amplitude_test/
+
+# Test images
+*_centering_*.png
+*_marked_*.png
+analysis_*.png
+embryo_*.png
+initial_view_*.png
+comparison_*.png
+sam_*.png
+spim_*.png
+*_montage.png
+*_analysis.png
+bottom_camera_*.png
+
+# Test volumes
+*.tif
+!docs/*.tif
+
+# Test scripts (one-off tests)
+test_*.py
+check_*.py
+
+# SAM model weights
+*.pth
+
+# Temporary JSON data
+multi_embryo_database.json
+piezo_galvo_calibration*.json
+sam_embryo_positions.json
+dispim_baseline_state_*.json
+dispim_parameters_*.json
+
+# Windows artifacts
+nul
+*.bak
+
+# Video environments
+venv_video/
+
+# CV environment
+venv_cv/
+
+# Test/debug directories
+camera_captures/
+centering_debug/
+centering_error.json
+
+# Large binary data (don't track)
+dispim_data/
+animated_video/
+*.npz
+*.gif
+
+# Local settings
+.claude/settings.local.json
+*.local.json
+
+# Backup files
+*_backup.py
+*_backup/
+
+# Demo and capture outputs
+demo.yml
+lightsheet_captures/

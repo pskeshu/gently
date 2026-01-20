@@ -1,0 +1,39 @@
+{
+  "stage": "2fold",
+  "timepoints": [
+    62,
+    68,
+    75
+  ],
+  "volumes": [
+    {
+      "timepoint": 62,
+      "filename": "T062.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 68,
+      "filename": "T068.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 75,
+      "filename": "T075.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
+}

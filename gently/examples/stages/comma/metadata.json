@@ -1,0 +1,39 @@
+{
+  "stage": "comma",
+  "timepoints": [
+    40,
+    42,
+    44
+  ],
+  "volumes": [
+    {
+      "timepoint": 40,
+      "filename": "T040.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 42,
+      "filename": "T042.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 44,
+      "filename": "T044.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
+}

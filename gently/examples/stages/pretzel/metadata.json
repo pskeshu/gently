@@ -1,0 +1,39 @@
+{
+  "stage": "pretzel",
+  "timepoints": [
+    82,
+    88,
+    95
+  ],
+  "volumes": [
+    {
+      "timepoint": 82,
+      "filename": "T082.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 88,
+      "filename": "T088.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    },
+    {
+      "timepoint": 95,
+      "filename": "T095.npz",
+      "shape": [
+        50,
+        512,
+        1024
+      ]
+    }
+  ],
+  "source_session": "59799c78",
+  "source_embryo": "embryo_2"
+}
