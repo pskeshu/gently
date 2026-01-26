@@ -139,7 +139,7 @@ Coding agents are welcome contributors.
 
 ## Acknowledgements
 
-Gently was developed collaboratively with members of the [Shroff Lab](https://www.janelia.org/lab/shroff-lab).
+Gently was developed collaboratively with members of the [Shroff Lab](https://www.janelia.org/lab/shroff-lab), [Magdalena Schneider](https://schneidermc.github.io/) (AI@HHMI), and [Subin Dev S](https://github.com/subindevs).
 
 ## Publications
 
