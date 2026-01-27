@@ -376,7 +376,7 @@ class DiSPIMCamera:
         """
         self.core.setCameraDevice(self.name)
         self.core.setExposure(self.name, exposure_ms)
-        time.sleep(0.1)  # Allow hardware to settle
+        self.core.waitForDevice(self.name)
 
     def set_roi(self, x: int, y: int, width: int, height: int):
         """Set camera region of interest."""
@@ -434,7 +434,7 @@ class DiSPIMCamera:
         self.set_trigger_mode("INTERNAL")
         self.set_sensor_mode("AREA")
         self.core.setExposure(self.name, exposure_ms)
-        time.sleep(0.1)  # Allow settings to stabilize
+        self.core.waitForDevice(self.name)
 
     def configure_for_volume_acquisition(self, exposure_ms: float,
                                           roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)):
@@ -458,7 +458,7 @@ class DiSPIMCamera:
         self.set_sensor_mode("PROGRESSIVE")  # CRITICAL for SPIM!
         self.set_trigger_active("EDGE")
         self.core.setExposure(self.name, exposure_ms)
-        time.sleep(0.1)  # Allow settings to stabilize
+        self.core.waitForDevice(self.name)
 
     @property
     def exposure_time(self):
@@ -765,7 +765,7 @@ class DiSPIMPiezo:
         """
         self.core.setProperty(self.name, "SPIMState", state)
         if state == "Armed":
-            time.sleep(0.3)  # Wait for piezo to be ready
+            self.core.waitForDevice(self.name)
 
     def configure_for_spim(self, num_slices: int):
         """
@@ -825,7 +825,7 @@ class _ScannerAxisOffset:
                 self.scanner.core.setProperty(
                     self.scanner.name, self.property_name, float(value)
                 )
-                time.sleep(0.3)  # Allow galvo to settle
+                self.scanner.core.waitForDevice(self.scanner.name)
             except Exception as exc:
                 status.set_exception(exc)
             else:
@@ -996,7 +996,7 @@ class DiSPIMScanner:
         """
         self.core.setProperty(self.name, "SPIMState", state)
         if state == "Idle":
-            time.sleep(0.2)  # Wait for state machine to fully reset
+            self.core.waitForDevice(self.name)
 
     def configure_x_axis(self, amplitude_deg: float, offset_deg: float,
                          pattern: str = "1 - Triangle",
@@ -1054,7 +1054,7 @@ class DiSPIMScanner:
             Y-axis offset angle in degrees
         """
         self.core.setProperty(self.name, "SingleAxisYOffset(deg)", float(angle_deg))
-        time.sleep(0.3)  # Allow galvo to settle
+        self.core.waitForDevice(self.name)
 
     def configure_spim_timing(self,
                               scan_delay_ms: float = 6.75,
@@ -1130,7 +1130,7 @@ class DiSPIMScanner:
         self.set_laser_output_mode("shutter + side")  # Enable laser triggering
         self.configure_x_axis(amplitude_deg=8.0, offset_deg=0.0005)
         self.configure_y_axis(amplitude_deg=0.0001, offset_deg=0.0)
-        time.sleep(0.3)  # Allow settings to stabilize
+        self.core.waitForDevice(self.name)
 
     def configure_for_volume_acquisition(self,
                                           galvo_amplitude: float,
@@ -1467,20 +1467,19 @@ class DiSPIMVolumeScanner:
                 # Enable lasers
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
-                time.sleep(0.1)
 
                 # Prepare circular buffer
                 self.core.clearCircularBuffer()
                 buffer_capacity = self.core.getBufferTotalCapacity()
                 if buffer_capacity < self._num_slices:
                     self.core.setCircularBufferMemoryFootprint(512)
-                    time.sleep(0.1)
+                    self.core.waitForDevice(self.camera.name)
 
                 # Start sequence acquisition
                 self.core.prepareSequenceAcquisition(self.camera.name)
-                time.sleep(0.1)
+                self.core.waitForDevice(self.camera.name)
                 self.core.startSequenceAcquisition(self.camera.name, self._num_slices, 0, True)
-                time.sleep(0.1)
+                self.core.waitForDevice(self.camera.name)
 
                 # Trigger SPIM state machine
                 self.scanner.set_spim_state("Running")
@@ -1710,7 +1709,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
         """
         self.core.setCameraDevice(self.name)
         self.core.setExposure(self.name, exposure_ms)
-        time.sleep(0.1)
+        self.core.waitForDevice(self.name)
         return self.trigger()  # LED automatically handled
 
 
