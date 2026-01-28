@@ -142,22 +142,41 @@ class EmbryoDataset:
     Provides iterator-based access to images organized by embryo,
     with support for storing predictions and annotations.
 
+    Supports both the legacy schema (``dataset.db``) and the
+    GentlyStore schema (``gently.db``).  Schema is auto-detected
+    on first database access.
+
     Parameters
     ----------
     db_path : Path, optional
         Path to SQLite database
     data_dir : Path, optional
         Root data directory for loading images
+    gently_store : GentlyStore, optional
+        If provided, queries use the GentlyStore DB and schema.
     """
 
     def __init__(
         self,
         db_path: Optional[Path] = None,
         data_dir: Path = Path("D:/gently/data"),
+        gently_store=None,
     ):
-        self.db_path = db_path or DEFAULT_DB_PATH
-        self.data_dir = data_dir
+        if gently_store is not None:
+            self.db_path = gently_store.db_path
+            self.data_dir = gently_store.root
+            self._gently_store = gently_store
+        else:
+            self.db_path = db_path or DEFAULT_DB_PATH
+            self.data_dir = data_dir
+            self._gently_store = None
         self._conn: Optional[sqlite3.Connection] = None
+        self._is_gently_schema: Optional[bool] = None
+
+    @classmethod
+    def from_store(cls, store) -> "EmbryoDataset":
+        """Create an EmbryoDataset backed by a GentlyStore."""
+        return cls(gently_store=store)
 
     @property
     def conn(self) -> sqlite3.Connection:
@@ -165,6 +184,24 @@ class EmbryoDataset:
         if self._conn is None:
             self._conn = get_connection(self.db_path)
         return self._conn
+
+    @property
+    def is_gently_schema(self) -> bool:
+        """Detect whether the DB uses the GentlyStore schema."""
+        if self._is_gently_schema is None:
+            cursor = self.conn.execute("PRAGMA table_info(volumes)")
+            columns = {row[1] for row in cursor.fetchall()}
+            # GentlyStore schema uses acquired_at; legacy uses uid + timestamp
+            self._is_gently_schema = "uid" not in columns
+        return self._is_gently_schema
+
+    def _resolve_db_path(self, db_path: Optional[str]) -> Optional[str]:
+        """Convert DB-stored file path to absolute path string."""
+        if db_path is None:
+            return None
+        if self.is_gently_schema and not Path(db_path).is_absolute():
+            return str(self.data_dir / db_path)
+        return db_path
 
     def close(self):
         """Close database connection."""
@@ -200,20 +237,35 @@ class EmbryoDataset:
         EmbryoInfo
             Information about each embryo
         """
-        # Build query
-        query = """
-            SELECT
-                v.embryo_id,
-                v.session_id,
-                COUNT(DISTINCT v.uid) as num_volumes,
-                COUNT(DISTINCT i.uid) as num_images,
-                MIN(COALESCE(v.timepoint, 0)) as min_tp,
-                MAX(COALESCE(v.timepoint, 0)) as max_tp
-            FROM volumes v
-            LEFT JOIN images i ON i.embryo_id = v.embryo_id
-                AND i.timepoint = v.timepoint
-            WHERE v.embryo_id IS NOT NULL
-        """
+        # Build query — schema-dependent
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    v.embryo_id,
+                    v.session_id,
+                    COUNT(*) as num_volumes,
+                    (SELECT COUNT(*) FROM projections p
+                     WHERE p.embryo_id = v.embryo_id
+                       AND p.session_id = v.session_id) as num_images,
+                    MIN(v.timepoint) as min_tp,
+                    MAX(v.timepoint) as max_tp
+                FROM volumes v
+                WHERE v.embryo_id IS NOT NULL
+            """
+        else:
+            query = """
+                SELECT
+                    v.embryo_id,
+                    v.session_id,
+                    COUNT(DISTINCT v.uid) as num_volumes,
+                    COUNT(DISTINCT i.uid) as num_images,
+                    MIN(COALESCE(v.timepoint, 0)) as min_tp,
+                    MAX(COALESCE(v.timepoint, 0)) as max_tp
+                FROM volumes v
+                LEFT JOIN images i ON i.embryo_id = v.embryo_id
+                    AND i.timepoint = v.timepoint
+                WHERE v.embryo_id IS NOT NULL
+            """
         params = []
 
         if session_id:
@@ -281,23 +333,43 @@ class EmbryoDataset:
         ImageData
             Image data for each timepoint
         """
-        # Query volumes (they have the main data)
-        query = """
-            SELECT
-                v.uid as volume_uid,
-                v.embryo_id,
-                v.timepoint,
-                v.timestamp,
-                v.file_path as volume_path,
-                v.session_id,
-                v.shape_json,
-                i.uid as image_uid,
-                i.shape_json as image_shape
-            FROM volumes v
-            LEFT JOIN images i ON i.embryo_id = v.embryo_id
-                AND i.timepoint = v.timepoint
-            WHERE v.embryo_id = ?
-        """
+        # Query volumes (they have the main data) — schema-dependent
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    v.session_id || '/' || v.embryo_id || '/t'
+                        || printf('%04d', v.timepoint) as volume_uid,
+                    v.embryo_id,
+                    v.timepoint,
+                    v.acquired_at as timestamp,
+                    v.file_path as volume_path,
+                    v.session_id,
+                    v.shape as shape_json,
+                    p.file_path as image_uid,
+                    NULL as image_shape
+                FROM volumes v
+                LEFT JOIN projections p ON p.embryo_id = v.embryo_id
+                    AND p.timepoint = v.timepoint
+                    AND p.session_id = v.session_id
+                WHERE v.embryo_id = ?
+            """
+        else:
+            query = """
+                SELECT
+                    v.uid as volume_uid,
+                    v.embryo_id,
+                    v.timepoint,
+                    v.timestamp,
+                    v.file_path as volume_path,
+                    v.session_id,
+                    v.shape_json,
+                    i.uid as image_uid,
+                    i.shape_json as image_shape
+                FROM volumes v
+                LEFT JOIN images i ON i.embryo_id = v.embryo_id
+                    AND i.timepoint = v.timepoint
+                WHERE v.embryo_id = ?
+            """
         params = [embryo_id]
 
         if session_id:
@@ -308,7 +380,10 @@ class EmbryoDataset:
             query += " AND v.timepoint >= ? AND v.timepoint <= ?"
             params.extend(timepoint_range)
 
-        query += " ORDER BY v.timestamp ASC"  # Order by timestamp for consistent indexing
+        if self.is_gently_schema:
+            query += " ORDER BY v.acquired_at ASC"
+        else:
+            query += " ORDER BY v.timestamp ASC"
 
         # Get ground truth for this embryo
         gt_map = self._get_ground_truth_map(embryo_id, session_id)
@@ -337,7 +412,7 @@ class EmbryoDataset:
                 embryo_id=row[1],
                 timepoint=timepoint,
                 timestamp=row[3],
-                _volume_path=row[4],
+                _volume_path=self._resolve_db_path(row[4]),
                 session_id=row[5],
                 shape=shape,
                 ground_truth_stage=gt_stage,
@@ -377,8 +452,15 @@ class EmbryoDataset:
         return None
 
     def get_image_by_uid(self, uid: str) -> Optional[ImageData]:
-        """Get a single image by its UID."""
-        # Query the volume directly
+        """Get a single image by its UID.
+
+        For GentlyStore schema (no UIDs), returns None.
+        Use ``get_image(embryo_id, timepoint, session_id)`` instead.
+        """
+        if self.is_gently_schema:
+            return None
+
+        # Legacy schema — query the volume directly
         row = self.conn.execute("""
             SELECT
                 v.uid as volume_uid,
@@ -613,21 +695,29 @@ class EmbryoDataset:
         int
             Run ID for storing predictions
         """
-        cursor = self.conn.execute("""
-            INSERT INTO perception_runs
-            (name, perception_method, model_name, config_json, description, status,
-             trace_type, source, session_id)
-            VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
-        """, (
-            name,
-            perception_method,
-            model_name,
-            json.dumps(config) if config else None,
-            description,
-            trace_type,
-            source,
-            session_id,
-        ))
+        config_json = json.dumps(config) if config else None
+
+        if self.is_gently_schema:
+            cursor = self.conn.execute("""
+                INSERT INTO perception_runs
+                (session_id, name, perception_method, model_name, config,
+                 status, trace_type, source, created_at)
+                VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
+            """, (
+                session_id, name, perception_method, model_name,
+                config_json, trace_type, source,
+                datetime.now().isoformat(),
+            ))
+        else:
+            cursor = self.conn.execute("""
+                INSERT INTO perception_runs
+                (name, perception_method, model_name, config_json, description, status,
+                 trace_type, source, session_id)
+                VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
+            """, (
+                name, perception_method, model_name,
+                config_json, description, trace_type, source, session_id,
+            ))
         self.conn.commit()
         return cursor.lastrowid
 
@@ -667,75 +757,86 @@ class EmbryoDataset:
                     is_correct = 1 if predicted_stage == gt_stage else 0
                     break
 
-        # Determine confidence level
-        confidence_level = None
-        if confidence is not None:
-            if confidence >= 0.8:
-                confidence_level = "HIGH"
-            elif confidence >= 0.5:
-                confidence_level = "MEDIUM"
-            else:
-                confidence_level = "LOW"
-
-        cursor = self.conn.execute("""
-            INSERT INTO predictions
-            (perception_run_id, image_uid, session_id, embryo_id, timepoint,
-             predicted_stage, confidence, confidence_level, is_transitional,
-             reasoning, ground_truth_stage, is_correct, execution_time_ms)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            run_id,
-            image_uid,
-            session_id,
-            embryo_id,
-            timepoint,
-            predicted_stage,
-            confidence,
-            confidence_level,
-            1 if is_transitional else 0,
-            reasoning,
-            gt_stage,
-            is_correct,
-            execution_time_ms,
-        ))
-
-        prediction_id = cursor.lastrowid
-
-        # Store observed features if provided
-        if observed_features:
-            self.conn.execute("""
-                INSERT INTO observed_features
-                (prediction_id, shape, curvature, shell_status, body_segments,
-                 emergence, movement, texture, features_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        if self.is_gently_schema:
+            # GentlyStore schema: single predictions table with JSON blobs
+            cursor = self.conn.execute("""
+                INSERT INTO predictions
+                (run_id, session_id, embryo_id, timepoint,
+                 predicted_stage, confidence, reasoning, is_transitional,
+                 ground_truth_stage, is_correct, execution_time_ms,
+                 trace_file, observed_features, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
-                prediction_id,
-                observed_features.get("shape"),
-                observed_features.get("curvature"),
-                observed_features.get("shell_status"),
-                observed_features.get("body_segments"),
-                observed_features.get("emergence"),
-                observed_features.get("movement"),
-                observed_features.get("texture"),
-                json.dumps(observed_features),
-            ))
-
-        # Store reasoning trace if provided
-        if reasoning_trace or trace_file_path:
-            self.conn.execute("""
-                INSERT INTO reasoning_traces
-                (prediction_id, contrastive_reasoning, steps_json,
-                 tool_calls_json, tools_used_json, total_tool_calls, file_path)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """, (
-                prediction_id,
-                reasoning_trace.get("contrastive_reasoning") if reasoning_trace else None,
-                json.dumps(reasoning_trace.get("steps", [])) if reasoning_trace else None,
-                json.dumps(reasoning_trace.get("tool_calls", [])) if reasoning_trace else None,
-                json.dumps(reasoning_trace.get("tools_used", [])) if reasoning_trace else None,
-                reasoning_trace.get("total_tool_calls", 0) if reasoning_trace else 0,
+                run_id, session_id, embryo_id, timepoint,
+                predicted_stage, confidence, reasoning,
+                1 if is_transitional else 0,
+                gt_stage, is_correct, execution_time_ms,
                 trace_file_path,
+                json.dumps(observed_features) if observed_features else None,
+                datetime.now().isoformat(),
             ))
+            prediction_id = cursor.lastrowid
+        else:
+            # Legacy schema: separate observed_features + reasoning_traces tables
+            confidence_level = None
+            if confidence is not None:
+                if confidence >= 0.8:
+                    confidence_level = "HIGH"
+                elif confidence >= 0.5:
+                    confidence_level = "MEDIUM"
+                else:
+                    confidence_level = "LOW"
+
+            cursor = self.conn.execute("""
+                INSERT INTO predictions
+                (perception_run_id, image_uid, session_id, embryo_id, timepoint,
+                 predicted_stage, confidence, confidence_level, is_transitional,
+                 reasoning, ground_truth_stage, is_correct, execution_time_ms)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                run_id, image_uid, session_id, embryo_id, timepoint,
+                predicted_stage, confidence, confidence_level,
+                1 if is_transitional else 0,
+                reasoning, gt_stage, is_correct, execution_time_ms,
+            ))
+
+            prediction_id = cursor.lastrowid
+
+            # Store observed features if provided
+            if observed_features:
+                self.conn.execute("""
+                    INSERT INTO observed_features
+                    (prediction_id, shape, curvature, shell_status, body_segments,
+                     emergence, movement, texture, features_json)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prediction_id,
+                    observed_features.get("shape"),
+                    observed_features.get("curvature"),
+                    observed_features.get("shell_status"),
+                    observed_features.get("body_segments"),
+                    observed_features.get("emergence"),
+                    observed_features.get("movement"),
+                    observed_features.get("texture"),
+                    json.dumps(observed_features),
+                ))
+
+            # Store reasoning trace if provided
+            if reasoning_trace or trace_file_path:
+                self.conn.execute("""
+                    INSERT INTO reasoning_traces
+                    (prediction_id, contrastive_reasoning, steps_json,
+                     tool_calls_json, tools_used_json, total_tool_calls, file_path)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    prediction_id,
+                    reasoning_trace.get("contrastive_reasoning") if reasoning_trace else None,
+                    json.dumps(reasoning_trace.get("steps", [])) if reasoning_trace else None,
+                    json.dumps(reasoning_trace.get("tool_calls", [])) if reasoning_trace else None,
+                    json.dumps(reasoning_trace.get("tools_used", [])) if reasoning_trace else None,
+                    reasoning_trace.get("total_tool_calls", 0) if reasoning_trace else 0,
+                    trace_file_path,
+                ))
 
         self.conn.commit()
         return prediction_id
@@ -747,16 +848,25 @@ class EmbryoDataset:
         error_message: Optional[str] = None,
     ):
         """Mark a perception run as completed."""
-        self.conn.execute("""
-            UPDATE perception_runs SET
-                status = ?,
-                completed_at = ?,
-                error_message = ?,
-                total_samples = (
-                    SELECT COUNT(*) FROM predictions WHERE perception_run_id = ?
-                )
-            WHERE id = ?
-        """, (status, datetime.now().isoformat(), error_message, run_id, run_id))
+        now = datetime.now().isoformat()
+
+        if self.is_gently_schema:
+            self.conn.execute("""
+                UPDATE perception_runs SET
+                    status = ?, completed_at = ?, error_message = ?
+                WHERE run_id = ?
+            """, (status, now, error_message, run_id))
+        else:
+            self.conn.execute("""
+                UPDATE perception_runs SET
+                    status = ?,
+                    completed_at = ?,
+                    error_message = ?,
+                    total_samples = (
+                        SELECT COUNT(*) FROM predictions WHERE perception_run_id = ?
+                    )
+                WHERE id = ?
+            """, (status, now, error_message, run_id, run_id))
         self.conn.commit()
 
     # =========================================================================
@@ -773,10 +883,11 @@ class EmbryoDataset:
             Metrics including accuracy, confusion matrix, per-stage stats
         """
         # Get predictions with ground truth
-        rows = self.conn.execute("""
+        run_col = "run_id" if self.is_gently_schema else "perception_run_id"
+        rows = self.conn.execute(f"""
             SELECT predicted_stage, ground_truth_stage, is_correct, confidence
             FROM predictions
-            WHERE perception_run_id = ? AND ground_truth_stage IS NOT NULL
+            WHERE {run_col} = ? AND ground_truth_stage IS NOT NULL
         """, (run_id,)).fetchall()
 
         if not rows:
@@ -931,10 +1042,31 @@ class EmbryoDataset:
 
     def get_perception_runs(self) -> List[Dict[str, Any]]:
         """Get list of perception runs with metrics."""
-        rows = self.conn.execute("""
-            SELECT * FROM v_run_accuracy
-            ORDER BY run_id DESC
-        """).fetchall()
+        if self.is_gently_schema:
+            # GentlyStore schema — inline the accuracy view
+            rows = self.conn.execute("""
+                SELECT
+                    pr.run_id,
+                    pr.name,
+                    pr.perception_method,
+                    pr.model_name,
+                    COUNT(p.prediction_id) as total_predictions,
+                    SUM(CASE WHEN p.is_correct = 1 THEN 1 ELSE 0 END) as correct,
+                    SUM(CASE WHEN p.is_correct = 0 THEN 1 ELSE 0 END) as incorrect,
+                    SUM(CASE WHEN p.is_correct IS NULL THEN 1 ELSE 0 END) as no_ground_truth,
+                    ROUND(100.0 * SUM(CASE WHEN p.is_correct = 1 THEN 1 ELSE 0 END) /
+                          NULLIF(SUM(CASE WHEN p.is_correct IS NOT NULL THEN 1 ELSE 0 END), 0), 2)
+                        as accuracy_pct
+                FROM perception_runs pr
+                LEFT JOIN predictions p ON pr.run_id = p.run_id
+                GROUP BY pr.run_id
+                ORDER BY pr.run_id DESC
+            """).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT * FROM v_run_accuracy
+                ORDER BY run_id DESC
+            """).fetchall()
 
         return [dict(r) for r in rows]
 
@@ -970,28 +1102,51 @@ class EmbryoDataset:
         list of dict
             Traces with prediction and run metadata
         """
-        query = """
-            SELECT
-                p.id as prediction_id,
-                p.predicted_stage,
-                p.confidence,
-                p.reasoning,
-                p.timestamp,
-                pr.id as run_id,
-                pr.name as run_name,
-                pr.trace_type,
-                pr.source,
-                pr.session_id as run_session_id,
-                pr.perception_method,
-                rt.file_path,
-                rt.contrastive_reasoning,
-                rt.steps_json,
-                rt.total_tool_calls
-            FROM predictions p
-            JOIN perception_runs pr ON p.perception_run_id = pr.id
-            LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
-            WHERE p.embryo_id = ? AND p.timepoint = ?
-        """
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    p.prediction_id,
+                    p.predicted_stage,
+                    p.confidence,
+                    p.reasoning,
+                    p.created_at,
+                    pr.run_id,
+                    pr.name as run_name,
+                    pr.trace_type,
+                    pr.source,
+                    pr.session_id as run_session_id,
+                    pr.perception_method,
+                    p.trace_file,
+                    NULL as contrastive_reasoning,
+                    p.observed_features as steps_json,
+                    NULL as total_tool_calls
+                FROM predictions p
+                JOIN perception_runs pr ON p.run_id = pr.run_id
+                WHERE p.embryo_id = ? AND p.timepoint = ?
+            """
+        else:
+            query = """
+                SELECT
+                    p.id as prediction_id,
+                    p.predicted_stage,
+                    p.confidence,
+                    p.reasoning,
+                    p.timestamp,
+                    pr.id as run_id,
+                    pr.name as run_name,
+                    pr.trace_type,
+                    pr.source,
+                    pr.session_id as run_session_id,
+                    pr.perception_method,
+                    rt.file_path,
+                    rt.contrastive_reasoning,
+                    rt.steps_json,
+                    rt.total_tool_calls
+                FROM predictions p
+                JOIN perception_runs pr ON p.perception_run_id = pr.id
+                LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
+                WHERE p.embryo_id = ? AND p.timepoint = ?
+            """
         params = [embryo_id, timepoint]
 
         if session_id:
@@ -1002,7 +1157,10 @@ class EmbryoDataset:
             query += " AND pr.trace_type = ?"
             params.append(trace_type)
 
-        query += " ORDER BY p.timestamp DESC"
+        if self.is_gently_schema:
+            query += " ORDER BY p.created_at DESC"
+        else:
+            query += " ORDER BY p.timestamp DESC"
 
         rows = self.conn.execute(query, params).fetchall()
 
@@ -1047,30 +1205,52 @@ class EmbryoDataset:
         list of dict
             Runs with metadata and prediction counts
         """
-        query = """
-            SELECT
-                pr.id,
-                pr.name,
-                pr.description,
-                pr.perception_method,
-                pr.model_name,
-                pr.trace_type,
-                pr.source,
-                pr.status,
-                pr.created_at,
-                pr.completed_at,
-                COUNT(p.id) as prediction_count
-            FROM perception_runs pr
-            LEFT JOIN predictions p ON pr.id = p.perception_run_id
-            WHERE pr.session_id = ?
-        """
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    pr.run_id,
+                    pr.name,
+                    NULL as description,
+                    pr.perception_method,
+                    pr.model_name,
+                    pr.trace_type,
+                    pr.source,
+                    pr.status,
+                    pr.created_at,
+                    pr.completed_at,
+                    COUNT(p.prediction_id) as prediction_count
+                FROM perception_runs pr
+                LEFT JOIN predictions p ON pr.run_id = p.run_id
+                WHERE pr.session_id = ?
+            """
+        else:
+            query = """
+                SELECT
+                    pr.id,
+                    pr.name,
+                    pr.description,
+                    pr.perception_method,
+                    pr.model_name,
+                    pr.trace_type,
+                    pr.source,
+                    pr.status,
+                    pr.created_at,
+                    pr.completed_at,
+                    COUNT(p.id) as prediction_count
+                FROM perception_runs pr
+                LEFT JOIN predictions p ON pr.id = p.perception_run_id
+                WHERE pr.session_id = ?
+            """
         params = [session_id]
 
         if trace_type:
             query += " AND pr.trace_type = ?"
             params.append(trace_type)
 
-        query += " GROUP BY pr.id ORDER BY pr.created_at DESC"
+        if self.is_gently_schema:
+            query += " GROUP BY pr.run_id ORDER BY pr.created_at DESC"
+        else:
+            query += " GROUP BY pr.id ORDER BY pr.created_at DESC"
 
         rows = self.conn.execute(query, params).fetchall()
 
@@ -1111,22 +1291,39 @@ class EmbryoDataset:
         list of dict
             Predictions with trace info
         """
-        query = """
-            SELECT
-                p.id,
-                p.embryo_id,
-                p.timepoint,
-                p.predicted_stage,
-                p.confidence,
-                p.reasoning,
-                p.ground_truth_stage,
-                p.is_correct,
-                p.timestamp,
-                rt.file_path
-            FROM predictions p
-            LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
-            WHERE p.perception_run_id = ?
-        """
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    p.prediction_id,
+                    p.embryo_id,
+                    p.timepoint,
+                    p.predicted_stage,
+                    p.confidence,
+                    p.reasoning,
+                    p.ground_truth_stage,
+                    p.is_correct,
+                    p.created_at,
+                    p.trace_file
+                FROM predictions p
+                WHERE p.run_id = ?
+            """
+        else:
+            query = """
+                SELECT
+                    p.id,
+                    p.embryo_id,
+                    p.timepoint,
+                    p.predicted_stage,
+                    p.confidence,
+                    p.reasoning,
+                    p.ground_truth_stage,
+                    p.is_correct,
+                    p.timestamp,
+                    rt.file_path
+                FROM predictions p
+                LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
+                WHERE p.perception_run_id = ?
+            """
         params = [run_id]
 
         if embryo_id:
@@ -1171,28 +1368,54 @@ class EmbryoDataset:
         list of dict
             All embryo instances matching this UID across different sessions
         """
-        rows = self.conn.execute("""
-            SELECT
-                e.embryo_id,
-                e.session_id,
-                e.embryo_uid,
-                e.nickname,
-                e.user_label,
-                e.stage_position_x,
-                e.stage_position_y,
-                e.calibration_json,
-                e.created_at,
-                s.name as session_name,
-                s.created_at as session_created_at,
-                (SELECT COUNT(*) FROM volumes v
-                 WHERE v.embryo_uid = e.embryo_uid AND v.session_id = e.session_id) as volume_count,
-                (SELECT COUNT(*) FROM images i
-                 WHERE i.embryo_uid = e.embryo_uid AND i.session_id = e.session_id) as image_count
-            FROM embryos e
-            LEFT JOIN sessions s ON e.session_id = s.session_id
-            WHERE e.embryo_uid = ?
-            ORDER BY e.created_at ASC
-        """, (uid,)).fetchall()
+        if self.is_gently_schema:
+            rows = self.conn.execute("""
+                SELECT
+                    e.embryo_id,
+                    e.session_id,
+                    e.embryo_uid,
+                    e.nickname,
+                    NULL as user_label,
+                    e.position_x as stage_position_x,
+                    e.position_y as stage_position_y,
+                    e.calibration as calibration_json,
+                    e.created_at,
+                    s.name as session_name,
+                    s.created_at as session_created_at,
+                    (SELECT COUNT(*) FROM volumes v
+                     WHERE v.embryo_id = e.embryo_id
+                       AND v.session_id = e.session_id) as volume_count,
+                    (SELECT COUNT(*) FROM projections p
+                     WHERE p.embryo_id = e.embryo_id
+                       AND p.session_id = e.session_id) as image_count
+                FROM embryos e
+                LEFT JOIN sessions s ON e.session_id = s.session_id
+                WHERE e.embryo_uid = ?
+                ORDER BY e.created_at ASC
+            """, (uid,)).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT
+                    e.embryo_id,
+                    e.session_id,
+                    e.embryo_uid,
+                    e.nickname,
+                    e.user_label,
+                    e.stage_position_x,
+                    e.stage_position_y,
+                    e.calibration_json,
+                    e.created_at,
+                    s.name as session_name,
+                    s.created_at as session_created_at,
+                    (SELECT COUNT(*) FROM volumes v
+                     WHERE v.embryo_uid = e.embryo_uid AND v.session_id = e.session_id) as volume_count,
+                    (SELECT COUNT(*) FROM images i
+                     WHERE i.embryo_uid = e.embryo_uid AND i.session_id = e.session_id) as image_count
+                FROM embryos e
+                LEFT JOIN sessions s ON e.session_id = s.session_id
+                WHERE e.embryo_uid = ?
+                ORDER BY e.created_at ASC
+            """, (uid,)).fetchall()
 
         return [
             {
@@ -1234,24 +1457,47 @@ class EmbryoDataset:
             Image data for each timepoint across all sessions
         """
         # Query volumes with this embryo UID across all sessions
-        query = """
-            SELECT
-                v.uid as volume_uid,
-                v.embryo_id,
-                v.timepoint,
-                v.timestamp,
-                v.file_path as volume_path,
-                v.session_id,
-                v.shape_json,
-                i.uid as image_uid,
-                i.shape_json as image_shape
-            FROM volumes v
-            LEFT JOIN images i ON i.embryo_uid = v.embryo_uid
-                AND i.timepoint = v.timepoint
-                AND i.session_id = v.session_id
-            WHERE v.embryo_uid = ?
-            ORDER BY v.session_id, v.timestamp ASC
-        """
+        if self.is_gently_schema:
+            query = """
+                SELECT
+                    v.session_id || '/' || v.embryo_id || '/t'
+                        || printf('%04d', v.timepoint) as volume_uid,
+                    v.embryo_id,
+                    v.timepoint,
+                    v.acquired_at as timestamp,
+                    v.file_path as volume_path,
+                    v.session_id,
+                    v.shape as shape_json,
+                    p.file_path as image_uid,
+                    NULL as image_shape
+                FROM volumes v
+                JOIN embryos e ON v.embryo_id = e.embryo_id
+                    AND v.session_id = e.session_id
+                LEFT JOIN projections p ON p.embryo_id = v.embryo_id
+                    AND p.timepoint = v.timepoint
+                    AND p.session_id = v.session_id
+                WHERE e.embryo_uid = ?
+                ORDER BY v.session_id, v.acquired_at ASC
+            """
+        else:
+            query = """
+                SELECT
+                    v.uid as volume_uid,
+                    v.embryo_id,
+                    v.timepoint,
+                    v.timestamp,
+                    v.file_path as volume_path,
+                    v.session_id,
+                    v.shape_json,
+                    i.uid as image_uid,
+                    i.shape_json as image_shape
+                FROM volumes v
+                LEFT JOIN images i ON i.embryo_uid = v.embryo_uid
+                    AND i.timepoint = v.timepoint
+                    AND i.session_id = v.session_id
+                WHERE v.embryo_uid = ?
+                ORDER BY v.session_id, v.timestamp ASC
+            """
 
         for row in self.conn.execute(query, (uid,)):
             timepoint = row[2] or 0
@@ -1279,7 +1525,7 @@ class EmbryoDataset:
                 embryo_id=embryo_id,
                 timepoint=timepoint,
                 timestamp=row[3],
-                _volume_path=row[4],
+                _volume_path=self._resolve_db_path(row[4]),
                 session_id=session_id,
                 shape=shape,
                 ground_truth_stage=gt_stage,
@@ -1297,26 +1543,49 @@ class EmbryoDataset:
         list of dict
             Embryo UIDs with session counts and details
         """
-        rows = self.conn.execute("""
-            SELECT
-                embryo_uid,
-                COUNT(DISTINCT session_id) as session_count,
-                GROUP_CONCAT(DISTINCT session_id) as session_ids,
-                MIN(created_at) as first_seen,
-                MAX(created_at) as last_seen,
-                (SELECT SUM(cnt) FROM (
-                    SELECT COUNT(*) as cnt FROM volumes v
-                    WHERE v.embryo_uid = e.embryo_uid
-                )) as total_volumes,
-                (SELECT COUNT(*) FROM ground_truth g
-                 JOIN embryos e2 ON g.session_id = e2.session_id AND g.embryo_id = e2.embryo_id
-                 WHERE e2.embryo_uid = e.embryo_uid) as gt_count
-            FROM embryos e
-            WHERE embryo_uid IS NOT NULL
-            GROUP BY embryo_uid
-            HAVING COUNT(DISTINCT session_id) > 1
-            ORDER BY session_count DESC, first_seen ASC
-        """).fetchall()
+        if self.is_gently_schema:
+            rows = self.conn.execute("""
+                SELECT
+                    embryo_uid,
+                    COUNT(DISTINCT session_id) as session_count,
+                    GROUP_CONCAT(DISTINCT session_id) as session_ids,
+                    MIN(created_at) as first_seen,
+                    MAX(created_at) as last_seen,
+                    (SELECT COUNT(*) FROM volumes v
+                     JOIN embryos e2 ON v.embryo_id = e2.embryo_id
+                         AND v.session_id = e2.session_id
+                     WHERE e2.embryo_uid = e.embryo_uid) as total_volumes,
+                    (SELECT COUNT(*) FROM ground_truth g
+                     JOIN embryos e3 ON g.session_id = e3.session_id
+                         AND g.embryo_id = e3.embryo_id
+                     WHERE e3.embryo_uid = e.embryo_uid) as gt_count
+                FROM embryos e
+                WHERE embryo_uid IS NOT NULL
+                GROUP BY embryo_uid
+                HAVING COUNT(DISTINCT session_id) > 1
+                ORDER BY session_count DESC, first_seen ASC
+            """).fetchall()
+        else:
+            rows = self.conn.execute("""
+                SELECT
+                    embryo_uid,
+                    COUNT(DISTINCT session_id) as session_count,
+                    GROUP_CONCAT(DISTINCT session_id) as session_ids,
+                    MIN(created_at) as first_seen,
+                    MAX(created_at) as last_seen,
+                    (SELECT SUM(cnt) FROM (
+                        SELECT COUNT(*) as cnt FROM volumes v
+                        WHERE v.embryo_uid = e.embryo_uid
+                    )) as total_volumes,
+                    (SELECT COUNT(*) FROM ground_truth g
+                     JOIN embryos e2 ON g.session_id = e2.session_id AND g.embryo_id = e2.embryo_id
+                     WHERE e2.embryo_uid = e.embryo_uid) as gt_count
+                FROM embryos e
+                WHERE embryo_uid IS NOT NULL
+                GROUP BY embryo_uid
+                HAVING COUNT(DISTINCT session_id) > 1
+                ORDER BY session_count DESC, first_seen ASC
+            """).fetchall()
 
         return [
             {
@@ -1357,16 +1626,30 @@ class EmbryoDataset:
             session_id = instance["session_id"]
 
             # Get timepoint range and image count for this session
-            stats = self.conn.execute("""
-                SELECT
-                    MIN(v.timestamp) as first_timestamp,
-                    MAX(v.timestamp) as last_timestamp,
-                    COUNT(DISTINCT v.uid) as volume_count,
-                    MIN(v.timepoint) as min_timepoint,
-                    MAX(v.timepoint) as max_timepoint
-                FROM volumes v
-                WHERE v.embryo_uid = ? AND v.session_id = ?
-            """, (uid, session_id)).fetchone()
+            if self.is_gently_schema:
+                stats = self.conn.execute("""
+                    SELECT
+                        MIN(v.acquired_at) as first_timestamp,
+                        MAX(v.acquired_at) as last_timestamp,
+                        COUNT(*) as volume_count,
+                        MIN(v.timepoint) as min_timepoint,
+                        MAX(v.timepoint) as max_timepoint
+                    FROM volumes v
+                    JOIN embryos e ON v.embryo_id = e.embryo_id
+                        AND v.session_id = e.session_id
+                    WHERE e.embryo_uid = ? AND v.session_id = ?
+                """, (uid, session_id)).fetchone()
+            else:
+                stats = self.conn.execute("""
+                    SELECT
+                        MIN(v.timestamp) as first_timestamp,
+                        MAX(v.timestamp) as last_timestamp,
+                        COUNT(DISTINCT v.uid) as volume_count,
+                        MIN(v.timepoint) as min_timepoint,
+                        MAX(v.timepoint) as max_timepoint
+                    FROM volumes v
+                    WHERE v.embryo_uid = ? AND v.session_id = ?
+                """, (uid, session_id)).fetchone()
 
             # Get ground truth stages for this session
             gt_rows = self.conn.execute("""

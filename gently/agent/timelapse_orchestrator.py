@@ -22,7 +22,7 @@ from ..core import EventType, get_event_bus
 from .error_log import GlobalErrorLog
 
 if TYPE_CHECKING:
-    pass
+    from ..store import GentlyStore
 
 # Default trace directory
 TRACE_BASE_PATH = Path("D:/Gently/traces")
@@ -362,6 +362,7 @@ class TimelapseOrchestrator:
         perception_manager=None,
         on_volume_callback: Optional[Callable] = None,
         session_id: Optional[str] = None,
+        store: Optional["GentlyStore"] = None,
     ):
         """
         Parameters
@@ -376,6 +377,8 @@ class TimelapseOrchestrator:
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
         session_id : str, optional
             Session identifier for trace file storage
+        store : GentlyStore, optional
+            Unified data store for persisting perception predictions
         """
         self.client = microscope_client
         self.experiment = experiment_state
@@ -385,6 +388,10 @@ class TimelapseOrchestrator:
         # Trace file storage (writes JSON files to disk)
         self._session_id = session_id
         self._trace_dir: Optional[Path] = None
+
+        # Unified store for perception persistence
+        self._store = store
+        self._perception_run_id: Optional[int] = None
 
         # Event bus for status updates
         self._event_bus = get_event_bus()
@@ -477,6 +484,22 @@ class TimelapseOrchestrator:
             self._trace_dir = TRACE_BASE_PATH / self._session_id
             self._trace_dir.mkdir(parents=True, exist_ok=True)
             logger.info(f"Trace file storage enabled: {self._trace_dir}")
+
+        # Create a perception run in the unified store
+        self._perception_run_id = None
+        if self._store and self._session_id and self.perception_manager:
+            try:
+                self._perception_run_id = self._store.create_perception_run(
+                    session_id=self._session_id,
+                    name=f"timelapse_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    method="vlm_stage_classification",
+                    model_name="claude-opus-4-5-20251101",
+                    source="live",
+                    config={"stop_condition": stop_condition, "interval": base_interval_seconds},
+                )
+                logger.info(f"Created perception run {self._perception_run_id} in GentlyStore")
+            except Exception as e:
+                logger.warning(f"Failed to create perception run in store: {e}")
 
         # Initialize round-based scheduling (global timing for all embryos)
         self._base_interval_seconds = base_interval_seconds
@@ -597,6 +620,8 @@ class TimelapseOrchestrator:
                         trace_count = len(list(self._trace_dir.glob("*.json")))
                         logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
 
+                    self._finalize_perception_run("completed")
+
                     self._emit_event(EventType.ACQUISITION_COMPLETED, {
                         'total_timepoints': self._total_timepoints,
                         'duration_minutes': (datetime.now() - self._started_at).total_seconds() / 60,
@@ -623,6 +648,7 @@ class TimelapseOrchestrator:
             logger.error(f"Timelapse error: {e}\n{traceback.format_exc()}")
             self._status = TimelapseStatus.FAILED
             self._error_message = str(e)
+            self._finalize_perception_run("failed", error_message=str(e))
             self._emit_event(EventType.ACQUISITION_FAILED, {
                 'error': str(e),
             })
@@ -718,11 +744,14 @@ class TimelapseOrchestrator:
                         if acquisition_mode == 'snap' and data.ndim == 2:
                             data = data[np.newaxis, ...]  # Add Z dimension: (Y,X) -> (1,Y,X)
                         volume_data = data
+                        # Pass volume_path if available (zero-copy from device)
+                        volume_path = result.get('volume_path')
                         # Callback may return UIDs from storage
                         callback_result = await self.on_volume_callback(
                             embryo_id,
                             embryo_state.timepoints_acquired,
-                            data
+                            data,
+                            volume_path=volume_path,
                         )
                         if isinstance(callback_result, dict):
                             volume_uids = callback_result
@@ -1125,6 +1154,8 @@ class TimelapseOrchestrator:
             trace_count = len(list(self._trace_dir.glob("*.json")))
             logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
 
+        self._finalize_perception_run("stopped")
+
         # Emit stop event for viz server and other listeners
         get_event_bus().publish(
             EventType.ACQUISITION_STOPPED,
@@ -1278,6 +1309,19 @@ class TimelapseOrchestrator:
                     'new_interval': rule.new_interval_seconds,
                 })
 
+    def _finalize_perception_run(self, status: str = "completed", error_message: str = None):
+        """Mark the perception run as finished in GentlyStore."""
+        if self._store and self._perception_run_id is not None:
+            try:
+                self._store.complete_perception_run(
+                    self._perception_run_id,
+                    status=status,
+                    error_message=error_message,
+                )
+                logger.info(f"Perception run {self._perception_run_id} marked as {status}")
+            except Exception as e:
+                logger.warning(f"Failed to finalize perception run: {e}")
+
     def _emit_event(self, event_type: EventType, data: Dict):
         """Emit event to event bus"""
         self._event_bus.publish(
@@ -1430,6 +1474,54 @@ class TimelapseOrchestrator:
                     self._write_trace_file(embryo_id, timepoint, result)
                 except Exception as persist_error:
                     logger.warning(f"Failed to write trace file: {persist_error}")
+
+            # Persist prediction to GentlyStore (dual-write during transition)
+            if self._store and self._perception_run_id and self._session_id:
+                try:
+                    obs_features = None
+                    if result.observed_features:
+                        obs_features = {
+                            'shape': result.observed_features.shape,
+                            'curvature': result.observed_features.curvature,
+                            'shell_status': result.observed_features.shell_status,
+                            'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
+                            'emergence': result.observed_features.emergence,
+                        }
+
+                    trace_data = {
+                        "session_id": self._session_id,
+                        "embryo_id": embryo_id,
+                        "timepoint": timepoint,
+                        "timestamp": datetime.now().isoformat(),
+                        "predicted_stage": result.stage,
+                        "confidence": result.confidence,
+                        "reasoning": result.reasoning,
+                        "is_hatching": getattr(result, 'is_hatching', False),
+                        "is_transitional": getattr(result, 'is_transitional', False),
+                        "transition_between": getattr(result, 'transition_between', None),
+                    }
+                    if hasattr(result, 'contrastive_reasoning') and result.contrastive_reasoning:
+                        trace_data["contrastive_reasoning"] = {
+                            'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
+                            'why_not_next': result.contrastive_reasoning.why_not_next_stage,
+                        }
+                    if hasattr(result, 'reasoning_trace') and result.reasoning_trace:
+                        trace_data["reasoning_trace"] = result.reasoning_trace.to_dict()
+
+                    self._store.store_prediction(
+                        run_id=self._perception_run_id,
+                        session_id=self._session_id,
+                        embryo_id=embryo_id,
+                        timepoint=timepoint,
+                        predicted_stage=result.stage,
+                        confidence=result.confidence,
+                        reasoning=result.reasoning,
+                        is_transitional=getattr(result, 'is_transitional', False),
+                        trace_data=trace_data,
+                        observed_features=obs_features,
+                    )
+                except Exception as store_error:
+                    logger.warning(f"Failed to store prediction in GentlyStore: {store_error}")
 
             # Emit perception event for viz server
             event_data = {

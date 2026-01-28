@@ -177,6 +177,85 @@ class QueueServerClient:
             )
 
     # =========================================================================
+    # Session Configuration (GentlyStore integration)
+    # =========================================================================
+
+    async def configure_device_session(self, volume_dir: str) -> dict:
+        """Tell the device server where to write staging TIFFs.
+
+        After this call, the server's ``serialize_value()`` will write large
+        numpy arrays as TIFF files into *volume_dir* and return a lightweight
+        file-reference dict instead of serializing the full data to JSON.
+
+        Parameters
+        ----------
+        volume_dir : str
+            Absolute path to the staging directory
+            (e.g. ``"D:/Gently2/incoming"``).
+
+        Returns
+        -------
+        dict
+            ``{"success": True, "volume_dir": "..."}`` on success.
+        """
+        self._ensure_connected()
+        async with self._session.post(
+            f"{self.http_url}/session/configure",
+            json={"volume_dir": volume_dir},
+        ) as resp:
+            return await resp.json()
+
+    @staticmethod
+    def _is_file_ref(obj) -> bool:
+        """Check if *obj* is a file-reference dict from the device server."""
+        return isinstance(obj, dict) and obj.get("__file_ref__") is True
+
+    @staticmethod
+    def _resolve_file_ref(ref: dict) -> tuple:
+        """Read a single file reference and return ``(np.ndarray, Path)``.
+
+        Parameters
+        ----------
+        ref : dict
+            ``{"__file_ref__": True, "path": "...", "shape": [...], "dtype": "..."}``
+
+        Returns
+        -------
+        tuple of (np.ndarray, Path)
+        """
+        import tifffile
+        from pathlib import Path
+
+        path = Path(ref["path"])
+        arr = tifffile.imread(str(path))
+        return arr, path
+
+    @classmethod
+    def _resolve_file_refs(cls, data: dict) -> dict:
+        """Walk *data* and replace every file-ref dict with its numpy array.
+
+        Also stores resolved file paths in ``data["__resolved_paths__"]``
+        for downstream use (e.g. ``register_volume``).
+        """
+        resolved_paths = {}
+
+        def _walk(obj, key_path=""):
+            if cls._is_file_ref(obj):
+                arr, path = cls._resolve_file_ref(obj)
+                resolved_paths[key_path] = path
+                return arr
+            if isinstance(obj, dict):
+                return {k: _walk(v, f"{key_path}.{k}") for k, v in obj.items()}
+            if isinstance(obj, list):
+                return [_walk(v, f"{key_path}[{i}]") for i, v in enumerate(obj)]
+            return obj
+
+        result = _walk(data)
+        if isinstance(result, dict):
+            result["__resolved_paths__"] = resolved_paths
+        return result
+
+    # =========================================================================
     # Server Operations
     # =========================================================================
 
@@ -446,13 +525,22 @@ class QueueServerClient:
                 for key in ['HamCam1', 'lightsheet_snap', 'camera']:
                     if key in data:
                         image_data = data[key]
-                        return {
-                            'image': np.array(image_data),
+                        # Handle file-ref protocol
+                        volume_path = None
+                        if self._is_file_ref(image_data):
+                            image_data, volume_path = self._resolve_file_ref(image_data)
+                        else:
+                            image_data = np.array(image_data)
+                        ret = {
+                            'image': image_data,
                             'piezo_position': piezo_position,
                             'galvo_position': galvo_position,
                             'run_uid': run_uid,
-                            'success': True
+                            'success': True,
                         }
+                        if volume_path is not None:
+                            ret['volume_path'] = volume_path
+                        return ret
 
             # Fallback: try databroker if response didn't have image data
             if run_uid and self._db:
@@ -540,19 +628,34 @@ class QueueServerClient:
             if events:
                 # Try to reconstruct volume from events
                 images = []
+                volume_path = None
                 for event in events:
                     data = event.get('data', {})
                     for key in ['volume_scanner', 'camera', 'camera_image']:
                         if key in data:
-                            images.append(data[key])
+                            val = data[key]
+                            # Handle file-ref protocol
+                            if self._is_file_ref(val):
+                                arr, fpath = self._resolve_file_ref(val)
+                                images.append(arr)
+                                volume_path = fpath
+                            else:
+                                images.append(val)
                             break
                 if images:
-                    volume = np.array(images)
-                    return {
+                    # If a file ref gave us the complete volume, use it directly
+                    if len(images) == 1 and isinstance(images[0], np.ndarray) and images[0].ndim >= 3:
+                        volume = images[0]
+                    else:
+                        volume = np.array(images)
+                    ret = {
                         'volume': volume,
                         'shape': volume.shape,
-                        'success': True
+                        'success': True,
                     }
+                    if volume_path is not None:
+                        ret['volume_path'] = volume_path
+                    return ret
 
         return {'error': result.get('error', 'Acquisition failed'), 'success': False}
 
@@ -659,7 +762,11 @@ class QueueServerClient:
                 data = events[0].get('data', {})
                 for key in ['bottom_camera', 'bottom_camera_image', 'Bottom PCO']:
                     if key in data:
-                        return np.array(data[key])
+                        val = data[key]
+                        if self._is_file_ref(val):
+                            arr, _ = self._resolve_file_ref(val)
+                            return arr
+                        return np.array(val)
 
         return np.zeros((100, 100), dtype=np.uint16)
 

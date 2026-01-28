@@ -36,7 +36,6 @@ from .schema import (
 )
 from .aggregator import DatasetAggregator
 from .embryo_dataset import EmbryoDataset, EmbryoInfo, ImageData
-from .trace_persister import TracePersister, TRACE_BASE_PATH
 
 __all__ = [
     "init_database",
@@ -47,7 +46,5 @@ __all__ = [
     "EmbryoDataset",
     "EmbryoInfo",
     "ImageData",
-    "TracePersister",
-    "TRACE_BASE_PATH",
     "DATABASE_VERSION",
 ]

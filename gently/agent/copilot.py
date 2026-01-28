@@ -34,6 +34,7 @@ from .timelapse_orchestrator import TimelapseOrchestrator
 from .timeline import TimelineManager
 from ..session import SessionManager
 from ..core import EventType, get_event_bus, emit
+from ..store import GentlyStore
 
 
 class MicroscopyCopilot:
@@ -55,6 +56,7 @@ class MicroscopyCopilot:
         model: str = "claude-opus-4-5-20251101",
         microscope_client=None,
         session_id: Optional[str] = None,
+        store: Optional[GentlyStore] = None,
     ):
         """
         Parameters
@@ -69,6 +71,9 @@ class MicroscopyCopilot:
             RPC client for microscope server. Required for hardware control.
         session_id : str, optional
             Session ID to resume. If None, creates new session.
+        store : GentlyStore, optional
+            Unified data store. When provided, volumes and sessions are
+            also written to GentlyStore alongside the legacy systems.
         """
         # API client with interleaved thinking support
         self.claude = anthropic.Anthropic(
@@ -92,6 +97,9 @@ class MicroscopyCopilot:
             storage_path=self.storage_path / "images",
             history_length=10
         )
+
+        # Unified store (GentlyStore) — optional, dual-writes during transition
+        self.store = store
 
         # Plan synthesis
         self.plan_synthesizer = PlanSynthesizer(
@@ -157,6 +165,9 @@ class MicroscopyCopilot:
             self.resume_session(session_id)
         else:
             self.session_manager.create_session()
+            # Mirror session in GentlyStore
+            if self.store:
+                self.store.create_session(self.session_id)
             self._emit_event(EventType.SESSION_STARTED, {
                 'session_id': self.session_id,
             })
@@ -531,6 +542,7 @@ Write a brief status summary. Examples:
                 perception_manager=self.perception_manager,
                 on_volume_callback=self.on_volume_acquired,
                 session_id=self.session_id,
+                store=self.store,
             )
         except Exception as e:
             import logging
@@ -645,6 +657,7 @@ Write a brief status summary. Examples:
             self.viz_server = VisualizationServer(
                 port=port,
                 event_bus=self._event_bus,
+                gently_store=self.store,
             )
             await self.viz_server.start()
             logger.info(f"Visualization server started at http://localhost:{port}")
@@ -775,6 +788,18 @@ Write a brief status summary. Examples:
         # Update image storage path for this session
         self.image_manager.set_session(session_id)
 
+        # Mirror session in GentlyStore
+        if self.store:
+            self.store.create_session(session_id)
+            for eid, edata in embryo_states.items():
+                pos = edata.get('stage_position', {})
+                self.store.register_embryo(
+                    session_id, eid,
+                    position_x=pos.get('x'),
+                    position_y=pos.get('y'),
+                    calibration=edata.get('calibration'),
+                )
+
         # Emit session restored event
         self._emit_event(EventType.SESSION_RESTORED, {
             'session_id': session_id,
@@ -795,6 +820,17 @@ Write a brief status summary. Examples:
             self.session_manager.save_session()
         except Exception:
             pass  # Silent fail for auto-save
+
+        # Also save snapshot to GentlyStore
+        if self.store and self.session_id:
+            try:
+                self.store.save_session_snapshot(self.session_id, {
+                    'conversation_history': self.conversation_history,
+                    'experiment_data': self.experiment.to_dict(),
+                    'system_prompt': self.system_prompt,
+                })
+            except Exception:
+                pass
 
     def save_session(self) -> bool:
         """
@@ -1661,7 +1697,8 @@ Write a brief status summary. Examples:
             'source_session': session_id,
         }
 
-    async def on_volume_acquired(self, embryo_id: str, timepoint: int, volume_data):
+    async def on_volume_acquired(self, embryo_id: str, timepoint: int,
+                                volume_data, volume_path=None):
         """
         Callback when a volume is acquired
 
@@ -1673,6 +1710,10 @@ Write a brief status summary. Examples:
             Timepoint number
         volume_data : np.ndarray or device
             Volume data (either numpy array or device to read from)
+        volume_path : Path, optional
+            If the device already wrote a TIFF (file-ref protocol), its
+            path is passed here so GentlyStore can do a zero-copy rename
+            via ``register_volume()`` instead of re-writing the file.
         """
         embryo = self.experiment.embryos.get(embryo_id)
         if not embryo:
@@ -1684,8 +1725,28 @@ Write a brief status summary. Examples:
         else:
             volume = volume_data
 
-        # Store image
+        # Store image (legacy system)
         record = self.image_manager.store_volume(embryo, timepoint, volume)
+
+        # Also store in GentlyStore (dual-write during transition)
+        if self.store and self.session_id:
+            try:
+                self.store.register_embryo(
+                    self.session_id, embryo_id,
+                    position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
+                    position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
+                )
+                if volume_path is not None:
+                    self.store.register_volume(
+                        self.session_id, embryo_id, timepoint,
+                        incoming_path=Path(volume_path),
+                    )
+                else:
+                    self.store.put_volume(
+                        self.session_id, embryo_id, timepoint, volume,
+                    )
+            except Exception as e:
+                logger.warning(f"GentlyStore write failed (non-fatal): {e}")
 
         # Push to viz server with three-view projection (same as what Claude sees)
         if self.viz_server and volume is not None:

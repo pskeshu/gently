@@ -769,6 +769,7 @@ class VisualizationServer:
         data_store=None,
         event_bus=None,
         sessions_dir: str = "D:/Gently/sessions",
+        gently_store=None,
     ):
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -781,6 +782,7 @@ class VisualizationServer:
         self.data_store = data_store
         self.event_bus = event_bus
         self.sessions_dir = Path(sessions_dir)
+        self.gently_store = gently_store  # GentlyStore for persistent volume/projection access
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -821,6 +823,40 @@ class VisualizationServer:
         # Server instance
         self._server = None
         self._server_task = None
+
+    def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> Optional[str]:
+        """Resolve volume file path from timelapse tracker or GentlyStore."""
+        # 1. Try timelapse tracker (in-memory, fastest)
+        if embryo_id in self.timelapse_tracker.volume_paths:
+            path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
+            if path:
+                return path
+
+        # 2. Try GentlyStore (SQLite, persistent)
+        if self.gently_store and self.timelapse_tracker.session_id:
+            try:
+                vol_path = self.gently_store.get_volume_path(
+                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                )
+                if vol_path and vol_path.exists():
+                    return str(vol_path)
+            except Exception as e:
+                logger.debug(f"GentlyStore volume path lookup failed: {e}")
+
+        return None
+
+    def _resolve_projection_path(self, embryo_id: str, timepoint: int) -> Optional[Path]:
+        """Resolve projection file path from GentlyStore."""
+        if self.gently_store and self.timelapse_tracker.session_id:
+            try:
+                proj_path = self.gently_store.get_projection_path(
+                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                )
+                if proj_path and proj_path.exists():
+                    return proj_path
+            except Exception as e:
+                logger.debug(f"GentlyStore projection path lookup failed: {e}")
+        return None
 
     def _setup_routes(self):
         """Setup FastAPI routes"""
@@ -1146,6 +1182,21 @@ class VisualizationServer:
                             return Response(content=buf.getvalue(), media_type="image/png", headers=cache_headers)
                 except Exception as e:
                     logger.warning(f"Failed to load image {uid} from DataStore: {e}")
+
+            # Fallback to GentlyStore JPEG projections (persistent on-disk)
+            if self.gently_store and uid.startswith("volume_"):
+                import re
+                match = re.match(r"volume_(.+)_t(\d+)$", uid)
+                if match:
+                    embryo_id, timepoint_str = match.groups()
+                    proj_path = self._resolve_projection_path(embryo_id, int(timepoint_str))
+                    if proj_path:
+                        return FileResponse(
+                            str(proj_path),
+                            media_type="image/jpeg",
+                            headers=cache_headers,
+                        )
+
             raise HTTPException(status_code=404, detail=f"Image {uid} not found")
 
         @self.app.get("/api/projections/{embryo_id}/{timepoint}")
@@ -1171,11 +1222,8 @@ class VisualizationServer:
                 apply_crop_bounds,
             )
 
-            # Look up volume path
-            if embryo_id not in self.timelapse_tracker.volume_paths:
-                raise HTTPException(status_code=404, detail=f"No volumes for embryo {embryo_id}")
-
-            volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
+            # Look up volume path (timelapse tracker + GentlyStore fallback)
+            volume_path = self._resolve_volume_path(embryo_id, timepoint)
             if not volume_path:
                 raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
 
@@ -1284,11 +1332,8 @@ class VisualizationServer:
                 apply_crop_bounds,
             )
 
-            # Look up volume path
-            if embryo_id not in self.timelapse_tracker.volume_paths:
-                raise HTTPException(status_code=404, detail=f"No volumes for embryo {embryo_id}")
-
-            volume_path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
+            # Look up volume path (timelapse tracker + GentlyStore fallback)
+            volume_path = self._resolve_volume_path(embryo_id, timepoint)
             if not volume_path:
                 raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
 
@@ -2079,6 +2124,7 @@ def create_visualization_server(
     port: int = 8080,
     data_store=None,
     event_bus=None,
+    gently_store=None,
 ) -> VisualizationServer:
     """
     Create a visualization server instance
@@ -2091,6 +2137,8 @@ def create_visualization_server(
         Data store for image retrieval
     event_bus : EventBus, optional
         Event bus for real-time updates
+    gently_store : GentlyStore, optional
+        Unified store for persistent volume/projection access
 
     Returns
     -------
@@ -2101,4 +2149,5 @@ def create_visualization_server(
         port=port,
         data_store=data_store,
         event_bus=event_bus,
+        gently_store=gently_store,
     )

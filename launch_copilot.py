@@ -36,6 +36,7 @@ from gently.agent.startup import StartupSequence
 from gently.agent.logger import CopilotLogger
 from gently.agent.theme import get_theme
 from gently.session import SessionManager
+from gently.store import GentlyStore
 
 
 async def show_session_picker(storage_dir: Path, console: Console) -> str:
@@ -343,11 +344,26 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     else:
         console.print(f"\n[{theme.muted}]{theme.icon_info} Offline mode[/]")
 
+    # Create unified store (GentlyStore)
+    store_dir = Path("D:/Gently2")
+    store = GentlyStore(store_dir)
+    console.print(f"  [{theme.muted}]Store: {store_dir}[/]")
+
+    # Configure device session for zero-copy volume transfer
+    if client and client.is_connected:
+        try:
+            resp = await client.configure_device_session(str(store.incoming_dir))
+            if resp.get("success"):
+                console.print(f"  [{theme.muted}]Volume staging: {store.incoming_dir}[/]")
+        except Exception as e:
+            console.print(f"  [{theme.warning}]Could not configure device session: {e}[/]")
+
     # Create copilot
     copilot = MicroscopyCopilot(
         microscope_client=client,
         storage_path=storage_dir,
-        session_id=session_to_resume  # Resume specific session if provided
+        session_id=session_to_resume,  # Resume specific session if provided
+        store=store,
     )
 
     # Start visualization server for real-time feedback

@@ -75,6 +75,12 @@ class SimpleMicroscopeServer:
         # Plan execution timing log
         self._plan_execution_log = []
 
+        # Volume staging directory — set via POST /session/configure
+        # When set, large numpy arrays are written as TIFF files instead of
+        # being serialized to JSON lists (which can turn a 400MB uint16 volume
+        # into ~2GB of JSON text).
+        self._volume_dir: Optional[str] = None
+
     async def initialize(self):
         """Initialize hardware and RunEngine"""
         print("=" * 60)
@@ -120,8 +126,33 @@ class SimpleMicroscopeServer:
 
         # Simple document collector with numpy serialization
         def serialize_value(v):
-            """Convert numpy arrays to lists for JSON serialization"""
+            """Convert numpy arrays to JSON-safe format.
+
+            When ``self._volume_dir`` is set and the array exceeds 1 MB,
+            the array is written as a TIFF file in the staging directory
+            and a lightweight *file reference* dict is returned instead of
+            the full data.  This avoids turning a 400 MB uint16 volume
+            into ~2 GB of JSON text.
+            """
             if isinstance(v, np.ndarray):
+                # Large array + staging dir configured → file ref
+                if self._volume_dir and v.nbytes > 1_000_000:
+                    import uuid
+                    try:
+                        import tifffile
+                    except ImportError:
+                        # tifffile not installed on server — fall back to list
+                        return v.tolist()
+                    uid = uuid.uuid4().hex[:12]
+                    tiff_path = Path(self._volume_dir) / f"{uid}.tif"
+                    tiff_path.parent.mkdir(parents=True, exist_ok=True)
+                    tifffile.imwrite(str(tiff_path), v)
+                    return {
+                        "__file_ref__": True,
+                        "path": str(tiff_path),
+                        "shape": list(v.shape),
+                        "dtype": str(v.dtype),
+                    }
                 return v.tolist()
             elif isinstance(v, (np.integer, np.floating)):
                 return v.item()
@@ -543,6 +574,39 @@ class SimpleMicroscopeServer:
                 'traceback': traceback.format_exc()
             }, status=500)
 
+    async def handle_session_configure(self, request):
+        """POST /session/configure — set staging directory for file-ref protocol.
+
+        Body: {"volume_dir": "D:/Gently2/incoming"}
+        """
+        try:
+            data = await request.json()
+            volume_dir = data.get("volume_dir")
+            if volume_dir:
+                # Ensure the directory exists
+                Path(volume_dir).mkdir(parents=True, exist_ok=True)
+                self._volume_dir = volume_dir
+                print(f"  Session configured: volume_dir = {volume_dir}")
+                return web.json_response({
+                    "success": True,
+                    "volume_dir": volume_dir,
+                })
+            else:
+                # Clear staging
+                self._volume_dir = None
+                return web.json_response({
+                    "success": True,
+                    "volume_dir": None,
+                    "message": "Volume staging disabled",
+                })
+        except Exception as e:
+            import traceback
+            return web.json_response({
+                "success": False,
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+            }, status=500)
+
     async def run(self, host: str = '127.0.0.1', port: int = 60610):
         """Start the server"""
         await self.initialize()
@@ -560,6 +624,7 @@ class SimpleMicroscopeServer:
         app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
         app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
         app.router.add_get('/api/plan_log', self.handle_get_plan_log)
+        app.router.add_post('/session/configure', self.handle_session_configure)
 
         # Start plan executor
         executor_task = asyncio.create_task(self._plan_executor())
@@ -581,6 +646,7 @@ class SimpleMicroscopeServer:
         print(f"  GET  /api/led/status - LED status and configs")
         print(f"  POST /api/led/set    - Set LED state directly")
         print(f"  GET  /api/plan_log   - Plan execution timing log")
+        print(f"  POST /session/configure - Set volume staging directory")
         print(f"\nPress Ctrl+C to stop")
         print("=" * 60 + "\n")
 

@@ -1721,6 +1721,29 @@ async def acquire_volume(
             # Record light exposure (num_slices frames at exposure_ms each)
             embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
 
+            # Store in GentlyStore (dual-write during transition)
+            if copilot.store and copilot.session_id:
+                try:
+                    from pathlib import Path as _Path
+                    pos = embryo.stage_position or {}
+                    copilot.store.register_embryo(
+                        copilot.session_id, embryo_id,
+                        position_x=pos.get('x'), position_y=pos.get('y'),
+                        calibration=embryo.calibration,
+                    )
+                    volume_path_ref = result.get('volume_path')
+                    if volume_path_ref is not None:
+                        copilot.store.register_volume(
+                            copilot.session_id, embryo_id, timepoint,
+                            incoming_path=_Path(volume_path_ref),
+                        )
+                    elif volume is not None:
+                        copilot.store.put_volume(
+                            copilot.session_id, embryo_id, timepoint, volume,
+                        )
+                except Exception as store_err:
+                    print(f"  Warning: GentlyStore write failed (non-fatal): {store_err}")
+
             # Push max projection to viz server
             if copilot.viz_server and volume is not None:
                 try:
