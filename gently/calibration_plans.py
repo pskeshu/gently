@@ -14,11 +14,19 @@ All plans are device-agnostic and work with standard Bluesky RunEngine.
 """
 
 import time
-import rpyc
 import bluesky.plan_stubs as bps
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+
+
+def _safe_obtain(obj):
+    """Pass-through for MMCore data.
+
+    With direct MMCore (in-process), arrays are already local numpy arrays.
+    This function exists for API compatibility - it simply returns the object.
+    """
+    return obj
 
 
 # ============================================================================
@@ -477,9 +485,9 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
         core.snapImage()
         img = core.getImage()
 
-        # Transfer RPyC netref to local numpy array using rpyc.classic.obtain()
+        # Transfer RPyC netref to local numpy array using _safe_obtain()
         # This is the only way to properly transfer numpy arrays across RPyC boundary
-        img = rpyc.classic.obtain(img)
+        img = _safe_obtain(img)
 
         # DiSPIM captures two views side-by-side (Path A and Path B)
         # Select the brighter view for focus scoring

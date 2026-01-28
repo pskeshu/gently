@@ -286,66 +286,6 @@ def set_service_registry(registry: ServiceRegistry):
 # Common Service Implementations
 # =============================================================================
 
-class RPCService(Service):
-    """
-    Base class for RPC-based services (rpyc)
-
-    Provides a standard pattern for services exposed via rpyc.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        host: str = "localhost",
-        port: int = 18861,
-    ):
-        super().__init__(name=name, service_type="rpc", host=host, port=port)
-        self._server = None
-
-    async def on_start(self):
-        """Start the rpyc server"""
-        try:
-            import rpyc
-            from rpyc.utils.server import ThreadedServer
-
-            # Create service class
-            service_class = self.create_service_class()
-
-            # Start server in thread
-            self._server = ThreadedServer(
-                service_class,
-                hostname=self.host,
-                port=self.port,
-                protocol_config={
-                    'allow_public_attrs': True,
-                    'allow_all_attrs': True,
-                }
-            )
-
-            # Run in background thread
-            import threading
-            self._server_thread = threading.Thread(
-                target=self._server.start,
-                daemon=True
-            )
-            self._server_thread.start()
-            logger.info(f"RPC service {self.name} started on {self.host}:{self.port}")
-
-        except ImportError:
-            logger.warning("rpyc not available, RPC service not started")
-
-    async def on_stop(self):
-        """Stop the rpyc server"""
-        if self._server:
-            self._server.close()
-            self._server = None
-
-    @abstractmethod
-    def create_service_class(self) -> type:
-        """Create the rpyc service class - implement in subclass"""
-        pass
-
-
 class HTTPService(Service):
     """
     Base class for HTTP-based services
@@ -412,7 +352,7 @@ class ServiceClient:
     Handles:
     - Service discovery via registry
     - Connection management
-    - Protocol abstraction (RPC, HTTP)
+    - Protocol abstraction (HTTP)
     """
 
     def __init__(self, registry: Optional[ServiceRegistry] = None):
@@ -432,32 +372,13 @@ class ServiceClient:
         if not info:
             raise ValueError(f"Service not found: {service_name}")
 
-        if info.service_type == "rpc":
-            conn = await self._connect_rpc(info)
-        elif info.service_type == "http":
+        if info.service_type == "http":
             conn = await self._connect_http(info)
         else:
             raise ValueError(f"Unknown service type: {info.service_type}")
 
         self._connections[service_name] = conn
         return conn
-
-    async def _connect_rpc(self, info: ServiceInfo):
-        """Connect to RPC service"""
-        try:
-            import rpyc
-            conn = rpyc.connect(
-                info.host,
-                info.port,
-                config={
-                    'allow_public_attrs': True,
-                    'allow_all_attrs': True,
-                    'sync_request_timeout': 300,
-                }
-            )
-            return conn.root
-        except ImportError:
-            raise RuntimeError("rpyc not available")
 
     async def _connect_http(self, info: ServiceInfo):
         """Connect to HTTP service"""

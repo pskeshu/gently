@@ -1,12 +1,12 @@
 """
 Queue Server Client for MicroscopyCopilot
 
-Provides async interface to:
-1. Simple Microscope Server (HTTP API) for hardware control via plans
-2. SAM Detection Server (rpyc) for embryo detection
+Provides async interface to the Gently Device Layer:
+- Hardware control via Bluesky plans (HTTP API)
+- SAM embryo detection (HTTP API)
 
-This client connects to our simple_server.py which runs RunEngine
-in the main thread, avoiding Windows threading issues.
+This client connects to the unified device_layer.py server which provides
+both hardware control and SAM detection in a single HTTP process.
 """
 
 import asyncio
@@ -25,17 +25,17 @@ from gently.coordinates import (
 
 class QueueServerClient:
     """
-    Client for Simple Microscope Server + SAM Server.
+    Client for Gently Device Layer Server.
 
     Provides async methods for:
     - Submitting Bluesky plans to the server
     - Waiting for plan completion
     - Retrieving results
-    - Running SAM embryo detection via separate server
+    - Running SAM embryo detection (via HTTP, same server)
 
     Example
     -------
-    >>> client = QueueServerClient(http_url="http://127.0.0.1:60610", sam_port=18862)
+    >>> client = QueueServerClient(http_url="http://127.0.0.1:60610")
     >>> await client.connect()
     >>>
     >>> # Move stage
@@ -51,52 +51,40 @@ class QueueServerClient:
     def __init__(
         self,
         http_url: str = "http://127.0.0.1:60610",
-        sam_host: str = "localhost",
-        sam_port: int = 18862,
-        databroker_catalog: str = "dispim_production",
     ):
         """
         Parameters
         ----------
         http_url : str
-            Simple Microscope Server HTTP API URL
-        sam_host : str
-            SAM server hostname
-        sam_port : int
-            SAM server port
-        databroker_catalog : str
-            Databroker catalog name (for future use)
+            Device Layer HTTP API URL (provides both hardware and SAM)
         """
         self.http_url = http_url
-        self.sam_host = sam_host
-        self.sam_port = sam_port
-        self.databroker_catalog = databroker_catalog
 
         self._session = None  # aiohttp session
-        self._sam_conn = None  # rpyc connection
-        self._db = None  # databroker catalog
         self._qs_connected = False  # Track actual queue server connection
+        self._sam_available = False  # Track SAM availability via HTTP
 
         # Store last detection results for visualization
         self._last_detection = None  # {image, embryos, stage_position}
 
     async def connect(self) -> bool:
         """
-        Connect to Simple Server and SAM Server.
+        Connect to Device Layer Server.
 
         Returns
         -------
         bool
-            True if all connections successful
+            True if connection successful
         """
         import aiohttp
 
-        self._qs_connected = False  # Track actual queue server connection
+        self._qs_connected = False
+        self._sam_available = False
 
         # Create aiohttp session
         self._session = aiohttp.ClientSession()
 
-        # Connect to Simple Microscope Server (HTTP API)
+        # Connect to Device Layer Server (HTTP API)
         try:
             async with self._session.get(f"{self.http_url}/api/status") as resp:
                 if resp.status == 200:
@@ -107,67 +95,34 @@ class QueueServerClient:
         except Exception:
             self._qs_connected = False
 
-        # Connect to SAM Server (rpyc)
-        try:
-            import rpyc
-
-            config = {
-                'allow_all_attrs': True,
-                'allow_pickle': True,
-                'sync_request_timeout': 300,
-            }
-            self._sam_conn = rpyc.connect(
-                self.sam_host, self.sam_port, config=config
-            )
-        except Exception:
-            self._sam_conn = None
-            # Don't fail completely - SAM is optional
-
-        # Connect to Databroker catalog (v1 style using sqlite)
-        try:
-            from databroker import Broker
-            from pathlib import Path
-            import os
-            import yaml
-            import warnings
-
-            # Load from v1 config file directly (bypasses intake which uses msgpack)
-            config_path = Path(os.path.expanduser("~")) / ".config" / "databroker" / f"{self.databroker_catalog}.yml"
-            if config_path.exists():
-                config = yaml.safe_load(config_path.read_text())
-                with warnings.catch_warnings():
-                    warnings.simplefilter("ignore")  # Suppress v0 fallback warning
-                    self._db = Broker.from_config(config)
-            else:
-                self._db = None
-        except Exception:
-            self._db = None
+        # Check SAM availability (via HTTP, same server)
+        if self._qs_connected:
+            try:
+                async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
+                    if resp.status == 200:
+                        sam_status = await resp.json()
+                        self._sam_available = sam_status.get('available', False)
+            except Exception:
+                self._sam_available = False
 
         return self._qs_connected
 
     async def disconnect(self):
-        """Disconnect from servers"""
-        if self._sam_conn:
-            self._sam_conn.close()
-            self._sam_conn = None
+        """Disconnect from server"""
         if self._session:
             await self._session.close()
             self._session = None
+        self._sam_available = False
 
     @property
     def is_connected(self) -> bool:
-        """Check if connected to Microscope Server"""
+        """Check if connected to Device Layer Server"""
         return self._qs_connected
 
     @property
     def has_sam(self) -> bool:
-        """Check if SAM server is available"""
-        return self._sam_conn is not None
-
-    @property
-    def has_databroker(self) -> bool:
-        """Check if Databroker catalog is available"""
-        return self._db is not None
+        """Check if SAM detection is available (via HTTP)"""
+        return self._sam_available
 
     def _ensure_connected(self):
         """Raise error if not connected"""
@@ -542,23 +497,6 @@ class QueueServerClient:
                             ret['volume_path'] = volume_path
                         return ret
 
-            # Fallback: try databroker if response didn't have image data
-            if run_uid and self._db:
-                try:
-                    run = self._db[run_uid]
-                    data = run.primary.read()
-                    if 'lightsheet_snap' in data:
-                        image = data['lightsheet_snap'].values[0]
-                        return {
-                            'image': np.array(image),
-                            'piezo_position': piezo_position,
-                            'galvo_position': galvo_position,
-                            'run_uid': run_uid,
-                            'success': True
-                        }
-                except Exception as e:
-                    print(f"  Warning: Could not read image from databroker: {e}")
-
             # Plan succeeded but no image data available
             return {
                 'image': None,
@@ -903,7 +841,7 @@ class QueueServerClient:
         return final_embryos
 
     # =========================================================================
-    # SAM Embryo Detection
+    # SAM Embryo Detection (HTTP API)
     # =========================================================================
 
     async def detect_embryos(
@@ -921,11 +859,11 @@ class QueueServerClient:
         """
         Capture image and detect embryos using brightness detection + SAM.
 
-        This method:
-        1. Captures image via Queue Server (Bluesky plan)
-        2. Reads stage position via Queue Server
-        3. Uses brightness detection to find candidates
-        4. Uses SAM with bounding box prompts for precise segmentation
+        This method calls the device layer's /api/detect_embryos endpoint which:
+        1. Captures image from bottom camera
+        2. Reads stage position
+        3. Runs brightness + SAM detection in-process
+        4. Returns embryo positions
 
         Parameters
         ----------
@@ -956,61 +894,69 @@ class QueueServerClient:
         dict
             Detection results with 'embryos' list
         """
-        # Check SAM server connection
+        # Check SAM availability
         if not self.has_sam:
-            return {'error': 'SAM Server not connected'}
+            return {'error': 'SAM detection not available on server'}
+
+        self._ensure_connected()
 
         try:
-            # Capture image via queue server
-            if exposure_ms:
-                print(f"  Setting exposure to {exposure_ms} ms for better contrast...")
-            print("  Capturing bottom camera image...")
-            image = await self.capture_bottom_image(exposure_ms=exposure_ms)
-            if image.shape == (100, 100):
-                return {'error': 'Failed to capture image'}
-
-            print(f"  Image shape: {image.shape}")
-
-            # Get stage position
-            print("  Reading stage position...")
-            stage_pos = await self.get_stage_position()
-            print(f"  Stage position: {stage_pos}")
-
-            # Run brightness + SAM detection via rpyc
-            print("  Running brightness + SAM detection...")
+            print("  Calling /api/detect_embryos (server-side capture + SAM)...")
             print(f"  Parameters: brightness_percentile={brightness_percentile}, area={min_area}-{max_area}")
-            sam_result = await asyncio.to_thread(
-                self._sam_conn.root.detect_embryos,
-                image,
-                stage_pos,
-                pixel_size_um=pixel_size_um,
-                objective_mag=objective_mag,
-                use_claude_review=use_claude_review,
-                min_confidence=min_confidence,
-                save_visualizations=True,
-                output_dir="./detection_results",
-                brightness_percentile=brightness_percentile,
-                min_area=min_area,
-                max_area=max_area
-            )
 
-            # Convert rpyc netref to dict
-            result = dict(sam_result)
-            if 'embryos' in result:
-                result['embryos'] = [dict(e) for e in result['embryos']]
+            # Build request payload
+            payload = {
+                'pixel_size_um': pixel_size_um,
+                'objective_mag': objective_mag,
+                'use_claude_review': use_claude_review,
+                'min_confidence': min_confidence,
+                'brightness_percentile': brightness_percentile,
+                'min_area': min_area,
+                'max_area': max_area,
+            }
+            if exposure_ms is not None:
+                payload['exposure_ms'] = exposure_ms
+
+            # Call HTTP endpoint (timeout 5 min for SAM + Claude)
+            async with self._session.post(
+                f"{self.http_url}/api/detect_embryos",
+                json=payload,
+                timeout=300
+            ) as resp:
+                result = await resp.json()
+
+            if not result.get('success'):
+                return result
 
             embryos = result.get('embryos', [])
+            stage_pos = tuple(result.get('stage_position', [0.0, 0.0]))
+
+            # Load image if path provided (for napari editor)
+            image = None
+            image_path = result.get('image_path')
+            if image_path and open_editor:
+                try:
+                    import tifffile
+                    image = tifffile.imread(image_path)
+                except Exception:
+                    pass
+
+            # If no image but editor requested, capture one for display
+            if image is None and open_editor:
+                print("  Capturing image for napari editor...")
+                image = await self.capture_bottom_image(exposure_ms=exposure_ms)
 
             # Open napari editor if requested (runs on client side for main thread)
-            if open_editor and result.get('success', False):
+            if open_editor and image is not None:
                 print("  Opening napari editor for review/editing...")
                 embryos = await self._edit_embryos_in_napari(
                     image, embryos, stage_pos, pixel_size_um, objective_mag
                 )
                 result['embryos'] = embryos
 
-            result['image'] = image
-            result['stage_position'] = list(stage_pos)
+            # Add image to result if available
+            if image is not None:
+                result['image'] = image
 
             # Store for later visualization
             self._last_detection = {
@@ -1021,6 +967,8 @@ class QueueServerClient:
 
             return result
 
+        except asyncio.TimeoutError:
+            return {'success': False, 'error': 'Detection timed out (5 min limit)'}
         except Exception as e:
             import traceback
             return {
@@ -1040,9 +988,9 @@ class QueueServerClient:
         existing_embryos: list = None,
     ) -> Dict:
         """
-        Capture image and manually mark embryos via matplotlib.
+        Capture image and manually mark embryos via napari.
 
-        Opens a matplotlib window where user can click on embryo centers.
+        Opens a napari window where user can click on embryo centers.
         Existing embryos are shown in green for reference.
 
         Parameters
@@ -1063,8 +1011,7 @@ class QueueServerClient:
         dict
             Detection results with 'embryos' list
         """
-        if not self.has_sam:
-            return {'error': 'SAM Server not connected (needed for manual marking)'}
+        self._ensure_connected()
 
         try:
             # Capture image via queue server
@@ -1243,26 +1190,18 @@ class QueueServerClient:
         dict
             Updated embryo list with added/removed counts
         """
-        if not self.has_sam:
-            return {'error': 'SAM Server not connected (needed for embryo editing)'}
-
         try:
             print("  Opening napari embryo editor...")
-            result = await asyncio.to_thread(
-                self._sam_conn.root.edit_embryos,
-                image,
-                embryos,
-                stage_position,
-                pixel_size_um=pixel_size_um,
-                objective_mag=objective_mag
+            edited_embryos = await self._edit_embryos_in_napari(
+                image, embryos, stage_position, pixel_size_um, objective_mag
             )
 
-            # Convert rpyc netref to dict
-            result = dict(result)
-            if 'embryos' in result:
-                result['embryos'] = [dict(e) for e in result['embryos']]
-
-            return result
+            return {
+                'success': True,
+                'embryos': edited_embryos,
+                'original_count': len(embryos),
+                'final_count': len(edited_embryos),
+            }
 
         except Exception as e:
             import traceback
@@ -1557,7 +1496,7 @@ class QueueServerClient:
         """
         status = {}
 
-        # Microscope Server status
+        # Device Layer Server status
         if self._session:
             try:
                 async with self._session.get(f"{self.http_url}/api/status") as resp:
@@ -1576,13 +1515,19 @@ class QueueServerClient:
         else:
             status['queue_server'] = {'connected': False}
 
-        # SAM Server status
-        if self._sam_conn:
+        # SAM status (via HTTP, same server)
+        if self._session and self._qs_connected:
             try:
-                sam_status = await asyncio.to_thread(
-                    self._sam_conn.root.get_status
-                )
-                status['sam_server'] = dict(sam_status)
+                async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
+                    if resp.status == 200:
+                        sam_status = await resp.json()
+                        status['sam_server'] = {
+                            'available': sam_status.get('available', False),
+                            'loaded': sam_status.get('loaded', False),
+                            'device': sam_status.get('device', 'unknown'),
+                        }
+                    else:
+                        status['sam_server'] = {'error': f'HTTP {resp.status}'}
             except Exception as e:
                 status['sam_server'] = {'error': str(e)}
         else:
@@ -1593,24 +1538,21 @@ class QueueServerClient:
 
 async def create_queue_server_client(
     http_url: str = "http://127.0.0.1:60610",
-    sam_port: int = 18862,
 ) -> Optional[QueueServerClient]:
     """
-    Create and connect a microscope server client.
+    Create and connect a device layer client.
 
     Parameters
     ----------
     http_url : str
-        Microscope Server HTTP API URL
-    sam_port : int
-        SAM server port
+        Device Layer HTTP API URL
 
     Returns
     -------
     QueueServerClient or None
         Connected client, or None if connection failed
     """
-    client = QueueServerClient(http_url=http_url, sam_port=sam_port)
+    client = QueueServerClient(http_url=http_url)
     if await client.connect():
         return client
     return None

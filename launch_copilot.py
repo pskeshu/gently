@@ -35,17 +35,15 @@ from gently.agent import MicroscopyCopilot, QueueServerClient, run_rich_cli
 from gently.agent.startup import StartupSequence
 from gently.agent.logger import CopilotLogger
 from gently.agent.theme import get_theme
-from gently.session import SessionManager
 from gently.store import GentlyStore
 
 
-async def show_session_picker(storage_dir: Path, console: Console) -> str:
+async def show_session_picker(store: GentlyStore, console: Console) -> str:
     """Show interactive session picker before copilot starts."""
     theme = get_theme()
 
-    # Create a temporary session manager to list sessions
-    session_mgr = SessionManager(sessions_dir=storage_dir / "sessions")
-    sessions = session_mgr.list_sessions()
+    # List sessions from GentlyStore (SQLite)
+    sessions = store.list_sessions()
 
     if not sessions:
         console.print(f"\n[{theme.muted}]No saved sessions found. Starting new session.[/]")
@@ -54,10 +52,11 @@ async def show_session_picker(storage_dir: Path, console: Console) -> str:
     # Build session items
     items = []
     for session in sessions:
-        session_id = session.get('session_id', session.get('id', 'unknown'))
+        session_id = session.get('session_id', 'unknown')
         name = session.get('name', '')
-        embryo_count = session.get('embryo_count', 0)
-        message_count = session.get('message_count', 0)
+        # Get embryo count from store
+        embryos = store.list_embryos(session_id)
+        embryo_count = len(embryos) if embryos else 0
 
         # Format last active time
         last_active = session.get('last_active', '')
@@ -81,7 +80,6 @@ async def show_session_picker(storage_dir: Path, console: Console) -> str:
             'id': session_id,
             'name': name,
             'embryos': embryo_count,
-            'messages': message_count,
             'time': time_str
         })
 
@@ -90,7 +88,6 @@ async def show_session_picker(storage_dir: Path, console: Console) -> str:
         'id': None,
         'name': 'Start fresh',
         'embryos': 0,
-        'messages': 0,
         'time': '',
         'is_new': True
     })
@@ -141,14 +138,14 @@ async def show_session_picker(storage_dir: Path, console: Console) -> str:
             else:
                 if is_selected:
                     line = f'<style bg="#0066cc" fg="white"><b>{marker}{item["id"]}</b>'
-                    line += f' │ {item["embryos"]} embryos │ {item["messages"]} msgs'
+                    line += f' │ {item["embryos"]} embryos'
                     if item['time']:
                         line += f' │ {item["time"]}'
                     line += '</style>\n'
                     text += line
                 else:
                     line = f'{marker}<style fg="#aaaaaa">{item["id"]}</style>'
-                    line += f' <style fg="#666666">│ {item["embryos"]} embryos │ {item["messages"]} msgs'
+                    line += f' <style fg="#666666">│ {item["embryos"]} embryos'
                     if item['time']:
                         line += f' │ {item["time"]}'
                     line += '</style>\n'
@@ -187,12 +184,11 @@ async def show_session_picker(storage_dir: Path, console: Console) -> str:
         return None
 
 
-def list_sessions(storage_dir: Path, console: Console):
+def list_sessions(store: GentlyStore, console: Console):
     """List all available sessions (non-interactive)."""
     theme = get_theme()
 
-    session_mgr = SessionManager(sessions_dir=storage_dir / "sessions")
-    sessions = session_mgr.list_sessions()
+    sessions = store.list_sessions()
 
     if not sessions:
         console.print(f"\n[{theme.muted}]No saved sessions found.[/]")
@@ -207,11 +203,11 @@ def list_sessions(storage_dir: Path, console: Console):
 
     table.add_column("ID", style=theme.info)
     table.add_column("Embryos", justify="center")
-    table.add_column("Messages", justify="center")
     table.add_column("Last Active", style=theme.muted)
 
     for session in sessions:
-        session_id = session.get('session_id', session.get('id', 'unknown'))
+        session_id = session.get('session_id', 'unknown')
+        embryo_count = len(store.list_embryos(session_id))
 
         # Format last active time
         last_active = session.get('last_active', '')
@@ -232,8 +228,7 @@ def list_sessions(storage_dir: Path, console: Console):
 
         table.add_row(
             session_id,
-            str(session.get('embryo_count', 0)),
-            str(session.get('message_count', 0)),
+            str(embryo_count),
             last_active,
         )
 
@@ -245,28 +240,31 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     theme = get_theme()
     console = Console()
 
-    # Storage directory
-    storage_dir = Path("D:/Gently")
+    # Storage directory (unified with GentlyStore)
+    storage_dir = Path("D:/Gently2")
     storage_dir.mkdir(exist_ok=True)
+
+    # Create unified store (GentlyStore) early for session queries
+    store = GentlyStore(storage_dir)
 
     # Handle --sessions (just list and exit)
     if show_sessions:
-        list_sessions(storage_dir, console)
+        list_sessions(store, console)
+        store.close()
         return
 
     # Handle --resume (interactive picker, "latest", or specific session)
     session_to_resume = None
     if pick_session:
         # Show interactive session picker
-        session_to_resume = await show_session_picker(storage_dir, console)
+        session_to_resume = await show_session_picker(store, console)
     elif resume_session == "latest":
-        # Find the most recent session
-        session_mgr = SessionManager(sessions_dir=storage_dir / "sessions")
-        sessions = session_mgr.list_sessions()
+        # Find the most recent session from GentlyStore
+        sessions = store.list_sessions()
         if sessions:
             # Sessions are sorted by last_active (most recent first)
             latest = sessions[0]
-            session_to_resume = latest.get('session_id', latest.get('id'))
+            session_to_resume = latest.get('session_id')
             console.print(f"\n[{theme.info}]{theme.icon_info}[/] Resuming latest session: [bold]{session_to_resume}[/]")
         else:
             console.print(f"\n[{theme.warning}]{theme.icon_warning}[/] No sessions found - starting fresh")
@@ -288,11 +286,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     client = None
 
     if not offline:
-        # Connect to servers with clean status display
+        # Connect to device layer server (unified HTTP API for hardware + SAM)
         client = QueueServerClient(
-            http_url="http://127.0.0.1:60610",
-            sam_host="localhost",
-            sam_port=18862
+            http_url="http://127.0.0.1:60610"
         )
 
         connected = await client.connect()
@@ -301,24 +297,18 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         status_lines = []
 
         if client.is_connected:
-            status_lines.append((theme.icon_success, "Queue Server", "connected", theme.success))
+            status_lines.append((theme.icon_success, "Device Layer", "connected", theme.success))
             status = await client.get_status()
             qs_status = status.get('queue_server', {})
             manager_state = qs_status.get('manager_state', 'unknown')
             status_lines.append((theme.icon_info, "  Manager", manager_state, theme.muted))
         else:
-            status_lines.append((theme.icon_error, "Queue Server", "not connected", theme.error))
+            status_lines.append((theme.icon_error, "Device Layer", "not connected", theme.error))
 
         if client.has_sam:
-            status_lines.append((theme.icon_success, "SAM Server", "connected", theme.success))
+            status_lines.append((theme.icon_success, "SAM Detection", "available", theme.success))
         else:
-            status_lines.append((theme.icon_warning, "SAM Server", "not connected", theme.warning))
-
-        # Databroker is only usable if Queue Server is connected (client gets nullified otherwise)
-        if client.has_databroker and client.is_connected:
-            status_lines.append((theme.icon_success, "Databroker", "connected", theme.success))
-        else:
-            status_lines.append((theme.icon_warning, "Databroker", "not connected", theme.warning))
+            status_lines.append((theme.icon_warning, "SAM Detection", "not available", theme.warning))
 
         # Print status table
         table = Table(show_header=False, box=None, padding=(0, 1))
@@ -344,10 +334,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     else:
         console.print(f"\n[{theme.muted}]{theme.icon_info} Offline mode[/]")
 
-    # Create unified store (GentlyStore)
-    store_dir = Path("D:/Gently2")
-    store = GentlyStore(store_dir)
-    console.print(f"  [{theme.muted}]Store: {store_dir}[/]")
+    # Store was created earlier for session queries
+    console.print(f"  [{theme.muted}]Store: {storage_dir}[/]")
 
     # Configure device session for zero-copy volume transfer
     if client and client.is_connected:
@@ -374,9 +362,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # Report session status
     if session_to_resume:
         console.print(f"\n[{theme.success}]{theme.icon_success}[/] Resumed session: {session_to_resume}")
-        session = copilot.session_manager.current_session
-        if session:
-            console.print(f"  [{theme.muted}]{session.embryo_count} embryos, {session.message_count} messages[/]")
+        embryo_count = len(store.list_embryos(session_to_resume))
+        console.print(f"  [{theme.muted}]{embryo_count} embryos[/]")
     else:
         console.print(f"\n[{theme.info}]{theme.icon_info}[/] New session: {copilot.session_id}")
 

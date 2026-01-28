@@ -3,14 +3,14 @@ Main Microscopy Copilot implementation
 
 Now integrated with:
 - Event Bus for async message passing between components
-- Session Manager for persistence and resume
-- Data Store for UID-based data flow
+- GentlyStore for unified data persistence (SQLite + filesystem)
 """
 
 import asyncio
 import json
 import logging
 import os
+import uuid
 from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +24,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 from .state import ExperimentState, EmbryoState, ImageRecord
-from .image_manager import ImageManager
 from .plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from .prompts import build_system_prompt, build_context_message
 from .tool_registry import get_tool_registry
@@ -32,7 +31,6 @@ from .perception import PerceptionManager
 from .interaction_logger import InteractionLogger
 from .timelapse_orchestrator import TimelapseOrchestrator
 from .timeline import TimelineManager
-from ..session import SessionManager
 from ..core import EventType, get_event_bus, emit
 from ..store import GentlyStore
 
@@ -56,7 +54,7 @@ class MicroscopyCopilot:
         model: str = "claude-opus-4-5-20251101",
         microscope_client=None,
         session_id: Optional[str] = None,
-        store: Optional[GentlyStore] = None,
+        store: GentlyStore = None,
     ):
         """
         Parameters
@@ -71,10 +69,12 @@ class MicroscopyCopilot:
             RPC client for microscope server. Required for hardware control.
         session_id : str, optional
             Session ID to resume. If None, creates new session.
-        store : GentlyStore, optional
-            Unified data store. When provided, volumes and sessions are
-            also written to GentlyStore alongside the legacy systems.
+        store : GentlyStore
+            Unified data store (SQLite + filesystem). Required.
         """
+        if store is None:
+            raise ValueError("GentlyStore is required. Pass store=GentlyStore(path) to copilot.")
+
         # API client with interleaved thinking support
         self.claude = anthropic.Anthropic(
             api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
@@ -89,17 +89,14 @@ class MicroscopyCopilot:
         # Experiment state
         self.experiment = ExperimentState()
 
-        # Storage path
+        # Storage path (for legacy compatibility, use store.root going forward)
         self.storage_path = Path(storage_path)
 
-        # Image management
-        self.image_manager = ImageManager(
-            storage_path=self.storage_path / "images",
-            history_length=10
-        )
-
-        # Unified store (GentlyStore) — optional, dual-writes during transition
+        # Unified store (GentlyStore) — single source of truth
         self.store = store
+
+        # Session ID (generated or resumed)
+        self._session_id: Optional[str] = None
 
         # Plan synthesis
         self.plan_synthesizer = PlanSynthesizer(
@@ -119,18 +116,8 @@ class MicroscopyCopilot:
             event_bus=self._event_bus,
         )
 
-        # Session management
-        self.session_manager = SessionManager(
-            sessions_dir=self.storage_path / "sessions",
-            auto_save=True
-        )
-
-        # Hardware interface via RPC client
+        # Hardware interface via HTTP client
         self.client = microscope_client
-
-        # Databroker (optional, for data catalog integration)
-        # Get from client if available
-        self.databroker = getattr(microscope_client, '_db', None) if microscope_client else None
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
@@ -162,19 +149,12 @@ class MicroscopyCopilot:
 
         # Initialize or resume session
         if session_id:
-            self.resume_session(session_id)
+            self._resume_session(session_id)
         else:
-            self.session_manager.create_session()
-            # Mirror session in GentlyStore
-            if self.store:
-                self.store.create_session(self.session_id)
+            self._create_session()
             self._emit_event(EventType.SESSION_STARTED, {
-                'session_id': self.session_id,
+                'session_id': self._session_id,
             })
-
-        # Set session-specific storage path for images
-        if self.session_id:
-            self.image_manager.set_session(self.session_id)
 
         # Initialize interaction logger (for research data collection)
         self._init_interaction_logger()
@@ -191,6 +171,96 @@ class MicroscopyCopilot:
         # Build initial system prompt
         self._update_system_prompt()
 
+    def _create_session(self):
+        """Create a new session in GentlyStore."""
+        self._session_id = str(uuid.uuid4())[:8]
+        self.store.create_session(self._session_id)
+        logger.info(f"Created new session: {self._session_id}")
+
+    def _resume_session(self, session_id: str) -> bool:
+        """
+        Resume a session from GentlyStore.
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID to resume
+
+        Returns
+        -------
+        bool
+            True if resumed successfully
+        """
+        # Check session exists in store
+        session = self.store.get_session(session_id)
+        if not session:
+            logger.warning(f"Session {session_id} not found, creating new")
+            self._session_id = session_id
+            self.store.create_session(session_id)
+            return False
+
+        self._session_id = session_id
+
+        # Load session snapshot (conversation + state)
+        snapshot = self.store.load_session_snapshot(session_id)
+        if snapshot:
+            # Restore conversation history
+            self.conversation_history = snapshot.get('conversation_history', [])
+
+            # Restore experiment state from snapshot
+            experiment_data = snapshot.get('experiment_data', {})
+            embryo_states = experiment_data.get('embryos', {})
+
+            # Restore embryos
+            for embryo_id, embryo_data in embryo_states.items():
+                pos = embryo_data.get('stage_position', {})
+                self.experiment.add_embryo(
+                    embryo_id=embryo_id,
+                    position=pos,
+                    calibration=embryo_data.get('calibration', {}),
+                    user_label=embryo_data.get('user_label'),
+                    uid=embryo_data.get('uid'),
+                )
+                # Restore additional embryo state
+                embryo = self.experiment.embryos[embryo_id]
+                embryo.nickname = embryo_data.get('nickname')
+                embryo.interval_seconds = embryo_data.get('interval_seconds')
+                embryo.num_slices = embryo_data.get('num_slices', 50)
+                embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
+                embryo.priority = embryo_data.get('priority', 'normal')
+                embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
+                embryo.should_skip = embryo_data.get('should_skip', False)
+                embryo.skip_reason = embryo_data.get('skip_reason')
+
+        # Also load embryos from store's embryo table
+        store_embryos = self.store.list_embryos(session_id)
+        for e in store_embryos:
+            eid = e['embryo_id']
+            if eid not in self.experiment.embryos:
+                self.experiment.add_embryo(
+                    embryo_id=eid,
+                    position={'x': e.get('position_x'), 'y': e.get('position_y')},
+                    calibration=json.loads(e['calibration']) if e.get('calibration') else {},
+                )
+
+        # Update last_active
+        self.store.touch_session(session_id)
+
+        # Emit session restored event
+        self._emit_event(EventType.SESSION_RESTORED, {
+            'session_id': session_id,
+            'embryo_count': len(self.experiment.embryos),
+            'message_count': len(self.conversation_history),
+        })
+
+        logger.info(f"Resumed session: {session_id}")
+        return True
+
+    @property
+    def session_id(self) -> str:
+        """Get current session ID"""
+        return self._session_id
+
     def _update_system_prompt(self, context_summary: str = None):
         """
         Rebuild system prompt with current experiment state and connection status.
@@ -204,9 +274,8 @@ class MicroscopyCopilot:
         # Build connection status
         if self.client:
             connection_status = {
-                'queue_server': self.client.is_connected,
-                'sam_server': self.client.has_sam,
-                'databroker': self.client.has_databroker and self.client.is_connected,
+                'device_layer': self.client.is_connected,
+                'sam_detection': self.client.has_sam,
             }
         else:
             connection_status = None  # Offline mode
@@ -553,11 +622,11 @@ Write a brief status summary. Examples:
         """Initialize the timeline manager for event tracking"""
         try:
             # Store timeline in sessions directory
-            timeline_path = self.session_manager.sessions_dir
+            timeline_path = self.store.root / "sessions"
             self.timeline_manager = TimelineManager(
                 storage_path=timeline_path,
                 max_events=1000,
-                session_id=self.session_id,  # Tag events with current session
+                session_id=self._session_id,  # Tag events with current session
             )
             self.timeline_manager.start()
         except Exception as e:
@@ -598,8 +667,7 @@ Write a brief status summary. Examples:
                         logger.info(f"Updated {embryo_id} with CV {result_type} result")
 
                         # Auto-save session
-                        if self.session_manager:
-                            self._save_session_state()
+                        self._auto_save()
 
                 except Exception as e:
                     logger.warning(f"Error handling CV result event: {e}")
@@ -720,145 +788,53 @@ Write a brief status summary. Examples:
 
     # ===== Session Management Methods =====
 
-    def resume_session(self, session_id: str) -> bool:
-        """
-        Resume a previous session
-
-        Restores conversation history, experiment state, and detector configs.
-
-        Parameters
-        ----------
-        session_id : str
-            Session ID to resume
-
-        Returns
-        -------
-        bool
-            True if resumed successfully
-        """
-        session = self.session_manager.load_session(session_id)
-        if not session:
-            return False
-
-        # Get state to restore
-        state = self.session_manager.sync_to_copilot()
-
-        # Restore conversation history
-        self.conversation_history = state.get('conversation_history', [])
-
-        # Restore experiment state
-        experiment_data = state.get('experiment_data', {})
-        embryo_states = state.get('embryo_states', {})
-
-        # Restore embryos
-        for embryo_id, embryo_data in embryo_states.items():
-            self.experiment.add_embryo(
-                embryo_id=embryo_id,
-                position=embryo_data.get('stage_position', {}),
-                calibration=embryo_data.get('calibration', {}),
-                user_label=embryo_data.get('user_label'),
-                uid=embryo_data.get('uid'),  # Restore global UID
-            )
-            # Restore additional embryo state
-            embryo = self.experiment.embryos[embryo_id]
-            embryo.nickname = embryo_data.get('nickname')
-            embryo.interval_seconds = embryo_data.get('interval_seconds')  # None = use timelapse default
-            embryo.num_slices = embryo_data.get('num_slices', 50)
-            embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
-            embryo.priority = embryo_data.get('priority', 'normal')
-            embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
-            embryo.should_skip = embryo_data.get('should_skip', False)
-            embryo.skip_reason = embryo_data.get('skip_reason')
-
-        # Restore detection history
-        detection_history = state.get('detection_history', {})
-        for embryo_id, detections in detection_history.items():
-            if embryo_id in self.experiment.embryos:
-                for det in detections:
-                    detector_name = det.pop('detector', 'unknown')
-                    self.experiment.embryos[embryo_id].add_detection_result(
-                        detector_name, det
-                    )
-
-        # Restore detector configs (if detector registry supports it)
-        detector_configs = state.get('detector_configs', {})
-        # Note: detector registry already persists to its own file,
-        # so we don't need to restore from session state
-
-        # Update image storage path for this session
-        self.image_manager.set_session(session_id)
-
-        # Mirror session in GentlyStore
-        if self.store:
-            self.store.create_session(session_id)
-            for eid, edata in embryo_states.items():
-                pos = edata.get('stage_position', {})
-                self.store.register_embryo(
-                    session_id, eid,
-                    position_x=pos.get('x'),
-                    position_y=pos.get('y'),
-                    calibration=edata.get('calibration'),
-                )
-
-        # Emit session restored event
-        self._emit_event(EventType.SESSION_RESTORED, {
-            'session_id': session_id,
-            'embryo_count': len(embryo_states),
-            'message_count': len(self.conversation_history),
-        })
-
-        return True
-
     def _auto_save(self):
-        """Auto-save session (non-blocking, silent on error)"""
+        """Auto-save session to GentlyStore (non-blocking, silent on error)"""
+        if not self._session_id:
+            return
         try:
-            self.session_manager.update_state(
-                conversation=self.conversation_history,
-                experiment=self.experiment.to_dict(),
-                system_prompt=self.system_prompt,
-            )
-            self.session_manager.save_session()
+            self.store.save_session_snapshot(self._session_id, {
+                'conversation_history': self.conversation_history,
+                'experiment_data': self.experiment.to_dict(),
+                'system_prompt': self.system_prompt,
+            })
+            self.store.touch_session(self._session_id)
         except Exception:
             pass  # Silent fail for auto-save
 
-        # Also save snapshot to GentlyStore
-        if self.store and self.session_id:
-            try:
-                self.store.save_session_snapshot(self.session_id, {
-                    'conversation_history': self.conversation_history,
-                    'experiment_data': self.experiment.to_dict(),
-                    'system_prompt': self.system_prompt,
-                })
-            except Exception:
-                pass
-
     def save_session(self) -> bool:
         """
-        Save current session state
+        Save current session state to GentlyStore
 
         Returns
         -------
         bool
             True if saved successfully
         """
-        # Sync current state to session
-        self.session_manager.sync_from_copilot(
-            conversation_history=self.conversation_history,
-            experiment=self.experiment,
-            system_prompt=self.system_prompt,
-        )
-        return self.session_manager.save_session()
+        if not self._session_id:
+            return False
+        try:
+            self.store.save_session_snapshot(self._session_id, {
+                'conversation_history': self.conversation_history,
+                'experiment_data': self.experiment.to_dict(),
+                'system_prompt': self.system_prompt,
+            })
+            self.store.touch_session(self._session_id)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to save session: {e}")
+            return False
 
     def list_sessions(self) -> List[Dict]:
         """
-        List available sessions
+        List available sessions from GentlyStore
 
         Returns
         -------
         list of dict
             Session summaries
         """
-        return self.session_manager.list_sessions()
+        return self.store.list_sessions()
 
     def _emit_event(self, event_type: EventType, data: Optional[Dict] = None):
         """
@@ -881,32 +857,21 @@ Write a brief status summary. Examples:
         """
         Mark that a significant action occurred
 
-        Triggers sync and auto-save.
+        Triggers auto-save.
 
         Parameters
         ----------
         action_type : str
             Type of action (acquisition, detection, calibration, etc.)
         """
-        # Sync current state to session
-        self.session_manager.sync_from_copilot(
-            conversation_history=self.conversation_history,
-            experiment=self.experiment,
-            system_prompt=self.system_prompt,
-        )
-        # Trigger auto-save
-        self.session_manager.mark_significant_action(action_type)
+        # Auto-save to GentlyStore
+        self._auto_save()
 
         # Emit session saved event
         self._emit_event(EventType.SESSION_SAVED, {
-            'session_id': self.session_id,
+            'session_id': self._session_id,
             'action_type': action_type,
         })
-
-    @property
-    def session_id(self) -> Optional[str]:
-        """Get current session ID"""
-        return self.session_manager.session_id
 
     async def handle_message(self, user_message: str) -> str:
         """
@@ -1584,25 +1549,12 @@ Write a brief status summary. Examples:
         dict
             Import result with 'success', 'imported', 'skipped', 'errors'
         """
-        import json
-
-        # Find session file
-        session_file = self.session_manager.sessions_dir / f"{session_id}.json"
-        if not session_file.exists():
+        # Load session snapshot from GentlyStore
+        session_data = self.store.load_session_snapshot(session_id)
+        if not session_data:
             return {
                 'success': False,
                 'error': f"Session not found: {session_id}",
-                'imported': [],
-                'skipped': [],
-            }
-
-        try:
-            with open(session_file, 'r') as f:
-                session_data = json.load(f)
-        except Exception as e:
-            return {
-                'success': False,
-                'error': f"Failed to read session: {e}",
                 'imported': [],
                 'skipped': [],
             }
@@ -1725,10 +1677,7 @@ Write a brief status summary. Examples:
         else:
             volume = volume_data
 
-        # Store image (legacy system)
-        record = self.image_manager.store_volume(embryo, timepoint, volume)
-
-        # Also store in GentlyStore (dual-write during transition)
+        # Store in GentlyStore (sole storage system)
         if self.store and self.session_id:
             try:
                 self.store.register_embryo(
@@ -1746,7 +1695,7 @@ Write a brief status summary. Examples:
                         self.session_id, embryo_id, timepoint, volume,
                     )
             except Exception as e:
-                logger.warning(f"GentlyStore write failed (non-fatal): {e}")
+                logger.error(f"GentlyStore write failed: {e}")
 
         # Push to viz server with three-view projection (same as what Claude sees)
         if self.viz_server and volume is not None:

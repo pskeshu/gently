@@ -34,7 +34,15 @@ import numpy as np
 from ophyd.status import Status
 
 import pymmcore
-import rpyc
+
+
+def _safe_obtain(obj):
+    """Pass-through for MMCore data.
+
+    With direct MMCore (in-process), arrays are already local numpy arrays.
+    This function exists for API compatibility - it simply returns the object.
+    """
+    return obj
 
 
 class DiSPIMZstage:
@@ -307,8 +315,8 @@ class DiSPIMCamera:
                 self.core.setCameraDevice(self.name)
                 self.core.snapImage()
                 
-                # Use rpyc.classic.obtain to transfer numpy array properly
-                self._last_image = rpyc.classic.obtain(self.core.getImage())
+                # Use _safe_obtain to transfer numpy array properly
+                self._last_image = _safe_obtain(self.core.getImage())
                 self._last_image_time = time.time()
 
             except Exception as exc:
@@ -1333,8 +1341,8 @@ class DiSPIMVolumeScanner:
     Compound device for hardware-triggered SPIM volume acquisition.
 
     Orchestrates camera, scanner, piezo, and lasers for synchronized 3D volume capture.
-    Handles all the complexity of circular buffer management, rpyc transfer, state
-    machine coordination, and automatic laser enable/disable.
+    Handles all the complexity of circular buffer management, state machine
+    coordination, and automatic laser enable/disable.
 
     Laser Management:
     - Automatically enables configured lasers before acquisition
@@ -1495,7 +1503,7 @@ class DiSPIMVolumeScanner:
 
                         # Handle rpyc transfer
                         try:
-                            img = rpyc.classic.obtain(img)
+                            img = _safe_obtain(img)
                         except (ImportError, AttributeError):
                             pass
 
@@ -1667,7 +1675,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
                 # Capture image
                 self.core.setCameraDevice(self.name)
                 self.core.snapImage()
-                self._last_image = rpyc.classic.obtain(self.core.getImage())
+                self._last_image = _safe_obtain(self.core.getImage())
                 self._last_image_time = time.time()
 
                 # Turn LED off (if enabled - important to prevent sample heating!)

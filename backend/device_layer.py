@@ -1,18 +1,20 @@
 """
-Simple Microscope Server for Gently DiSPIM
+Gently Device Layer - Unified Hardware Server
 
-A lightweight asyncio-based server that runs RunEngine in the main thread,
-solving the Windows threading issue with signal handlers.
+Consolidates hardware control into a single process:
+- Direct MMCore initialization (no RPyC hop to external Micro-Manager)
+- Ophyd device abstraction
+- Bluesky RunEngine for plan execution
+- SAM embryo detection via HTTP endpoints
 
-This replaces the full bluesky-queueserver approach which has Windows
-compatibility issues with multiprocessing.
+This replaces the previous 3-process architecture:
+- Process 1: Micro-Manager RPyC (port 18861) - ELIMINATED
+- Process 2: simple_server.py (port 60610)   - REPLACED by this
+- Process 3: sam_server.py (port 18862)      - REPLACED by this
 
 Usage:
-    python backend/simple_server.py
-
-The server provides:
-- HTTP API on port 60610 for plan submission
-- SAM detection on port 18862 (via rpyc)
+    python start_device_layer.py
+    python start_device_layer.py --port 60610 --sam-device cuda
 """
 
 import asyncio
@@ -22,8 +24,6 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 from dataclasses import dataclass, field
-from queue import Queue
-import threading
 
 import numpy as np
 
@@ -38,7 +38,6 @@ import yaml
 # Bluesky imports
 from bluesky import RunEngine
 from bluesky.callbacks.best_effort import BestEffortCallback
-from event_model import RunRouter
 
 
 @dataclass
@@ -49,20 +48,27 @@ class PlanRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
-class SimpleMicroscopeServer:
+class DeviceLayerServer:
     """
-    Simple HTTP server for microscope control.
+    Consolidated device layer: MMCore + Ophyd + RunEngine + SAM.
 
     Runs RunEngine in the main thread via an async task queue.
+    Provides HTTP API for plan submission and SAM detection.
     """
 
-    def __init__(self, config_path: str = "config.yml"):
+    def __init__(self, config_path: str = "config.yml", sam_device: str = "cuda"):
         self.config_path = config_path
         self.config = None
         self.core = None
         self.RE = None
         self.devices = {}
         self.plans = {}
+
+        # SAM configuration
+        self._sam_device = sam_device
+        self._sam_detector = None  # Lazy loaded
+        self._sam_checkpoint = "sam_vit_b_01ec64.pth"
+        self._sam_model_type = "vit_b"
 
         # Task queue for plan execution
         self._plan_queue: asyncio.Queue[PlanRequest] = asyncio.Queue()
@@ -75,7 +81,7 @@ class SimpleMicroscopeServer:
         # Plan execution timing log
         self._plan_execution_log = []
 
-        # Volume staging directory — set via POST /session/configure
+        # Volume staging directory - set via POST /session/configure
         # When set, large numpy arrays are written as TIFF files instead of
         # being serialized to JSON lists (which can turn a 400MB uint16 volume
         # into ~2GB of JSON text).
@@ -84,28 +90,44 @@ class SimpleMicroscopeServer:
     async def initialize(self):
         """Initialize hardware and RunEngine"""
         print("=" * 60)
-        print("SIMPLE MICROSCOPE SERVER")
+        print("GENTLY DEVICE LAYER")
         print("=" * 60)
 
-        # Load config
-        print("\n[1/4] Loading configuration...")
+        # [1/5] Load config
+        print("\n[1/5] Loading configuration...")
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         print(f"  Config loaded from {self.config_path}")
 
-        # Connect to existing Micro-Manager instance via rpyc
-        print("\n[2/4] Connecting to Micro-Manager...")
-        from client import get_mmc
+        # [2/5] Direct MMCore initialization (replaces RPyC hop)
+        print("\n[2/5] Initializing Micro-Manager Core (direct)...")
+        import pymmcore
 
-        self.core = get_mmc()
-        print(f"  Connected to MMCore via rpyc")
+        self.core = pymmcore.CMMCore()
+        self.core.enableStderrLog(True)
 
-        # Create devices
-        print("\n[3/4] Creating Ophyd devices...")
+        # Add MM directory to PATH for device adapters
+        mm_directory = self.config.get('mmdirectory', 'C:/Program Files/Micro-Manager-1.4')
+        os.environ["PATH"] += os.pathsep + mm_directory
+        self.core.setDeviceAdapterSearchPaths([mm_directory])
+
+        # Load system configuration
+        mm_config = self.config.get('mmconfig', 'MMConfig.cfg')
+        mm_config_path = os.path.join(mm_directory, mm_config)
+        if not os.path.exists(mm_config_path):
+            # Try config.yml directory
+            mm_config_path = mm_config
+
+        print(f"  Loading: {mm_config_path}")
+        self.core.loadSystemConfiguration(mm_config_path)
+        print(f"  MMCore initialized (direct, in-process)")
+        print(f"  Loaded devices: {self.core.getLoadedDevices()}")
+
+        # [3/5] Create Ophyd devices
+        print("\n[3/5] Creating Ophyd devices...")
         from gently.agent.device_factory import create_devices_from_mmcore
         # Suppress rich console output to avoid Unicode issues on Windows
         import io
-        import sys
         old_stdout = sys.stdout
         sys.stdout = io.StringIO()
         try:
@@ -116,8 +138,8 @@ class SimpleMicroscopeServer:
         for name in self.devices:
             print(f"    - {name}")
 
-        # Initialize RunEngine
-        print("\n[4/4] Initializing RunEngine...")
+        # [4/5] Initialize RunEngine
+        print("\n[4/5] Initializing RunEngine...")
         self.RE = RunEngine({})
 
         # Note: Databroker SQLite backend can't store image arrays directly.
@@ -135,13 +157,13 @@ class SimpleMicroscopeServer:
             into ~2 GB of JSON text.
             """
             if isinstance(v, np.ndarray):
-                # Large array + staging dir configured → file ref
+                # Large array + staging dir configured -> file ref
                 if self._volume_dir and v.nbytes > 1_000_000:
                     import uuid
                     try:
                         import tifffile
                     except ImportError:
-                        # tifffile not installed on server — fall back to list
+                        # tifffile not installed on server - fall back to list
                         return v.tolist()
                     uid = uuid.uuid4().hex[:12]
                     tiff_path = Path(self._volume_dir) / f"{uid}.tif"
@@ -179,12 +201,12 @@ class SimpleMicroscopeServer:
         self.RE.subscribe(collect_docs)
         print("  RunEngine ready")
 
-        # Import plans
+        # [5/5] Load plans
         print("\n[5/5] Loading plans...")
         self._load_plans()
 
         print("\n" + "=" * 60)
-        print("Server initialized successfully")
+        print("Device layer initialized successfully")
         print("=" * 60)
 
     def _load_plans(self):
@@ -233,6 +255,33 @@ class SimpleMicroscopeServer:
             else:
                 resolved[key] = value
         return resolved
+
+    # =========================================================================
+    # SAM Detection (Lazy Loading)
+    # =========================================================================
+
+    def _get_sam_detector(self):
+        """Lazy-load SAM detector on first detection request.
+
+        This defers the ~5-10 second model load until actually needed,
+        keeping server startup fast.
+        """
+        if self._sam_detector is None:
+            print(f"\n  Loading SAM detector ({self._sam_model_type} on {self._sam_device})...")
+            from gently.agent.sam_detection import SAMEmbryoDetector
+
+            self._sam_detector = SAMEmbryoDetector(
+                sam_checkpoint=self._sam_checkpoint,
+                sam_model_type=self._sam_model_type,
+                device=self._sam_device
+            )
+            print("  SAM detector ready")
+
+        return self._sam_detector
+
+    # =========================================================================
+    # Plan Execution
+    # =========================================================================
 
     async def _plan_executor(self):
         """Background task that executes plans from the queue"""
@@ -344,7 +393,7 @@ class SimpleMicroscopeServer:
         return result
 
     # =========================================================================
-    # HTTP API Handlers
+    # HTTP API Handlers - Core Operations
     # =========================================================================
 
     async def handle_status(self, request):
@@ -355,6 +404,7 @@ class SimpleMicroscopeServer:
             'devices': list(self.devices.keys()),
             'plans': list(self.plans.keys()),
             'queue_size': self._plan_queue.qsize(),
+            'sam_loaded': self._sam_detector is not None,
         }
         return web.json_response(status)
 
@@ -575,7 +625,7 @@ class SimpleMicroscopeServer:
             }, status=500)
 
     async def handle_session_configure(self, request):
-        """POST /session/configure — set staging directory for file-ref protocol.
+        """POST /session/configure - set staging directory for file-ref protocol.
 
         Body: {"volume_dir": "D:/Gently2/incoming"}
         """
@@ -607,12 +657,262 @@ class SimpleMicroscopeServer:
                 "traceback": traceback.format_exc(),
             }, status=500)
 
+    # =========================================================================
+    # HTTP API Handlers - SAM Detection
+    # =========================================================================
+
+    async def handle_sam_status(self, request):
+        """GET /api/sam/status - Check SAM model availability"""
+        return web.json_response({
+            'success': True,
+            'available': True,  # SAM is always available (lazy loaded)
+            'loaded': self._sam_detector is not None,
+            'device': self._sam_device,
+            'model_type': self._sam_model_type,
+        })
+
+    async def handle_detect_embryos(self, request):
+        """POST /api/detect_embryos - Capture image and detect embryos.
+
+        This combines image capture and SAM detection in one HTTP round-trip,
+        avoiding the need to serialize images across process boundaries.
+
+        Request body:
+        {
+            "pixel_size_um": 6.5,
+            "objective_mag": 10.0,
+            "use_claude_review": true,
+            "min_confidence": 0.7,
+            "exposure_ms": 50.0,  // optional
+            "brightness_percentile": 99.0,
+            "min_area": 5000,
+            "max_area": 150000
+        }
+
+        Returns:
+        {
+            "success": true,
+            "embryos": [...],
+            "initial_detections": 5,
+            "final_detections": 4,
+            "stage_position": [x, y],
+            "image_path": "path/to/captured/image.tif"  // if volume_dir configured
+        }
+        """
+        try:
+            data = await request.json()
+
+            # Extract parameters with defaults
+            from gently.coordinates import DEFAULT_PIXEL_SIZE_UM, DEFAULT_OBJECTIVE_MAG
+
+            pixel_size_um = data.get('pixel_size_um', DEFAULT_PIXEL_SIZE_UM)
+            objective_mag = data.get('objective_mag', DEFAULT_OBJECTIVE_MAG)
+            use_claude_review = data.get('use_claude_review', True)
+            min_confidence = data.get('min_confidence', 0.7)
+            exposure_ms = data.get('exposure_ms')
+            brightness_percentile = data.get('brightness_percentile', 99.0)
+            min_area = data.get('min_area', 5000)
+            max_area = data.get('max_area', 150000)
+
+            # Set exposure if specified
+            if exposure_ms is not None:
+                bottom_camera = self.devices.get('bottom_camera')
+                if bottom_camera:
+                    bottom_camera.configure_exposure(exposure_ms)
+
+            # Capture image via plan
+            print("  [detect_embryos] Capturing bottom camera image...")
+            capture_result = await self.submit_plan(
+                'capture_bottom_image_plan',
+                kwargs={'bottom_camera': 'bottom_camera'}
+            )
+
+            if not capture_result.get('success'):
+                return web.json_response({
+                    'success': False,
+                    'error': f"Image capture failed: {capture_result.get('error', 'Unknown')}"
+                }, status=500)
+
+            # Extract image from result
+            docs = capture_result.get('documents', {})
+            events = docs.get('events', [])
+            image = None
+            if events:
+                event_data = events[0].get('data', {})
+                for key in ['bottom_camera', 'bottom_camera_image', 'Bottom PCO']:
+                    if key in event_data:
+                        val = event_data[key]
+                        # Handle file ref
+                        if isinstance(val, dict) and val.get('__file_ref__'):
+                            import tifffile
+                            image = tifffile.imread(val['path'])
+                        else:
+                            image = np.array(val)
+                        break
+
+            if image is None:
+                return web.json_response({
+                    'success': False,
+                    'error': 'No image data in capture result'
+                }, status=500)
+
+            print(f"  [detect_embryos] Image shape: {image.shape}")
+
+            # Read stage position
+            print("  [detect_embryos] Reading stage position...")
+            stage_result = await self.submit_plan(
+                'read_stage_plan',
+                kwargs={'xy_stage': 'xy_stage'}
+            )
+
+            stage_x, stage_y = 0.0, 0.0
+            if stage_result.get('success'):
+                stage_docs = stage_result.get('documents', {})
+                stage_events = stage_docs.get('events', [])
+                if stage_events:
+                    stage_data = stage_events[0].get('data', {})
+                    for key in stage_data.keys():
+                        if 'x' in key.lower() and 'y' not in key.lower():
+                            val = stage_data[key]
+                            stage_x = float(val) if not isinstance(val, list) else float(val[0])
+                        elif 'y' in key.lower() and 'x' not in key.lower():
+                            val = stage_data[key]
+                            stage_y = float(val) if not isinstance(val, list) else float(val[0])
+
+            stage_position = (stage_x, stage_y)
+            print(f"  [detect_embryos] Stage position: {stage_position}")
+
+            # Run SAM detection in thread to avoid blocking event loop
+            print("  [detect_embryos] Running SAM detection...")
+            detector = self._get_sam_detector()
+
+            sam_result = await asyncio.to_thread(
+                self._run_sam_detection,
+                detector,
+                image,
+                stage_position,
+                pixel_size_um,
+                objective_mag,
+                use_claude_review,
+                brightness_percentile,
+                min_area,
+                max_area
+            )
+
+            # Save image if volume_dir configured
+            image_path = None
+            if self._volume_dir:
+                import uuid
+                try:
+                    import tifffile
+                    uid = uuid.uuid4().hex[:12]
+                    image_path = str(Path(self._volume_dir) / f"detection_{uid}.tif")
+                    tifffile.imwrite(image_path, image)
+                except ImportError:
+                    pass
+
+            # Build response
+            response = {
+                'success': sam_result.get('success', False),
+                'embryos': sam_result.get('embryos', []),
+                'initial_detections': sam_result.get('initial_detections', 0),
+                'final_detections': sam_result.get('final_detections', 0),
+                'stage_position': list(stage_position),
+                'verification': sam_result.get('verification', {}),
+            }
+
+            if image_path:
+                response['image_path'] = image_path
+
+            if 'error' in sam_result:
+                response['error'] = sam_result['error']
+
+            return web.json_response(response)
+
+        except Exception as e:
+            import traceback
+            return web.json_response({
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }, status=500)
+
+    def _run_sam_detection(
+        self,
+        detector,
+        image: np.ndarray,
+        stage_position: tuple,
+        pixel_size_um: float,
+        objective_mag: float,
+        use_claude_review: bool,
+        brightness_percentile: float,
+        min_area: int,
+        max_area: int
+    ) -> dict:
+        """Run SAM detection synchronously (called from thread).
+
+        The SAMEmbryoDetector.detect_embryos is async, so we need to
+        run it in a new event loop.
+        """
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        try:
+            result = loop.run_until_complete(
+                detector.detect_embryos(
+                    image=image,
+                    stage_position=stage_position,
+                    pixel_size_um=pixel_size_um,
+                    objective_mag=objective_mag,
+                    use_claude_review=use_claude_review,
+                    save_visualizations=True,
+                    output_dir=Path("./detection_results"),
+                    brightness_percentile=brightness_percentile,
+                    min_area=min_area,
+                    max_area=max_area
+                )
+            )
+
+            # Ensure results are serializable (convert numpy types)
+            embryos = result.get('embryos', [])
+            for embryo in embryos:
+                for key, value in list(embryo.items()):
+                    if isinstance(value, np.floating):
+                        embryo[key] = float(value)
+                    elif isinstance(value, np.integer):
+                        embryo[key] = int(value)
+                    elif isinstance(value, np.ndarray):
+                        # Remove mask from response (not JSON serializable)
+                        del embryo[key]
+
+            result['success'] = True
+            return result
+
+        except Exception as e:
+            import traceback
+            return {
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc(),
+                'embryos': [],
+                'initial_detections': 0,
+                'final_detections': 0,
+            }
+        finally:
+            loop.close()
+
+    # =========================================================================
+    # Server Lifecycle
+    # =========================================================================
+
     async def run(self, host: str = '127.0.0.1', port: int = 60610):
         """Start the server"""
         await self.initialize()
 
         # Create web app
         app = web.Application()
+
+        # Core endpoints (carried forward from simple_server.py)
         app.router.add_get('/api/status', self.handle_status)
         app.router.add_post('/api/queue/item/add', self.handle_submit_plan)
         app.router.add_get('/api/history', self.handle_get_history)
@@ -626,6 +926,10 @@ class SimpleMicroscopeServer:
         app.router.add_get('/api/plan_log', self.handle_get_plan_log)
         app.router.add_post('/session/configure', self.handle_session_configure)
 
+        # SAM endpoints (new - replaces RPyC sam_server.py)
+        app.router.add_get('/api/sam/status', self.handle_sam_status)
+        app.router.add_post('/api/detect_embryos', self.handle_detect_embryos)
+
         # Start plan executor
         executor_task = asyncio.create_task(self._plan_executor())
 
@@ -638,15 +942,17 @@ class SimpleMicroscopeServer:
         print(f"HTTP API available at http://{host}:{port}")
         print(f"{'=' * 60}")
         print("\nEndpoints:")
-        print(f"  GET  /api/status     - Server status")
-        print(f"  GET  /api/devices    - List devices")
-        print(f"  GET  /api/plans      - List plans")
+        print(f"  GET  /api/status         - Server status")
+        print(f"  GET  /api/devices        - List devices")
+        print(f"  GET  /api/plans          - List plans")
         print(f"  POST /api/queue/item/add - Submit plan")
-        print(f"  GET  /api/history    - Run history")
-        print(f"  GET  /api/led/status - LED status and configs")
-        print(f"  POST /api/led/set    - Set LED state directly")
-        print(f"  GET  /api/plan_log   - Plan execution timing log")
-        print(f"  POST /session/configure - Set volume staging directory")
+        print(f"  GET  /api/history        - Run history")
+        print(f"  GET  /api/led/status     - LED status and configs")
+        print(f"  POST /api/led/set        - Set LED state directly")
+        print(f"  GET  /api/plan_log       - Plan execution timing log")
+        print(f"  POST /session/configure  - Set volume staging directory")
+        print(f"  GET  /api/sam/status     - SAM model status")
+        print(f"  POST /api/detect_embryos - Capture + SAM detection")
         print(f"\nPress Ctrl+C to stop")
         print("=" * 60 + "\n")
 
@@ -664,16 +970,25 @@ class SimpleMicroscopeServer:
             await runner.cleanup()
 
 
-async def main():
-    server = SimpleMicroscopeServer()
-    await server.run()
+async def main(port: int = 60610, sam_device: str = "cuda"):
+    server = DeviceLayerServer(sam_device=sam_device)
+    await server.run(port=port)
 
 
 if __name__ == "__main__":
-    print("\nStarting Simple Microscope Server...")
-    print("This server runs RunEngine in the main thread.\n")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Gently Device Layer Server")
+    parser.add_argument("--port", type=int, default=60610, help="HTTP port")
+    parser.add_argument("--sam-device", default="cuda", choices=["cuda", "cpu"],
+                        help="Device for SAM model (default: cuda)")
+
+    args = parser.parse_args()
+
+    print("\nStarting Gently Device Layer...")
+    print("This server provides unified hardware control + SAM detection.\n")
 
     try:
-        asyncio.run(main())
+        asyncio.run(main(port=args.port, sam_device=args.sam_device))
     except KeyboardInterrupt:
-        print("\n\nServer stopped.")
+        print("\n\nDevice layer stopped.")
