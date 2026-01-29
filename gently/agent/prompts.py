@@ -338,7 +338,7 @@ def build_system_prompt(
     experiment_state : ExperimentState
         Current experiment state
     connection_status : dict, optional
-        Connection status for servers: {queue_server: bool, sam_server: bool, databroker: bool}
+        Connection status: {device_layer: bool, sam_detection: bool}
     context_summary : str, optional
         AI-generated summary of current session context (timelapse status, recent events)
 
@@ -351,28 +351,25 @@ def build_system_prompt(
 
     # Build connection status section
     if connection_status:
-        qs = "connected" if connection_status.get('queue_server') else "NOT CONNECTED"
-        sam = "connected" if connection_status.get('sam_server') else "NOT CONNECTED"
-        db = "connected" if connection_status.get('databroker') else "NOT CONNECTED"
+        device_layer = "connected" if connection_status.get('device_layer') else "NOT CONNECTED"
+        sam = "available" if connection_status.get('sam_detection') else "not available"
 
-        if not connection_status.get('queue_server'):
+        if not connection_status.get('device_layer'):
             connection_section = f"""# Hardware Connection Status
 
-⚠️ **OFFLINE MODE** - Microscope server is not connected.
+⚠️ **OFFLINE MODE** - Device layer is not connected.
 
-- Queue Server: {qs}
-- SAM Server: {sam}
-- Databroker: {db}
+- Device Layer: {device_layer}
+- SAM Detection: {sam}
 
 **Important**: You cannot perform hardware operations (detect embryos, capture images, move stage, etc.)
-without a connected microscope server. If the user asks for hardware operations, inform them that
+without a connected device layer. If the user asks for hardware operations, inform them that
 the microscope is not connected and suggest they start the server or check the connection."""
         else:
             connection_section = f"""# Hardware Connection Status
 
-- Queue Server: {qs}
-- SAM Server: {sam}
-- Databroker: {db}"""
+- Device Layer: {device_layer}
+- SAM Detection: {sam}"""
     else:
         connection_section = """# Hardware Connection Status
 
