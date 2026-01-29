@@ -1880,6 +1880,72 @@ class RichCopilotCLI:
             self.console.print()
             return False  # Handled, continue loop
 
+        elif cmd.startswith('/benchmark'):
+            # Run end-to-end volume acquisition benchmark
+            theme = get_theme()
+
+            # Check connection
+            if not self.copilot.client or not self.copilot.client.is_connected:
+                self.console.print(f"[{theme.error}]✗ Microscope not connected.[/]")
+                self.console.print(f"[{theme.muted}]Benchmark requires hardware connection.[/]")
+                return False
+
+            # Parse options
+            import shlex
+            try:
+                parts = shlex.split(command)
+            except ValueError:
+                parts = command.split()
+
+            num_volumes = 5
+            num_slices = 50
+            warmup = 1
+            save_csv = False
+
+            i = 1
+            while i < len(parts):
+                arg = parts[i]
+                if arg in ('--volumes', '-n') and i + 1 < len(parts):
+                    num_volumes = int(parts[i + 1])
+                    i += 2
+                elif arg in ('--slices', '-s') and i + 1 < len(parts):
+                    num_slices = int(parts[i + 1])
+                    i += 2
+                elif arg in ('--warmup', '-w') and i + 1 < len(parts):
+                    warmup = int(parts[i + 1])
+                    i += 2
+                elif arg == '--save':
+                    save_csv = True
+                    i += 1
+                else:
+                    i += 1
+
+            # Run benchmark
+            from .benchmark import run_benchmark, print_benchmark_results, save_benchmark_csv
+            from datetime import datetime
+
+            try:
+                results = await run_benchmark(
+                    self.copilot,
+                    num_volumes=num_volumes,
+                    num_slices=num_slices,
+                    warmup=warmup,
+                    console=self.console,
+                )
+
+                print_benchmark_results(results, self.console)
+
+                if save_csv:
+                    from pathlib import Path
+                    csv_path = Path("results") / f"benchmark_e2e_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    save_benchmark_csv(results, csv_path)
+                    self.console.print(f"[{theme.success}]Results saved to: {csv_path}[/]")
+
+            except Exception as e:
+                self.console.print(f"[{theme.error}]✗ Benchmark failed: {e}[/]")
+
+            return False  # Handled, continue loop
+
         elif cmd == '/timelapse' or cmd == '/timelapse watch':
             # Show timelapse status (with optional live watch mode)
             watch_mode = 'watch' in cmd

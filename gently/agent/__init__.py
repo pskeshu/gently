@@ -13,6 +13,7 @@ from .autocomplete import create_completer, CopilotCompleter
 from .device_factory import create_devices_from_mmcore
 from .queue_server_client import QueueServerClient
 from .tool_registry import ToolRegistry, get_tool_registry, tool, ToolCategory
+from .benchmark import run_benchmark, BenchmarkResults, print_benchmark_results
 
 # Import tools package to register all tools
 from . import tools
@@ -39,4 +40,8 @@ __all__ = [
     'get_tool_registry',
     'tool',
     'ToolCategory',
+    # Benchmark
+    'run_benchmark',
+    'BenchmarkResults',
+    'print_benchmark_results',
 ]

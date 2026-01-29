@@ -19,6 +19,7 @@ class CommandCategory(Enum):
     INSPECTION = auto()    # /status, /detectors, /embryos, /timelapse, /timeline
     SESSION = auto()       # /sessions, /resume, /save, /import-embryos
     APPEARANCE = auto()    # /theme, /history, /tokens
+    DIAGNOSTICS = auto()   # /benchmark
 
 
 @dataclass
@@ -174,6 +175,7 @@ class CommandRegistry:
             CommandCategory.INSPECTION: "Inspection",
             CommandCategory.SESSION: "Session",
             CommandCategory.APPEARANCE: "Appearance",
+            CommandCategory.DIAGNOSTICS: "Diagnostics",
         }
 
         for category in CommandCategory:
@@ -488,6 +490,49 @@ Options:
         description="Show API token usage",
         help_text="Display token usage statistics and estimated cost for the current session.",
         category=CommandCategory.APPEARANCE,
+    ))
+
+    # === Diagnostics Commands ===
+    registry.register(CommandDefinition(
+        name="/benchmark",
+        description="Run end-to-end FPS benchmark",
+        help_text="""Run end-to-end volume acquisition benchmark.
+
+Measures the full pipeline latency:
+- Acquisition: HTTP → device layer → hardware → file written
+- Storage: GentlyStore registration (projection + DB)
+- Viz push: Push to visualization server (if running)
+
+Requires microscope connection and at least one registered embryo.""",
+        options=[
+            CommandOption(
+                name="--volumes",
+                short="-n",
+                description="Number of volumes to acquire",
+                takes_value=True,
+                value_hint="N",
+            ),
+            CommandOption(
+                name="--slices",
+                short="-s",
+                description="Slices per volume",
+                takes_value=True,
+                value_hint="N",
+            ),
+            CommandOption(
+                name="--warmup",
+                short="-w",
+                description="Warmup volumes (not timed)",
+                takes_value=True,
+                value_hint="N",
+            ),
+            CommandOption(
+                name="--save",
+                description="Save results to CSV",
+                is_flag=True,
+            ),
+        ],
+        category=CommandCategory.DIAGNOSTICS,
     ))
 
 
