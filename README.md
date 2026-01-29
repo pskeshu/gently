@@ -28,7 +28,7 @@ Multiple independent layers of protection:
 
 | Layer | Protection |
 |-------|------------|
-| **Process Isolation** | RPyC separates client from hardware server. Client crashes don't affect the microscope. |
+| **Process Isolation** | HTTP API separates copilot from device layer. Client crashes don't affect the microscope. |
 | **Device Limits** | Hard bounds validated in `set()` before any motion. Stage, piezo, galvo all protected. |
 | **Plan Constraints** | Bluesky plans use a restricted vocabulary of safe primitives. |
 | **Templated Actions** | Agents work with `Embryo` objects, not raw coordinates. |
@@ -73,17 +73,11 @@ git clone https://github.com/pskeshu/gently.git
 cd gently
 pip install -r requirements_copilot.txt
 
-# 1. Start the Micro-Manager control layer
-python start_server.py
+# 1. Start the device layer (hardware control + SAM detection)
+python start_device_layer.py
 
-# 2. Start services (visualization, etc.)
-start_services.bat  # Windows
-
-# 3. Launch the copilot
+# 2. Launch the copilot
 python launch_copilot.py
-
-# 4. Open the web interface
-# http://localhost:8080
 ```
 
 ## Architecture
