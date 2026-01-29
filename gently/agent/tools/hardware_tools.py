@@ -1704,19 +1704,8 @@ async def acquire_volume(
             volume = result.get('volume')
             timepoint = embryo.timepoints_acquired  # Current timepoint (0-indexed)
 
-            # Save volume to disk (also updates embryo.timepoints_acquired)
-            if volume is not None:
-                try:
-                    record = copilot.image_manager.store_volume(embryo, timepoint, volume)
-                    saved_path = record.volume_path
-                except Exception as save_err:
-                    print(f"  Warning: Failed to save volume: {save_err}")
-                    saved_path = None
-                    # Still need to increment timepoints_acquired since store_volume didn't run
-                    embryo.timepoints_acquired += 1
-            else:
-                saved_path = None
-                embryo.timepoints_acquired += 1
+            # Increment timepoints acquired
+            embryo.timepoints_acquired += 1
 
             # Record light exposure (num_slices frames at exposure_ms each)
             embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
@@ -2167,13 +2156,13 @@ async def view_volume(
         title = f"Volume: {volume_path.name}"
 
     elif embryo_id:
-        # Get volume for embryo - check both recent_images and disk
-        storage_dir = copilot.image_manager.storage_path
+        # Get volume for embryo from GentlyStore
+        session_id = copilot.session_id
 
         if timepoint is not None:
-            # Try to find specific timepoint - first check disk directly
-            volume_path = storage_dir / f"{embryo_id}_t{timepoint:04d}.tif"
-            if volume_path.exists():
+            # Try to find specific timepoint via GentlyStore
+            volume_path = copilot.store.get_volume_path(session_id, embryo_id, timepoint)
+            if volume_path and volume_path.exists():
                 title = f"{embryo_id} - t{timepoint:04d}"
             else:
                 # Check recent_images as fallback
@@ -2186,32 +2175,21 @@ async def view_volume(
                         volume_path = Path(matching[0].volume_path)
                         title = f"{embryo_id} - t{timepoint:04d}"
 
-                if not volume_path.exists():
-                    # List available timepoints from disk
-                    available = []
-                    for f in storage_dir.glob(f"{embryo_id}_t*.tif"):
-                        import re
-                        match = re.search(r'_t(\d+)\.tif$', f.name)
-                        if match:
-                            available.append(int(match.group(1)))
-                    available.sort()
+                if not volume_path or not volume_path.exists():
+                    # List available timepoints from store
+                    volumes = copilot.store.list_volumes(session_id, embryo_id)
+                    available = sorted([v['timepoint'] for v in volumes])
                     return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
         else:
-            # Find latest volume from disk
-            import re
-            volume_files = list(storage_dir.glob(f"{embryo_id}_t*.tif"))
-            if not volume_files:
-                return f"No volumes found for {embryo_id} in {storage_dir}"
+            # Find latest volume from store
+            volumes = copilot.store.list_volumes(session_id, embryo_id)
+            if not volumes:
+                return f"No volumes found for {embryo_id} in session {session_id}"
 
             # Find highest timepoint
-            latest_tp = -1
-            for f in volume_files:
-                match = re.search(r'_t(\d+)\.tif$', f.name)
-                if match:
-                    tp = int(match.group(1))
-                    if tp > latest_tp:
-                        latest_tp = tp
-                        volume_path = f
+            latest = max(volumes, key=lambda v: v['timepoint'])
+            latest_tp = latest['timepoint']
+            volume_path = copilot.store.get_volume_path(session_id, embryo_id, latest_tp)
 
             title = f"{embryo_id} - t{latest_tp:04d}"
 
@@ -2263,70 +2241,76 @@ async def list_volumes(
     context: Dict = None
 ) -> str:
     """List available volumes"""
-    from pathlib import Path
-    import re
-
     copilot, err = require_copilot(context)
     if err:
         return err
 
-    # Get storage directory
-    storage_dir = copilot.image_manager.storage_path
+    session_id = copilot.session_id
     lines = []
 
-    # Pattern to match volume files: embryo_id_tXXXX.tif
-    volume_pattern = re.compile(r'^(.+)_t(\d+)\.tif$')
+    # Get volumes from GentlyStore
+    all_volumes_list = copilot.store.list_volumes(session_id, embryo_id)
 
-    # Scan storage directory for all volume files
-    all_volumes = {}  # embryo_id -> list of (timepoint, path)
-    if storage_dir.exists():
-        for f in storage_dir.glob("*.tif"):
-            match = volume_pattern.match(f.name)
-            if match:
-                eid = match.group(1)
-                tp = int(match.group(2))
-                if eid not in all_volumes:
-                    all_volumes[eid] = []
-                all_volumes[eid].append((tp, f))
+    # Group by embryo_id
+    all_volumes = {}  # embryo_id -> list of volume records
+    for vol in all_volumes_list:
+        eid = vol['embryo_id']
+        if eid not in all_volumes:
+            all_volumes[eid] = []
+        all_volumes[eid].append(vol)
 
     # Sort by timepoint
     for eid in all_volumes:
-        all_volumes[eid].sort(key=lambda x: x[0])
+        all_volumes[eid].sort(key=lambda x: x['timepoint'])
 
     if embryo_id:
         # List volumes for specific embryo
         if embryo_id not in all_volumes:
-            return f"No volume files found for {embryo_id} in {storage_dir}"
+            return f"No volumes found for {embryo_id} in session {session_id}"
 
         volumes = all_volumes[embryo_id]
         lines.append(f"Volumes for {embryo_id}: {len(volumes)} file(s)")
-        lines.append(f"Storage: {storage_dir}")
+        lines.append(f"Session: {session_id}")
         lines.append("")
 
-        for tp, path in volumes:
-            size_mb = path.stat().st_size / (1024 * 1024)
-            lines.append(f"  t{tp:04d}: {path.name} ({size_mb:.1f} MB)")
+        for vol in volumes:
+            tp = vol['timepoint']
+            path = copilot.store.get_volume_path(session_id, embryo_id, tp)
+            if path and path.exists():
+                size_mb = path.stat().st_size / (1024 * 1024)
+                lines.append(f"  t{tp:04d}: {path.name} ({size_mb:.1f} MB)")
+            else:
+                lines.append(f"  t{tp:04d}: (file missing)")
 
     else:
         # List volumes for all embryos
         if not all_volumes:
-            return f"No volume files found in {storage_dir}"
+            return f"No volumes found in session {session_id}"
 
         total_files = sum(len(v) for v in all_volumes.values())
         lines.append(f"Available volumes: {total_files} file(s) across {len(all_volumes)} embryo(s)")
-        lines.append(f"Storage: {storage_dir}")
+        lines.append(f"Session: {session_id}")
 
         for eid in sorted(all_volumes.keys()):
             volumes = all_volumes[eid]
-            timepoints = [tp for tp, _ in volumes]
+            timepoints = [v['timepoint'] for v in volumes]
             tp_range = f"t{min(timepoints):04d}-t{max(timepoints):04d}" if len(timepoints) > 1 else f"t{timepoints[0]:04d}"
-            total_size = sum(p.stat().st_size for _, p in volumes) / (1024 * 1024)
+
+            # Calculate total size
+            total_size = 0
+            for vol in volumes:
+                path = copilot.store.get_volume_path(session_id, eid, vol['timepoint'])
+                if path and path.exists():
+                    total_size += path.stat().st_size / (1024 * 1024)
             lines.append(f"\n{eid}: {len(volumes)} volume(s) [{tp_range}] ({total_size:.1f} MB total)")
 
             # Show last few timepoints
-            for tp, path in volumes[-3:]:
-                size_mb = path.stat().st_size / (1024 * 1024)
-                lines.append(f"    t{tp:04d}: {size_mb:.1f} MB")
+            for vol in volumes[-3:]:
+                tp = vol['timepoint']
+                path = copilot.store.get_volume_path(session_id, eid, tp)
+                if path and path.exists():
+                    size_mb = path.stat().st_size / (1024 * 1024)
+                    lines.append(f"    t{tp:04d}: {size_mb:.1f} MB")
             if len(volumes) > 3:
                 lines.append(f"    ... and {len(volumes) - 3} more")
 

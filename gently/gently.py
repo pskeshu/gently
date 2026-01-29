@@ -526,10 +526,9 @@ class Gently:
             from .agent.copilot import MicroscopyCopilot
             self._copilot = MicroscopyCopilot(
                 storage_path=self.storage_path,
+                store=self._store,
                 **kwargs
             )
-            # Share components
-            self._copilot.image_manager.set_data_store(self._data_store)
         return self._copilot
 
     # =========================================================================
