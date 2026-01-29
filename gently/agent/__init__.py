@@ -7,7 +7,6 @@ AI agent that acts as a scientific collaborator for diSPIM microscopy experiment
 from .copilot import MicroscopyCopilot
 from .state import EmbryoState, ExperimentState, ImageRecord
 from .plan_synthesis import PlanSynthesizer, PlanValidator
-from .image_manager import ImageManager
 from .perception import PerceptionManager, PerceptionResult, PerceptionSession
 from .rich_cli import run_rich_cli, RichCopilotCLI
 from .autocomplete import create_completer, CopilotCompleter
@@ -26,7 +25,6 @@ __all__ = [
     'ImageRecord',
     'PlanSynthesizer',
     'PlanValidator',
-    'ImageManager',
     # Perception system
     'PerceptionManager',
     'PerceptionResult',

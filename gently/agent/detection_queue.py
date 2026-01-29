@@ -10,7 +10,6 @@ import anthropic
 from .detector import Detector, DetectionResult, ConfidenceLevel
 from .detector_registry import DetectorRegistry
 from .state import EmbryoState
-from .image_manager import ImageManager
 
 
 class DetectionQueue:
@@ -23,7 +22,6 @@ class DetectionQueue:
     def __init__(
         self,
         registry: DetectorRegistry,
-        image_manager: ImageManager,
         claude_client: anthropic.Anthropic,
         model: str = "claude-opus-4-5-20251101",
         on_detection_callback: Optional[Callable] = None,
@@ -34,8 +32,6 @@ class DetectionQueue:
         ----------
         registry : DetectorRegistry
             Detector registry
-        image_manager : ImageManager
-            Image manager for retrieving images
         claude_client : anthropic.Anthropic
             Claude API client
         model : str
@@ -46,7 +42,6 @@ class DetectionQueue:
             Called for every evaluation: callback(detector, embryo_id, result, embryo_state)
         """
         self.registry = registry
-        self.image_manager = image_manager
         self.claude = claude_client
         self.model = model
         self.on_detection_callback = on_detection_callback

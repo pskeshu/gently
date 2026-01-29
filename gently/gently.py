@@ -49,7 +49,7 @@ from .core import (
     get_event_bus,
     get_service_registry,
 )
-from .session import SessionManager
+from .store import GentlyStore
 from .agent.tool_registry import ToolRegistry, get_tool_registry
 from .analysis import (
     Pipeline,
@@ -110,11 +110,11 @@ class Gently:
         self._services = get_service_registry()
         self._client = ServiceClient(self._services)
 
-        # Initialize session manager
-        self._sessions = SessionManager(
-            sessions_dir=self.storage_path / "sessions",
-            auto_save=True,
-        )
+        # Initialize GentlyStore (unified storage)
+        self._store = GentlyStore(self.storage_path)
+
+        # Current session ID (set by start_session or resume_session)
+        self._current_session_id: Optional[str] = None
 
         # Initialize tool registry
         self._tools = get_tool_registry()
@@ -192,9 +192,9 @@ class Gently:
         return self._client
 
     @property
-    def sessions(self) -> SessionManager:
-        """Access the session manager"""
-        return self._sessions
+    def store(self) -> GentlyStore:
+        """Access the unified data store"""
+        return self._store
 
     @property
     def tools(self) -> ToolRegistry:
@@ -223,26 +223,26 @@ class Gently:
         name : str, optional
             Human-readable session name
         description : str, optional
-            Session description
+            Session description (stored in metadata)
 
         Returns
         -------
         str
             Session ID
         """
-        session = self._sessions.create_session(
-            name=name,
-            description=description,
-        )
+        import uuid
+        session_id = str(uuid.uuid4())[:8]
+        self._store.create_session(session_id, name=name)
+        self._current_session_id = session_id
 
         self._event_bus.publish(
             EventType.SESSION_STARTED,
-            {'session_id': session.session_id, 'name': name},
+            {'session_id': session_id, 'name': name},
             source="gently",
         )
 
-        logger.info(f"Started session: {session.session_id}")
-        return session.session_id
+        logger.info(f"Started session: {session_id}")
+        return session_id
 
     async def resume_session(self, session_id: str) -> bool:
         """
@@ -258,8 +258,9 @@ class Gently:
         bool
             True if resumed successfully
         """
-        session = self._sessions.load_session(session_id)
+        session = self._store.get_session(session_id)
         if session:
+            self._current_session_id = session_id
             self._event_bus.publish(
                 EventType.SESSION_RESTORED,
                 {'session_id': session_id},
@@ -271,7 +272,7 @@ class Gently:
 
     def list_sessions(self) -> List[Dict]:
         """List available sessions"""
-        return self._sessions.list_sessions()
+        return self._store.list_sessions()
 
     # =========================================================================
     # Service Connection
@@ -597,20 +598,21 @@ class Gently:
             await self._viz_server.stop()
             self._viz_server = None
 
-        # Save session
-        self._sessions.save_session()
-
         # Disconnect services
         await self._client.disconnect_all()
 
         # Stop any running services
         await self._services.stop_all()
 
-        self._event_bus.publish(
-            EventType.SESSION_ENDED,
-            {'session_id': self._sessions.session_id},
-            source="gently",
-        )
+        if self._current_session_id:
+            self._event_bus.publish(
+                EventType.SESSION_ENDED,
+                {'session_id': self._current_session_id},
+                source="gently",
+            )
+
+        # Close store
+        self._store.close()
 
         logger.info("Gently shutdown complete")
 
