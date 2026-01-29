@@ -1618,9 +1618,10 @@ class RichCopilotCLI:
 
             if selected_id:
                 if self.copilot.resume_session(selected_id):
-                    session = self.copilot.session_manager.current_session
+                    embryo_count = len(self.copilot.experiment.embryos)
+                    message_count = len(self.copilot.conversation_history)
                     self.console.print(f"\n[{theme.success}]✓ Session resumed: {selected_id}[/]")
-                    self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                    self.console.print(f"[{theme.muted}]  {embryo_count} embryos, {message_count} messages[/]")
                 else:
                     self.console.print(f"\n[{theme.error}]✗ Failed to resume session '{selected_id}'[/]")
             else:
@@ -1665,9 +1666,10 @@ class RichCopilotCLI:
                 session_id = parts[1]
                 if self.copilot.resume_session(session_id):
                     theme = get_theme()
-                    session = self.copilot.session_manager.current_session
+                    embryo_count = len(self.copilot.experiment.embryos)
+                    message_count = len(self.copilot.conversation_history)
                     self.console.print(f"[{theme.success}]✓ Session resumed: {session_id}[/]")
-                    self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                    self.console.print(f"[{theme.muted}]  {embryo_count} embryos, {message_count} messages[/]")
                 else:
                     theme = get_theme()
                     self.console.print(f"[{theme.error}]✗ Session '{session_id}' not found[/]")
@@ -1679,9 +1681,10 @@ class RichCopilotCLI:
 
                 if selected_id:
                     if self.copilot.resume_session(selected_id):
-                        session = self.copilot.session_manager.current_session
+                        embryo_count = len(self.copilot.experiment.embryos)
+                        message_count = len(self.copilot.conversation_history)
                         self.console.print(f"\n[{theme.success}]✓ Session resumed: {selected_id}[/]")
-                        self.console.print(f"[{theme.muted}]  {session.embryo_count} embryos, {session.message_count} messages[/]")
+                        self.console.print(f"[{theme.muted}]  {embryo_count} embryos, {message_count} messages[/]")
                     else:
                         self.console.print(f"\n[{theme.error}]✗ Failed to resume session '{selected_id}'[/]")
                 else:
