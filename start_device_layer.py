@@ -22,6 +22,7 @@ Usage:
 
 import asyncio
 import argparse
+import signal
 import sys
 from pathlib import Path
 
@@ -84,13 +85,34 @@ The server provides:
             config_path=args.config,
             sam_device=args.sam_device
         )
+
+        # Set up signal handling within the async context
+        loop = asyncio.get_running_loop()
+
+        def request_shutdown():
+            print("\n\nReceived interrupt signal...")
+            if hasattr(server, '_shutdown_event'):
+                server._shutdown_event.set()
+
+        # On Windows, use signal.signal; on Unix, use loop.add_signal_handler
+        if sys.platform == 'win32':
+            # Windows: use signal module with thread-safe callback
+            def win_signal_handler(sig, frame):
+                loop.call_soon_threadsafe(request_shutdown)
+
+            signal.signal(signal.SIGINT, win_signal_handler)
+            signal.signal(signal.SIGTERM, win_signal_handler)
+        else:
+            # Unix: use asyncio's native signal handling
+            loop.add_signal_handler(signal.SIGINT, request_shutdown)
+            loop.add_signal_handler(signal.SIGTERM, request_shutdown)
+
         await server.run(port=args.port)
 
     try:
         asyncio.run(run_server())
     except KeyboardInterrupt:
         print("\n\nDevice layer stopped.")
-        sys.exit(0)
 
 
 if __name__ == "__main__":

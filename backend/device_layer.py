@@ -958,16 +958,25 @@ class DeviceLayerServer:
 
         await site.start()
 
-        # Keep running
+        # Keep running with proper shutdown handling
+        # Use an Event for clean shutdown (works on Windows)
+        self._shutdown_event = asyncio.Event()
+
         try:
-            while True:
-                await asyncio.sleep(3600)
+            # Wait for shutdown signal
+            await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
         finally:
+            print("\nShutting down...")
             self._running = False
             executor_task.cancel()
+            try:
+                await executor_task
+            except asyncio.CancelledError:
+                pass
             await runner.cleanup()
+            print("Device layer stopped.")
 
 
 async def main(port: int = 60610, sam_device: str = "cuda"):
