@@ -836,6 +836,34 @@ Write a brief status summary. Examples:
         """
         return self.store.list_sessions()
 
+    def resume_session(self, session_id: str) -> bool:
+        """
+        Resume a session (public interface for CLI).
+
+        Saves current session first, then loads the target session.
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID to resume
+
+        Returns
+        -------
+        bool
+            True if resumed successfully
+        """
+        # Save current session before switching
+        if self._session_id:
+            self.save_session()
+
+        # Resume target session
+        result = self._resume_session(session_id)
+
+        # Update system prompt with restored state
+        self._update_system_prompt()
+
+        return result
+
     def _emit_event(self, event_type: EventType, data: Optional[Dict] = None):
         """
         Emit an event to the event bus
