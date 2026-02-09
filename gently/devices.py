@@ -1629,7 +1629,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
         self.pixel_size_um = pixel_size_um
         self.magnification = magnification
         self.effective_pixel_size = pixel_size_um / magnification
-        self.use_led = True  # Set to False to disable automatic LED control
+        self.use_led = False  # Set to True to enable automatic LED control
 
     def pixel_to_um(self, pixels: float) -> float:
         """
