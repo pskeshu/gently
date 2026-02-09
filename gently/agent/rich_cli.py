@@ -201,6 +201,7 @@ class RichCopilotCLI:
     def print_welcome(self):
         """Print welcome banner with categorized commands"""
         from .command_registry import get_command_registry, CommandCategory
+        from .. import __version__
 
         theme = get_theme()
         registry = get_command_registry()
@@ -225,7 +226,7 @@ class RichCopilotCLI:
 
         welcome = Panel(
             Text.from_markup(
-                f"[bold {theme.primary}]Microscopy Copilot v2.0[/]\n"
+                f"[bold {theme.primary}]Microscopy Copilot v{__version__}[/]\n"
                 f"[{theme.muted}]AI-powered adaptive microscopy control[/]\n\n"
                 f"[{theme.secondary}]Commands:[/]\n"
                 f"{cmd_section}\n\n"

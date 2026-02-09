@@ -78,6 +78,14 @@ python start_device_layer.py
 
 # 2. Launch the copilot
 python launch_copilot.py
+
+# Or launch without hardware (for development / review)
+python launch_copilot.py --offline
+
+# Resume a previous session
+python launch_copilot.py --resume            # interactive picker
+python launch_copilot.py --resume latest     # most recent session
+python launch_copilot.py --resume <id>       # specific session
 ```
 
 ## Architecture
@@ -87,11 +95,12 @@ gently/
 ├── agent/              # Copilot and tool registry
 │   ├── perception/     # VLM-based perception with reasoning traces
 │   └── tools/          # Tool definitions for the copilot
-├── core/               # Event bus, data store, service registry
+├── core/               # Event bus, service registry
+├── store.py            # GentlyStore — unified data storage (SQLite + files)
+├── imaging.py          # Projection and image compression utilities
 ├── devices.py          # Ophyd device wrappers with safety limits
 ├── plans.py            # Bluesky plans for acquisition workflows
-├── dataset/            # Data management and exploration
-├── session/            # Session state and persistence
+├── dataset/            # Dataset exploration and annotation
 └── visualization/      # Web-based monitoring
 ```
 

@@ -771,13 +771,13 @@ class DeviceLayerServer:
                 stage_events = stage_docs.get('events', [])
                 if stage_events:
                     stage_data = stage_events[0].get('data', {})
-                    for key in stage_data.keys():
-                        if 'x' in key.lower() and 'y' not in key.lower():
+                    # DiSPIMXYStage.read() returns {device_name: [x, y]}
+                    for key in ['xy_stage', 'XYStage:XY:31', 'xy_stage_position']:
+                        if key in stage_data:
                             val = stage_data[key]
-                            stage_x = float(val) if not isinstance(val, list) else float(val[0])
-                        elif 'y' in key.lower() and 'x' not in key.lower():
-                            val = stage_data[key]
-                            stage_y = float(val) if not isinstance(val, list) else float(val[0])
+                            if isinstance(val, (list, tuple)) and len(val) >= 2:
+                                stage_x, stage_y = float(val[0]), float(val[1])
+                                break
 
             stage_position = (stage_x, stage_y)
             print(f"  [detect_embryos] Stage position: {stage_position}")

@@ -685,6 +685,7 @@ class ConnectionManager:
             clients_list = list(seen_clients.values())
 
         # Send personalized presence to each client (with is_you flag)
+        disconnected = []
         for ws, info in list(self.active_connections.items()):
             try:
                 personalized = []
@@ -697,8 +698,13 @@ class ConnectionManager:
                     'type': 'presence',
                     'clients': personalized
                 })
-            except Exception as e:
-                logger.warning(f"Failed to send presence to client: {e}")
+            except Exception:
+                disconnected.append(ws)
+
+        # Remove stale connections
+        async with self._lock:
+            for ws in disconnected:
+                self.active_connections.pop(ws, None)
 
     async def broadcast(self, message: Dict):
         """Broadcast message to all connected clients"""

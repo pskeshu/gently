@@ -137,7 +137,7 @@ from .core import (
     get_data_store,
 )
 
-__version__ = "0.3.0"
+__version__ = "0.4.0-20260209"
 __all__ = [
     # Main entry point
     "Gently",

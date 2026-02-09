@@ -331,34 +331,16 @@ class QueueServerClient:
         )
 
         if result.get('success'):
-            # Try to extract position from documents
             docs = result.get('documents', {})
             events = docs.get('events', [])
             if events:
                 data = events[0].get('data', {})
-
-                # Try to find x and y values
-                x, y = 0.0, 0.0
-
-                # Look for separate x and y components
-                for key in data.keys():
-                    if 'x' in key.lower() and 'y' not in key.lower():
-                        x = float(data[key]) if not isinstance(data[key], list) else float(data[key][0])
-                    elif 'y' in key.lower() and 'x' not in key.lower():
-                        y = float(data[key]) if not isinstance(data[key], list) else float(data[key][0])
-
-                # If found, return
-                if x != 0.0 or y != 0.0:
-                    return (x, y)
-
-                # Try combined position key
+                # DiSPIMXYStage.read() returns {device_name: [x, y]}
                 for key in ['xy_stage', 'XYStage:XY:31', 'xy_stage_position']:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (list, tuple)) and len(val) >= 2:
                             return (float(val[0]), float(val[1]))
-                        elif isinstance(val, (int, float)):
-                            return (float(val), 0.0)
 
         return (0.0, 0.0)
 

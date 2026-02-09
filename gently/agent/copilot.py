@@ -1706,6 +1706,7 @@ Write a brief status summary. Examples:
             volume = volume_data
 
         # Store in GentlyStore (sole storage system)
+        stored_path = None
         if self.store and self.session_id:
             try:
                 self.store.register_embryo(
@@ -1714,16 +1715,21 @@ Write a brief status summary. Examples:
                     position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
                 )
                 if volume_path is not None:
-                    self.store.register_volume(
+                    stored_path = self.store.register_volume(
                         self.session_id, embryo_id, timepoint,
                         incoming_path=Path(volume_path),
                     )
                 else:
-                    self.store.put_volume(
+                    stored_path = self.store.put_volume(
                         self.session_id, embryo_id, timepoint, volume,
                     )
             except Exception as e:
                 logger.error(f"GentlyStore write failed: {e}")
+
+        # Construct UIDs for viz and events
+        session_prefix = f"{self.session_id[:8]}_" if self.session_id else ""
+        volume_uid = f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}"
+        projection_uid = f"proj_{session_prefix}{embryo_id}_t{timepoint:04d}"
 
         # Push to viz server with three-view projection (same as what Claude sees)
         if self.viz_server and volume is not None:
@@ -1756,20 +1762,16 @@ Write a brief status summary. Examples:
                         three_view_img = (three_view_img - three_view_img.min()) / (three_view_img.max() - three_view_img.min()) * 255
                     three_view_img = three_view_img.astype(np.uint8)
 
-                # Use proper UID from DataStore, fallback to constructed if None
-                # Include session_id in fallback to ensure uniqueness across sessions
-                session_prefix = f"{self.session_id[:8]}_" if self.session_id else ""
-                viz_uid = record.projection_uid or f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}"
                 self.push_viz(
                     array=three_view_img,
-                    uid=viz_uid,
+                    uid=projection_uid,
                     data_type="volume_projection",
                     metadata={
                         'embryo_id': embryo_id,
                         'timepoint': timepoint,
                         'shape': list(volume.shape),
-                        'projection_uid': record.projection_uid,
-                        'volume_uid': record.volume_uid,
+                        'projection_uid': projection_uid,
+                        'volume_uid': volume_uid,
                         'projection_type': 'three_view',  # XY (top), YZ (side), XZ (front)
                     }
                 )
@@ -1781,16 +1783,16 @@ Write a brief status summary. Examples:
         self._emit_event(EventType.VOLUME_ACQUIRED, {
             'embryo_id': embryo_id,
             'timepoint': timepoint,
-            'volume_uid': record.volume_uid,
-            'projection_uid': record.projection_uid,
-            'volume_path': record.volume_path,  # Disk path for direct file access
+            'volume_uid': volume_uid,
+            'projection_uid': projection_uid,
+            'volume_path': str(stored_path) if stored_path else None,
             'shape': list(volume.shape),
         })
 
         # Return UIDs so orchestrator can include them in perception events
         return {
-            'volume_uid': record.volume_uid,
-            'projection_uid': record.projection_uid,
+            'volume_uid': volume_uid,
+            'projection_uid': projection_uid,
         }
 
     def should_stop_experiment(self) -> bool:
