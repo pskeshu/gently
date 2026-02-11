@@ -114,7 +114,11 @@ class Agent:
                 self.client.messages.create,
                 model=model,
                 max_tokens=max_tokens,
-                system=self._system_prompt,
+                system=[{
+                    "type": "text",
+                    "text": self._system_prompt,
+                    "cache_control": {"type": "ephemeral"},
+                }],
                 messages=[
                     {"role": "user", "content": prompt}
                 ],

@@ -37,6 +37,8 @@ from .model import (
 )
 from .store import ContextStore
 from .serialization import context_to_dict, context_to_json, context_summary
+from .gap_assessment import assess_gaps, ContextGapReport, Gap, GapLayer, GapSeverity
+from .onboarding import generate_onboarding_messages, process_onboarding_response, OnboardingMessage
 
 __all__ = [
     # Dataclasses
@@ -67,4 +69,14 @@ __all__ = [
     "context_to_dict",
     "context_to_json",
     "context_summary",
+    # Gap Assessment
+    "assess_gaps",
+    "ContextGapReport",
+    "Gap",
+    "GapLayer",
+    "GapSeverity",
+    # Onboarding
+    "generate_onboarding_messages",
+    "process_onboarding_response",
+    "OnboardingMessage",
 ]

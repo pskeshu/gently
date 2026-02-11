@@ -8,6 +8,7 @@ from typing import Any, Dict, Optional
 from .hardware import HardwareCapability, Result
 from .perception import PerceptionCapability
 from .interaction import InteractionCapability
+from .ingestion import IngestionCapability
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +26,7 @@ class Capabilities:
         perception_manager: Optional[Any] = None,
         message_handler: Optional[Any] = None,
         notifier: Optional[Any] = None,
+        claude_client: Optional[Any] = None,
     ):
         """
         Parameters
@@ -37,10 +39,13 @@ class Capabilities:
             Function to handle agent messages
         notifier : Any, optional
             Notification system
+        claude_client : Any, optional
+            Anthropic client for ingestion capability
         """
         self.hardware = HardwareCapability(device_client)
         self.perception = PerceptionCapability(perception_manager)
         self.interaction = InteractionCapability(message_handler, notifier)
+        self.ingestion = IngestionCapability(claude_client)
 
     async def execute(self, action_type: str, params: Dict[str, Any]) -> Result:
         """
@@ -114,6 +119,23 @@ class Capabilities:
 
                 case "configure":
                     return await self.hardware.configure(**params)
+
+                case "ingest":
+                    source = params.get("source", "")
+                    if source.startswith(("http://", "https://")):
+                        ingest_result = await self.ingestion.ingest_url(source)
+                    elif source.lower().endswith(".pdf"):
+                        ingest_result = await self.ingestion.ingest_pdf(source)
+                    else:
+                        ingest_result = await self.ingestion.ingest_text(source)
+                    return Result(
+                        success=True,
+                        data={
+                            "summary": ingest_result.summary,
+                            "entry_count": ingest_result.entry_count,
+                            "result": ingest_result,
+                        },
+                    )
 
                 case _:
                     logger.warning(f"Unknown action type: {action_type}")

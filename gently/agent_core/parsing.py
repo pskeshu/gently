@@ -218,6 +218,10 @@ def parse_actions(text: str) -> List[Dict[str, Any]]:
         if not action_type:
             continue
 
+        # Clean up LLM formatting slop: strip quotes, commas, normalize case
+        if isinstance(action_type, str):
+            action_type = action_type.strip().strip('"\'').rstrip(",")
+
         actions.append({
             "type": action_type,
             "params": item.get("params", {}),
