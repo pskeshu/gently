@@ -61,12 +61,6 @@ function switchTab(tabName) {
     }
 }
 
-function logEvent(type, message) {
-    // Event log panel was removed - this function is now a no-op
-    // Events are tracked in state.allEvents and shown in the Events tab
-    console.debug(`[${type}] ${message}`);
-}
-
 /**
  * Copy session ID to clipboard
  */
@@ -200,6 +194,9 @@ const PresenceManager = {
         if (!this.name) {
             this.name = this.getAnonymousName();
         }
+
+        // Subscribe to presence updates via event bus
+        ClientEventBus.on('PRESENCE_UPDATE', (clients) => this.handlePresenceUpdate(clients));
     },
 
     generateId() {

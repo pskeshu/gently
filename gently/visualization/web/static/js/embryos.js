@@ -85,6 +85,28 @@ const EmbryosManager = {
         this.updateDetectionBadge();
         // Apply header panel state
         this.applyHeaderPanelState();
+
+        // Subscribe to events via ClientEventBus
+        this._subscribeToEvents();
+    },
+
+    _subscribeToEvents() {
+        ClientEventBus.on('ACQUISITION_STARTED', (data) => this.handleAcquisitionStarted(data));
+        ClientEventBus.on('ACQUISITION_COMPLETED', (data) => this.handleAcquisitionCompleted(data));
+        ClientEventBus.on('VOLUME_ACQUIRED', (data) => this.handleVolumeAcquired(data));
+        ClientEventBus.on('DETECTOR_EVALUATED', (data) => this.handleDetectorEvaluated(data));
+        ClientEventBus.on('DETECTION_TRIGGERED', (data) => this.handleDetectionTriggered(data));
+        ClientEventBus.on('STATUS_CHANGED', (data) => this.handleStatusChanged(data));
+        ClientEventBus.on('HATCHING_DETECTED', (data) => this.handleDetectionTriggered({
+            embryo_id: data.embryo_id,
+            detector_name: 'hatching',
+            ...data
+        }));
+        ClientEventBus.on('VERIFICATION_STARTED', (data) => this.handleVerificationStarted(data));
+        ClientEventBus.on('VERIFICATION_STRATEGY', (data) => this.handleVerificationStrategy(data));
+        ClientEventBus.on('VERIFICATION_PROGRESS', (data) => this.handleVerificationProgress(data));
+        ClientEventBus.on('VERIFICATION_COMPLETED', (data) => this.handleVerificationCompleted(data));
+        ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
     },
 
     // Header panel collapse state
@@ -2657,10 +2679,10 @@ const EmbryosManager = {
                 this.showToast(`Showing most recent 3D volume (no match for ${embryoId})`, 'info');
             }
 
-            if (volumeUid && typeof ProjectionsViewer !== 'undefined') {
-                ProjectionsViewer.open(volumeUid, embryoId, timepoint);
-            } else if (typeof ProjectionsViewer === 'undefined') {
-                console.error('ProjectionsViewer not loaded');
+            if (volumeUid && typeof ProjectionViewer !== 'undefined') {
+                ProjectionViewer.open(embryoId, timepoint);
+            } else if (typeof ProjectionViewer === 'undefined') {
+                console.error('ProjectionViewer not loaded');
                 this.showToast('3D Viewer not available - refresh the page', 'error');
             }
         } catch (err) {

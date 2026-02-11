@@ -2,16 +2,19 @@
  * WebSocket connection management for Gently Visualization
  */
 
-// Connect WebSocket
+// Reconnect state for exponential backoff
+let _wsReconnectDelay = 1000;  // Start at 1s
+const _WS_MAX_DELAY = 30000;   // Max 30s
+
 function connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.ws = new WebSocket(`${protocol}//${location.host}/ws`);
 
     state.ws.onopen = () => {
         state.connected = true;
+        _wsReconnectDelay = 1000;  // Reset backoff on success
         document.getElementById('status-text').textContent = 'Connected';
         document.getElementById('status-dot').classList.add('connected');
-        logEvent('system', 'Connected to server');
 
         // Send join message with presence info
         if (typeof PresenceManager !== 'undefined') {
@@ -28,11 +31,12 @@ function connectWebSocket() {
         state.connected = false;
         document.getElementById('status-text').textContent = 'Disconnected';
         document.getElementById('status-dot').classList.remove('connected');
-        logEvent('system', 'Disconnected');
-        setTimeout(connectWebSocket, 3000);
+        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
+        setTimeout(connectWebSocket, _wsReconnectDelay);
+        _wsReconnectDelay = Math.min(_wsReconnectDelay * 2, _WS_MAX_DELAY);
     };
 
-    state.ws.onerror = () => logEvent('error', 'Connection error');
+    state.ws.onerror = () => {};
 
     state.ws.onmessage = (event) => {
         const msg = JSON.parse(event.data);
@@ -43,10 +47,7 @@ function connectWebSocket() {
 function handleMessage(msg) {
     if (msg.type === 'image') {
         handleNewImage(msg.data);
-        // Update latest frame preview in experiment strip
-        if (typeof ExperimentStrip !== 'undefined' && msg.data?.uid) {
-            ExperimentStrip.updateLatestFrame(msg.data.uid, msg.data.embryo_id);
-        }
+        ClientEventBus.emit('IMAGE_RECEIVED', msg.data);
     } else if (msg.type === 'volume_3d') {
         handleNew3DVolume(msg.data);
     } else if (msg.type === 'snapshots') {
@@ -69,77 +70,14 @@ function handleMessage(msg) {
             event_id: msg.event_id || ''
         });
 
-        // Route timelapse/embryo events to EmbryosManager
-        if (typeof EmbryosManager !== 'undefined') {
-            if (msg.event_type === 'ACQUISITION_STARTED') {
-                EmbryosManager.handleAcquisitionStarted(msg.data);
-            } else if (msg.event_type === 'ACQUISITION_COMPLETED') {
-                EmbryosManager.handleAcquisitionCompleted(msg.data);
-            } else if (msg.event_type === 'VOLUME_ACQUIRED') {
-                EmbryosManager.handleVolumeAcquired(msg.data);
-                // Update latest frame with projection if available
-                const projUid = msg.data.projection_uid || msg.data.volume_uid;
-                if (typeof ExperimentStrip !== 'undefined' && projUid) {
-                    ExperimentStrip.updateLatestFrame(projUid, msg.data.embryo_id);
-                }
-            } else if (msg.event_type === 'DETECTOR_EVALUATED') {
-                // All detector evaluations (with reasoning) - for reasoning panel
-                EmbryosManager.handleDetectorEvaluated(msg.data);
-            } else if (msg.event_type === 'DETECTION_TRIGGERED') {
-                // Positive detection - update embryo status
-                EmbryosManager.handleDetectionTriggered(msg.data);
-            } else if (msg.event_type === 'STATUS_CHANGED') {
-                EmbryosManager.handleStatusChanged(msg.data);
-            } else if (msg.event_type === 'HATCHING_DETECTED') {
-                // Hatching is a positive detection
-                EmbryosManager.handleDetectionTriggered({
-                    embryo_id: msg.data.embryo_id,
-                    detector_name: 'hatching',
-                    ...msg.data
-                });
-            } else if (msg.event_type === 'VERIFICATION_STARTED') {
-                EmbryosManager.handleVerificationStarted(msg.data);
-            } else if (msg.event_type === 'VERIFICATION_STRATEGY') {
-                EmbryosManager.handleVerificationStrategy(msg.data);
-            } else if (msg.event_type === 'VERIFICATION_PROGRESS') {
-                EmbryosManager.handleVerificationProgress(msg.data);
-            } else if (msg.event_type === 'VERIFICATION_COMPLETED') {
-                EmbryosManager.handleVerificationCompleted(msg.data);
-            }
-        }
+        // Broadcast via client event bus - managers subscribe at init time
+        ClientEventBus.emit(msg.event_type, msg.data);
 
-        // Format CV events nicely for sidebar log
-        let eventMsg;
-        if (msg.event_type === 'CV_AGENT_THINKING') {
-            const thinking = msg.data.thinking || '';
-            const preview = thinking.length > 40 ? thinking.slice(0, 40) + '...' : thinking;
-            eventMsg = `iter ${msg.data.iteration}: ${preview}`;
-        } else if (msg.event_type === 'CV_TASK_QUEUED') {
-            eventMsg = `${msg.data.intent} (${msg.data.embryo_id})`;
-        } else if (msg.event_type === 'CV_TASK_COMPLETED') {
-            eventMsg = `${msg.data.intent} done in ${(msg.data.processing_time_ms/1000).toFixed(1)}s`;
-        } else if (msg.event_type === 'CV_TASK_FAILED') {
-            eventMsg = `${msg.data.intent} failed: ${msg.data.error?.slice(0, 30) || 'unknown'}`;
-        } else if (msg.event_type === 'ACQUISITION_STARTED') {
-            const embryoCount = msg.data.embryo_ids?.length || 0;
-            eventMsg = `Timelapse started with ${embryoCount} embryo${embryoCount !== 1 ? 's' : ''}`;
-        } else if (msg.event_type === 'ACQUISITION_COMPLETED') {
-            eventMsg = 'Timelapse completed';
-        } else {
-            eventMsg = JSON.stringify(msg.data).slice(0, 50);
-        }
-        logEvent(msg.event_type, eventMsg);
     } else if (msg.type === 'timelapse_state') {
-        // Server sending authoritative timelapse state on connect
-        if (typeof EmbryosManager !== 'undefined') {
-            EmbryosManager.reconcileWithServerState(msg.data);
-        }
+        ClientEventBus.emit('TIMELAPSE_STATE', msg.data);
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
     } else if (msg.type === 'presence') {
-        // Update presence display
-        if (typeof PresenceManager !== 'undefined') {
-            PresenceManager.handlePresenceUpdate(msg.clients);
-        }
+        ClientEventBus.emit('PRESENCE_UPDATE', msg.clients);
     }
 }

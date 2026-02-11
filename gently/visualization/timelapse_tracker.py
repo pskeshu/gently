@@ -1,0 +1,250 @@
+"""
+Timelapse State Tracker for the Visualization Server
+=====================================================
+
+Tracks timelapse state from events for client synchronization.
+"""
+
+from datetime import datetime
+from typing import Dict, List, Optional
+
+
+class TimelapseStateTracker:
+    """
+    Tracks timelapse state from events for client synchronization.
+
+    Maintains state from EventBus events so new WebSocket clients
+    can receive current timelapse status on connect.
+
+    Uses session_id to help clients identify session boundaries and
+    clear stale data when a new experiment starts.
+    """
+
+    def __init__(self):
+        self.session_id: Optional[str] = None  # Unique ID per experiment
+        self.status = "IDLE"  # IDLE, RUNNING, PAUSED, COMPLETED
+        self.started_at: Optional[str] = None
+        self.embryos: Dict[str, dict] = {}  # embryo_id -> state
+        self.total_timepoints = 0
+        self.base_interval = 120
+        self.detection_reasoning: Dict[str, List[dict]] = {}  # embryo_id -> list of detections
+        self.projection_uids: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> projection_uid}
+        self.volume_paths: Dict[str, Dict[int, str]] = {}  # embryo_id -> {timepoint -> volume_path}
+
+    def handle_event(self, event_type: str, data: dict):
+        """Update state based on incoming event"""
+        if event_type == "SESSION_STARTED":
+            # New session - clear all state from previous session
+            self.session_id = data.get("session_id")
+            self.status = "IDLE"
+            self.started_at = None
+            self.embryos = {}
+            self.detection_reasoning = {}
+            self.projection_uids = {}
+            self.volume_paths = {}
+            self.total_timepoints = 0
+
+        elif event_type == "SESSION_RESTORED":
+            # Capture session ID when copilot resumes a session
+            self.session_id = data.get("session_id")
+
+        elif event_type == "ACQUISITION_STARTED":
+            # Use session_id from prior SESSION_STARTED/SESSION_RESTORED event
+            # (session_id should already be set before acquisition starts)
+            self.status = "RUNNING"
+            self.started_at = datetime.now().isoformat()
+            self.base_interval = data.get("interval_seconds", 120)
+            self.embryos = {}
+            self.detection_reasoning = {}
+            self.projection_uids = {}
+            self.volume_paths = {}
+            self.total_timepoints = 0
+            for eid in data.get("embryo_ids", []):
+                self.embryos[eid] = {
+                    "embryo_id": eid,
+                    "stop_condition": data.get("stop_condition", "manual"),
+                    "interval_seconds": self.base_interval,
+                    "timepoints": 0,
+                    "is_complete": False,
+                    "first_acquired": None,
+                    "last_acquired": None,
+                    "detections": {},
+                    "current_stage": None,  # Updated by perception system
+                }
+                self.detection_reasoning[eid] = []
+
+        elif event_type == "VOLUME_ACQUIRED":
+            eid = data.get("embryo_id")
+            if eid:
+                # Create embryo if not exists (late join)
+                if eid not in self.embryos:
+                    self.embryos[eid] = {
+                        "embryo_id": eid,
+                        "stop_condition": "unknown",
+                        "interval_seconds": self.base_interval,
+                        "timepoints": 0,
+                        "is_complete": False,
+                        "first_acquired": None,
+                        "last_acquired": None,
+                        "detections": {},
+                        "current_stage": None,  # Updated by perception system
+                    }
+                    self.detection_reasoning[eid] = []
+                    if self.status == "IDLE":
+                        self.status = "RUNNING"
+                        self.started_at = datetime.now().isoformat()
+
+                now = datetime.now().isoformat()
+                # timepoint is already the count (timepoints_acquired), not 0-indexed
+                timepoint = data.get("timepoint", 1)
+                self.embryos[eid]["timepoints"] = timepoint
+                if self.embryos[eid]["first_acquired"] is None:
+                    self.embryos[eid]["first_acquired"] = now
+                self.embryos[eid]["last_acquired"] = now
+                self.total_timepoints += 1
+
+                # Track projection UID for image lookup
+                projection_uid = data.get("projection_uid")
+                if projection_uid:
+                    if eid not in self.projection_uids:
+                        self.projection_uids[eid] = {}
+                    self.projection_uids[eid][timepoint] = projection_uid
+
+                # Track volume path for direct file access (projection generation)
+                volume_path = data.get("volume_path")
+                if volume_path:
+                    if eid not in self.volume_paths:
+                        self.volume_paths[eid] = {}
+                    self.volume_paths[eid][timepoint] = volume_path
+
+        elif event_type == "ACQUISITION_COMPLETED":
+            self.status = "COMPLETED"
+            for embryo in self.embryos.values():
+                embryo["is_complete"] = True
+
+        elif event_type == "ACQUISITION_STOPPED":
+            self.status = "STOPPED"
+            # Don't mark embryos as complete - they were stopped, not finished
+
+        elif event_type == "DETECTOR_EVALUATED":
+            # All detector/perception evaluations (with reasoning) - populates reasoning panel
+            eid = data.get("embryo_id")
+            if eid:
+                timepoint = data.get("timepoint")
+                # Look up projection UID for this timepoint
+                projection_uid = None
+                if eid in self.projection_uids and timepoint in self.projection_uids.get(eid, {}):
+                    projection_uid = self.projection_uids[eid][timepoint]
+
+                detection = {
+                    "detector_name": data.get("detector_name", "unknown"),
+                    "detected": data.get("detected", data.get("is_hatching", False)),
+                    "confidence": data.get("confidence"),
+                    "reasoning": data.get("reasoning"),
+                    "timepoint": timepoint,
+                    "volume_uid": data.get("volume_uid"),
+                    "projection_uid": data.get("projection_uid") or projection_uid,  # Use stored UID as fallback
+                    "timestamp": datetime.now().isoformat(),
+                    # Perception-specific fields
+                    "stage": data.get("stage"),
+                    "is_hatching": data.get("is_hatching", False),
+                    # Full reasoning trace from VLM (for detail panel)
+                    "reasoning_trace": data.get("reasoning_trace"),
+                    "is_transitional": data.get("is_transitional"),
+                    "transition_between": data.get("transition_between"),
+                    "observed_features": data.get("observed_features"),
+                    "shape": data.get("shape"),
+                }
+                if eid not in self.detection_reasoning:
+                    self.detection_reasoning[eid] = []
+                self.detection_reasoning[eid].append(detection)
+
+                # Update embryo's current stage if perception result
+                if data.get("stage") and eid in self.embryos:
+                    self.embryos[eid]["current_stage"] = data.get("stage")
+
+        elif event_type in ("DETECTION_TRIGGERED", "HATCHING_DETECTED"):
+            # Positive detection events - update embryo status
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                detector_name = data.get("detector_name", "unknown")
+                self.embryos[eid]["detections"][detector_name] = {
+                    "detected": True,
+                    "confidence": data.get("confidence")
+                }
+                if detector_name == "hatching":
+                    self.embryos[eid]["is_complete"] = True
+
+        elif event_type == "VERIFICATION_STARTED":
+            # Verification round started for embryo
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["verification"] = {
+                    "status": "running",
+                    "consecutive_count": data.get("consecutive_count", 0),
+                    "required_count": data.get("required_count", 5),
+                    "strategies_complete": 0,
+                    "total_strategies": 5,
+                    "strategies": {},
+                }
+
+        elif event_type == "VERIFICATION_STRATEGY":
+            # Individual strategy result
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos and "verification" in self.embryos[eid]:
+                strategy = data.get("strategy")
+                self.embryos[eid]["verification"]["strategies"][strategy] = {
+                    "passed": data.get("passed"),
+                    "summary": data.get("summary"),
+                }
+
+        elif event_type == "VERIFICATION_PROGRESS":
+            # Progress update
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos and "verification" in self.embryos[eid]:
+                self.embryos[eid]["verification"]["strategies_complete"] = data.get("strategies_complete", 0)
+                self.embryos[eid]["verification"]["total_strategies"] = data.get("total_strategies", 5)
+
+        elif event_type == "VERIFICATION_COMPLETED":
+            # Final verification result
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["verification"] = {
+                    "status": "completed",
+                    "consensus": data.get("consensus"),
+                    "reasoning": data.get("reasoning"),
+                    "strategies": data.get("strategies", {}),
+                    "ensemble_votes": data.get("ensemble_votes"),
+                    "duration_seconds": data.get("duration_seconds"),
+                }
+                # Update consecutive count display
+                if data.get("consensus"):
+                    current = self.embryos[eid].get("consecutive_verified", 0)
+                    self.embryos[eid]["consecutive_verified"] = current + 1
+                else:
+                    self.embryos[eid]["consecutive_verified"] = 0
+
+        elif event_type == "STATUS_CHANGED":
+            if data.get("status"):
+                self.status = data["status"]
+            # Handle interval changes
+            if data.get("embryo_id") and data.get("new_interval_seconds"):
+                eid = data["embryo_id"]
+                if eid in self.embryos:
+                    self.embryos[eid]["interval_seconds"] = data["new_interval_seconds"]
+
+    def to_dict(self) -> dict:
+        """Serialize for WebSocket transmission"""
+        return {
+            "session_id": self.session_id,
+            "status": self.status,
+            "started_at": self.started_at,
+            "embryos": self.embryos,
+            "total_timepoints": self.total_timepoints,
+            "base_interval": self.base_interval,
+            "detection_reasoning": self.detection_reasoning
+        }
+
+    def reset(self):
+        """Clear state for new timelapse"""
+        self.__init__()

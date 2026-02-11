@@ -263,20 +263,8 @@ const CalibrationManager = {
     }
 };
 
-// Legacy function for compatibility
-function renderCalibrationGallery() {
-    CalibrationManager.render();
-}
-
-function openCalibrationLightbox(index) {
-    const displayList = state.calibration.slice(-50).reverse();
-    Lightbox.open(displayList, index, 'calibration');
-}
-
-// Legacy function - now handled by CalibrationManager
-function render3DVolumesGallery() {
-    CalibrationManager.render();
-}
+// Legacy wrappers kept for backward compatibility
+function renderCalibrationGallery() { CalibrationManager.render(); }
 
 function formatMeta(meta) {
     if (!meta) return '';

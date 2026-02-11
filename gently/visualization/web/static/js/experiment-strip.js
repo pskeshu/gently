@@ -18,6 +18,15 @@ const ExperimentStrip = {
             localStorage.setItem('gently-last-check', this.lastCheck.toISOString());
         }
         this.update();
+
+        // Subscribe to events via ClientEventBus
+        ClientEventBus.on('IMAGE_RECEIVED', (data) => {
+            if (data?.uid) this.updateLatestFrame(data.uid, data.embryo_id);
+        });
+        ClientEventBus.on('VOLUME_ACQUIRED', (data) => {
+            const projUid = data.projection_uid || data.volume_uid;
+            if (projUid) this.updateLatestFrame(projUid, data.embryo_id);
+        });
     },
 
     update() {
