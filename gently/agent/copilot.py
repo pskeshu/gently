@@ -1714,14 +1714,23 @@ Write a brief status summary. Examples:
                     position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
                     position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
                 )
+                acq_metadata = {
+                    "num_slices": embryo.num_slices,
+                    "exposure_ms": embryo.exposure_ms,
+                    "interval_seconds": embryo.interval_seconds,
+                    "acquisition_mode": embryo.acquisition_mode,
+                    "calibration": embryo.calibration,
+                }
                 if volume_path is not None:
                     stored_path = self.store.register_volume(
                         self.session_id, embryo_id, timepoint,
                         incoming_path=Path(volume_path),
+                        metadata=acq_metadata,
                     )
                 else:
                     stored_path = self.store.put_volume(
                         self.session_id, embryo_id, timepoint, volume,
+                        metadata=acq_metadata,
                     )
             except Exception as e:
                 logger.error(f"GentlyStore write failed: {e}")

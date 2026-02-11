@@ -545,6 +545,45 @@ class GentlyStore:
             result.append(d)
         return result
 
+    def get_acquisition_params(
+        self, session_id: str, embryo_id: str = None
+    ) -> Optional[dict]:
+        """
+        Get the acquisition parameters used in a session.
+
+        Returns the metadata from the most recent volume, which contains
+        num_slices, exposure_ms, interval_seconds, calibration, etc.
+
+        Parameters
+        ----------
+        session_id : str
+            Session to query.
+        embryo_id : str, optional
+            If provided, get params for this specific embryo.
+
+        Returns
+        -------
+        dict or None
+            Acquisition metadata dict, or None if no volumes found.
+        """
+        if embryo_id:
+            row = self._conn.execute(
+                "SELECT metadata FROM volumes "
+                "WHERE session_id = ? AND embryo_id = ? AND metadata IS NOT NULL "
+                "ORDER BY timepoint DESC LIMIT 1",
+                (session_id, embryo_id),
+            ).fetchone()
+        else:
+            row = self._conn.execute(
+                "SELECT metadata FROM volumes "
+                "WHERE session_id = ? AND metadata IS NOT NULL "
+                "ORDER BY timepoint DESC LIMIT 1",
+                (session_id,),
+            ).fetchone()
+        if row and row["metadata"]:
+            return json.loads(row["metadata"])
+        return None
+
     # -- internal helpers --
 
     def _generate_projection(

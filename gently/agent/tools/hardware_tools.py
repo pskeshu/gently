@@ -1720,15 +1720,29 @@ async def acquire_volume(
                         position_x=pos.get('x'), position_y=pos.get('y'),
                         calibration=embryo.calibration,
                     )
+                    acq_metadata = {
+                        "num_slices": num_slices,
+                        "exposure_ms": exposure_ms,
+                        "interval_seconds": embryo.interval_seconds,
+                        "acquisition_mode": embryo.acquisition_mode,
+                        "calibration": {
+                            "galvo_amplitude": galvo_amplitude,
+                            "galvo_center": galvo_center,
+                            "piezo_amplitude": piezo_amplitude,
+                            "piezo_center": piezo_center,
+                        },
+                    }
                     volume_path_ref = result.get('volume_path')
                     if volume_path_ref is not None:
                         copilot.store.register_volume(
                             copilot.session_id, embryo_id, timepoint,
                             incoming_path=_Path(volume_path_ref),
+                            metadata=acq_metadata,
                         )
                     elif volume is not None:
                         copilot.store.put_volume(
                             copilot.session_id, embryo_id, timepoint, volume,
+                            metadata=acq_metadata,
                         )
                 except Exception as store_err:
                     print(f"  Warning: GentlyStore write failed (non-fatal): {store_err}")
