@@ -1,0 +1,225 @@
+"""
+Context serialization — convert context to/from prompt format.
+
+Provides utilities for formatting context for LLM prompts and
+parsing context updates from LLM responses.
+"""
+
+import json
+from datetime import datetime
+from typing import Any, Dict, List
+
+from .model import (
+    Campaign,
+    Project,
+    SessionIntent,
+    Learning,
+    Observation,
+    Expectation,
+    Watchpoint,
+    Question,
+    EmbryoUnderstanding,
+    Context,
+    Significance,
+    Confidence,
+    ExpectationStatus,
+)
+
+
+def context_to_dict(context: Context) -> Dict[str, Any]:
+    """
+    Serialize a Context to a dictionary.
+
+    Useful for JSON export or API responses.
+    """
+    return {
+        "intentions": {
+            "campaigns": [_campaign_to_dict(c) for c in context.intentions.campaigns],
+            "projects": [_project_to_dict(p) for p in context.intentions.projects],
+            "current_focus": context.intentions.current_focus,
+            "session_intent": _session_intent_to_dict(context.intentions.session_intent)
+            if context.intentions.session_intent
+            else None,
+        },
+        "understanding": {
+            "embryo_states": {
+                eid: _embryo_to_dict(e)
+                for eid, e in context.understanding.embryo_states.items()
+            },
+            "learnings": [_learning_to_dict(l) for l in context.understanding.learnings],
+        },
+        "observations": [_observation_to_dict(o) for o in context.observations],
+        "expectations": [_expectation_to_dict(e) for e in context.expectations],
+        "attention": {
+            "watchpoints": [_watchpoint_to_dict(w) for w in context.attention.watchpoints],
+            "open_questions": [_question_to_dict(q) for q in context.attention.open_questions],
+        },
+    }
+
+
+def context_to_json(context: Context, indent: int = 2) -> str:
+    """Serialize a Context to JSON string."""
+    return json.dumps(context_to_dict(context), indent=indent, default=str)
+
+
+def context_summary(context: Context) -> str:
+    """
+    Generate a brief human-readable summary of the context.
+
+    Useful for logging and debugging.
+    """
+    lines = []
+
+    # Campaigns
+    active_campaigns = [c for c in context.intentions.campaigns if c.status.value == "active"]
+    if active_campaigns:
+        lines.append(f"Campaigns: {len(active_campaigns)} active")
+        for c in active_campaigns[:2]:
+            progress = f" ({c.progress})" if c.progress else ""
+            lines.append(f"  - {c.description[:50]}{progress}")
+
+    # Focus
+    if context.intentions.current_focus:
+        lines.append(f"Focus: {context.intentions.current_focus}")
+
+    # Embryos
+    embryos = context.understanding.embryo_states
+    if embryos:
+        tracked = [e for e in embryos.values() if e.is_tracked]
+        hatched = [e for e in embryos.values() if e.is_hatched]
+        attention = [e for e in embryos.values() if e.needs_attention]
+        lines.append(f"Embryos: {len(tracked)} tracked, {len(hatched)} hatched, {len(attention)} need attention")
+
+    # Expectations
+    pending = [e for e in context.expectations if e.status == ExpectationStatus.PENDING]
+    if pending:
+        lines.append(f"Expectations: {len(pending)} pending")
+
+    # Watchpoints
+    active_wp = [w for w in context.attention.watchpoints if w.status.value == "active"]
+    if active_wp:
+        lines.append(f"Watchpoints: {len(active_wp)} active")
+
+    # Questions
+    open_q = [q for q in context.attention.open_questions if q.status.value in ("open", "investigating")]
+    if open_q:
+        lines.append(f"Questions: {len(open_q)} open")
+
+    # Recent observations
+    if context.observations:
+        lines.append(f"Observations: {len(context.observations)} recent")
+
+    return "\n".join(lines) if lines else "Empty context"
+
+
+# ---------------------------------------------------------------------------
+# Helper functions
+# ---------------------------------------------------------------------------
+
+def _campaign_to_dict(c: Campaign) -> Dict[str, Any]:
+    return {
+        "id": c.id,
+        "description": c.description,
+        "target": c.target,
+        "progress": c.progress,
+        "status": c.status.value,
+        "created_at": c.created_at.isoformat(),
+        "updated_at": c.updated_at.isoformat(),
+    }
+
+
+def _project_to_dict(p: Project) -> Dict[str, Any]:
+    return {
+        "id": p.id,
+        "description": p.description,
+        "campaign_id": p.campaign_id,
+        "status": p.status.value,
+        "created_at": p.created_at.isoformat(),
+        "updated_at": p.updated_at.isoformat(),
+    }
+
+
+def _session_intent_to_dict(s: SessionIntent) -> Dict[str, Any]:
+    return {
+        "session_id": s.session_id,
+        "planned_intent": s.planned_intent,
+        "actual_summary": s.actual_summary,
+        "campaign_id": s.campaign_id,
+        "created_at": s.created_at.isoformat(),
+        "completed_at": s.completed_at.isoformat() if s.completed_at else None,
+    }
+
+
+def _learning_to_dict(l: Learning) -> Dict[str, Any]:
+    return {
+        "id": l.id,
+        "content": l.content,
+        "confidence": l.confidence.value,
+        "basis": l.basis,
+        "created_at": l.created_at.isoformat(),
+    }
+
+
+def _embryo_to_dict(e: EmbryoUnderstanding) -> Dict[str, Any]:
+    return {
+        "embryo_id": e.embryo_id,
+        "current_stage": e.current_stage,
+        "stage_confidence": e.stage_confidence.value if e.stage_confidence else None,
+        "health_assessment": e.health_assessment,
+        "notes": e.notes,
+        "last_observed": e.last_observed.isoformat() if e.last_observed else None,
+        "is_tracked": e.is_tracked,
+        "is_hatched": e.is_hatched,
+        "needs_attention": e.needs_attention,
+        "attention_reason": e.attention_reason,
+    }
+
+
+def _observation_to_dict(o: Observation) -> Dict[str, Any]:
+    return {
+        "id": o.id,
+        "timestamp": o.timestamp.isoformat(),
+        "type": o.type,
+        "content": o.content,
+        "embryo_id": o.embryo_id,
+        "significance": o.significance.value,
+        "session_id": o.session_id,
+        "gently_refs": o.gently_refs,
+        "relates_to": o.relates_to,
+    }
+
+
+def _expectation_to_dict(e: Expectation) -> Dict[str, Any]:
+    return {
+        "id": e.id,
+        "target": e.target,
+        "prediction": e.prediction,
+        "expected_time": e.expected_time.isoformat(),
+        "uncertainty": e.uncertainty,
+        "basis": e.basis,
+        "status": e.status.value,
+        "created_at": e.created_at.isoformat(),
+        "resolved_at": e.resolved_at.isoformat() if e.resolved_at else None,
+    }
+
+
+def _watchpoint_to_dict(w: Watchpoint) -> Dict[str, Any]:
+    return {
+        "id": w.id,
+        "target": w.target,
+        "condition": w.condition,
+        "priority": w.priority.value,
+        "status": w.status.value,
+        "created_at": w.created_at.isoformat(),
+    }
+
+
+def _question_to_dict(q: Question) -> Dict[str, Any]:
+    return {
+        "id": q.id,
+        "content": q.content,
+        "status": q.status.value,
+        "resolution": q.resolution,
+        "created_at": q.created_at.isoformat(),
+        "resolved_at": q.resolved_at.isoformat() if q.resolved_at else None,
+    }
