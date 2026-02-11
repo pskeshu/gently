@@ -104,9 +104,9 @@ def generate_onboarding_messages(
         ))
 
     if gap_report.needs_campaign:
-        if gap_report.active_campaign_description:
+        if gap_report.past_campaign_count > 0:
             prompt = CAMPAIGN_PROMPT_RETURNING.format(
-                campaign_description=gap_report.active_campaign_description,
+                campaign_description="(previous campaigns completed)",
                 campaign_status="completed",
             )
         else:
@@ -120,12 +120,14 @@ def generate_onboarding_messages(
         ))
 
     if gap_report.needs_session_intent and session_id:
-        if gap_report.has_campaign:
+        if gap_report.has_campaigns:
             history = ""
             if gap_report.session_count > 0:
-                history = f"This is session #{gap_report.session_count + 1} in this campaign. "
+                history = f"This is session #{gap_report.session_count + 1}. "
+            # Use the first active campaign's display name for the prompt
+            campaign_name = gap_report.active_campaigns[0].display_name
             prompt = SESSION_PROMPT_WITH_CAMPAIGN.format(
-                campaign_description=gap_report.active_campaign_description,
+                campaign_description=campaign_name,
                 history_context=history,
             )
         else:
@@ -154,9 +156,6 @@ def get_onboarding_messages(
     """
     Get plain-text onboarding messages for direct CLI display.
 
-    Called at startup to surface questions immediately, before the daemon
-    scheduler has had a chance to execute the SURFACE tasks.
-
     Parameters
     ----------
     gap_report : ContextGapReport
@@ -175,21 +174,22 @@ def get_onboarding_messages(
         messages.append(LAB_ONBOARDING_GREETING)
 
     if gap_report.needs_campaign:
-        if gap_report.active_campaign_description:
+        if gap_report.past_campaign_count > 0:
             messages.append(CAMPAIGN_PROMPT_RETURNING.format(
-                campaign_description=gap_report.active_campaign_description,
+                campaign_description="(previous campaigns completed)",
                 campaign_status="completed",
             ))
         else:
             messages.append(CAMPAIGN_PROMPT_FRESH)
 
     if gap_report.needs_session_intent and session_id:
-        if gap_report.has_campaign:
+        if gap_report.has_campaigns:
             history = ""
             if gap_report.session_count > 0:
-                history = f"This is session #{gap_report.session_count + 1} in this campaign. "
+                history = f"This is session #{gap_report.session_count + 1}. "
+            campaign_name = gap_report.active_campaigns[0].display_name
             messages.append(SESSION_PROMPT_WITH_CAMPAIGN.format(
-                campaign_description=gap_report.active_campaign_description,
+                campaign_description=campaign_name,
                 history_context=history,
             ))
         else:

@@ -76,7 +76,7 @@ def context_summary(context: Context) -> str:
         lines.append(f"Campaigns: {len(active_campaigns)} active")
         for c in active_campaigns[:2]:
             progress = f" ({c.progress})" if c.progress else ""
-            lines.append(f"  - {c.description[:50]}{progress}")
+            lines.append(f"  - {c.display_name}{progress}")
 
     # Focus
     if context.intentions.current_focus:
@@ -120,8 +120,11 @@ def _campaign_to_dict(c: Campaign) -> Dict[str, Any]:
     return {
         "id": c.id,
         "description": c.description,
+        "shorthand": c.shorthand,
+        "summary": c.summary,
         "target": c.target,
         "progress": c.progress,
+        "parent_id": c.parent_id,
         "status": c.status.value,
         "created_at": c.created_at.isoformat(),
         "updated_at": c.updated_at.isoformat(),
@@ -144,7 +147,7 @@ def _session_intent_to_dict(s: SessionIntent) -> Dict[str, Any]:
         "session_id": s.session_id,
         "planned_intent": s.planned_intent,
         "actual_summary": s.actual_summary,
-        "campaign_id": s.campaign_id,
+        "campaign_ids": s.campaign_ids,
         "created_at": s.created_at.isoformat(),
         "completed_at": s.completed_at.isoformat() if s.completed_at else None,
     }

@@ -1,9 +1,9 @@
 """
-Gap assessment — the daemon inspects its own mind and identifies what's missing.
+Gap assessment — the agent inspects its own mind and identifies what's missing.
 
-Run at every startup. Produces a ContextGap report that drives onboarding:
+Run at every startup. Produces a ContextGap report that drives the wizard:
 which questions to ask, what ingestion to suggest, how much conversation
-is needed before the daemon can be a useful partner.
+is needed before the agent can be a useful partner.
 """
 
 import logging
@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional
 
+from .model import Campaign
 from .store import ContextStore
 
 logger = logging.getLogger(__name__)
@@ -45,15 +46,15 @@ class ContextGapReport:
     """
     Result of gap assessment.
 
-    The daemon uses this to decide what onboarding is needed.
+    Drives the startup wizard: which steps to show, what to ask.
     """
     gaps: List[Gap] = field(default_factory=list)
     readiness: float = 0.0  # 0.0 (blank) to 1.0 (fully oriented)
     needs_lab_onboarding: bool = False
     needs_campaign: bool = False
     needs_session_intent: bool = False
-    active_campaign_id: Optional[str] = None
-    active_campaign_description: Optional[str] = None
+    active_campaigns: List[Campaign] = field(default_factory=list)  # All active campaigns
+    past_campaign_count: int = 0  # Completed/paused campaigns
     session_count: int = 0  # How many past sessions exist
     learning_count: int = 0
 
@@ -62,8 +63,8 @@ class ContextGapReport:
         return self.needs_lab_onboarding
 
     @property
-    def has_campaign(self) -> bool:
-        return self.active_campaign_id is not None
+    def has_campaigns(self) -> bool:
+        return len(self.active_campaigns) > 0
 
     @property
     def conversation_weight(self) -> str:
@@ -128,16 +129,18 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
 
     # --- Layer 2: Campaign ---
     campaigns = context_store.get_active_campaigns()
+    report.active_campaigns = campaigns
+
+    # Count non-active campaigns for context
+    all_campaigns_row = context_store._conn.execute(
+        "SELECT COUNT(*) as cnt FROM campaigns WHERE status != 'active'"
+    ).fetchone()
+    report.past_campaign_count = all_campaigns_row["cnt"] if all_campaigns_row else 0
 
     if not campaigns:
         report.needs_campaign = True
-        # Check if there were ever campaigns (completed ones)
-        all_campaigns_row = context_store._conn.execute(
-            "SELECT COUNT(*) as cnt FROM campaigns"
-        ).fetchone()
-        total_campaigns = all_campaigns_row["cnt"] if all_campaigns_row else 0
 
-        if total_campaigns == 0:
+        if report.past_campaign_count == 0:
             report.gaps.append(Gap(
                 layer=GapLayer.CAMPAIGN,
                 severity=GapSeverity.EMPTY,
@@ -148,13 +151,11 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
             report.gaps.append(Gap(
                 layer=GapLayer.CAMPAIGN,
                 severity=GapSeverity.THIN,
-                description="Past campaigns exist but none active.",
+                description=f"{report.past_campaign_count} past campaigns but none active.",
                 suggested_action="Ask if starting new work or resuming.",
             ))
             readiness_score += 0.1
     else:
-        report.active_campaign_id = campaigns[0].id
-        report.active_campaign_description = campaigns[0].description
         readiness_score += 0.25
 
     # --- Layer 3: Session intent ---

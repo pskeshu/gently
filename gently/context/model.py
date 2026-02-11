@@ -62,15 +62,29 @@ class Campaign:
     """
     A research campaign — a long-running goal spanning multiple sessions.
 
+    Campaigns form a hierarchy: a campaign can have subcampaigns (children)
+    or grow into a supercampaign (by acquiring children over time). A session
+    can contribute to multiple campaigns simultaneously.
+
     Example: "Capture 50 hatching events from wild-type embryos"
     """
     id: str
-    description: str
-    target: Optional[str] = None  # "50 hatching events"
-    progress: Optional[str] = None  # "23/50"
+    description: str  # Natural language, as the researcher said it
+    shorthand: Optional[str] = None  # Short label: "temp-division", "hatching-50"
+    summary: Optional[str] = None  # Agent-rephrased structured summary
+    target: Optional[str] = None  # Measurable goal: "50 hatching events"
+    progress: Optional[str] = None  # Current state: "23/50"
+    parent_id: Optional[str] = None  # Parent campaign (for hierarchy)
     status: Status = Status.ACTIVE
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def display_name(self) -> str:
+        """Short display name: shorthand if available, else truncated description."""
+        if self.shorthand:
+            return self.shorthand
+        return self.description[:50] + ("..." if len(self.description) > 50 else "")
 
 
 @dataclass
@@ -94,11 +108,12 @@ class SessionIntent:
     What this session is about.
 
     Tracks planned intent vs what actually happened.
+    A session can belong to multiple campaigns (linked via session_campaigns).
     """
     session_id: str
     planned_intent: Optional[str] = None  # What was planned
     actual_summary: Optional[str] = None  # What happened
-    campaign_id: Optional[str] = None
+    campaign_ids: List[str] = field(default_factory=list)  # Linked campaigns
     created_at: datetime = field(default_factory=datetime.now)
     completed_at: Optional[datetime] = None
 

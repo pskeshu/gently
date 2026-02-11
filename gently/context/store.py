@@ -52,11 +52,15 @@ PRAGMA foreign_keys=ON;
 CREATE TABLE IF NOT EXISTS campaigns (
     id TEXT PRIMARY KEY,
     description TEXT NOT NULL,
+    shorthand TEXT,
+    summary TEXT,
     target TEXT,
     progress TEXT,
+    parent_id TEXT,
     status TEXT DEFAULT 'active',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (parent_id) REFERENCES campaigns(id)
 );
 
 CREATE TABLE IF NOT EXISTS projects (
@@ -73,9 +77,17 @@ CREATE TABLE IF NOT EXISTS session_intents (
     session_id TEXT PRIMARY KEY,
     planned_intent TEXT,
     actual_summary TEXT,
-    campaign_id TEXT,
     created_at TEXT NOT NULL,
-    completed_at TEXT,
+    completed_at TEXT
+);
+
+-- Many-to-many: a session can contribute to multiple campaigns
+CREATE TABLE IF NOT EXISTS session_campaigns (
+    session_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY (session_id, campaign_id),
+    FOREIGN KEY (session_id) REFERENCES session_intents(session_id),
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
 );
 
@@ -159,6 +171,9 @@ CREATE INDEX IF NOT EXISTS idx_observations_embryo ON observations(embryo_id);
 CREATE INDEX IF NOT EXISTS idx_expectations_status ON expectations(status);
 CREATE INDEX IF NOT EXISTS idx_watchpoints_status ON watchpoints(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
+CREATE INDEX IF NOT EXISTS idx_campaigns_parent ON campaigns(parent_id);
+CREATE INDEX IF NOT EXISTS idx_session_campaigns_session ON session_campaigns(session_id);
+CREATE INDEX IF NOT EXISTS idx_session_campaigns_campaign ON session_campaigns(campaign_id);
 """
 
 
@@ -273,7 +288,10 @@ class ContextStore:
     def create_campaign(
         self,
         description: str,
+        shorthand: Optional[str] = None,
+        summary: Optional[str] = None,
         target: Optional[str] = None,
+        parent_id: Optional[str] = None,
         campaign_id: Optional[str] = None,
     ) -> str:
         """Create a new campaign. Returns campaign ID."""
@@ -281,11 +299,13 @@ class ContextStore:
         now = self._now()
         with self._tx():
             self._conn.execute(
-                "INSERT INTO campaigns (id, description, target, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, 'active', ?, ?)",
-                (cid, description, target, now, now),
+                "INSERT INTO campaigns "
+                "(id, description, shorthand, summary, target, parent_id, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+                (cid, description, shorthand, summary, target, parent_id, now, now),
             )
-        logger.info(f"Created campaign {cid}: {description}")
+        label = shorthand or description[:50]
+        logger.info(f"Created campaign {cid} [{label}]")
         return cid
 
     def get_active_campaigns(self) -> List[Campaign]:
@@ -320,13 +340,77 @@ class ContextStore:
                 (status.value, now, campaign_id),
             )
 
+    def get_subcampaigns(self, campaign_id: str) -> List[Campaign]:
+        """Get direct children of a campaign."""
+        rows = self._conn.execute(
+            "SELECT * FROM campaigns WHERE parent_id = ? ORDER BY created_at",
+            (campaign_id,),
+        ).fetchall()
+        return [self._row_to_campaign(row) for row in rows]
+
+    def get_campaign_tree(self, campaign_id: str) -> Dict[str, Any]:
+        """Get a campaign and all its descendants as a tree."""
+        campaign = self.get_campaign(campaign_id)
+        if not campaign:
+            return {}
+        children = self.get_subcampaigns(campaign_id)
+        return {
+            "campaign": campaign,
+            "children": [self.get_campaign_tree(c.id) for c in children],
+        }
+
+    def get_root_campaigns(self) -> List[Campaign]:
+        """Get top-level campaigns (no parent)."""
+        rows = self._conn.execute(
+            "SELECT * FROM campaigns WHERE parent_id IS NULL AND status = 'active' "
+            "ORDER BY created_at DESC"
+        ).fetchall()
+        return [self._row_to_campaign(row) for row in rows]
+
+    def update_campaign(
+        self,
+        campaign_id: str,
+        description: Optional[str] = None,
+        shorthand: Optional[str] = None,
+        summary: Optional[str] = None,
+        target: Optional[str] = None,
+        parent_id: Optional[str] = None,
+    ):
+        """Update campaign fields. Only non-None values are applied."""
+        now = self._now()
+        updates = []
+        values = []
+        for col, val in [
+            ("description", description),
+            ("shorthand", shorthand),
+            ("summary", summary),
+            ("target", target),
+            ("parent_id", parent_id),
+        ]:
+            if val is not None:
+                updates.append(f"{col} = ?")
+                values.append(val)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(campaign_id)
+        with self._tx():
+            self._conn.execute(
+                f"UPDATE campaigns SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+
     def _row_to_campaign(self, row: sqlite3.Row) -> Campaign:
         d = dict(row)
         return Campaign(
             id=d["id"],
             description=d["description"],
+            shorthand=d.get("shorthand"),
+            summary=d.get("summary"),
             target=d.get("target"),
             progress=d.get("progress"),
+            parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
@@ -380,17 +464,20 @@ class ContextStore:
         self,
         session_id: str,
         planned_intent: Optional[str] = None,
-        campaign_id: Optional[str] = None,
+        campaign_ids: Optional[List[str]] = None,
     ):
-        """Create or update session intent."""
+        """Create or update session intent, optionally linking to campaigns."""
         now = self._now()
         with self._tx():
             self._conn.execute(
                 "INSERT OR REPLACE INTO session_intents "
-                "(session_id, planned_intent, campaign_id, created_at) "
-                "VALUES (?, ?, ?, ?)",
-                (session_id, planned_intent, campaign_id, now),
+                "(session_id, planned_intent, created_at) "
+                "VALUES (?, ?, ?)",
+                (session_id, planned_intent, now),
             )
+        if campaign_ids:
+            for cid in campaign_ids:
+                self.link_session_campaign(session_id, cid)
 
     def get_current_session_intent(self) -> Optional[SessionIntent]:
         """Get the most recent incomplete session intent."""
@@ -401,11 +488,13 @@ class ContextStore:
         if not row:
             return None
         d = dict(row)
+        session_id = d["session_id"]
+        campaign_ids = self.get_campaign_ids_for_session(session_id)
         return SessionIntent(
-            session_id=d["session_id"],
+            session_id=session_id,
             planned_intent=d.get("planned_intent"),
             actual_summary=d.get("actual_summary"),
-            campaign_id=d.get("campaign_id"),
+            campaign_ids=campaign_ids,
             created_at=datetime.fromisoformat(d["created_at"]),
             completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
         )
@@ -419,6 +508,70 @@ class ContextStore:
                 "WHERE session_id = ?",
                 (actual_summary, now, session_id),
             )
+
+    # ==================================================================
+    # Session ↔ Campaign (many-to-many)
+    # ==================================================================
+
+    def link_session_campaign(self, session_id: str, campaign_id: str):
+        """Link a session to a campaign."""
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT OR IGNORE INTO session_campaigns "
+                "(session_id, campaign_id, linked_at) VALUES (?, ?, ?)",
+                (session_id, campaign_id, now),
+            )
+
+    def unlink_session_campaign(self, session_id: str, campaign_id: str):
+        """Unlink a session from a campaign."""
+        with self._tx():
+            self._conn.execute(
+                "DELETE FROM session_campaigns WHERE session_id = ? AND campaign_id = ?",
+                (session_id, campaign_id),
+            )
+
+    def get_campaign_ids_for_session(self, session_id: str) -> List[str]:
+        """Get campaign IDs linked to a session."""
+        rows = self._conn.execute(
+            "SELECT campaign_id FROM session_campaigns WHERE session_id = ? "
+            "ORDER BY linked_at",
+            (session_id,),
+        ).fetchall()
+        return [row["campaign_id"] for row in rows]
+
+    def get_campaigns_for_session(self, session_id: str) -> List[Campaign]:
+        """Get campaigns linked to a session."""
+        rows = self._conn.execute(
+            "SELECT c.* FROM campaigns c "
+            "JOIN session_campaigns sc ON c.id = sc.campaign_id "
+            "WHERE sc.session_id = ? ORDER BY sc.linked_at",
+            (session_id,),
+        ).fetchall()
+        return [self._row_to_campaign(row) for row in rows]
+
+    def get_sessions_for_campaign(self, campaign_id: str) -> List[SessionIntent]:
+        """Get session intents linked to a campaign."""
+        rows = self._conn.execute(
+            "SELECT si.* FROM session_intents si "
+            "JOIN session_campaigns sc ON si.session_id = sc.session_id "
+            "WHERE sc.campaign_id = ? ORDER BY si.created_at",
+            (campaign_id,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            sid = d["session_id"]
+            cids = self.get_campaign_ids_for_session(sid)
+            results.append(SessionIntent(
+                session_id=sid,
+                planned_intent=d.get("planned_intent"),
+                actual_summary=d.get("actual_summary"),
+                campaign_ids=cids,
+                created_at=datetime.fromisoformat(d["created_at"]),
+                completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
+            ))
+        return results
 
     # ==================================================================
     # Observations
