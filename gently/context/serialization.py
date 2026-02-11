@@ -13,6 +13,7 @@ from .model import (
     Campaign,
     Project,
     SessionIntent,
+    PlannedSession,
     Learning,
     Observation,
     Expectation,
@@ -23,6 +24,7 @@ from .model import (
     Significance,
     Confidence,
     ExpectationStatus,
+    PlannedSessionStatus,
 )
 
 
@@ -36,6 +38,7 @@ def context_to_dict(context: Context) -> Dict[str, Any]:
         "intentions": {
             "campaigns": [_campaign_to_dict(c) for c in context.intentions.campaigns],
             "projects": [_project_to_dict(p) for p in context.intentions.projects],
+            "planned_sessions": [_planned_session_to_dict(ps) for ps in context.intentions.planned_sessions],
             "current_focus": context.intentions.current_focus,
             "session_intent": _session_intent_to_dict(context.intentions.session_intent)
             if context.intentions.session_intent
@@ -77,6 +80,15 @@ def context_summary(context: Context) -> str:
         for c in active_campaigns[:2]:
             progress = f" ({c.progress})" if c.progress else ""
             lines.append(f"  - {c.display_name}{progress}")
+
+    # Planned sessions
+    upcoming = [ps for ps in context.intentions.planned_sessions
+                if ps.status == PlannedSessionStatus.PLANNED]
+    if upcoming:
+        lines.append(f"Planned sessions: {len(upcoming)} upcoming")
+        for ps in upcoming[:2]:
+            when = ps.scheduled_date or "(unscheduled)"
+            lines.append(f"  - {ps.display_title} [{when}]")
 
     # Focus
     if context.intentions.current_focus:
@@ -139,6 +151,24 @@ def _project_to_dict(p: Project) -> Dict[str, Any]:
         "status": p.status.value,
         "created_at": p.created_at.isoformat(),
         "updated_at": p.updated_at.isoformat(),
+    }
+
+
+def _planned_session_to_dict(ps: PlannedSession) -> Dict[str, Any]:
+    return {
+        "id": ps.id,
+        "title": ps.title,
+        "notes": ps.notes,
+        "scheduled_date": ps.scheduled_date,
+        "scheduled_time": ps.scheduled_time,
+        "estimated_duration_minutes": ps.estimated_duration_minutes,
+        "acquisition_params": ps.acquisition_params,
+        "source_session_id": ps.source_session_id,
+        "status": ps.status.value,
+        "session_id": ps.session_id,
+        "campaign_ids": ps.campaign_ids,
+        "created_at": ps.created_at.isoformat(),
+        "updated_at": ps.updated_at.isoformat(),
     }
 
 

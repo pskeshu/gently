@@ -17,6 +17,8 @@ from .model import (
     Campaign,
     Project,
     SessionIntent,
+    PlannedSession,
+    PlannedSessionStatus,
     Learning,
     Observation,
     Expectation,
@@ -88,6 +90,32 @@ CREATE TABLE IF NOT EXISTS session_campaigns (
     linked_at TEXT NOT NULL,
     PRIMARY KEY (session_id, campaign_id),
     FOREIGN KEY (session_id) REFERENCES session_intents(session_id),
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+);
+
+-- Project calendar: planned imaging sessions
+CREATE TABLE IF NOT EXISTS planned_sessions (
+    id TEXT PRIMARY KEY,
+    title TEXT,
+    notes TEXT,
+    scheduled_date TEXT,
+    scheduled_time TEXT,
+    estimated_duration_minutes INTEGER,
+    acquisition_params TEXT,
+    source_session_id TEXT,
+    status TEXT DEFAULT 'planned',
+    session_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+-- Many-to-many: a planned session can serve multiple campaigns
+CREATE TABLE IF NOT EXISTS planned_session_campaigns (
+    planned_session_id TEXT NOT NULL,
+    campaign_id TEXT NOT NULL,
+    linked_at TEXT NOT NULL,
+    PRIMARY KEY (planned_session_id, campaign_id),
+    FOREIGN KEY (planned_session_id) REFERENCES planned_sessions(id),
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
 );
 
@@ -174,6 +202,10 @@ CREATE INDEX IF NOT EXISTS idx_campaigns_status ON campaigns(status);
 CREATE INDEX IF NOT EXISTS idx_campaigns_parent ON campaigns(parent_id);
 CREATE INDEX IF NOT EXISTS idx_session_campaigns_session ON session_campaigns(session_id);
 CREATE INDEX IF NOT EXISTS idx_session_campaigns_campaign ON session_campaigns(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_planned_sessions_date ON planned_sessions(scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_planned_sessions_status ON planned_sessions(status);
+CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_ps ON planned_session_campaigns(planned_session_id);
+CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_c ON planned_session_campaigns(campaign_id);
 """
 
 
@@ -244,6 +276,7 @@ class ContextStore:
         return Intentions(
             campaigns=self.get_active_campaigns(),
             projects=self.get_active_projects(),
+            planned_sessions=self.get_upcoming_sessions(limit=5),
             current_focus=self.get_state("current_focus"),
             session_intent=self.get_current_session_intent(),
         )
@@ -572,6 +605,228 @@ class ContextStore:
                 completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
             ))
         return results
+
+    # ==================================================================
+    # Planned Sessions (project calendar)
+    # ==================================================================
+
+    def create_planned_session(
+        self,
+        scheduled_date: str,
+        title: Optional[str] = None,
+        notes: Optional[str] = None,
+        scheduled_time: Optional[str] = None,
+        estimated_duration_minutes: Optional[int] = None,
+        acquisition_params: Optional[Dict] = None,
+        source_session_id: Optional[str] = None,
+        campaign_ids: Optional[List[str]] = None,
+        planned_session_id: Optional[str] = None,
+    ) -> str:
+        """Create a planned imaging session. Returns its ID."""
+        psid = planned_session_id or self._gen_id()
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT INTO planned_sessions "
+                "(id, title, notes, scheduled_date, scheduled_time, "
+                " estimated_duration_minutes, acquisition_params, "
+                " source_session_id, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
+                (
+                    psid, title, notes, scheduled_date, scheduled_time,
+                    estimated_duration_minutes,
+                    json.dumps(acquisition_params) if acquisition_params else None,
+                    source_session_id, now, now,
+                ),
+            )
+        if campaign_ids:
+            for cid in campaign_ids:
+                self.link_planned_session_campaign(psid, cid)
+        logger.info(f"Created planned session {psid} for {scheduled_date}: {title or notes or '(untitled)'}")
+        return psid
+
+    def get_planned_session(self, planned_session_id: str) -> Optional[PlannedSession]:
+        """Get a specific planned session."""
+        row = self._conn.execute(
+            "SELECT * FROM planned_sessions WHERE id = ?",
+            (planned_session_id,),
+        ).fetchone()
+        return self._row_to_planned_session(row) if row else None
+
+    def get_planned_sessions(
+        self,
+        status: Optional[str] = None,
+        campaign_id: Optional[str] = None,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+    ) -> List[PlannedSession]:
+        """
+        Query planned sessions with optional filters.
+
+        Parameters
+        ----------
+        status : str, optional
+            Filter by status ("planned", "active", "completed", etc.)
+        campaign_id : str, optional
+            Filter to sessions linked to this campaign.
+        from_date, to_date : str, optional
+            ISO date range filter (inclusive).
+        """
+        if campaign_id:
+            query = (
+                "SELECT ps.* FROM planned_sessions ps "
+                "JOIN planned_session_campaigns psc ON ps.id = psc.planned_session_id "
+                "WHERE psc.campaign_id = ?"
+            )
+            params: list = [campaign_id]
+        else:
+            query = "SELECT * FROM planned_sessions WHERE 1=1"
+            params = []
+
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if from_date:
+            query += " AND scheduled_date >= ?"
+            params.append(from_date)
+        if to_date:
+            query += " AND scheduled_date <= ?"
+            params.append(to_date)
+
+        query += " ORDER BY scheduled_date, scheduled_time"
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._row_to_planned_session(row) for row in rows]
+
+    def get_upcoming_sessions(self, limit: int = 10) -> List[PlannedSession]:
+        """Get upcoming planned sessions (today and future, status=planned)."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        rows = self._conn.execute(
+            "SELECT * FROM planned_sessions "
+            "WHERE status = 'planned' AND scheduled_date >= ? "
+            "ORDER BY scheduled_date, scheduled_time LIMIT ?",
+            (today, limit),
+        ).fetchall()
+        return [self._row_to_planned_session(row) for row in rows]
+
+    def get_todays_sessions(self) -> List[PlannedSession]:
+        """Get planned sessions for today."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        rows = self._conn.execute(
+            "SELECT * FROM planned_sessions "
+            "WHERE scheduled_date = ? AND status IN ('planned', 'active') "
+            "ORDER BY scheduled_time",
+            (today,),
+        ).fetchall()
+        return [self._row_to_planned_session(row) for row in rows]
+
+    def update_planned_session(
+        self,
+        planned_session_id: str,
+        title: Optional[str] = None,
+        notes: Optional[str] = None,
+        scheduled_date: Optional[str] = None,
+        scheduled_time: Optional[str] = None,
+        estimated_duration_minutes: Optional[int] = None,
+        acquisition_params: Optional[Dict] = None,
+        source_session_id: Optional[str] = None,
+        status: Optional[PlannedSessionStatus] = None,
+        session_id: Optional[str] = None,
+    ):
+        """Update a planned session. Only non-None values are applied."""
+        now = self._now()
+        updates = []
+        values = []
+        for col, val in [
+            ("title", title),
+            ("notes", notes),
+            ("scheduled_date", scheduled_date),
+            ("scheduled_time", scheduled_time),
+            ("estimated_duration_minutes", estimated_duration_minutes),
+            ("source_session_id", source_session_id),
+            ("session_id", session_id),
+        ]:
+            if val is not None:
+                updates.append(f"{col} = ?")
+                values.append(val)
+        if acquisition_params is not None:
+            updates.append("acquisition_params = ?")
+            values.append(json.dumps(acquisition_params))
+        if status is not None:
+            updates.append("status = ?")
+            values.append(status.value)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(planned_session_id)
+        with self._tx():
+            self._conn.execute(
+                f"UPDATE planned_sessions SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+
+    def start_planned_session(self, planned_session_id: str, session_id: str):
+        """Mark a planned session as active and link it to the real session."""
+        self.update_planned_session(
+            planned_session_id,
+            status=PlannedSessionStatus.ACTIVE,
+            session_id=session_id,
+        )
+
+    def complete_planned_session(self, planned_session_id: str):
+        """Mark a planned session as completed."""
+        self.update_planned_session(
+            planned_session_id,
+            status=PlannedSessionStatus.COMPLETED,
+        )
+
+    def link_planned_session_campaign(self, planned_session_id: str, campaign_id: str):
+        """Link a planned session to a campaign."""
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT OR IGNORE INTO planned_session_campaigns "
+                "(planned_session_id, campaign_id, linked_at) VALUES (?, ?, ?)",
+                (planned_session_id, campaign_id, now),
+            )
+
+    def unlink_planned_session_campaign(self, planned_session_id: str, campaign_id: str):
+        """Unlink a planned session from a campaign."""
+        with self._tx():
+            self._conn.execute(
+                "DELETE FROM planned_session_campaigns "
+                "WHERE planned_session_id = ? AND campaign_id = ?",
+                (planned_session_id, campaign_id),
+            )
+
+    def get_campaign_ids_for_planned_session(self, planned_session_id: str) -> List[str]:
+        """Get campaign IDs linked to a planned session."""
+        rows = self._conn.execute(
+            "SELECT campaign_id FROM planned_session_campaigns "
+            "WHERE planned_session_id = ? ORDER BY linked_at",
+            (planned_session_id,),
+        ).fetchall()
+        return [row["campaign_id"] for row in rows]
+
+    def _row_to_planned_session(self, row: sqlite3.Row) -> PlannedSession:
+        d = dict(row)
+        psid = d["id"]
+        campaign_ids = self.get_campaign_ids_for_planned_session(psid)
+        return PlannedSession(
+            id=psid,
+            title=d.get("title"),
+            notes=d.get("notes"),
+            scheduled_date=d.get("scheduled_date"),
+            scheduled_time=d.get("scheduled_time"),
+            estimated_duration_minutes=d.get("estimated_duration_minutes"),
+            acquisition_params=json.loads(d["acquisition_params"]) if d.get("acquisition_params") else None,
+            source_session_id=d.get("source_session_id"),
+            status=PlannedSessionStatus(d.get("status", "planned")),
+            session_id=d.get("session_id"),
+            campaign_ids=campaign_ids,
+            created_at=datetime.fromisoformat(d["created_at"]),
+            updated_at=datetime.fromisoformat(d["updated_at"]),
+        )
 
     # ==================================================================
     # Observations

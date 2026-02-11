@@ -31,6 +31,15 @@ class Status(str, Enum):
     COMPLETED = "completed"
 
 
+class PlannedSessionStatus(str, Enum):
+    """Status for planned imaging sessions."""
+    PLANNED = "planned"
+    ACTIVE = "active"        # Currently in progress
+    COMPLETED = "completed"
+    SKIPPED = "skipped"      # Decided not to do it
+    CANCELLED = "cancelled"
+
+
 class ExpectationStatus(str, Enum):
     """Status for expectations/predictions."""
     PENDING = "pending"
@@ -119,10 +128,47 @@ class SessionIntent:
 
 
 @dataclass
+class PlannedSession:
+    """
+    A scheduled imaging session on the project calendar.
+
+    Created days or weeks ahead. Links to campaigns. Can carry
+    acquisition parameters from a previous session so you can
+    say "use same settings as last Tuesday."
+
+    When the researcher sits down and starts imaging, the wizard
+    can match the planned session to the actual session and
+    pre-populate intent + parameters.
+    """
+    id: str
+    title: Optional[str] = None  # "N2 baseline imaging round 3"
+    notes: Optional[str] = None  # Free-form: what to do, what to watch for
+    scheduled_date: Optional[str] = None  # ISO date: "2026-02-15"
+    scheduled_time: Optional[str] = None  # ISO time: "14:00" (optional)
+    estimated_duration_minutes: Optional[int] = None
+    acquisition_params: Optional[Dict[str, Any]] = None  # From previous session
+    source_session_id: Optional[str] = None  # "use params from this session"
+    status: PlannedSessionStatus = PlannedSessionStatus.PLANNED
+    session_id: Optional[str] = None  # Linked actual session once started
+    campaign_ids: List[str] = field(default_factory=list)
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def display_title(self) -> str:
+        if self.title:
+            return self.title
+        if self.notes:
+            return self.notes[:40] + ("..." if len(self.notes) > 40 else "")
+        return f"Session on {self.scheduled_date or '(unscheduled)'}"
+
+
+@dataclass
 class Intentions:
     """Collection of the agent's intentions at multiple levels."""
     campaigns: List[Campaign] = field(default_factory=list)
     projects: List[Project] = field(default_factory=list)
+    planned_sessions: List[PlannedSession] = field(default_factory=list)
     current_focus: Optional[str] = None
     session_intent: Optional[SessionIntent] = None
 
