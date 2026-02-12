@@ -19,6 +19,7 @@ import type { TuiStore } from "../store.js";
 import { useWebSocket } from "../hooks/useWebSocket.js";
 import { useKeyboard } from "../hooks/useKeyboard.js";
 import { isSlashCommand } from "../commands.js";
+import { setTheme, listThemes } from "../theme.js";
 
 import { Header } from "./Header.js";
 import { MessageBubble } from "./MessageBubble.js";
@@ -42,10 +43,49 @@ export function App({ wsUrl, store }: AppProps) {
   // ------------------------------------------------------------------
   // Send a message (or queue it if copilot is busy)
   // ------------------------------------------------------------------
+  // ------------------------------------------------------------------
+  // Handle /theme locally (no server round-trip needed)
+  // ------------------------------------------------------------------
+  const handleThemeCommand = useCallback(
+    (cmd: string): boolean => {
+      const parts = cmd.trim().split(/\s+/);
+      if (parts[0] !== "/theme") return false;
+
+      const s = store.getState();
+      if (parts.length > 1) {
+        // /theme <name> — switch theme
+        const name = parts[1]!;
+        try {
+          setTheme(name);
+          const newTheme = listThemes()[name]!;
+          s.setTheme(newTheme);
+          s.addSystemMessage(`Theme changed to ${newTheme.name}`);
+          // Also update Python side
+          send({ type: "command", command: cmd });
+        } catch {
+          const available = Object.keys(listThemes()).join(", ");
+          s.addSystemMessage(`Unknown theme: '${name}'. Available: ${available}`);
+        }
+      } else {
+        // /theme — list available themes
+        const themes = listThemes();
+        const current = s.theme.name;
+        const lines = Object.entries(themes)
+          .map(([k, t]) => `  ${k}${t.name === current ? " (current)" : ""}`)
+          .join("\n");
+        s.addSystemMessage(`Themes:\n${lines}\n\nUse /theme <name> to switch.`);
+      }
+      return true;
+    },
+    [send, store],
+  );
+
   const sendMessage = useCallback(
     (text: string) => {
       if (isSlashCommand(text)) {
-        // Commands always go immediately
+        // Handle /theme locally
+        if (handleThemeCommand(text)) return;
+        // Other commands go to server
         send({ type: "command", command: text });
         return;
       }
@@ -79,12 +119,14 @@ export function App({ wsUrl, store }: AppProps) {
   // ------------------------------------------------------------------
   const handleChoiceSelect = useCallback(
     (selected: string) => {
-      // Show the user's selection in the chat
+      // Show the user's selection in the chat without committing the
+      // active tool message (the tool_call completion from the server
+      // will handle that).
       const choice = store.getState().pendingChoice;
       if (choice) {
         const option = choice.choice_data.options.find((o) => o.id === selected);
         const label = option?.label ?? selected;
-        store.getState().addUserMessage(label);
+        store.getState().addUserSelection(label);
       }
 
       send({
@@ -98,15 +140,16 @@ export function App({ wsUrl, store }: AppProps) {
   );
 
   const handleChoiceCancel = useCallback(() => {
-    // Show cancellation in the chat
-    store.getState().addUserMessage("(cancelled)");
-
     send({
       type: "choice_response",
       request_id: state.pendingChoiceRequestId,
       selected: "",
     });
     store.getState().clearChoice();
+    // Use addSystemMessage instead of addUserMessage so we don't
+    // trigger a new thinking indicator for the cancelled choice.
+    store.getState().addSystemMessage("(cancelled)");
+    store.getState().finishStreaming();
   }, [send, state.pendingChoiceRequestId, store]);
 
   const handleClearNotification = useCallback(() => {

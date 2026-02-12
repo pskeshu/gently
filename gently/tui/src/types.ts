@@ -194,6 +194,7 @@ export type ConnectionStatus = "connecting" | "connected" | "disconnected";
 
 export interface ThemeColors {
   name: string;
+  colorMode: "dark" | "light";
   primary: string;
   secondary: string;
   accent: string;
@@ -206,4 +207,7 @@ export interface ThemeColors {
   error: string;
   info: string;
   muted: string;
+  // Background colors
+  userMessageBg: string;
+  surfaceBg: string;
 }

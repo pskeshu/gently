@@ -94,6 +94,7 @@ export interface TuiActions {
   updateTokens: (tokens: TokenSnapshot) => void;
 
   addUserMessage: (text: string) => void;
+  addUserSelection: (text: string) => void;
   appendCopilotText: (text: string) => void;
   addToolStart: (toolName: string, toolInput: Record<string, unknown>) => void;
   addToolCall: (toolName: string, duration?: number) => void;
@@ -134,7 +135,13 @@ function commitActive(state: TuiState): {
 } {
   const completed = [...state.completedMessages];
   if (state.activeMessage) {
-    completed.push({ ...state.activeMessage, isStreaming: false });
+    // Don't commit empty thinking placeholders — they're transient
+    // indicators, not real messages.
+    const isEmptyThinking =
+      state.activeMessage.isThinking && !state.activeMessage.text;
+    if (!isEmptyThinking) {
+      completed.push({ ...state.activeMessage, isStreaming: false });
+    }
   }
   return { completedMessages: completed, activeMessage: null };
 }
@@ -216,6 +223,16 @@ export function createTuiStore() {
           isStreaming: true,
         };
       }),
+
+    addUserSelection: (text) =>
+      set((s) => ({
+        // Add user selection to completed WITHOUT committing activeMessage.
+        // Used for choice picker selections where a tool is still active.
+        completedMessages: [
+          ...s.completedMessages,
+          { id: nextId(), role: "user" as const, text, timestamp: Date.now() },
+        ],
+      })),
 
     appendCopilotText: (text) =>
       set((s) => {

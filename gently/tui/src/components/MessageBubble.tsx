@@ -41,9 +41,10 @@ export function MessageBubble({ entry, theme }: MessageBubbleProps) {
             borderTop={false}
             borderBottom={false}
             borderColor={theme.user}
-            paddingLeft={1}
           >
-            <Text bold>{entry.text}</Text>
+            <Text bold backgroundColor={theme.userMessageBg}>
+              {" "}{entry.text}{" "}
+            </Text>
           </Box>
         </Box>
       );
@@ -78,7 +79,7 @@ export function MessageBubble({ entry, theme }: MessageBubbleProps) {
             </Text>
           ) : (
             <Text>
-              <Text color={theme.success}>{"✓ "}</Text>
+              <Text color={theme.success}>{"● "}</Text>
               <Text color={theme.muted}>{entry.text}</Text>
             </Text>
           )}

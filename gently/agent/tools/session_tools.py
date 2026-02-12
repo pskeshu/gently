@@ -402,9 +402,9 @@ def import_embryos_from_session(
 
 @tool(
     name="list_sessions",
-    description="""List available sessions with their IDs, names, embryo counts, and last active times.
-Use when user asks "show sessions", "what sessions exist", or before importing embryos from another session.
-Returns session IDs that can be used with import_embryos_from_session or to resume a session.""",
+    description="""List available sessions with their IDs, embryo counts, message counts, and last active times.
+Use when user asks "show sessions", "what sessions exist", or needs to pick a session to resume or import from.
+Returns ALL sessions — do NOT filter by embryo count. Sessions are valuable for conversation history too.""",
     category=ToolCategory.DATA,
     examples=[
         ToolExample("Show available sessions", {}),
@@ -412,7 +412,7 @@ Returns session IDs that can be used with import_embryos_from_session or to resu
     ],
 )
 def list_sessions(
-    limit: int = 10,
+    limit: int = 20,
     context: Dict = None
 ) -> str:
     """
@@ -421,7 +421,7 @@ def list_sessions(
     Parameters
     ----------
     limit : int
-        Maximum number of sessions to show (default: 10)
+        Maximum number of sessions to show (default: 20)
     context : dict
         Execution context
     """
@@ -429,14 +429,15 @@ def list_sessions(
     if err:
         return err
 
-    sessions = copilot.list_sessions()
+    all_sessions = copilot.list_sessions()
 
-    if not sessions:
+    if not all_sessions:
         return "No sessions found."
 
-    sessions = sessions[:limit]
+    sessions = all_sessions[:limit]
+    total = len(all_sessions)
 
-    lines = ["Available Sessions:", ""]
+    lines = [f"Available Sessions ({total} total):", ""]
     lines.append(f"{'ID':<40} {'Embryos':<8} {'Messages':<10} {'Last Active'}")
     lines.append("-" * 80)
 
@@ -456,7 +457,11 @@ def list_sessions(
 
         lines.append(f"{session_id:<40} {embryo_count:<8} {msg_count:<10} {last_active}")
 
+    if total > limit:
+        lines.append(f"  ... and {total - limit} more (use limit= to see more)")
+
     lines.append("")
-    lines.append("Use import_embryos_from_session(session_id) to import embryos from a session.")
+    lines.append("To resume a session (full history + state): /resume <session_id>")
+    lines.append("To import only embryo positions into current session: import_embryos_from_session(session_id)")
 
     return "\n".join(lines)

@@ -87,7 +87,7 @@ export function StatusBar({
   // Device status indicator
   let deviceDot: { char: string; color: string; label: string };
   if (offline) {
-    deviceDot = { char: "○", color: theme.warning, label: "Offline" };
+    deviceDot = { char: "○", color: theme.warning, label: "Device offline" };
   } else if (deviceConnected) {
     deviceDot = { char: "●", color: theme.success, label: "Device connected" };
   } else {

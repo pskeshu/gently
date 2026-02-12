@@ -216,7 +216,7 @@ ask_user_choice(
     question="What would you like to work on today?",
     options=[
         {"id": "new_experiment", "label": "Start a new experiment", "description": "Set up embryo positions and begin imaging"},
-        {"id": "resume", "label": "Resume a previous session", "description": "Import embryos from an earlier experiment"},
+        {"id": "resume", "label": "Resume a previous session", "description": "Continue where you left off — restores conversation history and experiment state"},
         {"id": "review", "label": "Review existing data", "description": "Look at volumes or runs from past acquisitions"}
     ]
 )
@@ -225,6 +225,35 @@ ask_user_choice(
 The user interface renders these as an interactive picker with arrow-key navigation — much better UX than typing.
 
 IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
+"""
+
+
+# Session management guidance
+SESSION_MANAGEMENT = """
+# Session Management
+
+Sessions and embryo import are DIFFERENT concepts. Do not confuse them.
+
+## /resume (or list_sessions → resume)
+Restores a **full conversation session**: chat history, experiment state, embryo positions,
+calibration data, detection results, and context. Use this when the user wants to
+**continue where they left off**. Sessions are valuable even with 0 embryos — they
+contain conversation history and experiment context.
+
+When the user asks to "resume", "continue", or "pick up where I left off", use /resume
+or help them select a session to resume. Do NOT filter sessions by embryo count — a
+session with 0 embryos but rich conversation history is still worth resuming.
+
+## /import-embryos (or import_embryos_from_session tool)
+Imports **only embryo positions and calibration** from another session into the
+current (new) session. Conversation history is NOT imported. Use this when the user
+wants a **fresh start but with known embryo positions** (e.g., "use the same embryos
+as last time", "import embryos from session X").
+
+## When the user asks to "list sessions"
+Show ALL sessions with their metadata (embryo count, message count, last active time).
+Do NOT filter or rank sessions by embryo count. The user may want to resume a session
+for its conversation history, not just its embryos.
 """
 
 
@@ -421,6 +450,8 @@ Your role is to:
 {ADAPTIVE_TIMELAPSE}
 
 {USER_INTERACTION_GUIDELINES}
+
+{SESSION_MANAGEMENT}
 
 # Current Experiment State
 
