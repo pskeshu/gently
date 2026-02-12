@@ -407,22 +407,23 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             exit_code = await asyncio.get_event_loop().run_in_executor(
                 None, tui_proc.wait
             )
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, asyncio.CancelledError):
             tui_proc.terminate()
             try:
                 tui_proc.wait(timeout=5)
             except Exception:
                 pass
         finally:
-            # Suppress noisy CancelledError from uvicorn during shutdown
-            import logging
-            logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
-            logging.getLogger("uvicorn").setLevel(logging.CRITICAL)
+            # Suppress noisy CancelledError / overlapped IO errors from
+            # uvicorn during shutdown on Windows.
+            import logging as _logging
+            _logging.getLogger("uvicorn.error").setLevel(_logging.CRITICAL)
+            _logging.getLogger("uvicorn").setLevel(_logging.CRITICAL)
             # Cleanup: stop viz server gracefully
             if copilot.viz_server is not None:
                 try:
                     await copilot.viz_server.stop()
-                except (asyncio.CancelledError, Exception):
+                except (asyncio.CancelledError, RuntimeError, OSError, Exception):
                     pass  # Server already stopped or event loop closing
     else:
         if not classic and not tui_dist.exists():
@@ -454,10 +455,13 @@ if __name__ == "__main__":
     pick_session = (args.resume == "__PICK__")
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
-    asyncio.run(main(
-        offline=args.offline,
-        show_sessions=args.sessions,
-        resume_session=resume_id,
-        pick_session=pick_session,
-        classic=args.classic,
-    ))
+    try:
+        asyncio.run(main(
+            offline=args.offline,
+            show_sessions=args.sessions,
+            resume_session=resume_id,
+            pick_session=pick_session,
+            classic=args.classic,
+        ))
+    except KeyboardInterrupt:
+        pass  # Clean exit on Ctrl+C — suppress Windows ProactorEventLoop teardown noise
