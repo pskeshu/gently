@@ -1,9 +1,12 @@
 /**
  * Persistent bottom status bar — always visible below the input.
  *
- * Layout (like Claude Code):
- *   ─────────────────────────────────────────────────────
- *   gently v0.4.0 · session abc123 · ● Connected · 3 embryos · 12.4k tokens
+ * Layout:
+ *   ─────────────────────────────────────────────────────────────
+ *   ● Device connected · 3 embryos · 12.4k tokens      gently v0.4.0
+ *
+ * Left side: device status, embryos, token usage.
+ * Right side: version (right-aligned).
  *
  * Notifications overlay temporarily when they fire, then fade back
  * to the persistent status line.
@@ -11,13 +14,14 @@
 
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
-import type { ConnectionStatus, ThemeColors, TokenSnapshot } from "../types.js";
+import type { ThemeColors, TokenSnapshot } from "../types.js";
 
 interface StatusBarProps {
   theme: ThemeColors;
   version: string;
   sessionId: string;
-  connectionStatus: ConnectionStatus;
+  deviceConnected: boolean;
+  offline: boolean;
   embryoCount: number;
   tokens: TokenSnapshot;
   notification: { level: string; title: string; body?: string } | null;
@@ -34,7 +38,8 @@ export function StatusBar({
   theme,
   version,
   sessionId,
-  connectionStatus,
+  deviceConnected,
+  offline,
   embryoCount,
   tokens,
   notification,
@@ -55,14 +60,6 @@ export function StatusBar({
     }, 5000);
     return () => clearTimeout(timer);
   }, [notification, onClearNotification]);
-
-  // Connection indicator
-  const connDot =
-    connectionStatus === "connected"
-      ? { char: "●", color: theme.success, label: "Connected" }
-      : connectionStatus === "connecting"
-        ? { char: "○", color: theme.warning, label: "Connecting" }
-        : { char: "●", color: theme.error, label: "Disconnected" };
 
   // Notification overlay
   if (showNotification && notification) {
@@ -87,53 +84,54 @@ export function StatusBar({
     );
   }
 
-  // Persistent status line
+  // Device status indicator
+  let deviceDot: { char: string; color: string; label: string };
+  if (offline) {
+    deviceDot = { char: "○", color: theme.warning, label: "Offline" };
+  } else if (deviceConnected) {
+    deviceDot = { char: "●", color: theme.success, label: "Device connected" };
+  } else {
+    deviceDot = { char: "●", color: theme.error, label: "Device disconnected" };
+  }
+
   const sep = <Text color={theme.muted}> · </Text>;
 
   return (
-    <Box>
+    <Box justifyContent="space-between">
+      {/* Left: device status, session, embryos, tokens */}
+      <Box>
+        <Text color={deviceDot.color}>{deviceDot.char}</Text>
+        <Text color={theme.muted}> {deviceDot.label}</Text>
+
+        {sessionId ? (
+          <>
+            {sep}
+            <Text color={theme.muted}>{sessionId.slice(0, 8)}</Text>
+          </>
+        ) : null}
+
+        {embryoCount > 0 ? (
+          <>
+            {sep}
+            <Text color={theme.muted}>
+              {embryoCount} embryo{embryoCount !== 1 ? "s" : ""}
+            </Text>
+          </>
+        ) : null}
+
+        {tokens.total_tokens > 0 ? (
+          <>
+            {sep}
+            <Text color={theme.muted}>
+              {formatTokens(tokens.total_tokens)} tokens
+            </Text>
+          </>
+        ) : null}
+      </Box>
+
+      {/* Right: version */}
       {version ? (
-        <>
-          <Text color={theme.muted}>gently v{version}</Text>
-          {sep}
-        </>
-      ) : null}
-
-      {sessionId ? (
-        <>
-          <Text color={theme.muted}>{sessionId.slice(0, 8)}</Text>
-          {sep}
-        </>
-      ) : null}
-
-      <Text color={connDot.color}>{connDot.char}</Text>
-      <Text color={theme.muted}> {connDot.label}</Text>
-
-      {embryoCount > 0 ? (
-        <>
-          {sep}
-          <Text color={theme.muted}>
-            {embryoCount} embryo{embryoCount !== 1 ? "s" : ""}
-          </Text>
-        </>
-      ) : null}
-
-      {tokens.total_tokens > 0 ? (
-        <>
-          {sep}
-          <Text color={theme.muted}>
-            {formatTokens(tokens.total_tokens)} tokens
-          </Text>
-        </>
-      ) : null}
-
-      {tokens.api_calls > 0 ? (
-        <>
-          {sep}
-          <Text color={theme.muted}>
-            {tokens.api_calls} call{tokens.api_calls !== 1 ? "s" : ""}
-          </Text>
-        </>
+        <Text color={theme.muted}>gently v{version}</Text>
       ) : null}
     </Box>
   );

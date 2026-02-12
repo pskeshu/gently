@@ -4,16 +4,12 @@ Device Factory for MicroscopyCopilot
 Helper functions to create Ophyd devices from Micro-Manager core for hardware control.
 """
 
+import logging
 from typing import Dict, Optional
 from pathlib import Path
 import pymmcore
 
-from rich.console import Console
-
-from .theme import get_theme
-
-# Module-level console for styled output
-_console = Console()
+logger = logging.getLogger(__name__)
 
 
 def create_devices_from_mmcore(core: pymmcore.CMMCore,
@@ -89,127 +85,87 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
     laser_control = None
     led = None
 
-    theme = get_theme()
-
     try:
-        # Scanner (for direct control)
-        scanner = DiSPIMScanner(
-            name=cfg['scanner_name'],
-            core=core
-        )
+        scanner = DiSPIMScanner(name=cfg['scanner_name'], core=core)
         devices['scanner'] = scanner
-        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]scanner[/]: {cfg['scanner_name']}")
+        logger.info("Created scanner: %s", cfg['scanner_name'])
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create scanner: {e}")
+        logger.warning("Could not create scanner: %s", e)
 
     try:
-        # Piezo (for direct control)
-        piezo = DiSPIMPiezo(
-            name=cfg['piezo_name'],
-            core=core
-        )
+        piezo = DiSPIMPiezo(name=cfg['piezo_name'], core=core)
         devices['piezo'] = piezo
-        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]piezo[/]: {cfg['piezo_name']}")
+        logger.info("Created piezo: %s", cfg['piezo_name'])
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create piezo: {e}")
+        logger.warning("Could not create piezo: %s", e)
 
     try:
-        # Camera
         from gently.devices import DiSPIMCamera
-        camera = DiSPIMCamera(
-            device_name=cfg['camera_name'],
-            core=core
-        )
+        camera = DiSPIMCamera(device_name=cfg['camera_name'], core=core)
         devices['camera'] = camera
-        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]camera[/]: {cfg['camera_name']}")
+        logger.info("Created camera: %s", cfg['camera_name'])
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create camera: {e}")
+        logger.warning("Could not create camera: %s", e)
 
     try:
-        # Laser Control
         from gently.devices import DiSPIMLaserControl
-        laser_control = DiSPIMLaserControl(
-            core=core,
-            name='laser_control',
-            group_name="Laser"
-        )
+        laser_control = DiSPIMLaserControl(core=core, name='laser_control', group_name="Laser")
         devices['laser_control'] = laser_control
-        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]laser control[/]")
+        logger.info("Created laser control")
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create laser control: {e}")
+        logger.warning("Could not create laser control: %s", e)
 
     try:
-        # XY Stage
-        devices['xy_stage'] = DiSPIMXYStage(
-            name=cfg['xy_stage_name'],
-            core=core
-        )
-        _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]XY stage[/]: {cfg['xy_stage_name']}")
+        devices['xy_stage'] = DiSPIMXYStage(name=cfg['xy_stage_name'], core=core)
+        logger.info("Created XY stage: %s", cfg['xy_stage_name'])
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create XY stage: {e}")
+        logger.warning("Could not create XY stage: %s", e)
 
     try:
-        # LED (optional)
         if cfg.get('led_name'):
             from gently.devices import DiSPIMLED
-            led = DiSPIMLED(
-                core=core,
-                name=cfg['led_name'],
-                group_name="LED"
-            )
+            led = DiSPIMLED(core=core, name=cfg['led_name'], group_name="LED")
             devices['led'] = led
-            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]LED[/]: {cfg['led_name']}")
+            logger.info("Created LED: %s", cfg['led_name'])
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create LED: {e}")
+        logger.warning("Could not create LED: %s", e)
 
-    # Now create compound devices
+    # Compound devices
     try:
-        # Volume Scanner (requires scanner, camera, piezo, laser_control)
         if scanner and camera and piezo and laser_control:
             devices['volume_scanner'] = DiSPIMVolumeScanner(
-                scanner=scanner,
-                camera=camera,
-                piezo=piezo,
-                laser_control=laser_control,
-                core=core,
-                name='volume_scanner'
+                scanner=scanner, camera=camera, piezo=piezo,
+                laser_control=laser_control, core=core, name='volume_scanner',
             )
-            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]volume scanner[/]")
+            logger.info("Created volume scanner")
         else:
-            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping volume scanner (missing required devices)")
+            logger.warning("Skipping volume scanner (missing required devices)")
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create volume scanner: {e}")
+        logger.warning("Could not create volume scanner: %s", e)
 
     try:
-        # Bottom Camera (with LED control)
         if led:
             bottom_camera = DiSPIMBottomCamera(
-                device_name=cfg['bottom_camera_name'],
-                core=core,
-                led_control=led,
-                pixel_size_um=6.5,
-                magnification=10.0  # 6.5µm / 10x = 0.65µm effective
+                device_name=cfg['bottom_camera_name'], core=core,
+                led_control=led, pixel_size_um=6.5, magnification=10.0,
             )
             devices['bottom_camera'] = bottom_camera
-            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]bottom camera[/]: {cfg['bottom_camera_name']}")
+            logger.info("Created bottom camera: %s", cfg['bottom_camera_name'])
         else:
-            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping bottom camera (missing LED device)")
+            logger.warning("Skipping bottom camera (missing LED device)")
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create bottom camera: {e}")
+        logger.warning("Could not create bottom camera: %s", e)
 
     try:
-        # Light Sheet Snap (requires scanner and camera)
         if scanner and camera:
             devices['lightsheet_snap'] = DiSPIMLightSheetSnap(
-                scanner=scanner,
-                camera=camera,
-                name='lightsheet_snap'
+                scanner=scanner, camera=camera, name='lightsheet_snap',
             )
-            _console.print(f"  [{theme.success}]{theme.icon_success}[/] Created [bold]lightsheet snap[/] device")
+            logger.info("Created lightsheet snap device")
         else:
-            _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Skipping lightsheet snap (missing required devices)")
+            logger.warning("Skipping lightsheet snap (missing required devices)")
     except Exception as e:
-        _console.print(f"  [{theme.warning}]{theme.icon_warning}[/] Could not create lightsheet snap: {e}")
+        logger.warning("Could not create lightsheet snap: %s", e)
 
     if not devices:
         raise RuntimeError("Failed to create any devices. Check your Micro-Manager configuration.")

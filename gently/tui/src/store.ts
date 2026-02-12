@@ -37,6 +37,15 @@ export interface TuiState {
   tokens: TokenSnapshot;
   embryoCount: number;
 
+  // Launch status (from connected message)
+  deviceConnected: boolean;
+  samAvailable: boolean;
+  offline: boolean;
+  storePath: string;
+  vizUrl: string | null;
+  logPath: string;
+  resumed: boolean;
+
   // Chat — split for <Static> vs dynamic rendering
   completedMessages: ChatEntry[];
   activeMessage: ChatEntry | null;
@@ -72,6 +81,13 @@ export interface TuiActions {
     version: string;
     tokens: TokenSnapshot;
     embryoCount: number;
+    deviceConnected: boolean;
+    samAvailable: boolean;
+    offline: boolean;
+    storePath: string;
+    vizUrl: string | null;
+    logPath: string;
+    resumed: boolean;
   }) => void;
   setDisconnected: () => void;
   setConnecting: () => void;
@@ -135,6 +151,13 @@ export function createTuiStore() {
     version: "",
     tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0, api_calls: 0 },
     embryoCount: 0,
+    deviceConnected: false,
+    samAvailable: false,
+    offline: false,
+    storePath: "",
+    vizUrl: null,
+    logPath: "",
+    resumed: false,
     completedMessages: [],
     activeMessage: null,
     messageQueue: [],
@@ -154,6 +177,13 @@ export function createTuiStore() {
         version: meta.version,
         tokens: meta.tokens,
         embryoCount: meta.embryoCount,
+        deviceConnected: meta.deviceConnected,
+        samAvailable: meta.samAvailable,
+        offline: meta.offline,
+        storePath: meta.storePath,
+        vizUrl: meta.vizUrl,
+        logPath: meta.logPath,
+        resumed: meta.resumed,
       }),
     setDisconnected: () => set({ connectionStatus: "disconnected" }),
     setConnecting: () => set({ connectionStatus: "connecting" }),

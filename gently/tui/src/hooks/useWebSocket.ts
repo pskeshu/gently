@@ -36,6 +36,13 @@ export function useWebSocket(
               version: msg.version ?? "",
               tokens: msg.tokens ?? { input_tokens: 0, output_tokens: 0, total_tokens: 0, api_calls: 0 },
               embryoCount: msg.embryo_count ?? 0,
+              deviceConnected: msg.device_connected ?? false,
+              samAvailable: msg.sam_available ?? false,
+              offline: msg.offline ?? false,
+              storePath: msg.store_path ?? "",
+              vizUrl: msg.viz_url ?? null,
+              logPath: msg.log_path ?? "",
+              resumed: msg.resumed ?? false,
             });
             break;
 

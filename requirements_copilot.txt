@@ -20,10 +20,6 @@ python-multipart>=0.0.6
 # Async HTTP client (for queue server communication)
 aiohttp>=3.9.0
 
-# Rich CLI interface
-rich>=13.7.0
-prompt-toolkit>=3.0.43
-
 # Visualization (optional - for interactive embryo marking)
 napari>=0.4.18
 

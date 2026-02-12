@@ -127,6 +127,13 @@ export function App({ wsUrl, store }: AppProps) {
             version={state.version}
             sessionId={state.sessionId}
             embryoCount={state.embryoCount}
+            deviceConnected={state.deviceConnected}
+            samAvailable={state.samAvailable}
+            offline={state.offline}
+            storePath={state.storePath}
+            vizUrl={state.vizUrl}
+            logPath={state.logPath}
+            resumed={state.resumed}
           />
         ) : null}
 
@@ -166,7 +173,8 @@ export function App({ wsUrl, store }: AppProps) {
         theme={state.theme}
         version={state.version}
         sessionId={state.sessionId}
-        connectionStatus={state.connectionStatus}
+        deviceConnected={state.deviceConnected}
+        offline={state.offline}
         embryoCount={state.embryoCount}
         tokens={state.tokens}
         notification={state.notification}

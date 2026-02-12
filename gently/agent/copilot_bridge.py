@@ -40,6 +40,11 @@ class CopilotBridge:
     def __init__(self, copilot):
         self.copilot = copilot
         self._active_stream: Optional[asyncio.Task] = None
+        self._launch_info: Dict[str, Any] = {}
+
+    def set_launch_info(self, info: Dict[str, Any]) -> None:
+        """Store launch metadata to include in the connect message."""
+        self._launch_info = info
 
     async def stream_response(
         self,
@@ -634,13 +639,22 @@ class CopilotBridge:
         """Metadata sent to the TUI on connect."""
         import gently
         exp = self.copilot.experiment
-        return {
+        meta = {
             "session_id": self.copilot.session_id,
             "commands": self.get_commands_json(),
             "version": getattr(gently, "__version__", "dev"),
             "tokens": self._get_token_snapshot(),
             "embryo_count": len(exp.embryos),
+            # Launch info fields (set by launch_copilot.py for TUI mode)
+            "device_connected": self._launch_info.get("device_connected", False),
+            "sam_available": self._launch_info.get("sam_available", False),
+            "offline": self._launch_info.get("offline", False),
+            "store_path": self._launch_info.get("store_path", ""),
+            "viz_url": self._launch_info.get("viz_url", None),
+            "log_path": self._launch_info.get("log_path", ""),
+            "resumed": self._launch_info.get("resumed", False),
         }
+        return meta
 
     def _get_sessions_list(self) -> list:
         """Return a list of saved sessions with metadata."""

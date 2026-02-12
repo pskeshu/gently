@@ -67,12 +67,30 @@ The architecture is designed for generalization to other microscopy platforms.
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.11+
+- [Node.js](https://nodejs.org/) 18+ (for the Ink TUI)
+- An `ANTHROPIC_API_KEY` environment variable
+
+### Setup
+
 ```bash
-# Clone and install
+# Clone and install Python dependencies
 git clone https://github.com/pskeshu/gently.git
 cd gently
 pip install -r requirements_copilot.txt
 
+# Build the TUI (one-time, rebuild after TUI code changes)
+cd gently/tui
+npm install
+npm run build
+cd ../..
+```
+
+### Launch
+
+```bash
 # 1. Start the device layer (hardware control + SAM detection)
 python start_device_layer.py
 
@@ -86,6 +104,9 @@ python launch_copilot.py --offline
 python launch_copilot.py --resume            # interactive picker
 python launch_copilot.py --resume latest     # most recent session
 python launch_copilot.py --resume <id>       # specific session
+
+# List saved sessions
+python launch_copilot.py --sessions
 ```
 
 ## Architecture

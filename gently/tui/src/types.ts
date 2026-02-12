@@ -24,6 +24,14 @@ export interface ConnectedMessage {
   tokens: TokenSnapshot;
   embryo_count: number;
   timestamp: string;
+  // Launch status metadata (populated by TUI launch path)
+  device_connected: boolean;
+  sam_available: boolean;
+  offline: boolean;
+  store_path: string;
+  viz_url: string | null;
+  log_path: string;
+  resumed: boolean;
 }
 
 export interface StreamEndMessage {
