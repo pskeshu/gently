@@ -67,13 +67,26 @@ export function App({ wsUrl, store }: AppProps) {
           s.addSystemMessage(`Unknown theme: '${name}'. Available: ${available}`);
         }
       } else {
-        // /theme — list available themes
+        // /theme — show interactive picker
         const themes = listThemes();
         const current = s.theme.name;
-        const lines = Object.entries(themes)
-          .map(([k, t]) => `  ${k}${t.name === current ? " (current)" : ""}`)
-          .join("\n");
-        s.addSystemMessage(`Themes:\n${lines}\n\nUse /theme <name> to switch.`);
+        const options = Object.entries(themes).map(([key, t]) => ({
+          id: key,
+          label: `${t.name}${t.name === current ? " (current)" : ""}`,
+          description: t.colorMode === "dark" ? "Dark mode" : "Light mode",
+        }));
+        s.setChoice(
+          {
+            type: "choice_request",
+            choice_data: {
+              _type: "single",
+              question: "Choose a theme",
+              options,
+              allow_multiple: false,
+            },
+          },
+          "local:theme",
+        );
       }
       return true;
     },
@@ -119,38 +132,66 @@ export function App({ wsUrl, store }: AppProps) {
   // ------------------------------------------------------------------
   const handleChoiceSelect = useCallback(
     (selected: string) => {
-      // Show the user's selection in the chat without committing the
-      // active tool message (the tool_call completion from the server
-      // will handle that).
-      const choice = store.getState().pendingChoice;
+      const s = store.getState();
+      const requestId = s.pendingChoiceRequestId;
+
+      // Local theme picker — handle without server round-trip
+      if (requestId === "local:theme") {
+        s.clearChoice();
+        try {
+          setTheme(selected);
+          const newTheme = listThemes()[selected]!;
+          s.setTheme(newTheme);
+          s.addSystemMessage(`Theme changed to ${newTheme.name}`);
+          // Also update Python side
+          send({ type: "command", command: `/theme ${selected}` });
+        } catch {
+          const available = Object.keys(listThemes()).join(", ");
+          s.addSystemMessage(`Unknown theme: '${selected}'. Available: ${available}`);
+        }
+        return;
+      }
+
+      // Server choice — show selection without committing active tool
+      const choice = s.pendingChoice;
       if (choice) {
         const option = choice.choice_data.options.find((o) => o.id === selected);
         const label = option?.label ?? selected;
-        store.getState().addUserSelection(label);
+        s.addUserSelection(label);
       }
 
       send({
         type: "choice_response",
-        request_id: state.pendingChoiceRequestId,
+        request_id: requestId,
         selected,
       });
-      store.getState().clearChoice();
+      s.clearChoice();
     },
-    [send, state.pendingChoiceRequestId, store],
+    [send, store],
   );
 
   const handleChoiceCancel = useCallback(() => {
+    const s = store.getState();
+    const requestId = s.pendingChoiceRequestId;
+
+    // Local picker — just dismiss
+    if (requestId.startsWith("local:")) {
+      s.clearChoice();
+      return;
+    }
+
+    // Server choice — send empty response
     send({
       type: "choice_response",
-      request_id: state.pendingChoiceRequestId,
+      request_id: requestId,
       selected: "",
     });
-    store.getState().clearChoice();
+    s.clearChoice();
     // Use addSystemMessage instead of addUserMessage so we don't
     // trigger a new thinking indicator for the cancelled choice.
-    store.getState().addSystemMessage("(cancelled)");
-    store.getState().finishStreaming();
-  }, [send, state.pendingChoiceRequestId, store]);
+    s.addSystemMessage("(cancelled)");
+    s.finishStreaming();
+  }, [send, store]);
 
   const handleClearNotification = useCallback(() => {
     store.getState().setNotification(null);
