@@ -20,6 +20,7 @@ import type {
   ConnectionStatus,
   ThemeColors,
   TokenSnapshot,
+  WizardMeta,
 } from "./types.js";
 import { getTheme } from "./theme.js";
 
@@ -68,6 +69,10 @@ export interface TuiState {
 
   // Whether copilot is currently streaming a response
   isStreaming: boolean;
+
+  // Startup wizard
+  wizardActive: boolean;
+  wizardWeight: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -88,6 +93,7 @@ export interface TuiActions {
     vizUrl: string | null;
     logPath: string;
     resumed: boolean;
+    wizard?: WizardMeta;
   }) => void;
   setDisconnected: () => void;
   setConnecting: () => void;
@@ -96,6 +102,7 @@ export interface TuiActions {
   addUserMessage: (text: string) => void;
   addUserSelection: (text: string) => void;
   appendCopilotText: (text: string) => void;
+  showThinking: () => void;
   addToolStart: (toolName: string, toolInput: Record<string, unknown>) => void;
   addToolCall: (toolName: string, duration?: number) => void;
   addSystemMessage: (text: string) => void;
@@ -115,6 +122,8 @@ export interface TuiActions {
 
   setStreaming: (v: boolean) => void;
   cancelStream: () => void;
+
+  setWizardActive: (active: boolean) => void;
 }
 
 export type TuiStore = TuiState & TuiActions;
@@ -174,6 +183,8 @@ export function createTuiStore() {
     theme: getTheme(),
     notification: null,
     isStreaming: false,
+    wizardActive: false,
+    wizardWeight: "none",
 
     // Connection
     setConnected: (meta) =>
@@ -191,6 +202,8 @@ export function createTuiStore() {
         vizUrl: meta.vizUrl,
         logPath: meta.logPath,
         resumed: meta.resumed,
+        wizardActive: meta.wizard?.wizard_needed ?? false,
+        wizardWeight: meta.wizard?.conversation_weight ?? "none",
       }),
     setDisconnected: () => set({ connectionStatus: "disconnected" }),
     setConnecting: () => set({ connectionStatus: "connecting" }),
@@ -258,6 +271,22 @@ export function createTuiStore() {
             timestamp: Date.now(),
             isStreaming: true,
           },
+        };
+      }),
+
+    showThinking: () =>
+      set((s) => {
+        const { completedMessages } = commitActive(s);
+        return {
+          completedMessages,
+          activeMessage: {
+            id: nextId(),
+            role: "copilot",
+            text: "",
+            timestamp: Date.now(),
+            isThinking: true,
+          },
+          isStreaming: true,
         };
       }),
 
@@ -393,5 +422,7 @@ export function createTuiStore() {
           isStreaming: false,
         };
       }),
+
+    setWizardActive: (active) => set({ wizardActive: active }),
   }));
 }

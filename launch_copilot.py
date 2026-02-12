@@ -199,6 +199,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         "resumed": session_to_resume is not None,
     })
 
+    # Initialize startup wizard (gap-driven onboarding)
+    from gently.context import ContextStore as CtxStore
+    context_db = storage_dir / "context" / "agent_mind.db"
+    context_store = CtxStore(context_db)
+    bridge.init_wizard(context_store=context_store, claude_client=copilot.claude)
+
     if copilot.viz_server is not None:
         copilot.viz_server.copilot_bridge = bridge
 

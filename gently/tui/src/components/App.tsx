@@ -202,10 +202,11 @@ export function App({ wsUrl, store }: AppProps) {
       {/* ── Header ──────────────────────────────────────────── */}
       <Header theme={state.theme} />
 
-      {/* ── Welcome screen (before any messages) ────────────── */}
+      {/* ── Welcome screen (before any messages, hidden during wizard) */}
       {state.connectionStatus === "connected" &&
         state.completedMessages.length === 0 &&
-        !state.activeMessage ? (
+        !state.activeMessage &&
+        !state.wizardActive ? (
           <WelcomeScreen
             theme={state.theme}
             version={state.version}
@@ -243,14 +244,16 @@ export function App({ wsUrl, store }: AppProps) {
         />
       ) : null}
 
-      {/* ── Persistent input bar (always at the bottom) ───────── */}
-      <CommandInput
-        commands={state.commands}
-        theme={state.theme}
-        isStreaming={state.isStreaming}
-        queueLength={state.messageQueue.length}
-        onSubmit={sendMessage}
-      />
+      {/* ── Persistent input bar (hidden when picker is active) ── */}
+      {!state.pendingChoice ? (
+        <CommandInput
+          commands={state.commands}
+          theme={state.theme}
+          isStreaming={state.isStreaming}
+          queueLength={state.messageQueue.length}
+          onSubmit={sendMessage}
+        />
+      ) : null}
 
       {/* ── Persistent status bar ─────────────────────────────── */}
       <StatusBar
@@ -263,6 +266,7 @@ export function App({ wsUrl, store }: AppProps) {
         tokens={state.tokens}
         notification={state.notification}
         onClearNotification={handleClearNotification}
+        wizardActive={state.wizardActive}
       />
     </Box>
   );

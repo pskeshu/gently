@@ -41,10 +41,21 @@ class CopilotBridge:
         self.copilot = copilot
         self._active_stream: Optional[asyncio.Task] = None
         self._launch_info: Dict[str, Any] = {}
+        self._wizard = None  # StartupWizard, set by init_wizard()
 
     def set_launch_info(self, info: Dict[str, Any]) -> None:
         """Store launch metadata to include in the connect message."""
         self._launch_info = info
+
+    def init_wizard(self, context_store, claude_client=None) -> None:
+        """Create the startup wizard from a ContextStore."""
+        from gently.context.startup_wizard import StartupWizard
+        self._context_store = context_store
+        self._wizard = StartupWizard(
+            context_store=context_store,
+            session_id=self.copilot.session_id,
+            claude_client=claude_client,
+        )
 
     async def stream_response(
         self,
@@ -293,6 +304,43 @@ class CopilotBridge:
                     "command": "/save",
                     "error": "Failed to save session",
                 })
+            return
+
+        if cmd == "/reset-context":
+            cs = getattr(self, "_context_store", None)
+            if cs is None:
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/reset-context",
+                    "error": "Context store not available",
+                })
+            else:
+                counts = cs.reset()
+                total = sum(counts.values())
+                # Re-create the wizard so it re-assesses gaps
+                claude_client = self._wizard.claude_client if self._wizard else None
+                self.init_wizard(cs, claude_client)
+                if total > 0:
+                    details = ", ".join(f"{v} {k}" for k, v in counts.items())
+                    msg = f"Context cleared: {total} entries removed ({details}).\nRun /wizard to set up again."
+                else:
+                    msg = "Context already empty — nothing to clear."
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/reset-context",
+                    "content": {"text": msg},
+                })
+            return
+
+        if cmd == "/wizard":
+            # Handled by the WebSocket route (copilot_ws.py), not the bridge.
+            # If we reach here, it means the wizard loop called handle_command
+            # — i.e. /wizard was typed while the wizard is already running.
+            await send_fn({
+                "type": "command_result",
+                "command": "/wizard",
+                "content": {"text": "The wizard is already running."},
+            })
             return
 
         if cmd == "/clear":
@@ -654,6 +702,9 @@ class CopilotBridge:
             "log_path": self._launch_info.get("log_path", ""),
             "resumed": self._launch_info.get("resumed", False),
         }
+        # Wizard metadata (if initialized)
+        if self._wizard is not None:
+            meta["wizard"] = self._wizard.gap_summary
         return meta
 
     def _get_sessions_list(self) -> list:

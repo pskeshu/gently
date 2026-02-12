@@ -535,6 +535,20 @@ Requires microscope connection and at least one registered embryo.""",
         category=CommandCategory.DIAGNOSTICS,
     ))
 
+    registry.register(CommandDefinition(
+        name="/reset-context",
+        description="Clear the context database (for testing)",
+        help_text="Wipe all campaigns, learnings, session intents, and other context.\nThe startup wizard will run again on next launch.",
+        category=CommandCategory.DIAGNOSTICS,
+    ))
+
+    registry.register(CommandDefinition(
+        name="/wizard",
+        description="Run the startup wizard",
+        help_text="Re-run the onboarding wizard to set organism, campaign, and session intent.\nUseful after /reset-context or to change your current setup.",
+        category=CommandCategory.SESSION,
+    ))
+
 
 # ============================================================================
 # Global Registry

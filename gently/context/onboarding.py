@@ -310,7 +310,7 @@ async def _extract_with_llm(
     entries = 0
 
     # Store learnings
-    for item in data.get("learnings", []):
+    for item in (data.get("learnings") or []):
         if item and item.get("content"):
             context_store.add_learning(Learning(
                 id=str(uuid.uuid4())[:8],
@@ -330,7 +330,7 @@ async def _extract_with_llm(
         entries += 1
 
     # Store watchpoints
-    for item in data.get("watchpoints", []):
+    for item in (data.get("watchpoints") or []):
         if item and item.get("target"):
             context_store.add_watchpoint(Watchpoint(
                 id=str(uuid.uuid4())[:8],

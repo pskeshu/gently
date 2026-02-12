@@ -41,6 +41,7 @@ from .store import ContextStore
 from .serialization import context_to_dict, context_to_json, context_summary
 from .gap_assessment import assess_gaps, ContextGapReport, Gap, GapLayer, GapSeverity
 from .onboarding import generate_onboarding_messages, process_onboarding_response, OnboardingMessage
+from .startup_wizard import StartupWizard
 
 __all__ = [
     # Dataclasses
@@ -83,4 +84,6 @@ __all__ = [
     "generate_onboarding_messages",
     "process_onboarding_response",
     "OnboardingMessage",
+    # Startup Wizard
+    "StartupWizard",
 ]

@@ -26,6 +26,7 @@ interface StatusBarProps {
   tokens: TokenSnapshot;
   notification: { level: string; title: string; body?: string } | null;
   onClearNotification: () => void;
+  wizardActive?: boolean;
 }
 
 function formatTokens(n: number): string {
@@ -44,6 +45,7 @@ export function StatusBar({
   tokens,
   notification,
   onClearNotification,
+  wizardActive,
 }: StatusBarProps) {
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);
@@ -79,6 +81,21 @@ export function StatusBar({
         </Text>
         {notification.body ? (
           <Text color={theme.muted}> — {notification.body}</Text>
+        ) : null}
+      </Box>
+    );
+  }
+
+  // Wizard active indicator
+  if (wizardActive) {
+    return (
+      <Box justifyContent="space-between">
+        <Box>
+          <Text color={theme.accent} bold>Setting up...</Text>
+          <Text color={theme.muted}> Answer a few questions to get started</Text>
+        </Box>
+        {version ? (
+          <Text color={theme.muted}>gently v{version}</Text>
         ) : null}
       </Box>
     );

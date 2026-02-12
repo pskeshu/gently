@@ -248,6 +248,37 @@ class ContextStore:
             self._conn.rollback()
             raise
 
+    def reset(self) -> dict:
+        """Drop all data from every table. The schema is preserved.
+
+        Returns a dict of table_name → rows_deleted.
+        """
+        tables = [
+            "planned_session_campaigns",
+            "session_campaigns",
+            "planned_sessions",
+            "session_intents",
+            "projects",
+            "campaigns",
+            "learnings",
+            "embryo_understanding",
+            "observations",
+            "expectations",
+            "watchpoints",
+            "questions",
+            "agent_state",
+        ]
+        counts = {}
+        with self._tx() as conn:
+            for t in tables:
+                before = conn.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+                conn.execute(f"DELETE FROM {t}")
+                if before > 0:
+                    counts[t] = before
+        total = sum(counts.values())
+        logger.info(f"Context store reset — {total} rows cleared from {len(counts)} tables")
+        return counts
+
     def _now(self) -> str:
         return datetime.now().isoformat()
 
@@ -550,6 +581,12 @@ class ContextStore:
         """Link a session to a campaign."""
         now = self._now()
         with self._tx():
+            # Ensure session_intents row exists (FK target)
+            self._conn.execute(
+                "INSERT OR IGNORE INTO session_intents "
+                "(session_id, created_at) VALUES (?, ?)",
+                (session_id, now),
+            )
             self._conn.execute(
                 "INSERT OR IGNORE INTO session_campaigns "
                 "(session_id, campaign_id, linked_at) VALUES (?, ?, ?)",

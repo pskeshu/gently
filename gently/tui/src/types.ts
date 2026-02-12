@@ -16,6 +16,13 @@ export interface TokenSnapshot {
   api_calls: number;
 }
 
+export interface WizardMeta {
+  wizard_needed: boolean;
+  conversation_weight: string;
+  is_first_launch: boolean;
+  readiness: number;
+}
+
 export interface ConnectedMessage {
   type: "connected";
   session_id: string;
@@ -32,16 +39,23 @@ export interface ConnectedMessage {
   viz_url: string | null;
   log_path: string;
   resumed: boolean;
+  // Startup wizard metadata
+  wizard?: WizardMeta;
 }
 
 export interface StreamEndMessage {
   type: "stream_end";
   tokens: TokenSnapshot;
+  wizard_complete?: boolean;
 }
 
 export interface TextChunk {
   type: "text";
   text: string;
+}
+
+export interface ThinkingChunk {
+  type: "thinking";
 }
 
 export interface ToolStartChunk {
@@ -114,6 +128,7 @@ export type ServerMessage =
   | ConnectedMessage
   | StreamEndMessage
   | TextChunk
+  | ThinkingChunk
   | ToolStartChunk
   | ToolCallChunk
   | ChoiceRequest

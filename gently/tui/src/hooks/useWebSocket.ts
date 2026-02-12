@@ -43,12 +43,21 @@ export function useWebSocket(
               vizUrl: msg.viz_url ?? null,
               logPath: msg.log_path ?? "",
               resumed: msg.resumed ?? false,
+              wizard: msg.wizard,
             });
             break;
 
           case "stream_end":
             s.updateTokens(msg.tokens);
             s.finishStreaming();
+            if (msg.wizard_complete) {
+              s.setWizardActive(false);
+            }
+            break;
+
+          case "thinking":
+            // Show thinking spinner (wizard uses this during LLM calls)
+            s.showThinking();
             break;
 
           case "text":
