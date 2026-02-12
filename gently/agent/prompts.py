@@ -178,40 +178,53 @@ Fast Z-positioning for light sheet.
 
 # Interactive choice guidance
 USER_INTERACTION_GUIDELINES = """
-# Interactive User Choices
+# Interactive User Choices — MANDATORY
 
-When asking the user to choose from discrete options, USE the `ask_user_choice` tool instead of just typing the options as text. This provides a much better user experience with arrow-key selection.
+CRITICAL RULE: Whenever you need to ask the user a question — whether it's a yes/no confirmation, a choice between options, or any question where the answer could be one of several discrete responses — you MUST use the `ask_user_choice` tool. NEVER present options as numbered text lists or bullet points. NEVER ask the user to type their choice as text when you could present selectable options instead.
 
 ## When to use ask_user_choice
 
-Use it when presenting:
-- Lists of sessions to import
-- Which embryo to focus on
-- Yes/No confirmations
-- Algorithm options
-- Any question with enumerable answers
+You MUST use this tool for:
+- ANY question you ask the user (including "What would you like to do?")
+- Yes/No or confirmation questions
+- Choosing between sessions, embryos, algorithms, actions, etc.
+- Open-ended "what next?" questions — create options for the most likely answers
+- ANY time you would otherwise list options as text with numbers or bullets
+
+## How to think about it
+
+If you're about to write a message that includes phrases like:
+- "Would you like to..."
+- "Which ... do you want?"
+- "Here are some options:"
+- "You could: A, B, or C"
+- "What would you like to work on?"
+
+STOP. Use `ask_user_choice` instead. Convert your text options into tool parameters.
 
 ## Example
 
-Instead of writing:
-"Which session do you want to import?
-1. Session abc123 (4 embryos)
-2. Session def456 (2 embryos)"
+BAD (never do this):
+"What would you like to do today?
+- Start a new experiment
+- Resume a previous session
+- Review existing data"
 
-Use the tool:
+GOOD (always do this):
 ```
 ask_user_choice(
-    question="Which session to import?",
+    question="What would you like to work on today?",
     options=[
-        {"id": "abc123", "label": "Session abc123 (4 embryos)"},
-        {"id": "def456", "label": "Session def456 (2 embryos)"}
+        {"id": "new_experiment", "label": "Start a new experiment", "description": "Set up embryo positions and begin imaging"},
+        {"id": "resume", "label": "Resume a previous session", "description": "Import embryos from an earlier experiment"},
+        {"id": "review", "label": "Review existing data", "description": "Look at volumes or runs from past acquisitions"}
     ]
 )
 ```
 
-The CLI will render this as an interactive picker where users can use arrow keys to select.
+The user interface renders these as an interactive picker with arrow-key navigation — much better UX than typing.
 
-IMPORTANT: Always use ask_user_choice for discrete choices. Never just print numbered options as text.
+IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
 """
 
 
@@ -437,6 +450,7 @@ Do NOT explain what you "would need to do" - just do it. Never say "I would need
 8. **Stop after success**: When a tool returns a success message (starts with ✓), do NOT retry. Report success and wait for next request.
 9. **Single tool = complete action**: Tools like capture_lightsheet, view_image, and acquire_volume are COMPLETE actions. Do NOT chain them unless explicitly asked.
 10. **Use defaults**: If a tool has default parameters and the user doesn't specify values, use the defaults.
+11. **ALWAYS use ask_user_choice**: When asking the user ANY question with selectable answers, MUST use the `ask_user_choice` tool. NEVER list options as text. This is the #1 UX rule.
 
 # Embryo Naming
 

@@ -5,16 +5,20 @@ Launch the Microscopy Copilot
 Conversational AI agent for diSPIM microscope control.
 
 Usage:
-    python launch_copilot.py
+    python launch_copilot.py                      # Ink TUI (default)
+    python launch_copilot.py --classic            # Rich CLI fallback
     python launch_copilot.py --offline
-    python launch_copilot.py --sessions          # List and select a session
-    python launch_copilot.py --resume            # Interactive session picker
-    python launch_copilot.py --resume latest     # Resume most recent session
-    python launch_copilot.py --resume <id>       # Resume specific session
+    python launch_copilot.py --sessions           # List and select a session
+    python launch_copilot.py --resume             # Interactive session picker
+    python launch_copilot.py --resume latest      # Resume most recent session
+    python launch_copilot.py --resume <id>        # Resume specific session
 """
 
 import asyncio
 import os
+import sys
+import shutil
+import subprocess
 import argparse
 from pathlib import Path
 from datetime import datetime
@@ -236,7 +240,7 @@ def list_sessions(store: GentlyStore, console: Console):
     console.print(f"\n[{theme.muted}]Use: python launch_copilot.py --resume <id>[/]")
 
 
-async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False):
+async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, classic: bool = False):
     theme = get_theme()
     console = Console()
 
@@ -373,8 +377,59 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     console.print(f"  [{theme.info}]{theme.icon_info}[/] Slash commands: [{theme.tool}]/embryos[/], [{theme.tool}]/status[/], [{theme.tool}]/help[/]")
     console.print(f"  [{theme.muted}]Log: {logger.log_file}[/]\n")
 
-    # Run CLI
-    await run_rich_cli(copilot, history_file=storage_dir / ".copilot_history")
+    # Decide which frontend to run
+    tui_dist = Path(__file__).parent / "gently" / "tui" / "dist" / "index.js"
+    use_tui = not classic and tui_dist.exists() and shutil.which("node")
+
+    if use_tui:
+        # Attach the copilot bridge to the viz server so the /ws/copilot
+        # endpoint can reach it.
+        from gently.agent.copilot_bridge import CopilotBridge
+        bridge = CopilotBridge(copilot)
+        if copilot.viz_server is not None:
+            copilot.viz_server.copilot_bridge = bridge
+
+        ws_url = "ws://localhost:8080/ws/copilot"
+        console.print(f"  [{theme.info}]{theme.icon_info}[/] Starting Ink TUI...\n")
+
+        # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
+        # takes over the terminal.
+        tui_proc = subprocess.Popen(
+            ["node", str(tui_dist), "--ws-url", ws_url],
+            stdin=sys.stdin,
+            stdout=sys.stdout,
+            stderr=sys.stderr,
+        )
+
+        try:
+            # Wait for TUI to exit (blocks the event loop in a thread so
+            # the asyncio loop stays responsive for the viz server).
+            exit_code = await asyncio.get_event_loop().run_in_executor(
+                None, tui_proc.wait
+            )
+        except KeyboardInterrupt:
+            tui_proc.terminate()
+            try:
+                tui_proc.wait(timeout=5)
+            except Exception:
+                pass
+        finally:
+            # Suppress noisy CancelledError from uvicorn during shutdown
+            import logging
+            logging.getLogger("uvicorn.error").setLevel(logging.CRITICAL)
+            logging.getLogger("uvicorn").setLevel(logging.CRITICAL)
+            # Cleanup: stop viz server gracefully
+            if copilot.viz_server is not None:
+                try:
+                    await copilot.viz_server.stop()
+                except (asyncio.CancelledError, Exception):
+                    pass  # Server already stopped or event loop closing
+    else:
+        if not classic and not tui_dist.exists():
+            console.print(f"  [{theme.warning}]{theme.icon_warning}[/] TUI not built (run: cd gently/tui && npm install && npm run build)")
+            console.print(f"  [{theme.muted}]Falling back to Rich CLI[/]\n")
+        # Classic Rich CLI
+        await run_rich_cli(copilot, history_file=storage_dir / ".copilot_history")
 
 
 if __name__ == "__main__":
@@ -391,6 +446,8 @@ if __name__ == "__main__":
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
     parser.add_argument("--resume", nargs="?", const="__PICK__", metavar="ID",
                         help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
+    parser.add_argument("--classic", action="store_true",
+                        help="Use the Rich CLI instead of the Ink TUI")
     args = parser.parse_args()
 
     # Determine resume mode
@@ -401,5 +458,6 @@ if __name__ == "__main__":
         offline=args.offline,
         show_sessions=args.sessions,
         resume_session=resume_id,
-        pick_session=pick_session
+        pick_session=pick_session,
+        classic=args.classic,
     ))
