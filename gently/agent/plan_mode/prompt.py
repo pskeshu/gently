@@ -2,7 +2,7 @@
 Plan mode system prompt.
 
 Configures Claude as a scientific experimental design collaborator
-rather than a microscope execution agent.
+rather than a live microscope control agent.
 """
 
 from typing import Optional

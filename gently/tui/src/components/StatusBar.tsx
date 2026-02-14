@@ -27,6 +27,7 @@ interface StatusBarProps {
   notification: { level: string; title: string; body?: string } | null;
   onClearNotification: () => void;
   wizardActive?: boolean;
+  copilotMode?: string;
 }
 
 function formatTokens(n: number): string {
@@ -46,6 +47,7 @@ export function StatusBar({
   notification,
   onClearNotification,
   wizardActive,
+  copilotMode,
 }: StatusBarProps) {
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);
@@ -146,10 +148,15 @@ export function StatusBar({
         ) : null}
       </Box>
 
-      {/* Right: version */}
-      {version ? (
-        <Text color={theme.muted}>gently v{version}</Text>
-      ) : null}
+      {/* Right: mode badge + version */}
+      <Box>
+        {copilotMode === "plan" ? (
+          <Text color={theme.accent} bold> plan </Text>
+        ) : null}
+        {version ? (
+          <Text color={theme.muted}>gently v{version}</Text>
+        ) : null}
+      </Box>
     </Box>
   );
 }

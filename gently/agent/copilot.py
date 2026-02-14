@@ -87,8 +87,8 @@ class MicroscopyCopilot:
         self.conversation_history: List[Dict] = []
         self.system_prompt: str = ""
 
-        # Mode: "execution" (default) or "plan" (experimental design)
-        self.mode: str = "execution"
+        # Mode: "live" (default) or "plan" (experimental design)
+        self.mode: str = "live"
 
         # Context store (agent's mind — set via set_context_store)
         self.context_store: Optional["ContextStore"] = None
@@ -316,13 +316,13 @@ class MicroscopyCopilot:
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
     def exit_plan_mode(self) -> str:
-        """Switch back to execution mode."""
-        if self.mode == "execution":
-            return "Already in execution mode."
-        self.mode = "execution"
+        """Switch back to live mode."""
+        if self.mode == "live":
+            return "Already in live mode."
+        self.mode = "live"
         self._update_system_prompt()
         logger.info("Exited plan mode")
-        return "Back to execution mode."
+        return "Back to live mode."
 
     def _get_tools_for_mode(self) -> list:
         """Get the Claude tool schemas for the current mode."""

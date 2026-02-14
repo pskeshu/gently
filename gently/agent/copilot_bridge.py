@@ -378,7 +378,7 @@ class CopilotBridge:
                     text = "Already in plan mode."
                     if summary:
                         text += f"\n\n{summary}"
-                    text += "\n\nUse /plan exit to return to execution mode."
+                    text += "\n\nUse /plan exit to return to live mode."
                     await send_fn({
                         "type": "command_result",
                         "command": "/plan",

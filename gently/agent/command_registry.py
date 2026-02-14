@@ -550,7 +550,7 @@ and track progress across sessions.
 Sub-commands:
   /plan          Enter plan mode (or show status if already in plan mode)
   /plan status   Show current plan progress
-  /plan exit     Return to execution mode""",
+  /plan exit     Return to live mode""",
         subcommands=[
             SubCommand(
                 name="status",
@@ -558,7 +558,7 @@ Sub-commands:
             ),
             SubCommand(
                 name="exit",
-                description="Return to execution mode",
+                description="Return to live mode",
             ),
         ],
         category=CommandCategory.PLANNING,

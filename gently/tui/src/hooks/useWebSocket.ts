@@ -44,6 +44,7 @@ export function useWebSocket(
               logPath: msg.log_path ?? "",
               resumed: msg.resumed ?? false,
               wizard: msg.wizard,
+              mode: msg.mode,
             });
             break;
 
@@ -86,6 +87,10 @@ export function useWebSocket(
             if (msg.action === "clear") {
               s.clearMessages();
               break;
+            }
+            // Update copilot mode when /plan command returns it
+            if (msg.content?.mode && typeof msg.content.mode === "string") {
+              s.setCopilotMode(msg.content.mode);
             }
             const text = msg.error
               ? `Error: ${msg.error}`

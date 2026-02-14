@@ -267,6 +267,7 @@ export function App({ wsUrl, store }: AppProps) {
         notification={state.notification}
         onClearNotification={handleClearNotification}
         wizardActive={state.wizardActive}
+        copilotMode={state.copilotMode}
       />
     </Box>
   );

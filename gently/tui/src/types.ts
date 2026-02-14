@@ -39,6 +39,8 @@ export interface ConnectedMessage {
   viz_url: string | null;
   log_path: string;
   resumed: boolean;
+  // Copilot mode
+  mode?: string;
   // Startup wizard metadata
   wizard?: WizardMeta;
 }

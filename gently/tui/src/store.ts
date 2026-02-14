@@ -70,6 +70,9 @@ export interface TuiState {
   // Whether copilot is currently streaming a response
   isStreaming: boolean;
 
+  // Copilot mode ("live" or "plan")
+  copilotMode: string;
+
   // Startup wizard
   wizardActive: boolean;
   wizardWeight: string;
@@ -94,6 +97,7 @@ export interface TuiActions {
     logPath: string;
     resumed: boolean;
     wizard?: WizardMeta;
+    mode?: string;
   }) => void;
   setDisconnected: () => void;
   setConnecting: () => void;
@@ -124,6 +128,7 @@ export interface TuiActions {
   cancelStream: () => void;
 
   setWizardActive: (active: boolean) => void;
+  setCopilotMode: (mode: string) => void;
 }
 
 export type TuiStore = TuiState & TuiActions;
@@ -183,6 +188,7 @@ export function createTuiStore() {
     theme: getTheme(),
     notification: null,
     isStreaming: false,
+    copilotMode: "live",
     wizardActive: false,
     wizardWeight: "none",
 
@@ -202,6 +208,7 @@ export function createTuiStore() {
         vizUrl: meta.vizUrl,
         logPath: meta.logPath,
         resumed: meta.resumed,
+        copilotMode: meta.mode ?? "live",
         wizardActive: meta.wizard?.wizard_needed ?? false,
         wizardWeight: meta.wizard?.conversation_weight ?? "none",
       }),
@@ -424,5 +431,6 @@ export function createTuiStore() {
       }),
 
     setWizardActive: (active) => set({ wizardActive: active }),
+    setCopilotMode: (mode) => set({ copilotMode: mode }),
   }));
 }
