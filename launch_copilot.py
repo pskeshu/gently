@@ -222,6 +222,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
     if copilot.viz_server is not None:
         copilot.viz_server.copilot_bridge = bridge
+        copilot.viz_server.set_context_store(context_store)
 
     ws_url = "ws://localhost:8080/ws/copilot"
 

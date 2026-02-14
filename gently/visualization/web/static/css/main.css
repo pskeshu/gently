@@ -225,6 +225,22 @@ body {
     gap: 1rem;
 }
 
+.header-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+    padding: 4px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+}
+.header-nav-link:hover {
+    color: var(--accent);
+    background: var(--bg-hover);
+}
+
 /* Presence indicators */
 .presence-container {
     display: flex;

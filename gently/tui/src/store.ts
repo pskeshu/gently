@@ -156,10 +156,43 @@ function commitActive(state: TuiState): {
     const isEmptyThinking =
       state.activeMessage.isThinking && !state.activeMessage.text;
     if (!isEmptyThinking) {
-      completed.push({ ...state.activeMessage, isStreaming: false });
+      // Dedup guard: skip if identical to the last completed message
+      // (prevents duplicate rendering from race conditions)
+      const last = completed[completed.length - 1];
+      const isDuplicate =
+        last &&
+        last.role === state.activeMessage.role &&
+        last.text === state.activeMessage.text &&
+        last.text !== "";
+      if (!isDuplicate) {
+        completed.push({ ...state.activeMessage, isStreaming: false });
+      }
     }
   }
   return { completedMessages: completed, activeMessage: null };
+}
+
+/** Extract a short summary from tool input for display. */
+function extractToolSummary(toolName: string, input: Record<string, unknown>): string {
+  // Choice picker — no summary needed
+  if (toolName === "ask_user_choice") return "";
+
+  // Look for common descriptive keys in priority order
+  const keys = ["query", "question", "description", "title", "campaign_id", "item_id", "shorthand"];
+  for (const key of keys) {
+    if (input[key] && typeof input[key] === "string") {
+      const val = input[key] as string;
+      // Truncate long values
+      return val.length > 60 ? val.slice(0, 57) + "..." : val;
+    }
+  }
+
+  // For tools with a "type" field, show it
+  if (input["type"] && typeof input["type"] === "string") {
+    return input["type"] as string;
+  }
+
+  return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -305,17 +338,19 @@ export function createTuiStore() {
         };
       }),
 
-    addToolStart: (toolName, _toolInput) =>
+    addToolStart: (toolName, toolInput) =>
       set((s) => {
         // Commit any active message, then set tool as active
         const { completedMessages } = commitActive(s);
+        const summary = extractToolSummary(toolName, toolInput);
         return {
           completedMessages,
           activeMessage: {
             id: nextId(),
             role: "tool",
-            text: `Running ${toolName}...`,
+            text: summary ? `${toolName} — ${summary}` : toolName,
             toolName,
+            toolSummary: summary || undefined,
             timestamp: Date.now(),
             isStreaming: true,
           },
@@ -329,6 +364,18 @@ export function createTuiStore() {
           ? { id: nextId(), role: "copilot", text: "", timestamp: Date.now(), isThinking: true }
           : null;
 
+        // Build display text: tool name + summary + meaningful duration
+        const isChoice = toolName === "ask_user_choice";
+        const buildText = (summary?: string) => {
+          let text = toolName;
+          if (summary) text += ` — ${summary}`;
+          // Only show duration if > 0.1s and not a choice picker (user wait time)
+          if (duration && duration > 0.1 && !isChoice) {
+            text += ` (${duration.toFixed(1)}s)`;
+          }
+          return text;
+        };
+
         // If active message is the matching tool, complete it
         if (
           s.activeMessage?.role === "tool" &&
@@ -336,10 +383,8 @@ export function createTuiStore() {
         ) {
           const finished: ChatEntry = {
             ...s.activeMessage,
-            text: duration
-              ? `${toolName} (${duration.toFixed(2)}s)`
-              : toolName,
-            toolDuration: duration,
+            text: buildText(s.activeMessage.toolSummary),
+            toolDuration: isChoice ? undefined : duration,
             isStreaming: false,
           };
           return {
@@ -352,11 +397,9 @@ export function createTuiStore() {
         completedMessages.push({
           id: nextId(),
           role: "tool",
-          text: duration
-            ? `${toolName} (${duration.toFixed(2)}s)`
-            : toolName,
+          text: buildText(),
           toolName,
-          toolDuration: duration,
+          toolDuration: isChoice ? undefined : duration,
           timestamp: Date.now(),
         });
         return { completedMessages, activeMessage: thinkingMessage };

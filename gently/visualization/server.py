@@ -113,6 +113,7 @@ class VisualizationServer:
         self.event_bus = event_bus
         self.sessions_dir = Path(sessions_dir)
         self.gently_store = gently_store  # GentlyStore for persistent volume/projection access
+        self.context_store = None  # ContextStore — set via set_context_store()
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -154,6 +155,10 @@ class VisualizationServer:
         # Server instance
         self._server = None
         self._server_task = None
+
+    def set_context_store(self, context_store) -> None:
+        """Set the ContextStore for campaign/plan data access."""
+        self.context_store = context_store
 
     def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> Optional[str]:
         """Resolve volume file path from timelapse tracker or GentlyStore."""

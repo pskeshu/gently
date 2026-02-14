@@ -67,24 +67,39 @@ export function MessageBubble({ entry, theme }: MessageBubbleProps) {
         </Box>
       );
 
-    case "tool":
+    case "tool": {
+      const name = entry.toolName ?? entry.text;
+      const summary = entry.toolSummary;
+      const dur = entry.toolDuration;
+      const showDuration = dur && dur > 0.1;
+
       return (
         <Box marginBottom={0} paddingLeft={2}>
           {entry.isStreaming ? (
             <Text>
               <Text color={theme.tool}>{"⠸ "}</Text>
               <Text color={theme.tool} dimColor>
-                {entry.text}
+                {name}
               </Text>
+              {summary ? (
+                <Text color={theme.muted} dimColor>{" — "}{summary}</Text>
+              ) : null}
             </Text>
           ) : (
             <Text>
               <Text color={theme.success}>{"● "}</Text>
-              <Text color={theme.muted}>{entry.text}</Text>
+              <Text color={theme.muted}>{name}</Text>
+              {summary ? (
+                <Text dimColor>{" — "}{summary}</Text>
+              ) : null}
+              {showDuration ? (
+                <Text dimColor>{` (${dur.toFixed(1)}s)`}</Text>
+              ) : null}
             </Text>
           )}
         </Box>
       );
+    }
 
     case "system":
       return (

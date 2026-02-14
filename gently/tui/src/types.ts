@@ -189,6 +189,7 @@ export interface ChatEntry {
   timestamp: number;
   toolName?: string;
   toolDuration?: number;
+  toolSummary?: string;
   isStreaming?: boolean;
   isThinking?: boolean;
 }
