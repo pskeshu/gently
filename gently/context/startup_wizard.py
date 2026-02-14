@@ -443,7 +443,11 @@ class StartupWizard:
         return None, None
 
     async def _extract(self, send_fn, response: str, topic: str):
-        """Run LLM extraction with progress feedback and error recovery."""
+        """Run LLM extraction silently — no acknowledgment message.
+
+        The _finish() method handles the wrap-up message after all
+        extraction steps are done.
+        """
         await self._think(send_fn)
         try:
             result = await process_onboarding_response(
@@ -453,40 +457,12 @@ class StartupWizard:
                 claude_client=self.claude_client,
                 session_id=self.session_id,
             )
-            # Generate a conversational acknowledgment
-            ack = await self._acknowledge(response, topic)
-            await send_fn({"type": "text", "text": ack or "Got it."})
+            # Close the thinking indicator without a message
             await send_fn({"type": "stream_end", "tokens": _empty_tokens()})
             return result
         except Exception as e:
             logger.warning(f"LLM extraction failed for {topic}: {e}")
-            await send_fn({"type": "text", "text": "Got it."})
             await send_fn({"type": "stream_end", "tokens": _empty_tokens()})
-            return None
-
-    async def _acknowledge(self, response: str, topic: str) -> str:
-        """Generate a brief conversational acknowledgment of what the user said."""
-        import asyncio
-
-        if not self.claude_client:
-            return None
-
-        prompt = (
-            f"You are a microscopy copilot doing onboarding. The researcher just "
-            f"described their {topic}:\n\n\"{response}\"\n\n"
-            f"Write a brief (1 sentence max) acknowledgment that shows you "
-            f"understood. Be warm but concise — this is a quick setup, not a "
-            f"long conversation. Don't ask follow-up questions."
-        )
-        try:
-            resp = await asyncio.to_thread(
-                self.claude_client.messages.create,
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=100,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            return resp.content[0].text.strip()
-        except Exception:
             return None
 
     async def _think(self, send_fn):
