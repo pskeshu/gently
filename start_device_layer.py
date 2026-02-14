@@ -62,8 +62,8 @@ The server provides:
     )
     parser.add_argument(
         "--config",
-        default="config.yml",
-        help="Path to config.yml (default: config.yml)"
+        default="config/config.yml",
+        help="Path to config.yml (default: config/config.yml)"
     )
 
     args = parser.parse_args()

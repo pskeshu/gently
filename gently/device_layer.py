@@ -56,7 +56,7 @@ class DeviceLayerServer:
     Provides HTTP API for plan submission and SAM detection.
     """
 
-    def __init__(self, config_path: str = "config.yml", sam_device: str = "cuda"):
+    def __init__(self, config_path: str = "config/config.yml", sam_device: str = "cuda"):
         self.config_path = config_path
         self.config = None
         self.core = None

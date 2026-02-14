@@ -112,7 +112,7 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False):
     # Load organism module from config
-    config_path = Path(__file__).parent / "config.yml"
+    config_path = Path(__file__).parent / "config" / "config.yml"
     if config_path.exists():
         with open(config_path) as f:
             config = yaml.safe_load(f) or {}
