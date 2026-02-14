@@ -50,6 +50,7 @@ export interface StreamEndMessage {
   type: "stream_end";
   tokens: TokenSnapshot;
   wizard_complete?: boolean;
+  mode?: string;
 }
 
 export interface TextChunk {

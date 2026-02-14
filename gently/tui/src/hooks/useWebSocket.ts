@@ -55,6 +55,9 @@ export function useWebSocket(
             if (msg.wizard_complete) {
               s.setWizardActive(false);
             }
+            if (msg.mode && typeof msg.mode === "string") {
+              s.setCopilotMode(msg.mode);
+            }
             break;
 
           case "thinking":

@@ -88,10 +88,11 @@ class CopilotBridge:
                     else:
                         chunk = await stream_iter.__anext__()
                 except StopAsyncIteration:
-                    # Stream finished — send token usage summary
+                    # Stream finished — send token usage summary + current mode
                     await send_fn({
                         "type": "stream_end",
                         "tokens": self._get_token_snapshot(),
+                        "mode": self.copilot.mode,
                     })
                     return
 
