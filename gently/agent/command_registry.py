@@ -540,17 +540,24 @@ Requires microscope connection and at least one registered embryo.""",
     # === Planning Commands ===
     registry.register(CommandDefinition(
         name="/campaign",
-        description="View campaigns and experimental plans",
-        help_text="""Browse campaigns and their experimental plans.
+        description="View or manage campaigns",
+        help_text="""Browse and manage campaigns and experimental plans.
 
 Usage:
-  /campaign          List all campaigns with progress summary
-  /campaign <id>     Show detailed view of a specific campaign with plan items
+  /campaign              List all campaigns with progress summary
+  /campaign <id>         Show detailed view of a specific campaign
+  /campaign delete <id>  Delete a campaign and all its plan items
 
 Use plan mode (/plan) to create and modify campaigns.""",
         aliases=["/campaigns"],
         positional_arg="campaign_id",
         positional_hint="ID",
+        subcommands=[
+            SubCommand(
+                name="delete",
+                description="Delete a campaign and its plan items",
+            ),
+        ],
         category=CommandCategory.PLANNING,
     ))
 

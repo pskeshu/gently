@@ -447,6 +447,57 @@ class ContextStore:
                 (status.value, now, campaign_id),
             )
 
+    def delete_campaign(self, campaign_id: str, cascade: bool = True) -> Dict[str, int]:
+        """
+        Delete a campaign and optionally its children and plan items.
+
+        Parameters
+        ----------
+        campaign_id : str
+            Campaign to delete.
+        cascade : bool
+            If True, also delete subcampaigns, plan items, and dependencies.
+
+        Returns
+        -------
+        dict
+            Counts of deleted records by type.
+        """
+        counts = {"campaigns": 0, "plan_items": 0, "dependencies": 0}
+
+        def _delete_recursive(cid: str):
+            if cascade:
+                # Delete children first
+                children = self.get_subcampaigns(cid)
+                for child in children:
+                    _delete_recursive(child.id)
+
+            # Delete plan item dependencies for items in this campaign
+            items = self.get_plan_items(campaign_id=cid)
+            for item in items:
+                r = self._conn.execute(
+                    "DELETE FROM plan_item_dependencies WHERE item_id = ? OR depends_on_id = ?",
+                    (item.id, item.id),
+                )
+                counts["dependencies"] += r.rowcount
+
+            # Delete plan items
+            r = self._conn.execute(
+                "DELETE FROM plan_items WHERE campaign_id = ?", (cid,),
+            )
+            counts["plan_items"] += r.rowcount
+
+            # Delete campaign
+            r = self._conn.execute(
+                "DELETE FROM campaigns WHERE id = ?", (cid,),
+            )
+            counts["campaigns"] += r.rowcount
+
+        with self._tx():
+            _delete_recursive(campaign_id)
+
+        return counts
+
     def get_subcampaigns(self, campaign_id: str) -> List[Campaign]:
         """Get direct children of a campaign."""
         rows = self._conn.execute(

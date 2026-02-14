@@ -344,12 +344,22 @@ class CopilotBridge:
             return
 
         if cmd == "/campaign" or cmd == "/campaigns" or cmd.startswith("/campaign "):
-            data = self._get_campaigns_data(command.strip())
-            await send_fn({
-                "type": "command_result",
-                "command": "/campaign",
-                "content": data,
-            })
+            # Check for /campaign delete <id>
+            parts = command.strip().split()
+            if len(parts) >= 3 and parts[1].lower() == "delete":
+                data = self._delete_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
+            else:
+                data = self._get_campaigns_data(command.strip())
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
             return
 
         if cmd == "/plan" or cmd.startswith("/plan "):
@@ -873,6 +883,32 @@ class CopilotBridge:
         except Exception:
             return 0
 
+    def _delete_campaign(self, campaign_id: str) -> dict:
+        """Delete a campaign by ID or shorthand."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+
+        # Resolve by shorthand if needed
+        campaign = cs.get_campaign(campaign_id)
+        if not campaign:
+            for c in cs.get_root_campaigns():
+                if c.shorthand and c.shorthand.lower() == campaign_id.lower():
+                    campaign = c
+                    break
+        if not campaign:
+            return {"text": f"Campaign '{campaign_id}' not found."}
+
+        label = campaign.shorthand or campaign.display_name
+        counts = cs.delete_campaign(campaign.id, cascade=True)
+        parts = []
+        if counts["campaigns"] > 0:
+            parts.append(f"{counts['campaigns']} campaign{'s' if counts['campaigns'] != 1 else ''}")
+        if counts["plan_items"] > 0:
+            parts.append(f"{counts['plan_items']} plan item{'s' if counts['plan_items'] != 1 else ''}")
+        detail = f" ({', '.join(parts)})" if parts else ""
+        return {"text": f"Deleted **{label}**{detail}."}
+
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""
         cs = getattr(self, "_context_store", None)
@@ -982,7 +1018,8 @@ class CopilotBridge:
                 for item in items:
                     icon = TYPE_ICONS.get(item.type.value, "📋")
                     mark = STATUS_MARKS.get(item.status.value, "?")
-                    lines.append(f"  {mark} {icon} {item.title}")
+                    short_id = item.id[:8]
+                    lines.append(f"  {mark} {icon} `{short_id}` {item.title}")
                     if item.imaging_spec and item.imaging_spec.strain:
                         spec = item.imaging_spec
                         details = []
@@ -1001,7 +1038,8 @@ class CopilotBridge:
             for item in items:
                 icon = TYPE_ICONS.get(item.type.value, "📋")
                 mark = STATUS_MARKS.get(item.status.value, "?")
-                lines.append(f"  {mark} {icon} {item.title}")
+                short_id = item.id[:8]
+                lines.append(f"  {mark} {icon} `{short_id}` {item.title}")
 
         # Next actions
         if status["next_actions"]:
