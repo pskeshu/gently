@@ -23,8 +23,12 @@ import argparse
 from pathlib import Path
 from datetime import datetime
 
+import yaml
+
 from gently.agent import MicroscopyCopilot, QueueServerClient
 from gently.agent.logger import CopilotLogger
+from gently.organisms import load_organism
+from gently.hardware import load_hardware
 from gently.store import GentlyStore
 
 
@@ -107,6 +111,16 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False):
+    # Load organism module from config
+    config_path = Path(__file__).parent / "config.yml"
+    if config_path.exists():
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        config = {}
+    load_organism(config.get("organism", "celegans"))
+    load_hardware(config.get("hardware", "dispim"))
+
     # Storage directory (unified with GentlyStore)
     storage_dir = Path("D:/Gently2")
     storage_dir.mkdir(exist_ok=True)

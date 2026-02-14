@@ -1,2 +1,4 @@
+organism: "celegans"
+hardware: "dispim"
 mmconfig: "MMConfig_tracking_screening.cfg"
 mmdirectory: "C:/Program Files/Micro-Manager-1.4"

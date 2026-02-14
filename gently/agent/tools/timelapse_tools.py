@@ -417,13 +417,17 @@ def enable_pre_hatching_speedup(
     if err:
         return err
 
-    # Add speedup rule for 3fold stage (uses perception system)
-    orchestrator.add_pre_hatching_speedup(fast_interval_seconds)
+    # Add speedup rule for pre-terminal stage (uses perception system + organism config)
+    orchestrator.add_pre_terminal_speedup(fast_interval_seconds)
+
+    from gently.organisms import get_organism
+    organism = get_organism()
+    trigger_stage = organism.PRE_TERMINAL_SPEEDUP_STAGE
 
     return (
         f"Enabled pre-hatching speedup:\n"
         f"  - Perception system will detect developmental stages\n"
-        f"  - When 3-fold stage detected, interval will change to {fast_interval_seconds}s\n"
+        f"  - When {trigger_stage} stage detected, interval will change to {fast_interval_seconds}s\n"
         f"  - This helps capture hatching at high temporal resolution"
     )
 

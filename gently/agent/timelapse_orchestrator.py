@@ -20,6 +20,7 @@ import traceback
 
 from ..core import EventType, get_event_bus
 from .error_log import GlobalErrorLog
+from gently.organisms import get_organism
 
 if TYPE_CHECKING:
     from ..store import GentlyStore
@@ -33,11 +34,13 @@ logger = logging.getLogger(__name__)
 class StopConditionType(Enum):
     """Types of stop conditions for embryo acquisition"""
     MANUAL = "manual"                    # Stop only when user says
-    HATCHING = "hatching"                # Stop when hatching detected
-    COMMA_STAGE = "comma_stage"          # Stop at comma stage
+    STAGE_BASED = "stage_based"          # Stop when any of target stages reached
     FIXED_TIMEPOINTS = "fixed_timepoints"  # Stop after N timepoints
     DURATION = "duration"                # Stop after X hours
-    ALL_HATCHED = "all_hatched"          # Stop when all embryos hatch
+    ALL_TERMINAL = "all_terminal"        # Stop when all embryos reach terminal stage
+    # Legacy aliases (kept for backward compatibility with serialized data)
+    HATCHING = "hatching"
+    COMMA_STAGE = "comma_stage"
 
 
 @dataclass
@@ -92,6 +95,7 @@ class StopCondition:
     """
     condition_type: StopConditionType
     value: Any = None  # e.g., number of timepoints, hours, etc.
+    target_stages: Optional[Set[str]] = None  # Stages that satisfy STAGE_BASED condition
     confirm_timepoints: int = 0  # Extra timepoints to acquire after detection
     additional_conditions: List['StopCondition'] = field(default_factory=list)
 
@@ -132,14 +136,17 @@ class StopCondition:
             confirm_suffix = f"+{cond.confirm_timepoints}tp" if cond.confirm_timepoints > 0 else ""
             if cond.condition_type == StopConditionType.MANUAL:
                 return "manual"
-            elif cond.condition_type == StopConditionType.HATCHING:
-                return f"hatching{confirm_suffix}"
-            elif cond.condition_type == StopConditionType.COMMA_STAGE:
-                return f"comma_stage{confirm_suffix}"
+            elif cond.condition_type in (StopConditionType.STAGE_BASED,
+                                         StopConditionType.HATCHING,
+                                         StopConditionType.COMMA_STAGE):
+                stages_str = ",".join(sorted(cond.target_stages)) if cond.target_stages else "?"
+                return f"stages({stages_str}){confirm_suffix}"
             elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
                 return f"{cond.value} timepoints"
             elif cond.condition_type == StopConditionType.DURATION:
                 return f"{cond.value}h duration"
+            elif cond.condition_type == StopConditionType.ALL_TERMINAL:
+                return "all_terminal"
             else:
                 return str(cond.condition_type.value)
 
@@ -152,26 +159,30 @@ class StopCondition:
     @classmethod
     def until_hatching(cls, confirm_timepoints: int = 0) -> 'StopCondition':
         """
-        Stop when hatching is detected.
+        Stop when hatching is detected (backward-compatible convenience method).
 
-        Parameters
-        ----------
-        confirm_timepoints : int
-            Extra timepoints to acquire after detection to confirm (default 0)
+        Uses the organism module's STOP_CONDITIONS["hatching"] target stages.
         """
-        return cls(StopConditionType.HATCHING, confirm_timepoints=confirm_timepoints)
+        organism = get_organism()
+        return cls(
+            StopConditionType.STAGE_BASED,
+            target_stages=organism.STOP_CONDITIONS["hatching"],
+            confirm_timepoints=confirm_timepoints,
+        )
 
     @classmethod
     def until_comma(cls, confirm_timepoints: int = 0) -> 'StopCondition':
         """
-        Stop when comma stage is detected.
+        Stop when comma stage is detected (backward-compatible convenience method).
 
-        Parameters
-        ----------
-        confirm_timepoints : int
-            Extra timepoints to acquire after detection to confirm (default 0)
+        Uses the organism module's STOP_CONDITIONS["comma"] target stages.
         """
-        return cls(StopConditionType.COMMA_STAGE, confirm_timepoints=confirm_timepoints)
+        organism = get_organism()
+        return cls(
+            StopConditionType.STAGE_BASED,
+            target_stages=organism.STOP_CONDITIONS["comma"],
+            confirm_timepoints=confirm_timepoints,
+        )
 
     @classmethod
     def fixed_timepoints(cls, n: int) -> 'StopCondition':
@@ -222,6 +233,8 @@ class StopCondition:
         Parse a stop condition specification string.
 
         Supports composite conditions with | separator.
+        Organism-defined stop condition names (from STOP_CONDITIONS dict)
+        are resolved automatically.
 
         Parameters
         ----------
@@ -248,10 +261,6 @@ class StopCondition:
 
             if s == 'manual':
                 return cls.manual()
-            elif s == 'hatching':
-                return cls.until_hatching(confirm_timepoints=confirm_timepoints)
-            elif s in ('comma', 'comma_stage'):
-                return cls.until_comma(confirm_timepoints=confirm_timepoints)
             elif s.startswith('timepoints:'):
                 n = int(s.split(':')[1])
                 return cls.fixed_timepoints(n)
@@ -263,7 +272,21 @@ class StopCondition:
                 hours = float(hours_str)
                 return cls.duration_hours(hours)
             else:
-                raise ValueError(f"Unknown stop condition: {s}")
+                # Check organism-defined stop conditions
+                organism = get_organism()
+                # Normalize: "comma_stage" -> "comma"
+                lookup = s.replace("_stage", "")
+                if lookup in organism.STOP_CONDITIONS:
+                    return cls(
+                        StopConditionType.STAGE_BASED,
+                        target_stages=organism.STOP_CONDITIONS[lookup],
+                        confirm_timepoints=confirm_timepoints,
+                    )
+                raise ValueError(
+                    f"Unknown stop condition: {s}. "
+                    f"Available: manual, timepoints:N, duration:Xh, "
+                    f"{', '.join(organism.STOP_CONDITIONS.keys())}"
+                )
 
         parts = spec.split('|')
         conditions = [_parse_single(p) for p in parts]
@@ -543,23 +566,19 @@ class TimelapseOrchestrator:
         """Parse stop condition string into StopCondition object"""
         condition = condition.lower().strip()
 
-        if condition == "manual":
-            return StopCondition.manual()
-        elif condition == "hatching" or condition == "until_hatching":
-            return StopCondition.until_hatching()
-        elif condition == "comma" or condition == "comma_stage" or condition == "until_comma":
-            return StopCondition.until_comma()
-        elif condition.startswith("timepoints:"):
-            n = int(condition.split(":")[1])
-            return StopCondition.fixed_timepoints(n)
-        elif condition.startswith("duration:"):
-            h = float(condition.split(":")[1].rstrip("h"))
-            return StopCondition.duration_hours(h)
-        elif value is not None and condition == "fixed_timepoints":
+        # Handle legacy keyword forms
+        if condition in ("until_hatching",):
+            condition = "hatching"
+        elif condition in ("until_comma",):
+            condition = "comma"
+        elif condition == "fixed_timepoints" and value is not None:
             return StopCondition.fixed_timepoints(int(value))
-        elif value is not None and condition == "duration":
+        elif condition == "duration" and value is not None:
             return StopCondition.duration_hours(float(value))
-        else:
+
+        try:
+            return StopCondition.parse(condition)
+        except ValueError:
             logger.warning(f"Unknown stop condition '{condition}', using manual")
             return StopCondition.manual()
 
@@ -853,43 +872,54 @@ class TimelapseOrchestrator:
             if elapsed_hours >= cond.value:
                 return f"reached {cond.value}h duration"
 
-        elif cond.condition_type == StopConditionType.HATCHING:
-            # Check perception system for hatching/hatched status
-            if self.perception_manager:
-                session = self.perception_manager.get_session(embryo_state.embryo_id)
-                if session and session.is_complete():
-                    return "hatching complete (perception)"
+        elif cond.condition_type in (StopConditionType.STAGE_BASED,
+                                      StopConditionType.HATCHING,
+                                      StopConditionType.COMMA_STAGE):
+            # Generic stage-based stop: check if current stage is in target set
+            target = cond.target_stages or set()
 
-            # Fallback: check legacy hatching_status (for manual marking)
-            embryo = self.experiment.embryos.get(embryo_state.embryo_id)
-            if embryo:
-                hatched_via_status = embryo.hatching_status.get('hatched', False)
-                if hatched_via_status:
-                    return "hatching detected (manual)"
-
-        elif cond.condition_type == StopConditionType.COMMA_STAGE:
-            # Check perception system for comma stage
+            # Check perception system for current stage
             if self.perception_manager:
                 session = self.perception_manager.get_session(embryo_state.embryo_id)
                 if session:
                     current_stage = session.get_current_stage()
-                    # Comma or later stages (embryo has passed comma)
-                    if current_stage in ('comma', '1.5fold', '2fold', '3fold', 'hatched'):
-                        # First time detecting comma - record the timepoint
+                    if current_stage and current_stage in target:
+                        # First time detecting target stage — record the timepoint
                         if embryo_state.detection_triggered_at is None:
                             embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
-                            embryo_state.detection_type = "comma_stage"
+                            embryo_state.detection_type = f"stage:{current_stage}"
                             logger.info(
-                                f"Comma stage detected for {embryo_state.embryo_id} at t{embryo_state.timepoints_acquired}, "
+                                f"Target stage '{current_stage}' detected for {embryo_state.embryo_id} "
+                                f"at t{embryo_state.timepoints_acquired}, "
                                 f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
                             )
 
                         # Check if we've acquired enough confirmation timepoints
-                        timepoints_since_detection = embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                        timepoints_since_detection = (
+                            embryo_state.timepoints_acquired - embryo_state.detection_triggered_at
+                        )
                         if timepoints_since_detection >= cond.confirm_timepoints:
                             if cond.confirm_timepoints > 0:
-                                return f"comma stage detected + {cond.confirm_timepoints} confirmation timepoints"
-                            return f"comma stage detected (current: {current_stage})"
+                                return (
+                                    f"stage '{current_stage}' detected + "
+                                    f"{cond.confirm_timepoints} confirmation timepoints"
+                                )
+                            return f"target stage reached (current: {current_stage})"
+
+                    # Also check session.is_complete() for hatching-type conditions
+                    if session.is_complete():
+                        organism = get_organism()
+                        if target & organism.TERMINAL_STAGES:
+                            return "terminal stage complete (perception)"
+
+            # Fallback: check legacy hatching_status (for manual marking)
+            organism = get_organism()
+            if target & organism.TERMINAL_STAGES:
+                embryo = self.experiment.embryos.get(embryo_state.embryo_id)
+                if embryo:
+                    hatched_via_status = embryo.hatching_status.get('hatched', False)
+                    if hatched_via_status:
+                        return "terminal stage detected (manual)"
 
         return None
 
@@ -1234,21 +1264,27 @@ class TimelapseOrchestrator:
         )
         self.add_interval_rule(rule)
 
-    def add_pre_hatching_speedup(self, fast_interval: float = 30.0):
+    def add_pre_terminal_speedup(self, fast_interval: float = 30.0):
         """
-        Add automatic speedup when 3fold stage is detected
+        Add automatic speedup when the organism's pre-terminal stage is detected.
 
-        This is a convenience method for the common "speed up near hatching" use case.
-        When the perception system detects 3fold stage, the interval is reduced to
-        capture hatching at higher temporal resolution.
+        Uses get_organism().PRE_TERMINAL_SPEEDUP_STAGE to determine the trigger
+        stage (e.g., "pretzel" for C. elegans).
 
         Parameters
         ----------
         fast_interval : float
-            Interval to use after 3fold detection (default 30s)
+            Interval to use after pre-terminal stage detection (default 30s)
         """
-        self.add_speedup_on_stage("3fold", fast_interval)
-        logger.info(f"Added pre-hatching speedup: {fast_interval}s after 3fold detection")
+        organism = get_organism()
+        stage = organism.PRE_TERMINAL_SPEEDUP_STAGE
+        self.add_speedup_on_stage(stage, fast_interval)
+        logger.info(f"Added pre-terminal speedup: {fast_interval}s after {stage} detection")
+
+    # Backward-compatible alias
+    def add_pre_hatching_speedup(self, fast_interval: float = 30.0):
+        """Alias for add_pre_terminal_speedup (backward compatibility)."""
+        self.add_pre_terminal_speedup(fast_interval)
 
     def _check_interval_rules(
         self,

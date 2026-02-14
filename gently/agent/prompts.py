@@ -4,176 +4,14 @@ System prompts and context builders for the Microscopy Copilot
 
 from typing import Dict, List
 from .state import ExperimentState
+from gently.organisms import get_organism
+from gently.hardware import get_hardware
 
+# Import biology text from organism module (canonical source)
+from gently.organisms.celegans.biology import BIOLOGY_KNOWLEDGE as CELEGANS_BIOLOGY
 
-# C. elegans developmental biology knowledge
-CELEGANS_BIOLOGY = """
-# C. elegans Embryonic Development
-
-C. elegans embryogenesis is highly stereotyped and invariant, proceeding through well-defined stages:
-
-## Key Developmental Stages
-
-1. **One-cell stage (0-40 min)**: Fertilized egg with asymmetric first division
-   - Anterior-posterior axis established
-   - P granules segregate to posterior
-
-2. **2-cell stage (~40-55 min)**: Unequal division into AB (anterior) and P1 (posterior)
-   - AB larger, divides first
-   - P1 smaller, divides ~2 min after AB
-
-3. **4-cell stage (~55-80 min)**: AB divides into ABa/ABp, P1 into EMS/P2
-   - Characteristic diamond shape
-   - Cell fate determination begins
-
-4. **8-cell stage (~80-105 min)**: Continued divisions
-   - EMS divides into MS and E (gut precursor)
-   - P2 divides into C and P3
-
-5. **Gastrulation (~210 min)**: Internalization of cells
-   - E cells (gut) move inward
-   - Embryo begins elongation
-
-6. **Comma stage (~400 min)**: Embryo curves into comma shape
-   - Major morphogenesis
-   - Organ systems forming
-
-7. **1.5-fold stage (~450 min)**: Elongation continues
-   - Embryo 1.5x length of eggshell
-
-8. **2-fold stage (~500 min)**: Further elongation
-   - Embryo 2x length, begins folding
-
-9. **3-fold stage (~550 min)**: Near full elongation
-   - Embryo 3x length, tightly folded
-   - Movement begins
-
-10. **Hatching (~800 min, 13-14 hours at 20°C)**: L1 larva emerges
-    - Breach of eggshell (vitelline membrane)
-    - Active pushing and wriggling
-    - Takes 5-30 minutes to fully emerge
-
-## Observable Features for AI Analysis
-
-- **Cell division timing**: Precise intervals between divisions
-- **Cell positions**: Stereotyped spatial arrangement
-- **Eggshell integrity**: Clear boundary until hatching
-- **Morphology changes**: Spherical → comma → elongated
-- **Movement**: Increases dramatically after 3-fold stage
-- **Hatching**: Visible breach, emerging larva
-
-## Temperature Dependence
-
-Development rate is temperature-dependent:
-- 20°C: ~14 hours to hatching (standard)
-- 25°C: ~10 hours to hatching (faster)
-- 15°C: ~24 hours to hatching (slower)
-
-## Common Phenotypes to Detect
-
-- **Normal development**: Follows timeline above
-- **Delayed**: Slower progression through stages
-- **Arrest**: Development stops at specific stage
-- **Abnormal morphology**: Incorrect cell divisions, elongation defects
-- **Death**: Loss of cell boundaries, cytoplasmic blebbing
-"""
-
-
-# diSPIM hardware capabilities
-DISPIM_HARDWARE = """
-# diSPIM Microscopy System
-
-Dual-view Inverted Selective Plane Illumination Microscopy (diSPIM) for high-speed 3D imaging.
-
-## System Components
-
-### 1. DiSPIMVolumeScanner
-Synchronized galvo mirrors, piezo stage, and camera for 3D volume acquisition.
-
-**Capabilities:**
-- Acquires 3D volumes by scanning light sheet through sample
-- Hardware-triggered for precise synchronization
-- Speed: ~20-50 slices per second
-
-**Parameters:**
-- `num_slices`: Number of Z planes to acquire (range: 10-200, typical: 50-100)
-- `exposure_ms`: Camera exposure time (range: 5-100ms, typical: 10ms)
-- `galvo_amplitude`: Light sheet width (typically 8° for full FOV)
-- `piezo_amplitude`: Z-range in microns (calibrated per embryo)
-
-**Typical volume acquisition time:**
-- 50 slices @ 10ms exposure = ~2.5 seconds
-- 100 slices @ 10ms exposure = ~5 seconds
-
-### 2. DiSPIMXYStage
-Motorized stage for multi-position imaging.
-
-**Capabilities:**
-- Position multiple embryos across large area
-- Precision: ~1 micron
-- Speed: ~5 mm/s
-
-**Limits:**
-- X: 500 - 2500 μm
-- Y: -1000 - 1000 μm
-
-**Safety:** Always check positions are within limits to prevent collisions!
-
-### 3. DiSPIMPiezo
-Fast Z-positioning for light sheet.
-
-**Capabilities:**
-- Synchronized with galvo for volumetric scanning
-- Response time: <1ms
-
-**Limits:**
-- Range: ±200 μm from center
-
-### 4. DiSPIMLaserControl
-488nm and 561nm lasers for fluorescence.
-
-**Important:**
-- ALWAYS turn off lasers between acquisitions to prevent photobleaching!
-- Laser exposure is cumulative - minimize total dose
-
-## Safety Limits and Best Practices
-
-### Photobleaching Prevention
-- Use minimum laser power needed
-- Minimize exposure time
-- Maximize intervals between timepoints
-- Turn off lasers immediately after acquisition
-
-### Sample Health
-- Maximum continuous imaging: ~2 hours recommended
-- If embryo development appears delayed, reduce imaging frequency
-- Watch for signs of photodamage: developmental arrest, blebbing
-
-### Hardware Constraints
-- Minimum interval between volumes: 10 seconds (hardware settle time)
-- Stage movement takes ~0.5 seconds, add settling time
-- Don't exceed stage limits (samples can collide with objectives!)
-
-### Typical Acquisition Strategies
-
-**Normal Development Monitoring:**
-- Interval: 2-5 minutes
-- Slices: 50-80 (covers full embryo)
-- Exposure: 10ms
-- Duration: Until hatching (~14 hours)
-
-**High Temporal Resolution (pre-hatching):**
-- Interval: 30-60 seconds
-- Slices: 80-100 (embryo elongates!)
-- Exposure: 8-10ms
-- Duration: 30-60 minutes
-
-**Low Photobleaching (long-term):**
-- Interval: 5-10 minutes
-- Slices: 40-60
-- Exposure: 10ms
-- Duration: 24+ hours
-"""
+# Import hardware description from hardware module (canonical source)
+from gently.hardware.dispim.description import HARDWARE_DESCRIPTION as DISPIM_HARDWARE
 
 
 # Interactive choice guidance
@@ -429,11 +267,26 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     else:
         context_section = ""
 
-    return f"""You are a Microscopy Copilot - an AI scientific collaborator assisting with diSPIM
-microscopy experiments on C. elegans embryos.
+    # Pull organism-specific content from the active organism module
+    organism = get_organism()
+    organism_display = organism.ORGANISM_DISPLAY_NAME
+    sample_plural = organism.SAMPLE_TERM_PLURAL
+    biology_knowledge = organism.BIOLOGY_KNOWLEDGE
+
+    # Build stop conditions list from organism module
+    stop_condition_names = list(organism.STOP_CONDITIONS.keys())
+    detector_names = list(organism.get_detector_presets().keys())
+
+    # Pull hardware description from the active hardware module
+    hardware = get_hardware()
+    hardware_description = hardware.HARDWARE_DESCRIPTION
+    hardware_display = hardware.HARDWARE_DISPLAY_NAME
+
+    return f"""You are a Microscopy Copilot - an AI scientific collaborator assisting with {hardware_display}
+microscopy experiments on {organism_display} {sample_plural}.
 
 Your role is to:
-1. Understand developmental biology and interpret embryo images
+1. Understand developmental biology and interpret {sample_plural} images
 2. Generate valid Bluesky acquisition plans from scientific goals
 3. Monitor experiments in real-time and make intelligent decisions
 4. Communicate clearly with researchers about observations and actions
@@ -441,9 +294,9 @@ Your role is to:
 
 {connection_section}
 
-{CELEGANS_BIOLOGY}
+{biology_knowledge}
 
-{DISPIM_HARDWARE}
+{hardware_description}
 
 {CV_SUBAGENT}
 
