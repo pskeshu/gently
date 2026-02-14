@@ -79,7 +79,7 @@ The architecture is designed for generalization to other microscopy platforms.
 # Clone and install Python dependencies
 git clone https://github.com/pskeshu/gently.git
 cd gently
-pip install -r requirements_copilot.txt
+pip install -r requirements.txt
 
 # Build the TUI (one-time, rebuild after TUI code changes)
 cd gently/tui
@@ -113,16 +113,20 @@ python launch_copilot.py --sessions
 
 ```
 gently/
-├── agent/              # Copilot and tool registry
+├── agent/              # Copilot, tool registry, timelapse orchestrator
 │   ├── perception/     # VLM-based perception with reasoning traces
+│   ├── plan_mode/      # Campaign planning tools
 │   └── tools/          # Tool definitions for the copilot
-├── core/               # Event bus, service registry
+├── context/            # Persistent agent memory (learnings, campaigns, plan items)
+├── organisms/          # Organism modules (C. elegans stages, biology, detectors)
+├── hardware/           # Hardware modules (diSPIM description)
+├── tui/                # Ink terminal UI (Node.js / React)
+├── visualization/      # Web-based monitoring and viz server
 ├── store.py            # GentlyStore — unified data storage (SQLite + files)
-├── imaging.py          # Projection and image compression utilities
+├── device_layer.py     # Device layer server (MMCore + Bluesky + SAM)
 ├── devices.py          # Ophyd device wrappers with safety limits
 ├── plans.py            # Bluesky plans for acquisition workflows
-├── dataset/            # Dataset exploration and annotation
-└── visualization/      # Web-based monitoring
+└── imaging.py          # Projection and image compression utilities
 ```
 
 ## Contributing
