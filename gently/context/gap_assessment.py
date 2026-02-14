@@ -188,6 +188,13 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
     else:
         readiness_score += 0.25
 
+    # --- Plan items (active experimental plans) ---
+    for campaign in campaigns:
+        plan_status = context_store.get_plan_status(campaign.id)
+        if plan_status["total"] > 0:
+            readiness_score += 0.05
+            break
+
     # --- Expectations and watchpoints (indicators of engaged state) ---
     expectations = context_store.get_pending_expectations()
     watchpoints = context_store.get_active_watchpoints()

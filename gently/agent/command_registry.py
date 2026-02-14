@@ -18,6 +18,7 @@ class CommandCategory(Enum):
     NAVIGATION = auto()    # /quit, /clear, /help
     INSPECTION = auto()    # /status, /detectors, /embryos, /timelapse, /timeline
     SESSION = auto()       # /sessions, /resume, /save, /import-embryos
+    PLANNING = auto()      # /plan
     APPEARANCE = auto()    # /theme, /history, /tokens
     DIAGNOSTICS = auto()   # /benchmark
 
@@ -174,6 +175,7 @@ class CommandRegistry:
             CommandCategory.NAVIGATION: "Navigation",
             CommandCategory.INSPECTION: "Inspection",
             CommandCategory.SESSION: "Session",
+            CommandCategory.PLANNING: "Planning",
             CommandCategory.APPEARANCE: "Appearance",
             CommandCategory.DIAGNOSTICS: "Diagnostics",
         }
@@ -533,6 +535,33 @@ Requires microscope connection and at least one registered embryo.""",
             ),
         ],
         category=CommandCategory.DIAGNOSTICS,
+    ))
+
+    # === Planning Commands ===
+    registry.register(CommandDefinition(
+        name="/plan",
+        description="Switch to plan mode for experimental design",
+        help_text="""Enter plan mode to design experiments with the copilot.
+
+In plan mode, the copilot acts as a scientific collaborator — helping
+design campaigns, choose strains, set imaging parameters, plan controls,
+and track progress across sessions.
+
+Sub-commands:
+  /plan          Enter plan mode (or show status if already in plan mode)
+  /plan status   Show current plan progress
+  /plan exit     Return to execution mode""",
+        subcommands=[
+            SubCommand(
+                name="status",
+                description="Show current plan progress",
+            ),
+            SubCommand(
+                name="exit",
+                description="Return to execution mode",
+            ),
+        ],
+        category=CommandCategory.PLANNING,
     ))
 
     registry.register(CommandDefinition(

@@ -19,6 +19,11 @@ from .model import (
     SessionIntent,
     PlannedSession,
     PlannedSessionStatus,
+    PlanItem,
+    PlanItemStatus,
+    PlanItemType,
+    ImagingSpec,
+    BenchSpec,
     Learning,
     Observation,
     Expectation,
@@ -186,6 +191,36 @@ CREATE TABLE IF NOT EXISTS questions (
     resolved_at TEXT
 );
 
+-- Plan items: tasks in an experimental plan
+CREATE TABLE IF NOT EXISTS plan_items (
+    id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    description TEXT,
+    status TEXT DEFAULT 'planned',
+    outcome TEXT,
+    spec TEXT,
+    inherit_from TEXT,
+    planned_session_id TEXT,
+    session_id TEXT,
+    phase_order INTEGER DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+    FOREIGN KEY (planned_session_id) REFERENCES planned_sessions(id),
+    FOREIGN KEY (inherit_from) REFERENCES plan_items(id)
+);
+
+-- Plan item dependencies
+CREATE TABLE IF NOT EXISTS plan_item_dependencies (
+    item_id TEXT NOT NULL,
+    depends_on_id TEXT NOT NULL,
+    PRIMARY KEY (item_id, depends_on_id),
+    FOREIGN KEY (item_id) REFERENCES plan_items(id),
+    FOREIGN KEY (depends_on_id) REFERENCES plan_items(id)
+);
+
 -- Agent state
 CREATE TABLE IF NOT EXISTS agent_state (
     key TEXT PRIMARY KEY,
@@ -206,6 +241,12 @@ CREATE INDEX IF NOT EXISTS idx_planned_sessions_date ON planned_sessions(schedul
 CREATE INDEX IF NOT EXISTS idx_planned_sessions_status ON planned_sessions(status);
 CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_ps ON planned_session_campaigns(planned_session_id);
 CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_c ON planned_session_campaigns(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_plan_items_campaign ON plan_items(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_plan_items_status ON plan_items(status);
+CREATE INDEX IF NOT EXISTS idx_plan_items_type ON plan_items(type);
+CREATE INDEX IF NOT EXISTS idx_plan_items_inherit ON plan_items(inherit_from);
+CREATE INDEX IF NOT EXISTS idx_plan_item_deps_item ON plan_item_dependencies(item_id);
+CREATE INDEX IF NOT EXISTS idx_plan_item_deps_dep ON plan_item_dependencies(depends_on_id);
 """
 
 
@@ -254,6 +295,8 @@ class ContextStore:
         Returns a dict of table_name → rows_deleted.
         """
         tables = [
+            "plan_item_dependencies",
+            "plan_items",
             "planned_session_campaigns",
             "session_campaigns",
             "planned_sessions",
@@ -861,6 +904,372 @@ class ContextStore:
             status=PlannedSessionStatus(d.get("status", "planned")),
             session_id=d.get("session_id"),
             campaign_ids=campaign_ids,
+            created_at=datetime.fromisoformat(d["created_at"]),
+            updated_at=datetime.fromisoformat(d["updated_at"]),
+        )
+
+    # ==================================================================
+    # Plan Items (experimental plan)
+    # ==================================================================
+
+    def create_plan_item(
+        self,
+        campaign_id: str,
+        type: str,
+        title: str,
+        description: Optional[str] = None,
+        spec: Optional[Dict] = None,
+        inherit_from: Optional[str] = None,
+        planned_session_id: Optional[str] = None,
+        phase_order: int = 0,
+        depends_on: Optional[List[str]] = None,
+        item_id: Optional[str] = None,
+    ) -> str:
+        """Create a plan item. Returns its ID."""
+        pid = item_id or self._gen_id()
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT INTO plan_items "
+                "(id, campaign_id, type, title, description, spec, inherit_from, "
+                " planned_session_id, phase_order, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
+                (
+                    pid, campaign_id, type, title, description,
+                    json.dumps(spec) if spec else None,
+                    inherit_from, planned_session_id, phase_order, now, now,
+                ),
+            )
+            if depends_on:
+                for dep_id in depends_on:
+                    self._conn.execute(
+                        "INSERT OR IGNORE INTO plan_item_dependencies "
+                        "(item_id, depends_on_id) VALUES (?, ?)",
+                        (pid, dep_id),
+                    )
+        logger.info(f"Created plan item {pid} [{type}]: {title}")
+        return pid
+
+    def get_plan_item(self, item_id: str) -> Optional[PlanItem]:
+        """Get a specific plan item."""
+        row = self._conn.execute(
+            "SELECT * FROM plan_items WHERE id = ?", (item_id,)
+        ).fetchone()
+        return self._row_to_plan_item(row) if row else None
+
+    def get_plan_items(
+        self,
+        campaign_id: Optional[str] = None,
+        status: Optional[str] = None,
+        type: Optional[str] = None,
+        include_children: bool = False,
+    ) -> List[PlanItem]:
+        """
+        Query plan items with optional filters.
+
+        Parameters
+        ----------
+        campaign_id : str, optional
+            Filter to items in this campaign. If include_children is True,
+            also includes items in child campaigns.
+        status : str, optional
+            Filter by status.
+        type : str, optional
+            Filter by type (imaging, bench, etc.).
+        include_children : bool
+            If True, include items from child campaigns of campaign_id.
+        """
+        if campaign_id and include_children:
+            # Get all campaign IDs in the tree
+            campaign_ids = self._get_campaign_tree_ids(campaign_id)
+            placeholders = ",".join("?" * len(campaign_ids))
+            query = f"SELECT * FROM plan_items WHERE campaign_id IN ({placeholders})"
+            params: list = list(campaign_ids)
+        elif campaign_id:
+            query = "SELECT * FROM plan_items WHERE campaign_id = ?"
+            params = [campaign_id]
+        else:
+            query = "SELECT * FROM plan_items WHERE 1=1"
+            params = []
+
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if type:
+            query += " AND type = ?"
+            params.append(type)
+
+        query += " ORDER BY phase_order, created_at"
+        rows = self._conn.execute(query, params).fetchall()
+        return [self._row_to_plan_item(row) for row in rows]
+
+    def update_plan_item(
+        self,
+        item_id: str,
+        title: Optional[str] = None,
+        description: Optional[str] = None,
+        status: Optional[PlanItemStatus] = None,
+        outcome: Optional[str] = None,
+        spec: Optional[Dict] = None,
+        planned_session_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        phase_order: Optional[int] = None,
+    ):
+        """Update a plan item. Only non-None values are applied."""
+        now = self._now()
+        updates = []
+        values = []
+        for col, val in [
+            ("title", title),
+            ("description", description),
+            ("outcome", outcome),
+            ("planned_session_id", planned_session_id),
+            ("session_id", session_id),
+        ]:
+            if val is not None:
+                updates.append(f"{col} = ?")
+                values.append(val)
+        if status is not None:
+            updates.append("status = ?")
+            values.append(status.value)
+        if spec is not None:
+            updates.append("spec = ?")
+            values.append(json.dumps(spec))
+        if phase_order is not None:
+            updates.append("phase_order = ?")
+            values.append(phase_order)
+        if not updates:
+            return
+        updates.append("updated_at = ?")
+        values.append(now)
+        values.append(item_id)
+        with self._tx():
+            self._conn.execute(
+                f"UPDATE plan_items SET {', '.join(updates)} WHERE id = ?",
+                values,
+            )
+
+    def complete_plan_item(self, item_id: str, outcome: str):
+        """Mark a plan item as completed with an outcome description."""
+        self.update_plan_item(
+            item_id, status=PlanItemStatus.COMPLETED, outcome=outcome,
+        )
+
+    def skip_plan_item(self, item_id: str, reason: Optional[str] = None):
+        """Mark a plan item as skipped."""
+        self.update_plan_item(
+            item_id,
+            status=PlanItemStatus.SKIPPED,
+            outcome=reason or "Skipped",
+        )
+
+    def add_plan_item_dependency(self, item_id: str, depends_on_id: str):
+        """Add a dependency between plan items."""
+        with self._tx():
+            self._conn.execute(
+                "INSERT OR IGNORE INTO plan_item_dependencies "
+                "(item_id, depends_on_id) VALUES (?, ?)",
+                (item_id, depends_on_id),
+            )
+
+    def remove_plan_item_dependency(self, item_id: str, depends_on_id: str):
+        """Remove a dependency between plan items."""
+        with self._tx():
+            self._conn.execute(
+                "DELETE FROM plan_item_dependencies "
+                "WHERE item_id = ? AND depends_on_id = ?",
+                (item_id, depends_on_id),
+            )
+
+    def get_plan_item_dependencies(self, item_id: str) -> List[str]:
+        """Get IDs of items this item depends on."""
+        rows = self._conn.execute(
+            "SELECT depends_on_id FROM plan_item_dependencies WHERE item_id = ?",
+            (item_id,),
+        ).fetchall()
+        return [row["depends_on_id"] for row in rows]
+
+    def get_plan_item_dependents(self, item_id: str) -> List[str]:
+        """Get IDs of items that depend on this item."""
+        rows = self._conn.execute(
+            "SELECT item_id FROM plan_item_dependencies WHERE depends_on_id = ?",
+            (item_id,),
+        ).fetchall()
+        return [row["item_id"] for row in rows]
+
+    def get_unblocked_plan_items(self, campaign_id: str) -> List[PlanItem]:
+        """
+        Get plan items that are planned and have all dependencies completed.
+        These are the items that can be started next.
+        """
+        items = self.get_plan_items(
+            campaign_id=campaign_id, status="planned", include_children=True,
+        )
+        unblocked = []
+        for item in items:
+            if not item.depends_on:
+                unblocked.append(item)
+                continue
+            # Check if all dependencies are completed or skipped
+            all_resolved = True
+            for dep_id in item.depends_on:
+                dep = self.get_plan_item(dep_id)
+                if dep and dep.status not in (
+                    PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED,
+                ):
+                    all_resolved = False
+                    break
+            if all_resolved:
+                unblocked.append(item)
+        return unblocked
+
+    def get_plan_status(self, campaign_id: str) -> Dict[str, Any]:
+        """
+        Get a summary of plan progress for a campaign and its children.
+
+        Returns
+        -------
+        dict
+            {
+                "total": int,
+                "completed": int,
+                "in_progress": int,
+                "planned": int,
+                "skipped": int,
+                "blocked": int,
+                "by_type": {"imaging": {"total": N, "completed": N, ...}, ...},
+                "next_actions": [PlanItem, ...],
+                "pending_decisions": [PlanItem, ...],
+            }
+        """
+        items = self.get_plan_items(
+            campaign_id=campaign_id, include_children=True,
+        )
+        result = {
+            "total": len(items),
+            "completed": 0,
+            "in_progress": 0,
+            "planned": 0,
+            "skipped": 0,
+            "blocked": 0,
+            "by_type": {},
+            "next_actions": [],
+            "pending_decisions": [],
+        }
+        for item in items:
+            status_key = item.status.value
+            if status_key in result:
+                result[status_key] += 1
+
+            # By type
+            type_key = item.type.value
+            if type_key not in result["by_type"]:
+                result["by_type"][type_key] = {"total": 0, "completed": 0}
+            result["by_type"][type_key]["total"] += 1
+            if item.status == PlanItemStatus.COMPLETED:
+                result["by_type"][type_key]["completed"] += 1
+
+            # Pending decisions
+            if (
+                item.type == PlanItemType.DECISION_POINT
+                and item.status == PlanItemStatus.PLANNED
+            ):
+                result["pending_decisions"].append(item)
+
+        # Next actions = unblocked items
+        result["next_actions"] = self.get_unblocked_plan_items(campaign_id)
+
+        return result
+
+    def resolve_imaging_spec(self, item: PlanItem) -> Optional[ImagingSpec]:
+        """
+        Resolve the full ImagingSpec for an item, following inheritance.
+
+        If the item inherits from another, the parent's spec is loaded
+        first, then local fields override.
+        """
+        import dataclasses
+
+        if item.type != PlanItemType.IMAGING:
+            return None
+
+        # Base case: no inheritance
+        if not item.inherit_from:
+            return item.imaging_spec
+
+        # Load parent spec (recursive)
+        parent = self.get_plan_item(item.inherit_from)
+        if not parent:
+            return item.imaging_spec
+
+        parent_spec = self.resolve_imaging_spec(parent)
+        if not parent_spec:
+            return item.imaging_spec
+
+        # Merge: local fields override parent fields
+        if not item.imaging_spec:
+            return parent_spec
+
+        merged = dataclasses.replace(parent_spec)
+        for f in dataclasses.fields(ImagingSpec):
+            local_val = getattr(item.imaging_spec, f.name)
+            if local_val is not None:
+                setattr(merged, f.name, local_val)
+        return merged
+
+    def _get_campaign_tree_ids(self, campaign_id: str) -> List[str]:
+        """Get all campaign IDs in a tree (recursive)."""
+        ids = [campaign_id]
+        children = self._conn.execute(
+            "SELECT id FROM campaigns WHERE parent_id = ?",
+            (campaign_id,),
+        ).fetchall()
+        for child in children:
+            ids.extend(self._get_campaign_tree_ids(child["id"]))
+        return ids
+
+    def _row_to_plan_item(self, row: sqlite3.Row) -> PlanItem:
+        d = dict(row)
+        item_id = d["id"]
+
+        # Load dependencies
+        deps = self.get_plan_item_dependencies(item_id)
+
+        # Parse spec into ImagingSpec or BenchSpec based on type
+        spec_data = json.loads(d["spec"]) if d.get("spec") else None
+        item_type = PlanItemType(d["type"])
+        imaging_spec = None
+        bench_spec = None
+
+        if spec_data:
+            if item_type == PlanItemType.IMAGING:
+                import dataclasses as _dc
+                valid = {f.name for f in _dc.fields(ImagingSpec)}
+                imaging_spec = ImagingSpec(**{
+                    k: v for k, v in spec_data.items() if k in valid
+                })
+            else:
+                import dataclasses as _dc
+                valid = {f.name for f in _dc.fields(BenchSpec)}
+                bench_spec = BenchSpec(**{
+                    k: v for k, v in spec_data.items() if k in valid
+                })
+
+        return PlanItem(
+            id=item_id,
+            campaign_id=d["campaign_id"],
+            type=item_type,
+            title=d["title"],
+            description=d.get("description"),
+            status=PlanItemStatus(d.get("status", "planned")),
+            depends_on=deps,
+            outcome=d.get("outcome"),
+            imaging_spec=imaging_spec,
+            bench_spec=bench_spec,
+            planned_session_id=d.get("planned_session_id"),
+            session_id=d.get("session_id"),
+            inherit_from=d.get("inherit_from"),
+            phase_order=d.get("phase_order", 0),
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
         )

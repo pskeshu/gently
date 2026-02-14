@@ -27,6 +27,7 @@ from .state import ExperimentState, EmbryoState, ImageRecord
 from .plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from .prompts import build_system_prompt, build_context_message
 from .tool_registry import get_tool_registry
+from .plan_mode import build_plan_prompt
 from .perception import PerceptionManager
 from .interaction_logger import InteractionLogger
 from .timelapse_orchestrator import TimelapseOrchestrator
@@ -85,6 +86,12 @@ class MicroscopyCopilot:
         # Conversation state
         self.conversation_history: List[Dict] = []
         self.system_prompt: str = ""
+
+        # Mode: "execution" (default) or "plan" (experimental design)
+        self.mode: str = "execution"
+
+        # Context store (agent's mind — set via set_context_store)
+        self.context_store: Optional["ContextStore"] = None
 
         # Experiment state
         self.experiment = ExperimentState()
@@ -271,7 +278,16 @@ class MicroscopyCopilot:
             AI-generated context summary for session awareness.
             If None, no context section is included in the prompt.
         """
-        # Build connection status
+        if self.mode == "plan":
+            # Plan mode: scientific design prompt
+            active_plan = self._get_active_plan_summary()
+            self.system_prompt = build_plan_prompt(
+                context_summary=context_summary,
+                active_plan_summary=active_plan,
+            )
+            return
+
+        # Execution mode: standard microscope prompt
         if self.client:
             connection_status = {
                 'device_layer': self.client.is_connected,
@@ -283,6 +299,78 @@ class MicroscopyCopilot:
         self.system_prompt = build_system_prompt(
             self.experiment, connection_status, context_summary
         )
+
+    def set_context_store(self, context_store) -> None:
+        """Attach the context store (agent's mind) to the copilot."""
+        self.context_store = context_store
+
+    def enter_plan_mode(self) -> str:
+        """Switch to plan mode (experimental design)."""
+        if self.mode == "plan":
+            return "Already in plan mode."
+        self.mode = "plan"
+        # Ensure plan tools are registered
+        import gently.agent.plan_mode.tools  # noqa: F401
+        self._update_system_prompt()
+        logger.info("Entered plan mode")
+        return "Switched to plan mode. I'm now your experimental design collaborator."
+
+    def exit_plan_mode(self) -> str:
+        """Switch back to execution mode."""
+        if self.mode == "execution":
+            return "Already in execution mode."
+        self.mode = "execution"
+        self._update_system_prompt()
+        logger.info("Exited plan mode")
+        return "Back to execution mode."
+
+    def _get_tools_for_mode(self) -> list:
+        """Get the Claude tool schemas for the current mode."""
+        registry = get_tool_registry()
+        if self.mode == "plan":
+            # In plan mode: only plan-specific tools + ask_user_choice
+            plan_tool_names = {
+                "create_campaign", "create_plan_item", "update_plan_item",
+                "link_plan_items", "propose_plan", "get_plan_status",
+                "query_lab_history", "check_hardware_capability",
+                "search_literature", "search_strains",
+                "ask_user_choice",
+            }
+            all_tools = registry.get_claude_schemas(has_microscope=False)
+            return [t for t in all_tools if t["name"] in plan_tool_names]
+        else:
+            return registry.get_claude_schemas(
+                has_microscope=self._has_microscope()
+            )
+
+    def _get_active_plan_summary(self) -> Optional[str]:
+        """Get a summary of the active experimental plan, if any."""
+        if not self.context_store:
+            return None
+        try:
+            campaigns = self.context_store.get_root_campaigns()
+            if not campaigns:
+                return None
+            lines = []
+            for campaign in campaigns:
+                status = self.context_store.get_plan_status(campaign.id)
+                if status["total"] == 0:
+                    continue
+                lines.append(
+                    f"Campaign: {campaign.description}"
+                    f" ({status['completed']}/{status['total']} items done)"
+                )
+                if status["next_actions"]:
+                    lines.append("  Next: " + ", ".join(
+                        a.title for a in status["next_actions"][:3]
+                    ))
+                if status["pending_decisions"]:
+                    lines.append("  Decisions pending: " + ", ".join(
+                        d.title for d in status["pending_decisions"]
+                    ))
+            return "\n".join(lines) if lines else None
+        except Exception:
+            return None
 
     def _gather_context_data(self) -> dict:
         """
@@ -1094,7 +1182,7 @@ Write a brief status summary. Examples:
                 "model": self.model,
                 "system": self._get_cached_system_prompt(),
                 "messages": self.conversation_history,
-                "tools": get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                "tools": self._get_tools_for_mode(),
                 "max_tokens": 16000 if use_thinking else 4096,
             }
             # Enable extended thinking if --think flag was used
@@ -1214,7 +1302,7 @@ Write a brief status summary. Examples:
                 "model": self.model,
                 "system": self._get_cached_system_prompt(),
                 "messages": messages,
-                "tools": get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                "tools": self._get_tools_for_mode(),
                 "max_tokens": 4096,
             }
 
@@ -1340,7 +1428,7 @@ Write a brief status summary. Examples:
                 model=self.model,
                 system=self._get_cached_system_prompt(),
                 messages=self.conversation_history,
-                tools=get_tool_registry().get_claude_schemas(has_microscope=self._has_microscope()),
+                tools=self._get_tools_for_mode(),
                 max_tokens=4096
             ) as stream:
                 for event in stream:

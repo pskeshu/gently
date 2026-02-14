@@ -217,6 +217,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     from gently.context import ContextStore as CtxStore
     context_db = storage_dir / "context" / "agent_mind.db"
     context_store = CtxStore(context_db)
+    copilot.set_context_store(context_store)
     bridge.init_wizard(context_store=context_store, claude_client=copilot.claude)
 
     if copilot.viz_server is not None:

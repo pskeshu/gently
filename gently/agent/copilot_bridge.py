@@ -343,6 +343,62 @@ class CopilotBridge:
             })
             return
 
+        if cmd == "/plan" or cmd.startswith("/plan "):
+            parts = command.strip().split(maxsplit=1)
+            subcmd = parts[1].strip().lower() if len(parts) > 1 else None
+
+            if subcmd == "exit":
+                msg = self.copilot.exit_plan_mode()
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/plan",
+                    "content": {
+                        "text": msg,
+                        "mode": self.copilot.mode,
+                    },
+                })
+            elif subcmd == "status":
+                summary = self.copilot._get_active_plan_summary()
+                if summary:
+                    text = f"Mode: {self.copilot.mode}\n\n{summary}"
+                else:
+                    text = f"Mode: {self.copilot.mode}\nNo active campaigns found."
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/plan",
+                    "content": {
+                        "text": text,
+                        "mode": self.copilot.mode,
+                    },
+                })
+            else:
+                # Enter plan mode (or show status if already in it)
+                if self.copilot.mode == "plan":
+                    summary = self.copilot._get_active_plan_summary()
+                    text = "Already in plan mode."
+                    if summary:
+                        text += f"\n\n{summary}"
+                    text += "\n\nUse /plan exit to return to execution mode."
+                    await send_fn({
+                        "type": "command_result",
+                        "command": "/plan",
+                        "content": {
+                            "text": text,
+                            "mode": "plan",
+                        },
+                    })
+                else:
+                    msg = self.copilot.enter_plan_mode()
+                    await send_fn({
+                        "type": "command_result",
+                        "command": "/plan",
+                        "content": {
+                            "text": msg,
+                            "mode": "plan",
+                        },
+                    })
+            return
+
         if cmd == "/clear":
             await send_fn({
                 "type": "command_result",
@@ -701,6 +757,7 @@ class CopilotBridge:
             "viz_url": self._launch_info.get("viz_url", None),
             "log_path": self._launch_info.get("log_path", ""),
             "resumed": self._launch_info.get("resumed", False),
+            "mode": self.copilot.mode,
         }
         # Wizard metadata (if initialized)
         if self._wizard is not None:

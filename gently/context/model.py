@@ -40,6 +40,24 @@ class PlannedSessionStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
+class PlanItemStatus(str, Enum):
+    """Status for plan items."""
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+    BLOCKED = "blocked"
+
+
+class PlanItemType(str, Enum):
+    """Type of plan item."""
+    IMAGING = "imaging"
+    BENCH = "bench"
+    GENETICS = "genetics"
+    ANALYSIS = "analysis"
+    DECISION_POINT = "decision_point"
+
+
 class ExpectationStatus(str, Enum):
     """Status for expectations/predictions."""
     PENDING = "pending"
@@ -161,6 +179,106 @@ class PlannedSession:
         if self.notes:
             return self.notes[:40] + ("..." if len(self.notes) > 40 else "")
         return f"Session on {self.scheduled_date or '(unscheduled)'}"
+
+
+@dataclass
+class ImagingSpec:
+    """
+    Complete specification for a planned imaging session.
+
+    Everything needed to auto-configure the microscope when
+    it's time to execute this plan item.
+    """
+    # Sample
+    strain: Optional[str] = None              # "OH904"
+    genotype: Optional[str] = None            # "otIs355[rab-3p::2xNLS::TagRFP]"
+    reporter: Optional[str] = None            # "rab-3p::GFP (pan-neuronal)"
+    sample_prep: Optional[str] = None         # "Standard egg prep, poly-lysine pads"
+    temperature_c: Optional[float] = None     # 20.0
+    num_embryos: Optional[int] = None         # 4
+
+    # Acquisition
+    num_slices: Optional[int] = None          # 80
+    exposure_ms: Optional[float] = None       # 10.0
+    laser_wavelength_nm: Optional[int] = None # 488
+    laser_power_pct: Optional[float] = None   # 10.0
+    galvo_amplitude: Optional[float] = None   # 8.0
+    piezo_amplitude_um: Optional[float] = None  # 50.0
+
+    # Timing
+    interval_s: Optional[int] = None          # 180
+    adaptive_intervals: Optional[Dict[str, int]] = None
+    # e.g. {"early_to_comma": 300, "comma_to_2fold": 60}
+
+    # Developmental window
+    target_window: Optional[str] = None       # "comma → pretzel"
+    start_stage: Optional[str] = None         # "comma"
+    stop_condition: Optional[str] = None      # "pretzel"
+    estimated_duration_h: Optional[float] = None  # 4.0
+
+    # Detection
+    detectors: Optional[List[str]] = None     # ["comma", "pretzel"]
+    pre_terminal_speedup: Optional[bool] = None
+
+    # Validation
+    success_criteria: Optional[str] = None
+    comparison_to: Optional[str] = None       # "Compare to WT session 1"
+
+
+@dataclass
+class BenchSpec:
+    """
+    Specification for non-imaging tasks (bench work, genetics, analysis).
+    """
+    protocol: Optional[str] = None            # "Standard chemotaxis assay"
+    reagents: Optional[List[str]] = None      # ["anti-UNC-33", "secondary 568"]
+    strains: Optional[List[str]] = None       # ["OH904", "N2"]
+    target_genotype: Optional[str] = None     # "unc-6(ev400); otIs355"
+    estimated_days: Optional[int] = None      # 14
+    success_criteria: Optional[str] = None
+    notes: Optional[str] = None
+
+
+@dataclass
+class PlanItem:
+    """
+    A single item in an experimental plan — imaging or not.
+
+    Every task in the plan is a PlanItem: imaging sessions, bench work,
+    genetic crosses, analyses, and decision points. Imaging items carry
+    an ImagingSpec; non-imaging items carry a BenchSpec.
+
+    Dependencies between items (depends_on) enable the copilot to track
+    what's blocked and what's newly unblocked.
+    """
+    id: str
+    campaign_id: str                          # Which campaign/phase
+    type: PlanItemType                        # imaging, bench, genetics, analysis, decision_point
+    title: str                                # "Pilot — rab-3p::GFP visibility test"
+    description: Optional[str] = None         # Detailed notes, protocols, what to watch for
+    status: PlanItemStatus = PlanItemStatus.PLANNED
+    depends_on: List[str] = field(default_factory=list)  # PlanItem IDs
+    outcome: Optional[str] = None             # What happened (filled after completion)
+
+    # Specifications (type-dependent)
+    imaging_spec: Optional[ImagingSpec] = None
+    bench_spec: Optional[BenchSpec] = None
+
+    # Linking
+    planned_session_id: Optional[str] = None  # → PlannedSession (for imaging items)
+    session_id: Optional[str] = None          # → Actual session (once executed)
+    inherit_from: Optional[str] = None        # PlanItem ID to inherit spec from
+
+    # Ordering
+    phase_order: int = 0
+
+    created_at: datetime = field(default_factory=datetime.now)
+    updated_at: datetime = field(default_factory=datetime.now)
+
+    @property
+    def is_actionable(self) -> bool:
+        """True if this item can be started (not blocked by dependencies)."""
+        return self.status == PlanItemStatus.PLANNED and not self.depends_on
 
 
 @dataclass
