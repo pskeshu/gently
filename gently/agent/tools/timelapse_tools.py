@@ -73,6 +73,22 @@ async def start_adaptive_timelapse(
             base_interval_seconds=interval_seconds,
             condition_value=condition_value,
         )
+
+        # Best-effort auto-link to a matching plan item (Feature 3)
+        try:
+            cs = getattr(copilot, "context_store", None)
+            if cs:
+                from .plan_execution_tools import try_auto_link_plan_item
+                session_id = getattr(copilot, "session_id", None)
+                if session_id:
+                    linked = try_auto_link_plan_item(
+                        cs, session_id, stop_condition, interval_seconds,
+                    )
+                    if linked:
+                        result += f"\n(Auto-linked to plan item: '{linked}')"
+        except Exception:
+            pass  # Never block timelapse
+
         return result
     except Exception as e:
         return f"Error starting timelapse: {str(e)}"

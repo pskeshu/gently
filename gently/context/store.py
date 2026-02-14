@@ -221,6 +221,16 @@ CREATE TABLE IF NOT EXISTS plan_item_dependencies (
     FOREIGN KEY (depends_on_id) REFERENCES plan_items(id)
 );
 
+-- Plan templates
+CREATE TABLE IF NOT EXISTS plan_templates (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    description TEXT,
+    template_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 -- Agent state
 CREATE TABLE IF NOT EXISTS agent_state (
     key TEXT PRIMARY KEY,
@@ -297,6 +307,7 @@ class ContextStore:
         tables = [
             "plan_item_dependencies",
             "plan_items",
+            "plan_templates",
             "planned_session_campaigns",
             "session_campaigns",
             "planned_sessions",
@@ -505,6 +516,13 @@ class ContextStore:
             (campaign_id,),
         ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
+
+    def get_nth_subcampaign(self, parent_id: str, n: int) -> Optional[Campaign]:
+        """Get the nth child campaign (1-indexed) of a parent, ordered by creation."""
+        phases = self.get_subcampaigns(parent_id)
+        if 1 <= n <= len(phases):
+            return phases[n - 1]
+        return None
 
     def get_campaign_tree(self, campaign_id: str) -> Dict[str, Any]:
         """Get a campaign and all its descendants as a tree."""
@@ -1387,6 +1405,205 @@ class ContextStore:
             if local_val is not None:
                 setattr(merged, f.name, local_val)
         return merged
+
+    # ==================================================================
+    # Plan Templates
+    # ==================================================================
+
+    def save_plan_template(
+        self,
+        name: str,
+        description: Optional[str],
+        campaign_id: str,
+    ) -> str:
+        """
+        Serialize a campaign tree (campaigns + items + specs + dependencies)
+        into a reusable template. Returns the template ID.
+        """
+        campaign = self.get_campaign(campaign_id)
+        if not campaign:
+            raise ValueError(f"Campaign {campaign_id} not found")
+
+        # Build a portable representation
+        template_data = self._serialize_campaign_tree(campaign_id)
+
+        tid = self._gen_id()
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT INTO plan_templates "
+                "(id, name, description, template_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (tid, name, description, json.dumps(template_data), now, now),
+            )
+        logger.info(f"Saved plan template '{name}' ({tid})")
+        return tid
+
+    def _serialize_campaign_tree(self, campaign_id: str) -> Dict:
+        """Recursively serialize a campaign and its children/items."""
+        campaign = self.get_campaign(campaign_id)
+        if not campaign:
+            return {}
+
+        items = self.get_plan_items(campaign_id=campaign_id)
+        items.sort(key=lambda x: x.phase_order)
+
+        # Build item list with relative dependency indices
+        all_item_ids = [it.id for it in items]
+        serialized_items = []
+        for item in items:
+            item_data = {
+                "type": item.type.value,
+                "title": item.title,
+                "description": item.description,
+                "phase_order": item.phase_order,
+            }
+            # Serialize spec
+            if item.imaging_spec:
+                import dataclasses as _dc
+                spec_dict = {}
+                for f in _dc.fields(item.imaging_spec):
+                    val = getattr(item.imaging_spec, f.name)
+                    if val is not None:
+                        spec_dict[f.name] = val
+                item_data["spec"] = spec_dict
+            elif item.bench_spec:
+                import dataclasses as _dc
+                spec_dict = {}
+                for f in _dc.fields(item.bench_spec):
+                    val = getattr(item.bench_spec, f.name)
+                    if val is not None:
+                        spec_dict[f.name] = val
+                item_data["spec"] = spec_dict
+
+            # Dependencies as relative indices within this campaign's items
+            if item.depends_on:
+                dep_indices = []
+                for dep_id in item.depends_on:
+                    if dep_id in all_item_ids:
+                        dep_indices.append(all_item_ids.index(dep_id))
+                if dep_indices:
+                    item_data["depends_on_indices"] = dep_indices
+
+            serialized_items.append(item_data)
+
+        # Recurse into sub-campaigns
+        children = self.get_subcampaigns(campaign_id)
+        serialized_children = []
+        for child in children:
+            serialized_children.append(self._serialize_campaign_tree(child.id))
+
+        return {
+            "description": campaign.description,
+            "shorthand": campaign.shorthand,
+            "target": campaign.target,
+            "items": serialized_items,
+            "children": serialized_children,
+        }
+
+    def list_plan_templates(self) -> List[Dict]:
+        """List all plan templates (id, name, description, dates)."""
+        rows = self._conn.execute(
+            "SELECT id, name, description, created_at, updated_at "
+            "FROM plan_templates ORDER BY created_at DESC"
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_plan_template(self, id_or_name: str) -> Optional[Dict]:
+        """Get a plan template by ID or name."""
+        row = self._conn.execute(
+            "SELECT * FROM plan_templates WHERE id = ? OR name = ?",
+            (id_or_name, id_or_name),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["template_json"] = json.loads(d["template_json"])
+        return d
+
+    def apply_plan_template(
+        self,
+        template_id: str,
+        overrides: Optional[Dict] = None,
+    ) -> str:
+        """
+        Instantiate a template into a new campaign with plan items.
+        Overrides (e.g. strain, temperature_c) are applied to all imaging specs.
+        Returns the new root campaign ID.
+        """
+        tmpl = self.get_plan_template(template_id)
+        if not tmpl:
+            raise ValueError(f"Template '{template_id}' not found")
+
+        data = tmpl["template_json"]
+        overrides = overrides or {}
+        return self._instantiate_template_tree(data, parent_id=None, overrides=overrides)
+
+    def _instantiate_template_tree(
+        self,
+        data: Dict,
+        parent_id: Optional[str],
+        overrides: Dict,
+    ) -> str:
+        """Recursively create campaigns and items from template data."""
+        cid = self.create_campaign(
+            description=data.get("description", "Untitled"),
+            shorthand=data.get("shorthand"),
+            target=data.get("target"),
+            parent_id=parent_id,
+        )
+
+        # Create items, track new IDs for dependency wiring
+        items_data = data.get("items", [])
+        new_item_ids: List[str] = []
+
+        for item_data in items_data:
+            spec = item_data.get("spec")
+
+            # Apply overrides to imaging specs
+            if spec and item_data.get("type") == "imaging" and overrides:
+                spec = dict(spec)  # copy
+                for k, v in overrides.items():
+                    if k in spec or k in (
+                        "strain", "genotype", "reporter", "temperature_c",
+                        "num_slices", "exposure_ms", "interval_s",
+                        "num_embryos", "stop_condition",
+                    ):
+                        spec[k] = v
+
+            item_id = self.create_plan_item(
+                campaign_id=cid,
+                type=item_data.get("type", "imaging"),
+                title=item_data.get("title", "Untitled"),
+                description=item_data.get("description"),
+                spec=spec,
+                phase_order=item_data.get("phase_order", -1),
+            )
+            new_item_ids.append(item_id)
+
+        # Wire up dependencies using relative indices
+        for idx, item_data in enumerate(items_data):
+            dep_indices = item_data.get("depends_on_indices", [])
+            for dep_idx in dep_indices:
+                if 0 <= dep_idx < len(new_item_ids):
+                    self.add_plan_item_dependency(
+                        new_item_ids[idx], new_item_ids[dep_idx],
+                    )
+
+        # Recurse into children
+        for child_data in data.get("children", []):
+            self._instantiate_template_tree(child_data, parent_id=cid, overrides=overrides)
+
+        return cid
+
+    def delete_plan_template(self, template_id: str) -> bool:
+        """Delete a plan template. Returns True if found and deleted."""
+        with self._tx():
+            r = self._conn.execute(
+                "DELETE FROM plan_templates WHERE id = ? OR name = ?",
+                (template_id, template_id),
+            )
+            return r.rowcount > 0
 
     def _get_campaign_tree_ids(self, campaign_id: str) -> List[str]:
         """Get all campaign IDs in a tree (recursive)."""

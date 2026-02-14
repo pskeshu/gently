@@ -488,3 +488,161 @@ async def get_plan_status(
                 lines.append(f"    {item.description[:100]}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Batch Operations
+# ---------------------------------------------------------------------------
+
+@tool(
+    name="batch_update_status",
+    description=(
+        "Batch-update the status of plan items in a campaign or phase. "
+        "Optionally filter by phase number and item type. Skips items "
+        "with unresolved dependencies when marking complete."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Mark all phase 1 items as completed",
+            tool_input={
+                "campaign_id": "nrf-2026",
+                "new_status": "completed",
+                "outcome": "Phase 1 completed successfully",
+                "phase_number": 1,
+            },
+        ),
+    ],
+)
+async def batch_update_status(
+    campaign_id: str,
+    new_status: str,
+    outcome: str = None,
+    phase_number: int = None,
+    item_type: str = None,
+    context: Dict = None,
+) -> str:
+    """Batch-update status of plan items."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    from gently.context.model import PlanItemStatus
+
+    store = copilot.context_store
+
+    # Resolve phase number to a campaign ID
+    target_campaign_id = campaign_id
+    if phase_number is not None:
+        phase = store.get_nth_subcampaign(campaign_id, phase_number)
+        if not phase:
+            return f"Phase {phase_number} not found under campaign {campaign_id}"
+        target_campaign_id = phase.id
+
+    # Get matching items
+    items = store.get_plan_items(
+        campaign_id=target_campaign_id,
+        type=item_type,
+    )
+
+    status_enum = PlanItemStatus(new_status)
+    updated = 0
+    skipped = 0
+
+    for item in items:
+        # Guard: skip items with unresolved deps when marking complete
+        if status_enum == PlanItemStatus.COMPLETED and item.depends_on:
+            all_resolved = True
+            for dep_id in item.depends_on:
+                dep = store.get_plan_item(dep_id)
+                if dep and dep.status not in (
+                    PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED,
+                ):
+                    all_resolved = False
+                    break
+            if not all_resolved:
+                skipped += 1
+                continue
+
+        kwargs = {"item_id": item.id, "status": status_enum}
+        if outcome and status_enum == PlanItemStatus.COMPLETED:
+            kwargs["outcome"] = outcome
+        store.update_plan_item(**kwargs)
+        updated += 1
+
+    parts = [f"Updated {updated} items to '{new_status}'"]
+    if skipped:
+        parts.append(f"skipped {skipped} (unresolved dependencies)")
+    return ", ".join(parts)
+
+
+@tool(
+    name="batch_update_spec",
+    description=(
+        "Batch-update a single spec field across all imaging items in a "
+        "campaign or phase. Useful for globally adjusting parameters like "
+        "interval_s, num_slices, or temperature_c."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Change all imaging intervals to 120s",
+            tool_input={
+                "campaign_id": "nrf-2026",
+                "field_name": "interval_s",
+                "field_value": 120,
+            },
+        ),
+    ],
+)
+async def batch_update_spec(
+    campaign_id: str,
+    field_name: str,
+    field_value: object,
+    phase_number: int = None,
+    context: Dict = None,
+) -> str:
+    """Batch-update a spec field on imaging items."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    store = copilot.context_store
+
+    # Validate field name against ImagingSpec
+    from gently.context.model import ImagingSpec
+    valid_fields = {f.name for f in dataclasses.fields(ImagingSpec)}
+    if field_name not in valid_fields:
+        return (
+            f"'{field_name}' is not a valid ImagingSpec field. "
+            f"Valid fields: {', '.join(sorted(valid_fields))}"
+        )
+
+    # Resolve phase
+    target_campaign_id = campaign_id
+    if phase_number is not None:
+        phase = store.get_nth_subcampaign(campaign_id, phase_number)
+        if not phase:
+            return f"Phase {phase_number} not found under campaign {campaign_id}"
+        target_campaign_id = phase.id
+
+    items = store.get_plan_items(
+        campaign_id=target_campaign_id,
+        type="imaging",
+    )
+
+    updated = 0
+    for item in items:
+        # Merge the field into existing spec
+        spec_data = {}
+        if item.imaging_spec:
+            spec_data = {
+                f.name: getattr(item.imaging_spec, f.name)
+                for f in dataclasses.fields(item.imaging_spec)
+                if getattr(item.imaging_spec, f.name) is not None
+            }
+        spec_data[field_name] = field_value
+        store.update_plan_item(item_id=item.id, spec=spec_data)
+        updated += 1
+
+    return f"Updated '{field_name}' to {field_value} on {updated} imaging items"

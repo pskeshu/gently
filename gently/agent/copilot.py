@@ -335,6 +335,9 @@ class MicroscopyCopilot:
                 "get_plan_item",
                 "query_lab_history", "check_hardware_capability",
                 "search_literature", "search_strains",
+                "validate_plan",
+                "batch_update_status", "batch_update_spec",
+                "save_plan_template", "list_templates", "apply_template",
                 "ask_user_choice",
             }
             all_tools = registry.get_claude_schemas(has_microscope=False)

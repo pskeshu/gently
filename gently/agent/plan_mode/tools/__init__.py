@@ -9,3 +9,5 @@ They replace the run-mode hardware tools.
 from . import planning
 from . import lab_context
 from . import research
+from . import validation
+from . import templates
