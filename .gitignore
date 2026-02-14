@@ -36,11 +36,6 @@ ENV/
 
 # OS
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db
 
 # Logs
@@ -64,42 +59,30 @@ htmlcov/
 .dmypy.json
 dmypy.json
 
-# Config files with sensitive data
-config.yml
-
 # Napari/Qt
 *.qss
 
-# Node.js / Frontend
-node_modules/
-frontend/dist/
-frontend/.vite/
-frontend/node_modules/
+# Node.js / TUI
+gently/tui/node_modules/
+gently/tui/dist/
 
 # Database
 *.db
 *.sqlite
 *.sqlite3
 
-# GUI outputs
-multi_embryo_volumes/
-embryo_calibration.db
+# Test scripts (one-off tests)
+test_*.py
+check_*.py
 
-# Test artifacts and temporary data
-calibration_session_*/
-calibration_images/
-calibration_images_embryo/
-calibration_videos/
-detection_results/
-experiment_data/
-galvo_range_test/
-microscope_images/
-scan_images/
-test_line_images/
-timelapse_volumes/
-x_offset_centering/
-y_offset_centering/
-y_amplitude_test/
+# SAM model weights
+*.pth
+
+# Binary data
+*.tif
+!docs/*.tif
+*.npz
+*.gif
 
 # Test images
 *_centering_*.png
@@ -114,44 +97,18 @@ spim_*.png
 *_analysis.png
 bottom_camera_*.png
 
-# Test volumes
-*.tif
-!docs/*.tif
-
-# Test scripts (one-off tests)
-test_*.py
-check_*.py
-
-# SAM model weights
-*.pth
+# Output directories (experiment data, calibration artifacts)
+experiment_data/
+dispim_data/
+lightsheet_captures/
 
 # Temporary JSON data
-multi_embryo_database.json
-piezo_galvo_calibration*.json
-sam_embryo_positions.json
 dispim_baseline_state_*.json
 dispim_parameters_*.json
 
 # Windows artifacts
 nul
 *.bak
-
-# Video environments
-venv_video/
-
-# CV environment
-venv_cv/
-
-# Test/debug directories
-camera_captures/
-centering_debug/
-centering_error.json
-
-# Large binary data (don't track)
-dispim_data/
-animated_video/
-*.npz
-*.gif
 
 # Local settings
 .claude/settings.local.json
@@ -160,7 +117,3 @@ animated_video/
 # Backup files
 *_backup.py
 *_backup/
-
-# Demo and capture outputs
-demo.yml
-lightsheet_captures/
