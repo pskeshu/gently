@@ -388,6 +388,22 @@ class VisualizationServer:
         if self.event_bus:
             self.event_bus.set_event_loop(asyncio.get_running_loop())
 
+        # Pre-flight check: verify the port is available before handing
+        # off to uvicorn (whose bind error surfaces inside a background
+        # task and produces an unhelpful log line).
+        import socket
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            sock.bind((self.host, self.port))
+        except OSError:
+            raise OSError(
+                f"Port {self.port} is already in use. "
+                "Is another instance of the copilot running? "
+                "Close it first and try again."
+            )
+        finally:
+            sock.close()
+
         config = uvicorn.Config(
             self.app,
             host=self.host,
