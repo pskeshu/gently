@@ -235,6 +235,7 @@ export function App({ wsUrl, store }: AppProps) {
       <ActiveMessage
         entry={state.activeMessage}
         theme={state.theme}
+        tokens={state.tokens}
         streamStartedAt={state.streamStartedAt}
         streamCharsReceived={state.streamCharsReceived}
       />

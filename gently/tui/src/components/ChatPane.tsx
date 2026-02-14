@@ -6,19 +6,20 @@
  * can re-render on every text chunk without touching history.
  *
  * When isThinking is true (message sent, no response yet), shows a
- * spinner with a live elapsed timer. During streaming, shows elapsed
- * time and approximate output tokens alongside the text.
+ * spinner with a live elapsed timer and session token stats. During
+ * streaming, shows elapsed time and approximate output tokens.
  */
 
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { MessageBubble } from "./MessageBubble.js";
-import type { ChatEntry, ThemeColors } from "../types.js";
+import type { ChatEntry, ThemeColors, TokenSnapshot } from "../types.js";
 
 interface ActiveMessageProps {
   entry: ChatEntry | null;
   theme: ThemeColors;
+  tokens?: TokenSnapshot;
   streamStartedAt?: number;
   streamCharsReceived?: number;
 }
@@ -31,7 +32,13 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem}s`;
 }
 
-export function ActiveMessage({ entry, theme, streamStartedAt, streamCharsReceived }: ActiveMessageProps) {
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+  return String(n);
+}
+
+export function ActiveMessage({ entry, theme, tokens, streamStartedAt, streamCharsReceived }: ActiveMessageProps) {
   const [elapsed, setElapsed] = useState(0);
 
   // Live timer — ticks every second while streaming or thinking
@@ -49,8 +56,11 @@ export function ActiveMessage({ entry, theme, streamStartedAt, streamCharsReceiv
 
   if (!entry) return null;
 
-  // Thinking state — spinner with elapsed timer
+  // Thinking state — spinner with elapsed timer and session stats
   if (entry.isThinking) {
+    const apiCalls = tokens?.api_calls ?? 0;
+    const totalTokens = tokens?.total_tokens ?? 0;
+
     return (
       <Box marginBottom={1}>
         <Text color={theme.copilot}>
@@ -58,12 +68,13 @@ export function ActiveMessage({ entry, theme, streamStartedAt, streamCharsReceiv
         </Text>
         <Text color={theme.muted}>
           {" "}Thinking{elapsed >= 1000 ? ` ${formatElapsed(elapsed)}` : ""}
+          {apiCalls > 0 ? ` · ${formatTokens(totalTokens)} tokens · ${apiCalls} API call${apiCalls !== 1 ? "s" : ""}` : ""}
         </Text>
       </Box>
     );
   }
 
-  // Streaming text — show message with elapsed time and approx tokens
+  // Streaming text — show message with elapsed time and approx output tokens
   const approxTokens = Math.round((streamCharsReceived ?? 0) / 4);
 
   return (
@@ -73,7 +84,7 @@ export function ActiveMessage({ entry, theme, streamStartedAt, streamCharsReceiv
         <Box>
           <Text color={theme.muted}>
             {"  "}{formatElapsed(elapsed)}
-            {approxTokens > 0 ? ` · ~${approxTokens} tokens` : ""}
+            {approxTokens > 0 ? ` · ~${approxTokens} output tokens` : ""}
           </Text>
         </Box>
       ) : null}
