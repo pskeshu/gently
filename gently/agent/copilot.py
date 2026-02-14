@@ -332,6 +332,7 @@ class MicroscopyCopilot:
             plan_tool_names = {
                 "create_campaign", "create_plan_item", "update_plan_item",
                 "link_plan_items", "propose_plan", "get_plan_status",
+                "get_plan_item",
                 "query_lab_history", "check_hardware_capability",
                 "search_literature", "search_strains",
                 "ask_user_choice",

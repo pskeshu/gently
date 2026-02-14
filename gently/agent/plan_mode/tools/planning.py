@@ -49,6 +49,13 @@ async def create_campaign(
     if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
         return "Error: Context store not available"
 
+    # Fix year in shorthand — models sometimes hallucinate the wrong year
+    if shorthand:
+        import re
+        from datetime import datetime
+        current_year = str(datetime.now().year)
+        shorthand = re.sub(r'-20\d{2}$', f'-{current_year}', shorthand)
+
     store = copilot.context_store
     cid = store.create_campaign(
         description=description,
@@ -103,7 +110,7 @@ async def create_plan_item(
     spec: Dict = None,
     inherit_from: str = None,
     depends_on: List[str] = None,
-    phase_order: int = 0,
+    phase_order: int = -1,
     context: Dict = None,
 ) -> str:
     """Create a plan item within a campaign/phase."""
@@ -122,8 +129,35 @@ async def create_plan_item(
         depends_on=depends_on,
         phase_order=phase_order,
     )
+
+    # Include the human-friendly task number in the response
+    item = store.get_plan_item(item_id)
+    task_num = ""
+    if item:
+        # Determine phase number if this is a subcampaign
+        campaign = store.get_campaign(campaign_id)
+        if campaign and campaign.parent_id:
+            phases = store.get_subcampaigns(campaign.parent_id)
+            for pi, phase in enumerate(phases, 1):
+                if phase.id == campaign_id:
+                    # Count items in this phase up to this one
+                    items = store.get_plan_items(campaign_id=campaign_id)
+                    items.sort(key=lambda x: x.phase_order)
+                    for ti, it in enumerate(items, 1):
+                        if it.id == item_id:
+                            task_num = f" #{pi}.{ti}"
+                            break
+                    break
+        else:
+            items = store.get_plan_items(campaign_id=campaign_id)
+            items.sort(key=lambda x: x.phase_order)
+            for ti, it in enumerate(items, 1):
+                if it.id == item_id:
+                    task_num = f" #{ti}"
+                    break
+
     dep_str = f", depends on: {depends_on}" if depends_on else ""
-    return f"Created [{type}] plan item '{title}' (id: {item_id}){dep_str}"
+    return f"Created [{type}] plan item{task_num} '{title}' (id: {item_id}){dep_str}"
 
 
 @tool(
@@ -144,17 +178,25 @@ async def update_plan_item(
     spec: Dict = None,
     context: Dict = None,
 ) -> str:
-    """Update a plan item."""
+    """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
+    or phase.task reference (e.g. '1.3')."""
     copilot = context.get("copilot") if context else None
     if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
         return "Error: Context store not available"
 
     store = copilot.context_store
+
+    # Resolve natural references
+    item = store.resolve_plan_item(item_id)
+    if not item:
+        return f"Plan item '{item_id}' not found"
+    resolved_id = item.id
+
     from gently.context.model import PlanItemStatus
 
     status_enum = PlanItemStatus(status) if status else None
     store.update_plan_item(
-        item_id=item_id,
+        item_id=resolved_id,
         status=status_enum,
         title=title,
         description=description,
@@ -170,14 +212,16 @@ async def update_plan_item(
         changes.append(f"spec updated")
     if title:
         changes.append(f"title → {title}")
-    return f"Updated plan item {item_id}: {', '.join(changes) or 'updated'}"
+    return f"Updated plan item '{item.title}' ({resolved_id}): {', '.join(changes) or 'updated'}"
 
 
 @tool(
     name="link_plan_items",
     description=(
         "Set a dependency between plan items. The first item (item_id) "
-        "cannot start until the second item (depends_on_id) is completed."
+        "cannot start until the second item (depends_on_id) is completed. "
+        "Items can be referenced by UUID, task number (e.g. '3'), or "
+        "phase.task (e.g. '1.3')."
     ),
     category=ToolCategory.UTILITY,
 )
@@ -192,8 +236,55 @@ async def link_plan_items(
         return "Error: Context store not available"
 
     store = copilot.context_store
-    store.add_plan_item_dependency(item_id, depends_on_id)
-    return f"Linked: {item_id} now depends on {depends_on_id}"
+
+    # Resolve natural references
+    item = store.resolve_plan_item(item_id)
+    dep = store.resolve_plan_item(depends_on_id)
+    if not item:
+        return f"Plan item '{item_id}' not found"
+    if not dep:
+        return f"Plan item '{depends_on_id}' not found"
+
+    store.add_plan_item_dependency(item.id, dep.id)
+    return f"Linked: '{item.title}' now depends on '{dep.title}'"
+
+
+@tool(
+    name="get_plan_item",
+    description=(
+        "Look up a plan item by reference. Accepts a UUID, task number "
+        "(e.g. '3'), phase.task (e.g. '1.3'), or natural language like "
+        "'task 3 of phase 1'. Returns full details including spec, "
+        "dependencies, and status."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Show me task 3 of phase 1",
+            tool_input={"ref": "1.3"},
+        ),
+        ToolExample(
+            user_query="What's the status of the pilot imaging task?",
+            tool_input={"ref": "1"},
+        ),
+    ],
+)
+async def get_plan_item_tool(
+    ref: str,
+    campaign_id: str = None,
+    context: Dict = None,
+) -> str:
+    """Look up a plan item by natural reference."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    store = copilot.context_store
+    item = store.resolve_plan_item(ref, campaign_id=campaign_id)
+    if not item:
+        return f"No plan item matching '{ref}' found"
+
+    return _format_plan_item(item, store, task_num="")
 
 
 # ---------------------------------------------------------------------------
@@ -246,15 +337,18 @@ async def propose_plan(
     if not phases:
         # No sub-campaigns — show items directly
         items = store.get_plan_items(campaign_id=campaign_id)
-        for item in items:
-            lines.append(_format_plan_item(item, store))
+        items.sort(key=lambda x: x.phase_order)
+        for task_idx, item in enumerate(items, 1):
+            lines.append(_format_plan_item(item, store, task_num=str(task_idx)))
     else:
-        for phase in phases:
-            lines.append(f"── {phase.description} ──")
+        for phase_idx, phase in enumerate(phases, 1):
+            lines.append(f"── Phase {phase_idx}: {phase.description} ──")
             lines.append("")
             items = store.get_plan_items(campaign_id=phase.id)
-            for item in items:
-                lines.append(_format_plan_item(item, store))
+            items.sort(key=lambda x: x.phase_order)
+            for task_idx, item in enumerate(items, 1):
+                num = f"{phase_idx}.{task_idx}"
+                lines.append(_format_plan_item(item, store, task_num=num))
             lines.append("")
 
     # Summary
@@ -270,7 +364,7 @@ async def propose_plan(
     return "\n".join(lines)
 
 
-def _format_plan_item(item, store) -> str:
+def _format_plan_item(item, store, task_num: str = "") -> str:
     """Format a single plan item for display."""
     from gently.context.model import PlanItemStatus
 
@@ -283,7 +377,8 @@ def _format_plan_item(item, store) -> str:
     }
     icon = status_icons.get(item.status, " ")
     type_tag = item.type.value.upper()
-    line = f" {icon} [{type_tag}] {item.title}"
+    num_label = f"#{task_num} " if task_num else ""
+    line = f" {icon} {num_label}[{type_tag}] {item.title}  ({item.id})"
 
     details = []
     if item.imaging_spec:

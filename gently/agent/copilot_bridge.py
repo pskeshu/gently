@@ -344,10 +344,18 @@ class CopilotBridge:
             return
 
         if cmd == "/campaign" or cmd == "/campaigns" or cmd.startswith("/campaign "):
-            # Check for /campaign delete <id>
             parts = command.strip().split()
-            if len(parts) >= 3 and parts[1].lower() == "delete":
+            subcmd = parts[1].lower() if len(parts) >= 2 else None
+
+            if subcmd == "delete" and len(parts) >= 3:
                 data = self._delete_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
+            elif subcmd == "rename" and len(parts) >= 4:
+                data = self._rename_campaign(parts[2], " ".join(parts[3:]))
                 await send_fn({
                     "type": "command_result",
                     "command": "/campaign",
@@ -909,6 +917,26 @@ class CopilotBridge:
         detail = f" ({', '.join(parts)})" if parts else ""
         return {"text": f"Deleted **{label}**{detail}."}
 
+    def _rename_campaign(self, campaign_id: str, new_name: str) -> dict:
+        """Rename a campaign's shorthand."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+
+        # Resolve by shorthand if needed
+        campaign = cs.get_campaign(campaign_id)
+        if not campaign:
+            for c in cs.get_root_campaigns():
+                if c.shorthand and c.shorthand.lower() == campaign_id.lower():
+                    campaign = c
+                    break
+        if not campaign:
+            return {"text": f"Campaign '{campaign_id}' not found."}
+
+        old_name = campaign.shorthand or campaign.display_name
+        cs.update_campaign(campaign.id, shorthand=new_name.strip())
+        return {"text": f"Renamed **{old_name}** → **{new_name.strip()}**"}
+
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""
         cs = getattr(self, "_context_store", None)
@@ -1007,19 +1035,21 @@ class CopilotBridge:
         # Show subcampaigns/phases with their items
         children = cs.get_subcampaigns(campaign.id)
         if children:
-            for child in children:
+            for phase_idx, child in enumerate(children, 1):
                 child_status = cs.get_plan_status(child.id)
                 ct = child_status["total"]
                 cc = child_status["completed"]
-                lines.append(f"**{child.shorthand or child.display_name}** ({cc}/{ct})")
+                phase_label = child.shorthand or child.display_name
+                lines.append(f"**Phase {phase_idx}: {phase_label}** ({cc}/{ct})")
 
                 items = cs.get_plan_items(campaign_id=child.id)
                 items.sort(key=lambda x: x.phase_order)
-                for item in items:
+                for task_idx, item in enumerate(items, 1):
                     icon = TYPE_ICONS.get(item.type.value, "📋")
                     mark = STATUS_MARKS.get(item.status.value, "?")
+                    num = f"{phase_idx}.{task_idx}"
                     short_id = item.id[:8]
-                    lines.append(f"  {mark} {icon} `{short_id}` {item.title}")
+                    lines.append(f"  {mark} {icon} **{num}** {item.title}  `{short_id}`")
                     if item.imaging_spec and item.imaging_spec.strain:
                         spec = item.imaging_spec
                         details = []
@@ -1032,14 +1062,14 @@ class CopilotBridge:
                         lines.append(f"      {' · '.join(details)}")
                 lines.append("")
         else:
-            # Items directly under this campaign
+            # Items directly under this campaign (no phases)
             items = cs.get_plan_items(campaign_id=campaign.id)
             items.sort(key=lambda x: x.phase_order)
-            for item in items:
+            for task_idx, item in enumerate(items, 1):
                 icon = TYPE_ICONS.get(item.type.value, "📋")
                 mark = STATUS_MARKS.get(item.status.value, "?")
                 short_id = item.id[:8]
-                lines.append(f"  {mark} {icon} `{short_id}` {item.title}")
+                lines.append(f"  {mark} {icon} **{task_idx}** {item.title}  `{short_id}`")
 
         # Next actions
         if status["next_actions"]:

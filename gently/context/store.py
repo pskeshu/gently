@@ -972,13 +972,27 @@ class ContextStore:
         spec: Optional[Dict] = None,
         inherit_from: Optional[str] = None,
         planned_session_id: Optional[str] = None,
-        phase_order: int = 0,
+        phase_order: int = -1,
         depends_on: Optional[List[str]] = None,
         item_id: Optional[str] = None,
     ) -> str:
-        """Create a plan item. Returns its ID."""
+        """Create a plan item. Returns its ID.
+
+        If phase_order is -1 (default), auto-assigns the next sequential
+        number within the campaign (1-based).
+        """
         pid = item_id or self._gen_id()
         now = self._now()
+
+        if phase_order < 0:
+            # Auto-assign: next number in this campaign
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(phase_order), 0) FROM plan_items "
+                "WHERE campaign_id = ?",
+                (campaign_id,),
+            ).fetchone()
+            phase_order = row[0] + 1
+
         with self._tx():
             self._conn.execute(
                 "INSERT INTO plan_items "
@@ -998,7 +1012,7 @@ class ContextStore:
                         "(item_id, depends_on_id) VALUES (?, ?)",
                         (pid, dep_id),
                     )
-        logger.info(f"Created plan item {pid} [{type}]: {title}")
+        logger.info(f"Created plan item {pid} [{type}] #{phase_order}: {title}")
         return pid
 
     def get_plan_item(self, item_id: str) -> Optional[PlanItem]:
@@ -1007,6 +1021,112 @@ class ContextStore:
             "SELECT * FROM plan_items WHERE id = ?", (item_id,)
         ).fetchone()
         return self._row_to_plan_item(row) if row else None
+
+    def resolve_plan_item(
+        self, ref: str, campaign_id: Optional[str] = None,
+    ) -> Optional[PlanItem]:
+        """Resolve a human-friendly plan item reference.
+
+        Supported formats:
+          - UUID or UUID prefix: "a1b2c3d4"
+          - Task number within campaign: "3", "task 3", "#3"
+          - Phase.task: "1.3", "2.1"
+          - Natural language: "task 3 of phase 1", "phase 2 task 1"
+
+        When a bare task number is given, campaign_id scopes the lookup
+        (or falls back to the current session's campaign).
+        """
+        import re
+
+        ref = ref.strip().lower()
+
+        # --- Direct ID match (UUID prefix) ---
+        row = self._conn.execute(
+            "SELECT * FROM plan_items WHERE id = ?", (ref,)
+        ).fetchone()
+        if row:
+            return self._row_to_plan_item(row)
+
+        # Also try UUID prefix match (e.g. first few chars)
+        if len(ref) >= 4 and re.match(r'^[0-9a-f]+$', ref):
+            row = self._conn.execute(
+                "SELECT * FROM plan_items WHERE id LIKE ?", (ref + '%',)
+            ).fetchone()
+            if row:
+                return self._row_to_plan_item(row)
+
+        # --- Determine root campaign ---
+        root_id = campaign_id
+        if not root_id:
+            # Fall back to first root campaign
+            campaigns = self.get_root_campaigns()
+            if campaigns:
+                root_id = campaigns[0].id
+
+        if not root_id:
+            return None
+
+        # --- Parse "phase P task T" / "task T of phase P" / "P.T" ---
+        phase_num = None
+        task_num = None
+
+        # "1.3" or "2.1"
+        m = re.match(r'^(\d+)\.(\d+)$', ref)
+        if m:
+            phase_num, task_num = int(m.group(1)), int(m.group(2))
+
+        # "task 3 of phase 1" / "task 3 phase 1"
+        if not task_num:
+            m = re.search(r'task\s+(\d+)\s+(?:of\s+)?phase\s+(\d+)', ref)
+            if m:
+                task_num, phase_num = int(m.group(1)), int(m.group(2))
+
+        # "phase 1 task 3"
+        if not task_num:
+            m = re.search(r'phase\s+(\d+)\s+task\s+(\d+)', ref)
+            if m:
+                phase_num, task_num = int(m.group(1)), int(m.group(2))
+
+        # "task 3" / "#3" / just "3"
+        if not task_num:
+            m = re.match(r'^(?:task\s+|#)?(\d+)$', ref)
+            if m:
+                task_num = int(m.group(1))
+
+        if not task_num:
+            return None
+
+        # --- Resolve phase → campaign_id ---
+        if phase_num is not None:
+            phases = self.get_subcampaigns(root_id)
+            if 1 <= phase_num <= len(phases):
+                target_campaign = phases[phase_num - 1].id
+            else:
+                return None
+        else:
+            # No phase specified — check subcampaigns first, then root
+            phases = self.get_subcampaigns(root_id)
+            if phases:
+                # Search across all phases for a global task number
+                # Assign sequential numbers across phases: phase1 items, then phase2, etc.
+                all_items = []
+                for phase in phases:
+                    items = self.get_plan_items(campaign_id=phase.id)
+                    items.sort(key=lambda x: x.phase_order)
+                    all_items.extend(items)
+                if 1 <= task_num <= len(all_items):
+                    return all_items[task_num - 1]
+                return None
+            else:
+                target_campaign = root_id
+
+        # --- Find task by phase_order within the target campaign ---
+        items = self.get_plan_items(campaign_id=target_campaign)
+        items.sort(key=lambda x: x.phase_order)
+        if 1 <= task_num <= len(items):
+            return items[task_num - 1]
+
+        return None
 
     def get_plan_items(
         self,

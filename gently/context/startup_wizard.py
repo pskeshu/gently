@@ -117,9 +117,9 @@ class StartupWizard:
     # ------------------------------------------------------------------
 
     async def _step_first_launch(self, send_fn, wait_for_input, wait_for_choice):
-        """First launch: organism → goal. Two pickers, feels conversational."""
+        """First launch: just ask the organism. Research program emerges from conversation."""
 
-        # Step 1: What organism?
+        # What organism?
         await self._say(send_fn, "Hi! I'm your microscopy copilot. What organism do you work with?")
 
         organism_choices = {
@@ -172,60 +172,6 @@ class StartupWizard:
             self._store_learning(f"Lab organism: {organism_label}")
         else:
             return  # skip or cancelled
-
-        # Step 2: Research campaign / program
-        # Generate organism-specific options + greeting via LLM
-        await self._think(send_fn)
-        greeting, llm_options = await self._generate_campaign_options(organism_label)
-        msg = greeting or f"Great choice. What's your research focus with {organism_label}?"
-        await self._say(send_fn, msg)
-
-        if llm_options:
-            options = llm_options
-        else:
-            options = [
-                {
-                    "id": "dev_timing",
-                    "label": "Developmental timing",
-                    "description": "Tracking stage transitions, division rates",
-                },
-                {
-                    "id": "phenotype_screen",
-                    "label": "Phenotype screening",
-                    "description": "Comparing mutants, RNAi, drug effects",
-                },
-                {
-                    "id": "long_term",
-                    "label": "Long-term imaging",
-                    "description": "Collecting data over days/weeks",
-                },
-            ]
-        campaign_choices = {
-            "_type": "single",
-            "question": "What's your research goal?",
-            "options": options,
-            "allow_multiple": False,
-        }
-        campaign = await wait_for_choice(campaign_choices)
-
-        if campaign:
-            known_ids = {o["id"] for o in options if o["id"] != "__custom__"}
-            picked = next((o for o in options if o["id"] == campaign), None)
-            if campaign in known_ids and picked:
-                # Known pick
-                desc = f"{picked['label']}: {picked['description']}" if picked.get("description") else picked["label"]
-                desc = f"{organism_label} — {desc}"
-                cid = self.context_store.create_campaign(description=desc)
-                self.context_store.link_session_campaign(self.session_id, cid)
-            elif campaign != "__custom__" and not _is_skip(campaign):
-                # Custom text typed inline in the picker
-                result = await self._extract(send_fn, campaign, "campaign")
-                if not result:
-                    cid = self.context_store.create_campaign(description=campaign[:200])
-                    self.context_store.link_session_campaign(self.session_id, cid)
-
-        # Session intent is no longer forced here — it emerges from
-        # conversation or from entering plan mode.
 
     async def _step_campaign_select(self, send_fn, wait_for_input, wait_for_choice):
         """Show active campaigns in a picker."""
@@ -395,53 +341,6 @@ class StartupWizard:
             basis=basis,
         ))
 
-    async def _generate_campaign_options(self, organism: str) -> tuple:
-        """Ask the LLM for research program suggestions tailored to the organism.
-
-        Returns (greeting, options) or (None, None) on failure.
-        """
-        import asyncio
-        import json as _json
-
-        if not self.claude_client:
-            return None, None
-
-        prompt = (
-            f"A researcher just told you they work with {organism} on a "
-            f"light-sheet microscope. You are their microscopy copilot.\n\n"
-            f"Return JSON with:\n"
-            f"- \"greeting\": a brief, warm 1-sentence response acknowledging "
-            f"their organism (show you know something about imaging it)\n"
-            f"- \"options\": exactly 3 common research programs for this organism, "
-            f"each with \"id\" (snake_case), \"label\" (≤4 words), "
-            f"\"description\" (one sentence)\n\n"
-            f"Return ONLY JSON, no markdown."
-        )
-        try:
-            resp = await asyncio.to_thread(
-                self.claude_client.messages.create,
-                model="claude-sonnet-4-5-20250929",
-                max_tokens=512,
-                messages=[{"role": "user", "content": prompt}],
-            )
-            text = resp.content[0].text.strip()
-            if text.startswith("```"):
-                text = text.split("\n", 1)[1].rsplit("```", 1)[0]
-            data = _json.loads(text)
-
-            greeting = data.get("greeting")
-            options = data.get("options", [])
-
-            if isinstance(options, list) and len(options) >= 2:
-                for opt in options:
-                    opt.setdefault("id", opt.get("label", "").lower().replace(" ", "_"))
-                    opt.setdefault("label", "Research")
-                    opt.setdefault("description", "")
-                return greeting, options[:4]
-        except Exception as e:
-            logger.warning(f"Campaign option generation failed: {e}")
-        return None, None
-
     async def _extract(self, send_fn, response: str, topic: str):
         """Run LLM extraction silently — no acknowledgment message.
 
@@ -480,15 +379,23 @@ class StartupWizard:
 
         campaigns = self.context_store.get_active_campaigns()
         intent = self.context_store.get_current_session_intent()
+        learnings = self.context_store.get_learnings()
 
         campaign_name = campaigns[0].display_name if campaigns else None
         plan = intent.planned_intent if intent else None
+        organism = None
+        for l in learnings:
+            if l.content.startswith("Lab organism:"):
+                organism = l.content.split(":", 1)[1].strip()
+                break
 
         # Try LLM-generated summary
         await self._think(send_fn)
         summary = None
-        if self.claude_client and (campaign_name or plan):
+        if self.claude_client and (campaign_name or plan or organism):
             context_parts = []
+            if organism:
+                context_parts.append(f"Organism: {organism}")
             if campaign_name:
                 context_parts.append(f"Campaign: {campaign_name}")
             if plan:
@@ -499,7 +406,7 @@ class StartupWizard:
                 f"Here's what you know:\n\n{context_str}\n\n"
                 f"Write a brief (2-3 sentences max) ready message. Summarize "
                 f"what you understood and offer to help. Be specific to their "
-                f"research, not generic. Don't use bullet points."
+                f"organism/research, not generic. Don't use bullet points."
             )
             try:
                 resp = await asyncio.to_thread(
@@ -513,12 +420,10 @@ class StartupWizard:
                 pass
 
         if not summary:
-            lines = []
-            if campaign_name:
-                lines.append(f"Campaign: {campaign_name}")
-            if plan:
-                lines.append(f"Plan: {plan[:100]}")
-            summary = "\n".join(lines) + "\n\nHow can I help?" if lines else "All set. What can I help with?"
+            if organism:
+                summary = f"Got it — {organism}. I'm ready to help with your imaging session. What would you like to do?"
+            else:
+                summary = "All set. What can I help with?"
 
         await send_fn({"type": "text", "text": summary})
         await send_fn({
