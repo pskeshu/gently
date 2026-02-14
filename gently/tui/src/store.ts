@@ -69,6 +69,8 @@ export interface TuiState {
 
   // Whether copilot is currently streaming a response
   isStreaming: boolean;
+  streamStartedAt: number; // timestamp when current stream began
+  streamCharsReceived: number; // chars received in current stream
 
   // Copilot mode ("run" or "plan")
   copilotMode: string;
@@ -188,6 +190,8 @@ export function createTuiStore() {
     theme: getTheme(),
     notification: null,
     isStreaming: false,
+    streamStartedAt: 0,
+    streamCharsReceived: 0,
     copilotMode: "run",
     wizardActive: false,
     wizardWeight: "none",
@@ -241,6 +245,8 @@ export function createTuiStore() {
             isThinking: true,
           },
           isStreaming: true,
+          streamStartedAt: Date.now(),
+          streamCharsReceived: 0,
         };
       }),
 
@@ -265,6 +271,7 @@ export function createTuiStore() {
               isThinking: false,
               isStreaming: true,
             },
+            streamCharsReceived: s.streamCharsReceived + text.length,
           };
         }
         // Commit previous active message, start new copilot message
@@ -278,6 +285,7 @@ export function createTuiStore() {
             timestamp: Date.now(),
             isStreaming: true,
           },
+          streamCharsReceived: s.streamCharsReceived + text.length,
         };
       }),
 
@@ -382,6 +390,8 @@ export function createTuiStore() {
       set((s) => ({
         ...commitActive(s),
         isStreaming: false,
+        streamStartedAt: 0,
+        streamCharsReceived: 0,
       })),
 
     // ------------------------------------------------------------------

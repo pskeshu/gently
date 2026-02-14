@@ -6,19 +6,21 @@
  * can re-render on every text chunk without touching history.
  *
  * When isThinking is true (message sent, no response yet), shows a
- * spinner with a live elapsed timer (like Claude Code).
+ * spinner with a live elapsed timer. During streaming, shows elapsed
+ * time and approximate output tokens alongside the text.
  */
 
 import React, { useEffect, useState } from "react";
 import { Box, Text } from "ink";
 import Spinner from "ink-spinner";
 import { MessageBubble } from "./MessageBubble.js";
-import type { ChatEntry, ThemeColors, TokenSnapshot } from "../types.js";
+import type { ChatEntry, ThemeColors } from "../types.js";
 
 interface ActiveMessageProps {
   entry: ChatEntry | null;
   theme: ThemeColors;
-  tokens?: TokenSnapshot;
+  streamStartedAt?: number;
+  streamCharsReceived?: number;
 }
 
 function formatElapsed(ms: number): string {
@@ -29,35 +31,26 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem}s`;
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
-export function ActiveMessage({ entry, theme, tokens }: ActiveMessageProps) {
+export function ActiveMessage({ entry, theme, streamStartedAt, streamCharsReceived }: ActiveMessageProps) {
   const [elapsed, setElapsed] = useState(0);
 
-  // Live timer — ticks every second while thinking
+  // Live timer — ticks every second while streaming or thinking
   useEffect(() => {
-    if (!entry?.isThinking) {
+    if (!streamStartedAt) {
       setElapsed(0);
       return;
     }
-    const start = entry.timestamp;
-    setElapsed(Date.now() - start);
+    setElapsed(Date.now() - streamStartedAt);
     const interval = setInterval(() => {
-      setElapsed(Date.now() - start);
+      setElapsed(Date.now() - streamStartedAt);
     }, 1000);
     return () => clearInterval(interval);
-  }, [entry?.isThinking, entry?.timestamp]);
+  }, [streamStartedAt]);
 
   if (!entry) return null;
 
-  // Thinking state — spinner with elapsed timer and token activity
+  // Thinking state — spinner with elapsed timer
   if (entry.isThinking) {
-    const totalTokens = tokens?.total_tokens ?? 0;
-
     return (
       <Box marginBottom={1}>
         <Text color={theme.copilot}>
@@ -66,16 +59,24 @@ export function ActiveMessage({ entry, theme, tokens }: ActiveMessageProps) {
         <Text color={theme.muted}>
           {" "}Thinking{elapsed >= 1000 ? ` ${formatElapsed(elapsed)}` : ""}
         </Text>
-        {totalTokens > 0 ? (
-          <Text color={theme.muted}> · {formatTokens(totalTokens)} tokens</Text>
-        ) : null}
       </Box>
     );
   }
 
+  // Streaming text — show message with elapsed time and approx tokens
+  const approxTokens = Math.round((streamCharsReceived ?? 0) / 4);
+
   return (
     <Box flexDirection="column">
       <MessageBubble entry={entry} theme={theme} />
+      {entry.isStreaming && elapsed >= 1000 ? (
+        <Box>
+          <Text color={theme.muted}>
+            {"  "}{formatElapsed(elapsed)}
+            {approxTokens > 0 ? ` · ~${approxTokens} tokens` : ""}
+          </Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }
