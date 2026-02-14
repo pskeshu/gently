@@ -232,7 +232,7 @@ export function App({ wsUrl, store }: AppProps) {
       </Static>
 
       {/* ── Active streaming message (re-renders on each chunk) ─ */}
-      <ActiveMessage entry={state.activeMessage} theme={state.theme} />
+      <ActiveMessage entry={state.activeMessage} theme={state.theme} tokens={state.tokens} />
 
       {/* ── Choice picker (when copilot asks a question) ──────── */}
       {state.pendingChoice ? (

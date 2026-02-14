@@ -38,9 +38,9 @@ function formatTokens(n: number): string {
 
 function ModeBadge({ mode, theme }: { mode: string; theme: ThemeColors }) {
   if (mode === "plan") {
-    return <Text color={theme.accent} bold>plan</Text>;
+    return <Text color={theme.info} bold>plan</Text>;
   }
-  return <Text color={theme.muted}>live</Text>;
+  return <Text color={theme.muted}>run</Text>;
 }
 
 export function StatusBar({
@@ -54,7 +54,7 @@ export function StatusBar({
   notification,
   onClearNotification,
   wizardActive,
-  copilotMode = "live",
+  copilotMode = "run",
 }: StatusBarProps) {
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);

@@ -70,7 +70,7 @@ export interface TuiState {
   // Whether copilot is currently streaming a response
   isStreaming: boolean;
 
-  // Copilot mode ("live" or "plan")
+  // Copilot mode ("run" or "plan")
   copilotMode: string;
 
   // Startup wizard
@@ -188,7 +188,7 @@ export function createTuiStore() {
     theme: getTheme(),
     notification: null,
     isStreaming: false,
-    copilotMode: "live",
+    copilotMode: "run",
     wizardActive: false,
     wizardWeight: "none",
 
@@ -208,7 +208,7 @@ export function createTuiStore() {
         vizUrl: meta.vizUrl,
         logPath: meta.logPath,
         resumed: meta.resumed,
-        copilotMode: meta.mode ?? "live",
+        copilotMode: meta.mode ?? "run",
         wizardActive: meta.wizard?.wizard_needed ?? false,
         wizardWeight: meta.wizard?.conversation_weight ?? "none",
       }),
