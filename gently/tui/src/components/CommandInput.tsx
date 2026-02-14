@@ -41,7 +41,7 @@ export function CommandInput({
   const showCompletions = completions.length > 0 && completionIdx < 0;
 
   useInput((input, key) => {
-    if (key.tab && completions.length > 0) {
+    if (key.tab && !key.shift && completions.length > 0) {
       const idx =
         completionIdx < 0 ? 0 : (completionIdx + 1) % completions.length;
       setCompletionIdx(idx);

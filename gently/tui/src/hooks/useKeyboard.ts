@@ -2,6 +2,7 @@
  * Global keyboard shortcut hook.
  *
  * - Escape: cancel in-flight stream (interruptible thinking)
+ * - Shift+Tab: toggle between live and plan mode
  */
 
 import { useInput } from "ink";
@@ -21,6 +22,14 @@ export function useKeyboard(
         send({ type: "cancel" });
         s.cancelStream();
       }
+    }
+
+    // Shift+Tab — toggle plan/live mode
+    if (key.tab && key.shift) {
+      const s = store.getState();
+      if (s.isStreaming) return; // Don't switch while streaming
+      const cmd = s.copilotMode === "plan" ? "/plan exit" : "/plan";
+      send({ type: "command", command: cmd });
     }
   });
 }
