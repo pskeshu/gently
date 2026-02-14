@@ -19,6 +19,14 @@ const STATUS_LABELS = {
     paused: 'Paused',
 };
 
+const STATUS_DOTS = {
+    planned: '○',
+    in_progress: '◑',
+    completed: '●',
+    skipped: '⊘',
+    blocked: '⊗',
+};
+
 // ── State ─────────────────────────────────────────────────
 let allCampaigns = [];
 let allItemsById = {};  // flat map for quick lookups
@@ -111,11 +119,11 @@ function renderCampaignTree(tree) {
     let phases = '';
     if (hasChildren) {
         phases = `<div class="campaign-phases">
-            ${tree.children.map(renderPhase).join('')}
+            ${tree.children.map((child, idx) => renderPhase(child, idx + 1)).join('')}
         </div>`;
     } else if (hasItems) {
         phases = `<div class="campaign-items">
-            ${tree.items.map(renderPlanItem).join('')}
+            ${tree.items.map((item, idx) => renderPlanItem(item, String(idx + 1))).join('')}
         </div>`;
     }
 
@@ -141,7 +149,7 @@ function renderCampaignTree(tree) {
     `;
 }
 
-function renderPhase(tree) {
+function renderPhase(tree, phaseNum) {
     const c = tree.campaign;
     const items = tree.items || [];
     const status = tree.status || {};
@@ -152,25 +160,27 @@ function renderPhase(tree) {
     return `
         <div class="phase-section">
             <div class="phase-header" onclick="togglePhase(this)">
-                <svg class="phase-chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <svg class="phase-chevron open" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <polyline points="9,18 15,12 9,6"></polyline>
                 </svg>
+                <span class="phase-num">Phase ${phaseNum}</span>
                 <span class="phase-name">${esc(c.shorthand || c.description)}</span>
                 <span class="phase-count">${countText}</span>
             </div>
-            <div class="plan-items collapsed">
-                ${items.map(renderPlanItem).join('')}
+            <div class="plan-items">
+                ${items.map((item, idx) => renderPlanItem(item, `${phaseNum}.${idx + 1}`)).join('')}
                 ${(tree.children || []).length > 0
-                    ? tree.children.map(renderPhase).join('')
+                    ? tree.children.map((child, idx) => renderPhase(child, `${phaseNum}.${idx + 1}`)).join('')
                     : ''}
             </div>
         </div>
     `;
 }
 
-function renderPlanItem(item) {
+function renderPlanItem(item, taskNum) {
     const icon = TYPE_ICONS[item.type] || '📋';
     const statusClass = item.status || 'planned';
+    const statusDot = STATUS_DOTS[statusClass] || '○';
 
     // Build description hint
     let desc = '';
@@ -186,14 +196,17 @@ function renderPlanItem(item) {
 
     return `
         <div class="plan-item" onclick="showItemDetail('${item.id}')">
+            <span class="item-num">${esc(taskNum)}</span>
+            <span class="item-status-dot dot-${statusClass}">${statusDot}</span>
             <span class="item-icon type-${item.type}">${icon}</span>
             <div class="item-content">
                 <div class="item-title">${esc(item.title)}</div>
                 ${desc ? `<div class="item-desc">${esc(desc)}</div>` : ''}
             </div>
-            <div class="item-status">
-                <div class="item-status-dot dot-${statusClass}"></div>
-            </div>
+            <span class="item-id">${item.id.slice(0, 8)}</span>
+            <svg class="item-arrow" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="9,18 15,12 9,6"></polyline>
+            </svg>
         </div>
     `;
 }
@@ -227,11 +240,11 @@ function showItemDetail(itemId) {
 
     let html = '';
 
-    // Type
+    // Type + ID row
     const icon = TYPE_ICONS[item.type] || '📋';
-    html += `<div class="detail-section">
-        <div class="detail-section-title">Type</div>
-        <div class="detail-section-content">${icon} ${item.type.replace('_', ' ')}</div>
+    html += `<div class="detail-meta">
+        <span class="detail-type">${icon} ${item.type.replace('_', ' ')}</span>
+        <span class="detail-id">${item.id}</span>
     </div>`;
 
     // Description
