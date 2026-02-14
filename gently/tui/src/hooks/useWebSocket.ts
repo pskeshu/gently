@@ -88,9 +88,10 @@ export function useWebSocket(
               s.clearMessages();
               break;
             }
-            // Update copilot mode when /plan command returns it
+            // Mode switch — update status bar silently, no chat message
             if (msg.content?.mode && typeof msg.content.mode === "string") {
               s.setCopilotMode(msg.content.mode);
+              if (msg.command === "/plan") break;
             }
             const text = msg.error
               ? `Error: ${msg.error}`

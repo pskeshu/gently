@@ -73,8 +73,8 @@ class ContextGapReport:
             return "heavy"
         if self.needs_campaign:
             return "moderate"
-        if self.needs_session_intent:
-            return "light"
+        # Session intent is no longer wizard-driven — it emerges from
+        # conversation or plan mode.
         return "none"
 
 

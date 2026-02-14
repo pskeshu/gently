@@ -3,9 +3,9 @@
  *
  * Layout:
  *   ─────────────────────────────────────────────────────────────
- *   ● Device connected · 3 embryos · 12.4k tokens      gently v0.4.0
+ *   live · ● Device connected · 3 embryos · 12.4k tokens      gently v0.4.0
  *
- * Left side: device status, embryos, token usage.
+ * Left side: mode badge, device status, embryos, token usage.
  * Right side: version (right-aligned).
  *
  * Notifications overlay temporarily when they fire, then fade back
@@ -36,6 +36,13 @@ function formatTokens(n: number): string {
   return String(n);
 }
 
+function ModeBadge({ mode, theme }: { mode: string; theme: ThemeColors }) {
+  if (mode === "plan") {
+    return <Text color={theme.accent} bold>plan</Text>;
+  }
+  return <Text color={theme.muted}>live</Text>;
+}
+
 export function StatusBar({
   theme,
   version,
@@ -47,7 +54,7 @@ export function StatusBar({
   notification,
   onClearNotification,
   wizardActive,
-  copilotMode,
+  copilotMode = "live",
 }: StatusBarProps) {
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);
@@ -65,6 +72,8 @@ export function StatusBar({
     return () => clearTimeout(timer);
   }, [notification, onClearNotification]);
 
+  const sep = <Text color={theme.muted}> · </Text>;
+
   // Notification overlay
   if (showNotification && notification) {
     const levelColor =
@@ -77,12 +86,19 @@ export function StatusBar({
             : theme.info;
 
     return (
-      <Box>
-        <Text color={levelColor} bold>
-          {notification.title}
-        </Text>
-        {notification.body ? (
-          <Text color={theme.muted}> — {notification.body}</Text>
+      <Box justifyContent="space-between">
+        <Box>
+          <ModeBadge mode={copilotMode} theme={theme} />
+          {sep}
+          <Text color={levelColor} bold>
+            {notification.title}
+          </Text>
+          {notification.body ? (
+            <Text color={theme.muted}> — {notification.body}</Text>
+          ) : null}
+        </Box>
+        {version ? (
+          <Text color={theme.muted}>gently v{version}</Text>
         ) : null}
       </Box>
     );
@@ -93,8 +109,10 @@ export function StatusBar({
     return (
       <Box justifyContent="space-between">
         <Box>
-          <Text color={theme.accent} bold>Setting up...</Text>
-          <Text color={theme.muted}> Answer a few questions to get started</Text>
+          <ModeBadge mode={copilotMode} theme={theme} />
+          {sep}
+          <Text color={theme.info} bold>setting up</Text>
+          <Text color={theme.muted}> — answer a few questions to get started</Text>
         </Box>
         {version ? (
           <Text color={theme.muted}>gently v{version}</Text>
@@ -106,19 +124,19 @@ export function StatusBar({
   // Device status indicator
   let deviceDot: { char: string; color: string; label: string };
   if (offline) {
-    deviceDot = { char: "○", color: theme.warning, label: "Device offline" };
+    deviceDot = { char: "○", color: theme.warning, label: "offline" };
   } else if (deviceConnected) {
-    deviceDot = { char: "●", color: theme.success, label: "Device connected" };
+    deviceDot = { char: "●", color: theme.success, label: "connected" };
   } else {
-    deviceDot = { char: "●", color: theme.error, label: "Device disconnected" };
+    deviceDot = { char: "●", color: theme.error, label: "disconnected" };
   }
-
-  const sep = <Text color={theme.muted}> · </Text>;
 
   return (
     <Box justifyContent="space-between">
-      {/* Left: device status, session, embryos, tokens */}
+      {/* Left: mode, device status, session, embryos, tokens */}
       <Box>
+        <ModeBadge mode={copilotMode} theme={theme} />
+        {sep}
         <Text color={deviceDot.color}>{deviceDot.char}</Text>
         <Text color={theme.muted}> {deviceDot.label}</Text>
 
@@ -148,15 +166,10 @@ export function StatusBar({
         ) : null}
       </Box>
 
-      {/* Right: mode badge + version */}
-      <Box>
-        {copilotMode === "plan" ? (
-          <Text color={theme.accent} bold> plan </Text>
-        ) : null}
-        {version ? (
-          <Text color={theme.muted}>gently v{version}</Text>
-        ) : null}
-      </Box>
+      {/* Right: version */}
+      {version ? (
+        <Text color={theme.muted}>gently v{version}</Text>
+      ) : null}
     </Box>
   );
 }

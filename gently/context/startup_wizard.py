@@ -92,7 +92,7 @@ class StartupWizard:
         """Run the wizard to completion."""
         report = self.gap_report
 
-        # --- First launch: introduce + ask what they're doing ---
+        # --- First launch: organism + research program ---
         if report.needs_lab_onboarding:
             await self._step_first_launch(send_fn, wait_for_input, wait_for_choice)
             await self._finish(send_fn)
@@ -109,11 +109,6 @@ class StartupWizard:
         todays = self.context_store.get_todays_sessions()
         if todays:
             await self._step_planned_session(todays, send_fn, wait_for_choice)
-
-        # --- Session intent (if not already set) ---
-        refreshed = assess_gaps(self.context_store)
-        if refreshed.needs_session_intent:
-            await self._step_session_intent(send_fn, wait_for_input, wait_for_choice)
 
         await self._finish(send_fn)
 
@@ -229,57 +224,8 @@ class StartupWizard:
                     cid = self.context_store.create_campaign(description=campaign[:200])
                     self.context_store.link_session_campaign(self.session_id, cid)
 
-        # Step 3: What's the plan for today?
-        await self._say(send_fn, "Last thing — what are you planning for this session?")
-
-        goal_choices = {
-            "_type": "single",
-            "question": "Session goal",
-            "options": [
-                {
-                    "id": "timelapse",
-                    "label": "Run a timelapse",
-                    "description": "Time-series imaging of embryos",
-                },
-                {
-                    "id": "data_review",
-                    "label": "Review existing data",
-                    "description": "Look at images from a previous session",
-                },
-                {
-                    "id": "setup",
-                    "label": "Set up / calibrate",
-                    "description": "Alignment, testing, sample prep",
-                },
-            ],
-            "allow_multiple": False,
-        }
-        goal = await wait_for_choice(goal_choices)
-
-        if not goal:
-            return
-
-        goal_intents = {
-            "timelapse": "Run a timelapse of embryo development",
-            "data_review": "Review data from a previous imaging session",
-            "setup": "Set up and calibrate the microscope",
-        }
-        intent_text = goal_intents.get(goal)
-
-        if not intent_text and goal != "__custom__" and not _is_skip(goal):
-            # Custom text typed inline in the picker
-            result = await self._extract(send_fn, goal, "session")
-            if not result:
-                self.context_store.create_session_intent(
-                    session_id=self.session_id,
-                    planned_intent=goal,
-                )
-            return
-        if intent_text:
-            self.context_store.create_session_intent(
-                session_id=self.session_id,
-                planned_intent=intent_text,
-            )
+        # Session intent is no longer forced here — it emerges from
+        # conversation or from entering plan mode.
 
     async def _step_campaign_select(self, send_fn, wait_for_input, wait_for_choice):
         """Show active campaigns in a picker."""
