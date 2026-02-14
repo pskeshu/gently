@@ -1080,6 +1080,23 @@ Write a brief status summary. Examples:
         if "status" in message_lower and len(message.split()) < 5:
             return self.experiment.get_summary()
 
+        # Plan mode switching via natural language
+        plan_enter_phrases = ("plan mode", "enter plan", "switch to plan", "let's plan", "design an experiment")
+        plan_exit_phrases = ("exit plan", "leave plan", "back to run", "run mode")
+
+        if self.mode != "plan" and any(p in message_lower for p in plan_enter_phrases):
+            self.enter_plan_mode()
+            # Short request = just switch modes; longer = switch + pass through to Claude
+            if len(message.split()) <= 6:
+                return "Switched to plan mode. I'm now your experimental design collaborator."
+            return None  # mode switched; let _call_claude handle the full request
+
+        if self.mode == "plan" and any(p in message_lower for p in plan_exit_phrases):
+            self.exit_plan_mode()
+            if len(message.split()) <= 6:
+                return "Back to run mode."
+            return None
+
         # Simple commands
         if message_lower in ["stop", "pause", "halt"]:
             if self.run_engine:

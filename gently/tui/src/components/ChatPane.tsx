@@ -61,6 +61,15 @@ export function ActiveMessage({ entry, theme, tokens, streamStartedAt, streamCha
     const apiCalls = tokens?.api_calls ?? 0;
     const totalTokens = tokens?.total_tokens ?? 0;
 
+    // Build stats suffix: show session totals if we have them, otherwise
+    // just show "calling API..." so the user knows something is happening.
+    let stats = "";
+    if (apiCalls > 0) {
+      stats = ` · ${formatTokens(totalTokens)} tokens · ${apiCalls} API call${apiCalls !== 1 ? "s" : ""}`;
+    } else if (elapsed >= 2000) {
+      stats = " · calling API...";
+    }
+
     return (
       <Box marginBottom={1}>
         <Text color={theme.copilot}>
@@ -68,7 +77,7 @@ export function ActiveMessage({ entry, theme, tokens, streamStartedAt, streamCha
         </Text>
         <Text color={theme.muted}>
           {" "}Thinking{elapsed >= 1000 ? ` ${formatElapsed(elapsed)}` : ""}
-          {apiCalls > 0 ? ` · ${formatTokens(totalTokens)} tokens · ${apiCalls} API call${apiCalls !== 1 ? "s" : ""}` : ""}
+          {stats}
         </Text>
       </Box>
     );
