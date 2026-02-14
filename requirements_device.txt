@@ -1,0 +1,23 @@
+# Gently Device Layer (microscope computer)
+# Install: pip install -r requirements_device.txt
+
+# Hardware control
+pymmcore>=11.1.1
+bluesky>=1.11.0
+ophyd>=1.9.0
+
+# Web server (HTTP API for plan execution)
+aiohttp>=3.9.0
+
+# Image processing
+numpy>=1.24.0
+pillow>=10.0.0
+tifffile>=2023.0.0
+scipy>=1.10.0
+
+# Configuration
+pyyaml>=6.0
+
+# SAM embryo detection (optional, needs CUDA GPU)
+# torch>=2.0.0
+# segment-anything
