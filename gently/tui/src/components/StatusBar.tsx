@@ -23,6 +23,7 @@ interface StatusBarProps {
   deviceConnected: boolean;
   offline: boolean;
   embryoCount: number;
+  campaignCount: number;
   tokens: TokenSnapshot;
   notification: { level: string; title: string; body?: string } | null;
   onClearNotification: () => void;
@@ -50,6 +51,7 @@ export function StatusBar({
   deviceConnected,
   offline,
   embryoCount,
+  campaignCount,
   tokens,
   notification,
   onClearNotification,
@@ -152,6 +154,15 @@ export function StatusBar({
             {sep}
             <Text color={theme.muted}>
               {embryoCount} embryo{embryoCount !== 1 ? "s" : ""}
+            </Text>
+          </>
+        ) : null}
+
+        {campaignCount > 0 ? (
+          <>
+            {sep}
+            <Text color={theme.muted}>
+              {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}
             </Text>
           </>
         ) : null}

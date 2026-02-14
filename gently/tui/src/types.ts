@@ -30,6 +30,7 @@ export interface ConnectedMessage {
   version: string;
   tokens: TokenSnapshot;
   embryo_count: number;
+  campaign_count?: number;
   timestamp: string;
   // Launch status metadata (populated by TUI launch path)
   device_connected: boolean;

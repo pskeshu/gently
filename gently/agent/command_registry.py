@@ -539,6 +539,22 @@ Requires microscope connection and at least one registered embryo.""",
 
     # === Planning Commands ===
     registry.register(CommandDefinition(
+        name="/campaign",
+        description="View campaigns and experimental plans",
+        help_text="""Browse campaigns and their experimental plans.
+
+Usage:
+  /campaign          List all campaigns with progress summary
+  /campaign <id>     Show detailed view of a specific campaign with plan items
+
+Use plan mode (/plan) to create and modify campaigns.""",
+        aliases=["/campaigns"],
+        positional_arg="campaign_id",
+        positional_hint="ID",
+        category=CommandCategory.PLANNING,
+    ))
+
+    registry.register(CommandDefinition(
         name="/plan",
         description="Switch to plan mode for experimental design",
         help_text="""Enter plan mode to design experiments with the copilot.

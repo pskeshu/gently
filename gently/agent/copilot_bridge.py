@@ -343,6 +343,15 @@ class CopilotBridge:
             })
             return
 
+        if cmd == "/campaign" or cmd == "/campaigns" or cmd.startswith("/campaign "):
+            data = self._get_campaigns_data(command.strip())
+            await send_fn({
+                "type": "command_result",
+                "command": "/campaign",
+                "content": data,
+            })
+            return
+
         if cmd == "/plan" or cmd.startswith("/plan "):
             parts = command.strip().split(maxsplit=1)
             subcmd = parts[1].strip().lower() if len(parts) > 1 else None
@@ -749,6 +758,7 @@ class CopilotBridge:
             "version": getattr(gently, "__version__", "dev"),
             "tokens": self._get_token_snapshot(),
             "embryo_count": len(exp.embryos),
+            "campaign_count": self._get_campaign_count(),
             # Launch info fields (set by launch_copilot.py for TUI mode)
             "device_connected": self._launch_info.get("device_connected", False),
             "sam_available": self._launch_info.get("sam_available", False),
@@ -850,6 +860,156 @@ class CopilotBridge:
             stage = session.get_current_stage() or "unknown"
             obs_count = len(session.observations)
             lines.append(f"  {embryo_id}: stage={stage}, {obs_count} observations")
+
+        return {"text": "\n".join(lines)}
+
+    def _get_campaign_count(self) -> int:
+        """Count active root campaigns."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return 0
+        try:
+            return len(cs.get_root_campaigns())
+        except Exception:
+            return 0
+
+    def _get_campaigns_data(self, command: str) -> dict:
+        """Build structured campaign/plan data."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+
+        parts = command.split(maxsplit=1)
+        campaign_id = parts[1].strip() if len(parts) > 1 else None
+
+        if campaign_id:
+            return self._render_campaign_detail(cs, campaign_id)
+        return self._render_campaign_list(cs)
+
+    def _render_campaign_list(self, cs) -> dict:
+        """Render all campaigns as a text summary."""
+        roots = cs.get_root_campaigns()
+        if not roots:
+            return {"text": "No campaigns yet. Use plan mode (/plan) to create experimental plans."}
+
+        lines = ["Campaigns", ""]
+        for root in roots:
+            status = cs.get_plan_status(root.id)
+            total = status["total"]
+            completed = status["completed"]
+            pct = f" ({completed}/{total})" if total > 0 else ""
+
+            label = root.shorthand or root.display_name
+            lines.append(f"  **{label}**{pct} — {root.description}")
+            if root.target:
+                lines.append(f"    Target: {root.target}")
+
+            # Show subcampaigns (phases)
+            children = cs.get_subcampaigns(root.id)
+            for child in children:
+                child_status = cs.get_plan_status(child.id)
+                ct = child_status["total"]
+                cc = child_status["completed"]
+                child_label = child.shorthand or child.display_name
+                child_pct = f" ({cc}/{ct})" if ct > 0 else ""
+                lines.append(f"    · {child_label}{child_pct}")
+
+            lines.append("")
+
+        lines.append(f"Use `/campaign <id>` for details, or browse at the viz server /campaigns page.")
+        return {"text": "\n".join(lines)}
+
+    def _render_campaign_detail(self, cs, campaign_id: str) -> dict:
+        """Render a single campaign with all plan items."""
+        # Try to find by ID or shorthand
+        campaign = cs.get_campaign(campaign_id)
+        if not campaign:
+            # Try matching by shorthand
+            for c in cs.get_active_campaigns():
+                if c.shorthand and c.shorthand.lower() == campaign_id.lower():
+                    campaign = c
+                    break
+            # Also check root campaigns
+            if not campaign:
+                for c in cs.get_root_campaigns():
+                    if c.shorthand and c.shorthand.lower() == campaign_id.lower():
+                        campaign = c
+                        break
+        if not campaign:
+            return {"text": f"Campaign '{campaign_id}' not found."}
+
+        status = cs.get_plan_status(campaign.id)
+        total = status["total"]
+        completed = status["completed"]
+        in_progress = status["in_progress"]
+
+        lines = [
+            f"**{campaign.shorthand or campaign.display_name}** — {campaign.description}",
+        ]
+        if campaign.target:
+            lines.append(f"Target: {campaign.target}")
+        if campaign.progress:
+            lines.append(f"Progress: {campaign.progress}")
+        lines.append(f"Status: {campaign.status.value} · {completed}/{total} complete · {in_progress} in progress")
+        lines.append("")
+
+        TYPE_ICONS = {
+            "imaging": "📷",
+            "bench": "🧪",
+            "genetics": "🧬",
+            "analysis": "📊",
+            "decision_point": "🚦",
+        }
+        STATUS_MARKS = {
+            "planned": "○",
+            "in_progress": "◑",
+            "completed": "●",
+            "skipped": "⊘",
+            "blocked": "⊗",
+        }
+
+        # Show subcampaigns/phases with their items
+        children = cs.get_subcampaigns(campaign.id)
+        if children:
+            for child in children:
+                child_status = cs.get_plan_status(child.id)
+                ct = child_status["total"]
+                cc = child_status["completed"]
+                lines.append(f"**{child.shorthand or child.display_name}** ({cc}/{ct})")
+
+                items = cs.get_plan_items(campaign_id=child.id)
+                items.sort(key=lambda x: x.phase_order)
+                for item in items:
+                    icon = TYPE_ICONS.get(item.type.value, "📋")
+                    mark = STATUS_MARKS.get(item.status.value, "?")
+                    lines.append(f"  {mark} {icon} {item.title}")
+                    if item.imaging_spec and item.imaging_spec.strain:
+                        spec = item.imaging_spec
+                        details = []
+                        if spec.strain:
+                            details.append(spec.strain)
+                        if spec.num_embryos:
+                            details.append(f"{spec.num_embryos} embryos")
+                        if spec.interval_s:
+                            details.append(f"{spec.interval_s}s interval")
+                        lines.append(f"      {' · '.join(details)}")
+                lines.append("")
+        else:
+            # Items directly under this campaign
+            items = cs.get_plan_items(campaign_id=campaign.id)
+            items.sort(key=lambda x: x.phase_order)
+            for item in items:
+                icon = TYPE_ICONS.get(item.type.value, "📋")
+                mark = STATUS_MARKS.get(item.status.value, "?")
+                lines.append(f"  {mark} {icon} {item.title}")
+
+        # Next actions
+        if status["next_actions"]:
+            lines.append("")
+            lines.append("**Next actions:**")
+            for item in status["next_actions"][:5]:
+                icon = TYPE_ICONS.get(item.type.value, "📋")
+                lines.append(f"  → {icon} {item.title}")
 
         return {"text": "\n".join(lines)}
 

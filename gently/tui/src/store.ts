@@ -37,6 +37,7 @@ export interface TuiState {
   version: string;
   tokens: TokenSnapshot;
   embryoCount: number;
+  campaignCount: number;
 
   // Launch status (from connected message)
   deviceConnected: boolean;
@@ -91,6 +92,7 @@ export interface TuiActions {
     version: string;
     tokens: TokenSnapshot;
     embryoCount: number;
+    campaignCount: number;
     deviceConnected: boolean;
     samAvailable: boolean;
     offline: boolean;
@@ -207,6 +209,7 @@ export function createTuiStore() {
     version: "",
     tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0, api_calls: 0 },
     embryoCount: 0,
+    campaignCount: 0,
     deviceConnected: false,
     samAvailable: false,
     offline: false,
@@ -238,6 +241,7 @@ export function createTuiStore() {
         version: meta.version,
         tokens: meta.tokens,
         embryoCount: meta.embryoCount,
+        campaignCount: meta.campaignCount,
         deviceConnected: meta.deviceConnected,
         samAvailable: meta.samAvailable,
         offline: meta.offline,
