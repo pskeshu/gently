@@ -78,7 +78,7 @@ The server provides:
     print()
 
     # Import and run server
-    from backend.device_layer import DeviceLayerServer
+    from gently.device_layer import DeviceLayerServer
 
     async def run_server():
         server = DeviceLayerServer(
