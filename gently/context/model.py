@@ -259,6 +259,7 @@ class PlanItem:
     status: PlanItemStatus = PlanItemStatus.PLANNED
     depends_on: List[str] = field(default_factory=list)  # PlanItem IDs
     outcome: Optional[str] = None             # What happened (filled after completion)
+    references: List[Dict[str, str]] = field(default_factory=list)  # Source citations
 
     # Specifications (type-dependent)
     imaging_spec: Optional[ImagingSpec] = None

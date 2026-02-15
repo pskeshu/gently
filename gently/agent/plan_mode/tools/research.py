@@ -11,6 +11,7 @@ APIs used:
 - WormBase REST API for strain details per gene
 """
 
+import json
 import logging
 from typing import Dict, List, Optional
 
@@ -446,6 +447,22 @@ async def search_literature(
         "Use these results as context for experimental design. "
         "I can discuss any of these papers in more detail."
     )
+
+    # Citation-ready block for plan item references
+    lines.append("\n---")
+    lines.append("**Citation references for plan items** (pass to `references` param):")
+    for r in results:
+        author = r['authors'] or 'Unknown'
+        year = r['year'] or ''
+        journal = r['journal'] or ''
+        cite = f"{author} ({year}) {r['title'][:80]}. {journal}"
+        ref = {
+            "source": "pubmed",
+            "citation": cite,
+            "id": f"PMID:{r['pmid']}",
+        }
+        lines.append(f"  {json.dumps(ref)}")
+
     return "\n".join(lines)
 
 
@@ -579,4 +596,26 @@ async def search_strains(
         "I can provide more details about specific genes or strains, "
         "including expression patterns, phenotypes, and reporter availability."
     )
+
+    # Citation-ready block for plan item references
+    citation_refs = []
+    if cgc_results:
+        for s in cgc_results:
+            citation_refs.append({
+                "source": "cgc",
+                "citation": f"{s['name']} available from CGC",
+                "id": f"CGC:{s['name']}",
+            })
+    for gene in genes:
+        citation_refs.append({
+            "source": "ncbi_gene",
+            "citation": f"{gene['name']} — {gene['description']}",
+            "id": f"GeneID:{gene['gene_id']}",
+        })
+    if citation_refs:
+        lines.append("\n---")
+        lines.append("**Citation references for plan items** (pass to `references` param):")
+        for ref in citation_refs:
+            lines.append(f"  {json.dumps(ref)}")
+
     return "\n".join(lines)

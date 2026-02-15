@@ -80,7 +80,9 @@ async def create_campaign(
         "'genetics', 'analysis', 'decision_point'. "
         "Use depends_on to set dependencies on other plan item IDs. "
         "Use phase_number (e.g. 1) to add the item to a specific phase "
-        "instead of looking up the subcampaign ID."
+        "instead of looking up the subcampaign ID. "
+        "Use references to cite literature, databases, or other sources "
+        "(each with source, citation, and optional id/note)."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -114,6 +116,7 @@ async def create_plan_item(
     depends_on: List[str] = None,
     phase_number: int = None,
     phase_order: int = -1,
+    references: List[Dict] = None,
     context: Dict = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
@@ -147,6 +150,7 @@ async def create_plan_item(
         inherit_from=inherit_from,
         depends_on=depends_on,
         phase_order=phase_order,
+        references=references,
     )
 
     # Include the human-friendly task number in the response
@@ -183,8 +187,8 @@ async def create_plan_item(
     name="update_plan_item",
     description=(
         "Update an existing plan item — change status, title, description, "
-        "outcome, or spec. Use this to mark items as completed, skipped, or "
-        "to update imaging specifications."
+        "outcome, spec, or references. Use this to mark items as completed, "
+        "skipped, update imaging specifications, or attach source citations."
     ),
     category=ToolCategory.UTILITY,
 )
@@ -195,6 +199,7 @@ async def update_plan_item(
     description: str = None,
     outcome: str = None,
     spec: Dict = None,
+    references: List[Dict] = None,
     context: Dict = None,
 ) -> str:
     """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
@@ -221,16 +226,19 @@ async def update_plan_item(
         description=description,
         outcome=outcome,
         spec=spec,
+        references=references,
     )
     changes = []
     if status:
-        changes.append(f"status → {status}")
+        changes.append(f"status -> {status}")
     if outcome:
         changes.append(f"outcome recorded")
     if spec:
         changes.append(f"spec updated")
     if title:
-        changes.append(f"title → {title}")
+        changes.append(f"title -> {title}")
+    if references:
+        changes.append(f"{len(references)} references attached")
     return f"Updated plan item '{item.title}' ({resolved_id}): {', '.join(changes) or 'updated'}"
 
 
@@ -462,6 +470,14 @@ def _format_plan_item(item, store, task_num: str = "") -> str:
 
     if item.outcome:
         details.append(f"   Outcome: {item.outcome}")
+
+    if item.references:
+        ref_strs = []
+        for r in item.references:
+            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
+            cite = r.get('citation', '')
+            ref_strs.append(f"{tag} {cite}")
+        details.append(f"   Refs: {'; '.join(ref_strs)}")
 
     if details:
         return line + "\n" + "\n".join(details)
@@ -1031,6 +1047,32 @@ async def export_plan(
                 lines.extend(_export_item(item, store, num))
             lines.append("")
 
+    # References appendix — collect all unique references across items
+    all_items = store.get_plan_items(campaign_id=campaign_id, include_children=True)
+    all_refs = []
+    seen_ids = set()
+    for item in all_items:
+        for ref in item.references:
+            ref_key = ref.get('id') or ref.get('citation', '')
+            if ref_key and ref_key not in seen_ids:
+                seen_ids.add(ref_key)
+                all_refs.append(ref)
+
+    if all_refs:
+        lines.append("---\n## References\n")
+        for i, r in enumerate(all_refs, 1):
+            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
+            cite = r.get('citation', '')
+            rid = r.get('id', '')
+            note = r.get('note', '')
+            line = f"{i}. {tag} {cite}"
+            if rid:
+                line += f" ({rid})"
+            if note:
+                line += f" — *{note}*"
+            lines.append(line)
+        lines.append("")
+
     # Validation report (optional)
     if include_validation:
         lines.append("## Validation Report")
@@ -1129,6 +1171,21 @@ def _export_item(item, store, num: str) -> List[str]:
 
     if item.outcome:
         lines.append(f"**Outcome:** {item.outcome}")
+        lines.append("")
+
+    if item.references:
+        lines.append("**References:**")
+        for r in item.references:
+            tag = f"[{r.get('source', '').upper()}]" if r.get('source') else ""
+            cite = r.get('citation', '')
+            rid = r.get('id', '')
+            note = r.get('note', '')
+            line = f"- {tag} {cite}"
+            if rid:
+                line += f" ({rid})"
+            if note:
+                line += f" — *{note}*"
+            lines.append(line)
         lines.append("")
 
     return lines

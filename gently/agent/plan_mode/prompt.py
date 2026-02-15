@@ -72,6 +72,24 @@ Use the plan tools to build the plan:
 
 IMPORTANT: ALWAYS use ask_user_choice when asking the researcher questions. Never
 present options as text lists.
+
+## Citing Sources
+
+When you suggest strains, protocols, parameters, or approaches in a plan item, **always
+attach references** via the `references` parameter on create_plan_item or update_plan_item.
+Every recommendation should be traceable:
+
+- Found a strain via search_strains? → source="wormbase" or "cgc", with the ID
+- Citing a paper from search_literature? → source="pubmed", id="PMID:12345678"
+- Drawing on your own training knowledge? → source="claude", note explaining what you know
+  (e.g., "Standard C. elegans egg prep protocol, widely used in the field")
+
+The distinction between database-verified and LLM-knowledge references matters:
+- **Database sources** (pubmed, wormbase, cgc) = verified, current, citable
+- **Claude knowledge** = generally reliable but should be confirmed for critical decisions
+
+This creates a transparent evidence trail — collaborators can see *why* specific choices
+were made and which recommendations need independent verification.
 """
 
 
@@ -94,6 +112,15 @@ PLAN_MODE_GUIDELINES = """\
    intervals and minimal laser power should be the default.
 8. **Decision points are essential**: Every phase should have clear go/no-go
    criteria. This prevents wasting weeks on a dead-end approach.
+9. **Cite everything**: Every recommendation should have a reference. If you found
+   it via a tool, cite the database. If you're drawing on your training knowledge,
+   use source="claude" with a note explaining your reasoning. This lets researchers
+   see which suggestions are database-verified vs. LLM-suggested.
+10. **Search proactively**: Before suggesting a strain, search for it to confirm
+   availability and get the correct name. Before recommending an approach, search
+   the literature for recent protocols. Your built-in knowledge may be outdated —
+   the databases are current. When a search confirms your knowledge, cite the
+   database (not "claude") — the verified source is stronger.
 """
 
 

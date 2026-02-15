@@ -205,6 +205,7 @@ CREATE TABLE IF NOT EXISTS plan_items (
     planned_session_id TEXT,
     session_id TEXT,
     phase_order INTEGER DEFAULT 0,
+    references TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
@@ -993,6 +994,7 @@ class ContextStore:
         phase_order: int = -1,
         depends_on: Optional[List[str]] = None,
         item_id: Optional[str] = None,
+        references: Optional[List[Dict]] = None,
     ) -> str:
         """Create a plan item. Returns its ID.
 
@@ -1015,12 +1017,14 @@ class ContextStore:
             self._conn.execute(
                 "INSERT INTO plan_items "
                 "(id, campaign_id, type, title, description, spec, inherit_from, "
-                " planned_session_id, phase_order, status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
+                " planned_session_id, phase_order, references, status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
                     pid, campaign_id, type, title, description,
                     json.dumps(spec) if spec else None,
-                    inherit_from, planned_session_id, phase_order, now, now,
+                    inherit_from, planned_session_id, phase_order,
+                    json.dumps(references) if references else None,
+                    now, now,
                 ),
             )
             if depends_on:
@@ -1204,6 +1208,7 @@ class ContextStore:
         session_id: Optional[str] = None,
         phase_order: Optional[int] = None,
         campaign_id: Optional[str] = None,
+        references: Optional[List[Dict]] = None,
     ):
         """Update a plan item. Only non-None values are applied."""
         now = self._now()
@@ -1229,6 +1234,9 @@ class ContextStore:
         if phase_order is not None:
             updates.append("phase_order = ?")
             values.append(phase_order)
+        if references is not None:
+            updates.append("references = ?")
+            values.append(json.dumps(references))
         if not updates:
             return
         updates.append("updated_at = ?")
@@ -1665,6 +1673,8 @@ class ContextStore:
                     k: v for k, v in spec_data.items() if k in valid
                 })
 
+        references = json.loads(d["references"]) if d.get("references") else []
+
         return PlanItem(
             id=item_id,
             campaign_id=d["campaign_id"],
@@ -1674,6 +1684,7 @@ class ContextStore:
             status=PlanItemStatus(d.get("status", "planned")),
             depends_on=deps,
             outcome=d.get("outcome"),
+            references=references,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),
