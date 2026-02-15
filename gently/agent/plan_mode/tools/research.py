@@ -13,6 +13,7 @@ APIs used:
 
 import json
 import logging
+import ssl
 from typing import Dict, List, Optional
 
 from ...tool_registry import tool, ToolCategory, ToolExample
@@ -27,12 +28,32 @@ _NCBI_TOOL = "gently"
 _NCBI_EMAIL = "pskeshu@gmail.com"
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Create an SSL context using certifi's CA bundle.
+
+    The system cert file (C:\\Program Files\\Common Files\\SSL\\cert.pem)
+    doesn't exist on this machine, so we use certifi explicitly.
+    """
+    try:
+        import certifi
+        return ssl.create_default_context(cafile=certifi.where())
+    except ImportError:
+        return ssl.create_default_context()
+
+
 def _ncbi_params(**kwargs) -> Dict:
     """Add standard NCBI tool/email to query params."""
     kwargs["tool"] = _NCBI_TOOL
     kwargs["email"] = _NCBI_EMAIL
     kwargs["retmode"] = "json"
     return kwargs
+
+
+def _http_session():
+    """Create an aiohttp ClientSession with explicit SSL certs."""
+    import aiohttp
+    connector = aiohttp.TCPConnector(ssl=_ssl_context())
+    return aiohttp.ClientSession(connector=connector)
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +67,7 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
     results: List[Dict] = []
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _http_session() as session:
             # Step 1: esearch — get PMIDs
             async with session.get(
                 "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
@@ -58,9 +79,11 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
                 timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
-                    logger.debug(f"PubMed esearch HTTP {resp.status}")
+                    logger.warning(f"PubMed esearch HTTP {resp.status}")
                     return []
-                data = await resp.json()
+                # content_type=None avoids ContentTypeError when NCBI
+                # returns text/plain or other non-json content types
+                data = await resp.json(content_type=None)
 
             id_list = data.get("esearchresult", {}).get("idlist", [])
             if not id_list:
@@ -76,9 +99,9 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
                 timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
-                    logger.debug(f"PubMed esummary HTTP {resp.status}")
+                    logger.warning(f"PubMed esummary HTTP {resp.status}")
                     return []
-                data = await resp.json()
+                data = await resp.json(content_type=None)
 
             result_data = data.get("result", {})
             for pmid in id_list:
@@ -113,7 +136,7 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
                 })
 
     except Exception as e:
-        logger.debug(f"PubMed search failed: {e}")
+        logger.warning(f"PubMed search failed: {e}", exc_info=True)
 
     return results
 
@@ -129,7 +152,7 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
     results: List[Dict] = []
 
     try:
-        async with aiohttp.ClientSession() as session:
+        async with _http_session() as session:
             # esearch — find gene IDs
             term = f"{query} AND Caenorhabditis elegans[orgn]"
             async with session.get(
@@ -142,8 +165,9 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
                 timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
+                    logger.warning(f"NCBI Gene esearch HTTP {resp.status}")
                     return []
-                data = await resp.json()
+                data = await resp.json(content_type=None)
 
             id_list = data.get("esearchresult", {}).get("idlist", [])
             if not id_list:
@@ -159,8 +183,9 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
                 timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
+                    logger.warning(f"NCBI Gene esummary HTTP {resp.status}")
                     return []
-                data = await resp.json()
+                data = await resp.json(content_type=None)
 
             result_data = data.get("result", {})
             for gid in id_list:
@@ -183,7 +208,7 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
                 })
 
     except Exception as e:
-        logger.debug(f"NCBI Gene search failed: {e}")
+        logger.warning(f"NCBI Gene search failed: {e}", exc_info=True)
 
     return results
 
@@ -206,16 +231,16 @@ async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
 
     try:
         url = f"https://rest.wormbase.org/rest/field/gene/{wbgene_id}/strains"
-        async with aiohttp.ClientSession() as session:
+        async with _http_session() as session:
             async with session.get(
                 url,
                 headers={"Accept": "application/json"},
                 timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
             ) as resp:
                 if resp.status != 200:
-                    logger.debug(f"WormBase strains HTTP {resp.status} for {wbgene_id}")
+                    logger.warning(f"WormBase strains HTTP {resp.status} for {wbgene_id}")
                     return []
-                data = await resp.json()
+                data = await resp.json(content_type=None)
 
         strains_data = data.get("strains", {}).get("data", {})
         if not strains_data:
@@ -237,7 +262,7 @@ async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
                 })
 
     except Exception as e:
-        logger.debug(f"WormBase strain lookup failed: {e}")
+        logger.warning(f"WormBase strain lookup failed: {e}", exc_info=True)
 
     return results
 
@@ -252,7 +277,7 @@ async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
 
     try:
         # Try NCBI gene search with exact name match
-        async with aiohttp.ClientSession() as session:
+        async with _http_session() as session:
             async with session.get(
                 "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
                 params=_ncbi_params(
@@ -264,7 +289,7 @@ async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
             ) as resp:
                 if resp.status != 200:
                     return None
-                data = await resp.json()
+                data = await resp.json(content_type=None)
 
             id_list = data.get("esearchresult", {}).get("idlist", [])
             if not id_list:
@@ -293,7 +318,7 @@ async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
                 return match.group(1)
 
     except Exception as e:
-        logger.debug(f"WormBase gene ID lookup failed for {gene_name}: {e}")
+        logger.warning(f"WormBase gene ID lookup failed for {gene_name}: {e}")
 
     return None
 
@@ -320,7 +345,7 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
     try:
         url = "https://cgc.umn.edu/strain/search"
         params = {"st1": query, "sf1": field}
-        async with aiohttp.ClientSession() as session:
+        async with _http_session() as session:
             async with session.get(
                 url,
                 params=params,
@@ -375,7 +400,7 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
             return []
 
     except Exception as e:
-        logger.debug(f"CGC search failed: {e}")
+        logger.warning(f"CGC search failed: {e}", exc_info=True)
 
     return results[:10]
 
