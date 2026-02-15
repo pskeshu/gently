@@ -644,3 +644,658 @@ async def search_strains(
             lines.append(f"  {json.dumps(ref)}")
 
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Paper reading — full text retrieval
+# ---------------------------------------------------------------------------
+
+async def _pmid_to_pmcid(pmid: str) -> Optional[str]:
+    """Convert a PMID to a PMCID via the NCBI ID converter."""
+    import aiohttp
+
+    try:
+        async with _http_session() as session:
+            async with session.get(
+                "https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/",
+                params={
+                    "ids": pmid,
+                    "format": "json",
+                    "tool": _NCBI_TOOL,
+                    "email": _NCBI_EMAIL,
+                },
+                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json(content_type=None)
+
+        records = data.get("records", [])
+        if records and records[0].get("pmcid"):
+            return records[0]["pmcid"]
+    except Exception as e:
+        logger.warning(f"PMID→PMCID conversion failed for {pmid}: {e}")
+
+    return None
+
+
+async def _fetch_pmc_fulltext(pmcid: str) -> Optional[str]:
+    """Fetch full text from PubMed Central as XML, parse into sections."""
+    import aiohttp
+    import xml.etree.ElementTree as ET
+
+    try:
+        # Strip "PMC" prefix for efetch — it wants just the number
+        pmc_num = pmcid.replace("PMC", "")
+
+        async with _http_session() as session:
+            params = _ncbi_params(db="pmc", id=pmc_num)
+            params["rettype"] = "xml"
+            params.pop("retmode", None)  # PMC XML doesn't use retmode=json
+
+            async with session.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=20),
+            ) as resp:
+                if resp.status != 200:
+                    logger.warning(f"PMC efetch HTTP {resp.status} for {pmcid}")
+                    return None
+                xml_text = await resp.text()
+
+        root = ET.fromstring(xml_text)
+        return _parse_pmc_xml(root)
+
+    except Exception as e:
+        logger.warning(f"PMC full text fetch failed for {pmcid}: {e}")
+        return None
+
+
+def _parse_pmc_xml(root) -> str:
+    """Extract structured text from PMC XML (JATS format)."""
+    sections = []
+
+    # Article metadata
+    article = root.find(".//article-meta")
+    if article is not None:
+        title_el = article.find(".//article-title")
+        if title_el is not None:
+            sections.append(f"# {_xml_text(title_el)}\n")
+
+        # Authors
+        authors = []
+        for contrib in article.findall(".//contrib[@contrib-type='author']"):
+            surname = contrib.findtext("name/surname", "")
+            given = contrib.findtext("name/given-names", "")
+            if surname:
+                authors.append(f"{given} {surname}".strip())
+        if authors:
+            sections.append(f"**Authors:** {', '.join(authors)}\n")
+
+        # Abstract
+        abstract = article.find(".//abstract")
+        if abstract is not None:
+            sections.append("## Abstract\n")
+            sections.append(_xml_text(abstract) + "\n")
+
+    # Body sections
+    body = root.find(".//body")
+    if body is not None:
+        for sec in body.findall(".//sec"):
+            title_el = sec.find("title")
+            title = _xml_text(title_el) if title_el is not None else ""
+            if title:
+                # Determine heading level by nesting depth
+                depth = 0
+                parent = sec
+                while parent is not None:
+                    parent = _find_parent(body, parent)
+                    if parent is not None and parent.tag == "sec":
+                        depth += 1
+                level = min(depth + 2, 4)  # ##, ###, ####
+                sections.append(f"{'#' * level} {title}\n")
+
+            # Collect paragraph text (skip nested sec)
+            for child in sec:
+                if child.tag == "p":
+                    sections.append(_xml_text(child) + "\n")
+                elif child.tag == "table-wrap":
+                    caption = child.find(".//caption")
+                    if caption is not None:
+                        sections.append(f"*Table: {_xml_text(caption)}*\n")
+                elif child.tag == "fig":
+                    caption = child.find(".//caption")
+                    if caption is not None:
+                        label = child.findtext("label", "Figure")
+                        sections.append(f"*{label}: {_xml_text(caption)}*\n")
+
+    text = "\n".join(sections)
+
+    # Truncate if very long (keep under ~15k chars for context window)
+    if len(text) > 15000:
+        text = text[:15000] + "\n\n[... truncated — paper continues ...]"
+
+    return text
+
+
+def _xml_text(element) -> str:
+    """Extract all text from an XML element, including nested elements."""
+    if element is None:
+        return ""
+    parts = []
+    parts.append(element.text or "")
+    for child in element:
+        parts.append(_xml_text(child))
+        parts.append(child.tail or "")
+    return "".join(parts).strip()
+
+
+def _find_parent(root, target):
+    """Find the parent of an element in an XML tree."""
+    for parent in root.iter():
+        for child in parent:
+            if child is target:
+                return parent
+    return None
+
+
+async def _unpaywall_lookup(doi: str) -> Optional[str]:
+    """Find an open access full text URL via Unpaywall."""
+    import aiohttp
+
+    try:
+        async with _http_session() as session:
+            async with session.get(
+                f"https://api.unpaywall.org/v2/{doi}",
+                params={"email": _NCBI_EMAIL},
+                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json(content_type=None)
+
+        best = data.get("best_oa_location")
+        if best:
+            return best.get("url_for_pdf") or best.get("url_for_landing_page")
+
+    except Exception as e:
+        logger.warning(f"Unpaywall lookup failed for {doi}: {e}")
+
+    return None
+
+
+async def _fetch_url_text(url: str) -> Optional[str]:
+    """Fetch a URL and extract text content (HTML → plain text)."""
+    import aiohttp
+    import re as _re
+
+    try:
+        async with _http_session() as session:
+            async with session.get(
+                url,
+                timeout=aiohttp.ClientTimeout(total=20),
+                headers={"User-Agent": "gently/1.0 (microscopy copilot; mailto:" + _NCBI_EMAIL + ")"},
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                content_type = resp.content_type or ""
+
+                if "pdf" in content_type:
+                    # Can't parse PDF from URL without pymupdf
+                    return None
+
+                html = await resp.text()
+
+        # Simple HTML → text: strip tags, collapse whitespace
+        text = _re.sub(r'<script[^>]*>.*?</script>', '', html, flags=_re.DOTALL)
+        text = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL)
+        text = _re.sub(r'<[^>]+>', ' ', text)
+        text = _re.sub(r'\s+', ' ', text).strip()
+
+        if len(text) > 15000:
+            text = text[:15000] + "\n\n[... truncated ...]"
+
+        return text if len(text) > 200 else None
+
+    except Exception as e:
+        logger.warning(f"URL fetch failed for {url}: {e}")
+        return None
+
+
+def _read_pdf_file(path: str) -> Optional[str]:
+    """Extract text from a local PDF file using pymupdf if available."""
+    import os
+
+    if not os.path.isfile(path):
+        return None
+
+    try:
+        import fitz  # pymupdf
+        doc = fitz.open(path)
+        pages = []
+        for page in doc:
+            pages.append(page.get_text())
+        text = "\n\n".join(pages)
+        doc.close()
+
+        if len(text) > 15000:
+            text = text[:15000] + "\n\n[... truncated — PDF continues ...]"
+        return text if text.strip() else None
+
+    except ImportError:
+        logger.info("pymupdf not installed — cannot extract PDF text. "
+                     "Install with: pip install pymupdf")
+        return None
+    except Exception as e:
+        logger.warning(f"PDF extraction failed for {path}: {e}")
+        return None
+
+
+async def _pubmed_abstract(pmid: str) -> Optional[Dict]:
+    """Fetch article metadata + abstract from PubMed."""
+    import aiohttp
+
+    try:
+        async with _http_session() as session:
+            params = _ncbi_params(db="pubmed", id=pmid)
+            params["rettype"] = "abstract"
+            params["retmode"] = "xml"
+
+            async with session.get(
+                "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi",
+                params=params,
+                timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                xml_text = await resp.text()
+
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(xml_text)
+
+        article = root.find(".//PubmedArticle")
+        if article is None:
+            return None
+
+        title = article.findtext(".//ArticleTitle", "")
+
+        # Authors
+        authors = []
+        for author in article.findall(".//Author"):
+            last = author.findtext("LastName", "")
+            first = author.findtext("ForeName", "")
+            if last:
+                authors.append(f"{first} {last}".strip())
+
+        # Abstract
+        abstract_parts = []
+        for abs_text in article.findall(".//AbstractText"):
+            label = abs_text.get("Label", "")
+            text = _xml_text(abs_text)
+            if label:
+                abstract_parts.append(f"**{label}:** {text}")
+            else:
+                abstract_parts.append(text)
+
+        # DOI
+        doi = ""
+        for aid in article.findall(".//ArticleId"):
+            if aid.get("IdType") == "doi":
+                doi = aid.text or ""
+
+        journal = article.findtext(".//Journal/Title", "")
+        year = article.findtext(".//PubDate/Year", "")
+
+        return {
+            "pmid": pmid,
+            "title": title,
+            "authors": ", ".join(authors),
+            "journal": journal,
+            "year": year,
+            "doi": doi,
+            "abstract": "\n\n".join(abstract_parts),
+        }
+
+    except Exception as e:
+        logger.warning(f"PubMed abstract fetch failed for {pmid}: {e}")
+        return None
+
+
+async def _resolve_reference(reference: str) -> Dict:
+    """Parse a reference string and determine what kind of input it is.
+
+    Returns a dict with keys: type, pmid, doi, url, path, query
+    """
+    import re
+    import os
+
+    ref = reference.strip()
+    result = {"type": "unknown", "raw": ref}
+
+    # PMID
+    m = re.match(r'^(?:PMID[:\s]*)?(\d{6,9})$', ref, re.IGNORECASE)
+    if m:
+        result["type"] = "pmid"
+        result["pmid"] = m.group(1)
+        return result
+
+    # DOI
+    m = re.search(r'(10\.\d{4,}/[^\s]+)', ref)
+    if m:
+        result["type"] = "doi"
+        result["doi"] = m.group(1).rstrip(".,;)")
+        return result
+
+    # URL (PubMed, PMC, or other)
+    if ref.startswith(("http://", "https://", "www.")):
+        result["type"] = "url"
+        result["url"] = ref if ref.startswith("http") else "https://" + ref
+
+        # Extract PMID from PubMed URLs
+        m = re.search(r'pubmed\.ncbi.*?/(\d{6,9})', ref)
+        if m:
+            result["type"] = "pmid"
+            result["pmid"] = m.group(1)
+
+        # Extract PMCID from PMC URLs
+        m = re.search(r'/pmc/articles/(PMC\d+)', ref)
+        if m:
+            result["type"] = "pmcid"
+            result["pmcid"] = m.group(1)
+
+        return result
+
+    # File path (PDF)
+    if os.path.isfile(ref) or ref.lower().endswith(".pdf"):
+        result["type"] = "file"
+        result["path"] = ref
+        return result
+
+    # Citation / search query
+    result["type"] = "search"
+    result["query"] = ref
+    return result
+
+
+async def _search_pmid(query: str) -> Optional[str]:
+    """Search PubMed for a citation string and return the best PMID.
+
+    Tries multiple query strategies to handle imprecise citations like
+    "Rapti et al 2019 nerve ring" (actual paper is Rapti 2017, Science).
+    """
+    import re as _re
+
+    strategies = []
+
+    # Detect "Author et al YEAR topic" pattern
+    m = _re.match(
+        r'^([A-Z][a-z]+)\s+(?:et\s+al\.?\s+)?(\d{4})?\s*(.*)?$',
+        query.strip(),
+    )
+    if m:
+        author = m.group(1)
+        year = m.group(2)
+        topic = (m.group(3) or "").strip()
+
+        # Fix common organism names in topic
+        topic_fixed = _re.sub(
+            r'\bC\.?\s*elegans\b', '"Caenorhabditis elegans"',
+            topic, flags=_re.IGNORECASE,
+        )
+
+        # Strategy 1: author + organism MeSH + quoted topic (most specific)
+        if topic_fixed:
+            strategies.append(
+                f'{author}[author] AND "Caenorhabditis elegans"[Mesh] AND "{topic_fixed}"'
+            )
+
+        # Strategy 2: author + organism MeSH (no topic — topic may not be in title)
+        strategies.append(
+            f'{author}[author] AND "Caenorhabditis elegans"[Mesh]'
+        )
+
+        # Strategy 3: author + year + topic (exact year, may be wrong)
+        if year and topic_fixed:
+            strategies.append(
+                f'{author}[author] AND {year}[pdat] AND {topic_fixed}'
+            )
+
+        # Strategy 4: author + year only
+        if year:
+            strategies.append(f"{author}[author] AND {year}[pdat]")
+
+    # Strategy 5: original query with organism name fix
+    fixed = _re.sub(
+        r'\bC\.?\s*elegans\b', '"Caenorhabditis elegans"',
+        query, flags=_re.IGNORECASE,
+    )
+    if fixed != query:
+        strategies.append(fixed)
+
+    # Strategy 6: original query as-is
+    strategies.append(query)
+
+    # Deduplicate while preserving order
+    seen = set()
+    unique = []
+    for s in strategies:
+        if s not in seen:
+            seen.add(s)
+            unique.append(s)
+
+    # Try each strategy
+    import aiohttp
+    for attempt in unique:
+        try:
+            async with _http_session() as session:
+                async with session.get(
+                    "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi",
+                    params=_ncbi_params(db="pubmed", term=attempt, retmax="1"),
+                    timeout=aiohttp.ClientTimeout(total=_API_TIMEOUT),
+                ) as resp:
+                    if resp.status != 200:
+                        continue
+                    data = await resp.json(content_type=None)
+
+            ids = data.get("esearchresult", {}).get("idlist", [])
+            if ids:
+                logger.debug(f"PubMed search hit with: {attempt!r} -> {ids[0]}")
+                return ids[0]
+
+        except Exception as e:
+            logger.warning(f"PubMed search failed for '{attempt}': {e}")
+
+    return None
+
+
+async def _doi_to_pmid(doi: str) -> Optional[str]:
+    """Resolve a DOI to a PMID via PubMed search."""
+    return await _search_pmid(f"{doi}[doi]")
+
+
+@tool(
+    name="read_paper",
+    description=(
+        "Read a scientific paper given a PMID, DOI, URL, file path, or "
+        "citation text (e.g. 'Rapti et al 2019'). Retrieves full text "
+        "from PubMed Central when available, checks Unpaywall for open "
+        "access versions, reads local PDFs, or falls back to the abstract. "
+        "Returns structured text for the copilot to analyze."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Read the Rapti et al paper on nerve ring assembly",
+            tool_input={"reference": "Rapti et al 2019 nerve ring"},
+        ),
+        ToolExample(
+            user_query="What does PMID 31537803 say about axon guidance?",
+            tool_input={"reference": "31537803"},
+        ),
+        ToolExample(
+            user_query="Read this paper: 10.1016/j.cell.2019.08.023",
+            tool_input={"reference": "10.1016/j.cell.2019.08.023"},
+        ),
+    ],
+)
+async def read_paper(
+    reference: str,
+    context: Dict = None,
+) -> str:
+    """Read a scientific paper and return its content.
+
+    Tries multiple sources in order:
+    1. PubMed Central full text (open access)
+    2. Unpaywall OA version
+    3. Local PDF file
+    4. URL fetch
+    5. PubMed abstract (fallback)
+    """
+    parsed = await _resolve_reference(reference)
+    ref_type = parsed["type"]
+
+    pmid = parsed.get("pmid")
+    doi = parsed.get("doi")
+    pmcid = parsed.get("pmcid")
+    url = parsed.get("url")
+    path = parsed.get("path")
+
+    status_lines = []  # Track what we tried
+
+    # --- Step 1: Resolve to PMID if we don't have one ---
+
+    if ref_type == "search":
+        query = parsed["query"]
+        status_lines.append(f"Searching PubMed for: '{query}'")
+        pmid = await _search_pmid(query)
+        if pmid:
+            status_lines.append(f"Found PMID: {pmid}")
+        else:
+            return (
+                f"[Paper lookup: '{reference}']\n\n"
+                f"Could not find a matching paper on PubMed for '{query}'. "
+                f"Try providing a PMID, DOI, or more specific citation."
+            )
+
+    if ref_type == "doi" and not pmid:
+        status_lines.append(f"Resolving DOI: {doi}")
+        pmid = await _doi_to_pmid(doi)
+        if pmid:
+            status_lines.append(f"DOI → PMID: {pmid}")
+
+    if ref_type == "pmcid":
+        status_lines.append(f"Direct PMC access: {pmcid}")
+
+    # --- Step 2: Try local PDF first if file path ---
+
+    if ref_type == "file":
+        status_lines.append(f"Reading local PDF: {path}")
+        text = _read_pdf_file(path)
+        if text:
+            return (
+                f"[Paper from local file: {path}]\n\n"
+                f"{text}\n\n---\n"
+                f"Source: local file"
+            )
+        else:
+            return (
+                f"[Paper from local file: {path}]\n\n"
+                f"Could not extract text from PDF. "
+                f"Install pymupdf for PDF support: `pip install pymupdf`"
+            )
+
+    # --- Step 3: Try PubMed Central full text ---
+
+    full_text = None
+
+    if pmcid:
+        status_lines.append(f"Fetching full text from PMC ({pmcid})")
+        full_text = await _fetch_pmc_fulltext(pmcid)
+
+    if not full_text and pmid:
+        status_lines.append(f"Looking up PMCID for PMID {pmid}")
+        pmcid = await _pmid_to_pmcid(pmid)
+        if pmcid:
+            status_lines.append(f"Found PMCID: {pmcid} — fetching full text")
+            full_text = await _fetch_pmc_fulltext(pmcid)
+        else:
+            status_lines.append("No PMC full text available")
+
+    if full_text:
+        meta = await _pubmed_abstract(pmid) if pmid else None
+        cite = ""
+        if meta:
+            cite = (
+                f"\n---\n"
+                f"**Source:** PMID:{pmid} | {pmcid} | "
+                f"{meta['authors'][:60]} ({meta['year']}) {meta['journal']}"
+            )
+            if meta.get("doi"):
+                cite += f"\n**DOI:** {meta['doi']}"
+        return f"[Full text from PubMed Central — {pmcid}]\n\n{full_text}{cite}"
+
+    # --- Step 4: Try Unpaywall for OA version ---
+
+    if not doi and pmid:
+        meta = await _pubmed_abstract(pmid)
+        if meta and meta.get("doi"):
+            doi = meta["doi"]
+
+    if doi:
+        status_lines.append(f"Checking Unpaywall for open access: {doi}")
+        oa_url = await _unpaywall_lookup(doi)
+        if oa_url:
+            status_lines.append(f"Found OA version: {oa_url}")
+            text = await _fetch_url_text(oa_url)
+            if text:
+                return (
+                    f"[Open access version via Unpaywall]\n"
+                    f"URL: {oa_url}\n\n{text}\n\n---\n"
+                    f"Source: Unpaywall OA | DOI: {doi}"
+                )
+        else:
+            status_lines.append("No open access version found")
+
+    # --- Step 5: Try direct URL fetch ---
+
+    if url and ref_type == "url":
+        status_lines.append(f"Fetching URL: {url}")
+        text = await _fetch_url_text(url)
+        if text:
+            return f"[Content from URL]\n{url}\n\n{text}"
+
+    # --- Step 6: Fall back to abstract ---
+
+    if pmid:
+        status_lines.append("Falling back to abstract")
+        meta = await _pubmed_abstract(pmid)
+        if meta:
+            lines = [
+                f"[Abstract only — full text not freely available]\n",
+                f"# {meta['title']}\n",
+                f"**Authors:** {meta['authors']}",
+                f"**Journal:** {meta['journal']} ({meta['year']})",
+                f"**PMID:** {meta['pmid']}",
+            ]
+            if meta["doi"]:
+                lines.append(f"**DOI:** {meta['doi']}")
+            lines.append(f"\n## Abstract\n\n{meta['abstract']}")
+
+            lines.append(
+                f"\n---\n"
+                f"*Full text not available through open access channels. "
+                f"If you have a PDF, provide the file path and I can read it.*"
+            )
+            lines.append(f"\n*Resolution path: {' → '.join(status_lines)}*")
+
+            return "\n".join(lines)
+
+    # --- Nothing worked ---
+    return (
+        f"[Paper lookup: '{reference}']\n\n"
+        f"Could not retrieve this paper. Tried: {' → '.join(status_lines)}\n\n"
+        f"You can:\n"
+        f"- Provide a PMID or DOI directly\n"
+        f"- Share the PDF file path\n"
+        f"- Try a more specific citation (e.g. 'Rapti 2019 Cell nerve ring')"
+    )
