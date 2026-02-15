@@ -322,37 +322,10 @@ function renderNavOutline() {
 
     html += `<div class="nav-campaign-title">${esc(campaign.description)}</div>`;
 
-    const children = tree.children || [];
-    if (children.length > 0) {
-        children.forEach((child, idx) => {
-            const phaseNum = idx + 1;
-            const phaseName = child.campaign.description || child.campaign.shorthand;
-            const items = child.items || [];
-
-            html += `<div class="nav-outline-phase">
-                <div class="nav-phase-header" onclick="toggleNavPhase(this)">
-                    <svg class="nav-phase-chevron open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <polyline points="9,18 15,12 9,6"></polyline>
-                    </svg>
-                    <span class="nav-phase-name">${esc(phaseName)}</span>
-                </div>
-                <div class="nav-phase-items">`;
-
-            items.forEach((item, iIdx) => {
-                const taskNum = `${phaseNum}.${iIdx + 1}`;
-                const dot = STATUS_DOTS[item.status] || '\u25CB';
-                const dotClass = item.status || 'planned';
-                html += `<div class="nav-item" data-item-id="${item.id}" onclick="navigateToItem('${item.id}')">
-                    <span class="nav-item-dot dot-${dotClass}">${dot}</span>
-                    <span class="nav-item-num">${esc(taskNum)}</span>
-                    <span class="nav-item-title">${esc(item.title)}</span>
-                </div>`;
-            });
-
-            html += `</div></div>`;
-        });
-    } else if ((tree.items || []).length > 0) {
-        tree.items.forEach((item, idx) => {
+    // Root-level items (not in any phase)
+    const rootItems = tree.items || [];
+    if (rootItems.length > 0) {
+        rootItems.forEach((item, idx) => {
             const dot = STATUS_DOTS[item.status] || '\u25CB';
             const dotClass = item.status || 'planned';
             html += `<div class="nav-item" data-item-id="${item.id}" onclick="navigateToItem('${item.id}')">
@@ -362,6 +335,36 @@ function renderNavOutline() {
             </div>`;
         });
     }
+
+    // Phase children
+    const children = tree.children || [];
+    children.forEach((child, idx) => {
+        const phaseNum = idx + 1;
+        const phaseName = child.campaign.description || child.campaign.shorthand;
+        const items = child.items || [];
+
+        html += `<div class="nav-outline-phase">
+            <div class="nav-phase-header" onclick="toggleNavPhase(this)">
+                <svg class="nav-phase-chevron open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <polyline points="9,18 15,12 9,6"></polyline>
+                </svg>
+                <span class="nav-phase-name">${esc(phaseName)}</span>
+            </div>
+            <div class="nav-phase-items">`;
+
+        items.forEach((item, iIdx) => {
+            const taskNum = `${phaseNum}.${iIdx + 1}`;
+            const dot = STATUS_DOTS[item.status] || '\u25CB';
+            const dotClass = item.status || 'planned';
+            html += `<div class="nav-item" data-item-id="${item.id}" onclick="navigateToItem('${item.id}')">
+                <span class="nav-item-dot dot-${dotClass}">${dot}</span>
+                <span class="nav-item-num">${esc(taskNum)}</span>
+                <span class="nav-item-title">${esc(item.title)}</span>
+            </div>`;
+        });
+
+        html += `</div></div>`;
+    });
 
     // Bottom links
     const refCount = (state.docData.bibliography || []).length;
@@ -500,19 +503,27 @@ function renderPlanDoc() {
         <div class="plan-progress-label">${pct}%</div>` : ''}
     </div>`;
 
-    // Phase sections
-    const children = tree.children || [];
-    if (children.length > 0) {
-        children.forEach((child, idx) => {
-            html += renderPhaseBlock(child, idx + 1);
-        });
-    } else if ((tree.items || []).length > 0) {
+    // Root-level items (not assigned to any phase)
+    const rootItems = tree.items || [];
+    if (rootItems.length > 0) {
         html += '<div class="phase-block">';
-        tree.items.forEach((item, idx) => {
+        if ((tree.children || []).length > 0) {
+            html += `<div class="phase-block-header">
+                <span class="phase-block-name">Unassigned</span>
+                <span class="phase-block-count">${rootItems.length} item${rootItems.length !== 1 ? 's' : ''}</span>
+            </div>`;
+        }
+        rootItems.forEach((item, idx) => {
             html += renderDocItem(item, String(idx + 1));
         });
         html += '</div>';
     }
+
+    // Phase sections (children)
+    const children = tree.children || [];
+    children.forEach((child, idx) => {
+        html += renderPhaseBlock(child, idx + 1);
+    });
 
     // Bibliography
     html += renderBibliography();
@@ -897,11 +908,12 @@ async function viewVersion(versionId, isCurrent) {
             // but the rendering code expects {campaign: {...}, items, children, status}
             const normalized = normalizeSnapshotTree(snapshot.snapshot_json);
             state.docData.document = normalized;
+            state.docData.status = normalized.status;
+            state.docData.bibliography = [];  // snapshots don't carry bibliography
             state.allItemsFlat = {};
             buildItemIndex(normalized);
 
-            renderCanvas();
-            renderNavigator();
+            renderAll();
 
             // Show banner
             if ($snapshotBanner) $snapshotBanner.classList.remove('hidden');
@@ -1061,18 +1073,41 @@ function onCanvasScroll() {
 
 /**
  * Normalize a snapshot tree into the format the rendering code expects.
- * Snapshots store flat: {description, shorthand, target, items, children}
- * Document API returns: {campaign: {description, ...}, items, children, status}
+ *
+ * Snapshots store a compact format:
+ *   {description, shorthand, target, items: [{type, title, spec, ...}], children: [...]}
+ * Document API returns:
+ *   {campaign: {id, description, ...}, items: [{id, status, imaging_spec, ...}], children, status}
+ *
+ * Key differences: snapshot items have `spec` (not `imaging_spec`/`bench_spec`),
+ * no `id`, no `status` (null), and `depends_on_indices` instead of resolved deps.
  */
 function normalizeSnapshotTree(node) {
     if (!node) return node;
     // Already in document format (has .campaign key)
     if (node.campaign) return node;
 
-    const items = (node.items || []).map(item => {
-        // Snapshot items may lack an id — generate a stable placeholder
-        if (!item.id) item.id = '_snap_' + Math.random().toString(36).slice(2, 10);
-        return item;
+    const items = (node.items || []).map((item, idx) => {
+        const normalized = { ...item };
+        // Generate stable placeholder ID
+        if (!normalized.id) {
+            normalized.id = '_snap_' + idx + '_' + Math.random().toString(36).slice(2, 8);
+        }
+        // Default status
+        if (!normalized.status) {
+            normalized.status = 'planned';
+        }
+        // Snapshot uses generic `spec` — map to typed spec based on item type
+        if (normalized.spec && !normalized.imaging_spec && !normalized.bench_spec) {
+            if (normalized.type === 'imaging') {
+                normalized.imaging_spec = normalized.spec;
+            } else if (normalized.type === 'bench') {
+                normalized.bench_spec = normalized.spec;
+            } else if (normalized.type === 'genetics') {
+                normalized.bench_spec = normalized.spec;
+            }
+        }
+        return normalized;
     });
 
     const children = (node.children || []).map(c => normalizeSnapshotTree(c));
