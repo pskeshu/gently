@@ -70,7 +70,7 @@ export function useWebSocket(
             break;
 
           case "tool_start":
-            s.addToolStart(msg.tool_name, msg.tool_input);
+            s.addToolStart(msg.tool_name, msg.tool_input, msg.tool_label);
             break;
 
           case "tool_call":

@@ -66,6 +66,7 @@ export interface ToolStartChunk {
   type: "tool_start";
   tool_name: string;
   tool_input: Record<string, unknown>;
+  tool_label?: string;
 }
 
 export interface ToolCallChunk {

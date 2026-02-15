@@ -1594,6 +1594,7 @@ Write a brief status summary. Examples:
                         'type': 'tool_start',
                         'tool_name': block.name,
                         'tool_input': block.input,
+                        'tool_label': self._tool_label(block.name, block.input),
                     }
 
                     # Execute tool
@@ -1710,6 +1711,68 @@ Write a brief status summary. Examples:
                     })
 
         return results
+
+    def _tool_label(self, tool_name: str, tool_input: Dict) -> str:
+        """Build a human-readable label for a tool call.
+
+        Used in tool_start chunks so the TUI shows biologist-friendly
+        summaries instead of raw UUIDs.
+        """
+        inp = tool_input or {}
+
+        # Plan tools: resolve campaign/item IDs to names
+        campaign_id = inp.get("campaign_id")
+        if campaign_id and self.context_store:
+            campaign = self.context_store.get_campaign(campaign_id)
+            if campaign:
+                campaign_label = campaign.shorthand or campaign.description
+                # Tools that operate on campaigns
+                if tool_name in ("propose_plan", "get_plan_status", "export_plan",
+                                 "snapshot_plan", "list_plan_versions"):
+                    return campaign_label
+                if tool_name == "create_campaign" and inp.get("parent_id"):
+                    return f"phase under {campaign_label}"
+                if tool_name == "create_plan_item":
+                    title = inp.get("title", "")
+                    phase = inp.get("phase_number")
+                    prefix = f"P{phase}" if phase else campaign_label
+                    return f"{prefix}: {title}" if title else prefix
+                if tool_name == "delete_phase":
+                    phase = inp.get("phase_number")
+                    return f"{campaign_label} phase {phase}" if phase else campaign_label
+                if tool_name == "restore_plan_version":
+                    vn = inp.get("version_number")
+                    return f"{campaign_label} → v{vn}" if vn else campaign_label
+
+        # Item reference tools
+        item_ref = inp.get("item_ref") or inp.get("ref") or inp.get("item_id")
+        if item_ref and tool_name in ("get_plan_item", "update_plan_item",
+                                       "delete_plan_item", "move_plan_item"):
+            if self.context_store:
+                item = self.context_store.resolve_plan_item(str(item_ref), campaign_id=campaign_id)
+                if item:
+                    return item.title
+            return str(item_ref)
+
+        # Research tools
+        if tool_name == "search_literature":
+            return inp.get("query", "")
+        if tool_name == "search_strains":
+            return inp.get("gene", "") or inp.get("query", "")
+        if tool_name == "query_lab_history":
+            return inp.get("query", "")
+
+        # Campaign creation
+        if tool_name == "create_campaign":
+            return inp.get("shorthand") or inp.get("description", "")
+
+        # Generic fallback: title > description > query > first string value
+        for key in ("title", "description", "query", "question"):
+            val = inp.get(key)
+            if val and isinstance(val, str):
+                return val[:60]
+
+        return ""
 
     async def _execute_single_tool(self, tool_name: str, tool_input: Dict) -> str:
         """Execute a single tool call using the tool registry"""

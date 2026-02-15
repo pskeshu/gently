@@ -111,7 +111,7 @@ export interface TuiActions {
   addUserSelection: (text: string) => void;
   appendCopilotText: (text: string) => void;
   showThinking: () => void;
-  addToolStart: (toolName: string, toolInput: Record<string, unknown>) => void;
+  addToolStart: (toolName: string, toolInput: Record<string, unknown>, toolLabel?: string) => void;
   addToolCall: (toolName: string, duration?: number) => void;
   addSystemMessage: (text: string) => void;
   addCommandResult: (command: string, content: string) => void;
@@ -342,11 +342,12 @@ export function createTuiStore() {
         };
       }),
 
-    addToolStart: (toolName, toolInput) =>
+    addToolStart: (toolName, toolInput, toolLabel?) =>
       set((s) => {
         // Commit any active message, then set tool as active
         const { completedMessages } = commitActive(s);
-        const summary = extractToolSummary(toolName, toolInput);
+        // Prefer server-provided label (resolves IDs to names), fall back to client-side extraction
+        const summary = toolLabel || extractToolSummary(toolName, toolInput);
         return {
           completedMessages,
           activeMessage: {
