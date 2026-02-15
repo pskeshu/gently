@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS plan_items (
     planned_session_id TEXT,
     session_id TEXT,
     phase_order INTEGER DEFAULT 0,
-    references TEXT,
+    "references" TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
@@ -230,6 +230,20 @@ CREATE TABLE IF NOT EXISTS plan_templates (
     template_json TEXT NOT NULL,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+
+-- Plan snapshots (version history)
+CREATE TABLE IF NOT EXISTS plan_snapshots (
+    version_id TEXT PRIMARY KEY,
+    campaign_id TEXT NOT NULL,
+    version_number INTEGER NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    summary TEXT,
+    label TEXT,
+    parent_version_id TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (campaign_id) REFERENCES campaigns(id),
+    FOREIGN KEY (parent_version_id) REFERENCES plan_snapshots(version_id)
 );
 
 -- Agent state
@@ -258,6 +272,8 @@ CREATE INDEX IF NOT EXISTS idx_plan_items_type ON plan_items(type);
 CREATE INDEX IF NOT EXISTS idx_plan_items_inherit ON plan_items(inherit_from);
 CREATE INDEX IF NOT EXISTS idx_plan_item_deps_item ON plan_item_dependencies(item_id);
 CREATE INDEX IF NOT EXISTS idx_plan_item_deps_dep ON plan_item_dependencies(depends_on_id);
+CREATE INDEX IF NOT EXISTS idx_plan_snapshots_campaign ON plan_snapshots(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_plan_snapshots_version ON plan_snapshots(campaign_id, version_number);
 """
 
 
@@ -287,8 +303,17 @@ class ContextStore:
         conn = sqlite3.connect(str(self.db_path))
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA_SQL)
+        self._migrate(conn)
         conn.commit()
         return conn
+
+    def _migrate(self, conn: sqlite3.Connection):
+        """Run lightweight migrations for columns/tables added after initial schema."""
+        # Add "references" column to plan_items if missing (added after initial release)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(plan_items)").fetchall()}
+        if "references" not in cols:
+            conn.execute('ALTER TABLE plan_items ADD COLUMN "references" TEXT')
+            logger.info("Migration: added 'references' column to plan_items")
 
     @contextmanager
     def _tx(self):
@@ -308,6 +333,7 @@ class ContextStore:
         tables = [
             "plan_item_dependencies",
             "plan_items",
+            "plan_snapshots",
             "plan_templates",
             "planned_session_campaigns",
             "session_campaigns",
@@ -1017,7 +1043,7 @@ class ContextStore:
             self._conn.execute(
                 "INSERT INTO plan_items "
                 "(id, campaign_id, type, title, description, spec, inherit_from, "
-                " planned_session_id, phase_order, references, status, created_at, updated_at) "
+                " planned_session_id, phase_order, \"references\", status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
                     pid, campaign_id, type, title, description,
@@ -1235,7 +1261,7 @@ class ContextStore:
             updates.append("phase_order = ?")
             values.append(phase_order)
         if references is not None:
-            updates.append("references = ?")
+            updates.append("\"references\" = ?")
             values.append(json.dumps(references))
         if not updates:
             return
@@ -1515,6 +1541,9 @@ class ContextStore:
                 if dep_indices:
                     item_data["depends_on_indices"] = dep_indices
 
+            if item.references:
+                item_data["references"] = item.references
+
             serialized_items.append(item_data)
 
         # Recurse into sub-campaigns
@@ -1608,6 +1637,7 @@ class ContextStore:
                 description=item_data.get("description"),
                 spec=spec,
                 phase_order=item_data.get("phase_order", -1),
+                references=item_data.get("references"),
             )
             new_item_ids.append(item_id)
 
@@ -1634,6 +1664,169 @@ class ContextStore:
                 (template_id, template_id),
             )
             return r.rowcount > 0
+
+    # ==================================================================
+    # Plan Snapshots (version history)
+    # ==================================================================
+
+    def create_plan_snapshot(
+        self,
+        campaign_id: str,
+        label: Optional[str] = None,
+        summary: Optional[str] = None,
+    ) -> str:
+        """Create a snapshot of the current plan state.
+
+        Parameters
+        ----------
+        campaign_id : str
+            Root campaign to snapshot.
+        label : str, optional
+            Human-readable label (e.g. "before PI feedback").
+        summary : str, optional
+            Text summary. Auto-generated if not provided.
+
+        Returns
+        -------
+        str
+            The version_id of the new snapshot.
+        """
+        snapshot_data = self._serialize_campaign_tree(campaign_id)
+        if not summary:
+            summary = self._generate_snapshot_summary(campaign_id)
+
+        # Auto-increment version number for this campaign
+        row = self._conn.execute(
+            "SELECT COALESCE(MAX(version_number), 0) FROM plan_snapshots "
+            "WHERE campaign_id = ?",
+            (campaign_id,),
+        ).fetchone()
+        version_number = row[0] + 1
+
+        # Find parent version (previous latest snapshot)
+        parent_row = self._conn.execute(
+            "SELECT version_id FROM plan_snapshots "
+            "WHERE campaign_id = ? ORDER BY version_number DESC LIMIT 1",
+            (campaign_id,),
+        ).fetchone()
+        parent_version_id = parent_row["version_id"] if parent_row else None
+
+        version_id = self._gen_id()
+        now = self._now()
+        with self._tx():
+            self._conn.execute(
+                "INSERT INTO plan_snapshots "
+                "(version_id, campaign_id, version_number, snapshot_json, "
+                " summary, label, parent_version_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    version_id, campaign_id, version_number,
+                    json.dumps(snapshot_data), summary, label,
+                    parent_version_id, now,
+                ),
+            )
+        logger.info(f"Created plan snapshot v{version_number} ({version_id}) for campaign {campaign_id}")
+        return version_id
+
+    def _generate_snapshot_summary(self, campaign_id: str) -> str:
+        """Generate a brief text summary of the current plan state."""
+        campaign = self.get_campaign(campaign_id)
+        if not campaign:
+            return "Unknown campaign"
+
+        phases = self.get_subcampaigns(campaign_id)
+        items = self.get_plan_items(campaign_id=campaign_id, include_children=True)
+
+        # Count items by status
+        status_counts: Dict[str, int] = {}
+        for item in items:
+            key = item.status.value
+            status_counts[key] = status_counts.get(key, 0) + 1
+
+        parts = [campaign.description]
+        if phases:
+            phase_names = [p.description for p in phases]
+            parts.append(f"{len(phases)} phases: {', '.join(phase_names)}")
+        parts.append(f"{len(items)} items total")
+        for status_name, count in sorted(status_counts.items()):
+            parts.append(f"  {status_name}: {count}")
+
+        return "\n".join(parts)
+
+    def list_plan_snapshots(
+        self, campaign_id: str, limit: int = 50,
+    ) -> List[Dict]:
+        """List snapshots for a campaign (metadata only, no blob).
+
+        Returns list of dicts with version_id, version_number, label,
+        summary, parent_version_id, created_at.
+        """
+        rows = self._conn.execute(
+            "SELECT version_id, campaign_id, version_number, summary, "
+            "       label, parent_version_id, created_at "
+            "FROM plan_snapshots "
+            "WHERE campaign_id = ? ORDER BY version_number DESC LIMIT ?",
+            (campaign_id, limit),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_plan_snapshot(self, version_id: str) -> Optional[Dict]:
+        """Get a full snapshot including the parsed JSON blob."""
+        row = self._conn.execute(
+            "SELECT * FROM plan_snapshots WHERE version_id = ?",
+            (version_id,),
+        ).fetchone()
+        if not row:
+            return None
+        d = dict(row)
+        d["snapshot_json"] = json.loads(d["snapshot_json"])
+        return d
+
+    def restore_plan_snapshot(self, version_id: str) -> str:
+        """Restore a plan from a snapshot.
+
+        1. Auto-snapshots the current state before restoring.
+        2. Deletes the current campaign tree.
+        3. Re-creates it from the snapshot JSON.
+
+        Returns the new campaign_id (fresh IDs are generated).
+        """
+        snapshot = self.get_plan_snapshot(version_id)
+        if not snapshot:
+            raise ValueError(f"Snapshot {version_id} not found")
+
+        campaign_id = snapshot["campaign_id"]
+        version_number = snapshot["version_number"]
+
+        # Auto-snapshot current state before restoring
+        try:
+            self.create_plan_snapshot(
+                campaign_id,
+                label=f"auto: before restore to v{version_number}",
+            )
+        except Exception:
+            pass  # Don't block restore if snapshot fails
+
+        # Get the original campaign's parent_id so the restored tree
+        # is placed in the same position in the hierarchy
+        campaign = self.get_campaign(campaign_id)
+        parent_id = campaign.parent_id if campaign else None
+
+        # Delete the current campaign tree
+        self.delete_campaign(campaign_id, cascade=True)
+
+        # Re-create from snapshot
+        new_campaign_id = self._instantiate_template_tree(
+            snapshot["snapshot_json"],
+            parent_id=parent_id,
+            overrides={},
+        )
+
+        logger.info(
+            f"Restored plan snapshot v{version_number} ({version_id}) "
+            f"→ new campaign {new_campaign_id}"
+        )
+        return new_campaign_id
 
     def _get_campaign_tree_ids(self, campaign_id: str) -> List[str]:
         """Get all campaign IDs in a tree (recursive)."""

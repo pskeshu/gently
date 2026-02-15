@@ -796,6 +796,19 @@ async def delete_plan_item_tool(
     if not item:
         return f"Plan item '{item_ref}' not found"
 
+    # Auto-snapshot before destructive operation
+    try:
+        root_id = item.campaign_id
+        parent_campaign = store.get_campaign(root_id)
+        if parent_campaign and parent_campaign.parent_id:
+            root_id = parent_campaign.parent_id
+        store.create_plan_snapshot(
+            root_id,
+            label=f"auto: before deleting item '{item.title}'",
+        )
+    except Exception:
+        pass  # Don't block deletion if snapshot fails
+
     title = item.title
     deleted = store.delete_plan_item(item.id)
     if deleted:
@@ -944,6 +957,15 @@ async def delete_phase(
     phase = store.get_nth_subcampaign(campaign_id, phase_number)
     if not phase:
         return f"Phase {phase_number} not found under campaign {campaign_id}"
+
+    # Auto-snapshot before destructive operation
+    try:
+        store.create_plan_snapshot(
+            campaign_id,
+            label=f"auto: before deleting phase {phase_number} ({phase.description})",
+        )
+    except Exception:
+        pass  # Don't block deletion if snapshot fails
 
     desc = phase.description
     counts = store.delete_campaign(phase.id, cascade=True)
@@ -1243,3 +1265,156 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
     if not issues:
         return "All checks passed."
     return "\n".join(issues)
+
+
+# ---------------------------------------------------------------------------
+# Plan Versioning
+# ---------------------------------------------------------------------------
+
+@tool(
+    name="snapshot_plan",
+    description=(
+        "Save a snapshot of the current plan state. Use this before major "
+        "revisions to preserve the current version. Snapshots are also "
+        "created automatically before destructive operations."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Save the current plan before we revise it",
+            tool_input={
+                "campaign_id": "nrf-2026",
+                "label": "before PI feedback revision",
+            },
+        ),
+    ],
+)
+async def snapshot_plan(
+    campaign_id: str,
+    label: str = None,
+    context: Dict = None,
+) -> str:
+    """Save a snapshot of the current plan."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    store = copilot.context_store
+    campaign = store.get_campaign(campaign_id)
+    if not campaign:
+        return f"Campaign {campaign_id} not found"
+
+    version_id = store.create_plan_snapshot(campaign_id, label=label)
+
+    # Look up the version number
+    snapshot = store.get_plan_snapshot(version_id)
+    version_number = snapshot["version_number"] if snapshot else "?"
+
+    label_str = f" — {label}" if label else ""
+    return f"Snapshot v{version_number} created (id: {version_id}){label_str}"
+
+
+@tool(
+    name="list_plan_versions",
+    description=(
+        "List all saved versions (snapshots) of a plan. Shows version "
+        "number, label, summary, and timestamp for each."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Show me the version history for this plan",
+            tool_input={"campaign_id": "nrf-2026"},
+        ),
+    ],
+)
+async def list_plan_versions(
+    campaign_id: str,
+    context: Dict = None,
+) -> str:
+    """List saved plan versions."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    store = copilot.context_store
+    snapshots = store.list_plan_snapshots(campaign_id)
+
+    if not snapshots:
+        return f"No snapshots found for campaign {campaign_id}"
+
+    lines = [f"Plan versions ({len(snapshots)} snapshots):"]
+    lines.append("")
+    for s in snapshots:
+        label = f"  [{s['label']}]" if s.get("label") else ""
+        summary_line = ""
+        if s.get("summary"):
+            first_line = s["summary"].split("\n")[0]
+            summary_line = f"  {first_line}"
+        lines.append(
+            f"  v{s['version_number']}{label}  ({s['version_id']})  "
+            f"{s['created_at']}"
+        )
+        if summary_line:
+            lines.append(f"    {summary_line}")
+
+    return "\n".join(lines)
+
+
+@tool(
+    name="restore_plan_version",
+    description=(
+        "Restore a plan to a previous version. The current state is "
+        "auto-saved before restoring. Accepts either a version_id or "
+        "version_number. Returns the new campaign ID."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Roll back to version 2 of the plan",
+            tool_input={
+                "campaign_id": "nrf-2026",
+                "version_number": 2,
+            },
+        ),
+    ],
+)
+async def restore_plan_version(
+    campaign_id: str,
+    version_id: str = None,
+    version_number: int = None,
+    context: Dict = None,
+) -> str:
+    """Restore a plan to a previous snapshot."""
+    copilot = context.get("copilot") if context else None
+    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+        return "Error: Context store not available"
+
+    store = copilot.context_store
+
+    if not version_id and version_number is None:
+        return "Provide either version_id or version_number"
+
+    # Resolve version_number to version_id
+    if version_number is not None and not version_id:
+        row = store._conn.execute(
+            "SELECT version_id FROM plan_snapshots "
+            "WHERE campaign_id = ? AND version_number = ?",
+            (campaign_id, version_number),
+        ).fetchone()
+        if not row:
+            return f"Version {version_number} not found for campaign {campaign_id}"
+        version_id = row["version_id"]
+
+    try:
+        new_campaign_id = store.restore_plan_snapshot(version_id)
+    except ValueError as e:
+        return str(e)
+
+    snapshot = store.get_plan_snapshot(version_id)
+    v_label = f"v{snapshot['version_number']}" if snapshot else version_id
+    return (
+        f"Restored plan to {v_label}. "
+        f"New campaign ID: {new_campaign_id} "
+        f"(previous state was auto-saved before restoring)"
+    )

@@ -90,6 +90,13 @@ The distinction between database-verified and LLM-knowledge references matters:
 
 This creates a transparent evidence trail — collaborators can see *why* specific choices
 were made and which recommendations need independent verification.
+
+## Plan Versioning
+
+Plans are automatically versioned. Before destructive operations (deleting phases
+or items), a snapshot is saved. Use snapshot_plan to manually save a version before
+major revisions, list_plan_versions to review history, and restore_plan_version to
+roll back.
 """
 
 
