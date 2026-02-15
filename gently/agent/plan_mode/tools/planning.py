@@ -200,10 +200,12 @@ async def update_plan_item(
     outcome: str = None,
     spec: Dict = None,
     references: List[Dict] = None,
+    campaign_id: str = None,
     context: Dict = None,
 ) -> str:
     """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
-    or phase.task reference (e.g. '1.3')."""
+    or phase.task reference (e.g. '1.3'). campaign_id scopes resolution
+    when using shorthand refs with multiple plans."""
     copilot = context.get("copilot") if context else None
     if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
         return "Error: Context store not available"
@@ -211,7 +213,7 @@ async def update_plan_item(
     store = copilot.context_store
 
     # Resolve natural references
-    item = store.resolve_plan_item(item_id)
+    item = store.resolve_plan_item(item_id, campaign_id=campaign_id)
     if not item:
         return f"Plan item '{item_id}' not found"
     resolved_id = item.id
@@ -255,9 +257,11 @@ async def update_plan_item(
 async def link_plan_items(
     item_id: str,
     depends_on_id: str,
+    campaign_id: str = None,
     context: Dict = None,
 ) -> str:
-    """Add a dependency between plan items."""
+    """Add a dependency between plan items. campaign_id scopes resolution
+    when using shorthand refs (e.g. '1.3') with multiple plans."""
     copilot = context.get("copilot") if context else None
     if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
         return "Error: Context store not available"
@@ -265,8 +269,8 @@ async def link_plan_items(
     store = copilot.context_store
 
     # Resolve natural references
-    item = store.resolve_plan_item(item_id)
-    dep = store.resolve_plan_item(depends_on_id)
+    item = store.resolve_plan_item(item_id, campaign_id=campaign_id)
+    dep = store.resolve_plan_item(depends_on_id, campaign_id=campaign_id)
     if not item:
         return f"Plan item '{item_id}' not found"
     if not dep:

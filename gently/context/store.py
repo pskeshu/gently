@@ -1079,10 +1079,13 @@ class ContextStore:
           - UUID or UUID prefix: "a1b2c3d4"
           - Task number within campaign: "3", "task 3", "#3"
           - Phase.task: "1.3", "2.1"
+          - Campaign.phase.task: "nerve-ring.1.3", "ec11.2.1"
           - Natural language: "task 3 of phase 1", "phase 2 task 1"
 
-        When a bare task number is given, campaign_id scopes the lookup
-        (or falls back to the current session's campaign).
+        The campaign segment (in campaign.phase.task) can be a shorthand
+        name or a UUID prefix.  When a bare task number or phase.task is
+        given, campaign_id scopes the lookup (or falls back to the most
+        recent root campaign).
         """
         import re
 
@@ -1103,25 +1106,25 @@ class ContextStore:
             if row:
                 return self._row_to_plan_item(row)
 
-        # --- Determine root campaign ---
-        root_id = campaign_id
-        if not root_id:
-            # Fall back to first root campaign
-            campaigns = self.get_root_campaigns()
-            if campaigns:
-                root_id = campaigns[0].id
-
-        if not root_id:
-            return None
-
-        # --- Parse "phase P task T" / "task T of phase P" / "P.T" ---
+        # --- Parse campaign.phase.task / phase.task / task ---
         phase_num = None
         task_num = None
 
-        # "1.3" or "2.1"
-        m = re.match(r'^(\d+)\.(\d+)$', ref)
+        # "campaign.phase.task" — e.g. "nerve-ring.1.3" or "ec11.2.1"
+        m = re.match(r'^([^.\s]+)\.(\d+)\.(\d+)$', ref)
         if m:
-            phase_num, task_num = int(m.group(1)), int(m.group(2))
+            campaign_label = m.group(1)
+            phase_num, task_num = int(m.group(2)), int(m.group(3))
+            # Resolve campaign label → root_id
+            resolved = self._resolve_campaign_label(campaign_label)
+            if resolved:
+                campaign_id = resolved
+
+        # "1.3" or "2.1"
+        if not task_num:
+            m = re.match(r'^(\d+)\.(\d+)$', ref)
+            if m:
+                phase_num, task_num = int(m.group(1)), int(m.group(2))
 
         # "task 3 of phase 1" / "task 3 phase 1"
         if not task_num:
@@ -1142,6 +1145,17 @@ class ContextStore:
                 task_num = int(m.group(1))
 
         if not task_num:
+            return None
+
+        # --- Determine root campaign ---
+        root_id = campaign_id
+        if not root_id:
+            # Fall back to first root campaign
+            campaigns = self.get_root_campaigns()
+            if campaigns:
+                root_id = campaigns[0].id
+
+        if not root_id:
             return None
 
         # --- Resolve phase → campaign_id ---
@@ -1173,6 +1187,41 @@ class ContextStore:
         items.sort(key=lambda x: x.phase_order)
         if 1 <= task_num <= len(items):
             return items[task_num - 1]
+
+        return None
+
+    def _resolve_campaign_label(self, label: str) -> Optional[str]:
+        """Resolve a campaign shorthand or UUID prefix to an ID.
+
+        Checks shorthand (case-insensitive), then UUID prefix, then
+        description substring match.
+        """
+        label_lower = label.lower()
+
+        # Shorthand match (case-insensitive)
+        row = self._conn.execute(
+            "SELECT id FROM campaigns WHERE LOWER(shorthand) = ? AND parent_id IS NULL",
+            (label_lower,),
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        # UUID prefix match
+        if len(label) >= 4:
+            row = self._conn.execute(
+                "SELECT id FROM campaigns WHERE id LIKE ? AND parent_id IS NULL",
+                (label_lower + '%',),
+            ).fetchone()
+            if row:
+                return row["id"]
+
+        # Description substring match (first word or hyphenated slug)
+        row = self._conn.execute(
+            "SELECT id FROM campaigns WHERE LOWER(description) LIKE ? AND parent_id IS NULL",
+            ('%' + label_lower + '%',),
+        ).fetchone()
+        if row:
+            return row["id"]
 
         return None
 
