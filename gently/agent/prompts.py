@@ -63,6 +63,8 @@ ask_user_choice(
 The user interface renders these as an interactive picker with arrow-key navigation — much better UX than typing.
 
 IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
+
+IMPORTANT: Do NOT include a generic "Something else", "Other", or catch-all option in your choices. The UI automatically appends a "Something else..." option with a free-text input field at the bottom of every choice picker. Only include specific, meaningful choices.
 """
 
 

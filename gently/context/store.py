@@ -1203,6 +1203,7 @@ class ContextStore:
         planned_session_id: Optional[str] = None,
         session_id: Optional[str] = None,
         phase_order: Optional[int] = None,
+        campaign_id: Optional[str] = None,
     ):
         """Update a plan item. Only non-None values are applied."""
         now = self._now()
@@ -1214,6 +1215,7 @@ class ContextStore:
             ("outcome", outcome),
             ("planned_session_id", planned_session_id),
             ("session_id", session_id),
+            ("campaign_id", campaign_id),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -1251,6 +1253,26 @@ class ContextStore:
             status=PlanItemStatus.SKIPPED,
             outcome=reason or "Skipped",
         )
+
+    def delete_plan_item(self, item_id: str) -> bool:
+        """Delete a plan item and all its dependency links.
+
+        Returns True if the item existed and was deleted.
+        """
+        with self._tx():
+            # Remove dependency links (both directions)
+            self._conn.execute(
+                "DELETE FROM plan_item_dependencies "
+                "WHERE item_id = ? OR depends_on_id = ?",
+                (item_id, item_id),
+            )
+            r = self._conn.execute(
+                "DELETE FROM plan_items WHERE id = ?", (item_id,),
+            )
+            deleted = r.rowcount > 0
+        if deleted:
+            logger.info(f"Deleted plan item {item_id}")
+        return deleted
 
     def add_plan_item_dependency(self, item_id: str, depends_on_id: str):
         """Add a dependency between plan items."""

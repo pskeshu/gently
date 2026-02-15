@@ -25,7 +25,11 @@ Use this when asking questions with discrete, enumerable options like:
 - "Which algorithm?" → list of algorithm options
 
 The CLI will render these as selectable options (arrow keys + enter) for better UX.
-Returns the user's selected option(s).""",
+Returns the user's selected option(s).
+
+IMPORTANT: Do NOT include a generic "Something else" or "Other" option — the UI
+automatically appends a "Something else..." option with a free-text input field.
+Only include specific, meaningful choices.""",
     category=ToolCategory.EXPERIMENT,
     requires_microscope=False,
     examples=[
