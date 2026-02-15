@@ -461,11 +461,28 @@ class ContextStore:
         return [self._row_to_campaign(row) for row in rows]
 
     def get_campaign(self, campaign_id: str) -> Optional[Campaign]:
-        """Get a specific campaign."""
+        """Get a specific campaign by exact ID."""
         row = self._conn.execute(
             "SELECT * FROM campaigns WHERE id = ?", (campaign_id,)
         ).fetchone()
         return self._row_to_campaign(row) if row else None
+
+    def resolve_campaign(self, ref: str) -> Optional[Campaign]:
+        """Resolve a campaign by UUID, shorthand, UUID prefix, or description.
+
+        Tries exact ID first, then falls back to _resolve_campaign_label
+        for fuzzy matching. This lets tools accept "nrf-2026" or
+        "nerve ring" instead of requiring the raw UUID.
+        """
+        # Exact ID
+        campaign = self.get_campaign(ref)
+        if campaign:
+            return campaign
+        # Fuzzy: shorthand, UUID prefix, description substring
+        resolved_id = self._resolve_campaign_label(ref)
+        if resolved_id:
+            return self.get_campaign(resolved_id)
+        return None
 
     def update_campaign_progress(self, campaign_id: str, progress: str):
         """Update campaign progress."""

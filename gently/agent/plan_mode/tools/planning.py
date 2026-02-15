@@ -348,9 +348,10 @@ async def propose_plan(
         return "Error: Context store not available"
 
     store = copilot.context_store
-    campaign = store.get_campaign(campaign_id)
+    campaign = store.resolve_campaign(campaign_id)
     if not campaign:
-        return f"Campaign {campaign_id} not found"
+        return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
+    campaign_id = campaign.id
 
     lines = []
     lines.append(f"{'=' * 55}")
@@ -506,9 +507,10 @@ async def get_plan_status(
         return "Error: Context store not available"
 
     store = copilot.context_store
-    campaign = store.get_campaign(campaign_id)
+    campaign = store.resolve_campaign(campaign_id)
     if not campaign:
-        return f"Campaign {campaign_id} not found"
+        return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
+    campaign_id = campaign.id
 
     status = store.get_plan_status(campaign_id)
 
@@ -1011,9 +1013,10 @@ async def export_plan(
         return "Error: Context store not available"
 
     store = copilot.context_store
-    campaign = store.get_campaign(campaign_id)
+    campaign = store.resolve_campaign(campaign_id)
     if not campaign:
-        return f"Campaign {campaign_id} not found"
+        return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
+    campaign_id = campaign.id
 
     lines = []
 
@@ -1304,9 +1307,10 @@ async def snapshot_plan(
         return "Error: Context store not available"
 
     store = copilot.context_store
-    campaign = store.get_campaign(campaign_id)
+    campaign = store.resolve_campaign(campaign_id)
     if not campaign:
-        return f"Campaign {campaign_id} not found"
+        return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
+    campaign_id = campaign.id
 
     version_id = store.create_plan_snapshot(campaign_id, label=label)
 
