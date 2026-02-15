@@ -893,9 +893,12 @@ async function viewVersion(versionId, isCurrent) {
 
         if (snapshot && snapshot.snapshot_json) {
             state.viewingSnapshotId = versionId;
-            state.docData.document = snapshot.snapshot_json;
+            // Snapshot JSON is flat ({description, shorthand, items, children})
+            // but the rendering code expects {campaign: {...}, items, children, status}
+            const normalized = normalizeSnapshotTree(snapshot.snapshot_json);
+            state.docData.document = normalized;
             state.allItemsFlat = {};
-            buildItemIndex(snapshot.snapshot_json);
+            buildItemIndex(normalized);
 
             renderCanvas();
             renderNavigator();
@@ -1055,6 +1058,53 @@ function onCanvasScroll() {
 // ══════════════════════════════════════════════════════════
 //  UTILITIES
 // ══════════════════════════════════════════════════════════
+
+/**
+ * Normalize a snapshot tree into the format the rendering code expects.
+ * Snapshots store flat: {description, shorthand, target, items, children}
+ * Document API returns: {campaign: {description, ...}, items, children, status}
+ */
+function normalizeSnapshotTree(node) {
+    if (!node) return node;
+    // Already in document format (has .campaign key)
+    if (node.campaign) return node;
+
+    const items = (node.items || []).map(item => {
+        // Snapshot items may lack an id — generate a stable placeholder
+        if (!item.id) item.id = '_snap_' + Math.random().toString(36).slice(2, 10);
+        return item;
+    });
+
+    const children = (node.children || []).map(c => normalizeSnapshotTree(c));
+
+    // Count status from items + children
+    let total = items.length, completed = 0, inProgress = 0, planned = 0;
+    for (const it of items) {
+        if (it.status === 'completed') completed++;
+        else if (it.status === 'in_progress') inProgress++;
+        else planned++;
+    }
+    for (const ch of children) {
+        const s = ch.status || {};
+        total += s.total || 0;
+        completed += s.completed || 0;
+        inProgress += s.in_progress || 0;
+        planned += s.planned || 0;
+    }
+
+    return {
+        campaign: {
+            description: node.description || '',
+            shorthand: node.shorthand || null,
+            target: node.target || null,
+            status: node.status || 'active',
+            id: node.id || '',
+        },
+        items,
+        children,
+        status: { total, completed, in_progress: inProgress, planned },
+    };
+}
 
 function showLoading(text) {
     if ($canvasLoading) {
