@@ -28,7 +28,15 @@ def create_router(server) -> APIRouter:
         """Serve the campaigns/plans overview page"""
         return server.templates.TemplateResponse(
             "campaigns.html",
-            {"request": request}
+            {"request": request, "campaign_id": ""}
+        )
+
+    @router.get("/campaigns/{campaign_id}/review", response_class=HTMLResponse)
+    async def plan_review_page(request: Request, campaign_id: str):
+        """Serve the plan review page (same template, auto-opens campaign)"""
+        return server.templates.TemplateResponse(
+            "campaigns.html",
+            {"request": request, "campaign_id": campaign_id}
         )
 
     return router
