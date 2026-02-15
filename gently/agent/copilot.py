@@ -211,8 +211,10 @@ class MicroscopyCopilot:
         # Load session snapshot (conversation + state)
         snapshot = self.store.load_session_snapshot(session_id)
         if snapshot:
-            # Restore conversation history
-            self.conversation_history = snapshot.get('conversation_history', [])
+            # Restore conversation history — sanitize in case old snapshots
+            # contain Anthropic SDK objects serialized via default=str
+            raw_history = snapshot.get('conversation_history', [])
+            self.conversation_history = self._sanitize_loaded_messages(raw_history)
 
             # Restore experiment state from snapshot
             experiment_data = snapshot.get('experiment_data', {})
@@ -883,13 +885,94 @@ Write a brief status summary. Examples:
 
     # ===== Session Management Methods =====
 
+    @staticmethod
+    def _sanitize_loaded_messages(messages: List[Dict]) -> List[Dict]:
+        """Fix conversation history loaded from JSON snapshots.
+
+        Old snapshots may contain content blocks that were serialized
+        via ``default=str`` (e.g. ``"TextBlock(text='...', type='text')"``).
+        These are invalid for the Claude API.  This method drops any
+        message whose content blocks aren't valid dicts or strings.
+        """
+        clean = []
+        for msg in messages:
+            content = msg.get('content')
+            if content is None:
+                continue
+            # Simple string content is always valid
+            if isinstance(content, str):
+                clean.append(msg)
+                continue
+            # List content: check each block
+            if isinstance(content, list):
+                valid_blocks = []
+                for block in content:
+                    if isinstance(block, dict):
+                        valid_blocks.append(block)
+                    elif isinstance(block, str):
+                        # Bare strings in a content list are invalid for
+                        # assistant messages but may appear in old snapshots.
+                        # Skip SDK repr strings like "TextBlock(text='...')"
+                        if block.startswith(('TextBlock(', 'ToolUseBlock(')):
+                            continue
+                        valid_blocks.append(block)
+                    # else: skip non-serializable objects
+                if valid_blocks:
+                    clean.append({**msg, 'content': valid_blocks})
+                # else: skip messages with no valid content blocks
+                continue
+            # Anything else: skip
+        return clean
+
+    @staticmethod
+    def _serialize_messages(messages: List[Dict]) -> List[Dict]:
+        """Convert conversation history to JSON-safe plain dicts.
+
+        Anthropic SDK returns content blocks as objects (TextBlock,
+        ToolUseBlock) that serialize via ``default=str`` into their
+        repr strings.  On reload those strings aren't valid API
+        messages.  This converts everything to plain dicts so the
+        history round-trips cleanly through JSON.
+        """
+        def _block_to_dict(block):
+            # Already a plain dict (e.g. tool_result messages)
+            if isinstance(block, dict):
+                return block
+            # Already a plain string
+            if isinstance(block, str):
+                return block
+            # Anthropic SDK objects (TextBlock, ToolUseBlock, etc.)
+            if hasattr(block, 'model_dump'):
+                return block.model_dump()
+            if hasattr(block, 'to_dict'):
+                return block.to_dict()
+            # Fallback: convert known attributes manually
+            if hasattr(block, 'type'):
+                d = {'type': block.type}
+                if block.type == 'text' and hasattr(block, 'text'):
+                    d['text'] = block.text
+                elif block.type == 'tool_use':
+                    d['id'] = getattr(block, 'id', '')
+                    d['name'] = getattr(block, 'name', '')
+                    d['input'] = getattr(block, 'input', {})
+                return d
+            return str(block)
+
+        serialized = []
+        for msg in messages:
+            content = msg.get('content')
+            if isinstance(content, list):
+                content = [_block_to_dict(b) for b in content]
+            serialized.append({**msg, 'content': content})
+        return serialized
+
     def _auto_save(self):
         """Auto-save session to GentlyStore (non-blocking, silent on error)"""
         if not self._session_id:
             return
         try:
             self.store.save_session_snapshot(self._session_id, {
-                'conversation_history': self.conversation_history,
+                'conversation_history': self._serialize_messages(self.conversation_history),
                 'experiment_data': self.experiment.to_dict(),
                 'system_prompt': self.system_prompt,
             })
@@ -910,7 +993,7 @@ Write a brief status summary. Examples:
             return False
         try:
             self.store.save_session_snapshot(self._session_id, {
-                'conversation_history': self.conversation_history,
+                'conversation_history': self._serialize_messages(self.conversation_history),
                 'experiment_data': self.experiment.to_dict(),
                 'system_prompt': self.system_prompt,
             })
