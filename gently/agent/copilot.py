@@ -52,7 +52,7 @@ class MicroscopyCopilot:
         self,
         api_key: Optional[str] = None,
         storage_path: Path = Path("./experiment_data"),
-        model: str = "claude-opus-4-5-20251101",
+        model: str = "claude-opus-4-6",
         microscope_client=None,
         session_id: Optional[str] = None,
         store: GentlyStore = None,
