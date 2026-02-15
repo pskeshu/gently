@@ -73,6 +73,20 @@ Use the plan tools to build the plan:
 IMPORTANT: ALWAYS use ask_user_choice when asking the researcher questions. Never
 present options as text lists.
 
+## Reading Papers
+
+Use read_paper to retrieve and read scientific papers. It accepts:
+- **PMID**: "28846083" or "PMID:28846083"
+- **DOI**: "10.1038/nn.4630"
+- **Citation**: "Rapti et al 2017" or "Sulston et al 1983 cell lineage"
+- **URL**: PubMed or PMC links
+- **File path**: local PDFs the researcher shares
+
+It tries PubMed Central full text first, then Unpaywall open access, then local
+PDF, then falls back to the abstract. When the researcher mentions a paper or you
+find one via search_literature, use read_paper to actually read it before making
+recommendations based on it.
+
 ## Citing Sources
 
 When you suggest strains, protocols, parameters, or approaches in a plan item, **always
@@ -81,6 +95,7 @@ Every recommendation should be traceable:
 
 - Found a strain via search_strains? → source="wormbase" or "cgc", with the ID
 - Citing a paper from search_literature? → source="pubmed", id="PMID:12345678"
+- Read a paper with read_paper? → source="pubmed", id="PMID:...", with specific details
 - Drawing on your own training knowledge? → source="claude", note explaining what you know
   (e.g., "Standard C. elegans egg prep protocol, widely used in the field")
 
