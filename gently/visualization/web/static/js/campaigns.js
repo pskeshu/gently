@@ -676,10 +676,14 @@ function renderVersionHistory() {
             const isCurrent = idx === 0;
             const label = v.label || v.summary || 'Snapshot';
             const date = v.created_at ? formatDate(v.created_at) : '';
+            // Extract item count from summary (e.g. "...12 items total...")
+            const itemMatch = (v.summary || '').match(/(\d+)\s+items?\s+total/);
+            const itemCount = itemMatch ? itemMatch[1] + ' items' : '';
             html += `<div class="version-entry ${isCurrent ? 'current' : ''}" onclick="viewVersion('${v.version_id}', ${isCurrent})">
                 <span class="version-entry-num">v${v.version_number || '?'}</span>
                 <span class="version-entry-label">${esc(label)}</span>
                 ${isCurrent ? '<span class="version-entry-current">Current</span>' : ''}
+                ${itemCount ? `<span class="version-entry-count">${itemCount}</span>` : ''}
                 <span class="version-entry-date">${esc(date)}</span>
             </div>`;
         });
