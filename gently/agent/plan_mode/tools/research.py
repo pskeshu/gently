@@ -433,7 +433,8 @@ async def search_literature(
 ) -> str:
     """Search PubMed for relevant papers.
 
-    Falls back to Claude's built-in knowledge if the API is unavailable.
+    If the original query is too specific (zero hits), progressively
+    simplifies by dropping terms until results are found.
     """
     if max_results < 1:
         max_results = 5
@@ -441,17 +442,52 @@ async def search_literature(
         max_results = 8
 
     results = await _pubmed_search(query, max_results)
+    used_query = query
+
+    # If no results, try progressively simpler queries
+    if not results:
+        import re as _re
+        words = query.split()
+        if len(words) > 3:
+            # Strategy 1: keep first ~60% of terms (drop trailing specifics)
+            shorter = " ".join(words[:max(3, len(words) * 2 // 3)])
+            results = await _pubmed_search(shorter, max_results)
+            if results:
+                used_query = shorter
+
+        if not results and len(words) > 4:
+            # Strategy 2: keep only the core noun phrases (drop adjectives/filler)
+            # Remove common filler words
+            stopwords = {"and", "or", "the", "of", "in", "for", "with", "a", "an",
+                         "using", "based", "via", "during", "after", "before"}
+            core = [w for w in words if w.lower() not in stopwords]
+            if len(core) > 3:
+                core = core[:4]
+            shorter = " ".join(core)
+            results = await _pubmed_search(shorter, max_results)
+            if results:
+                used_query = shorter
+
+        if not results and len(words) > 2:
+            # Strategy 3: just the first 3 words
+            shorter = " ".join(words[:3])
+            results = await _pubmed_search(shorter, max_results)
+            if results:
+                used_query = shorter
 
     if not results:
         return (
             f"[Literature search for: '{query}']\n\n"
-            f"PubMed search returned no results or is currently unavailable. "
-            f"I'll use my knowledge of the published literature to inform "
-            f"the experimental design. If you have specific papers in mind, "
-            f"you can share them and I can read the PDFs."
+            f"No PubMed results found, even with simplified queries. "
+            f"Try shorter, more specific terms (e.g. 'C. elegans light sheet' "
+            f"instead of 'C. elegans light sheet fluorescence long-term imaging'). "
+            f"You can also use read_paper with a specific PMID or DOI."
         )
 
-    lines = [f"PubMed results for: '{query}' ({len(results)} found)\n"]
+    header = f"PubMed results for: '{query}' ({len(results)} found)"
+    if used_query != query:
+        header += f"\n*(original query too specific — matched on: '{used_query}')*"
+    lines = [header + "\n"]
     for i, r in enumerate(results, 1):
         lines.append(f"{i}. **{r['title']}**")
         parts = []
