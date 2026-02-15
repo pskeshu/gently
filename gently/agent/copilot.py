@@ -1202,12 +1202,17 @@ Write a brief status summary. Examples:
         Determine if extended thinking should be enabled for this message.
 
         Auto-triggers for:
+        - Plan mode (always — creative design needs deep reasoning)
         - Explicit "think/thinking" in message
         - Calibration operations
         - Plan generation / timelapse setup
         - Image/volume analysis
         - Complex multi-step queries
         """
+        # Plan mode: always think — experimental design is inherently complex
+        if self.mode == "plan":
+            return True
+
         import re
         msg_lower = message.lower()
 
@@ -1292,9 +1297,11 @@ Write a brief status summary. Examples:
                 "tools": self._get_tools_for_mode(),
                 "max_tokens": 16000 if use_thinking else 4096,
             }
-            # Enable extended thinking if --think flag was used
+            # Enable extended thinking — plan mode gets a larger budget
+            # for deep creative reasoning about experimental design
             if use_thinking:
-                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+                budget = 30000 if self.mode == "plan" else 10000
+                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
 
             # Call Claude with tools (with retry for transient errors)
             # Use cached system prompt to reduce token costs

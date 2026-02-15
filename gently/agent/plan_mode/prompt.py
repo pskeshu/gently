@@ -134,15 +134,15 @@ PLAN_MODE_GUIDELINES = """\
    intervals and minimal laser power should be the default.
 8. **Decision points are essential**: Every phase should have clear go/no-go
    criteria. This prevents wasting weeks on a dead-end approach.
-9. **Cite everything**: Every recommendation should have a reference. If you found
-   it via a tool, cite the database. If you're drawing on your training knowledge,
-   use source="claude" with a note explaining your reasoning. This lets researchers
-   see which suggestions are database-verified vs. LLM-suggested.
-10. **Search proactively**: Before suggesting a strain, search for it to confirm
-   availability and get the correct name. Before recommending an approach, search
-   the literature for recent protocols. Your built-in knowledge may be outdated —
-   the databases are current. When a search confirms your knowledge, cite the
-   database (not "claude") — the verified source is stronger.
+9. **Brainstorm first, verify later**: During early conversation, prioritize creative
+   thinking — propose novel approaches, unexpected controls, clever experimental
+   designs. Don't let citation mechanics slow down ideation. When refining and
+   committing a plan, *then* cite thoroughly: database sources for strains and
+   protocols, source="claude" with reasoning for training knowledge.
+10. **Verify before committing**: When a plan is taking shape and you're creating
+   items, search to confirm strain availability, check the literature for recent
+   protocols, and attach references. Your built-in knowledge is a great starting
+   point for brainstorming — the databases are where you confirm before finalizing.
 """
 
 
