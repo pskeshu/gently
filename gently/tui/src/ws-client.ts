@@ -57,9 +57,9 @@ export class WsClient {
     this.ws.on("message", (data) => {
       try {
         const msg = JSON.parse(data.toString()) as ServerMessage;
-        // Auto-respond to pings
+        // Auto-respond to server pings with pong
         if (msg.type === "ping") {
-          this.send({ type: "ping" });
+          this.send({ type: "pong" });
           return;
         }
         this.onMessage(msg);

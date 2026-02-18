@@ -21,6 +21,7 @@ import asyncio
 import base64
 import io
 import logging
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -83,7 +84,7 @@ class VisualizationServer:
     Parameters
     ----------
     host : str
-        Server host (default: "0.0.0.0")
+        Server host (default: "127.0.0.1")
     port : int
         Server port (default: 8080)
     data_store : DataStore, optional
@@ -94,7 +95,7 @@ class VisualizationServer:
 
     def __init__(
         self,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         port: int = 8080,
         data_store=None,
         event_bus=None,
@@ -408,6 +409,23 @@ class VisualizationServer:
             )
         finally:
             sock.close()
+
+        # On Windows, suppress noisy ConnectionResetError from the
+        # ProactorEventLoop when remote connections drop abruptly.
+        if sys.platform == "win32":
+            loop = asyncio.get_running_loop()
+            _original_handler = loop.get_exception_handler()
+
+            def _quiet_connection_reset(loop, context):
+                exc = context.get("exception")
+                if isinstance(exc, ConnectionResetError):
+                    return  # suppress — these are harmless on Windows
+                if _original_handler:
+                    _original_handler(loop, context)
+                else:
+                    loop.default_exception_handler(context)
+
+            loop.set_exception_handler(_quiet_connection_reset)
 
         config = uvicorn.Config(
             self.app,

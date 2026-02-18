@@ -168,6 +168,10 @@ export interface ClientPing {
   type: "ping";
 }
 
+export interface ClientPong {
+  type: "pong";
+}
+
 export interface CancelMessage {
   type: "cancel";
 }
@@ -177,7 +181,8 @@ export type ClientMessage =
   | ChoiceResponse
   | CommandMessage
   | CancelMessage
-  | ClientPing;
+  | ClientPing
+  | ClientPong;
 
 // ---------------------------------------------------------------------------
 // UI models
