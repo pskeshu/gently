@@ -84,7 +84,7 @@ class VisualizationServer:
     Parameters
     ----------
     host : str
-        Server host (default: "127.0.0.1")
+        Server host (default: "0.0.0.0")
     port : int
         Server port (default: 8080)
     data_store : DataStore, optional
@@ -95,7 +95,7 @@ class VisualizationServer:
 
     def __init__(
         self,
-        host: str = "127.0.0.1",
+        host: str = "0.0.0.0",
         port: int = 8080,
         data_store=None,
         event_bus=None,
