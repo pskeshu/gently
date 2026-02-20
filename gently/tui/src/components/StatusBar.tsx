@@ -24,6 +24,7 @@ interface StatusBarProps {
   offline: boolean;
   embryoCount: number;
   campaignCount: number;
+  peerCount: number;
   tokens: TokenSnapshot;
   notification: { level: string; title: string; body?: string } | null;
   onClearNotification: () => void;
@@ -52,6 +53,7 @@ export function StatusBar({
   offline,
   embryoCount,
   campaignCount,
+  peerCount,
   tokens,
   notification,
   onClearNotification,
@@ -163,6 +165,15 @@ export function StatusBar({
             {sep}
             <Text color={theme.muted}>
               {campaignCount} campaign{campaignCount !== 1 ? "s" : ""}
+            </Text>
+          </>
+        ) : null}
+
+        {peerCount > 0 ? (
+          <>
+            {sep}
+            <Text color={theme.muted}>
+              {peerCount} peer{peerCount !== 1 ? "s" : ""}
             </Text>
           </>
         ) : null}

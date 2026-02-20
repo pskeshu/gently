@@ -199,6 +199,82 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     await copilot.start_viz_server(port=8080)
     viz_url = "http://localhost:8080" if copilot.viz_server is not None else None
 
+    # ── Mesh discovery ──────────────────────────────────────────────
+    mesh = None
+    try:
+        from gently.mesh import MeshService, register_mesh_routes
+        import uuid as _uuid
+
+        # Persistent instance ID
+        instance_id_path = Path(__file__).parent / "config" / "mesh_instance_id"
+        if instance_id_path.exists():
+            instance_id = instance_id_path.read_text().strip()
+        else:
+            instance_id = str(_uuid.uuid4())
+            instance_id_path.parent.mkdir(parents=True, exist_ok=True)
+            instance_id_path.write_text(instance_id)
+
+        def _capability_provider():
+            caps = {
+                "has_microscope": client.is_connected if client else False,
+                "has_sam": client.has_sam if client else False,
+                "has_gpu": False,
+                "gpu_name": "",
+                "gpu_vram_gb": 0.0,
+                "storage_free_gb": 0.0,
+                "organism": config.get("organism", "celegans"),
+                "hardware_profile": config.get("hardware", "dispim"),
+                "tool_categories": [],
+            }
+            # GPU detection
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    caps["has_gpu"] = True
+                    caps["gpu_name"] = torch.cuda.get_device_name(0)
+                    caps["gpu_vram_gb"] = round(
+                        torch.cuda.get_device_properties(0).total_mem / (1024**3), 1
+                    )
+            except ImportError:
+                pass
+            # Free disk space
+            try:
+                usage = shutil.disk_usage(str(storage_dir))
+                caps["storage_free_gb"] = round(usage.free / (1024**3), 1)
+            except OSError:
+                pass
+            return caps
+
+        def _status_provider():
+            import gently as _gently
+            return {
+                "session_id": copilot.session_id or "",
+                "acquisition_status": "idle",
+                "embryo_count": len(copilot.experiment.embryos),
+                "total_timepoints": 0,
+                "uptime_seconds": 0.0,
+                "copilot_mode": copilot.mode,
+                "active_plan": "",
+                "version": getattr(_gently, "__version__", "dev"),
+            }
+
+        mesh = MeshService(
+            instance_id=instance_id,
+            viz_port=8080,
+            capability_provider=_capability_provider,
+            status_provider=_status_provider,
+        )
+
+        if copilot.viz_server is not None:
+            register_mesh_routes(copilot.viz_server, mesh)
+
+        await mesh.start()
+    except Exception as e:
+        import logging as _log
+        _log.getLogger(__name__).warning(f"Mesh discovery failed to start: {e}")
+        mesh = None
+    # ── End mesh ────────────────────────────────────────────────────
+
     # Attach the copilot bridge to the viz server
     from gently.agent.copilot_bridge import CopilotBridge
     bridge = CopilotBridge(copilot)
@@ -211,6 +287,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         "viz_url": viz_url,
         "log_path": str(logger.log_file),
         "resumed": session_to_resume is not None,
+        "mesh_service": mesh,
     })
 
     # Initialize startup wizard (gap-driven onboarding)
@@ -253,6 +330,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         import logging as _logging
         _logging.getLogger("uvicorn.error").setLevel(_logging.CRITICAL)
         _logging.getLogger("uvicorn").setLevel(_logging.CRITICAL)
+        # Cleanup: stop mesh service
+        if mesh is not None:
+            try:
+                await mesh.stop()
+            except (asyncio.CancelledError, RuntimeError, OSError, Exception):
+                pass
         # Cleanup: stop viz server gracefully
         if copilot.viz_server is not None:
             try:

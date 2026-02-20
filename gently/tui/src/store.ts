@@ -48,6 +48,9 @@ export interface TuiState {
   logPath: string;
   resumed: boolean;
 
+  // Mesh peers
+  peerCount: number;
+
   // Chat — split for <Static> vs dynamic rendering
   completedMessages: ChatEntry[];
   activeMessage: ChatEntry | null;
@@ -93,6 +96,7 @@ export interface TuiActions {
     tokens: TokenSnapshot;
     embryoCount: number;
     campaignCount: number;
+    peerCount: number;
     deviceConnected: boolean;
     samAvailable: boolean;
     offline: boolean;
@@ -210,6 +214,7 @@ export function createTuiStore() {
     tokens: { input_tokens: 0, output_tokens: 0, total_tokens: 0, api_calls: 0 },
     embryoCount: 0,
     campaignCount: 0,
+    peerCount: 0,
     deviceConnected: false,
     samAvailable: false,
     offline: false,
@@ -242,6 +247,7 @@ export function createTuiStore() {
         tokens: meta.tokens,
         embryoCount: meta.embryoCount,
         campaignCount: meta.campaignCount,
+        peerCount: meta.peerCount,
         deviceConnected: meta.deviceConnected,
         samAvailable: meta.samAvailable,
         offline: meta.offline,

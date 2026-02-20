@@ -270,6 +270,7 @@ export function App({ wsUrl, store }: AppProps) {
         offline={state.offline}
         embryoCount={state.embryoCount}
         campaignCount={state.campaignCount}
+        peerCount={state.peerCount}
         tokens={state.tokens}
         notification={state.notification}
         onClearNotification={handleClearNotification}

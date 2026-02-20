@@ -787,11 +787,22 @@ class CopilotBridge:
             "log_path": self._launch_info.get("log_path", ""),
             "resumed": self._launch_info.get("resumed", False),
             "mode": self.copilot.mode,
+            "peer_count": self._get_peer_count(),
         }
         # Wizard metadata (if initialized)
         if self._wizard is not None:
             meta["wizard"] = self._wizard.gap_summary
         return meta
+
+    def _get_peer_count(self) -> int:
+        """Return the number of live mesh peers."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is not None:
+            try:
+                return mesh.peer_count
+            except Exception:
+                pass
+        return 0
 
     def _get_sessions_list(self) -> list:
         """Return a list of saved sessions with metadata."""

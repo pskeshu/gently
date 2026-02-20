@@ -94,6 +94,11 @@ class EventType(Enum):
     USER_INPUT = auto()
     USER_COMMAND = auto()
 
+    # Mesh events
+    MESH_PEER_DISCOVERED = auto()
+    MESH_PEER_LOST = auto()
+    MESH_PEER_UPDATED = auto()
+
 
 @dataclass
 class Event:

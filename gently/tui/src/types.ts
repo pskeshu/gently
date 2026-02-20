@@ -40,6 +40,8 @@ export interface ConnectedMessage {
   viz_url: string | null;
   log_path: string;
   resumed: boolean;
+  // Mesh peers
+  peer_count?: number;
   // Copilot mode
   mode?: string;
   // Startup wizard metadata
