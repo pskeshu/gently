@@ -601,6 +601,14 @@ Sub-commands:
         category=CommandCategory.SESSION,
     ))
 
+    registry.register(CommandDefinition(
+        name="/peers",
+        description="Show mesh peers on the network",
+        help_text="List all Gently instances discovered on the LAN.\nShows hostname, capabilities (GPU, SAM, microscope), and status for each peer.",
+        aliases=["/mesh"],
+        category=CommandCategory.INSPECTION,
+    ))
+
 
 # ============================================================================
 # Global Registry

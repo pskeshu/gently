@@ -169,6 +169,15 @@ class CopilotBridge:
             })
             return
 
+        if cmd in ("/peers", "/mesh"):
+            data = self._get_peers_data()
+            await send_fn({
+                "type": "command_result",
+                "command": "/peers",
+                "content": data,
+            })
+            return
+
         if cmd == "/embryos" or cmd.startswith("/embryos "):
             parts = cmd.split(maxsplit=1)
             embryo_id = parts[1].strip() if len(parts) > 1 else None
@@ -793,6 +802,45 @@ class CopilotBridge:
         if self._wizard is not None:
             meta["wizard"] = self._wizard.gap_summary
         return meta
+
+    def _get_peers_data(self) -> dict:
+        """Build structured mesh peer data for the /peers command."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None:
+            return {"text": "Mesh not available."}
+
+        peers = mesh.get_peers()
+        if not peers:
+            local = mesh.get_local_info()
+            hostname = local.get("hostname", "unknown")
+            instance_id = local.get("instance_id", "")[:8]
+            return {"text": f"No peers discovered.\n  This node: {hostname} ({instance_id})"}
+
+        lines = [f"Mesh Peers ({len(peers)})", ""]
+        for p in peers:
+            caps = []
+            if p.capabilities.has_microscope:
+                caps.append("microscope")
+            if p.capabilities.has_gpu:
+                gpu = p.capabilities.gpu_name or "GPU"
+                vram = f" {p.capabilities.gpu_vram_gb}GB" if p.capabilities.gpu_vram_gb else ""
+                caps.append(f"{gpu}{vram}")
+            if p.capabilities.has_sam:
+                caps.append("SAM")
+            if p.capabilities.storage_free_gb:
+                caps.append(f"{p.capabilities.storage_free_gb:.0f}GB free")
+
+            cap_str = ", ".join(caps) if caps else "no special capabilities"
+            status = p.status.copilot_mode or "unknown"
+            embryos = p.status.embryo_count
+
+            stale = " (stale)" if p.is_stale else ""
+            lines.append(f"  **{p.hostname}** ({p.instance_id[:8]}){stale}")
+            lines.append(f"    {p.ip_address}:{p.viz_port} · {status} mode · {embryos} embryos")
+            lines.append(f"    {cap_str}")
+            lines.append("")
+
+        return {"text": "\n".join(lines)}
 
     def _get_peer_count(self) -> int:
         """Return the number of live mesh peers."""
