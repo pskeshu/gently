@@ -103,6 +103,7 @@ class Campaign:
     progress: Optional[str] = None  # Current state: "23/50"
     parent_id: Optional[str] = None  # Parent campaign (for hierarchy)
     status: Status = Status.ACTIVE
+    is_shared: bool = False
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
 
@@ -259,6 +260,8 @@ class PlanItem:
     status: PlanItemStatus = PlanItemStatus.PLANNED
     depends_on: List[str] = field(default_factory=list)  # PlanItem IDs
     outcome: Optional[str] = None             # What happened (filled after completion)
+    claimed_by: Optional[str] = None         # instance_id of claiming node
+    claimed_by_hostname: Optional[str] = None # human-readable hostname
     references: List[Dict[str, str]] = field(default_factory=list)  # Source citations
 
     # Specifications (type-dependent)

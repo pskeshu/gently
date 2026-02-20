@@ -7,7 +7,7 @@ from each discovered peer.
 
 import asyncio
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import aiohttp
 
@@ -49,6 +49,106 @@ class PeerClient:
             logger.debug(f"Failed to fetch from {peer.instance_id[:8]}: {e}")
 
         return None
+
+    # ------------------------------------------------------------------
+    # Campaign coordination methods
+    # ------------------------------------------------------------------
+
+    async def fetch_peer_campaigns(self, peer: PeerInfo) -> Optional[List]:
+        """GET /api/campaigns from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns"
+        try:
+            async with self._session.get(url) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    return data.get("campaigns", [])
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch campaigns from {peer.instance_id[:8]}: {e}")
+        return None
+
+    async def fetch_campaign_export(self, peer: PeerInfo, campaign_id: str) -> Optional[Dict]:
+        """GET /api/campaigns/{id}/export from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns/{campaign_id}/export"
+        try:
+            async with self._session.get(url) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch campaign export from {peer.instance_id[:8]}: {e}")
+        return None
+
+    async def join_campaign(
+        self, peer: PeerInfo, campaign_id: str, instance_id: str, hostname: str,
+    ) -> bool:
+        """POST /api/campaigns/{id}/join on a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns/{campaign_id}/join"
+        try:
+            async with self._session.post(url, json={
+                "instance_id": instance_id,
+                "hostname": hostname,
+            }) as resp:
+                return resp.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to join campaign on {peer.instance_id[:8]}: {e}")
+        return False
+
+    async def claim_item(
+        self,
+        peer: PeerInfo,
+        campaign_id: str,
+        item_id: str,
+        instance_id: str,
+        hostname: str,
+    ) -> bool:
+        """POST /api/campaigns/{id}/items/{item_id}/claim on a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/claim"
+        try:
+            async with self._session.post(url, json={
+                "instance_id": instance_id,
+                "hostname": hostname,
+            }) as resp:
+                return resp.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to claim item on {peer.instance_id[:8]}: {e}")
+        return False
+
+    async def unclaim_item(
+        self, peer: PeerInfo, campaign_id: str, item_id: str,
+    ) -> bool:
+        """POST /api/campaigns/{id}/items/{item_id}/unclaim on a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/unclaim"
+        try:
+            async with self._session.post(url) as resp:
+                return resp.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to unclaim item on {peer.instance_id[:8]}: {e}")
+        return False
+
+    async def update_item_status(
+        self,
+        peer: PeerInfo,
+        campaign_id: str,
+        item_id: str,
+        status: str,
+        outcome: Optional[str] = None,
+    ) -> bool:
+        """POST /api/campaigns/{id}/items/{item_id}/status on a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/campaigns/{campaign_id}/items/{item_id}/status"
+        body: Dict[str, Any] = {"status": status}
+        if outcome is not None:
+            body["outcome"] = outcome
+        try:
+            async with self._session.post(url, json=body) as resp:
+                return resp.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to update item status on {peer.instance_id[:8]}: {e}")
+        return False
 
     async def close(self):
         """Clean up the HTTP session."""

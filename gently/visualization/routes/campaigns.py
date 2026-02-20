@@ -6,7 +6,9 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+
+from gently.context.model import PlanItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -237,6 +239,92 @@ def create_router(server) -> APIRouter:
         sessions = cs.get_planned_sessions(campaign_id=campaign.id)
         return {"sessions": [_serialize(s) for s in sessions]}
 
+    # ------------------------------------------------------------------
+    # Mesh campaign coordination endpoints
+    # ------------------------------------------------------------------
+
+    @router.post("/api/campaigns/{campaign_id}/share")
+    async def share_campaign(campaign_id: str):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        cs.share_campaign(campaign.id)
+        return {"ok": True}
+
+    @router.post("/api/campaigns/{campaign_id}/unshare")
+    async def unshare_campaign(campaign_id: str):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        cs.unshare_campaign(campaign.id)
+        return {"ok": True}
+
+    @router.get("/api/campaigns/{campaign_id}/export")
+    async def export_campaign(campaign_id: str):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        tree = cs._serialize_campaign_tree(campaign.id)
+        _enrich_export_with_claims(tree, cs, campaign.id)
+        return tree
+
+    @router.post("/api/campaigns/{campaign_id}/join")
+    async def join_campaign(campaign_id: str, request: Request):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        body = await request.json()
+        instance_id = body.get("instance_id", "")
+        hostname = body.get("hostname", "")
+        if not instance_id:
+            raise HTTPException(status_code=400, detail="instance_id required")
+        cs.add_campaign_participant(campaign.id, instance_id, hostname)
+        return {"ok": True}
+
+    @router.get("/api/campaigns/{campaign_id}/participants")
+    async def get_participants(campaign_id: str):
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        participants = cs.get_campaign_participants(campaign.id)
+        return {"participants": participants}
+
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/claim")
+    async def claim_item(campaign_id: str, item_id: str, request: Request):
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        body = await request.json()
+        instance_id = body.get("instance_id", "")
+        hostname = body.get("hostname", "")
+        if not instance_id:
+            raise HTTPException(status_code=400, detail="instance_id required")
+        ok = cs.claim_plan_item(item_id, instance_id, hostname)
+        if not ok:
+            raise HTTPException(status_code=409, detail="Item already claimed by another node")
+        return {"ok": True}
+
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/unclaim")
+    async def unclaim_item(campaign_id: str, item_id: str):
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        cs.unclaim_plan_item(item_id)
+        return {"ok": True}
+
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status")
+    async def update_item_status(campaign_id: str, item_id: str, request: Request):
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        body = await request.json()
+        status_str = body.get("status")
+        outcome = body.get("outcome")
+        if not status_str:
+            raise HTTPException(status_code=400, detail="status required")
+        try:
+            item_status = PlanItemStatus(status_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status_str}")
+        cs.update_plan_item(item_id, status=item_status, outcome=outcome)
+        return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
     def _build_campaign_tree(cs, campaign_id: str) -> Optional[Dict]:
         """Recursively build campaign tree with plan items and status."""
         campaign = cs.get_campaign(campaign_id)
@@ -264,5 +352,25 @@ def create_router(server) -> APIRouter:
                 for child in children
             ],
         }
+
+    def _enrich_export_with_claims(tree: Dict, cs, campaign_id: str):
+        """Walk a serialized campaign tree and annotate items with IDs and claim info."""
+        items = cs.get_plan_items(campaign_id=campaign_id)
+        items.sort(key=lambda x: x.phase_order)
+
+        # Match serialized items to real items by index (same ordering)
+        for idx, serialized_item in enumerate(tree.get("items", [])):
+            if idx < len(items):
+                real = items[idx]
+                serialized_item["id"] = real.id
+                serialized_item["status"] = real.status.value
+                serialized_item["claimed_by"] = real.claimed_by
+                serialized_item["claimed_by_hostname"] = real.claimed_by_hostname
+
+        # Recurse into children
+        children = cs.get_subcampaigns(campaign_id)
+        for child_idx, child_tree in enumerate(tree.get("children", [])):
+            if child_idx < len(children):
+                _enrich_export_with_claims(child_tree, cs, children[child_idx].id)
 
     return router

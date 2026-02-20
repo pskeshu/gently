@@ -310,10 +310,36 @@ class ContextStore:
     def _migrate(self, conn: sqlite3.Connection):
         """Run lightweight migrations for columns/tables added after initial schema."""
         # Add "references" column to plan_items if missing (added after initial release)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(plan_items)").fetchall()}
-        if "references" not in cols:
+        pi_cols = {row[1] for row in conn.execute("PRAGMA table_info(plan_items)").fetchall()}
+        if "references" not in pi_cols:
             conn.execute('ALTER TABLE plan_items ADD COLUMN "references" TEXT')
             logger.info("Migration: added 'references' column to plan_items")
+
+        # Mesh campaign coordination columns
+        camp_cols = {row[1] for row in conn.execute("PRAGMA table_info(campaigns)").fetchall()}
+        if "is_shared" not in camp_cols:
+            conn.execute("ALTER TABLE campaigns ADD COLUMN is_shared INTEGER DEFAULT 0")
+            logger.info("Migration: added 'is_shared' column to campaigns")
+
+        if "claimed_by" not in pi_cols:
+            conn.execute("ALTER TABLE plan_items ADD COLUMN claimed_by TEXT")
+            logger.info("Migration: added 'claimed_by' column to plan_items")
+        if "claimed_by_hostname" not in pi_cols:
+            conn.execute("ALTER TABLE plan_items ADD COLUMN claimed_by_hostname TEXT")
+            logger.info("Migration: added 'claimed_by_hostname' column to plan_items")
+
+        # Campaign participants table for mesh coordination
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS campaign_participants (
+                campaign_id TEXT NOT NULL,
+                instance_id TEXT NOT NULL,
+                hostname TEXT,
+                joined_at TEXT NOT NULL,
+                PRIMARY KEY (campaign_id, instance_id),
+                FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
+            )
+        """)
+        logger.debug("Migration: ensured campaign_participants table exists")
 
     @contextmanager
     def _tx(self):
@@ -340,6 +366,7 @@ class ContextStore:
             "planned_sessions",
             "session_intents",
             "projects",
+            "campaign_participants",
             "campaigns",
             "learnings",
             "embryo_understanding",
@@ -542,6 +569,11 @@ class ContextStore:
             )
             counts["plan_items"] += r.rowcount
 
+            # Delete campaign participants
+            self._conn.execute(
+                "DELETE FROM campaign_participants WHERE campaign_id = ?", (cid,),
+            )
+
             # Delete campaign
             r = self._conn.execute(
                 "DELETE FROM campaigns WHERE id = ?", (cid,),
@@ -621,6 +653,73 @@ class ContextStore:
                 values,
             )
 
+    # ------------------------------------------------------------------
+    # Campaign sharing (mesh coordination)
+    # ------------------------------------------------------------------
+
+    def share_campaign(self, campaign_id: str):
+        """Mark a campaign as shared on the mesh."""
+        with self._tx():
+            self._conn.execute(
+                "UPDATE campaigns SET is_shared = 1, updated_at = ? WHERE id = ?",
+                (self._now(), campaign_id),
+            )
+
+    def unshare_campaign(self, campaign_id: str):
+        """Remove shared flag from a campaign."""
+        with self._tx():
+            self._conn.execute(
+                "UPDATE campaigns SET is_shared = 0, updated_at = ? WHERE id = ?",
+                (self._now(), campaign_id),
+            )
+
+    def get_shared_campaigns(self) -> List[Campaign]:
+        """Get all campaigns marked as shared."""
+        rows = self._conn.execute(
+            "SELECT * FROM campaigns WHERE is_shared = 1 ORDER BY created_at",
+        ).fetchall()
+        return [self._row_to_campaign(row) for row in rows]
+
+    def add_campaign_participant(self, campaign_id: str, instance_id: str, hostname: str):
+        """Register a mesh peer as a participant in a campaign."""
+        with self._tx():
+            self._conn.execute(
+                "INSERT OR REPLACE INTO campaign_participants "
+                "(campaign_id, instance_id, hostname, joined_at) VALUES (?, ?, ?, ?)",
+                (campaign_id, instance_id, hostname, self._now()),
+            )
+
+    def get_campaign_participants(self, campaign_id: str) -> List[Dict]:
+        """Get all participants for a campaign."""
+        rows = self._conn.execute(
+            "SELECT * FROM campaign_participants WHERE campaign_id = ? ORDER BY joined_at",
+            (campaign_id,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def claim_plan_item(self, item_id: str, instance_id: str, hostname: str) -> bool:
+        """Atomically claim a plan item for a mesh node.
+
+        Returns True if the claim succeeded, False if already claimed by another node.
+        Uses atomic UPDATE with WHERE to prevent races.
+        """
+        with self._tx():
+            r = self._conn.execute(
+                "UPDATE plan_items SET claimed_by = ?, claimed_by_hostname = ?, updated_at = ? "
+                "WHERE id = ? AND (claimed_by IS NULL OR claimed_by = ?)",
+                (instance_id, hostname, self._now(), item_id, instance_id),
+            )
+            return r.rowcount > 0
+
+    def unclaim_plan_item(self, item_id: str):
+        """Release a claim on a plan item."""
+        with self._tx():
+            self._conn.execute(
+                "UPDATE plan_items SET claimed_by = NULL, claimed_by_hostname = NULL, "
+                "updated_at = ? WHERE id = ?",
+                (self._now(), item_id),
+            )
+
     def _row_to_campaign(self, row: sqlite3.Row) -> Campaign:
         d = dict(row)
         return Campaign(
@@ -632,6 +731,7 @@ class ContextStore:
             progress=d.get("progress"),
             parent_id=d.get("parent_id"),
             status=Status(d.get("status", "active")),
+            is_shared=bool(d.get("is_shared", 0)),
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),
         )
@@ -1943,6 +2043,8 @@ class ContextStore:
             status=PlanItemStatus(d.get("status", "planned")),
             depends_on=deps,
             outcome=d.get("outcome"),
+            claimed_by=d.get("claimed_by"),
+            claimed_by_hostname=d.get("claimed_by_hostname"),
             references=references,
             imaging_spec=imaging_spec,
             bench_spec=bench_spec,

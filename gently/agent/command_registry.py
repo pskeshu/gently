@@ -547,6 +547,8 @@ Usage:
   /campaign              List all campaigns with progress summary
   /campaign <id>         Show detailed view of a specific campaign
   /campaign delete <id>  Delete a campaign and all its plan items
+  /campaign share <id>   Share a campaign on the mesh
+  /campaign unshare <id> Stop sharing a campaign
 
 Use plan mode (/plan) to create and modify campaigns.""",
         aliases=["/campaigns"],
@@ -556,6 +558,14 @@ Use plan mode (/plan) to create and modify campaigns.""",
             SubCommand(
                 name="delete",
                 description="Delete a campaign and its plan items",
+            ),
+            SubCommand(
+                name="share",
+                description="Share a campaign on the mesh for coordination",
+            ),
+            SubCommand(
+                name="unshare",
+                description="Stop sharing a campaign on the mesh",
             ),
         ],
         category=CommandCategory.PLANNING,
@@ -604,9 +614,49 @@ Sub-commands:
     registry.register(CommandDefinition(
         name="/peers",
         description="Show mesh peers on the network",
-        help_text="List all Gently instances discovered on the LAN.\nShows hostname, capabilities (GPU, SAM, microscope), and status for each peer.",
+        help_text="""List all Gently instances discovered on the LAN.
+Shows hostname, capabilities (GPU, SAM, microscope), and status for each peer.
+
+Usage:
+  /peers                        List all peers
+  /peers <hostname> campaigns   Show shared campaigns on a peer""",
         aliases=["/mesh"],
+        positional_arg="hostname",
+        positional_hint="HOSTNAME",
+        subcommands=[
+            SubCommand(
+                name="campaigns",
+                description="Show shared campaigns on a peer",
+            ),
+        ],
         category=CommandCategory.INSPECTION,
+    ))
+
+    # === Mesh coordination commands ===
+    registry.register(CommandDefinition(
+        name="/join-campaign",
+        description="Join a shared campaign on a peer",
+        help_text="""Join a campaign shared by a mesh peer.
+
+Usage:
+  /join-campaign <hostname> <campaign_id>
+
+After joining, use /claim to claim items for execution.""",
+        positional_hint="HOSTNAME CAMPAIGN_ID",
+        category=CommandCategory.PLANNING,
+    ))
+
+    registry.register(CommandDefinition(
+        name="/claim",
+        description="Claim a plan item from a shared campaign",
+        help_text="""Claim a plan item from a joined remote campaign.
+
+Usage:
+  /claim <item_id>
+
+Requires an active remote campaign (via /join-campaign).""",
+        positional_hint="ITEM_ID",
+        category=CommandCategory.PLANNING,
     ))
 
 

@@ -42,6 +42,7 @@ class CopilotBridge:
         self._active_stream: Optional[asyncio.Task] = None
         self._launch_info: Dict[str, Any] = {}
         self._wizard = None  # StartupWizard, set by init_wizard()
+        self._active_remote: Optional[Dict[str, Any]] = None  # {"peer": PeerInfo, "campaign_id": str}
 
     def set_launch_info(self, info: Dict[str, Any]) -> None:
         """Store launch metadata to include in the connect message."""
@@ -169,13 +170,22 @@ class CopilotBridge:
             })
             return
 
-        if cmd in ("/peers", "/mesh"):
-            data = self._get_peers_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/peers",
-                "content": data,
-            })
+        if cmd in ("/peers", "/mesh") or cmd.startswith("/peers ") or cmd.startswith("/mesh "):
+            parts = command.strip().split()
+            if len(parts) >= 3 and parts[2].lower() == "campaigns":
+                data = await self._get_peer_campaigns(parts[1])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/peers",
+                    "content": data,
+                })
+            else:
+                data = self._get_peers_data()
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/peers",
+                    "content": data,
+                })
             return
 
         if cmd == "/embryos" or cmd.startswith("/embryos "):
@@ -357,7 +367,21 @@ class CopilotBridge:
             parts = command.strip().split()
             subcmd = parts[1].lower() if len(parts) >= 2 else None
 
-            if subcmd == "delete" and len(parts) >= 3:
+            if subcmd == "share" and len(parts) >= 3:
+                data = self._share_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
+            elif subcmd == "unshare" and len(parts) >= 3:
+                data = self._unshare_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
+            elif subcmd == "delete" and len(parts) >= 3:
                 data = self._delete_campaign(parts[2])
                 await send_fn({
                     "type": "command_result",
@@ -378,6 +402,32 @@ class CopilotBridge:
                     "command": "/campaign",
                     "content": data,
                 })
+            return
+
+        if cmd.startswith("/join-campaign"):
+            parts = command.strip().split()
+            if len(parts) >= 3:
+                data = await self._join_campaign(parts[1], parts[2])
+            else:
+                data = {"text": "Usage: /join-campaign <hostname> <campaign_id>"}
+            await send_fn({
+                "type": "command_result",
+                "command": "/join-campaign",
+                "content": data,
+            })
+            return
+
+        if cmd.startswith("/claim"):
+            parts = command.strip().split()
+            if len(parts) >= 2:
+                data = await self._claim_item(parts[1])
+            else:
+                data = {"text": "Usage: /claim <item_id>"}
+            await send_fn({
+                "type": "command_result",
+                "command": "/claim",
+                "content": data,
+            })
             return
 
         if cmd == "/plan" or cmd.startswith("/plan "):
@@ -996,6 +1046,117 @@ class CopilotBridge:
         old_name = campaign.shorthand or campaign.display_name
         cs.update_campaign(campaign.id, shorthand=new_name.strip())
         return {"text": f"Renamed **{old_name}** → **{new_name.strip()}**"}
+
+    def _share_campaign(self, campaign_ref: str) -> dict:
+        """Share a campaign on the mesh."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+
+        campaign = cs.resolve_campaign(campaign_ref)
+        if not campaign:
+            return {"text": f"Campaign '{campaign_ref}' not found."}
+
+        cs.share_campaign(campaign.id)
+        label = campaign.shorthand or campaign.display_name
+        return {"text": f"Campaign **{label}** is now shared on the mesh."}
+
+    def _unshare_campaign(self, campaign_ref: str) -> dict:
+        """Stop sharing a campaign on the mesh."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+
+        campaign = cs.resolve_campaign(campaign_ref)
+        if not campaign:
+            return {"text": f"Campaign '{campaign_ref}' not found."}
+
+        cs.unshare_campaign(campaign.id)
+        label = campaign.shorthand or campaign.display_name
+        return {"text": f"Campaign **{label}** is no longer shared."}
+
+    async def _get_peer_campaigns(self, hostname: str) -> dict:
+        """Fetch shared campaigns from a specific peer."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None:
+            return {"text": "Mesh not available."}
+
+        peer = mesh.find_peer_by_hostname(hostname)
+        if peer is None:
+            return {"text": f"Peer '{hostname}' not found."}
+
+        pc = mesh.peer_client
+        if pc is None:
+            return {"text": "Peer client not available."}
+
+        info = await pc.fetch_peer_info(peer)
+        if info is None:
+            return {"text": f"Could not reach peer '{hostname}'."}
+
+        shared = info.get("shared_campaigns", [])
+        if not shared:
+            return {"text": f"No shared campaigns on **{hostname}**."}
+
+        lines = [f"Shared campaigns on **{hostname}**", ""]
+        for c in shared:
+            shorthand = c.get("shorthand") or c.get("id", "")[:8]
+            desc = c.get("description", "")
+            total = c.get("item_count", 0)
+            done = c.get("completed_count", 0)
+            lines.append(f"  **{shorthand}** ({done}/{total}) — {desc}")
+            lines.append(f"    ID: {c.get('id', '')}")
+        lines.append("")
+        lines.append(f"Use `/join-campaign {hostname} <id>` to join.")
+        return {"text": "\n".join(lines)}
+
+    async def _join_campaign(self, hostname: str, campaign_ref: str) -> dict:
+        """Join a shared campaign on a remote peer."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None:
+            return {"text": "Mesh not available."}
+
+        peer = mesh.find_peer_by_hostname(hostname)
+        if peer is None:
+            return {"text": f"Peer '{hostname}' not found."}
+
+        pc = mesh.peer_client
+        if pc is None:
+            return {"text": "Peer client not available."}
+
+        import socket
+        local_hostname = socket.gethostname()
+
+        ok = await pc.join_campaign(peer, campaign_ref, mesh.instance_id, local_hostname)
+        if not ok:
+            return {"text": f"Failed to join campaign '{campaign_ref}' on {hostname}."}
+
+        self._active_remote = {"peer": peer, "campaign_id": campaign_ref}
+        return {"text": f"Joined campaign **{campaign_ref}** on **{hostname}**.\nUse `/claim <item_id>` to claim items."}
+
+    async def _claim_item(self, item_id: str) -> dict:
+        """Claim a plan item from the active remote campaign."""
+        if self._active_remote is None:
+            return {"text": "No active remote campaign. Use `/join-campaign <hostname> <id>` first."}
+
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None:
+            return {"text": "Mesh not available."}
+
+        pc = mesh.peer_client
+        if pc is None:
+            return {"text": "Peer client not available."}
+
+        import socket
+        local_hostname = socket.gethostname()
+
+        peer = self._active_remote["peer"]
+        campaign_id = self._active_remote["campaign_id"]
+
+        ok = await pc.claim_item(peer, campaign_id, item_id, mesh.instance_id, local_hostname)
+        if not ok:
+            return {"text": f"Failed to claim item `{item_id}` — it may already be claimed by another node."}
+
+        return {"text": f"Claimed item `{item_id}` from campaign **{campaign_id}** on **{peer.hostname}**."}
 
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""

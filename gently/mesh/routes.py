@@ -24,7 +24,28 @@ def register_mesh_routes(viz_server, mesh_service) -> None:
     @router.get("/api/mesh/status")
     async def mesh_status():
         """Return this node's full info (called by other peers)."""
-        return JSONResponse(mesh_service.get_local_info())
+        info = mesh_service.get_local_info()
+
+        # Append shared campaigns if context store is available
+        cs = getattr(viz_server, "context_store", None)
+        if cs is not None:
+            try:
+                shared = cs.get_shared_campaigns()
+                shared_list = []
+                for c in shared:
+                    status = cs.get_plan_status(c.id)
+                    shared_list.append({
+                        "id": c.id,
+                        "shorthand": c.shorthand,
+                        "description": c.description,
+                        "item_count": status["total"],
+                        "completed_count": status["completed"],
+                    })
+                info["shared_campaigns"] = shared_list
+            except Exception:
+                pass
+
+        return JSONResponse(info)
 
     @router.get("/api/mesh/peers")
     async def mesh_peers():

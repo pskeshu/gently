@@ -243,6 +243,19 @@ class MeshService(Service):
         }
 
     @property
+    def peer_client(self) -> Optional[PeerClient]:
+        """Expose the peer client for direct campaign operations."""
+        return self._peer_client
+
+    def find_peer_by_hostname(self, hostname: str) -> Optional[PeerInfo]:
+        """Find a live peer by hostname (case-insensitive)."""
+        hostname_lower = hostname.lower()
+        for p in self.get_peers():
+            if p.hostname.lower() == hostname_lower:
+                return p
+        return None
+
+    @property
     def peer_count(self) -> int:
         """Number of live peers."""
         return len(self.get_peers())
