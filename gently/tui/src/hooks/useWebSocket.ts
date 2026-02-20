@@ -118,11 +118,18 @@ export function useWebSocket(
             s.finishStreaming();
             break;
 
+          case "state_update": {
+            const st = msg.state as Record<string, unknown>;
+            if (st.peer_count !== undefined) {
+              s.setPeerCount(st.peer_count as number);
+            }
+            break;
+          }
+
           case "pong":
             break;
 
           default:
-            // state_update, etc. — ignore for now
             break;
         }
       },

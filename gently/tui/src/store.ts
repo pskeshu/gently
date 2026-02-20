@@ -135,6 +135,7 @@ export interface TuiActions {
   setStreaming: (v: boolean) => void;
   cancelStream: () => void;
 
+  setPeerCount: (count: number) => void;
   setWizardActive: (active: boolean) => void;
   setCopilotMode: (mode: string) => void;
 }
@@ -494,6 +495,7 @@ export function createTuiStore() {
         };
       }),
 
+    setPeerCount: (count) => set({ peerCount: count }),
     setWizardActive: (active) => set({ wizardActive: active }),
     setCopilotMode: (mode) => set({ copilotMode: mode }),
   }));

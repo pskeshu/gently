@@ -141,6 +141,25 @@ def create_router(server) -> APIRouter:
             "timestamp": datetime.now().isoformat(),
         })
 
+        # Subscribe to mesh peer events so the TUI gets live peer counts
+        _mesh_unsubs = []
+        mesh_svc = getattr(server, "mesh_service", None)
+        if mesh_svc is not None and server.event_bus is not None:
+            from gently.core.event_bus import EventType as _ET
+
+            async def _push_peer_count(event):
+                try:
+                    await websocket.send_json({
+                        "type": "state_update",
+                        "state": {"peer_count": mesh_svc.peer_count},
+                    })
+                except Exception:
+                    pass
+
+            for evt in (_ET.MESH_PEER_DISCOVERED, _ET.MESH_PEER_LOST):
+                unsub = server.event_bus.subscribe_async(evt, _push_peer_count)
+                _mesh_unsubs.append(unsub)
+
         # Active streaming task (so we can cancel on disconnect)
         active_task: Optional[asyncio.Task] = None
         wizard_task = None
@@ -278,6 +297,12 @@ def create_router(server) -> APIRouter:
         except Exception as e:
             logger.error(f"Copilot WS error: {e}", exc_info=True)
         finally:
+            # Unsubscribe from mesh events
+            for unsub in _mesh_unsubs:
+                try:
+                    unsub()
+                except Exception:
+                    pass
             if wizard_task and not wizard_task.done():
                 wizard_task.cancel()
             if active_task and not active_task.done():

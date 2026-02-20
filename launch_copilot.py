@@ -267,6 +267,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
         if copilot.viz_server is not None:
             register_mesh_routes(copilot.viz_server, mesh)
+            copilot.viz_server.mesh_service = mesh
 
         await mesh.start()
     except Exception as e:
