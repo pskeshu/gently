@@ -169,14 +169,12 @@ export function StatusBar({
           </>
         ) : null}
 
-        {peerCount > 0 ? (
-          <>
-            {sep}
-            <Text color={theme.muted}>
-              {peerCount} peer{peerCount !== 1 ? "s" : ""}
-            </Text>
-          </>
-        ) : null}
+        {sep}
+        <Text color={theme.muted}>
+          {peerCount > 0
+            ? `${peerCount} peer${peerCount !== 1 ? "s" : ""}`
+            : "solo"}
+        </Text>
 
         {tokens.total_tokens > 0 ? (
           <>
