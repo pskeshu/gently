@@ -226,7 +226,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
                 "hardware_profile": config.get("hardware", "dispim"),
                 "tool_categories": [],
             }
-            # GPU detection
+            # GPU detection — try torch first, fall back to nvidia-smi
             try:
                 import torch
                 if torch.cuda.is_available():
@@ -236,7 +236,21 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
                         torch.cuda.get_device_properties(0).total_mem / (1024**3), 1
                     )
             except ImportError:
-                pass
+                try:
+                    import subprocess as _sp
+                    out = _sp.check_output(
+                        ["nvidia-smi", "--query-gpu=name,memory.total",
+                         "--format=csv,noheader,nounits"],
+                        timeout=5, text=True,
+                    ).strip()
+                    if out:
+                        parts = out.split(",", 1)
+                        caps["has_gpu"] = True
+                        caps["gpu_name"] = parts[0].strip()
+                        if len(parts) > 1:
+                            caps["gpu_vram_gb"] = round(float(parts[1].strip()) / 1024, 1)
+                except Exception:
+                    pass
             # Free disk space
             try:
                 usage = shutil.disk_usage(str(storage_dir))
