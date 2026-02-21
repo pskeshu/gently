@@ -1218,6 +1218,8 @@ class CopilotBridge:
         )
         if resp is None:
             return {"text": f"Failed to reach **{hostname}** for pairing."}
+        if "_error" in resp:
+            return {"text": f"Failed to reach **{hostname}** for pairing.\n\n`{resp['_error']}`"}
 
         nonce_remote = resp.get("nonce", "")
         pairing_id = resp.get("pairing_id", "")

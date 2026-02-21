@@ -171,12 +171,31 @@ def create_router(server) -> APIRouter:
                             "title": f"Peer joined: {hostname}",
                         })
                     else:
+                        # Interactive prompt for unpaired peers
+                        request_id = f"mesh_discover:{hostname}"
                         await websocket.send_json({
-                            "type": "notification",
-                            "level": "info",
-                            "title": f"New peer: {hostname}",
-                            "body": f"Use /pair {hostname} to connect",
+                            "type": "choice_request",
+                            "choice_data": {
+                                "_type": "single",
+                                "question": f"New peer discovered: {hostname}",
+                                "options": [
+                                    {"id": "pair", "label": "Pair",
+                                     "description": f"Start pairing with {hostname}"},
+                                    {"id": "ignore", "label": "Ignore",
+                                     "description": "Dismiss (you can pair later via /pair)"},
+                                ],
+                                "allow_multiple": False,
+                            },
+                            "request_id": request_id,
                         })
+                        loop = asyncio.get_event_loop()
+                        future = loop.create_future()
+                        _choice_futures[request_id] = future
+                        selected = await future
+                        if selected == "pair":
+                            await bridge.handle_command(f"/pair {hostname}", send_fn)
+                except asyncio.CancelledError:
+                    pass
                 except Exception:
                     pass
 

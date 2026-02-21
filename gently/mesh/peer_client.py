@@ -262,50 +262,57 @@ class PeerClient:
         self, peer: PeerInfo, initiator_id: str, hostname: str, nonce: str,
         cert_fingerprint: str = "", udp_sign_key: str = "",
     ) -> Optional[Dict]:
-        """POST /api/mesh/pair — initiate pairing with a peer."""
+        """POST /api/mesh/pair — initiate pairing with a peer.
+
+        Returns response dict on success, or {"_error": "..."} on failure.
+        """
+        payload = {
+            "initiator_id": initiator_id,
+            "hostname": hostname,
+            "nonce": nonce,
+            "cert_fingerprint": cert_fingerprint,
+            "udp_sign_key": udp_sign_key,
+        }
+        resp = await self._pairing_request(peer, "POST", "/api/mesh/pair", payload)
+        if resp is not None:
+            return resp
+        base = f"{peer.ip_address}:{peer.viz_port}"
+        return {"_error": f"Could not reach {base} via HTTPS or HTTP"}
+
+    async def _pairing_request(self, peer: PeerInfo, method: str, path: str,
+                               json_body: Optional[Dict] = None) -> Optional[Dict]:
+        """Make an HTTP request trying HTTPS first, then HTTP (for pre-pairing)."""
         await self._ensure_session()
-        url = f"{peer.base_url}/api/mesh/pair"
-        try:
-            async with self._session.post(url, json={
-                "initiator_id": initiator_id,
-                "hostname": hostname,
-                "nonce": nonce,
-                "cert_fingerprint": cert_fingerprint,
-                "udp_sign_key": udp_sign_key,
-            }) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-                logger.debug(f"Pair request to {peer.instance_id[:8]} returned {resp.status}")
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            logger.debug(f"Failed to send pair request to {peer.instance_id[:8]}: {e}")
+        base = f"{peer.ip_address}:{peer.viz_port}"
+        for scheme in ("https", "http"):
+            url = f"{scheme}://{base}{path}"
+            try:
+                if method == "GET":
+                    req = self._session.get(url)
+                else:
+                    req = self._session.post(url, json=json_body or {})
+                async with req as resp:
+                    if resp.status == 200:
+                        return await resp.json()
+            except (aiohttp.ClientError, asyncio.TimeoutError, OSError):
+                continue
         return None
 
     async def poll_pair_status(self, peer: PeerInfo, pairing_id: str) -> Optional[Dict]:
         """GET /api/mesh/pair/{id}/status — poll pairing status."""
-        await self._ensure_session()
-        url = f"{peer.base_url}/api/mesh/pair/{pairing_id}/status"
-        try:
-            async with self._session.get(url) as resp:
-                if resp.status == 200:
-                    return await resp.json()
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            logger.debug(f"Failed to poll pair status from {peer.instance_id[:8]}: {e}")
-        return None
+        return await self._pairing_request(
+            peer, "GET", f"/api/mesh/pair/{pairing_id}/status",
+        )
 
     async def confirm_pair_remote(
         self, peer: PeerInfo, pairing_id: str, confirmer_id: str,
     ) -> bool:
         """POST /api/mesh/pair/{id}/confirm — confirm pairing on remote side."""
-        await self._ensure_session()
-        url = f"{peer.base_url}/api/mesh/pair/{pairing_id}/confirm"
-        try:
-            async with self._session.post(url, json={
-                "confirmer_id": confirmer_id,
-            }) as resp:
-                return resp.status == 200
-        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
-            logger.debug(f"Failed to confirm pairing on {peer.instance_id[:8]}: {e}")
-        return False
+        resp = await self._pairing_request(
+            peer, "POST", f"/api/mesh/pair/{pairing_id}/confirm",
+            json_body={"confirmer_id": confirmer_id},
+        )
+        return resp is not None
 
     async def close(self):
         """Clean up the HTTP session."""
