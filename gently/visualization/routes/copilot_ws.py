@@ -492,27 +492,40 @@ async def _handle_browse(target, data, server, bridge, send_fn):
             if cs is None:
                 await send_fn({"type": "browse_result", "target": "campaigns", "data": []})
                 return
-            roots = cs.get_root_campaigns()
-            result = []
-            for c in roots:
-                status = cs.get_plan_status(c.id)
-                items_raw = cs.get_plan_items(campaign_id=c.id)
-                items = []
-                for item in items_raw:
-                    items.append({
+
+            def serialize_campaign(c):
+                status_val = c.status.value if hasattr(c.status, "value") else str(c.status)
+                plan_status = cs.get_plan_status(c.id)
+                subcampaigns = cs.get_subcampaigns(c.id)
+                if subcampaigns:
+                    children = [serialize_campaign(s) for s in subcampaigns]
+                    items = []
+                else:
+                    children = []
+                    items_raw = cs.get_plan_items(campaign_id=c.id)
+                    items = [{
                         "id": item.id,
                         "title": item.title,
                         "status": item.status.value if hasattr(item.status, "value") else str(item.status),
+                        "type": item.type.value if hasattr(item.type, "value") else str(item.type),
                         "claimed_by_hostname": getattr(item, "claimed_by_hostname", None),
-                    })
-                result.append({
+                    } for item in items_raw]
+                return {
                     "id": c.id,
                     "shorthand": c.shorthand or "",
                     "description": c.description or "",
-                    "total": status["total"],
-                    "completed": status["completed"],
+                    "target": c.target or "",
+                    "status": status_val,
+                    "is_shared": bool(c.is_shared),
+                    "total": plan_status["total"],
+                    "completed": plan_status["completed"],
+                    "in_progress": plan_status["in_progress"],
+                    "subcampaigns": children,
                     "items": items,
-                })
+                }
+
+            roots = cs.get_root_campaigns()
+            result = [serialize_campaign(c) for c in roots]
             await send_fn({"type": "browse_result", "target": "campaigns", "data": result})
 
         elif target == "peers":

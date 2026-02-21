@@ -395,6 +395,20 @@ class CopilotBridge:
                     "command": "/campaign",
                     "content": data,
                 })
+            elif subcmd == "pause" and len(parts) >= 3:
+                data = self._pause_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
+            elif subcmd == "resume" and len(parts) >= 3:
+                data = self._resume_campaign(parts[2])
+                await send_fn({
+                    "type": "command_result",
+                    "command": "/campaign",
+                    "content": data,
+                })
             else:
                 data = self._get_campaigns_data(command.strip())
                 await send_fn({
@@ -1103,6 +1117,32 @@ class CopilotBridge:
         cs.unshare_campaign(campaign.id)
         label = campaign.shorthand or campaign.display_name
         return {"text": f"Campaign **{label}** is no longer shared."}
+
+    def _pause_campaign(self, campaign_ref: str) -> dict:
+        """Pause a campaign."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+        campaign = cs.resolve_campaign(campaign_ref)
+        if not campaign:
+            return {"text": f"Campaign '{campaign_ref}' not found."}
+        from gently.context.model import Status
+        cs.update_campaign_status(campaign.id, Status.PAUSED)
+        label = campaign.shorthand or campaign.display_name
+        return {"text": f"Campaign **{label}** paused."}
+
+    def _resume_campaign(self, campaign_ref: str) -> dict:
+        """Resume a paused campaign."""
+        cs = getattr(self, "_context_store", None)
+        if cs is None:
+            return {"text": "Context store not available."}
+        campaign = cs.resolve_campaign(campaign_ref)
+        if not campaign:
+            return {"text": f"Campaign '{campaign_ref}' not found."}
+        from gently.context.model import Status
+        cs.update_campaign_status(campaign.id, Status.ACTIVE)
+        label = campaign.shorthand or campaign.display_name
+        return {"text": f"Campaign **{label}** resumed."}
 
     async def _get_peer_campaigns(self, hostname: str) -> dict:
         """Fetch shared campaigns from a specific peer."""

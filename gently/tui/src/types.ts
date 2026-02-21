@@ -226,6 +226,7 @@ export interface BrowserPlanItem {
   id: string;
   title: string;
   status: string;
+  type?: string;
   claimed_by_hostname?: string;
 }
 
@@ -233,8 +234,13 @@ export interface BrowserCampaign {
   id: string;
   shorthand: string;
   description: string;
+  target: string;
+  status: string;
+  is_shared: boolean;
   total: number;
   completed: number;
+  in_progress: number;
+  subcampaigns: BrowserCampaign[];
   items: BrowserPlanItem[];
 }
 

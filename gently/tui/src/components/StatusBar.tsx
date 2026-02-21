@@ -131,20 +131,71 @@ export function StatusBar({
 
   const listItems = activeView === "campaigns" ? campaigns : peers;
 
-  // Sub-items for expanded item
+  // Sub-items for expanded item (level 2)
   let subItems: unknown[] = [];
+  let campaignLevel2Mode: "subcampaigns" | "items" = "items";
   if (expandedId) {
     if (activeView === "campaigns") {
-      subItems = campaigns.find((c) => c.id === expandedId)?.items ?? [];
+      const ec = campaigns.find((c) => c.id === expandedId);
+      if (ec && ec.subcampaigns.length > 0) {
+        subItems = ec.subcampaigns;
+        campaignLevel2Mode = "subcampaigns";
+      } else {
+        subItems = ec?.items ?? [];
+        campaignLevel2Mode = "items";
+      }
     } else {
       subItems = peers.find((p) => p.instance_id === expandedId)?.shared_campaigns ?? [];
     }
   }
 
-  // Third-level items: campaign items within a peer's campaign (+ Join action)
-  // Items count = peerCampaignItems.length + 1 (for Join action)
-  const hasExpandedCampaign = activeView === "peers" && expandedId && expandedCampaignId;
-  const thirdLevelCount = hasExpandedCampaign ? peerCampaignItems.length + 1 : 0;
+  // Action count for a campaign (share toggle + optional pause/resume)
+  const getActionCount = (c: BrowserCampaign) => c.status === "completed" ? 1 : 2;
+
+  // Level-2 max cursor for campaigns (items/subcampaigns + optional action rows)
+  const campaignLevel2Max = (() => {
+    if (activeView !== "campaigns" || !expandedId || expandedCampaignId) return subItems.length - 1;
+    const ec = campaigns.find((c) => c.id === expandedId);
+    if (!ec) return subItems.length - 1;
+    if (campaignLevel2Mode === "subcampaigns") return ec.subcampaigns.length - 1;
+    return ec.items.length + getActionCount(ec) - 1;
+  })();
+
+  // Third-level count for campaigns (subcampaign items + action rows)
+  const campaignLevel3Max = (() => {
+    if (activeView !== "campaigns" || !expandedId || !expandedCampaignId) return -1;
+    const ec = campaigns.find((c) => c.id === expandedId);
+    if (!ec) return -1;
+    const sc = ec.subcampaigns.find((s) => s.id === expandedCampaignId);
+    if (!sc) return -1;
+    return sc.items.length + getActionCount(sc) - 1;
+  })();
+
+  // Third-level for peers (peer campaign items + Join action)
+  const hasExpandedPeerCampaign = activeView === "peers" && expandedId && expandedCampaignId;
+  const peerThirdLevelCount = hasExpandedPeerCampaign ? peerCampaignItems.length + 1 : 0;
+
+  // Helper: dispatch a campaign action command and refresh the browser
+  const dispatchCampaignAction = (campaign: BrowserCampaign, actionIdx: number) => {
+    const actions: string[] = [];
+    actions.push(
+      campaign.is_shared
+        ? `/campaign unshare ${campaign.id}`
+        : `/campaign share ${campaign.id}`,
+    );
+    if (campaign.status !== "completed") {
+      actions.push(
+        campaign.status === "active"
+          ? `/campaign pause ${campaign.id}`
+          : `/campaign resume ${campaign.id}`,
+      );
+    }
+    const action = actions[actionIdx];
+    if (action) {
+      send({ type: "command", command: action });
+      setTimeout(() => send({ type: "browse", target: "campaigns" }), 300);
+    }
+  };
 
   // ── Keyboard handling ────────────────────────────────────
   useInput((_input, key) => {
@@ -152,10 +203,9 @@ export function StatusBar({
 
     if (key.escape) {
       if (expandedCampaignId) {
-        // Close third level → back to campaign list
         setExpandedCampaignId(null);
         setItemCursor(0);
-        onClearPeerCampaignItems();
+        if (activeView === "peers") onClearPeerCampaignItems();
       } else if (expandedId) {
         setExpandedId(null);
         setSubCursor(0);
@@ -185,14 +235,12 @@ export function StatusBar({
 
     if (key.upArrow) {
       if (expandedCampaignId) {
-        // Third level navigation
         if (itemCursor > 0) {
           setItemCursor((c) => c - 1);
         } else {
-          // Back to campaign list
           setExpandedCampaignId(null);
           setItemCursor(0);
-          onClearPeerCampaignItems();
+          if (activeView === "peers") onClearPeerCampaignItems();
         }
       } else if (expandedId) {
         if (subCursor > 0) {
@@ -213,10 +261,17 @@ export function StatusBar({
 
     if (key.downArrow) {
       if (expandedCampaignId) {
-        // Third level: items + [Join campaign]
-        setItemCursor((c) => Math.min(thirdLevelCount - 1, c + 1));
+        if (activeView === "campaigns") {
+          setItemCursor((c) => Math.min(campaignLevel3Max, c + 1));
+        } else {
+          setItemCursor((c) => Math.min(peerThirdLevelCount - 1, c + 1));
+        }
       } else if (expandedId) {
-        setSubCursor((c) => Math.min(subItems.length - 1, c + 1));
+        if (activeView === "campaigns") {
+          setSubCursor((c) => Math.min(campaignLevel2Max, c + 1));
+        } else {
+          setSubCursor((c) => Math.min(subItems.length - 1, c + 1));
+        }
       } else {
         setCursor((c) => Math.min(listItems.length - 1, c + 1));
       }
@@ -224,26 +279,50 @@ export function StatusBar({
     }
 
     if (key.return) {
-      // Third level: action on campaign item or Join
+      // ── Third level ──
       if (expandedCampaignId) {
-        if (itemCursor === peerCampaignItems.length) {
-          // [Join campaign] action
-          const peer = peers.find((p) => p.instance_id === expandedId);
-          if (peer) {
-            send({
-              type: "command",
-              command: `/join-campaign ${peer.hostname} ${expandedCampaignId}`,
-            });
-            onCloseBrowser();
+        if (activeView === "campaigns") {
+          // Campaign third level: items + actions
+          const ec = campaigns.find((c) => c.id === expandedId);
+          const sc = ec?.subcampaigns.find((s) => s.id === expandedCampaignId);
+          if (sc) {
+            const actionIdx = itemCursor - sc.items.length;
+            if (actionIdx >= 0) dispatchCampaignAction(sc, actionIdx);
+          }
+        } else {
+          // Peer third level: items + [Join]
+          if (itemCursor === peerCampaignItems.length) {
+            const peer = peers.find((p) => p.instance_id === expandedId);
+            if (peer) {
+              send({
+                type: "command",
+                command: `/join-campaign ${peer.hostname} ${expandedCampaignId}`,
+              });
+              onCloseBrowser();
+            }
           }
         }
-        // Items themselves are read-only, no action on Enter
         return;
       }
 
+      // ── Second level ──
       if (expandedId) {
-        // Second level: expand campaign to show items
-        if (activeView === "peers") {
+        if (activeView === "campaigns") {
+          const ec = campaigns.find((c) => c.id === expandedId);
+          if (!ec) return;
+          if (campaignLevel2Mode === "subcampaigns") {
+            // Expand subcampaign to level 3
+            const sc = ec.subcampaigns[subCursor];
+            if (sc) {
+              setExpandedCampaignId(sc.id);
+              setItemCursor(0);
+            }
+          } else {
+            // Leaf campaign: items + actions
+            const actionIdx = subCursor - ec.items.length;
+            if (actionIdx >= 0) dispatchCampaignAction(ec, actionIdx);
+          }
+        } else if (activeView === "peers") {
           const peer = peers.find((p) => p.instance_id === expandedId);
           const camp = subItems[subCursor] as BrowserCampaign | undefined;
           if (peer && camp) {
@@ -260,7 +339,7 @@ export function StatusBar({
         return;
       }
 
-      // First level: expand / collapse list item
+      // ── First level ──
       const item = listItems[cursor];
       if (!item) return;
 
@@ -268,14 +347,18 @@ export function StatusBar({
         const c = item as BrowserCampaign;
         if (expandedId === c.id) {
           setExpandedId(null);
+          setSubCursor(0);
+          setExpandedCampaignId(null);
+          setItemCursor(0);
         } else {
           setExpandedId(c.id);
           setSubCursor(0);
+          setExpandedCampaignId(null);
+          setItemCursor(0);
         }
       } else {
         const p = item as BrowserPeer;
         if (!p.is_trusted) {
-          // Unpaired peer — initiate pairing
           send({ type: "command", command: `/pair ${p.hostname}` });
           onCloseBrowser();
           return;
@@ -365,7 +448,7 @@ export function StatusBar({
       {browserOpen ? (
         <Box flexDirection="column">
           {activeView === "campaigns"
-            ? renderCampaignList(campaigns, cursor, expandedId, subCursor, theme)
+            ? renderCampaignList(campaigns, cursor, expandedId, subCursor, expandedCampaignId, itemCursor, theme)
             : renderPeerList(peers, cursor, expandedId, subCursor, subItems as BrowserCampaign[], expandedCampaignId, itemCursor, peerCampaignItems, theme)}
         </Box>
       ) : null}
@@ -433,11 +516,61 @@ export function StatusBar({
 
 // ── Campaign list rendering ──────────────────────────────────
 
+function campaignStatusBadge(status: string, theme: ThemeColors): { char: string; color: string } {
+  if (status === "paused") return { char: "⏸", color: theme.warning };
+  if (status === "completed") return { char: "✓", color: theme.muted };
+  return { char: "●", color: theme.success };
+}
+
+function itemStatusIcon(status: string, theme: ThemeColors): { char: string; color: string } {
+  if (status === "completed" || status === "done") return { char: "✓", color: theme.success };
+  if (status === "running" || status === "in_progress") return { char: "●", color: theme.info };
+  if (status === "blocked") return { char: "✗", color: theme.error };
+  if (status === "skipped") return { char: "–", color: theme.muted };
+  return { char: "○", color: theme.muted };
+}
+
+function typeBadge(type?: string): string {
+  if (!type) return "";
+  const map: Record<string, string> = {
+    imaging: "[img]", bench: "[lab]", genetics: "[gen]",
+    analysis: "[ana]", decision_point: "[dec]",
+  };
+  return map[type] || "";
+}
+
+function renderCampaignActions(
+  campaign: BrowserCampaign,
+  actionIdx: number,
+  indent: string,
+  theme: ThemeColors,
+) {
+  const actions: string[] = [];
+  actions.push(campaign.is_shared ? "[Unshare]" : "[Share on mesh]");
+  if (campaign.status !== "completed") {
+    actions.push(campaign.status === "active" ? "[Pause campaign]" : "[Resume campaign]");
+  }
+  return actions.map((label, idx) => {
+    const isActive = idx === actionIdx;
+    return (
+      <Text
+        key={label}
+        color={isActive ? theme.success : theme.muted}
+        bold={isActive}
+      >
+        {indent}{isActive ? "▶ " : "  "}{label}
+      </Text>
+    );
+  });
+}
+
 function renderCampaignList(
   campaigns: BrowserCampaign[],
   cursor: number,
   expandedId: string | null,
   subCursor: number,
+  expandedCampaignId: string | null,
+  itemCursor: number,
   theme: ThemeColors,
 ) {
   if (campaigns.length === 0) {
@@ -447,8 +580,8 @@ function renderCampaignList(
   return campaigns.map((c, i) => {
     const isCursor = i === cursor && !expandedId;
     const isExpanded = expandedId === c.id;
-    const done = c.completed >= c.total && c.total > 0;
     const marker = isExpanded ? "▼" : isCursor ? "▶" : " ";
+    const badge = campaignStatusBadge(c.status, theme);
 
     return (
       <Box key={c.id} flexDirection="column">
@@ -456,39 +589,102 @@ function renderCampaignList(
           color={isCursor || isExpanded ? theme.info : undefined}
           bold={isCursor}
         >
-          {`  ${marker} ${c.shorthand || c.id.slice(0, 8)}`}
+          {`  ${marker} `}
+          <Text color={badge.color}>{badge.char}</Text>
+          {` ${c.shorthand || c.id.slice(0, 8)}`}
+          {c.is_shared ? <Text color={theme.success}>{" \u27C6"}</Text> : null}
           <Text color={theme.muted}>
-            {` (${c.completed}/${c.total})`}{done ? " ✓" : ""}
+            {` (${c.completed}/${c.total})`}
           </Text>
         </Text>
+        {/* Description + target when expanded */}
+        {isExpanded && c.description ? (
+          <Text color={theme.muted}>
+            {"      "}{c.description.length > 70 ? c.description.slice(0, 67) + "..." : c.description}
+          </Text>
+        ) : null}
+        {isExpanded && c.target ? (
+          <Text color={theme.muted}>{"      "}Target: {c.target}</Text>
+        ) : null}
+        {/* Level 2: subcampaigns or items + actions */}
         {isExpanded
-          ? c.items.map((item, j) => {
-              const isSub = j === subCursor;
-              const icon =
-                item.status === "completed" || item.status === "done"
-                  ? "✓"
-                  : item.status === "running" || item.status === "in_progress"
-                    ? "●"
-                    : "○";
-              const iconColor =
-                item.status === "completed" || item.status === "done"
-                  ? theme.success
-                  : item.status === "running" || item.status === "in_progress"
-                    ? theme.info
-                    : theme.muted;
+          ? c.subcampaigns.length > 0
+            ? renderSubcampaigns(c.subcampaigns, subCursor, expandedCampaignId, itemCursor, theme)
+            : (
+              <>
+                {c.items.map((item, j) => {
+                  const isSub = j === subCursor && !expandedCampaignId;
+                  const icon = itemStatusIcon(item.status, theme);
+                  const tb = typeBadge(item.type);
+                  return (
+                    <Text key={item.id} color={isSub ? theme.info : theme.muted}>
+                      {"      "}
+                      <Text color={icon.color}>{icon.char}</Text>
+                      {tb ? <Text color={theme.muted}> {tb}</Text> : null}
+                      {` ${item.title}`}
+                      {item.claimed_by_hostname ? (
+                        <Text color={theme.muted}> @{item.claimed_by_hostname}</Text>
+                      ) : null}
+                    </Text>
+                  );
+                })}
+                {renderCampaignActions(c, subCursor - c.items.length, "      ", theme)}
+              </>
+            )
+          : null}
+      </Box>
+    );
+  });
+}
 
+function renderSubcampaigns(
+  subcampaigns: BrowserCampaign[],
+  subCursor: number,
+  expandedCampaignId: string | null,
+  itemCursor: number,
+  theme: ThemeColors,
+) {
+  return subcampaigns.map((s, j) => {
+    const isSub = j === subCursor && !expandedCampaignId;
+    const isCampExpanded = expandedCampaignId === s.id;
+    const campMarker = isCampExpanded ? "▼" : isSub ? "▶" : " ";
+    const badge = campaignStatusBadge(s.status, theme);
+
+    return (
+      <Box key={s.id} flexDirection="column">
+        <Text
+          color={isSub || isCampExpanded ? theme.info : theme.muted}
+          bold={isSub}
+        >
+          {"      "}{campMarker}{" "}
+          <Text color={badge.color}>{badge.char}</Text>
+          {` ${s.shorthand || s.id.slice(0, 8)}`}
+          {s.is_shared ? <Text color={theme.success}>{" \u27C6"}</Text> : null}
+          <Text color={theme.muted}>
+            {` (${s.completed}/${s.total})`}
+          </Text>
+        </Text>
+        {isCampExpanded ? (
+          <>
+            {s.items.map((item, k) => {
+              const isActive = k === itemCursor;
+              const icon = itemStatusIcon(item.status, theme);
+              const tb = typeBadge(item.type);
               return (
-                <Text key={item.id} color={isSub ? theme.info : theme.muted}>
-                  {"      "}
-                  <Text color={iconColor}>{icon}</Text>
+                <Text key={item.id} color={isActive ? theme.info : theme.muted}>
+                  {"          "}
+                  <Text color={icon.color}>{icon.char}</Text>
+                  {tb ? <Text color={theme.muted}> {tb}</Text> : null}
                   {` ${item.title}`}
                   {item.claimed_by_hostname ? (
                     <Text color={theme.muted}> @{item.claimed_by_hostname}</Text>
                   ) : null}
                 </Text>
               );
-            })
-          : null}
+            })}
+            {renderCampaignActions(s, itemCursor - s.items.length, "          ", theme)}
+          </>
+        ) : null}
       </Box>
     );
   });
