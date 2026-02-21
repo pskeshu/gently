@@ -20,6 +20,8 @@ interface CommandInputProps {
   isStreaming: boolean;
   queueLength: number;
   onSubmit: (text: string) => void;
+  onOpenBrowser?: () => void;
+  browserOpen?: boolean;
 }
 
 export function CommandInput({
@@ -28,6 +30,8 @@ export function CommandInput({
   isStreaming,
   queueLength,
   onSubmit,
+  onOpenBrowser,
+  browserOpen,
 }: CommandInputProps) {
   const [value, setValue] = useState("");
   const [completionIdx, setCompletionIdx] = useState(-1);
@@ -41,6 +45,11 @@ export function CommandInput({
   const showCompletions = completions.length > 0 && completionIdx < 0;
 
   useInput((input, key) => {
+    if (key.downArrow && value === "" && onOpenBrowser && !browserOpen) {
+      onOpenBrowser();
+      return;
+    }
+    if (browserOpen) return;
     if (key.tab && !key.shift && completions.length > 0) {
       const idx =
         completionIdx < 0 ? 0 : (completionIdx + 1) % completions.length;
@@ -94,6 +103,7 @@ export function CommandInput({
           onChange={handleChange}
           onSubmit={handleSubmit}
           placeholder="Send a message..."
+          focus={!browserOpen}
         />
         {/* Queue indicator */}
         {queueLength > 0 ? (

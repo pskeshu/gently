@@ -71,10 +71,8 @@ class ContextGapReport:
         """How much conversation is needed: heavy, moderate, light, none."""
         if self.needs_lab_onboarding:
             return "heavy"
-        if self.needs_campaign:
-            return "moderate"
-        # Session intent is no longer wizard-driven — it emerges from
-        # conversation or plan mode.
+        # Campaign and session intent are no longer wizard-driven — they
+        # emerge from conversation or plan mode.
         return "none"
 
 

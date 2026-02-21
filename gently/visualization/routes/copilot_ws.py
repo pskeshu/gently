@@ -284,6 +284,12 @@ def create_router(server) -> APIRouter:
                     else:
                         await bridge.handle_command(command, send_fn)
 
+                elif msg_type == "browse":
+                    target = data.get("target", "")
+                    await _handle_browse(
+                        target, data, server, bridge, send_fn,
+                    )
+
                 elif msg_type == "ping":
                     await websocket.send_json({"type": "pong"})
 
@@ -314,6 +320,99 @@ def create_router(server) -> APIRouter:
             _choice_futures.clear()
 
     return router
+
+
+async def _handle_browse(target, data, server, bridge, send_fn):
+    """Handle browse requests from the TUI browser panel."""
+    try:
+        if target == "campaigns":
+            cs = getattr(server, "context_store", None)
+            if cs is None:
+                await send_fn({"type": "browse_result", "target": "campaigns", "data": []})
+                return
+            roots = cs.get_root_campaigns()
+            result = []
+            for c in roots:
+                status = cs.get_plan_status(c.id)
+                items_raw = cs.get_plan_items(campaign_id=c.id)
+                items = []
+                for item in items_raw:
+                    items.append({
+                        "id": item.id,
+                        "title": item.title,
+                        "status": item.status.value if hasattr(item.status, "value") else str(item.status),
+                        "claimed_by_hostname": getattr(item, "claimed_by_hostname", None),
+                    })
+                result.append({
+                    "id": c.id,
+                    "shorthand": c.shorthand or "",
+                    "description": c.description or "",
+                    "total": status["total"],
+                    "completed": status["completed"],
+                    "items": items,
+                })
+            await send_fn({"type": "browse_result", "target": "campaigns", "data": result})
+
+        elif target == "peers":
+            mesh_svc = getattr(server, "mesh_service", None)
+            if mesh_svc is None:
+                await send_fn({"type": "browse_result", "target": "peers", "data": []})
+                return
+            peers = mesh_svc.get_peers()
+            result = []
+            for p in peers:
+                result.append({
+                    "instance_id": p.instance_id,
+                    "hostname": p.hostname,
+                    "ip_address": p.ip_address,
+                    "viz_port": p.viz_port,
+                    "mode": p.status.copilot_mode if p.status else "unknown",
+                    "embryo_count": p.status.embryo_count if p.status else 0,
+                    "shared_campaigns": [],
+                })
+            await send_fn({"type": "browse_result", "target": "peers", "data": result})
+
+        elif target == "peer_campaigns":
+            hostname = data.get("hostname", "")
+            mesh_svc = getattr(server, "mesh_service", None)
+            if not mesh_svc or not hostname:
+                await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": []})
+                return
+            peer = mesh_svc.find_peer_by_hostname(hostname)
+            if not peer or not mesh_svc.peer_client:
+                await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": []})
+                return
+            info = await mesh_svc.peer_client.fetch_peer_info(peer)
+            shared = (info or {}).get("shared_campaigns", [])
+            # Return peers list with this peer's campaigns populated
+            peers = mesh_svc.get_peers()
+            result = []
+            for p in peers:
+                campaigns = []
+                if p.instance_id == peer.instance_id:
+                    for c in shared:
+                        campaigns.append({
+                            "id": c.get("id", ""),
+                            "shorthand": c.get("shorthand", ""),
+                            "description": c.get("description", ""),
+                            "total": c.get("item_count", 0),
+                            "completed": c.get("completed_count", 0),
+                            "items": [],
+                        })
+                result.append({
+                    "instance_id": p.instance_id,
+                    "hostname": p.hostname,
+                    "ip_address": p.ip_address,
+                    "viz_port": p.viz_port,
+                    "mode": p.status.copilot_mode if p.status else "unknown",
+                    "embryo_count": p.status.embryo_count if p.status else 0,
+                    "shared_campaigns": campaigns,
+                })
+            await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": result})
+
+    except Exception as e:
+        logger.debug(f"Browse error ({target}): {e}")
+        await send_fn({"type": "browse_result", "target": target, "data": []})
 
 
 _request_counter = 0

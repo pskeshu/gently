@@ -197,6 +197,14 @@ export function App({ wsUrl, store }: AppProps) {
     store.getState().setNotification(null);
   }, [store]);
 
+  const handleOpenBrowser = useCallback(() => {
+    store.getState().setBrowserOpen(true);
+  }, [store]);
+
+  const handleCloseBrowser = useCallback(() => {
+    store.getState().setBrowserOpen(false);
+  }, [store]);
+
   return (
     <Box flexDirection="column">
       {/* ── Header ──────────────────────────────────────────── */}
@@ -250,7 +258,7 @@ export function App({ wsUrl, store }: AppProps) {
         />
       ) : null}
 
-      {/* ── Persistent input bar (hidden when picker is active) ── */}
+      {/* ── Persistent input bar (hidden when picker active) ── */}
       {!state.pendingChoice ? (
         <CommandInput
           commands={state.commands}
@@ -258,10 +266,12 @@ export function App({ wsUrl, store }: AppProps) {
           isStreaming={state.isStreaming}
           queueLength={state.messageQueue.length}
           onSubmit={sendMessage}
+          onOpenBrowser={handleOpenBrowser}
+          browserOpen={state.browserOpen}
         />
       ) : null}
 
-      {/* ── Persistent status bar ─────────────────────────────── */}
+      {/* ── Persistent status bar (navigable when browser open) ── */}
       <StatusBar
         theme={state.theme}
         version={state.version}
@@ -276,6 +286,11 @@ export function App({ wsUrl, store }: AppProps) {
         onClearNotification={handleClearNotification}
         wizardActive={state.wizardActive}
         copilotMode={state.copilotMode}
+        browserOpen={state.browserOpen}
+        onCloseBrowser={handleCloseBrowser}
+        send={send}
+        campaigns={state.browserCampaigns}
+        peers={state.browserPeers}
       />
     </Box>
   );

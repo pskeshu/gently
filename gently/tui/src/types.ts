@@ -143,6 +143,7 @@ export type ServerMessage =
   | StateUpdate
   | NotificationMessage
   | ErrorMessage
+  | BrowseResult
   | PingMessage
   | PongMessage;
 
@@ -182,6 +183,7 @@ export type ClientMessage =
   | ChatMessage
   | ChoiceResponse
   | CommandMessage
+  | BrowseRequest
   | CancelMessage
   | ClientPing
   | ClientPong;
@@ -215,6 +217,48 @@ export interface CommandDef {
 }
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected";
+
+// ---------------------------------------------------------------------------
+// Browser panel
+// ---------------------------------------------------------------------------
+
+export interface BrowserPlanItem {
+  id: string;
+  title: string;
+  status: string;
+  claimed_by_hostname?: string;
+}
+
+export interface BrowserCampaign {
+  id: string;
+  shorthand: string;
+  description: string;
+  total: number;
+  completed: number;
+  items: BrowserPlanItem[];
+}
+
+export interface BrowserPeer {
+  instance_id: string;
+  hostname: string;
+  ip_address: string;
+  viz_port: number;
+  mode: string;
+  embryo_count: number;
+  shared_campaigns: BrowserCampaign[];
+}
+
+export interface BrowseRequest {
+  type: "browse";
+  target: "campaigns" | "peers" | "peer_campaigns";
+  hostname?: string;
+}
+
+export interface BrowseResult {
+  type: "browse_result";
+  target: "campaigns" | "peers" | "peer_campaigns";
+  data: unknown[];
+}
 
 // ---------------------------------------------------------------------------
 // Theme

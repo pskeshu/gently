@@ -126,6 +126,16 @@ export function useWebSocket(
             break;
           }
 
+          case "browse_result": {
+            const br = msg as { target: string; data: unknown[] };
+            if (br.target === "campaigns") {
+              s.setBrowserCampaigns(br.data as any);
+            } else if (br.target === "peers" || br.target === "peer_campaigns") {
+              s.setBrowserPeers(br.data as any);
+            }
+            break;
+          }
+
           case "pong":
             break;
 

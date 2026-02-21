@@ -14,6 +14,8 @@
 
 import { createStore } from "zustand/vanilla";
 import type {
+  BrowserCampaign,
+  BrowserPeer,
   ChatEntry,
   ChoiceRequest,
   CommandDef,
@@ -82,6 +84,11 @@ export interface TuiState {
   // Startup wizard
   wizardActive: boolean;
   wizardWeight: string;
+
+  // Browser panel
+  browserOpen: boolean;
+  browserCampaigns: BrowserCampaign[];
+  browserPeers: BrowserPeer[];
 }
 
 // ---------------------------------------------------------------------------
@@ -138,6 +145,11 @@ export interface TuiActions {
   setPeerCount: (count: number) => void;
   setWizardActive: (active: boolean) => void;
   setCopilotMode: (mode: string) => void;
+
+  // Browser panel
+  setBrowserOpen: (open: boolean) => void;
+  setBrowserCampaigns: (campaigns: BrowserCampaign[]) => void;
+  setBrowserPeers: (peers: BrowserPeer[]) => void;
 }
 
 export type TuiStore = TuiState & TuiActions;
@@ -237,6 +249,9 @@ export function createTuiStore() {
     copilotMode: "run",
     wizardActive: false,
     wizardWeight: "none",
+    browserOpen: false,
+    browserCampaigns: [],
+    browserPeers: [],
 
     // Connection
     setConnected: (meta) =>
@@ -498,5 +513,10 @@ export function createTuiStore() {
     setPeerCount: (count) => set({ peerCount: count }),
     setWizardActive: (active) => set({ wizardActive: active }),
     setCopilotMode: (mode) => set({ copilotMode: mode }),
+
+    // Browser panel
+    setBrowserOpen: (open) => set({ browserOpen: open }),
+    setBrowserCampaigns: (campaigns) => set({ browserCampaigns: campaigns }),
+    setBrowserPeers: (peers) => set({ browserPeers: peers }),
   }));
 }
