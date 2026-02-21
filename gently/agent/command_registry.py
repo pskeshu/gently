@@ -659,6 +659,31 @@ Requires an active remote campaign (via /join-campaign).""",
         category=CommandCategory.PLANNING,
     ))
 
+    registry.register(CommandDefinition(
+        name="/pair",
+        description="Pair with a mesh peer for secure communication",
+        help_text="""Bluetooth-style pairing with mesh peers.
+
+Usage:
+  /pair <hostname>   Initiate pairing with a peer (shows PIN)
+  /pair accept       Accept a pending pairing request
+  /pair reject       Reject a pending pairing request
+  /pair list         Show all trusted peers
+  /pair unpair <id>  Remove trust for a peer (hostname or instance_id)
+  /pair scopes       Show scopes for all peers
+  /pair scopes <hostname> <scope1,scope2>  Set scopes for a peer""",
+        positional_arg="target",
+        positional_hint="HOSTNAME|accept|reject|list|unpair|scopes",
+        subcommands=[
+            SubCommand(name="accept", description="Accept a pending pairing request"),
+            SubCommand(name="reject", description="Reject a pending pairing request"),
+            SubCommand(name="list", description="Show all trusted peers"),
+            SubCommand(name="unpair", description="Remove trust for a peer"),
+            SubCommand(name="scopes", description="View or set permission scopes for a peer"),
+        ],
+        category=CommandCategory.PLANNING,
+    ))
+
 
 # ============================================================================
 # Global Registry

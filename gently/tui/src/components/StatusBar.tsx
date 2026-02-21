@@ -448,13 +448,31 @@ function renderPeerList(
     const isExpanded = expandedId === p.instance_id;
     const marker = isExpanded ? "▼" : isCursor ? "▶" : " ";
 
+    // Trust indicator
+    let trustIcon: string;
+    let trustColor: string;
+    let trustSuffix = "";
+    if (p.is_trusted && p.tls_enabled) {
+      trustIcon = "🔒";
+      trustColor = theme.success;
+    } else if (p.is_trusted) {
+      trustIcon = "🛡";
+      trustColor = theme.warning;
+    } else {
+      trustIcon = "?";
+      trustColor = theme.error;
+      trustSuffix = " (unpaired)";
+    }
+
     return (
       <Box key={p.instance_id} flexDirection="column">
         <Text
           color={isCursor || isExpanded ? theme.info : undefined}
           bold={isCursor}
         >
-          {`  ${marker} ${p.hostname}`}
+          {`  ${marker} `}
+          <Text color={trustColor}>{trustIcon}</Text>
+          {` ${p.hostname}${trustSuffix}`}
           <Text color={theme.muted}>
             {` (${p.ip_address}) · ${p.mode} · ${p.embryo_count} embryo${p.embryo_count !== 1 ? "s" : ""}`}
           </Text>

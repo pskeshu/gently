@@ -802,17 +802,21 @@ Write a brief status summary. Examples:
 
     # ===== Visualization Server Methods =====
 
-    async def start_viz_server(self, port: int = 8080):
+    async def start_viz_server(self, port: int = 8080, ssl_certfile=None, ssl_keyfile=None):
         """
         Start the visualization server for real-time feedback.
 
-        Opens a web dashboard at http://localhost:{port} for viewing
+        Opens a web dashboard at http(s)://localhost:{port} for viewing
         live images during calibration and acquisition.
 
         Parameters
         ----------
         port : int
             Port for web server (default: 8080)
+        ssl_certfile : str, optional
+            Path to TLS certificate PEM file.
+        ssl_keyfile : str, optional
+            Path to TLS private key PEM file.
         """
         if self.viz_server is not None:
             logger.info("Visualization server already running")
@@ -825,9 +829,12 @@ Write a brief status summary. Examples:
                 port=port,
                 event_bus=self._event_bus,
                 gently_store=self.store,
+                ssl_certfile=ssl_certfile,
+                ssl_keyfile=ssl_keyfile,
             )
             await self.viz_server.start()
-            logger.info(f"Visualization server started at http://localhost:{port}")
+            scheme = "https" if ssl_certfile else "http"
+            logger.info(f"Visualization server started at {scheme}://localhost:{port}")
         except ImportError as e:
             logger.warning(f"FastAPI not available for viz server: {e}")
             self.viz_server = None

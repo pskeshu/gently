@@ -195,14 +195,30 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         store=store,
     )
 
+    # Generate TLS certificate for mesh communication
+    cert_path, key_path = None, None
+    try:
+        from gently.mesh.tls import ensure_tls_cert, get_cert_fingerprint
+        _config_dir = Path(__file__).parent / "config"
+        cert_path, key_path = ensure_tls_cert(_config_dir)
+    except Exception:
+        pass
+
     # Start visualization server for real-time feedback
-    await copilot.start_viz_server(port=8080)
-    viz_url = "http://localhost:8080" if copilot.viz_server is not None else None
+    await copilot.start_viz_server(
+        port=8080,
+        ssl_certfile=str(cert_path) if cert_path else None,
+        ssl_keyfile=str(key_path) if key_path else None,
+    )
+    scheme = "https" if cert_path else "http"
+    viz_url = f"{scheme}://localhost:8080" if copilot.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None
     try:
         from gently.mesh import MeshService, register_mesh_routes
+        from gently.mesh.audit import MeshAuditLog
+        from gently.mesh.pairing import PairingManager
         import uuid as _uuid
 
         # Persistent instance ID
@@ -272,15 +288,34 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
                 "version": getattr(_gently, "__version__", "dev"),
             }
 
+        import socket as _socket
+        config_dir = Path(__file__).parent / "config"
+        audit_log = MeshAuditLog(config_dir)
+        pairing_mgr = PairingManager(
+            instance_id=instance_id,
+            hostname=_socket.gethostname(),
+            config_dir=config_dir,
+            audit_log=audit_log,
+        )
+
+        # Set TLS cert fingerprint on pairing manager
+        if cert_path:
+            try:
+                pairing_mgr.cert_fingerprint = get_cert_fingerprint(cert_path)
+            except Exception:
+                pass
+
         mesh = MeshService(
             instance_id=instance_id,
             viz_port=8080,
             capability_provider=_capability_provider,
             status_provider=_status_provider,
+            pairing_manager=pairing_mgr,
+            audit_log=audit_log,
         )
 
         if copilot.viz_server is not None:
-            register_mesh_routes(copilot.viz_server, mesh)
+            register_mesh_routes(copilot.viz_server, mesh, audit_log=audit_log)
             copilot.viz_server.mesh_service = mesh
 
         await mesh.start()
@@ -316,15 +351,22 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         copilot.viz_server.copilot_bridge = bridge
         copilot.viz_server.set_context_store(context_store)
 
-    ws_url = "ws://localhost:8080/ws/copilot"
+    ws_scheme = "wss" if cert_path else "ws"
+    ws_url = f"{ws_scheme}://localhost:8080/ws/copilot"
 
     # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
     # takes over the terminal.
+    tui_env = None
+    if cert_path:
+        # Self-signed cert: tell Node.js to accept it for localhost
+        tui_env = {**os.environ, "NODE_TLS_REJECT_UNAUTHORIZED": "0"}
+
     tui_proc = subprocess.Popen(
         ["node", str(tui_dist), "--ws-url", ws_url],
         stdin=sys.stdin,
         stdout=sys.stdout,
         stderr=sys.stderr,
+        env=tui_env,
     )
 
     try:

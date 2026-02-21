@@ -101,6 +101,8 @@ class VisualizationServer:
         event_bus=None,
         sessions_dir: str = "D:/Gently/sessions",
         gently_store=None,
+        ssl_certfile: str = None,
+        ssl_keyfile: str = None,
     ):
         if not FASTAPI_AVAILABLE:
             raise ImportError(
@@ -112,6 +114,8 @@ class VisualizationServer:
         self.port = port
         self.data_store = data_store
         self.event_bus = event_bus
+        self._ssl_certfile = ssl_certfile
+        self._ssl_keyfile = ssl_keyfile
         self.sessions_dir = Path(sessions_dir)
         self.gently_store = gently_store  # GentlyStore for persistent volume/projection access
         self.context_store = None  # ContextStore — set via set_context_store()
@@ -427,15 +431,20 @@ class VisualizationServer:
 
             loop.set_exception_handler(_quiet_connection_reset)
 
-        config = uvicorn.Config(
-            self.app,
+        config_kwargs = dict(
             host=self.host,
             port=self.port,
             log_level="warning",
         )
+        if self._ssl_certfile and self._ssl_keyfile:
+            config_kwargs["ssl_certfile"] = self._ssl_certfile
+            config_kwargs["ssl_keyfile"] = self._ssl_keyfile
+
+        config = uvicorn.Config(self.app, **config_kwargs)
         self._server = uvicorn.Server(config)
 
-        logger.info(f"Starting visualization server on http://{self.host}:{self.port}")
+        scheme = "https" if self._ssl_certfile else "http"
+        logger.info(f"Starting visualization server on {scheme}://{self.host}:{self.port}")
 
         # Run server in background task
         self._server_task = asyncio.create_task(self._server.serve())
@@ -443,7 +452,7 @@ class VisualizationServer:
         # Wait a moment for server to start
         await asyncio.sleep(0.5)
 
-        logger.info(f"Visualization server running at http://{self.host}:{self.port}")
+        logger.info(f"Visualization server running at {scheme}://{self.host}:{self.port}")
 
     async def stop(self):
         """Stop the visualization server"""

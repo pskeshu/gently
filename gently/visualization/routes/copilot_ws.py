@@ -156,9 +156,127 @@ def create_router(server) -> APIRouter:
                 except Exception:
                     pass
 
-            for evt in (_ET.MESH_PEER_DISCOVERED, _ET.MESH_PEER_LOST, _ET.MESH_PEER_UPDATED):
-                unsub = server.event_bus.subscribe_async(evt, _push_peer_count)
-                _mesh_unsubs.append(unsub)
+            async def _push_peer_discovered(event):
+                try:
+                    is_trusted = event.data.get("is_trusted", True)
+                    hostname = event.data.get("hostname", "unknown")
+                    await websocket.send_json({
+                        "type": "state_update",
+                        "state": {"peer_count": mesh_svc.peer_count},
+                    })
+                    if is_trusted:
+                        await websocket.send_json({
+                            "type": "notification",
+                            "level": "info",
+                            "title": f"Peer joined: {hostname}",
+                        })
+                    else:
+                        await websocket.send_json({
+                            "type": "notification",
+                            "level": "info",
+                            "title": f"New peer: {hostname}",
+                            "body": f"Use /pair {hostname} to connect",
+                        })
+                except Exception:
+                    pass
+
+            async def _push_peer_lost(event):
+                try:
+                    hostname = event.data.get("hostname", "unknown")
+                    await websocket.send_json({
+                        "type": "state_update",
+                        "state": {"peer_count": mesh_svc.peer_count},
+                    })
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "warning",
+                        "title": f"Peer offline: {hostname}",
+                    })
+                except Exception:
+                    pass
+
+            async def _push_pairing_requested(event):
+                try:
+                    hostname = event.data.get("initiator_hostname", "unknown")
+                    pin = event.data.get("pin", "??????")
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "info",
+                        "title": f"Pairing request from {hostname}",
+                        "body": f"PIN: {pin} \u2014 Type /pair accept to confirm",
+                    })
+                except Exception:
+                    pass
+
+            async def _push_pairing_completed(event):
+                try:
+                    hostname = event.data.get("peer_hostname", "unknown")
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "success",
+                        "title": f"Paired with {hostname}",
+                    })
+                except Exception:
+                    pass
+
+            async def _push_auth_failure(event):
+                try:
+                    ip = event.data.get("ip", "unknown")
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "warning",
+                        "title": "Auth failed",
+                        "body": f"from {ip}",
+                    })
+                except Exception:
+                    pass
+
+            async def _push_cert_pin_failure(event):
+                try:
+                    peer_id = event.data.get("peer_id", "unknown")
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "error",
+                        "title": "Certificate mismatch",
+                        "body": f"{peer_id} \u2014 possible MITM",
+                    })
+                except Exception:
+                    pass
+
+            async def _push_scope_denied(event):
+                try:
+                    peer_id = event.data.get("peer_id", "unknown")
+                    scope = event.data.get("scope", "unknown")
+                    await websocket.send_json({
+                        "type": "notification",
+                        "level": "warning",
+                        "title": "Access denied",
+                        "body": f"{peer_id} missing scope: {scope}",
+                    })
+                except Exception:
+                    pass
+
+            # Peer discovery
+            unsub = server.event_bus.subscribe_async(_ET.MESH_PEER_DISCOVERED, _push_peer_discovered)
+            _mesh_unsubs.append(unsub)
+            unsub = server.event_bus.subscribe_async(_ET.MESH_PEER_LOST, _push_peer_lost)
+            _mesh_unsubs.append(unsub)
+            unsub = server.event_bus.subscribe_async(_ET.MESH_PEER_UPDATED, _push_peer_count)
+            _mesh_unsubs.append(unsub)
+
+            # Pairing events
+            unsub = server.event_bus.subscribe_async(_ET.MESH_PAIRING_REQUESTED, _push_pairing_requested)
+            _mesh_unsubs.append(unsub)
+            unsub = server.event_bus.subscribe_async(_ET.MESH_PAIRING_COMPLETED, _push_pairing_completed)
+            _mesh_unsubs.append(unsub)
+
+            # Security events
+            unsub = server.event_bus.subscribe_async(_ET.MESH_AUTH_FAILURE, _push_auth_failure)
+            _mesh_unsubs.append(unsub)
+            unsub = server.event_bus.subscribe_async(_ET.MESH_CERT_PIN_FAILURE, _push_cert_pin_failure)
+            _mesh_unsubs.append(unsub)
+            unsub = server.event_bus.subscribe_async(_ET.MESH_SCOPE_DENIED, _push_scope_denied)
+            _mesh_unsubs.append(unsub)
 
         # Active streaming task (so we can cancel on disconnect)
         active_task: Optional[asyncio.Task] = None
@@ -368,6 +486,8 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                     "viz_port": p.viz_port,
                     "mode": p.status.copilot_mode if p.status else "unknown",
                     "embryo_count": p.status.embryo_count if p.status else 0,
+                    "is_trusted": p.is_trusted,
+                    "tls_enabled": p.tls_enabled,
                     "shared_campaigns": [],
                 })
             await send_fn({"type": "browse_result", "target": "peers", "data": result})
@@ -406,6 +526,8 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                     "viz_port": p.viz_port,
                     "mode": p.status.copilot_mode if p.status else "unknown",
                     "embryo_count": p.status.embryo_count if p.status else 0,
+                    "is_trusted": p.is_trusted,
+                    "tls_enabled": p.tls_enabled,
                     "shared_campaigns": campaigns,
                 })
             await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": result})

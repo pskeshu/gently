@@ -42,7 +42,7 @@ export function MessageBubble({ entry, theme }: MessageBubbleProps) {
             borderBottom={false}
             borderColor={theme.user}
           >
-            <Text bold backgroundColor={theme.userMessageBg}>
+            <Text bold color={theme.colorMode === "light" ? "#1f2937" : "#f9fafb"} backgroundColor={theme.userMessageBg}>
               {" "}{entry.text}{" "}
             </Text>
           </Box>

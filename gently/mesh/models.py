@@ -106,10 +106,14 @@ class PeerInfo:
     first_seen: float = field(default_factory=time.time)
     last_seen: float = field(default_factory=time.time)
     is_self: bool = False
+    is_trusted: bool = False
+    tls_enabled: bool = False
+    udp_verified: bool = False
 
     @property
     def base_url(self) -> str:
-        return f"http://{self.ip_address}:{self.viz_port}"
+        scheme = "https" if self.tls_enabled else "http"
+        return f"{scheme}://{self.ip_address}:{self.viz_port}"
 
     @property
     def is_stale(self) -> bool:
@@ -132,6 +136,9 @@ class PeerInfo:
             "first_seen": self.first_seen,
             "last_seen": self.last_seen,
             "is_self": self.is_self,
+            "is_trusted": self.is_trusted,
+            "tls_enabled": self.tls_enabled,
+            "udp_verified": self.udp_verified,
             "base_url": self.base_url,
             "is_stale": self.is_stale,
             "is_dead": self.is_dead,
@@ -149,4 +156,7 @@ class PeerInfo:
             first_seen=d.get("first_seen", time.time()),
             last_seen=d.get("last_seen", time.time()),
             is_self=d.get("is_self", False),
+            is_trusted=d.get("is_trusted", False),
+            tls_enabled=d.get("tls_enabled", False),
+            udp_verified=d.get("udp_verified", False),
         )

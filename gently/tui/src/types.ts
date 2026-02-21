@@ -245,6 +245,8 @@ export interface BrowserPeer {
   viz_port: number;
   mode: string;
   embryo_count: number;
+  is_trusted: boolean;
+  tls_enabled: boolean;
   shared_campaigns: BrowserCampaign[];
 }
 

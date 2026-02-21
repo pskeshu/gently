@@ -6,7 +6,7 @@ from dataclasses import asdict
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from gently.context.model import PlanItemStatus
 
@@ -240,24 +240,70 @@ def create_router(server) -> APIRouter:
         return {"sessions": [_serialize(s) for s in sessions]}
 
     # ------------------------------------------------------------------
-    # Mesh campaign coordination endpoints
+    # Mesh campaign coordination endpoints (auth required for remote)
     # ------------------------------------------------------------------
 
-    @router.post("/api/campaigns/{campaign_id}/share")
+    def _make_campaign_auth(required_scope: str):
+        """Create a FastAPI dependency that checks auth + scope for campaigns."""
+
+        async def _require(request: Request):
+            mesh_svc = getattr(server, "mesh_service", None)
+            pairing_mgr = getattr(mesh_svc, "pairing_manager", None) if mesh_svc else None
+            _audit = getattr(mesh_svc, "audit_log", None) if mesh_svc else None
+            if pairing_mgr is None:
+                return  # no pairing manager = open access
+            host = request.client.host if request.client else ""
+            if host in ("127.0.0.1", "::1", "localhost"):
+                return
+            auth = request.headers.get("Authorization", "")
+            if auth.startswith("Bearer "):
+                peer_id = pairing_mgr.verify_token(auth[7:])
+                if peer_id:
+                    scopes = pairing_mgr.get_scopes_for_peer(peer_id)
+                    if required_scope not in scopes:
+                        if _audit:
+                            from gently.mesh.audit import AuditEvent
+                            _audit.log(
+                                AuditEvent.SCOPE_DENIED, outcome="deny",
+                                peer_id=peer_id, ip=host,
+                                detail=f"scope={required_scope} path={request.url.path}",
+                            )
+                        raise HTTPException(
+                            status_code=403,
+                            detail=f"Missing scope: {required_scope}",
+                        )
+                    if _audit:
+                        from gently.mesh.audit import AuditEvent
+                        _audit.log(
+                            AuditEvent.AUTH_SUCCESS, outcome="allow",
+                            peer_id=peer_id, ip=host,
+                        )
+                    return
+            if _audit:
+                from gently.mesh.audit import AuditEvent
+                _audit.log(
+                    AuditEvent.AUTH_FAILURE, outcome="deny",
+                    ip=host, detail=f"path={request.url.path}",
+                )
+            raise HTTPException(status_code=403, detail="Mesh authentication required")
+
+        return _require
+
+    @router.post("/api/campaigns/{campaign_id}/share", dependencies=[Depends(_make_campaign_auth("campaigns:admin"))])
     async def share_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         cs.share_campaign(campaign.id)
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/unshare")
+    @router.post("/api/campaigns/{campaign_id}/unshare", dependencies=[Depends(_make_campaign_auth("campaigns:admin"))])
     async def unshare_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         cs.unshare_campaign(campaign.id)
         return {"ok": True}
 
-    @router.get("/api/campaigns/{campaign_id}/export")
+    @router.get("/api/campaigns/{campaign_id}/export", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def export_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
@@ -265,7 +311,7 @@ def create_router(server) -> APIRouter:
         _enrich_export_with_claims(tree, cs, campaign.id)
         return tree
 
-    @router.post("/api/campaigns/{campaign_id}/join")
+    @router.post("/api/campaigns/{campaign_id}/join", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def join_campaign(campaign_id: str, request: Request):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
@@ -277,14 +323,14 @@ def create_router(server) -> APIRouter:
         cs.add_campaign_participant(campaign.id, instance_id, hostname)
         return {"ok": True}
 
-    @router.get("/api/campaigns/{campaign_id}/participants")
+    @router.get("/api/campaigns/{campaign_id}/participants", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def get_participants(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         participants = cs.get_campaign_participants(campaign.id)
         return {"participants": participants}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/claim")
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/claim", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def claim_item(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)
@@ -298,14 +344,14 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=409, detail="Item already claimed by another node")
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/unclaim")
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/unclaim", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def unclaim_item(campaign_id: str, item_id: str):
         cs = _get_store()
         _resolve(cs, campaign_id)
         cs.unclaim_plan_item(item_id)
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status")
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status", dependencies=[Depends(_make_campaign_auth("campaigns"))])
     async def update_item_status(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)

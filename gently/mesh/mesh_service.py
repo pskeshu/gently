@@ -50,6 +50,8 @@ class MeshService(Service):
         capability_provider: Callable[[], dict] = lambda: {},
         status_provider: Callable[[], dict] = lambda: {},
         mesh_port: int = 19547,
+        pairing_manager=None,
+        audit_log=None,
     ):
         import socket as _socket
 
@@ -64,6 +66,8 @@ class MeshService(Service):
         self._capability_provider = capability_provider
         self._status_provider = status_provider
         self._mesh_port = mesh_port
+        self._pairing_manager = pairing_manager
+        self._audit_log = audit_log
 
         self._hostname = _socket.gethostname()
         self._peers: Dict[str, PeerInfo] = {}
@@ -71,19 +75,25 @@ class MeshService(Service):
         self._peer_client: Optional[PeerClient] = None
         self._reaper_task: Optional[asyncio.Task] = None
         self._refresh_task: Optional[asyncio.Task] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
 
     # ------------------------------------------------------------------
     # Service lifecycle
     # ------------------------------------------------------------------
 
     async def on_start(self):
-        self._peer_client = PeerClient()
+        self._peer_client = PeerClient(
+            pairing_manager=self._pairing_manager,
+            audit_log=self._audit_log,
+        )
 
         self._discovery = MeshDiscovery(
             instance_id=self.instance_id,
             hostname=self._hostname,
             viz_port=self.viz_port,
             mesh_port=self._mesh_port,
+            pairing_manager=self._pairing_manager,
+            audit_log=self._audit_log,
         )
         self._discovery.on_peer_discovered = self._on_peer_discovered
         self._discovery.on_peer_heartbeat = self._on_peer_heartbeat
@@ -93,6 +103,8 @@ class MeshService(Service):
 
         self._reaper_task = asyncio.create_task(self._reaper_loop())
         self._refresh_task = asyncio.create_task(self._refresh_loop())
+        if self._pairing_manager:
+            self._cleanup_task = asyncio.create_task(self._pairing_cleanup_loop())
 
         # When our own status changes, broadcast a nudge to all peers
         self._status_unsub = self._event_bus.subscribe(
@@ -103,7 +115,7 @@ class MeshService(Service):
         if hasattr(self, "_status_unsub"):
             self._status_unsub()
 
-        for task in (self._reaper_task, self._refresh_task):
+        for task in (self._reaper_task, self._refresh_task, self._cleanup_task):
             if task and not task.done():
                 task.cancel()
                 try:
@@ -123,10 +135,22 @@ class MeshService(Service):
     # Discovery callbacks
     # ------------------------------------------------------------------
 
-    def _on_peer_discovered(self, data: dict, sender_ip: str):
+    def _on_peer_discovered(self, data: dict, sender_ip: str, verified: bool = False):
         """Called when a new instance_id is first seen."""
         peer_id = data.get("instance_id", "")
         now = time.time()
+
+        # Check if this peer is already trusted
+        trusted = (
+            self._pairing_manager.is_trusted(peer_id)
+            if self._pairing_manager else True  # no manager = trust all (backward compat)
+        )
+
+        # Determine TLS status — trusted peers with a cert fingerprint use TLS
+        tls_enabled = False
+        if trusted and self._pairing_manager:
+            cert_fp = self._pairing_manager.get_cert_fingerprint_for_peer(peer_id)
+            tls_enabled = bool(cert_fp)
 
         peer = PeerInfo(
             instance_id=peer_id,
@@ -135,6 +159,9 @@ class MeshService(Service):
             viz_port=data.get("viz_port", 8080),
             first_seen=now,
             last_seen=now,
+            is_trusted=trusted,
+            tls_enabled=tls_enabled,
+            udp_verified=verified,
         )
         self._peers[peer_id] = peer
 
@@ -142,19 +169,27 @@ class MeshService(Service):
             "instance_id": peer_id,
             "hostname": peer.hostname,
             "ip_address": sender_ip,
+            "is_trusted": trusted,
+            "udp_verified": verified,
+            "tls_enabled": tls_enabled,
         })
 
-        logger.info(f"Mesh: discovered peer {peer.hostname} ({peer_id[:8]}) at {sender_ip}")
+        logger.info(
+            f"Mesh: discovered peer {peer.hostname} ({peer_id[:8]}) at {sender_ip} "
+            f"[trusted={trusted}, udp_verified={verified}, tls={tls_enabled}]"
+        )
 
-        # Kick off an immediate status fetch (fire-and-forget)
-        asyncio.ensure_future(self._fetch_and_update_peer(peer))
+        # Only fetch status from trusted peers
+        if trusted:
+            asyncio.ensure_future(self._fetch_and_update_peer(peer))
 
-    def _on_peer_heartbeat(self, instance_id: str, sender_ip: str):
+    def _on_peer_heartbeat(self, instance_id: str, sender_ip: str, verified: bool = False):
         """Called on subsequent heartbeats from a known peer."""
         peer = self._peers.get(instance_id)
         if peer:
             peer.last_seen = time.time()
             peer.ip_address = sender_ip  # may change if DHCP renews
+            peer.udp_verified = verified
 
     def _on_nudge_received(self, peer_id: str, sender_ip: str):
         """Called when a peer broadcasts a status-changed nudge."""
@@ -196,8 +231,15 @@ class MeshService(Service):
         while True:
             await asyncio.sleep(STATUS_REFRESH_INTERVAL)
             for peer in list(self._peers.values()):
-                if not peer.is_dead:
+                if not peer.is_dead and peer.is_trusted:
                     await self._fetch_and_update_peer(peer)
+
+    async def _pairing_cleanup_loop(self):
+        """Periodically clean up expired pairing sessions."""
+        while True:
+            await asyncio.sleep(30.0)
+            if self._pairing_manager:
+                self._pairing_manager.cleanup_expired()
 
     async def _fetch_and_update_peer(self, peer: PeerInfo):
         """Fetch status from a peer and update local record."""
@@ -218,6 +260,34 @@ class MeshService(Service):
             "instance_id": peer.instance_id,
             "hostname": peer.hostname,
         })
+
+    # ------------------------------------------------------------------
+    # Pairing integration
+    # ------------------------------------------------------------------
+
+    @property
+    def pairing_manager(self):
+        """Expose the pairing manager for routes and commands."""
+        return self._pairing_manager
+
+    @property
+    def audit_log(self):
+        """Expose the audit log for routes."""
+        return self._audit_log
+
+    def mark_peer_trusted(self, instance_id: str):
+        """Mark a peer as trusted (after pairing completes)."""
+        peer = self._peers.get(instance_id)
+        if peer:
+            peer.is_trusted = True
+            # Check if this peer has a cert fingerprint → enable TLS
+            if self._pairing_manager:
+                cert_fp = self._pairing_manager.get_cert_fingerprint_for_peer(instance_id)
+                if cert_fp:
+                    peer.tls_enabled = True
+            # Kick off an immediate status fetch now that we trust them
+            asyncio.ensure_future(self._fetch_and_update_peer(peer))
+            logger.info(f"Mesh: peer {peer.hostname} ({instance_id[:8]}) now trusted")
 
     # ------------------------------------------------------------------
     # Public query API

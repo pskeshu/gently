@@ -98,6 +98,13 @@ class EventType(Enum):
     MESH_PEER_DISCOVERED = auto()
     MESH_PEER_LOST = auto()
     MESH_PEER_UPDATED = auto()
+    MESH_PAIRING_REQUESTED = auto()
+    MESH_PAIRING_COMPLETED = auto()
+
+    # Mesh security events (Phase 3)
+    MESH_AUTH_FAILURE = auto()
+    MESH_CERT_PIN_FAILURE = auto()
+    MESH_SCOPE_DENIED = auto()
 
 
 @dataclass

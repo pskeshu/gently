@@ -430,6 +430,35 @@ class CopilotBridge:
             })
             return
 
+        if cmd == "/pair" or cmd.startswith("/pair "):
+            parts = command.strip().split()
+            subcmd = parts[1].lower() if len(parts) > 1 else ""
+            arg = parts[2] if len(parts) > 2 else ""
+
+            if subcmd == "accept":
+                data = await self._pair_accept(send_fn)
+            elif subcmd == "reject":
+                data = await self._pair_reject()
+            elif subcmd == "list":
+                data = self._pair_list()
+            elif subcmd == "unpair" and arg:
+                data = self._pair_unpair(arg)
+            elif subcmd == "scopes":
+                extra_args = parts[3] if len(parts) > 3 else ""
+                data = self._pair_scopes(arg, extra_args)
+            elif subcmd and subcmd not in ("accept", "reject", "list", "unpair", "scopes"):
+                # Treat as hostname — initiate pairing
+                data = await self._pair_initiate(subcmd, send_fn)
+            else:
+                data = {"text": "Usage: /pair <hostname> | accept | reject | list | unpair <id> | scopes [hostname] [scope_list]"}
+
+            await send_fn({
+                "type": "command_result",
+                "command": "/pair",
+                "content": data,
+            })
+            return
+
         if cmd == "/plan" or cmd.startswith("/plan "):
             parts = command.strip().split(maxsplit=1)
             subcmd = parts[1].strip().lower() if len(parts) > 1 else None
@@ -1157,6 +1186,253 @@ class CopilotBridge:
             return {"text": f"Failed to claim item `{item_id}` — it may already be claimed by another node."}
 
         return {"text": f"Claimed item `{item_id}` from campaign **{campaign_id}** on **{peer.hostname}**."}
+
+    # ------------------------------------------------------------------
+    # /pair helpers
+    # ------------------------------------------------------------------
+
+    async def _pair_initiate(self, hostname: str, send_fn) -> dict:
+        """Initiate pairing with a peer by hostname."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None:
+            return {"text": "Mesh not available."}
+        if mesh.pairing_manager is None:
+            return {"text": "Pairing not configured."}
+
+        peer = mesh.find_peer_by_hostname(hostname)
+        if peer is None:
+            return {"text": f"Peer **{hostname}** not found. Use `/peers` to see discovered peers."}
+
+        pm = mesh.pairing_manager
+        nonce_local = pm.create_initiation()
+
+        # Send pairing request to the remote peer
+        pc = mesh.peer_client
+        if pc is None:
+            return {"text": "Peer client not available."}
+
+        resp = await pc.send_pair_request(
+            peer, pm.instance_id, pm.hostname, nonce_local,
+            cert_fingerprint=pm.cert_fingerprint,
+            udp_sign_key=pm.udp_sign_key,
+        )
+        if resp is None:
+            return {"text": f"Failed to reach **{hostname}** for pairing."}
+
+        nonce_remote = resp.get("nonce", "")
+        pairing_id = resp.get("pairing_id", "")
+        peer_id = resp.get("responder_id", peer.instance_id)
+        peer_host = resp.get("responder_hostname", hostname)
+        remote_cert_fp = resp.get("cert_fingerprint", "")
+        remote_udp_key = resp.get("udp_sign_key", "")
+
+        if not nonce_remote or not pairing_id:
+            return {"text": f"Invalid pairing response from **{hostname}**."}
+
+        # Create local session and compute PIN
+        session = pm.process_initiation_response(
+            peer_id, peer_host, nonce_local, nonce_remote, pairing_id,
+        )
+        # Store remote peer's TLS cert fingerprint and UDP signing key
+        session.responder_cert_fingerprint = remote_cert_fp
+        session.responder_udp_sign_key = remote_udp_key
+        session.initiator_cert_fingerprint = pm.cert_fingerprint
+        session.initiator_udp_sign_key = pm.udp_sign_key
+
+        # Auto-confirm initiator side on the remote
+        await pc.confirm_pair_remote(peer, pairing_id, pm.instance_id)
+
+        # Start background polling for confirmation
+        asyncio.create_task(self._pair_poll(
+            mesh, peer, pairing_id, nonce_local, nonce_remote, send_fn,
+        ))
+
+        return {
+            "text": (
+                f"Pairing with **{peer_host}**\n\n"
+                f"Verification code: **{session.pin}**\n\n"
+                f"Verify this code matches on {peer_host}, then they should type `/pair accept`."
+            ),
+        }
+
+    async def _pair_accept(self, send_fn) -> dict:
+        """Accept the most recent pending pairing request."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None or mesh.pairing_manager is None:
+            return {"text": "Mesh/pairing not available."}
+
+        pm = mesh.pairing_manager
+        pending = pm.get_pending_sessions()
+        if not pending:
+            return {"text": "No pending pairing requests."}
+
+        session = pending[-1]  # most recent
+        pm.confirm_pairing(session.pairing_id, pm.instance_id)
+
+        if session.status == "confirmed":
+            mesh.mark_peer_trusted(session.initiator_id)
+
+            from gently.core.event_bus import EventType, get_event_bus
+            get_event_bus().publish(
+                EventType.MESH_PAIRING_COMPLETED,
+                {"pairing_id": session.pairing_id, "peer_hostname": session.initiator_hostname},
+                source="mesh",
+            )
+
+            return {"text": f"Paired with **{session.initiator_hostname}**!"}
+
+        return {"text": f"Confirmed pairing with **{session.initiator_hostname}**. Waiting for their confirmation..."}
+
+    async def _pair_reject(self) -> dict:
+        """Reject the most recent pending pairing request."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None or mesh.pairing_manager is None:
+            return {"text": "Mesh/pairing not available."}
+
+        pm = mesh.pairing_manager
+        pending = pm.get_pending_sessions()
+        if not pending:
+            return {"text": "No pending pairing requests."}
+
+        session = pending[-1]
+        pm.reject_pairing(session.pairing_id)
+        return {"text": f"Rejected pairing request from **{session.initiator_hostname}**."}
+
+    def _pair_list(self) -> dict:
+        """List all trusted peers."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None or mesh.pairing_manager is None:
+            return {"text": "Mesh/pairing not available."}
+
+        pm = mesh.pairing_manager
+        trusted = pm.get_all_trusted()
+        if not trusted:
+            return {"text": "No trusted peers. Use `/pair <hostname>` to pair with a peer."}
+
+        lines = ["Trusted Peers", ""]
+        for tp in trusted:
+            peer = mesh.get_peer(tp.instance_id)
+            status = "online" if (peer and not peer.is_dead) else "offline"
+            scope_str = ", ".join(tp.scopes) if tp.scopes else "none"
+            lines.append(
+                f"  **{tp.hostname}** ({tp.instance_id[:8]}) \u2014 {status} "
+                f"\u2014 paired {tp.paired_at} \u2014 scopes: {scope_str}"
+            )
+        return {"text": "\n".join(lines)}
+
+    def _pair_scopes(self, hostname: str, scope_arg: str) -> dict:
+        """View or set permission scopes for a peer."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None or mesh.pairing_manager is None:
+            return {"text": "Mesh/pairing not available."}
+
+        pm = mesh.pairing_manager
+
+        if not hostname:
+            # Show scopes for all peers
+            trusted = pm.get_all_trusted()
+            if not trusted:
+                return {"text": "No trusted peers."}
+            lines = ["Peer Scopes", ""]
+            for tp in trusted:
+                scope_str = ", ".join(tp.scopes) if tp.scopes else "none"
+                lines.append(f"  **{tp.hostname}** ({tp.instance_id[:8]}): {scope_str}")
+            from gently.mesh.pairing import ALL_SCOPES
+            lines.append("")
+            lines.append(f"Available scopes: {', '.join(ALL_SCOPES)}")
+            return {"text": "\n".join(lines)}
+
+        if not scope_arg:
+            # Show scopes for a specific peer
+            trusted = pm.get_all_trusted()
+            for tp in trusted:
+                if tp.hostname.lower() == hostname.lower() or tp.instance_id.startswith(hostname):
+                    scope_str = ", ".join(tp.scopes) if tp.scopes else "none"
+                    return {"text": f"Scopes for **{tp.hostname}**: {scope_str}"}
+            return {"text": f"No trusted peer matching **{hostname}**."}
+
+        # Set scopes
+        new_scopes = [s.strip() for s in scope_arg.split(",") if s.strip()]
+        from gently.mesh.pairing import ALL_SCOPES
+        invalid = [s for s in new_scopes if s not in ALL_SCOPES]
+        if invalid:
+            return {"text": f"Invalid scopes: {', '.join(invalid)}. Available: {', '.join(ALL_SCOPES)}"}
+
+        if pm.set_scopes(hostname, new_scopes):
+            return {"text": f"Scopes for **{hostname}** updated to: {', '.join(new_scopes)}"}
+        return {"text": f"No trusted peer matching **{hostname}**."}
+
+    def _pair_unpair(self, identifier: str) -> dict:
+        """Remove trust for a peer."""
+        mesh = self._launch_info.get("mesh_service")
+        if mesh is None or mesh.pairing_manager is None:
+            return {"text": "Mesh/pairing not available."}
+
+        pm = mesh.pairing_manager
+        removed = pm.unpair(identifier)
+        if not removed:
+            return {"text": f"No trusted peer matching **{identifier}**."}
+
+        # Mark the peer as untrusted in the mesh
+        for peer in mesh.get_all_peers():
+            if (peer.hostname.lower() == identifier.lower()
+                    or peer.instance_id.startswith(identifier)):
+                peer.is_trusted = False
+                break
+
+        return {"text": f"Unpaired from **{identifier}**. They will need to re-pair to access mesh services."}
+
+    async def _pair_poll(self, mesh, peer, pairing_id, nonce_local, nonce_remote, send_fn):
+        """Background poll: wait for remote to confirm pairing."""
+        pm = mesh.pairing_manager
+        pc = mesh.peer_client
+        if pm is None or pc is None:
+            return
+
+        for _ in range(60):  # 2s * 60 = 120s timeout
+            await asyncio.sleep(2.0)
+
+            resp = await pc.poll_pair_status(peer, pairing_id)
+            if resp is None:
+                continue
+
+            status = resp.get("status", "")
+            if status == "confirmed":
+                # Finalize on our side
+                session = pm.get_session(pairing_id)
+                if session and session.status != "confirmed":
+                    pm.confirm_pairing(pairing_id, session.responder_id)
+
+                mesh.mark_peer_trusted(peer.instance_id)
+
+                from gently.core.event_bus import EventType, get_event_bus
+                get_event_bus().publish(
+                    EventType.MESH_PAIRING_COMPLETED,
+                    {"pairing_id": pairing_id, "peer_hostname": peer.hostname},
+                    source="mesh",
+                )
+
+                await send_fn({
+                    "type": "notification",
+                    "level": "success",
+                    "text": f"Paired with {peer.hostname}!",
+                })
+                return
+
+            if status in ("rejected", "expired"):
+                await send_fn({
+                    "type": "notification",
+                    "level": "warning",
+                    "text": f"Pairing with {peer.hostname} was {status}.",
+                })
+                return
+
+        # Timeout
+        await send_fn({
+            "type": "notification",
+            "level": "warning",
+            "text": f"Pairing with {peer.hostname} timed out.",
+        })
 
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""
