@@ -314,6 +314,7 @@ class MicroscopyCopilot:
         # Ensure plan tools are registered
         import gently.agent.plan_mode.tools  # noqa: F401
         self._update_system_prompt()
+        emit(EventType.STATUS_CHANGED, {"field": "copilot_mode", "value": "plan"}, source="copilot")
         logger.info("Entered plan mode")
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
@@ -323,6 +324,7 @@ class MicroscopyCopilot:
             return "Already in run mode."
         self.mode = "run"
         self._update_system_prompt()
+        emit(EventType.STATUS_CHANGED, {"field": "copilot_mode", "value": "run"}, source="copilot")
         logger.info("Exited plan mode")
         return "Back to run mode."
 

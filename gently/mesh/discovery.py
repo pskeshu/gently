@@ -27,10 +27,12 @@ class _MeshProtocol(asyncio.DatagramProtocol):
         instance_id: str,
         on_peer_discovered: Callable[[dict, str], None],
         on_peer_heartbeat: Callable[[str, str], None],
+        on_nudge_received: Callable[[str, str], None] = lambda pid, ip: None,
     ):
         self.instance_id = instance_id
         self._on_peer_discovered = on_peer_discovered
         self._on_peer_heartbeat = on_peer_heartbeat
+        self._on_nudge_received = on_nudge_received
         self._known_ids: set = set()
         self.transport: Optional[asyncio.DatagramTransport] = None
 
@@ -51,6 +53,11 @@ class _MeshProtocol(asyncio.DatagramProtocol):
             return
 
         sender_ip = addr[0]
+        msg_type = msg.get("msg_type", "heartbeat")
+
+        if msg_type == "nudge":
+            self._on_nudge_received(peer_id, sender_ip)
+            return
 
         if peer_id not in self._known_ids:
             self._known_ids.add(peer_id)
@@ -96,6 +103,7 @@ class MeshDiscovery:
         # Callbacks — set by MeshService before start()
         self.on_peer_discovered: Callable[[dict, str], None] = lambda d, ip: None
         self.on_peer_heartbeat: Callable[[str, str], None] = lambda id, ip: None
+        self.on_nudge_received: Callable[[str, str], None] = lambda pid, ip: None
 
     async def start(self):
         """Bind UDP socket and start broadcast loop."""
@@ -118,6 +126,7 @@ class MeshDiscovery:
             instance_id=self.instance_id,
             on_peer_discovered=self.on_peer_discovered,
             on_peer_heartbeat=self.on_peer_heartbeat,
+            on_nudge_received=self.on_nudge_received,
         )
 
         self._transport, _ = await loop.create_datagram_endpoint(
@@ -153,6 +162,23 @@ class MeshDiscovery:
         """Tell the protocol to forget a peer so it can be re-discovered."""
         if self._protocol:
             self._protocol.forget_peer(instance_id)
+
+    def send_nudge(self):
+        """Broadcast a nudge packet telling peers to refetch our status."""
+        if not self._transport:
+            return
+        packet = json.dumps({
+            "magic": MESH_MAGIC,
+            "version": MESH_PROTOCOL_VERSION,
+            "msg_type": "nudge",
+            "instance_id": self.instance_id,
+        }).encode("utf-8")
+        try:
+            self._transport.sendto(
+                packet, ("255.255.255.255", self.mesh_port)
+            )
+        except OSError as e:
+            logger.debug(f"Mesh nudge broadcast failed: {e}")
 
     async def _broadcast_loop(self):
         """Send heartbeat every BROADCAST_INTERVAL seconds."""

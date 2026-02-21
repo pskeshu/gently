@@ -87,13 +87,22 @@ class MeshService(Service):
         )
         self._discovery.on_peer_discovered = self._on_peer_discovered
         self._discovery.on_peer_heartbeat = self._on_peer_heartbeat
+        self._discovery.on_nudge_received = self._on_nudge_received
 
         await self._discovery.start()
 
         self._reaper_task = asyncio.create_task(self._reaper_loop())
         self._refresh_task = asyncio.create_task(self._refresh_loop())
 
+        # When our own status changes, broadcast a nudge to all peers
+        self._status_unsub = self._event_bus.subscribe(
+            EventType.STATUS_CHANGED, self._on_local_status_changed,
+        )
+
     async def on_stop(self):
+        if hasattr(self, "_status_unsub"):
+            self._status_unsub()
+
         for task in (self._reaper_task, self._refresh_task):
             if task and not task.done():
                 task.cancel()
@@ -146,6 +155,20 @@ class MeshService(Service):
         if peer:
             peer.last_seen = time.time()
             peer.ip_address = sender_ip  # may change if DHCP renews
+
+    def _on_nudge_received(self, peer_id: str, sender_ip: str):
+        """Called when a peer broadcasts a status-changed nudge."""
+        peer = self._peers.get(peer_id)
+        if peer:
+            peer.last_seen = time.time()
+            peer.ip_address = sender_ip
+            asyncio.ensure_future(self._fetch_and_update_peer(peer))
+            logger.debug(f"Mesh: nudge from {peer.hostname} ({peer_id[:8]}), refetching")
+
+    def _on_local_status_changed(self, event):
+        """Our own status changed — nudge all peers to refetch."""
+        if self._discovery:
+            self._discovery.send_nudge()
 
     # ------------------------------------------------------------------
     # Background loops

@@ -156,7 +156,7 @@ def create_router(server) -> APIRouter:
                 except Exception:
                     pass
 
-            for evt in (_ET.MESH_PEER_DISCOVERED, _ET.MESH_PEER_LOST):
+            for evt in (_ET.MESH_PEER_DISCOVERED, _ET.MESH_PEER_LOST, _ET.MESH_PEER_UPDATED):
                 unsub = server.event_bus.subscribe_async(evt, _push_peer_count)
                 _mesh_unsubs.append(unsub)
 
