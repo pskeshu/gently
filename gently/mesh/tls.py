@@ -1,16 +1,16 @@
 """
 TLS certificate utilities for mesh peer communication.
 
-Generates self-signed EC certificates via the openssl CLI (no Python
-cryptography dependency). Provides SSL context builders for server and
-client use.
+Generates self-signed EC certificates using the ``cryptography`` library
+(pure Python, no CLI dependency). Provides SSL context builders for
+server and client use.
 """
 
+import datetime
 import hashlib
+import ipaddress
 import logging
-import shutil
 import ssl
-import subprocess
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -26,7 +26,7 @@ def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
     Ensure a TLS cert/key pair exists in config_dir.
 
     Generates a self-signed EC (prime256v1) certificate if one doesn't
-    already exist. Uses the ``openssl`` CLI.
+    already exist. Uses the ``cryptography`` library.
 
     Returns
     -------
@@ -39,35 +39,57 @@ def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
         logger.info(f"TLS cert already exists: {cert_path}")
         return cert_path, key_path
 
-    openssl = shutil.which("openssl")
-    if openssl is None:
-        logger.warning("openssl not found in PATH — TLS disabled")
-        return None, None
-
     config_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        subprocess.run(
-            [
-                openssl, "req",
-                "-x509",
-                "-newkey", "ec",
-                "-pkeyopt", "ec_paramgen_curve:prime256v1",
-                "-keyout", str(key_path),
-                "-out", str(cert_path),
-                "-days", str(CERT_DAYS),
-                "-nodes",
-                "-subj", "/CN=gently-mesh",
-                "-addext", "subjectAltName=IP:0.0.0.0",
-            ],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import NameOID
+
+        # Generate EC private key (prime256v1 / SECP256R1)
+        private_key = ec.generate_private_key(ec.SECP256R1())
+
+        now = datetime.datetime.now(datetime.timezone.utc)
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COMMON_NAME, "gently-mesh"),
+        ])
+
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(private_key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now)
+            .not_valid_after(now + datetime.timedelta(days=CERT_DAYS))
+            .add_extension(
+                x509.SubjectAlternativeName([
+                    x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
+                ]),
+                critical=False,
+            )
+            .sign(private_key, hashes.SHA256())
         )
+
+        # Write PEM files
+        key_path.write_bytes(private_key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ))
+        cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+
         logger.info(f"Generated TLS cert: {cert_path}")
         return cert_path, key_path
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+
+    except ImportError:
+        logger.warning(
+            "cryptography package not installed — TLS disabled "
+            "(pip install cryptography)"
+        )
+        return None, None
+    except Exception as e:
         logger.warning(f"Failed to generate TLS cert: {e}")
         # Clean up partial files
         for p in (cert_path, key_path):
@@ -81,7 +103,7 @@ def get_cert_fingerprint(cert_path: Path) -> str:
     Compute SHA-256 fingerprint of a PEM certificate.
 
     Reads the cert, extracts DER bytes, and returns the hex digest.
-    Uses Python's ssl module — no openssl CLI needed.
+    Uses Python's ssl module — no external dependency needed.
     """
     try:
         der_bytes = ssl.PEM_cert_to_DER_cert(cert_path.read_text())
