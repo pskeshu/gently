@@ -252,14 +252,17 @@ export interface BrowserPeer {
 
 export interface BrowseRequest {
   type: "browse";
-  target: "campaigns" | "peers" | "peer_campaigns";
+  target: "campaigns" | "peers" | "peer_campaigns" | "peer_campaign_items";
   hostname?: string;
+  campaign_id?: string;
 }
 
 export interface BrowseResult {
   type: "browse_result";
-  target: "campaigns" | "peers" | "peer_campaigns";
+  target: "campaigns" | "peers" | "peer_campaigns" | "peer_campaign_items";
   data: unknown[];
+  campaign_id?: string;
+  hostname?: string;
 }
 
 // ---------------------------------------------------------------------------

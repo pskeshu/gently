@@ -291,6 +291,9 @@ export function App({ wsUrl, store }: AppProps) {
         send={send}
         campaigns={state.browserCampaigns}
         peers={state.browserPeers}
+        peerCampaignItems={state.peerCampaignItems}
+        peerCampaignMeta={state.peerCampaignMeta}
+        onClearPeerCampaignItems={store.getState().clearPeerCampaignItems}
       />
     </Box>
   );

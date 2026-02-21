@@ -15,6 +15,7 @@ import { Box, Text, useInput } from "ink";
 import type {
   BrowserCampaign,
   BrowserPeer,
+  BrowserPlanItem,
   ThemeColors,
   TokenSnapshot,
 } from "../types.js";
@@ -40,6 +41,9 @@ interface StatusBarProps {
   send: WsClient["send"];
   campaigns: BrowserCampaign[];
   peers: BrowserPeer[];
+  peerCampaignItems: BrowserPlanItem[];
+  peerCampaignMeta: { hostname: string; campaign_id: string } | null;
+  onClearPeerCampaignItems: () => void;
 }
 
 function formatTokens(n: number): string {
@@ -76,6 +80,9 @@ export function StatusBar({
   send,
   campaigns,
   peers,
+  peerCampaignItems,
+  peerCampaignMeta,
+  onClearPeerCampaignItems,
 }: StatusBarProps) {
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);
@@ -102,6 +109,9 @@ export function StatusBar({
   const [cursor, setCursor] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [subCursor, setSubCursor] = useState(0);
+  // Third level: expanded campaign within a peer
+  const [expandedCampaignId, setExpandedCampaignId] = useState<string | null>(null);
+  const [itemCursor, setItemCursor] = useState(0);
 
   // Reset and fetch when browser opens/closes
   useEffect(() => {
@@ -111,6 +121,9 @@ export function StatusBar({
       setCursor(0);
       setExpandedId(null);
       setSubCursor(0);
+      setExpandedCampaignId(null);
+      setItemCursor(0);
+      onClearPeerCampaignItems();
       if (campaignCount > 0) send({ type: "browse", target: "campaigns" });
       send({ type: "browse", target: "peers" });
     }
@@ -128,12 +141,22 @@ export function StatusBar({
     }
   }
 
+  // Third-level items: campaign items within a peer's campaign (+ Join action)
+  // Items count = peerCampaignItems.length + 1 (for Join action)
+  const hasExpandedCampaign = activeView === "peers" && expandedId && expandedCampaignId;
+  const thirdLevelCount = hasExpandedCampaign ? peerCampaignItems.length + 1 : 0;
+
   // ── Keyboard handling ────────────────────────────────────
   useInput((_input, key) => {
     if (!browserOpen) return;
 
     if (key.escape) {
-      if (expandedId) {
+      if (expandedCampaignId) {
+        // Close third level → back to campaign list
+        setExpandedCampaignId(null);
+        setItemCursor(0);
+        onClearPeerCampaignItems();
+      } else if (expandedId) {
         setExpandedId(null);
         setSubCursor(0);
       } else {
@@ -161,7 +184,17 @@ export function StatusBar({
     }
 
     if (key.upArrow) {
-      if (expandedId) {
+      if (expandedCampaignId) {
+        // Third level navigation
+        if (itemCursor > 0) {
+          setItemCursor((c) => c - 1);
+        } else {
+          // Back to campaign list
+          setExpandedCampaignId(null);
+          setItemCursor(0);
+          onClearPeerCampaignItems();
+        }
+      } else if (expandedId) {
         if (subCursor > 0) {
           setSubCursor((c) => c - 1);
         } else {
@@ -179,7 +212,10 @@ export function StatusBar({
     }
 
     if (key.downArrow) {
-      if (expandedId) {
+      if (expandedCampaignId) {
+        // Third level: items + [Join campaign]
+        setItemCursor((c) => Math.min(thirdLevelCount - 1, c + 1));
+      } else if (expandedId) {
         setSubCursor((c) => Math.min(subItems.length - 1, c + 1));
       } else {
         setCursor((c) => Math.min(listItems.length - 1, c + 1));
@@ -188,23 +224,43 @@ export function StatusBar({
     }
 
     if (key.return) {
+      // Third level: action on campaign item or Join
+      if (expandedCampaignId) {
+        if (itemCursor === peerCampaignItems.length) {
+          // [Join campaign] action
+          const peer = peers.find((p) => p.instance_id === expandedId);
+          if (peer) {
+            send({
+              type: "command",
+              command: `/join-campaign ${peer.hostname} ${expandedCampaignId}`,
+            });
+            onCloseBrowser();
+          }
+        }
+        // Items themselves are read-only, no action on Enter
+        return;
+      }
+
       if (expandedId) {
-        // Action on sub-item
+        // Second level: expand campaign to show items
         if (activeView === "peers") {
           const peer = peers.find((p) => p.instance_id === expandedId);
           const camp = subItems[subCursor] as BrowserCampaign | undefined;
           if (peer && camp) {
+            setExpandedCampaignId(camp.id);
+            setItemCursor(0);
             send({
-              type: "command",
-              command: `/join-campaign ${peer.hostname} ${camp.id}`,
+              type: "browse",
+              target: "peer_campaign_items",
+              hostname: peer.hostname,
+              campaign_id: camp.id,
             });
-            onCloseBrowser();
           }
         }
         return;
       }
 
-      // Expand / collapse list item
+      // First level: expand / collapse list item
       const item = listItems[cursor];
       if (!item) return;
 
@@ -229,6 +285,9 @@ export function StatusBar({
         } else {
           setExpandedId(p.instance_id);
           setSubCursor(0);
+          setExpandedCampaignId(null);
+          setItemCursor(0);
+          onClearPeerCampaignItems();
           send({ type: "browse", target: "peer_campaigns", hostname: p.hostname });
         }
       }
@@ -307,7 +366,7 @@ export function StatusBar({
         <Box flexDirection="column">
           {activeView === "campaigns"
             ? renderCampaignList(campaigns, cursor, expandedId, subCursor, theme)
-            : renderPeerList(peers, cursor, expandedId, subCursor, subItems as BrowserCampaign[], theme)}
+            : renderPeerList(peers, cursor, expandedId, subCursor, subItems as BrowserCampaign[], expandedCampaignId, itemCursor, peerCampaignItems, theme)}
         </Box>
       ) : null}
 
@@ -443,6 +502,9 @@ function renderPeerList(
   expandedId: string | null,
   subCursor: number,
   subCampaigns: BrowserCampaign[],
+  expandedCampaignId: string | null,
+  itemCursor: number,
+  peerCampaignItems: BrowserPlanItem[],
   theme: ThemeColors,
 ) {
   if (peers.length === 0) {
@@ -486,19 +548,27 @@ function renderPeerList(
         {isExpanded
           ? p.shared_campaigns.length > 0
             ? p.shared_campaigns.map((c, j) => {
-                const isSub = j === subCursor;
+                const isSub = j === subCursor && !expandedCampaignId;
+                const isCampExpanded = expandedCampaignId === c.id;
+                const campMarker = isCampExpanded ? "▼" : isSub ? "▶" : " ";
+                const done = c.completed >= c.total && c.total > 0;
+
                 return (
-                  <Text
-                    key={c.id}
-                    color={isSub ? theme.info : theme.muted}
-                    bold={isSub}
-                  >
-                    {"      "}
-                    {isSub ? "▶" : " "} {c.shorthand || c.id.slice(0, 8)}
-                    <Text color={theme.muted}>
-                      {` (${c.completed}/${c.total})`}
+                  <Box key={c.id} flexDirection="column">
+                    <Text
+                      color={isSub || isCampExpanded ? theme.info : theme.muted}
+                      bold={isSub}
+                    >
+                      {"      "}
+                      {campMarker} {c.shorthand || c.id.slice(0, 8)}
+                      <Text color={theme.muted}>
+                        {` (${c.completed}/${c.total})`}{done ? " ✓" : ""}
+                      </Text>
                     </Text>
-                  </Text>
+                    {isCampExpanded
+                      ? renderPeerCampaignItems(peerCampaignItems, itemCursor, theme)
+                      : null}
+                  </Box>
                 );
               })
             : <Text color={theme.muted}>{"      "}No shared campaigns</Text>
@@ -506,4 +576,63 @@ function renderPeerList(
       </Box>
     );
   });
+}
+
+// ── Peer campaign items (third level) ────────────────────────
+
+function renderPeerCampaignItems(
+  items: BrowserPlanItem[],
+  itemCursor: number,
+  theme: ThemeColors,
+) {
+  const rows: React.ReactNode[] = [];
+
+  if (items.length === 0) {
+    rows.push(
+      <Text key="loading" color={theme.muted}>{"          "}Loading items...</Text>
+    );
+  } else {
+    for (let k = 0; k < items.length; k++) {
+      const item = items[k]!;
+      const isActive = k === itemCursor;
+      const icon =
+        item.status === "completed" || item.status === "done"
+          ? "✓"
+          : item.status === "running" || item.status === "in_progress"
+            ? "●"
+            : "○";
+      const iconColor =
+        item.status === "completed" || item.status === "done"
+          ? theme.success
+          : item.status === "running" || item.status === "in_progress"
+            ? theme.info
+            : theme.muted;
+
+      rows.push(
+        <Text key={item.id} color={isActive ? theme.info : theme.muted}>
+          {"          "}
+          <Text color={iconColor}>{icon}</Text>
+          {` ${item.title}`}
+          {item.claimed_by_hostname ? (
+            <Text color={theme.muted}> @{item.claimed_by_hostname}</Text>
+          ) : null}
+        </Text>
+      );
+    }
+  }
+
+  // [Join campaign] action at the bottom
+  const isJoinActive = itemCursor === items.length && items.length > 0;
+  rows.push(
+    <Text
+      key="__join__"
+      color={isJoinActive ? theme.success : theme.muted}
+      bold={isJoinActive}
+    >
+      {"          "}
+      {isJoinActive ? "▶ " : "  "}[Join campaign]
+    </Text>
+  );
+
+  return <>{rows}</>;
 }

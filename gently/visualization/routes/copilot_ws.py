@@ -576,6 +576,37 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                 })
             await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": result})
 
+        elif target == "peer_campaign_items":
+            hostname = data.get("hostname", "")
+            campaign_id = data.get("campaign_id", "")
+            mesh_svc = getattr(server, "mesh_service", None)
+            if not mesh_svc or not hostname or not campaign_id:
+                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                return
+            peer = mesh_svc.find_peer_by_hostname(hostname)
+            if not peer or not mesh_svc.peer_client:
+                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                return
+            export = await mesh_svc.peer_client.fetch_campaign_export(peer, campaign_id)
+            if not export:
+                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                return
+            items = []
+            for item in export.get("items", []):
+                items.append({
+                    "id": item.get("id", ""),
+                    "title": item.get("title", ""),
+                    "status": item.get("status", "planned"),
+                    "claimed_by_hostname": item.get("claimed_by_hostname"),
+                })
+            await send_fn({
+                "type": "browse_result",
+                "target": "peer_campaign_items",
+                "data": items,
+                "campaign_id": campaign_id,
+                "hostname": hostname,
+            })
+
     except Exception as e:
         logger.debug(f"Browse error ({target}): {e}")
         await send_fn({"type": "browse_result", "target": target, "data": []})

@@ -127,11 +127,13 @@ export function useWebSocket(
           }
 
           case "browse_result": {
-            const br = msg as { target: string; data: unknown[] };
+            const br = msg as { target: string; data: unknown[]; campaign_id?: string; hostname?: string };
             if (br.target === "campaigns") {
               s.setBrowserCampaigns(br.data as any);
             } else if (br.target === "peers" || br.target === "peer_campaigns") {
               s.setBrowserPeers(br.data as any);
+            } else if (br.target === "peer_campaign_items") {
+              s.setPeerCampaignItems(br.data as any, br.hostname ?? "", br.campaign_id ?? "");
             }
             break;
           }

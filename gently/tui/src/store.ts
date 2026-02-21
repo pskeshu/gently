@@ -16,6 +16,7 @@ import { createStore } from "zustand/vanilla";
 import type {
   BrowserCampaign,
   BrowserPeer,
+  BrowserPlanItem,
   ChatEntry,
   ChoiceRequest,
   CommandDef,
@@ -89,6 +90,8 @@ export interface TuiState {
   browserOpen: boolean;
   browserCampaigns: BrowserCampaign[];
   browserPeers: BrowserPeer[];
+  peerCampaignItems: BrowserPlanItem[];
+  peerCampaignMeta: { hostname: string; campaign_id: string } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +153,8 @@ export interface TuiActions {
   setBrowserOpen: (open: boolean) => void;
   setBrowserCampaigns: (campaigns: BrowserCampaign[]) => void;
   setBrowserPeers: (peers: BrowserPeer[]) => void;
+  setPeerCampaignItems: (items: BrowserPlanItem[], hostname: string, campaign_id: string) => void;
+  clearPeerCampaignItems: () => void;
 }
 
 export type TuiStore = TuiState & TuiActions;
@@ -252,6 +257,8 @@ export function createTuiStore() {
     browserOpen: false,
     browserCampaigns: [],
     browserPeers: [],
+    peerCampaignItems: [],
+    peerCampaignMeta: null,
 
     // Connection
     setConnected: (meta) =>
@@ -518,5 +525,9 @@ export function createTuiStore() {
     setBrowserOpen: (open) => set({ browserOpen: open }),
     setBrowserCampaigns: (campaigns) => set({ browserCampaigns: campaigns }),
     setBrowserPeers: (peers) => set({ browserPeers: peers }),
+    setPeerCampaignItems: (items, hostname, campaign_id) =>
+      set({ peerCampaignItems: items, peerCampaignMeta: { hostname, campaign_id } }),
+    clearPeerCampaignItems: () =>
+      set({ peerCampaignItems: [], peerCampaignMeta: null }),
   }));
 }
