@@ -233,7 +233,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
                     caps["has_gpu"] = True
                     caps["gpu_name"] = torch.cuda.get_device_name(0)
                     caps["gpu_vram_gb"] = round(
-                        torch.cuda.get_device_properties(0).total_mem / (1024**3), 1
+                        torch.cuda.get_device_properties(0).total_memory / (1024**3), 1
                     )
             except ImportError:
                 try:
