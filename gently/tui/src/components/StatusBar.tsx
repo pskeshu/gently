@@ -218,6 +218,12 @@ export function StatusBar({
         }
       } else {
         const p = item as BrowserPeer;
+        if (!p.is_trusted) {
+          // Unpaired peer — initiate pairing
+          send({ type: "command", command: `/pair ${p.hostname}` });
+          onCloseBrowser();
+          return;
+        }
         if (expandedId === p.instance_id) {
           setExpandedId(null);
         } else {

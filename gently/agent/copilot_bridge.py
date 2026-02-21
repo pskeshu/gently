@@ -1415,7 +1415,7 @@ class CopilotBridge:
                 await send_fn({
                     "type": "notification",
                     "level": "success",
-                    "text": f"Paired with {peer.hostname}!",
+                    "title": f"Paired with {peer.hostname}",
                 })
                 return
 
@@ -1423,7 +1423,8 @@ class CopilotBridge:
                 await send_fn({
                     "type": "notification",
                     "level": "warning",
-                    "text": f"Pairing with {peer.hostname} was {status}.",
+                    "title": f"Pairing {status}",
+                    "body": peer.hostname,
                 })
                 return
 
@@ -1431,7 +1432,8 @@ class CopilotBridge:
         await send_fn({
             "type": "notification",
             "level": "warning",
-            "text": f"Pairing with {peer.hostname} timed out.",
+            "title": f"Pairing timed out",
+            "body": peer.hostname,
         })
 
     def _get_campaigns_data(self, command: str) -> dict:

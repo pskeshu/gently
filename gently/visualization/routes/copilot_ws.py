@@ -199,12 +199,37 @@ def create_router(server) -> APIRouter:
                 try:
                     hostname = event.data.get("initiator_hostname", "unknown")
                     pin = event.data.get("pin", "??????")
+                    pairing_id = event.data.get("pairing_id", "")
+
+                    request_id = f"mesh_pair:{pairing_id}"
                     await websocket.send_json({
-                        "type": "notification",
-                        "level": "info",
-                        "title": f"Pairing request from {hostname}",
-                        "body": f"PIN: {pin} \u2014 Type /pair accept to confirm",
+                        "type": "choice_request",
+                        "choice_data": {
+                            "_type": "single",
+                            "question": f"{hostname} wants to pair\nVerify this code matches: {pin}",
+                            "options": [
+                                {"id": "accept", "label": "Accept pairing",
+                                 "description": f"Trust {hostname} and allow mesh communication"},
+                                {"id": "reject", "label": "Reject",
+                                 "description": "Decline this pairing request"},
+                            ],
+                            "allow_multiple": False,
+                        },
+                        "request_id": request_id,
                     })
+
+                    # Register future — REPL loop resolves it on choice_response
+                    loop = asyncio.get_event_loop()
+                    future = loop.create_future()
+                    _choice_futures[request_id] = future
+
+                    selected = await future
+                    if selected == "accept":
+                        await bridge.handle_command("/pair accept", send_fn)
+                    else:
+                        await bridge.handle_command("/pair reject", send_fn)
+                except asyncio.CancelledError:
+                    pass
                 except Exception:
                     pass
 
