@@ -145,6 +145,71 @@ poll catches up.
 
 ---
 
+## v0.8.2 – v0.8.4
+
+Mesh security. The v0.8.0 mesh had no authentication — any node on the
+LAN could query any other. These three versions added layered security:
+
+**Phase 1 — Pairing (v0.8.2)**
+Bluetooth-style pairing flow. One node runs `/pair <hostname>`, the other
+sees a 6-digit PIN and runs `/pair accept`. Both sides must confirm the
+same code before trust is established. Trusted peers are persisted in
+`mesh_trusted_peers.json`. `/pair list`, `/pair unpair` for management.
+
+**Phase 2 — TLS + Signed UDP (v0.8.3)**
+- Self-signed TLS certificates generated per instance. Paired peers
+  exchange certificate fingerprints during pairing.
+- All HTTP calls between paired peers use HTTPS with cert pinning
+  (`aiohttp.Fingerprint`). Fingerprint mismatch → connection refused.
+- UDP heartbeats signed with HMAC-SHA256. Replay protection via
+  monotonic sequence numbers. Unsigned packets from unknown peers still
+  accepted for discovery (unpaired peers appear as "untrusted").
+- Rate limiting on pairing endpoint (5 attempts per IP per 5 minutes).
+
+**Phase 3 — Audit + Token Rotation (v0.8.4)**
+- `MeshAuditLog` writes structured JSON-lines to `mesh_audit.jsonl`.
+  Events: auth success/failure, cert pinning ok/fail, signature invalid,
+  replay rejected, pairing lifecycle, rate limiting. Auto-rotates at 10k
+  lines.
+- Daily token rotation: `HMAC-SHA256(base_token, epoch_day)`. Both
+  peers derive the same daily token independently — zero network
+  coordination. Accepts current + previous day for midnight boundaries.
+- Security events published to EventBus (`MESH_AUTH_FAILURE`,
+  `MESH_CERT_PIN_FAILURE`) for TUI notifications.
+
++1,920 lines across 21 files.
+
+---
+
+## v0.8.5
+
+Capability-scoped permissions and TUI status bar integration.
+
+**Phase 4 — Scoped Permissions**
+Three scopes: `status` (read mesh info), `campaigns` (join/claim/report),
+`campaigns:admin` (share/unshare). New pairings get all three by default.
+`/pair scopes <hostname> <scope_list>` to restrict.
+
+Auth dependency factory pattern — `_make_auth_dep("campaigns")` creates
+per-endpoint FastAPI dependencies. Scope denials logged to audit trail
+and published as `MESH_SCOPE_DENIED` events.
+
+**TUI Status Bar Integration**
+Merged the navigable status bar browser from main with mesh security
+notifications:
+- Fixed notification protocol (`text` → `title`/`body`) so mesh events
+  display correctly in the status bar.
+- Peer discovery: "Peer joined: hostname" (trusted) or "New peer:
+  hostname — Use /pair to connect" (untrusted).
+- Peer loss: "Peer offline: hostname" warning.
+- Pairing: PIN display in notification body, success confirmation.
+- Security alerts: auth failures, certificate mismatches (MITM warning),
+  scope denials pushed as warning/error notifications.
+- Trust indicators in peer browser: green lock (trusted+TLS), yellow
+  shield (trusted, no TLS), red ? (unpaired).
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:
