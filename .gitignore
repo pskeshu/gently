@@ -71,9 +71,9 @@ gently/tui/dist/
 *.sqlite
 *.sqlite3
 
-# Test scripts (one-off tests)
-test_*.py
-check_*.py
+# Test scripts (one-off tests in repo root, not tests/ directory)
+/test_*.py
+/check_*.py
 
 # SAM model weights
 *.pth
