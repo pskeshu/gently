@@ -6,7 +6,6 @@ Shared volume loading, processing, and UID parsing utilities.
 Consolidates duplicated code from route handlers.
 """
 
-import base64
 import logging
 import re
 from io import BytesIO
@@ -14,6 +13,8 @@ from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+from gently.imaging import normalize_to_uint8, image_to_base64
 
 logger = logging.getLogger(__name__)
 
@@ -70,8 +71,7 @@ def array_to_png_bytes(img_array: np.ndarray) -> bytes:
     """Convert a numpy array to PNG bytes."""
     from PIL import Image
 
-    if img_array.dtype != np.uint8:
-        img_array = (img_array * 255).astype(np.uint8)
+    img_array = normalize_to_uint8(img_array, method="simple")
     img = Image.fromarray(img_array)
     buf = BytesIO()
     img.save(buf, format='PNG')
@@ -80,4 +80,5 @@ def array_to_png_bytes(img_array: np.ndarray) -> bytes:
 
 def image_to_base64_png(img_array: np.ndarray) -> str:
     """Convert numpy array to base64-encoded PNG string."""
-    return base64.b64encode(array_to_png_bytes(img_array)).decode('utf-8')
+    img = normalize_to_uint8(img_array, method="simple")
+    return image_to_base64(img, format="PNG")

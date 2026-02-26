@@ -1,17 +1,19 @@
 """
 Projection utilities for perception system.
 
-Generates three-view orthogonal projections from 3D volumes.
+Generates three-view orthogonal projections from 3D volumes,
+and a depth-aware alpha-composite view for 3D viewing.
 Extracted from gently/dataset/explorer_server.py for shared use.
 """
 
-import base64
-import io
 from pathlib import Path
 from typing import Tuple
 
 import numpy as np
 from PIL import Image as PIL_Image
+
+from gently.imaging import normalize_to_uint8
+from gently.imaging import image_to_base64 as _image_to_base64
 
 # Optional tifffile import (only needed for load_volume)
 try:
@@ -21,25 +23,20 @@ except ImportError:
 
 
 def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np.ndarray:
-    """Normalize image to 0-255 uint8 using percentile scaling."""
-    img = img.astype(np.float32)
-    vmin = np.percentile(img, p_low)
-    vmax = np.percentile(img, p_high)
-    if vmax > vmin:
-        img = np.clip((img - vmin) / (vmax - vmin), 0, 1)
-    else:
-        img = np.zeros_like(img)
-    return (img * 255).astype(np.uint8)
+    """Normalize image to 0-255 uint8 using percentile scaling.
+
+    Thin wrapper around :func:`gently.imaging.normalize_to_uint8`.
+    """
+    return normalize_to_uint8(img, method="percentile", p_low=p_low, p_high=p_high)
 
 
 def image_to_base64(img: np.ndarray, format: str = "JPEG", quality: int = 90) -> str:
-    """Convert numpy array to base64-encoded image."""
-    pil_img = PIL_Image.fromarray(img)
-    if pil_img.mode not in ('RGB', 'RGBA'):
-        pil_img = pil_img.convert('RGB')
-    buffer = io.BytesIO()
-    pil_img.save(buffer, format=format, quality=quality)
-    return base64.b64encode(buffer.getvalue()).decode()
+    """Convert numpy array to base64-encoded image.
+
+    Thin wrapper around :func:`gently.imaging.image_to_base64` that preserves
+    the original default quality (90) and always converts to RGB.
+    """
+    return _image_to_base64(img, format=format, quality=quality, ensure_rgb=True)
 
 
 def load_volume(path: Path) -> np.ndarray:
@@ -173,3 +170,71 @@ def projection_three_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     combined = np.concatenate([top_row, h_sep, bottom_row], axis=0)
 
     return combined, "Three-view: [XY|YZ] top, [XZ] bottom"
+
+
+def render_volume_view(
+    volume: np.ndarray,
+    rotation_x: float = 0,
+    rotation_y: float = 0,
+    threshold: float = 0.2,
+) -> str:
+    """
+    Render a 3D volume from a specific viewing angle using alpha compositing.
+
+    Produces a depth-aware view where you can see the embryo's shape and
+    structure, not just a flat max projection.
+
+    Parameters
+    ----------
+    volume : np.ndarray
+        3D volume (Z, Y, X) or 4D (Views, Z, Y, X)
+    rotation_x : float
+        Rotation around X axis in degrees (-90 to 90)
+    rotation_y : float
+        Rotation around Y axis in degrees (-180 to 180)
+    threshold : float
+        Intensity threshold for transparency (0-1)
+
+    Returns
+    -------
+    str
+        Base64-encoded JPEG image
+    """
+    from scipy import ndimage
+
+    # Handle 4D volumes (Views, Z, Y, X) - take first view
+    if volume.ndim == 4:
+        volume = volume[0]
+
+    # Normalize to 0-1
+    vol = volume.astype(np.float32)
+    p1, p99 = np.percentile(vol, [1, 99])
+    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+    # Apply rotations
+    if rotation_y != 0:
+        vol = ndimage.rotate(vol, rotation_y, axes=(0, 2), reshape=False, order=1)
+    if rotation_x != 0:
+        vol = ndimage.rotate(vol, rotation_x, axes=(0, 1), reshape=False, order=1)
+
+    # Alpha composite from back to front (same as Three.js stacked slices)
+    z_depth = vol.shape[0]
+    result = np.zeros(vol.shape[1:], dtype=np.float32)
+    accumulated_alpha = np.zeros_like(result)
+
+    for z in range(z_depth):
+        slice_val = vol[z]
+        # Alpha based on intensity above threshold
+        alpha = np.clip((slice_val - threshold) / (1 - threshold + 1e-8), 0, 1) * 0.3
+
+        # Front-to-back compositing
+        result += slice_val * alpha * (1 - accumulated_alpha)
+        accumulated_alpha += alpha * (1 - accumulated_alpha)
+
+    # Normalize result to 0-255
+    if result.max() > 0:
+        result = (result / result.max() * 255).astype(np.uint8)
+    else:
+        result = result.astype(np.uint8)
+
+    return _image_to_base64(result, format="JPEG", quality=85, max_dimension=800)

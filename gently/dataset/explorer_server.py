@@ -12,8 +12,6 @@ Usage:
 """
 
 import asyncio
-import base64
-import io
 import json
 import logging
 from dataclasses import dataclass
@@ -29,6 +27,8 @@ from pydantic import BaseModel
 
 from .schema import get_connection, get_database_stats, DEFAULT_DB_PATH
 from .embryo_dataset import EmbryoDataset
+from gently.imaging import normalize_to_uint8
+from gently.imaging import image_to_base64 as _image_to_base64
 
 # Lazy imports for projection functions
 tifffile = None
@@ -52,25 +52,12 @@ def ensure_projection_deps():
 
 def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np.ndarray:
     """Normalize image to 0-255 uint8 using percentile scaling."""
-    img = img.astype(np.float32)
-    vmin = np.percentile(img, p_low)
-    vmax = np.percentile(img, p_high)
-    if vmax > vmin:
-        img = np.clip((img - vmin) / (vmax - vmin), 0, 1)
-    else:
-        img = np.zeros_like(img)
-    return (img * 255).astype(np.uint8)
+    return normalize_to_uint8(img, method="percentile", p_low=p_low, p_high=p_high)
 
 
 def image_to_base64(img: np.ndarray, format: str = "JPEG", quality: int = 90) -> str:
     """Convert numpy array to base64-encoded image."""
-    ensure_projection_deps()
-    pil_img = PIL_Image.fromarray(img)
-    if pil_img.mode not in ('RGB', 'RGBA'):
-        pil_img = pil_img.convert('RGB')
-    buffer = io.BytesIO()
-    pil_img.save(buffer, format=format, quality=quality)
-    return base64.b64encode(buffer.getvalue()).decode()
+    return _image_to_base64(img, format=format, quality=quality, ensure_rgb=True)
 
 
 def load_volume(path: Path) -> np.ndarray:

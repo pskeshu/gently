@@ -8,8 +8,6 @@ This module handles Phase 3 of the perceive-think-verify loop:
 """
 
 import asyncio
-import base64
-import io
 import json
 import logging
 import re
@@ -20,7 +18,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import anthropic
 import numpy as np
-from PIL import Image
 
 from .session import (
     CandidateStage,
@@ -31,68 +28,13 @@ from .session import (
     ReasoningStep,
 )
 from .example_store import ExampleStore
+from .projection import render_volume_view
 
 logger = logging.getLogger(__name__)
 
 
 # Subagent uses a faster, cheaper model for focused comparisons
 SUBAGENT_MODEL = "claude-haiku-4-5-20251001"
-
-
-def render_volume_view(
-    volume: np.ndarray,
-    rotation_x: float = 0,
-    rotation_y: float = 0,
-    threshold: float = 0.2,
-) -> str:
-    """
-    Render a 3D volume from a specific viewing angle.
-
-    Same as in engine.py - imported here to avoid circular deps.
-    """
-    from scipy import ndimage
-
-    # Handle 4D volumes (Views, Z, Y, X) - take first view
-    if volume.ndim == 4:
-        volume = volume[0]
-
-    # Normalize to 0-1
-    vol = volume.astype(np.float32)
-    p1, p99 = np.percentile(vol, [1, 99])
-    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
-
-    # Apply rotations
-    if rotation_y != 0:
-        vol = ndimage.rotate(vol, rotation_y, axes=(0, 2), reshape=False, order=1)
-    if rotation_x != 0:
-        vol = ndimage.rotate(vol, rotation_x, axes=(0, 1), reshape=False, order=1)
-
-    # Alpha composite from back to front
-    z_depth = vol.shape[0]
-    result = np.zeros(vol.shape[1:], dtype=np.float32)
-    accumulated_alpha = np.zeros_like(result)
-
-    for z in range(z_depth):
-        slice_val = vol[z]
-        alpha = np.clip((slice_val - threshold) / (1 - threshold + 1e-8), 0, 1) * 0.3
-        result += slice_val * alpha * (1 - accumulated_alpha)
-        accumulated_alpha += alpha * (1 - accumulated_alpha)
-
-    if result.max() > 0:
-        result = (result / result.max() * 255).astype(np.uint8)
-    else:
-        result = result.astype(np.uint8)
-
-    pil_image = Image.fromarray(result)
-    max_dim = 800
-    if max(pil_image.size) > max_dim:
-        scale = max_dim / max(pil_image.size)
-        new_size = (int(pil_image.size[0] * scale), int(pil_image.size[1] * scale))
-        pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-
-    buffer = io.BytesIO()
-    pil_image.save(buffer, format='JPEG', quality=85)
-    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 
 # Limited tools for subagents (focused comparison only)

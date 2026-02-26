@@ -8,8 +8,6 @@ Provides concrete implementations of AnalysisStep for:
 """
 
 import asyncio
-import base64
-import io
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -374,27 +372,10 @@ class VLMStep(AnalysisStep):
         self.api_key = api_key
 
     def _encode_image(self, image: np.ndarray) -> str:
-        """Encode image to base64 JPEG"""
-        from PIL import Image as PILImage
-
-        # Normalize to 0-255 uint8
-        if image.dtype != np.uint8:
-            if image.max() <= 1.0:
-                img_uint8 = (image * 255).astype(np.uint8)
-            else:
-                img_min, img_max = image.min(), image.max()
-                if img_max > img_min:
-                    img_uint8 = ((image - img_min) / (img_max - img_min) * 255).astype(np.uint8)
-                else:
-                    img_uint8 = np.zeros_like(image, dtype=np.uint8)
-        else:
-            img_uint8 = image
-
-        # Convert to PIL and encode
-        pil_image = PILImage.fromarray(img_uint8)
-        buffer = io.BytesIO()
-        pil_image.save(buffer, format='JPEG', quality=85)
-        return base64.b64encode(buffer.getvalue()).decode('utf-8')
+        """Encode image to base64 JPEG."""
+        from gently.imaging import normalize_to_uint8, image_to_base64
+        img = normalize_to_uint8(image, method="minmax")
+        return image_to_base64(img, format="JPEG", quality=85)
 
     async def execute(
         self,

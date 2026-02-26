@@ -1,12 +1,14 @@
 """
 Standalone imaging utilities for Gently.
 
-Extracted from ImageManager so they can be used by GentlyStore and any
-other component without depending on the ImageManager class.
+Single source of truth for image normalization, encoding, and compression.
+Used by perception, visualization, analysis, and dataset modules.
 
 Functions:
-    extract_view_a_and_max_project: 4D/3D volume -> 2D max projection
+    normalize_to_uint8: Any-dtype image -> uint8 (percentile/minmax/simple)
+    image_to_base64: uint8 array -> base64 string (JPEG or PNG)
     compress_image_for_api: 2D image -> base64 JPEG for Claude Vision API
+    extract_view_a_and_max_project: 4D/3D volume -> 2D max projection
     generate_jpeg_projection: Volume -> JPEG file on disk
 """
 
@@ -25,6 +27,113 @@ try:
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
+
+
+def normalize_to_uint8(
+    image: np.ndarray,
+    method: str = "percentile",
+    p_low: float = 1.0,
+    p_high: float = 99.0,
+) -> np.ndarray:
+    """Normalize any-dtype image to uint8.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image of any numeric dtype.
+    method : str
+        Normalization method:
+        - "percentile": Clip to [p_low, p_high] percentiles, then scale.
+          Best for microscopy where outlier hot pixels exist.
+        - "minmax": Scale full dynamic range to 0-255.
+        - "simple": Multiply by 255 (assumes input in [0, 1]).
+    p_low : float
+        Lower percentile for "percentile" method.
+    p_high : float
+        Upper percentile for "percentile" method.
+
+    Returns
+    -------
+    np.ndarray
+        uint8 image with values in [0, 255].
+    """
+    if image.dtype == np.uint8:
+        return image
+
+    img = image.astype(np.float32)
+
+    if method == "simple":
+        if img.max() <= 1.0:
+            return (img * 255).astype(np.uint8)
+        # Fall through to percentile if not 0-1 range
+        method = "percentile"
+
+    if method == "minmax":
+        vmin, vmax = float(img.min()), float(img.max())
+    else:  # percentile (default)
+        vmin = float(np.percentile(img, p_low))
+        vmax = float(np.percentile(img, p_high))
+
+    if vmax > vmin:
+        img = np.clip((img - vmin) / (vmax - vmin), 0, 1)
+    else:
+        img = np.zeros_like(img, dtype=np.float32)
+
+    return (img * 255).astype(np.uint8)
+
+
+def image_to_base64(
+    image: np.ndarray,
+    format: str = "JPEG",
+    quality: int = 85,
+    max_dimension: int = 0,
+    ensure_rgb: bool = False,
+) -> str:
+    """Convert a uint8 numpy array to a base64-encoded image string.
+
+    Call ``normalize_to_uint8`` first if the image is not already uint8.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        uint8 image array (2D grayscale or 3D RGB/RGBA).
+    format : str
+        Output format: "JPEG" or "PNG".
+    quality : int
+        JPEG quality (ignored for PNG).
+    max_dimension : int
+        If > 0, resize so longest edge <= this value.
+    ensure_rgb : bool
+        Convert grayscale to RGB (needed for some APIs).
+
+    Returns
+    -------
+    str
+        Base64-encoded image string.
+    """
+    if not PIL_AVAILABLE:
+        raise ImportError("Pillow is required: pip install Pillow")
+
+    pil_image = Image.fromarray(image)
+
+    if ensure_rgb and pil_image.mode not in ("RGB", "RGBA"):
+        pil_image = pil_image.convert("RGB")
+
+    if max_dimension > 0:
+        w, h = pil_image.size
+        if max(w, h) > max_dimension:
+            scale = max_dimension / max(w, h)
+            pil_image = pil_image.resize(
+                (int(w * scale), int(h * scale)),
+                Image.Resampling.LANCZOS,
+            )
+
+    buffer = io.BytesIO()
+    save_kwargs = {"format": format, "optimize": True}
+    if format.upper() == "JPEG":
+        save_kwargs["quality"] = quality
+    pil_image.save(buffer, **save_kwargs)
+    return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
 def extract_view_a_and_max_project(volume: np.ndarray) -> np.ndarray:
@@ -130,36 +239,11 @@ def compress_image_for_api(
         if image.shape[1] == 1:
             image = np.repeat(image, 10, axis=1)
 
-    # Normalize to uint8
-    if image.dtype != np.uint8:
-        if image.max() <= 1.0:
-            image = (image * 255).astype(np.uint8)
-        else:
-            img_min = np.percentile(image, 1)
-            img_max = np.percentile(image, 99.5)
-            if img_max > img_min:
-                image = np.clip(image, img_min, img_max)
-                image = ((image - img_min) / (img_max - img_min) * 255).astype(np.uint8)
-            else:
-                image = np.zeros_like(image, dtype=np.uint8)
-
-    pil_image = Image.fromarray(image)
-
-    # Resize if too large
-    width, height = pil_image.size
-    if max(width, height) > max_dimension:
-        scale = max_dimension / max(width, height)
-        new_size = (int(width * scale), int(height * scale))
-        pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-
-    buffer = io.BytesIO()
-    pil_image.save(buffer, format="JPEG", quality=quality, optimize=True)
-    jpeg_bytes = buffer.getvalue()
-
-    b64_string = base64.b64encode(jpeg_bytes).decode("utf-8")
-    size_kb = len(jpeg_bytes) / 1024
-
-    return b64_string, size_kb
+    img = normalize_to_uint8(image, method="percentile", p_low=1, p_high=99.5)
+    b64 = image_to_base64(img, format="JPEG", quality=quality,
+                          max_dimension=max_dimension)
+    size_kb = len(base64.b64decode(b64)) / 1024
+    return b64, size_kb
 
 
 def generate_jpeg_projection(
@@ -193,21 +277,8 @@ def generate_jpeg_projection(
 
     try:
         max_proj = extract_view_a_and_max_project(volume)
-
-        # Normalize to uint8
-        if max_proj.dtype != np.uint8:
-            if max_proj.max() <= 1.0 and max_proj.min() >= 0.0:
-                normalized = (max_proj * 255).astype(np.uint8)
-            else:
-                p_lo = np.percentile(max_proj, 1)
-                p_hi = np.percentile(max_proj, 99.5)
-                if p_hi > p_lo:
-                    clipped = np.clip(max_proj, p_lo, p_hi)
-                    normalized = ((clipped - p_lo) / (p_hi - p_lo) * 255).astype(np.uint8)
-                else:
-                    normalized = np.zeros_like(max_proj, dtype=np.uint8)
-        else:
-            normalized = max_proj
+        normalized = normalize_to_uint8(max_proj, method="percentile",
+                                        p_low=1, p_high=99.5)
 
         pil_image = Image.fromarray(normalized)
 

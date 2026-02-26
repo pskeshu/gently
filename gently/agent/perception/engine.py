@@ -6,8 +6,6 @@ No probability distributions, no tiered models, no complex parsing.
 """
 
 import asyncio
-import base64
-import io
 import json
 import logging
 import re
@@ -16,8 +14,6 @@ from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
 import numpy as np
-from PIL import Image
-from scipy import ndimage
 
 from .session import (
     Observation,
@@ -33,89 +29,13 @@ from .session import (
     PhaseTrace,
 )
 from .example_store import ExampleStore
+from .projection import render_volume_view
 from .stages import STAGES
 from .verification import VerificationEngine
 from gently.organisms import get_organism
 
 logger = logging.getLogger(__name__)
 
-
-def render_volume_view(
-    volume: np.ndarray,
-    rotation_x: float = 0,
-    rotation_y: float = 0,
-    threshold: float = 0.2,
-) -> str:
-    """
-    Render a 3D volume from a specific viewing angle using alpha compositing.
-
-    This produces a depth-aware view similar to the 3D viewer, where you can
-    see the embryo's shape and structure, not just a flat max projection.
-
-    Parameters
-    ----------
-    volume : np.ndarray
-        3D volume (Z, Y, X)
-    rotation_x : float
-        Rotation around X axis in degrees (-90 to 90)
-    rotation_y : float
-        Rotation around Y axis in degrees (-180 to 180)
-    threshold : float
-        Intensity threshold for transparency (0-1)
-
-    Returns
-    -------
-    str
-        Base64-encoded JPEG image
-    """
-    # Handle 4D volumes (Views, Z, Y, X) - take first view
-    if volume.ndim == 4:
-        volume = volume[0]
-
-    # Normalize to 0-1
-    vol = volume.astype(np.float32)
-    p1, p99 = np.percentile(vol, [1, 99])
-    vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
-
-    # Apply rotations
-    if rotation_y != 0:
-        vol = ndimage.rotate(vol, rotation_y, axes=(0, 2), reshape=False, order=1)
-    if rotation_x != 0:
-        vol = ndimage.rotate(vol, rotation_x, axes=(0, 1), reshape=False, order=1)
-
-    # Alpha composite from back to front (same as Three.js stacked slices)
-    z_depth = vol.shape[0]
-    result = np.zeros(vol.shape[1:], dtype=np.float32)
-    accumulated_alpha = np.zeros_like(result)
-
-    for z in range(z_depth):
-        slice_val = vol[z]
-        # Alpha based on intensity above threshold
-        alpha = np.clip((slice_val - threshold) / (1 - threshold + 1e-8), 0, 1) * 0.3
-
-        # Front-to-back compositing
-        result += slice_val * alpha * (1 - accumulated_alpha)
-        accumulated_alpha += alpha * (1 - accumulated_alpha)
-
-    # Normalize result to 0-255
-    if result.max() > 0:
-        result = (result / result.max() * 255).astype(np.uint8)
-    else:
-        result = result.astype(np.uint8)
-
-    # Convert to JPEG base64
-    pil_image = Image.fromarray(result)
-
-    # Resize if too large (max 800px)
-    max_dim = 800
-    if max(pil_image.size) > max_dim:
-        scale = max_dim / max(pil_image.size)
-        new_size = (int(pil_image.size[0] * scale), int(pil_image.size[1] * scale))
-        pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
-
-    buffer = io.BytesIO()
-    pil_image.save(buffer, format='JPEG', quality=85)
-    return base64.b64encode(buffer.getvalue()).decode('utf-8')
 
 def _build_perception_tools() -> list:
     """Build tool definitions, pulling stage names from the active organism."""
