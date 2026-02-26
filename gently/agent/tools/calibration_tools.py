@@ -1,8 +1,8 @@
 """
-Hardware Control Tools
+Calibration Tools
 
-Tools for controlling microscope hardware including stage movement,
-LED control, calibration, and image acquisition.
+Tools for microscope piezo-galvo calibration including adaptive focus sweeps,
+binary edge search, and full/fast calibration routines.
 """
 
 from typing import Dict, List, Optional, Tuple
@@ -13,160 +13,15 @@ import asyncio
 import numpy as np
 
 from ..tool_registry import tool, ToolCategory, ToolExample
-from ..tool_helpers import require_copilot, get_embryo_or_error
+from ..tool_helpers import get_embryo_or_error
 from ..state import CalibrationPrior
-from gently.coordinates import stage_to_pixel_position, get_um_per_pixel
 from gently.analysis.core import AdaptiveSweepState, FitFunction, fit_focus_curve
 from gently.visualization.plots import (
     generate_focus_curve_plot,
     generate_calibration_summary_plot,
     generate_edge_detection_plot,
 )
-
-
-@tool(
-    name="move_to_embryo",
-    description="""Move the XY stage to a specific embryo's stored position. The embryo must have been detected and have a valid stage_position.
-Use when user says "go to embryo X", "move to embryo X", or before imaging a specific embryo.
-This only moves XY - piezo/galvo are controlled separately during acquisition. Movement takes ~0.5 seconds.""",
-    category=ToolCategory.MOVEMENT,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Go to embryo 1", {"embryo_id": "embryo_1"}),
-        ToolExample("Move to embryo 3", {"embryo_id": "embryo_3"}),
-    ],
-)
-async def move_to_embryo(embryo_id: str, context: Dict) -> str:
-    """Move stage to embryo position"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot:
-        return "Error: No copilot context"
-
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
-    if err:
-        return err
-
-    if not embryo.stage_position:
-        return f"Embryo '{embryo_id}' has no stored position. Run calibration first."
-
-    try:
-        x = embryo.stage_position.get('x', 0)
-        y = embryo.stage_position.get('y', 0)
-        await client.move_to_position(x, y)
-
-        return f"Moved to {embryo_id}\nPosition: ({x:.2f}, {y:.2f}) um"
-
-    except Exception as e:
-        import traceback
-        return f"Error moving to embryo: {str(e)}\n{traceback.format_exc()}"
-
-
-@tool(
-    name="get_stage_position",
-    description="""Get the current XY stage position in micrometers. Returns the real-time position from the hardware.
-Use when user asks "where is the stage?", "current position?", or when you need to know the microscope's current location.
-This reads from hardware - different from embryo stored positions which are in the experiment data.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Where is the stage?", {}),
-        ToolExample("Current XY position?", {}),
-    ],
-)
-async def get_stage_position(context: Dict) -> str:
-    """Get current stage position"""
-    client = context.get('client')
-
-    if not client:
-        return "Error: No microscope client connected"
-
-    try:
-        pos = await client.get_stage_position()
-        return f"Current stage position: X={pos[0]:.1f} µm, Y={pos[1]:.1f} µm"
-
-    except Exception as e:
-        return f"Error reading stage position: {str(e)}"
-
-
-@tool(
-    name="move_stage",
-    description="""Move the XY stage to specific coordinates in micrometers.
-Use when user wants to move to arbitrary coordinates (e.g., "move to x=1000, y=500", "move stage to 1200, -600").
-For moving to a specific embryo, use move_to_embryo instead.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Move to x=1000, y=500", {"x": 1000, "y": 500}),
-        ToolExample("Move stage to coordinates 1200, -600", {"x": 1200, "y": -600}),
-    ],
-)
-async def move_stage(
-    x: float,
-    y: float,
-    context: Dict = None
-) -> str:
-    """Move stage to arbitrary XY coordinates"""
-    client = context.get('client')
-
-    if not client:
-        return "Error: No microscope client connected"
-
-    try:
-        await client.move_to_position(x=x, y=y)
-        pos = await client.get_stage_position()
-        return f"Moved to X={pos[0]:.1f} µm, Y={pos[1]:.1f} µm"
-
-    except Exception as e:
-        return f"Error moving stage: {str(e)}"
-
-
-@tool(
-    name="set_led",
-    description="Set the LED illumination state",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-)
-async def set_led(state: str, context: Dict) -> str:
-    """Set LED state"""
-    client = context.get('client')
-
-    try:
-        result = await client.set_led(state)
-        if result.get('success'):
-            return f"LED set to '{state}'"
-        else:
-            return f"Error setting LED: {result.get('error', 'Unknown error')}"
-    except Exception as e:
-        return f"Error setting LED: {str(e)}"
-
-
-@tool(
-    name="get_led_status",
-    description="Get the current LED illumination status",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-)
-async def get_led_status(context: Dict) -> str:
-    """Get LED status"""
-    client = context.get('client')
-
-    try:
-        result = await client.get_led_status()
-        if result.get('success'):
-            current = result.get('current_state', 'unknown')
-            available = result.get('available_configs', [])
-            group = result.get('group_name', 'unknown')
-
-            return (f"LED Status:\n"
-                    f"  Current state: {current}\n"
-                    f"  ConfigGroup: {group}\n"
-                    f"  Available configs: {available}")
-        else:
-            return f"Error getting LED status: {result.get('error', 'Unknown error')}"
-    except Exception as e:
-        return f"Error getting LED status: {str(e)}"
+from .hardware_common import select_best_view, crop_to_embryo_roi, select_view_and_crop_roi
 
 
 async def _adaptive_focus_sweep(
@@ -720,20 +575,6 @@ async def binary_edge_search(
     from pathlib import Path
     from PIL import Image
 
-    # Helper to select best camera view
-    def select_best_view(image: np.ndarray) -> np.ndarray:
-        if image.ndim != 2:
-            return image
-        h, w = image.shape
-        if w < 100:
-            return image
-        mid_x = w // 2
-        left_view = image[:, :mid_x]
-        right_view = image[:, mid_x:]
-        if np.mean(left_view) >= np.mean(right_view):
-            return left_view
-        return right_view
-
     sign = -1 if direction == 'top' else 1
     low, high = 0.0, max_range * sign
     last_visible = 0.0
@@ -894,20 +735,6 @@ async def fast_calibrate_embryo(
     focus_offsets = [-2.0, 0.0, 2.0]
     focus_images = []
 
-    # Helper to select best view
-    def select_best_view(image: np.ndarray) -> np.ndarray:
-        if image.ndim != 2:
-            return image
-        h, w = image.shape
-        if w < 100:
-            return image
-        mid_x = w // 2
-        left_view = image[:, :mid_x]
-        right_view = image[:, mid_x:]
-        if np.mean(left_view) >= np.mean(right_view):
-            return left_view
-        return right_view
-
     for offset in focus_offsets:
         result = await client.capture_lightsheet_image(
             piezo_position=float(piezo_expected + offset),
@@ -1035,11 +862,11 @@ async def fast_calibrate_embryo(
 
     copilot._save_state()
 
-    msg = f"""✓ Fast calibration complete for {embryo_id}
+    msg = f"""\u2713 Fast calibration complete for {embryo_id}
   Mode: {'BOOTSTRAP' if is_bootstrap else 'FAST'}
-  Slope: {calibrated_slope:.2f} µm/°
-  Offset: {calibrated_offset:.2f} µm
-  Edges: {galvo_top:.3f}° to {galvo_bottom:.3f}° ({galvo_extent:.3f}° extent)
+  Slope: {calibrated_slope:.2f} \u00b5m/\u00b0
+  Offset: {calibrated_offset:.2f} \u00b5m
+  Edges: {galvo_top:.3f}\u00b0 to {galvo_bottom:.3f}\u00b0 ({galvo_extent:.3f}\u00b0 extent)
   Total exposures: {total_exposures}
   Recommended slices: {recommended_slices}"""
 
@@ -1053,18 +880,18 @@ async def fast_calibrate_embryo(
 This performs:
 1. Move to embryo XY position
 2. Use Claude vision to detect embryo Z extent (top/bottom edges) AND rate feature richness
-3. Select two feature-rich positions (score ≥6/10) that are ≥30% of embryo range apart
+3. Select two feature-rich positions (score \u22656/10) that are \u226530% of embryo range apart
 4. Run focus sweeps at selected positions:
-   - Fine-only (±5µm) if feature-rich positions found (faster, ~20 exposures per position)
+   - Fine-only (\u00b15\u00b5m) if feature-rich positions found (faster, ~20 exposures per position)
    - Adaptive coarse+fine if fallback positions used (~30-40 exposures per position)
-5. FFT bandpass scoring with Gaussian fit (R² ≥ 0.75 threshold)
+5. FFT bandpass scoring with Gaussian fit (R\u00b2 \u2265 0.75 threshold)
 6. 2-point linear fit to establish piezo = slope*galvo + offset
 7. Store calibration including volume acquisition parameters
 
 Use after detection to prepare an embryo for volume acquisition. Takes ~2-4 minutes per embryo.
 
 The z_buffer_um parameter controls how much empty space is captured above and below the embryo.
-Default is 15µm. Increase for more context (useful for segmentation), decrease for faster acquisition.""",
+Default is 15\u00b5m. Increase for more context (useful for segmentation), decrease for faster acquisition.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
@@ -1105,75 +932,6 @@ async def calibrate_embryo(
     if err:
         return err
 
-    # Helper to select best camera view from dual-view diSPIM image
-    def select_best_view(image: np.ndarray) -> np.ndarray:
-        """Select brighter half from dual-view image (View A or B)"""
-        if image.ndim != 2:
-            return image
-        h, w = image.shape
-        if w < 100:  # Already single view or too small
-            return image
-        mid_x = w // 2
-        left_view = image[:, :mid_x]
-        right_view = image[:, mid_x:]
-        # Select view with higher mean intensity (better signal)
-        if np.mean(left_view) >= np.mean(right_view):
-            return left_view
-        return right_view
-
-    # Helper to detect and crop to embryo ROI for focus scoring
-    def crop_to_embryo_roi(image: np.ndarray, padding_percent: float = 20.0) -> np.ndarray:
-        """
-        Detect embryo in image and crop to ROI.
-        Returns cropped image for more accurate focus scoring.
-        """
-        try:
-            from scipy import ndimage
-
-            # Threshold to find embryo
-            threshold = np.percentile(image, 75)
-            mask = image > threshold
-
-            # Label connected components
-            labeled, num_features = ndimage.label(mask)
-            if num_features == 0:
-                return image  # No embryo found, return full image
-
-            # Find largest component
-            sizes = ndimage.sum(mask, labeled, range(1, num_features + 1))
-            largest_label = np.argmax(sizes) + 1
-            embryo_mask = labeled == largest_label
-
-            # Get bounding box
-            coords = np.argwhere(embryo_mask)
-            if len(coords) < 100:  # Too small, probably noise
-                return image
-
-            y_min, x_min = coords.min(axis=0)
-            y_max, x_max = coords.max(axis=0)
-
-            # Add padding
-            h, w = image.shape
-            y_pad = int((y_max - y_min) * padding_percent / 100)
-            x_pad = int((x_max - x_min) * padding_percent / 100)
-
-            y1 = max(0, y_min - y_pad)
-            x1 = max(0, x_min - x_pad)
-            y2 = min(h, y_max + y_pad + 1)
-            x2 = min(w, x_max + x_pad + 1)
-
-            cropped = image[y1:y2, x1:x2]
-            return cropped
-
-        except Exception:
-            return image  # Fallback to full image
-
-    # Wrapper that does view selection + ROI cropping
-    def select_view_and_crop_roi(image: np.ndarray) -> np.ndarray:
-        """Select best view and crop to embryo ROI for focus scoring"""
-        view = select_best_view(image)
-        return crop_to_embryo_roi(view)
-
     # Get session-level calibration prior for cross-embryo learning
     session_prior = copilot.experiment.calibration_prior
 
@@ -1182,16 +940,16 @@ async def calibrate_embryo(
     if session_prior.num_calibrations > 0 and session_prior.r_squared_mean >= 0.75:
         HEURISTIC_SLOPE = session_prior.slope_um_per_deg
         HEURISTIC_OFFSET = session_prior.offset_um
-        print(f"  Using session prior: {HEURISTIC_SLOPE:.1f} µm/deg, offset {HEURISTIC_OFFSET:.1f} µm")
-        print(f"    Prior from {session_prior.num_calibrations} embryo(s), R²={session_prior.r_squared_mean:.3f}")
+        print(f"  Using session prior: {HEURISTIC_SLOPE:.1f} \u00b5m/deg, offset {HEURISTIC_OFFSET:.1f} \u00b5m")
+        print(f"    Prior from {session_prior.num_calibrations} embryo(s), R\u00b2={session_prior.r_squared_mean:.3f}")
     elif embryo.calibration and embryo.calibration.get('slope_um_per_deg'):
         HEURISTIC_SLOPE = embryo.calibration['slope_um_per_deg']
         HEURISTIC_OFFSET = embryo.calibration.get('offset_um', 0.0)
-        print(f"  Using previous embryo calibration: {HEURISTIC_SLOPE:.1f} µm/deg, offset {HEURISTIC_OFFSET:.1f} µm")
+        print(f"  Using previous embryo calibration: {HEURISTIC_SLOPE:.1f} \u00b5m/deg, offset {HEURISTIC_OFFSET:.1f} \u00b5m")
     else:
         HEURISTIC_SLOPE = 100.0  # Default empirical value
         HEURISTIC_OFFSET = 0.0
-        print(f"  Using default heuristic: {HEURISTIC_SLOPE:.1f} µm/deg")
+        print(f"  Using default heuristic: {HEURISTIC_SLOPE:.1f} \u00b5m/deg")
 
     # Track total exposures during calibration
     total_exposures = 0
@@ -1238,7 +996,7 @@ async def calibrate_embryo(
             try:
                 # Claude now returns (visible, feature_score, description)
                 visible, feature_score, description = await claude_vision.detect_embryo_presence(temp_path)
-                print(f"    galvo={galvo_pos:+.3f}°: {'VISIBLE' if visible else 'EMPTY'} (features={feature_score}/10) - {description[:40]}...")
+                print(f"    galvo={galvo_pos:+.3f}\u00b0: {'VISIBLE' if visible else 'EMPTY'} (features={feature_score}/10) - {description[:40]}...")
 
                 # Record for optimal focus position selection
                 edge_detection_data.append({
@@ -1272,7 +1030,7 @@ async def calibrate_embryo(
             # Use provided galvo positions or defaults
             detected_top = galvo_top if galvo_top is not None else -0.15
             detected_bottom = galvo_bottom if galvo_bottom is not None else 0.15
-            print(f"\n  Skipping edge detection, using galvo range: {detected_top:.3f}° to {detected_bottom:.3f}°")
+            print(f"\n  Skipping edge detection, using galvo range: {detected_top:.3f}\u00b0 to {detected_bottom:.3f}\u00b0")
         else:
             print(f"\n  Phase 1: Detecting embryo Z extent with Claude vision...")
 
@@ -1284,7 +1042,7 @@ async def calibrate_embryo(
                 if visible:
                     detected_top = galvo
                 else:
-                    print(f"    → Embryo disappeared at galvo={galvo:.3f}°")
+                    print(f"    \u2192 Embryo disappeared at galvo={galvo:.3f}\u00b0")
                     break
 
             # Detect BOTTOM edge (sweep from center toward positive)
@@ -1295,13 +1053,13 @@ async def calibrate_embryo(
                 if visible:
                     detected_bottom = galvo
                 else:
-                    print(f"    → Embryo disappeared at galvo={galvo:.3f}°")
+                    print(f"    \u2192 Embryo disappeared at galvo={galvo:.3f}\u00b0")
                     break
 
             print(f"\n  Detected embryo extent:")
-            print(f"    Top edge: galvo={detected_top:.3f}°")
-            print(f"    Bottom edge: galvo={detected_bottom:.3f}°")
-            print(f"    Range: {detected_bottom - detected_top:.3f}° (~{(detected_bottom - detected_top) * 100:.0f}µm)")
+            print(f"    Top edge: galvo={detected_top:.3f}\u00b0")
+            print(f"    Bottom edge: galvo={detected_bottom:.3f}\u00b0")
+            print(f"    Range: {detected_bottom - detected_top:.3f}\u00b0 (~{(detected_bottom - detected_top) * 100:.0f}\u00b5m)")
 
         # === PHASE 2: SELECT OPTIMAL FOCUS POSITIONS ===
         # Use Claude's feature richness scores to find best positions for calibration
@@ -1346,17 +1104,17 @@ async def calibrate_embryo(
                     use_fine_only = True  # Feature-rich positions, use fine-only sweep
 
                     print(f"\n  Optimal focus positions (selected by Claude feature richness):")
-                    print(f"    Position 1: galvo={calib_top:.3f}° (features={score_top}/10)")
-                    print(f"    Position 2: galvo={calib_bottom:.3f}° (features={score_bottom}/10)")
+                    print(f"    Position 1: galvo={calib_top:.3f}\u00b0 (features={score_top}/10)")
+                    print(f"    Position 2: galvo={calib_bottom:.3f}\u00b0 (features={score_bottom}/10)")
                     print(f"    Separation: {actual_separation:.0f}% of embryo range")
-                    print(f"    → Using FINE-ONLY focus sweeps (heuristic is good enough)")
+                    print(f"    \u2192 Using FINE-ONLY focus sweeps (heuristic is good enough)")
                 else:
                     # Only one good position found, fall back to inset
                     calib_top = detected_top + galvo_range * inset_fraction
                     calib_bottom = detected_bottom - galvo_range * inset_fraction
                     print(f"\n  Calibration positions (fallback - only 1 feature-rich position found):")
-                    print(f"    Top calibration: galvo={calib_top:.3f}°")
-                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+                    print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
+                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
             else:
                 # Not enough good positions (score >= 6), try positions with any visibility
                 visible_positions = [p for p in edge_detection_data if p['visible']]
@@ -1378,8 +1136,8 @@ async def calibrate_embryo(
                         else:
                             calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
                         print(f"\n  Calibration positions (moderate features, using adaptive sweep):")
-                        print(f"    Top: galvo={calib_top:.3f}° (features={calib_pos_1['feature_score']}/10)")
-                        print(f"    Bottom: galvo={calib_bottom:.3f}° (features={calib_pos_2['feature_score']}/10)")
+                        print(f"    Top: galvo={calib_top:.3f}\u00b0 (features={calib_pos_1['feature_score']}/10)")
+                        print(f"    Bottom: galvo={calib_bottom:.3f}\u00b0 (features={calib_pos_2['feature_score']}/10)")
                     else:
                         calib_top = detected_top + galvo_range * inset_fraction
                         calib_bottom = detected_bottom - galvo_range * inset_fraction
@@ -1387,15 +1145,15 @@ async def calibrate_embryo(
                     calib_top = detected_top + galvo_range * inset_fraction
                     calib_bottom = detected_bottom - galvo_range * inset_fraction
                     print(f"\n  Calibration positions (fallback to {inset_fraction*100:.0f}% inset):")
-                    print(f"    Top calibration: galvo={calib_top:.3f}°")
-                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+                    print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
+                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
         else:
             # No edge detection data, use traditional inset method
             calib_top = detected_top + galvo_range * inset_fraction
             calib_bottom = detected_bottom - galvo_range * inset_fraction
             print(f"\n  Calibration positions (interior, {inset_fraction*100:.0f}% inset from edges):")
-            print(f"    Top calibration: galvo={calib_top:.3f}°")
-            print(f"    Bottom calibration: galvo={calib_bottom:.3f}°")
+            print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
+            print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
 
         # === PHASE 3: FOCUS SWEEPS AT CALIBRATION POSITIONS ===
         # Use fine-only if we found feature-rich positions, otherwise adaptive sweep
@@ -1442,7 +1200,7 @@ async def calibrate_embryo(
 
             # Check for sweep failure
             if result_dict['r_squared'] < 0.5:
-                print(f"  Warning: Low confidence for {galvo_name} (R²={result_dict['r_squared']:.3f})")
+                print(f"  Warning: Low confidence for {galvo_name} (R\u00b2={result_dict['r_squared']:.3f})")
 
         # === PHASE 4: CALCULATE 2-POINT LINEAR CALIBRATION ===
         g_top = results['top']['galvo']
@@ -1500,7 +1258,7 @@ async def calibrate_embryo(
             r_squared=avg_r_squared,
             extent_deg=extent_deg,
         )
-        print(f"\n  Updated session prior (now {session_prior.num_calibrations} embryo(s), avg R²={session_prior.r_squared_mean:.3f})")
+        print(f"\n  Updated session prior (now {session_prior.num_calibrations} embryo(s), avg R\u00b2={session_prior.r_squared_mean:.3f})")
 
         # Add to focus history
         for name in ['top', 'bottom']:
@@ -1553,16 +1311,16 @@ async def calibrate_embryo(
         copilot._mark_significant_action("calibration")
 
         return (
-            f"✓ Calibrated {embryo_id}\n"
-            f"  Embryo extent: galvo {detected_top:.3f}° to {detected_bottom:.3f}° "
-            f"(~{(detected_bottom - detected_top) * 100:.0f}µm)\n"
-            f"  Slope: {slope:.2f} µm/deg\n"
-            f"  Offset: {offset:.2f} µm (piezo at galvo=0)\n"
-            f"  Top: galvo={g_top:.3f}° → piezo={p_top:.1f}µm\n"
-            f"  Bottom: galvo={g_bottom:.3f}° → piezo={p_bottom:.1f}µm\n"
-            f"  Volume params: galvo={galvo_center:.3f}°±{galvo_amplitude:.3f}°, "
-            f"piezo={piezo_center:.1f}µm±{piezo_amplitude:.1f}µm\n"
-            f"  Z buffer: ±{z_buffer_um:.0f}µm above/below embryo"
+            f"\u2713 Calibrated {embryo_id}\n"
+            f"  Embryo extent: galvo {detected_top:.3f}\u00b0 to {detected_bottom:.3f}\u00b0 "
+            f"(~{(detected_bottom - detected_top) * 100:.0f}\u00b5m)\n"
+            f"  Slope: {slope:.2f} \u00b5m/deg\n"
+            f"  Offset: {offset:.2f} \u00b5m (piezo at galvo=0)\n"
+            f"  Top: galvo={g_top:.3f}\u00b0 \u2192 piezo={p_top:.1f}\u00b5m\n"
+            f"  Bottom: galvo={g_bottom:.3f}\u00b0 \u2192 piezo={p_bottom:.1f}\u00b5m\n"
+            f"  Volume params: galvo={galvo_center:.3f}\u00b0\u00b1{galvo_amplitude:.3f}\u00b0, "
+            f"piezo={piezo_center:.1f}\u00b5m\u00b1{piezo_amplitude:.1f}\u00b5m\n"
+            f"  Z buffer: \u00b1{z_buffer_um:.0f}\u00b5m above/below embryo"
         )
 
     except Exception as e:
@@ -1577,7 +1335,7 @@ Uses Claude vision to detect embryo Z extent for each embryo, then runs focus sw
 Use after detecting multiple embryos.
 
 The z_buffer_um parameter controls how much empty space is captured above and below each embryo.
-Default is 15µm.""",
+Default is 15\u00b5m.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
@@ -1625,707 +1383,3 @@ async def calibrate_all_embryos(
         results.append(f"{eid}: {summary}")
 
     return f"Calibration complete for {len(ids_to_calibrate)} embryo(s):\n" + "\n".join(results)
-
-
-@tool(
-    name="acquire_volume",
-    description="""Acquire a single 3D lightsheet volume for a specific embryo. Moves to embryo position and uses its calibration data.
-Use when user wants a full 3D stack of an embryo (e.g., "acquire volume of embryo 1", "take a 3D image").
-Embryo must be calibrated first. Default 50 slices at 10ms exposure takes ~2.5 seconds. Turns laser on during acquisition.
-
-The z_buffer_um parameter can override the calibrated Z range to add more empty space above/below the embryo.
-This is useful for segmentation without needing to recalibrate. Set to None to use calibrated range.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Acquire volume of embryo 1", {"embryo_id": "embryo_1"}),
-        ToolExample("Take a 3D image of embryo 2 with 80 slices", {"embryo_id": "embryo_2", "num_slices": 80}),
-        ToolExample("Acquire with more Z padding", {"embryo_id": "embryo_1", "z_buffer_um": 20.0}),
-    ],
-)
-async def acquire_volume(
-    embryo_id: str,
-    num_slices: int = 50,
-    exposure_ms: float = 10.0,
-    z_buffer_um: float = None,
-    context: Dict = None
-) -> str:
-    """Acquire single volume - moves to embryo first, uses calibration"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot:
-        return "Error: No copilot context"
-
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
-    if err:
-        return err
-
-    try:
-        # Move to embryo position first
-        pos = embryo.stage_position
-        if pos and pos.get('x') is not None and pos.get('y') is not None:
-            await client.move_to_position(pos['x'], pos['y'])
-
-        # Get calibration parameters (use defaults if not calibrated)
-        cal = embryo.calibration or {}
-        galvo_amplitude = cal.get('galvo_amplitude', 0.5)
-        galvo_center = cal.get('galvo_center', 0.0)
-        piezo_amplitude = cal.get('piezo_amplitude', 25.0)
-        piezo_center = cal.get('piezo_center', 50.0)
-
-        # Override Z range if z_buffer_um is specified
-        z_buffer_applied = None
-        if z_buffer_um is not None and cal:
-            # Get the original embryo extent from calibration
-            calibrated_buffer = cal.get('z_buffer_um', 5.0)  # Old default was 5µm
-            slope = cal.get('slope_um_per_deg', 100.0)
-
-            # Calculate additional buffer needed
-            additional_buffer_um = z_buffer_um - calibrated_buffer
-            if additional_buffer_um > 0:
-                # Convert µm to degrees and add to amplitude
-                additional_buffer_deg = additional_buffer_um / 100.0
-                galvo_amplitude = galvo_amplitude + additional_buffer_deg
-                # Piezo amplitude scales with slope
-                piezo_amplitude = piezo_amplitude + (additional_buffer_um * abs(slope) / 100.0)
-                z_buffer_applied = z_buffer_um
-
-        result = await client.acquire_volume(
-            num_slices=num_slices,
-            exposure_ms=exposure_ms,
-            galvo_amplitude=galvo_amplitude,
-            galvo_center=galvo_center,
-            piezo_amplitude=piezo_amplitude,
-            piezo_center=piezo_center
-        )
-
-        if result.get('success'):
-            volume = result.get('volume')
-            timepoint = embryo.timepoints_acquired  # Current timepoint (0-indexed)
-
-            # Increment timepoints acquired
-            embryo.timepoints_acquired += 1
-
-            # Record light exposure (num_slices frames at exposure_ms each)
-            embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
-
-            # Store in GentlyStore (dual-write during transition)
-            if copilot.store and copilot.session_id:
-                try:
-                    from pathlib import Path as _Path
-                    pos = embryo.stage_position or {}
-                    copilot.store.register_embryo(
-                        copilot.session_id, embryo_id,
-                        position_x=pos.get('x'), position_y=pos.get('y'),
-                        calibration=embryo.calibration,
-                    )
-                    acq_metadata = {
-                        "num_slices": num_slices,
-                        "exposure_ms": exposure_ms,
-                        "interval_seconds": embryo.interval_seconds,
-                        "acquisition_mode": embryo.acquisition_mode,
-                        "calibration": {
-                            "galvo_amplitude": galvo_amplitude,
-                            "galvo_center": galvo_center,
-                            "piezo_amplitude": piezo_amplitude,
-                            "piezo_center": piezo_center,
-                        },
-                    }
-                    volume_path_ref = result.get('volume_path')
-                    if volume_path_ref is not None:
-                        copilot.store.register_volume(
-                            copilot.session_id, embryo_id, timepoint,
-                            incoming_path=_Path(volume_path_ref),
-                            metadata=acq_metadata,
-                        )
-                    elif volume is not None:
-                        copilot.store.put_volume(
-                            copilot.session_id, embryo_id, timepoint, volume,
-                            metadata=acq_metadata,
-                        )
-                except Exception as store_err:
-                    print(f"  Warning: GentlyStore write failed (non-fatal): {store_err}")
-
-            # Push max projection to viz server
-            if copilot.viz_server and volume is not None:
-                try:
-                    # Create max intensity projection (View A only)
-                    vol = volume
-                    # If 4D (Views, Z, Y, X), select View A (index 0)
-                    if vol.ndim == 4:
-                        vol = vol[0]  # View A
-                    max_proj = np.max(vol, axis=0)
-                    # Include session_id in UID to ensure uniqueness across sessions
-                    session_prefix = f"{copilot.session_id[:8]}_" if copilot.session_id else ""
-                    copilot.push_viz(
-                        array=max_proj,
-                        uid=f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}",
-                        data_type="volume_projection",
-                        metadata={
-                            'embryo_id': embryo_id,
-                            'timepoint': timepoint,
-                            'shape': list(volume.shape) if hasattr(volume, 'shape') else None,
-                            'num_slices': num_slices,
-                            'exposure_ms': exposure_ms,
-                        }
-                    )
-                except Exception as viz_err:
-                    print(f"  Warning: Failed to push volume to viz: {viz_err}")
-
-            # Build response
-            shape_str = str(result.get('shape', 'unknown'))
-            z_info = f" (z_buffer: {z_buffer_applied}µm)" if z_buffer_applied else ""
-            if saved_path:
-                return f"Acquired volume for {embryo.id}{z_info}\nShape: {shape_str}\nSaved: {saved_path}"
-            else:
-                return f"Acquired volume for {embryo.id}{z_info}\nShape: {shape_str}\n(Volume not saved to disk)"
-        else:
-            return f"Acquisition failed: {result.get('error', 'Unknown error')}"
-
-    except Exception as e:
-        return f"Error acquiring volume: {str(e)}"
-
-
-@tool(
-    name="view_image",
-    description="""Capture and display the current bottom camera widefield image. Shows what's visible at the current stage position.
-Use when user says "show me the view", "take a picture", "what does it look like?", or to check sample positioning.
-This is the widefield/brightfield camera looking up at the sample - good for seeing embryo outlines and overall positioning.
-Image is automatically saved to camera_captures/ folder.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Show me the current view", {}),
-        ToolExample("What does the sample look like?", {}),
-    ],
-)
-async def view_image(
-    title: str = "Bottom Camera Image",
-    exposure_ms: float = None,
-    show: bool = True,
-    show_embryos: bool = True,
-    context: Dict = None
-) -> str:
-    """Capture and display bottom camera image with embryo annotations"""
-    client = context.get('client')
-    copilot = context.get('copilot')
-
-    try:
-        image = await client.capture_bottom_image(exposure_ms=exposure_ms)
-
-        if image is None or image.shape == (100, 100):
-            return "Failed to capture image from bottom camera"
-
-        # Get current stage position for coordinate conversion
-        stage_pos = await client.get_stage_position()
-
-        # Prepare embryo annotations if requested
-        embryo_annotations = []
-        if show_embryos and copilot and copilot.experiment.embryos:
-            um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py
-            image_center_x = image.shape[1] / 2
-            image_center_y = image.shape[0] / 2
-
-            for embryo_id, embryo in copilot.experiment.embryos.items():
-                if embryo.stage_position:
-                    # Convert stage position to pixel position using centralized function
-                    emb_x = embryo.stage_position.get('x', 0)
-                    emb_y = embryo.stage_position.get('y', 0)
-                    pixel_x, pixel_y = stage_to_pixel_position(
-                        stage_x=emb_x,
-                        stage_y=emb_y,
-                        current_stage_x=stage_pos[0],
-                        current_stage_y=stage_pos[1],
-                        image_center_x=image_center_x,
-                        image_center_y=image_center_y,
-                        um_per_pixel=um_per_pixel
-                    )
-
-                    embryo_annotations.append({
-                        'embryo_id': embryo_id,
-                        'pixel_x': pixel_x,
-                        'pixel_y': pixel_y,
-                        'label': embryo.user_label or embryo_id
-                    })
-
-        if show:
-            from datetime import datetime
-            from pathlib import Path
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            save_path = f"camera_captures/bottom_camera_{timestamp}.jpg"
-            Path("camera_captures").mkdir(exist_ok=True)
-
-            view_result = await client.view_image(
-                image=image,
-                title=title,
-                save_path=save_path,
-                show=True,
-                embryo_annotations=embryo_annotations if embryo_annotations else None
-            )
-            num_visible = len([a for a in embryo_annotations
-                              if 0 <= a['pixel_x'] < image.shape[1] and 0 <= a['pixel_y'] < image.shape[0]])
-            annotation_msg = f"\nShowing {num_visible} embryo(s) in view" if embryo_annotations else ""
-            return f"Captured bottom camera image ({image.shape[0]}x{image.shape[1]})\nSaved to: {save_path}{annotation_msg}"
-        else:
-            return f"Captured bottom camera image ({image.shape[0]}x{image.shape[1]})"
-
-    except Exception as e:
-        return f"Error capturing image: {str(e)}"
-
-
-@tool(
-    name="capture_lightsheet",
-    description="""Capture a single 2D lightsheet fluorescence image at specified piezo/galvo position. Uses 50ms exposure by default.
-Use when user says "take a lightsheet image", "lightsheet snap", or wants to see fluorescence at a specific Z position.
-This is a COMPLETE action - do NOT follow up with acquire_volume unless user explicitly asks for a 3D volume.
-
-IMPORTANT: Always pass embryo_id when capturing for an embryo. This ensures the image is captured at the correct
-focus position from the embryo's focus_history (set by fine_focus). Without embryo_id, focus may be incorrect.
-
-The piezo position is determined by priority:
-1. Explicit piezo_position parameter (if provided)
-2. Embryo's focus_history for the given galvo_position (if embryo_id provided and has focus data)
-3. Hardware query fallback (unreliable, may return 0)
-
-If embryo has no focus data for the requested galvo_position, consider running fine_focus first.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Take a lightsheet image of embryo 1", {"embryo_id": "embryo_1"}),
-        ToolExample("Lightsheet snap at specific piezo", {"embryo_id": "embryo_1", "piezo_position": 50.0}),
-        ToolExample("Capture at different galvo", {"embryo_id": "embryo_1", "galvo_position": 0.5}),
-    ],
-)
-async def capture_lightsheet(
-    piezo_position: float = None,
-    galvo_position: float = 0.0,
-    embryo_id: str = None,
-    show: bool = True,
-    context: Dict = None
-) -> str:
-    """Capture and optionally display a single lightsheet image"""
-    client = context.get('client')
-    copilot = context.get('copilot')
-
-    try:
-        embryo = None
-        # If embryo_id specified, get the embryo and move to its position
-        if embryo_id and copilot:
-            embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
-            if embryo and embryo.stage_position:
-                # Move stage to embryo's position
-                await client.move_to_position(
-                    x=embryo.stage_position['x'],
-                    y=embryo.stage_position['y']
-                )
-
-        # Determine piezo position for best focus
-        # Priority: explicit param > embryo focus history > hardware query
-        focus_source = None
-        if piezo_position is None:
-            # Check embryo's focus history first (from fine_focus)
-            if embryo and embryo.focus_history:
-                    # Try interpolation if we have 2+ points
-                    fit = embryo.get_piezo_galvo_fit()
-                    if fit is not None:
-                        slope, intercept = fit
-                        piezo_position = slope * galvo_position + intercept
-                        focus_source = "interpolated"
-                    else:
-                        # Single point or exact match
-                        piezo_position = embryo.get_focus_at_galvo(galvo_position)
-                        if piezo_position is not None:
-                            focus_source = "focus_history"
-
-            # Fall back to hardware query (unreliable)
-            if piezo_position is None:
-                piezo_position = await client.get_piezo_position()
-                focus_source = "hardware_query"
-
-        result = await client.capture_lightsheet_image(
-            piezo_position=piezo_position,
-            galvo_position=galvo_position
-        )
-
-        if result.get('success'):
-            image = result.get('image')
-            run_uid = result.get('run_uid', 'unknown')
-
-            # Update embryo's last_imaged and exposure tracking if specified
-            if embryo:
-                # Default lightsheet exposure is 50ms
-                embryo.record_exposure(exposure_ms=50.0, num_frames=1)
-
-            # Build focus info string
-            focus_info = ""
-            if focus_source == "interpolated":
-                focus_info = " (focus: interpolated from calibration)"
-            elif focus_source == "focus_history":
-                focus_info = " (focus: from fine_focus)"
-            elif focus_source == "hardware_query":
-                focus_info = " (focus: hardware query - may be inaccurate)"
-
-            if image is not None and show:
-                # Display the image
-                from datetime import datetime
-                from pathlib import Path
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                save_path = f"lightsheet_captures/lightsheet_{timestamp}.jpg"
-                Path("lightsheet_captures").mkdir(exist_ok=True)
-
-                view_result = await client.view_image(
-                    image=image,
-                    title=f"Lightsheet: piezo={piezo_position:.2f}um, galvo={galvo_position}V",
-                    save_path=save_path,
-                    show=True
-                )
-                return f"✓ Captured lightsheet at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info}\nSaved to: {save_path}"
-            elif image is None:
-                return f"✓ Lightsheet captured at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info} (image not displayed)\nRun UID: {run_uid}"
-            else:
-                return f"✓ Captured lightsheet at piezo={piezo_position:.2f}μm, galvo={galvo_position}V{focus_info}"
-        else:
-            return f"Failed: {result.get('error', 'Unknown error')}"
-
-    except Exception as e:
-        return f"Error capturing lightsheet: {str(e)}"
-
-
-@tool(
-    name="batch_lightsheet",
-    description="""Capture lightsheet images from ALL embryos and display them together in a single napari viewer.
-Use when user says "lightsheet all embryos", "capture all embryos", "show me all embryos in lightsheet".
-Moves to each embryo, captures a lightsheet image, then opens napari with all images as separate layers.
-Much more efficient than capturing one at a time.""",
-    category=ToolCategory.HARDWARE,
-    requires_microscope=True,
-    examples=[
-        ToolExample("Take lightsheet of all embryos", {}),
-        ToolExample("Capture all embryos", {}),
-    ],
-)
-async def batch_lightsheet(
-    galvo_position: float = 0.0,
-    context: Dict = None
-) -> str:
-    """Capture lightsheet images from all embryos and show in single napari viewer"""
-    copilot = context.get('copilot')
-    client = context.get('client')
-
-    if not copilot or not client:
-        return "Error: Copilot or microscope not available"
-
-    if not copilot.experiment.embryos:
-        return "No embryos in experiment. Run detect_embryos first."
-
-    # Collect images from all embryos
-    images = []
-    embryo_ids = []
-    errors = []
-
-    active_embryos = [
-        (eid, emb) for eid, emb in copilot.experiment.embryos.items()
-        if not emb.should_skip
-    ]
-
-    if not active_embryos:
-        return "No active embryos to capture. All embryos are marked as skipped."
-
-    print(f"  Capturing lightsheet from {len(active_embryos)} embryos...")
-
-    for embryo_id, embryo in active_embryos:
-        try:
-            # Move to embryo position
-            if embryo.stage_position:
-                x = embryo.stage_position.get('x', 0)
-                y = embryo.stage_position.get('y', 0)
-                print(f"  Moving to {embryo_id} at ({x:.1f}, {y:.1f})...")
-                await client.move_to_position(x, y)
-                # Wait for stage to settle
-                await asyncio.sleep(0.5)
-
-            # Get piezo and galvo positions from calibration or defaults
-            piezo_position = 4.0  # default for galvo=0
-            embryo_galvo = galvo_position  # use parameter as default
-
-            if embryo.calibration:
-                # Get piezo center
-                if embryo.calibration.get('piezo_center'):
-                    piezo_position = embryo.calibration['piezo_center']
-                elif embryo.calibration.get('focus_position'):
-                    piezo_position = embryo.calibration['focus_position']
-
-                # Get galvo center (critical for light sheet alignment)
-                if embryo.calibration.get('galvo_center'):
-                    embryo_galvo = embryo.calibration['galvo_center']
-
-            # Capture lightsheet
-            print(f"  Capturing {embryo_id} at piezo={piezo_position:.1f}μm, galvo={embryo_galvo:.2f}...")
-            result = await client.capture_lightsheet_image(
-                piezo_position=piezo_position,
-                galvo_position=embryo_galvo
-            )
-
-            if result.get('success') and result.get('image') is not None:
-                images.append(result['image'])
-                embryo_ids.append(embryo_id)
-                # Track light exposure (default 50ms)
-                embryo.record_exposure(exposure_ms=50.0, num_frames=1)
-            else:
-                errors.append(f"{embryo_id}: {result.get('error', 'no image')}")
-
-        except Exception as e:
-            errors.append(f"{embryo_id}: {str(e)}")
-
-    if not images:
-        return f"Failed to capture any images. Errors: {'; '.join(errors)}"
-
-    # Save images
-    from datetime import datetime
-    from pathlib import Path
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    save_dir = Path("lightsheet_captures") / f"batch_{timestamp}"
-    save_dir.mkdir(parents=True, exist_ok=True)
-
-    for i, (img, eid) in enumerate(zip(images, embryo_ids)):
-        import tifffile
-        save_path = save_dir / f"{eid}.tiff"
-        tifffile.imwrite(str(save_path), img)
-
-    print(f"  Saved {len(images)} images to {save_dir}")
-
-    # Open single napari viewer with all images as a stack
-    import napari
-    import numpy as np
-    print(f"  Opening napari with {len(images)} embryo images as stack...")
-
-    # Stack images into a single array for slider navigation
-    image_stack = np.stack(images, axis=0)
-
-    viewer = napari.Viewer(title=f"Batch Lightsheet - {len(images)} embryos")
-
-    # Add as single stack with slider (grayscale)
-    viewer.add_image(
-        image_stack,
-        name='Embryos',
-        colormap='gray',
-    )
-
-    # Print embryo ID mapping for reference
-    print("  Slider index → Embryo ID:")
-    for i, eid in enumerate(embryo_ids):
-        print(f"    {i}: {eid}")
-
-    napari.run()
-
-    # Summary
-    summary = f"✓ Captured {len(images)} embryos: {', '.join(embryo_ids)}"
-    if errors:
-        summary += f"\n⚠ Errors: {'; '.join(errors)}"
-    summary += f"\nSaved to: {save_dir}"
-
-    return summary
-
-
-@tool(
-    name="view_volume",
-    description="""Open a volume in napari for 3D visualization.
-Can open a volume by file path OR by embryo ID (opens latest volume or specific timepoint).
-Use when user says "open volume", "view volume", "show volume in napari", or "look at the 3D data".""",
-    category=ToolCategory.ANALYSIS,
-    requires_microscope=False,
-    examples=[
-        ToolExample("Open latest volume for embryo 2", {"embryo_id": "embryo_2"}),
-        ToolExample("Open specific timepoint", {"embryo_id": "embryo_2", "timepoint": 5}),
-        ToolExample("Open volume file", {"file_path": "D:/Gently/volumes/embryo_1_t0001.tif"}),
-    ],
-)
-async def view_volume(
-    embryo_id: str = None,
-    timepoint: int = None,
-    file_path: str = None,
-    context: Dict = None
-) -> str:
-    """Open a volume in napari for visualization"""
-    import napari
-    import tifffile
-    import numpy as np
-    from pathlib import Path
-
-    copilot, err = require_copilot(context)
-    if err:
-        return err
-
-    volume = None
-    volume_path = None
-    title = "Volume Viewer"
-
-    # Determine which volume to open
-    if file_path:
-        # Open from file path
-        volume_path = Path(file_path)
-        if not volume_path.exists():
-            return f"Error: File not found: {file_path}"
-        title = f"Volume: {volume_path.name}"
-
-    elif embryo_id:
-        # Get volume for embryo from GentlyStore
-        session_id = copilot.session_id
-
-        if timepoint is not None:
-            # Try to find specific timepoint via GentlyStore
-            volume_path = copilot.store.get_volume_path(session_id, embryo_id, timepoint)
-            if volume_path and volume_path.exists():
-                title = f"{embryo_id} - t{timepoint:04d}"
-            else:
-                # Check recent_images as fallback
-                embryo, err = get_embryo_or_error(copilot, embryo_id)
-                if err:
-                    return err
-                if embryo.recent_images:
-                    matching = [img for img in embryo.recent_images if img.timepoint == timepoint]
-                    if matching:
-                        volume_path = Path(matching[0].volume_path)
-                        title = f"{embryo_id} - t{timepoint:04d}"
-
-                if not volume_path or not volume_path.exists():
-                    # List available timepoints from store
-                    volumes = copilot.store.list_volumes(session_id, embryo_id)
-                    available = sorted([v['timepoint'] for v in volumes])
-                    return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
-        else:
-            # Find latest volume from store
-            volumes = copilot.store.list_volumes(session_id, embryo_id)
-            if not volumes:
-                return f"No volumes found for {embryo_id} in session {session_id}"
-
-            # Find highest timepoint
-            latest = max(volumes, key=lambda v: v['timepoint'])
-            latest_tp = latest['timepoint']
-            volume_path = copilot.store.get_volume_path(session_id, embryo_id, latest_tp)
-
-            title = f"{embryo_id} - t{latest_tp:04d}"
-
-    else:
-        return "Error: Specify either embryo_id or file_path"
-
-    # Load the volume
-    try:
-        volume = tifffile.imread(str(volume_path))
-        print(f"  Loaded volume: {volume.shape}, dtype={volume.dtype}")
-    except Exception as e:
-        return f"Error loading volume: {e}"
-
-    # Open in napari
-    print(f"  Opening napari viewer...")
-    viewer = napari.Viewer(title=title)
-
-    # Add volume with appropriate settings
-    viewer.add_image(
-        volume,
-        name='Volume',
-        colormap='gray',
-        rendering='mip',  # Maximum intensity projection for 3D
-    )
-
-    # Add scale bar info
-    viewer.scale_bar.visible = True
-    viewer.scale_bar.unit = "um"
-
-    napari.run()
-
-    return f"✓ Opened volume in napari: {volume_path.name} (shape: {volume.shape})"
-
-
-@tool(
-    name="list_volumes",
-    description="""List available volumes for an embryo or all embryos.
-Shows volume files with timepoints and file sizes. Scans the storage directory for all volumes (not just recent ones in memory).
-Use to see what data is available before viewing.""",
-    category=ToolCategory.ANALYSIS,
-    requires_microscope=False,
-    examples=[
-        ToolExample("List volumes for embryo 2", {"embryo_id": "embryo_2"}),
-        ToolExample("List all volumes", {}),
-    ],
-)
-async def list_volumes(
-    embryo_id: str = None,
-    context: Dict = None
-) -> str:
-    """List available volumes"""
-    copilot, err = require_copilot(context)
-    if err:
-        return err
-
-    session_id = copilot.session_id
-    lines = []
-
-    # Get volumes from GentlyStore
-    all_volumes_list = copilot.store.list_volumes(session_id, embryo_id)
-
-    # Group by embryo_id
-    all_volumes = {}  # embryo_id -> list of volume records
-    for vol in all_volumes_list:
-        eid = vol['embryo_id']
-        if eid not in all_volumes:
-            all_volumes[eid] = []
-        all_volumes[eid].append(vol)
-
-    # Sort by timepoint
-    for eid in all_volumes:
-        all_volumes[eid].sort(key=lambda x: x['timepoint'])
-
-    if embryo_id:
-        # List volumes for specific embryo
-        if embryo_id not in all_volumes:
-            return f"No volumes found for {embryo_id} in session {session_id}"
-
-        volumes = all_volumes[embryo_id]
-        lines.append(f"Volumes for {embryo_id}: {len(volumes)} file(s)")
-        lines.append(f"Session: {session_id}")
-        lines.append("")
-
-        for vol in volumes:
-            tp = vol['timepoint']
-            path = copilot.store.get_volume_path(session_id, embryo_id, tp)
-            if path and path.exists():
-                size_mb = path.stat().st_size / (1024 * 1024)
-                lines.append(f"  t{tp:04d}: {path.name} ({size_mb:.1f} MB)")
-            else:
-                lines.append(f"  t{tp:04d}: (file missing)")
-
-    else:
-        # List volumes for all embryos
-        if not all_volumes:
-            return f"No volumes found in session {session_id}"
-
-        total_files = sum(len(v) for v in all_volumes.values())
-        lines.append(f"Available volumes: {total_files} file(s) across {len(all_volumes)} embryo(s)")
-        lines.append(f"Session: {session_id}")
-
-        for eid in sorted(all_volumes.keys()):
-            volumes = all_volumes[eid]
-            timepoints = [v['timepoint'] for v in volumes]
-            tp_range = f"t{min(timepoints):04d}-t{max(timepoints):04d}" if len(timepoints) > 1 else f"t{timepoints[0]:04d}"
-
-            # Calculate total size
-            total_size = 0
-            for vol in volumes:
-                path = copilot.store.get_volume_path(session_id, eid, vol['timepoint'])
-                if path and path.exists():
-                    total_size += path.stat().st_size / (1024 * 1024)
-            lines.append(f"\n{eid}: {len(volumes)} volume(s) [{tp_range}] ({total_size:.1f} MB total)")
-
-            # Show last few timepoints
-            for vol in volumes[-3:]:
-                tp = vol['timepoint']
-                path = copilot.store.get_volume_path(session_id, eid, tp)
-                if path and path.exists():
-                    size_mb = path.stat().st_size / (1024 * 1024)
-                    lines.append(f"    t{tp:04d}: {size_mb:.1f} MB")
-            if len(volumes) > 3:
-                lines.append(f"    ... and {len(volumes) - 3} more")
-
-    return "\n".join(lines)
