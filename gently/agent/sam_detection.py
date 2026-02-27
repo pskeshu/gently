@@ -5,6 +5,7 @@ Extracts detection logic from test_sam_claude_hybrid_detection.py into reusable 
 Returns embryo positions (pixel + stage coordinates) for calibration workflow.
 """
 
+import logging
 import time
 import json
 import uuid
@@ -19,6 +20,9 @@ from typing import Dict, List, Tuple, Optional
 import os
 
 from gently.settings import settings
+
+logger = logging.getLogger(__name__)
+
 from gently.coordinates import (
     pixel_to_stage_position,
     get_um_per_pixel,
@@ -86,7 +90,7 @@ class SAMEmbryoDetector:
         if not Path(self.sam_checkpoint).exists():
             raise FileNotFoundError(f"SAM checkpoint not found: {self.sam_checkpoint}")
 
-        print(f"Loading SAM model: {self.sam_model_type} on {self.device}")
+        logger.info("Loading SAM model: %s on %s", self.sam_model_type, self.device)
         sam = sam_model_registry[self.sam_model_type](checkpoint=self.sam_checkpoint)
         sam.to(device=self.device)
 
@@ -102,7 +106,7 @@ class SAMEmbryoDetector:
         )
 
         self._predictor = SamPredictor(sam)
-        print("✓ SAM model loaded")
+        logger.info("SAM model loaded")
 
     def preprocess_image(self,
                          image: np.ndarray,
@@ -140,50 +144,50 @@ class SAMEmbryoDetector:
         np.ndarray
             Preprocessed 8-bit image with enhanced contrast
         """
-        print(f"  Preprocessing image (shape: {image.shape}, dtype: {image.dtype})...")
-        print(f"    Input range: {image.min()} - {image.max()}")
+        logger.debug("Preprocessing image (shape: %s, dtype: %s)...", image.shape, image.dtype)
+        logger.debug("Input range: %s - %s", image.min(), image.max())
 
         # Step 1: Percentile normalization (handles low dynamic range)
         # This stretches the narrow range (e.g., 84-354) to full 0-255
-        print(f"    Percentile normalization (2-98%)...")
+        logger.debug("Percentile normalization (2-98%%)...")
         p2, p98 = np.percentile(image, (2, 98))
         img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
-        print(f"    ✓ Normalized to 0-255")
+        logger.debug("Normalized to 0-255")
 
         # Step 2: Background subtraction with large morphological opening
         # Removes large-scale illumination variations
         if bg_kernel_size > 0:
-            print(f"    Background subtraction (kernel={bg_kernel_size})...")
+            logger.debug("Background subtraction (kernel=%d)...", bg_kernel_size)
             kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (bg_kernel_size, bg_kernel_size))
             background = cv2.morphologyEx(img_norm, cv2.MORPH_OPEN, kernel_bg)
             img_no_bg = cv2.subtract(img_norm, background)
             img_no_bg = cv2.normalize(img_no_bg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-            print(f"    ✓ Background subtracted")
+            logger.debug("Background subtracted")
         else:
             img_no_bg = img_norm
 
         # Step 3: CLAHE for local contrast enhancement
         # Makes embryo boundaries much more visible
         if use_clahe:
-            print(f"    CLAHE (clip={clahe_clip_limit}, tile={clahe_tile_size})...")
+            logger.debug("CLAHE (clip=%.1f, tile=%d)...", clahe_clip_limit, clahe_tile_size)
             clahe = cv2.createCLAHE(
                 clipLimit=clahe_clip_limit,
                 tileGridSize=(clahe_tile_size, clahe_tile_size)
             )
             img_enhanced = clahe.apply(img_no_bg)
-            print(f"    ✓ CLAHE applied")
+            logger.debug("CLAHE applied")
         else:
             img_enhanced = img_no_bg
 
         # Step 4: Light Gaussian smoothing to reduce noise
         if gaussian_sigma > 0:
-            print(f"    Gaussian blur (sigma={gaussian_sigma})...")
+            logger.debug("Gaussian blur (sigma=%.1f)...", gaussian_sigma)
             img_smooth = cv2.GaussianBlur(img_enhanced, (5, 5), gaussian_sigma)
-            print(f"    ✓ Smoothing applied")
+            logger.debug("Smoothing applied")
         else:
             img_smooth = img_enhanced
 
-        print(f"  ✓ Preprocessing complete (output range: {img_smooth.min()} - {img_smooth.max()})")
+        logger.debug("Preprocessing complete (output range: %s - %s)", img_smooth.min(), img_smooth.max())
         return img_smooth
 
     def find_embryo_candidates(self,
@@ -225,18 +229,18 @@ class SAMEmbryoDetector:
         enhanced_image : np.ndarray
             Contrast-enhanced 8-bit image for SAM
         """
-        print(f"  Finding embryo candidates (brightness percentile={brightness_percentile})...")
-        print(f"    Input range: {image.min()} - {image.max()}")
+        logger.info("Finding embryo candidates (brightness percentile=%.1f)...", brightness_percentile)
+        logger.debug("Input range: %s - %s", image.min(), image.max())
 
         # Step 1: Percentile normalization (handles low dynamic range)
         p2, p98 = np.percentile(image, (2, 98))
         img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
-        print(f"    ✓ Normalized to 0-255")
+        logger.debug("Normalized to 0-255")
 
         # Step 2: CLAHE for local contrast enhancement
         clahe = cv2.createCLAHE(clipLimit=clahe_clip, tileGridSize=(clahe_tile, clahe_tile))
         img_enhanced = clahe.apply(img_norm)
-        print(f"    ✓ CLAHE applied (clip={clahe_clip}, tile={clahe_tile})")
+        logger.debug("CLAHE applied (clip=%.1f, tile=%d)", clahe_clip, clahe_tile)
 
         # Step 3: Light smoothing
         img_smooth = cv2.GaussianBlur(img_enhanced, (5, 5), 2)
@@ -244,7 +248,7 @@ class SAMEmbryoDetector:
         # Step 4: Threshold brightest pixels (embryos are BRIGHT)
         threshold_value = np.percentile(img_smooth, brightness_percentile)
         _, mask = cv2.threshold(img_smooth, threshold_value, 255, cv2.THRESH_BINARY)
-        print(f"    ✓ Threshold at {threshold_value:.1f} (percentile {brightness_percentile})")
+        logger.debug("Threshold at %.1f (percentile %.1f)", threshold_value, brightness_percentile)
 
         # Step 5: Morphological cleanup
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
@@ -254,7 +258,7 @@ class SAMEmbryoDetector:
         # Step 6: Dilate to capture full embryo extent
         kernel_dilate = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
         mask = cv2.dilate(mask, kernel_dilate, iterations=2)
-        print(f"    ✓ Morphological cleanup complete")
+        logger.debug("Morphological cleanup complete")
 
         # Step 7: Find connected components and filter by area
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
@@ -275,7 +279,7 @@ class SAMEmbryoDetector:
                     'area': area
                 })
 
-        print(f"  ✓ Found {len(candidates)} embryo candidates")
+        logger.info("Found %d embryo candidates", len(candidates))
         return candidates, img_smooth
 
     def refine_with_sam(self,
@@ -381,7 +385,7 @@ class SAMEmbryoDetector:
                     'mask': mask
                 })
 
-        print(f"  ✓ SAM refined {len(embryos)} embryos")
+        logger.info("SAM refined %d embryos", len(embryos))
         return embryos
 
     async def detect_embryos(self,
@@ -451,12 +455,12 @@ class SAMEmbryoDetector:
             output_dir = Path("./detection_results")
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        print("\n" + "="*70)
-        print("BRIGHTNESS + SAM EMBRYO DETECTION")
-        print("="*70)
+        logger.info("=" * 70)
+        logger.info("BRIGHTNESS + SAM EMBRYO DETECTION")
+        logger.info("=" * 70)
 
         # Step 1: Find candidates using brightness detection
-        print("\n[1/4] Finding embryo candidates (brightness-based)...")
+        logger.info("[1/4] Finding embryo candidates (brightness-based)...")
         candidates, image_enhanced = self.find_embryo_candidates(
             image,
             brightness_percentile=brightness_percentile,
@@ -465,7 +469,7 @@ class SAMEmbryoDetector:
         )
 
         if len(candidates) == 0:
-            print("  ⚠ No embryo candidates found!")
+            logger.warning("No embryo candidates found!")
             return {
                 'embryos': [],
                 'initial_detections': 0,
@@ -475,15 +479,15 @@ class SAMEmbryoDetector:
             }
 
         # Step 2: Refine with SAM
-        print("\n[2/4] Refining with SAM...")
+        logger.info("[2/4] Refining with SAM...")
         embryos_sam = self.refine_with_sam(image_enhanced, candidates)
-        print(f"  ✓ SAM refined {len(embryos_sam)} embryos")
+        logger.info("SAM refined %d embryos", len(embryos_sam))
 
         # Use enhanced image for visualization
         image_8bit = image_enhanced
 
         if len(embryos_sam) == 0:
-            print("  ⚠ No embryos detected by SAM!")
+            logger.warning("No embryos detected by SAM!")
             return {
                 'embryos': [],
                 'initial_detections': 0,
@@ -503,11 +507,11 @@ class SAMEmbryoDetector:
         changes = {'round1': {'removed': [], 'added': []}}
 
         if use_claude_review and self.claude_client:
-            print("\n[2/4] Claude Vision review (Round 1)...")
+            logger.info("[2/4] Claude Vision review (Round 1)...")
             annotated = self._create_annotated_image(image_8bit, embryos_sam)
             review_r1 = await self._review_with_claude(image_8bit, annotated, embryos_sam)
 
-            print("\n[3/4] Applying corrections...")
+            logger.info("[3/4] Applying corrections...")
             embryos_r1, changes['round1'] = self._apply_corrections(
                 embryos_sam, review_r1, image, self._predictor
             )
@@ -517,7 +521,7 @@ class SAMEmbryoDetector:
                 cv2.imwrite(str(output_dir / "detection_round1.png"), r1_viz)
 
             # Round 2: Verification
-            print("\n[4/4] Claude verification (Round 2)...")
+            logger.info("[4/4] Claude verification (Round 2)...")
             r1_viz = self._create_annotated_image(image_8bit, embryos_r1)
             verification = await self._verify_with_claude(
                 image_8bit, r1_viz, embryos_r1, changes['round1']
@@ -530,7 +534,7 @@ class SAMEmbryoDetector:
             )
 
             if has_r2_changes:
-                print("  Applying Round 2 corrections...")
+                logger.info("Applying Round 2 corrections...")
                 review_r2 = {
                     'false_positives': verification.get('additional_false_positives', []),
                     'false_negatives': verification.get('additional_false_negatives', [])
@@ -540,10 +544,10 @@ class SAMEmbryoDetector:
                 )
             else:
                 embryos_final = embryos_r1
-                print("  ✓ No additional corrections needed")
+                logger.info("No additional corrections needed")
 
         # Convert to stage coordinates
-        print("\nConverting to stage coordinates...")
+        logger.info("Converting to stage coordinates...")
         embryo_positions = self._pixel_to_stage_coordinates(
             embryos_final,
             stage_position,
@@ -573,9 +577,9 @@ class SAMEmbryoDetector:
         if use_claude_review and save_visualizations:
             results['images']['round1'] = str(output_dir / "detection_round1.png")
 
-        print("\n" + "="*70)
-        print(f"DETECTION COMPLETE: {len(embryo_positions)} embryos")
-        print("="*70)
+        logger.info("=" * 70)
+        logger.info("DETECTION COMPLETE: %d embryos", len(embryo_positions))
+        logger.info("=" * 70)
 
         return results
 
@@ -781,7 +785,7 @@ Respond in JSON:
             return json.loads(json_str)
 
         except Exception as e:
-            print(f"  ⚠ Claude review failed: {e}")
+            logger.warning("Claude review failed: %s", e)
             return {'false_positives': [], 'false_negatives': []}
 
     async def _verify_with_claude(self, image: np.ndarray, annotated: np.ndarray,
@@ -840,7 +844,7 @@ Respond in JSON:
             return json.loads(json_str)
 
         except Exception as e:
-            print(f"  ⚠ Verification failed: {e}")
+            logger.warning("Verification failed: %s", e)
             return {'verified': False}
 
     def _apply_corrections(self, embryos: List[Dict], review: Dict,
@@ -991,7 +995,7 @@ Respond in JSON:
         try:
             import napari
         except ImportError:
-            print("  ⚠ napari not installed. Install with: pip install napari[all]")
+            logger.warning("napari not installed. Install with: pip install napari[all]")
             return None
 
         viewer = napari.Viewer(title="Embryo Detection - Review Required")
@@ -1020,8 +1024,8 @@ Respond in JSON:
             text='detection_id'
         )
 
-        print("\n👁️  Napari viewer opened - review green boxes")
-        print("   Close viewer or return to CLI to continue\n")
+        logger.info("Napari viewer opened - review green boxes")
+        logger.info("Close viewer or return to CLI to continue")
 
         if block:
             napari.run()

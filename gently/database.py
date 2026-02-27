@@ -11,8 +11,11 @@ utilities enable exporting to JSON format for compatibility with existing
 analysis tools and workflows.
 """
 
+import logging
 import json
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 import numpy as np
@@ -212,8 +215,8 @@ def export_multi_embryo_database(
     embryo_uids = session_metadata.get('embryo_runs', [])
 
     if not embryo_uids:
-        print(f"Warning: No embryo runs found in session {session_uid[:8]}...")
-        print(f"  Session may still be running or no embryos were calibrated.")
+        logger.warning("No embryo runs found in session %s...", session_uid[:8])
+        logger.warning("Session may still be running or no embryos were calibrated.")
 
     # Process each embryo run
     for embryo_uid in embryo_uids:
@@ -235,7 +238,7 @@ def export_multi_embryo_database(
             database['embryos'][embryo_id] = embryo_entry
 
         except Exception as e:
-            print(f"Warning: Could not export embryo {embryo_uid[:8]}...: {e}")
+            logger.warning("Could not export embryo %s...: %s", embryo_uid[:8], e)
             continue
 
     # Write to JSON file
@@ -246,10 +249,8 @@ def export_multi_embryo_database(
         else:
             json.dump(database, f)
 
-    print(f"\n✓ Exported multi-embryo database:")
-    print(f"  File: {output_path}")
-    print(f"  Embryos: {len(database['embryos'])}")
-    print(f"  Session UID: {session_uid[:8]}...")
+    logger.info("Exported multi-embryo database: File=%s, Embryos=%d, Session=%s...",
+                 output_path, len(database['embryos']), session_uid[:8])
 
     return output_path
 

@@ -27,10 +27,13 @@ TODO: investigate the coordinate system of xy stage units. Ideally should be in 
 import time
 import logging
 from collections import OrderedDict
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Tuple
 import numpy as np
 
 from .settings import settings
+
 
 from ophyd.status import Status
 
@@ -98,7 +101,7 @@ class DiSPIMZstage:
         try:
             value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.name}: {e}")
+            logger.error("Failed to read position from %s: %s", self.name, e)
             value = 0.0
 
         data = OrderedDict()
@@ -483,7 +486,7 @@ class DiSPIMCamera:
         try:
             self.core.setExposure(value_ms)
         except Exception as e:
-            print(f"Failed to set exposure: {e}")
+            logger.error("Failed to set exposure: %s", e)
 
 
 class DiSPIMDualCamera:
@@ -628,7 +631,7 @@ class DiSPIMFDrive:
         try:
             value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.name}: {e}")
+            logger.error("Failed to read position from %s: %s", self.name, e)
 
         data = OrderedDict()
         data[self.name] = {
@@ -708,7 +711,7 @@ class DiSPIMPiezo:
         try:
             value = self.core.getPosition(self.name)
         except Exception as e:
-            print(f"Failed to read position from {self.name}: {e}")
+            logger.error("Failed to read position from %s: %s", self.name, e)
             value = 0.0
 
         data = OrderedDict()
@@ -941,7 +944,7 @@ class DiSPIMScanner:
             # getGalvoPosition returns tuple (a, b) voltages for galvo device
             ab_pos = np.array(self.core.getGalvoPosition(self.name))
         except Exception as e:
-            print(f"Failed to read scanner positions from {self.name}: {e}")
+            logger.error("Failed to read scanner positions from %s: %s", self.name, e)
             ab_pos = np.array([0.0, 0.0])
 
         data = OrderedDict()

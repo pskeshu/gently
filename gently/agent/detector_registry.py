@@ -2,10 +2,13 @@
 Detector registry for managing all configured detectors
 """
 
+import logging
 import json
 from pathlib import Path
 from typing import Dict, List, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode, ConfidenceLevel
 
@@ -218,7 +221,7 @@ class DetectorRegistry:
                 detector = Detector.from_dict(detector_data)
                 self.detectors[name] = detector
             except Exception as e:
-                print(f"Warning: Failed to load detector '{name}': {e}")
+                logger.warning("Failed to load detector '%s': %s", name, e)
 
     def create_preset_detector(self, preset_name: str) -> Optional[Detector]:
         """

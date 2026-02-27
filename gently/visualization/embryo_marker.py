@@ -14,18 +14,21 @@ Key Features:
 - Visual feedback during marking
 """
 
+import logging
 import numpy as np
 import threading
 from typing import List, Dict, Tuple, Optional
 from pathlib import Path
 from datetime import datetime
 
+logger = logging.getLogger(__name__)
+
 try:
     import napari
     NAPARI_AVAILABLE = True
 except ImportError:
     NAPARI_AVAILABLE = False
-    print("Warning: napari not installed. Install with: pip install napari[all]")
+    logging.getLogger(__name__).warning("napari not installed. Install with: pip install napari[all]")
 
 
 class EmbryoMarker:
@@ -125,16 +128,11 @@ class EmbryoMarker:
 
     def _show_instructions(self):
         """Display marking instructions in console."""
-        print("\n" + "="*70)
-        print("EMBRYO MARKING - INTERACTIVE MODE")
-        print("="*70)
-        print("\nINSTRUCTIONS:")
-        print("  1. Click on each embryo center to mark its position")
-        print("  2. Embryos will be numbered automatically (1, 2, 3, ...)")
-        print("  3. You can zoom and pan as needed")
-        print("  4. When done marking, close the napari window")
-        print("\nTIP: Mark embryos in order of priority (most important first)")
-        print("="*70 + "\n")
+        logger.info("=" * 70)
+        logger.info("EMBRYO MARKING - INTERACTIVE MODE")
+        logger.info("=" * 70)
+        logger.info("INSTRUCTIONS: Click on each embryo center, close window when done")
+        logger.info("TIP: Mark embryos in order of priority (most important first)")
 
     def _on_point_added(self, event):
         """
@@ -176,7 +174,7 @@ class EmbryoMarker:
 
                 self.marked_embryos.append(embryo_entry)
 
-                print(f"✓ Marked {embryo_id} at pixel position ({pixel_x:.1f}, {pixel_y:.1f})")
+                logger.info("Marked %s at pixel position (%.1f, %.1f)", embryo_id, pixel_x, pixel_y)
 
             # Update count of processed points
             self._num_points_processed = num_current_points
@@ -188,7 +186,7 @@ class EmbryoMarker:
         This method blocks the calling thread until the user finishes marking
         and closes the napari viewer.
         """
-        print("\nWaiting for marking to complete (close napari window when done)...")
+        logger.info("Waiting for marking to complete (close napari window when done)...")
 
         # Wait for viewer to close
         # Note: napari.run() only works if viewer was created by us
@@ -204,7 +202,7 @@ class EmbryoMarker:
         with self._lock:
             self.marking_complete = True
 
-        print(f"\n✓ Marking complete! Total embryos marked: {len(self.marked_embryos)}")
+        logger.info("Marking complete! Total embryos marked: %d", len(self.marked_embryos))
 
     def get_marked_embryos(self) -> List[Dict]:
         """
@@ -296,7 +294,7 @@ class EmbryoMarker:
 
         # Save
         pil_image.save(output_path)
-        print(f"  Saved marked image: {output_path}")
+        logger.info("Saved marked image: %s", output_path)
 
 
 def mark_embryos_napari(

@@ -10,9 +10,12 @@ This avoids Qt/main-thread issues when RunEngine runs in a background thread.
 """
 
 import asyncio
+import logging
 import json
 import multiprocessing
 import subprocess
+
+logger = logging.getLogger(__name__)
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -319,7 +322,7 @@ class VisualizationManager:
                 try:
                     callback(request)
                 except Exception as e:
-                    print(f"Visualization callback error: {e}")
+                    logger.error("Visualization callback error: %s", e)
 
     def _save_to_disk(self, request: VisualizationRequest) -> Path:
         """Save visualization to disk"""
@@ -402,14 +405,14 @@ class VisualizationManager:
             requests = self.get_recent(show_recent)
 
         if not requests:
-            print("No visualizations to show")
+            logger.info("No visualizations to show")
             return False
 
         # Collect file paths
         paths = [str(r.saved_path) for r in requests if r.saved_path and r.saved_path.exists()]
 
         if not paths:
-            print("No saved files to display")
+            logger.info("No saved files to display")
             return False
 
         # Launch napari in subprocess
@@ -443,11 +446,11 @@ napari.run()
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            print(f"Napari viewer launched (PID: {self._napari_process.pid})")
+            logger.info("Napari viewer launched (PID: %d)", self._napari_process.pid)
             return True
 
         except Exception as e:
-            print(f"Could not launch napari: {e}")
+            logger.error("Could not launch napari: %s", e)
             return False
 
     async def open_napari_for_embryo_detection(
@@ -541,7 +544,7 @@ napari.run()
                 return True
 
             except Exception as e:
-                print(f"Could not launch napari: {e}")
+                logger.error("Could not launch napari: %s", e)
                 return False
 
     def close_napari(self):

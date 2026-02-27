@@ -18,11 +18,14 @@ Usage:
 """
 
 import asyncio
+import logging
 import json
 import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -35,6 +38,7 @@ if str(project_root) not in sys.path:
 from aiohttp import web
 import yaml
 
+from .log_config import configure_logging
 from .settings import settings
 
 # Bluesky imports
@@ -91,18 +95,18 @@ class DeviceLayerServer:
 
     async def initialize(self):
         """Initialize hardware and RunEngine"""
-        print("=" * 60)
-        print("GENTLY DEVICE LAYER")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("GENTLY DEVICE LAYER")
+        logger.info("=" * 60)
 
         # [1/5] Load config
-        print("\n[1/5] Loading configuration...")
+        logger.info("[1/5] Loading configuration...")
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
-        print(f"  Config loaded from {self.config_path}")
+        logger.info("Config loaded from %s", self.config_path)
 
         # [2/5] Direct MMCore initialization (replaces RPyC hop)
-        print("\n[2/5] Initializing Micro-Manager Core (direct)...")
+        logger.info("[2/5] Initializing Micro-Manager Core (direct)...")
         import pymmcore
 
         self.core = pymmcore.CMMCore()
@@ -120,13 +124,13 @@ class DeviceLayerServer:
             # Try config.yml directory
             mm_config_path = mm_config
 
-        print(f"  Loading: {mm_config_path}")
+        logger.info("Loading: %s", mm_config_path)
         self.core.loadSystemConfiguration(mm_config_path)
-        print(f"  MMCore initialized (direct, in-process)")
-        print(f"  Loaded devices: {self.core.getLoadedDevices()}")
+        logger.info("MMCore initialized (direct, in-process)")
+        logger.info("Loaded devices: %s", self.core.getLoadedDevices())
 
         # [3/5] Create Ophyd devices
-        print("\n[3/5] Creating Ophyd devices...")
+        logger.info("[3/5] Creating Ophyd devices...")
         from gently.agent.device_factory import create_devices_from_mmcore
         # Suppress rich console output to avoid Unicode issues on Windows
         import io
@@ -136,12 +140,12 @@ class DeviceLayerServer:
             self.devices = create_devices_from_mmcore(self.core)
         finally:
             sys.stdout = old_stdout
-        print(f"  Created {len(self.devices)} devices")
+        logger.info("Created %d devices", len(self.devices))
         for name in self.devices:
-            print(f"    - {name}")
+            logger.debug("  - %s", name)
 
         # [4/5] Initialize RunEngine
-        print("\n[4/5] Initializing RunEngine...")
+        logger.info("[4/5] Initializing RunEngine...")
         self.RE = RunEngine({})
 
         # Note: Databroker SQLite backend can't store image arrays directly.
@@ -201,15 +205,15 @@ class DeviceLayerServer:
                 self._run_history.append(self._last_documents.copy())
 
         self.RE.subscribe(collect_docs)
-        print("  RunEngine ready")
+        logger.info("RunEngine ready")
 
         # [5/5] Load plans
-        print("\n[5/5] Loading plans...")
+        logger.info("[5/5] Loading plans...")
         self._load_plans()
 
-        print("\n" + "=" * 60)
-        print("Device layer initialized successfully")
-        print("=" * 60)
+        logger.info("=" * 60)
+        logger.info("Device layer initialized successfully")
+        logger.info("=" * 60)
 
     def _load_plans(self):
         """Load available plans"""
@@ -232,9 +236,9 @@ class DeviceLayerServer:
             self.plans['move_scanner_plan'] = move_scanner_plan
             self.plans['set_led_plan'] = set_led_plan
             self.plans['set_laser_plan'] = set_laser_plan
-            print(f"  Loaded {len(self.plans)} plans")
+            logger.info("Loaded %d plans", len(self.plans))
         except ImportError as e:
-            print(f"  Warning: Could not load some plans: {e}")
+            logger.warning("Could not load some plans: %s", e)
 
         # Also load main plans if available
         try:
@@ -244,9 +248,9 @@ class DeviceLayerServer:
             )
             self.plans['calibrate_piezo_galvo_plan'] = calibrate_piezo_galvo_plan
             self.plans['acquire_single_volume_plan'] = acquire_single_volume_plan
-            print("  Loaded main acquisition plans")
+            logger.info("Loaded main acquisition plans")
         except ImportError:
-            print("  Main acquisition plans not available")
+            logger.info("Main acquisition plans not available")
 
     def _resolve_device_args(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Replace device name strings with actual device objects"""
@@ -269,7 +273,7 @@ class DeviceLayerServer:
         keeping server startup fast.
         """
         if self._sam_detector is None:
-            print(f"\n  Loading SAM detector ({self._sam_model_type} on {self._sam_device})...")
+            logger.info("Loading SAM detector (%s on %s)...", self._sam_model_type, self._sam_device)
             from gently.agent.sam_detection import SAMEmbryoDetector
 
             self._sam_detector = SAMEmbryoDetector(
@@ -277,7 +281,7 @@ class DeviceLayerServer:
                 sam_model_type=self._sam_model_type,
                 device=self._sam_device
             )
-            print("  SAM detector ready")
+            logger.info("SAM detector ready")
 
         return self._sam_detector
 
@@ -289,7 +293,7 @@ class DeviceLayerServer:
         """Background task that executes plans from the queue"""
         from datetime import datetime
 
-        print("\nPlan executor started - waiting for plans...")
+        logger.info("Plan executor started - waiting for plans...")
         self._running = True
 
         while self._running:
@@ -311,7 +315,7 @@ class DeviceLayerServer:
                 'start_time_formatted': start_time.strftime('%H:%M:%S.%f')[:-3],
             }
 
-            print(f"\n>>> [{start_time.strftime('%H:%M:%S')}] Executing: {request.plan_name}")
+            logger.info(">>> [%s] Executing: %s", start_time.strftime('%H:%M:%S'), request.plan_name)
 
             try:
                 # Get the plan function
@@ -344,7 +348,7 @@ class DeviceLayerServer:
                     'uid': uid,
                 })
 
-                print(f"<<< [{end_time.strftime('%H:%M:%S')}] Complete: {request.plan_name} ({duration_ms:.0f}ms)")
+                logger.info("<<< [%s] Complete: %s (%.0fms)", end_time.strftime('%H:%M:%S'), request.plan_name, duration_ms)
 
                 # Complete the future with result
                 request.future.set_result({
@@ -366,7 +370,7 @@ class DeviceLayerServer:
                     'error': str(e),
                 })
 
-                print(f"<<< [{end_time.strftime('%H:%M:%S')}] Failed: {request.plan_name} - {e}")
+                logger.error("<<< [%s] Failed: %s - %s", end_time.strftime('%H:%M:%S'), request.plan_name, e)
                 request.future.set_exception(e)
 
             # Store execution record
@@ -638,7 +642,7 @@ class DeviceLayerServer:
                 # Ensure the directory exists
                 Path(volume_dir).mkdir(parents=True, exist_ok=True)
                 self._volume_dir = volume_dir
-                print(f"  Session configured: volume_dir = {volume_dir}")
+                logger.info("Session configured: volume_dir = %s", volume_dir)
                 return web.json_response({
                     "success": True,
                     "volume_dir": volume_dir,
@@ -723,7 +727,7 @@ class DeviceLayerServer:
                     bottom_camera.configure_exposure(exposure_ms)
 
             # Capture image via plan
-            print("  [detect_embryos] Capturing bottom camera image...")
+            logger.info("[detect_embryos] Capturing bottom camera image...")
             capture_result = await self.submit_plan(
                 'capture_bottom_image_plan',
                 kwargs={'bottom_camera': 'bottom_camera'}
@@ -758,10 +762,10 @@ class DeviceLayerServer:
                     'error': 'No image data in capture result'
                 }, status=500)
 
-            print(f"  [detect_embryos] Image shape: {image.shape}")
+            logger.info("[detect_embryos] Image shape: %s", image.shape)
 
             # Read stage position
-            print("  [detect_embryos] Reading stage position...")
+            logger.info("[detect_embryos] Reading stage position...")
             stage_result = await self.submit_plan(
                 'read_stage_plan',
                 kwargs={'xy_stage': 'xy_stage'}
@@ -782,10 +786,10 @@ class DeviceLayerServer:
                                 break
 
             stage_position = (stage_x, stage_y)
-            print(f"  [detect_embryos] Stage position: {stage_position}")
+            logger.info("[detect_embryos] Stage position: %s", stage_position)
 
             # Run SAM detection in thread to avoid blocking event loop
-            print("  [detect_embryos] Running SAM detection...")
+            logger.info("[detect_embryos] Running SAM detection...")
             detector = self._get_sam_detector()
 
             sam_result = await asyncio.to_thread(
@@ -940,23 +944,11 @@ class DeviceLayerServer:
         await runner.setup()
         site = web.TCPSite(runner, host, port)
 
-        print(f"\n{'=' * 60}")
-        print(f"HTTP API available at http://{host}:{port}")
-        print(f"{'=' * 60}")
-        print("\nEndpoints:")
-        print(f"  GET  /api/status         - Server status")
-        print(f"  GET  /api/devices        - List devices")
-        print(f"  GET  /api/plans          - List plans")
-        print(f"  POST /api/queue/item/add - Submit plan")
-        print(f"  GET  /api/history        - Run history")
-        print(f"  GET  /api/led/status     - LED status and configs")
-        print(f"  POST /api/led/set        - Set LED state directly")
-        print(f"  GET  /api/plan_log       - Plan execution timing log")
-        print(f"  POST /session/configure  - Set volume staging directory")
-        print(f"  GET  /api/sam/status     - SAM model status")
-        print(f"  POST /api/detect_embryos - Capture + SAM detection")
-        print(f"\nPress Ctrl+C to stop")
-        print("=" * 60 + "\n")
+        logger.info("=" * 60)
+        logger.info("HTTP API available at http://%s:%d", host, port)
+        logger.info("=" * 60)
+        logger.info("Endpoints: GET /api/status, GET /api/devices, GET /api/plans, POST /api/queue/item/add, ...")
+        logger.info("Press Ctrl+C to stop")
 
         await site.start()
 
@@ -970,7 +962,7 @@ class DeviceLayerServer:
         except asyncio.CancelledError:
             pass
         finally:
-            print("\nShutting down...")
+            logger.info("Shutting down...")
             self._running = False
             executor_task.cancel()
             try:
@@ -978,7 +970,7 @@ class DeviceLayerServer:
             except asyncio.CancelledError:
                 pass
             await runner.cleanup()
-            print("Device layer stopped.")
+            logger.info("Device layer stopped.")
 
 
 async def main(port: int = settings.network.device_port, sam_device: str = "cuda"):
@@ -996,10 +988,12 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
+    configure_logging(level="INFO")
+
     print("\nStarting Gently Device Layer...")
     print("This server provides unified hardware control + SAM detection.\n")
 
     try:
         asyncio.run(main(port=args.port, sam_device=args.sam_device))
     except KeyboardInterrupt:
-        print("\n\nDevice layer stopped.")
+        logger.info("Device layer stopped.")

@@ -9,9 +9,12 @@ Key principle: Pure functions that take data → return results.
 No device dependencies, no Bluesky plan integration here.
 """
 
+import logging
 import numpy as np
 from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 # Import from core analysis module
 from .core import (
@@ -237,11 +240,11 @@ def print_focus_summary(result: FocusSweepResult, scan_type: str = "focus") -> N
         Type of scan ("coarse", "fine", etc.)
     """
     if result.success:
-        print(f"{scan_type.capitalize()} analysis: "
-              f"best position {result.best_position:.2f} μm "
-              f"(score: {result.best_score:.1f}, R²: {result.r_squared:.3f})")
+        logger.info(f"{scan_type.capitalize()} analysis: "
+              f"best position {result.best_position:.2f} um "
+              f"(score: {result.best_score:.1f}, R2: {result.r_squared:.3f})")
     else:
-        print(f"{scan_type.capitalize()} analysis failed: {result.error_message}")
+        logger.warning(f"{scan_type.capitalize()} analysis failed: {result.error_message}")
 
 
 # Convenience functions for common operations

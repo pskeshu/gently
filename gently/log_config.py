@@ -1,0 +1,48 @@
+"""Logging configuration for the Gently system.
+
+Reads its own GENTLY_LOG_* env vars directly — no dependency on settings.py
+so logging can be bootstrapped before the rest of the app loads.
+
+Env vars:
+    GENTLY_LOG_LEVEL   — DEBUG, INFO (default), WARNING, ERROR
+    GENTLY_LOG_FILE    — path to log file (disabled by default)
+    GENTLY_LOG_FORMAT  — console format string
+    GENTLY_LOG_DATEFMT — timestamp format (default: %H:%M:%S)
+"""
+import logging
+import os
+import sys
+
+_DEFAULT_FORMAT = "%(asctime)s %(name)s %(levelname)s %(message)s"
+_DEFAULT_FILE_FORMAT = "%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno)d %(message)s"
+_DEFAULT_DATEFMT = "%H:%M:%S"
+
+
+def configure_logging(
+    level: str = None,
+    log_file: str = None,
+):
+    """Configure root logger for the Gently system.
+
+    Call once at startup (launch_copilot.py or gently.py).
+    Explicit arguments take priority over env vars.
+    """
+    level = level or os.environ.get("GENTLY_LOG_LEVEL", "INFO")
+    log_file = log_file or os.environ.get("GENTLY_LOG_FILE") or None
+    console_fmt = os.environ.get("GENTLY_LOG_FORMAT", _DEFAULT_FORMAT)
+    datefmt = os.environ.get("GENTLY_LOG_DATEFMT", _DEFAULT_DATEFMT)
+
+    root = logging.getLogger("gently")
+    root.setLevel(getattr(logging, level.upper(), logging.INFO))
+
+    # Console handler
+    console = logging.StreamHandler(sys.stderr)
+    console.setFormatter(logging.Formatter(console_fmt, datefmt=datefmt))
+    root.addHandler(console)
+
+    # Optional file handler
+    if log_file:
+        file_fmt = os.environ.get("GENTLY_LOG_FILE_FORMAT", _DEFAULT_FILE_FORMAT)
+        fh = logging.FileHandler(log_file)
+        fh.setFormatter(logging.Formatter(file_fmt))
+        root.addHandler(fh)

@@ -13,11 +13,14 @@ Plans included:
 All plans are device-agnostic and work with standard Bluesky RunEngine.
 """
 
+import logging
 import time
 import bluesky.plan_stubs as bps
 import numpy as np
 from pathlib import Path
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 def _safe_obtain(obj):
@@ -137,9 +140,9 @@ def verify_embryo_centered(embryo_detector, image_dir=None):
     >>> centered = RE(verify_embryo_centered(detector))
     >>> print(f"Embryo centered: {centered}")
     """
-    print(f"\n{'='*70}")
-    print("PHASE 1: CENTERING VERIFICATION")
-    print(f"{'='*70}\n")
+    logger.info("=" * 70)
+    logger.info("PHASE 1: CENTERING VERIFICATION")
+    logger.info("=" * 70)
 
     # Metadata for this phase
     metadata = {
@@ -158,7 +161,7 @@ def verify_embryo_centered(embryo_detector, image_dir=None):
         image_path = None
 
     # Check embryo at center position
-    print("  Checking embryo at center (galvo=0.0°, piezo=0.0µm)...")
+    logger.info("Checking embryo at center (galvo=0.0 deg, piezo=0.0 um)...")
 
     result = embryo_detector.check_embryo_at_position(
         galvo_deg=0.0,
@@ -177,16 +180,16 @@ def verify_embryo_centered(embryo_detector, image_dir=None):
 
     # Report result
     if result['embryo_visible']:
-        print(f"  ✓ Embryo VISIBLE at center")
-        print(f"    Claude: {result['description']}")
-        print(f"    Confidence: {result['confidence']:.1%}")
+        logger.info("Embryo VISIBLE at center")
+        logger.info("Claude: %s", result['description'])
+        logger.info("Confidence: %.1f%%", result['confidence'] * 100)
         if image_path:
-            print(f"    Image: {image_path}")
+            logger.info("Image: %s", image_path)
         return True
     else:
-        print(f"  ✗ Embryo NOT VISIBLE at center")
-        print(f"    Claude: {result['description']}")
-        print(f"  ⚠ Please adjust sample position and try again")
+        logger.warning("Embryo NOT VISIBLE at center")
+        logger.info("Claude: %s", result['description'])
+        logger.warning("Please adjust sample position and try again")
         return False
 
 
@@ -252,9 +255,9 @@ def detect_embryo_edge(embryo_detector, direction='top',
     >>> print(f"Top edge: {top['edge_deg']:.3f}°")
     >>> print(f"Scan boundary: {top['with_tolerance_deg']:.3f}°")
     """
-    print(f"\n{'='*70}")
-    print(f"PHASE 1.5: DETECT {direction.upper()} EDGE")
-    print(f"{'='*70}\n")
+    logger.info("=" * 70)
+    logger.info("PHASE 1.5: DETECT %s EDGE", direction.upper())
+    logger.info("=" * 70)
 
     # Determine sweep direction
     if direction == 'top':
@@ -270,9 +273,9 @@ def detect_embryo_edge(embryo_detector, direction='top',
     num_steps = int(abs(end_deg - start_deg) / abs(step)) + 1
     positions = [start_deg + i * step for i in range(num_steps)]
 
-    print(f"  Sweep strategy: Start at {start_deg:+.3f}°, step {step:+.3f}°")
-    print(f"  Testing {num_steps} positions from {start_deg:+.3f}° to {end_deg:+.3f}°")
-    print(f"  Looking for position where embryo disappears...\n")
+    logger.info("Sweep strategy: Start at %+.3f deg, step %+.3f deg", start_deg, step)
+    logger.info("Testing %d positions from %+.3f deg to %+.3f deg", num_steps, start_deg, end_deg)
+    logger.info("Looking for position where embryo disappears...")
 
     # Metadata
     metadata = {
@@ -302,7 +305,7 @@ def detect_embryo_edge(embryo_detector, direction='top',
             image_path = None
 
         # Check embryo at this position
-        print(f"  [{i+1}/{num_steps}] Position {pos:+.3f}°...", end=" ")
+        logger.info("[%d/%d] Position %+.3f deg...", i + 1, num_steps, pos)
 
         result = embryo_detector.check_embryo_at_position(
             galvo_deg=pos,
@@ -320,28 +323,26 @@ def detect_embryo_edge(embryo_detector, direction='top',
 
         # Check if embryo disappeared
         if result['embryo_visible']:
-            print(f"✓ visible")
+            logger.info("  -> visible")
         else:
-            print(f"✗ NOT visible - EDGE FOUND!")
+            logger.info("  -> NOT visible - EDGE FOUND!")
             edge_found = True
             edge_position = pos
             break
 
     if not edge_found:
-        print(f"\n  ⚠ WARNING: Embryo still visible at end of sweep!")
-        print(f"  Using last position as edge: {positions[-1]:+.3f}°")
+        logger.warning("Embryo still visible at end of sweep!")
+        logger.warning("Using last position as edge: %+.3f deg", positions[-1])
         edge_position = positions[-1]
 
     # Add tolerance
     edge_with_tolerance = edge_position + (tolerance_sign * tolerance_deg)
 
-    print(f"\n  {'─'*68}")
-    print(f"  EDGE DETECTION COMPLETE")
-    print(f"  {'─'*68}")
-    print(f"    Detected edge: {edge_position:+.3f}° (embryo disappears here)")
-    print(f"    Tolerance margin: {tolerance_deg:.3f}° (~{tolerance_deg*100:.0f} µm)")
-    print(f"    Scan boundary: {edge_with_tolerance:+.3f}° (edge + tolerance)")
-    print(f"    Positions tested: {len(all_results)}")
+    logger.info("EDGE DETECTION COMPLETE")
+    logger.info("Detected edge: %+.3f deg (embryo disappears here)", edge_position)
+    logger.info("Tolerance margin: %.3f deg (~%.0f um)", tolerance_deg, tolerance_deg * 100)
+    logger.info("Scan boundary: %+.3f deg (edge + tolerance)", edge_with_tolerance)
+    logger.info("Positions tested: %d", len(all_results))
 
     # Prepare result
     edge_result = {
@@ -436,12 +437,12 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
     >>> print(f"Best focus: {result['optimal_position_um']:.2f} µm")
     >>> print(f"R²: {result['r_squared']:.3f}")
     """
-    print(f"\n{'='*70}")
-    print(f"{phase_name}")
-    print(f"{'='*70}\n")
-    print(f"  Galvo position: {galvo_deg:+.3f}°")
-    print(f"  Piezo sweep: {piezo_center_um:.1f} ± {sweep_range_um:.1f} µm")
-    print(f"  Step size: {sweep_step_um:.2f} µm")
+    logger.info("=" * 70)
+    logger.info("%s", phase_name)
+    logger.info("=" * 70)
+    logger.info("Galvo position: %+.3f deg", galvo_deg)
+    logger.info("Piezo sweep: %.1f +/- %.1f um", piezo_center_um, sweep_range_um)
+    logger.info("Step size: %.2f um", sweep_step_um)
 
     # Generate sweep positions
     piezo_start = piezo_center_um - sweep_range_um
@@ -449,7 +450,7 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
     num_steps = int(2 * sweep_range_um / sweep_step_um) + 1
     positions = np.linspace(piezo_start, piezo_end, num_steps)
 
-    print(f"  Total positions: {num_steps}\n")
+    logger.info("Total positions: %d", num_steps)
 
     # Metadata
     metadata = {
@@ -510,22 +511,22 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
             img = right_view
             view_name = "right"
 
-        if pos == positions[0]:  # Only print once at start
-            print(f"    Using {view_name} camera view (L:{left_intensity:.1f} vs R:{right_intensity:.1f})")
+        if pos == positions[0]:  # Only log once at start
+            logger.info("Using %s camera view (L:%.1f vs R:%.1f)", view_name, left_intensity, right_intensity)
 
         # Store image for ROI detection
         all_images.append(img)
 
         # Detect embryo ROI from center image (most likely to have good visibility)
         if i == len(positions) // 2 and embryo_roi is None:
-            print(f"\n    [ROI DETECTION] Detecting embryo region from center image...")
+            logger.info("[ROI DETECTION] Detecting embryo region from center image...")
             embryo_roi = focus_scorer.detect_embryo_roi(img)
             y_min, y_max, x_min, x_max = embryo_roi
             roi_height = y_max - y_min
             roi_width = x_max - x_min
             roi_percent = (roi_width * roi_height) / (img.shape[0] * img.shape[1]) * 100
-            print(f"    ✓ Embryo ROI: [{y_min}:{y_max}, {x_min}:{x_max}] "
-                  f"({roi_width}x{roi_height} px, {roi_percent:.1f}% of frame)")
+            logger.info("Embryo ROI: [%d:%d, %d:%d] (%dx%d px, %.1f%% of frame)",
+                        y_min, y_max, x_min, x_max, roi_width, roi_height, roi_percent)
 
         # Convert to 8-bit with auto-scaling for better visibility
         # This matches the working calibrate_embryo_piezo_galvo.py behavior
@@ -555,17 +556,17 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
         yield from bps.read(focus_scorer)
         yield from bps.save()
 
-        print(f"  [{i+1}/{num_steps}] z={pos:+6.1f} µm → score={score:.2e}")
+        logger.debug("[%d/%d] z=%+6.1f um -> score=%.2e", i + 1, num_steps, pos, score)
 
     # Fit Gaussian curve
-    print(f"\n  Fitting Gaussian curve to focus scores...")
+    logger.info("Fitting Gaussian curve to focus scores...")
     fit_result = focus_scorer.fit_focus_curve(all_positions, all_scores)
 
     if fit_result['success']:
-        print(f"  ✓ Fit successful!")
-        print(f"    Best focus: {fit_result['best_position']:.2f} µm")
-        print(f"    R²: {fit_result['r_squared']:.3f} ({fit_result['fit_quality']})")
-        print(f"    Peak in center: {fit_result['peak_in_center']}")
+        logger.info("Fit successful!")
+        logger.info("Best focus: %.2f um", fit_result['best_position'])
+        logger.info("R-squared: %.3f (%s)", fit_result['r_squared'], fit_result['fit_quality'])
+        logger.info("Peak in center: %s", fit_result['peak_in_center'])
 
         result = {
             'success': True,
@@ -577,9 +578,9 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
             'fit_params': fit_result['params']
         }
     else:
-        print(f"  ✗ Fit failed: {fit_result.get('error_message', 'Unknown error')}")
-        print(f"    R²: {fit_result['r_squared']:.3f} (threshold: {min_r_squared:.3f})")
-        print(f"  ⚠ Using maximum score position as fallback")
+        logger.warning("Fit failed: %s", fit_result.get('error_message', 'Unknown error'))
+        logger.warning("R-squared: %.3f (threshold: %.3f)", fit_result['r_squared'], min_r_squared)
+        logger.warning("Using maximum score position as fallback")
 
         max_idx = np.argmax(all_scores)
         fallback_position = all_positions[max_idx]
@@ -694,10 +695,10 @@ def calibrate_embryo_piezo_galvo(
     """
     from gently.config import PiezoGalvoCalibration
 
-    print(f"\n{'='*70}")
-    print("EMBRYO-BASED PIEZO-GALVO CALIBRATION")
-    print("Automated with Claude Vision + FFT Bandpass Focus")
-    print(f"{'='*70}\n")
+    logger.info("=" * 70)
+    logger.info("EMBRYO-BASED PIEZO-GALVO CALIBRATION")
+    logger.info("Automated with Claude Vision + FFT Bandpass Focus")
+    logger.info("=" * 70)
 
     # Overall metadata
     # Note: This orchestration plan does NOT create its own run.
@@ -709,25 +710,23 @@ def calibrate_embryo_piezo_galvo(
         # ====================================================================
         # PHASE 1: CENTERING VERIFICATION
         # ====================================================================
-        print(f"[1/8] Phase 1: Centering Verification")
-        print(f"{'─'*70}")
+        logger.info("[1/8] Phase 1: Centering Verification")
 
         centered = yield from verify_embryo_centered(embryo_detector, image_dir)
 
         if not centered:
-            print(f"\n✗ CALIBRATION ABORTED: Embryo not centered")
-            print(f"Please adjust sample position and try again.")
+            logger.error("CALIBRATION ABORTED: Embryo not centered")
+            logger.error("Please adjust sample position and try again.")
             return {'success': False, 'error': 'Embryo not centered'}
 
         # ====================================================================
         # PHASE 1.5: EDGE DETECTION
         # ====================================================================
-        print(f"\n[2/8] Phase 1.5: Edge Detection")
-        print(f"{'─'*70}")
-        print(f"Detecting embryo extent to optimize scan range...\n")
+        logger.info("[2/8] Phase 1.5: Edge Detection")
+        logger.info("Detecting embryo extent to optimize scan range...")
 
         # Detect TOP edge (sweep upward from center)
-        print(f"Detecting TOP edge (sweeping upward from center)...")
+        logger.info("Detecting TOP edge (sweeping upward from center)...")
         top_edge_result = yield from detect_embryo_edge(
             embryo_detector,
             direction='top',
@@ -743,7 +742,7 @@ def calibrate_embryo_piezo_galvo(
         scan_top_deg = top_edge_result['with_tolerance_deg']
 
         # Detect BOTTOM edge (sweep downward from center)
-        print(f"\nDetecting BOTTOM edge (sweeping downward from center)...")
+        logger.info("Detecting BOTTOM edge (sweeping downward from center)...")
         bottom_edge_result = yield from detect_embryo_edge(
             embryo_detector,
             direction='bottom',
@@ -760,25 +759,17 @@ def calibrate_embryo_piezo_galvo(
 
         detected_range = scan_bottom_deg - scan_top_deg
 
-        print(f"\n{'─'*70}")
-        print(f"EDGE DETECTION SUMMARY")
-        print(f"{'─'*70}")
-        print(f"  Detected edges:")
-        print(f"    TOP: {edge_top_deg:+.3f}° (embryo starts to disappear)")
-        print(f"    BOTTOM: {edge_bottom_deg:+.3f}° (embryo starts to disappear)")
-        print(f"  Scan boundaries (with tolerance):")
-        print(f"    TOP: {scan_top_deg:+.3f}° (includes {edge_tolerance_deg:.3f}° margin)")
-        print(f"    BOTTOM: {scan_bottom_deg:+.3f}° (includes {edge_tolerance_deg:.3f}° margin)")
-        print(f"  Total scan range: {detected_range:.3f}° (~{detected_range*100:.1f} µm)")
+        logger.info("EDGE DETECTION SUMMARY")
+        logger.info("Detected edges: TOP=%+.3f deg, BOTTOM=%+.3f deg", edge_top_deg, edge_bottom_deg)
+        logger.info("Scan boundaries: TOP=%+.3f deg (incl %.3f deg margin), BOTTOM=%+.3f deg",
+                     scan_top_deg, edge_tolerance_deg, scan_bottom_deg)
+        logger.info("Total scan range: %.3f deg (~%.1f um)", detected_range, detected_range * 100)
 
         # ====================================================================
         # CALCULATE INTERIOR CALIBRATION POSITIONS
         # ====================================================================
-        print(f"\n[3/8] Calculate Interior Calibration Positions")
-        print(f"{'─'*70}")
-        print(f"Strategy: Calibrate at INTERIOR positions (not at edges)")
-        print(f"Reason: Edges have sparse embryo → poor focus detection")
-        print(f"        Interior has sharp morphology → accurate focus\n")
+        logger.info("[3/8] Calculate Interior Calibration Positions")
+        logger.info("Strategy: Calibrate at INTERIOR positions (not at edges)")
 
         # Move inward from scan boundaries (not edges!)
         scan_range = scan_bottom_deg - scan_top_deg
@@ -788,28 +779,26 @@ def calibrate_embryo_piezo_galvo(
         calib_bottom_deg = scan_bottom_deg - inset_amount
         calib_range = calib_bottom_deg - calib_top_deg
 
-        print(f"  Inset fraction: {calibration_inset_fraction*100:.0f}%")
-        print(f"  Inset distance: {inset_amount:.3f}° (~{inset_amount*100:.1f} µm)")
-        print(f"\n  TOP calibration position:")
-        print(f"    Scan boundary: {scan_top_deg:+.3f}° → Calibrate at: {calib_top_deg:+.3f}°")
-        print(f"  BOTTOM calibration position:")
-        print(f"    Scan boundary: {scan_bottom_deg:+.3f}° → Calibrate at: {calib_bottom_deg:+.3f}°")
-        print(f"\n  Calibration range: {calib_range:.3f}° (interior positions)")
-        print(f"  Volume scan range: {detected_range:.3f}° (full detected extent)")
+        logger.info("Inset fraction: %.0f%%, distance: %.3f deg (~%.1f um)",
+                     calibration_inset_fraction * 100, inset_amount, inset_amount * 100)
+        logger.info("TOP calibration: scan boundary %+.3f deg -> calibrate at %+.3f deg",
+                     scan_top_deg, calib_top_deg)
+        logger.info("BOTTOM calibration: scan boundary %+.3f deg -> calibrate at %+.3f deg",
+                     scan_bottom_deg, calib_bottom_deg)
+        logger.info("Calibration range: %.3f deg, Volume scan range: %.3f deg",
+                     calib_range, detected_range)
 
         # Estimate piezo positions using heuristic
         piezo_top_heuristic = calib_top_deg * heuristic_slope + heuristic_offset
         piezo_bottom_heuristic = calib_bottom_deg * heuristic_slope + heuristic_offset
 
-        print(f"\n  Heuristic piezo positions (for focus sweep centers):")
-        print(f"    TOP: {piezo_top_heuristic:.1f} µm (from heuristic calibration)")
-        print(f"    BOTTOM: {piezo_bottom_heuristic:.1f} µm (from heuristic calibration)")
+        logger.info("Heuristic piezo positions: TOP=%.1f um, BOTTOM=%.1f um",
+                     piezo_top_heuristic, piezo_bottom_heuristic)
 
         # ====================================================================
         # PHASE 2: TOP CALIBRATION
         # ====================================================================
-        print(f"\n[4/8] Phase 2: TOP Interior Focus Calibration")
-        print(f"{'─'*70}")
+        logger.info("[4/8] Phase 2: TOP Interior Focus Calibration")
 
         top_result = yield from calibrate_focus_at_position(
             camera, galvo, piezo, focus_scorer, core,
@@ -823,17 +812,16 @@ def calibrate_embryo_piezo_galvo(
         )
 
         if not top_result['success']:
-            print(f"\n⚠ WARNING: TOP calibration fit quality poor (R²={top_result['r_squared']:.3f})")
-            print(f"Using best score position as fallback")
+            logger.warning("TOP calibration fit quality poor (R-squared=%.3f)", top_result['r_squared'])
+            logger.warning("Using best score position as fallback")
 
         piezo_top_final = top_result['optimal_position_um']
-        print(f"\n✓ TOP optimal position: {piezo_top_final:.2f} µm")
+        logger.info("TOP optimal position: %.2f um", piezo_top_final)
 
         # ====================================================================
         # PHASE 3: BOTTOM CALIBRATION
         # ====================================================================
-        print(f"\n[5/8] Phase 3: BOTTOM Interior Focus Calibration")
-        print(f"{'─'*70}")
+        logger.info("[5/8] Phase 3: BOTTOM Interior Focus Calibration")
 
         bottom_result = yield from calibrate_focus_at_position(
             camera, galvo, piezo, focus_scorer, core,
@@ -847,17 +835,16 @@ def calibrate_embryo_piezo_galvo(
         )
 
         if not bottom_result['success']:
-            print(f"\n⚠ WARNING: BOTTOM calibration fit quality poor (R²={bottom_result['r_squared']:.3f})")
-            print(f"Using best score position as fallback")
+            logger.warning("BOTTOM calibration fit quality poor (R-squared=%.3f)", bottom_result['r_squared'])
+            logger.warning("Using best score position as fallback")
 
         piezo_bottom_final = bottom_result['optimal_position_um']
-        print(f"\n✓ BOTTOM optimal position: {piezo_bottom_final:.2f} µm")
+        logger.info("BOTTOM optimal position: %.2f um", piezo_bottom_final)
 
         # ====================================================================
         # PHASE 4: CALCULATE CALIBRATION
         # ====================================================================
-        print(f"\n[6/8] Phase 4: Calculate 2-Point Linear Calibration")
-        print(f"{'─'*70}")
+        logger.info("[6/8] Phase 4: Calculate 2-Point Linear Calibration")
 
         # Calculate slope and offset from 2 points
         delta_galvo = calib_bottom_deg - calib_top_deg
@@ -869,27 +856,23 @@ def calibrate_embryo_piezo_galvo(
         slope = delta_piezo / delta_galvo
         offset = piezo_top_final - slope * calib_top_deg
 
-        print(f"  Calibration points:")
-        print(f"    TOP:    galvo={calib_top_deg:+.3f}°, piezo={piezo_top_final:+.2f} µm")
-        print(f"    BOTTOM: galvo={calib_bottom_deg:+.3f}°, piezo={piezo_bottom_final:+.2f} µm")
-        print(f"\n  Linear fit: piezo(µm) = {slope:.2f} × galvo(deg) + {offset:.2f}")
-        print(f"    Slope: {slope:.2f} µm/deg")
-        print(f"    Offset: {offset:.2f} µm")
+        logger.info("Calibration points: TOP galvo=%+.3f deg piezo=%+.2f um, BOTTOM galvo=%+.3f deg piezo=%+.2f um",
+                     calib_top_deg, piezo_top_final, calib_bottom_deg, piezo_bottom_final)
+        logger.info("Linear fit: piezo(um) = %.2f * galvo(deg) + %.2f", slope, offset)
+        logger.info("Slope: %.2f um/deg, Offset: %.2f um", slope, offset)
 
         # Calculate full range positions (for volume scanning)
         piezo_top_scan = scan_top_deg * slope + offset
         piezo_bottom_scan = scan_bottom_deg * slope + offset
 
-        print(f"\n  Volume scan range (applying calibration to scan boundaries):")
-        print(f"    TOP:    galvo={scan_top_deg:+.3f}°, piezo={piezo_top_scan:+.2f} µm")
-        print(f"    BOTTOM: galvo={scan_bottom_deg:+.3f}°, piezo={piezo_bottom_scan:+.2f} µm")
-        print(f"    Total: {abs(piezo_bottom_scan - piezo_top_scan):.1f} µm")
+        logger.info("Volume scan range: TOP galvo=%+.3f deg piezo=%+.2f um, BOTTOM galvo=%+.3f deg piezo=%+.2f um, Total=%.1f um",
+                     scan_top_deg, piezo_top_scan, scan_bottom_deg, piezo_bottom_scan,
+                     abs(piezo_bottom_scan - piezo_top_scan))
 
         # ====================================================================
         # CREATE CALIBRATION OBJECT
         # ====================================================================
-        print(f"\n[7/8] Create Calibration Object")
-        print(f"{'─'*70}")
+        logger.info("[7/8] Create Calibration Object")
 
         calibration = PiezoGalvoCalibration(
             slope_um_per_deg=slope,
@@ -904,42 +887,35 @@ def calibrate_embryo_piezo_galvo(
             timestamp=datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         )
 
-        print(f"  ✓ Calibration object created")
-        print(f"  {calibration}")
+        logger.info("Calibration object created: %s", calibration)
 
         # ====================================================================
         # SAVE CALIBRATION
         # ====================================================================
         if save_path is not None:
-            print(f"\n[8/8] Save Calibration")
-            print(f"{'─'*70}")
+            logger.info("[8/8] Save Calibration")
 
             save_path = Path(save_path)
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
             calibration.to_file(save_path)
 
-            print(f"  ✓ Saved to: {save_path.absolute()}")
-            print(f"  Format: JSON with complete metadata")
+            logger.info("Saved to: %s", save_path.absolute())
 
         # ====================================================================
         # SUCCESS SUMMARY
         # ====================================================================
-        print(f"\n{'='*70}")
-        print("✓ CALIBRATION SUCCESSFUL")
-        print(f"{'='*70}")
-        print(f"\nResults:")
-        print(f"  Calibration: piezo(µm) = {slope:.2f} × galvo(deg) + {offset:.2f}")
-        print(f"  Scan range: {scan_top_deg:+.3f}° to {scan_bottom_deg:+.3f}°")
-        print(f"  Piezo range: {piezo_top_scan:+.2f} to {piezo_bottom_scan:+.2f} µm")
-        print(f"  Quality:")
-        print(f"    TOP fit R²: {top_result['r_squared']:.3f}")
-        print(f"    BOTTOM fit R²: {bottom_result['r_squared']:.3f}")
+        logger.info("=" * 70)
+        logger.info("CALIBRATION SUCCESSFUL")
+        logger.info("=" * 70)
+        logger.info("Calibration: piezo(um) = %.2f * galvo(deg) + %.2f", slope, offset)
+        logger.info("Scan range: %+.3f deg to %+.3f deg", scan_top_deg, scan_bottom_deg)
+        logger.info("Piezo range: %+.2f to %+.2f um", piezo_top_scan, piezo_bottom_scan)
+        logger.info("Quality: TOP R-squared=%.3f, BOTTOM R-squared=%.3f",
+                     top_result['r_squared'], bottom_result['r_squared'])
 
         if save_path:
-            print(f"\nCalibration saved to: {save_path}")
-            print(f"\nNext step:")
-            print(f"  python test_embryo_bluesky_plan.py --tolerance 1.5")
+            logger.info("Calibration saved to: %s", save_path)
 
         # Store result for databroker access
         result = {
@@ -956,12 +932,10 @@ def calibrate_embryo_piezo_galvo(
         }
 
     except Exception as e:
-        print(f"\n{'='*70}")
-        print("✗ CALIBRATION FAILED")
-        print(f"{'='*70}")
-        print(f"\nError: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("=" * 70)
+        logger.error("CALIBRATION FAILED")
+        logger.error("=" * 70)
+        logger.error("Error: %s", e, exc_info=True)
 
         result = {
             'success': False,

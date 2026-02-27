@@ -14,12 +14,15 @@ Plans included:
 All plans use databroker as primary storage with JSON export at completion.
 """
 
+import logging
 import numpy as np
 import time
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 import bluesky.plan_stubs as bps
+
+logger = logging.getLogger(__name__)
 from bluesky.preprocessors import finalize_wrapper, run_wrapper
 
 # Import existing calibration infrastructure
@@ -79,12 +82,12 @@ def center_and_verify_embryo_plan(
     pixel_x, pixel_y = embryo_data['pixel_position']
     initial_stage_x, initial_stage_y = embryo_data['initial_stage_position']
 
-    print(f"\n  [Centering {embryo_id}]")
-    print(f"    Pixel position: ({pixel_x:.1f}, {pixel_y:.1f})")
+    logger.info("[Centering %s]", embryo_id)
+    logger.info("Pixel position: (%.1f, %.1f)", pixel_x, pixel_y)
 
     # Read current stage position
     current_pos = xy_stage.get_position()
-    print(f"    Current stage: ({current_pos[0]:.2f}, {current_pos[1]:.2f}) µm")
+    logger.info("Current stage: (%.2f, %.2f) um", current_pos[0], current_pos[1])
 
     # Calculate pixel displacement needed to center the embryo
     # Note: Must use (CENTER - EMBRYO), not (EMBRYO - CENTER)!
@@ -104,24 +107,24 @@ def center_and_verify_embryo_plan(
     target_pos = current_pos + np.array([dx, dy])
 
     # Debug output matching original code format
-    print(f"    Image center: ({image_center_x:.0f}, {image_center_y:.0f}) pixels")
-    print(f"    Pixel displacement: ({pixel_displacement_x:+.1f}, {pixel_displacement_y:+.1f}) pixels")
-    print(f"    Stage movement: ({dx:+.2f}, {dy:+.2f}) µm")
-    print(f"    Target stage: ({target_pos[0]:.2f}, {target_pos[1]:.2f}) µm")
+    logger.debug("Image center: (%.0f, %.0f) pixels", image_center_x, image_center_y)
+    logger.debug("Pixel displacement: (%+.1f, %+.1f) pixels", pixel_displacement_x, pixel_displacement_y)
+    logger.debug("Stage movement: (%+.2f, %+.2f) um", dx, dy)
+    logger.info("Target stage: (%.2f, %.2f) um", target_pos[0], target_pos[1])
 
     # Check if target position is within stage limits
     x_min, x_max = xy_stage._x_limits
     y_min, y_max = xy_stage._y_limits
 
     if not (x_min <= target_pos[0] <= x_max):
-        print(f"    ✗ ERROR: Target X position {target_pos[0]:.2f} outside limits ({x_min}, {x_max})")
-        print(f"    Skipping {embryo_id} - marked position unreachable")
+        logger.error("Target X position %.2f outside limits (%s, %s)", target_pos[0], x_min, x_max)
+        logger.error("Skipping %s - marked position unreachable", embryo_id)
         embryo_data['error'] = f"Stage X out of bounds: {target_pos[0]:.2f} not in ({x_min}, {x_max})"
         return embryo_data
 
     if not (y_min <= target_pos[1] <= y_max):
-        print(f"    ✗ ERROR: Target Y position {target_pos[1]:.2f} outside limits ({y_min}, {y_max})")
-        print(f"    Skipping {embryo_id} - marked position unreachable")
+        logger.error("Target Y position %.2f outside limits (%s, %s)", target_pos[1], y_min, y_max)
+        logger.error("Skipping %s - marked position unreachable", embryo_id)
         embryo_data['error'] = f"Stage Y out of bounds: {target_pos[1]:.2f} not in ({y_min}, {y_max})"
         return embryo_data
 
@@ -133,10 +136,10 @@ def center_and_verify_embryo_plan(
 
     # Verify position
     final_pos = xy_stage.get_position()
-    print(f"    Final stage: ({final_pos[0]:.2f}, {final_pos[1]:.2f}) µm")
+    logger.info("Final stage: (%.2f, %.2f) um", final_pos[0], final_pos[1])
 
     # Capture verification image
-    print(f"    Capturing verification image...")
+    logger.info("Capturing verification image...")
     yield from bps.trigger_and_read([bottom_camera], name='verification')
 
     # Save verification image if requested
@@ -153,14 +156,14 @@ def center_and_verify_embryo_plan(
         if verification_image is not None:
             import tifffile
             tifffile.imwrite(save_path, verification_image)
-            print(f"    ✓ Saved: {save_path.name}")
+            logger.info("Saved: %s", save_path.name)
 
     # Update embryo data with centered position
     embryo_data['centered_stage_x'] = float(final_pos[0])
     embryo_data['centered_stage_y'] = float(final_pos[1])
     embryo_data['centering_timestamp'] = datetime.now().isoformat()
 
-    print(f"    ✓ {embryo_id} centered!")
+    logger.info("%s centered!", embryo_id)
 
     return embryo_data
 
@@ -207,9 +210,9 @@ def calibrate_single_embryo_in_session_plan(
     embryo_id = embryo_data['embryo_id']
     embryo_number = embryo_data['embryo_number']
 
-    print(f"\n{'='*70}")
-    print(f"CALIBRATING {embryo_id.upper()}")
-    print(f"{'='*70}")
+    logger.info("=" * 70)
+    logger.info("CALIBRATING %s", embryo_id.upper())
+    logger.info("=" * 70)
 
     # Prepare metadata for this embryo run
     embryo_metadata = {
@@ -245,9 +248,9 @@ def calibrate_single_embryo_in_session_plan(
     # Extract calibration data from result
     if calibration_result is not None:
         embryo_data['calibration'] = calibration_result
-        print(f"\n✓ {embryo_id} calibration complete!")
+        logger.info("%s calibration complete!", embryo_id)
     else:
-        print(f"\n✗ {embryo_id} calibration failed!")
+        logger.error("%s calibration failed!", embryo_id)
         embryo_data['calibration'] = None
 
     return embryo_data
@@ -343,9 +346,9 @@ def multi_embryo_calibration_session_plan(
     image_dir = Path(image_dir)
     image_dir.mkdir(parents=True, exist_ok=True)
 
-    print("\n" + "="*70)
-    print("MULTI-EMBRYO CALIBRATION SESSION - BLUESKY ARCHITECTURE")
-    print("="*70)
+    logger.info("=" * 70)
+    logger.info("MULTI-EMBRYO CALIBRATION SESSION - BLUESKY ARCHITECTURE")
+    logger.info("=" * 70)
 
     # Prepare session metadata
     session_metadata = {
@@ -362,26 +365,26 @@ def multi_embryo_calibration_session_plan(
         # ====================================================================
         # PHASE 1: SETUP (OVERVIEW + MARKING DONE OUTSIDE IF PRE-MARKED)
         # ====================================================================
-        print(f"\n[PHASE 1] Embryo positions...")
+        logger.info("[PHASE 1] Embryo positions...")
 
         # Use pre-marked embryos if provided (marking done outside plan to avoid Qt threading)
         if pre_marked_embryos is not None:
-            print(f"  Using pre-marked embryo positions ({len(pre_marked_embryos)} embryos)")
+            logger.info("Using pre-marked embryo positions (%d embryos)", len(pre_marked_embryos))
             marked_embryos = pre_marked_embryos
         elif auto_mark:
             raise NotImplementedError("Auto-detection not yet implemented. Use pre-marked positions.")
         else:
             # This path requires capturing overview and interactive marking inside plan
             # WARNING: This may cause Qt threading issues with napari!
-            print(f"\n  WARNING: Interactive marking inside plan may cause Qt threading errors!")
-            print(f"  Recommended: Mark embryos outside plan and pass as pre_marked_embryos")
+            logger.warning("Interactive marking inside plan may cause Qt threading errors!")
+            logger.warning("Recommended: Mark embryos outside plan and pass as pre_marked_embryos")
 
             # Get initial stage position
             initial_stage_pos = xy_stage.get_position()
-            print(f"  Initial stage position: ({initial_stage_pos[0]:.2f}, {initial_stage_pos[1]:.2f}) µm")
+            logger.info("Initial stage position: (%.2f, %.2f) um", initial_stage_pos[0], initial_stage_pos[1])
 
             # Capture overview image
-            print(f"  Capturing bottom camera overview...")
+            logger.info("Capturing bottom camera overview...")
             yield from bps.trigger_and_read([bottom_camera], name='overview')
 
             # Get overview image from device
@@ -395,10 +398,10 @@ def multi_embryo_calibration_session_plan(
             overview_path = image_dir / f"initial_view_{timestamp}.png"
             import tifffile
             tifffile.imwrite(overview_path, overview_image)
-            print(f"  ✓ Saved overview: {overview_path.name}")
+            logger.info("Saved overview: %s", overview_path.name)
 
-            print(f"\n  Launching interactive embryo marking...")
-            print(f"  (This will open napari window - may have threading issues)")
+            logger.info("Launching interactive embryo marking...")
+            logger.info("(This will open napari window - may have threading issues)")
 
             # Interactive marking with napari (may fail with Qt threading error!)
             try:
@@ -409,21 +412,21 @@ def multi_embryo_calibration_session_plan(
                     save_image_path=image_dir / f"all_embryos_marked_{timestamp}.png"
                 )
             except Exception as e:
-                print(f"  ✗ Interactive marking failed (likely Qt threading issue): {e}")
-                print(f"  Solution: Capture overview and mark embryos BEFORE calling this plan")
+                logger.error("Interactive marking failed (likely Qt threading issue): %s", e)
+                logger.error("Solution: Capture overview and mark embryos BEFORE calling this plan")
                 raise
 
         if len(marked_embryos) == 0:
-            print("\n  ✗ No embryos marked! Aborting session.")
+            logger.error("No embryos marked! Aborting session.")
             # Return empty path - can't just return None in a generator
             return Path("no_database_created.json")
 
-        print(f"\n  ✓ Total embryos to calibrate: {len(marked_embryos)}")
+        logger.info("Total embryos to calibrate: %d", len(marked_embryos))
 
         # ====================================================================
         # PHASE 2: CALIBRATE EACH EMBRYO
         # ====================================================================
-        print(f"\n[PHASE 2] Calibrating each embryo...")
+        logger.info("[PHASE 2] Calibrating each embryo...")
 
         calibrated_embryos = []
         embryo_run_uids = []
@@ -431,9 +434,9 @@ def multi_embryo_calibration_session_plan(
         for i, embryo_data in enumerate(marked_embryos, 1):
             embryo_id = embryo_data['embryo_id']
 
-            print(f"\n" + "-"*70)
-            print(f"EMBRYO {i}/{len(marked_embryos)}: {embryo_id}")
-            print("-"*70)
+            logger.info("-" * 70)
+            logger.info("EMBRYO %d/%d: %s", i, len(marked_embryos), embryo_id)
+            logger.info("-" * 70)
 
             # Center stage on embryo
             embryo_data = yield from center_and_verify_embryo_plan(
@@ -446,7 +449,7 @@ def multi_embryo_calibration_session_plan(
 
             # Check if centering failed (position out of bounds)
             if 'error' in embryo_data:
-                print(f"  ⚠ Skipping calibration for {embryo_id} due to centering error")
+                logger.warning("Skipping calibration for %s due to centering error", embryo_id)
                 calibrated_embryos.append(embryo_data)
                 continue
 
@@ -468,7 +471,7 @@ def multi_embryo_calibration_session_plan(
         # ====================================================================
         # PHASE 3: EXPORT TO JSON DATABASE
         # ====================================================================
-        print(f"\n[PHASE 3] Exporting results to JSON database...")
+        logger.info("[PHASE 3] Exporting results to JSON database...")
 
         # Build database structure
         database = {
@@ -485,20 +488,19 @@ def multi_embryo_calibration_session_plan(
         output_database_path_resolved = Path(output_database_path)
         save_multi_embryo_database(database, output_database_path_resolved)
 
-        print(f"\n  ✓ Exported database: {output_database_path_resolved}")
-        print(f"    Total embryos: {len(calibrated_embryos)}")
-        print(f"    Successful calibrations: {sum(1 for e in calibrated_embryos if e.get('calibration') is not None)}")
+        logger.info("Exported database: %s", output_database_path_resolved)
+        logger.info("Total embryos: %d", len(calibrated_embryos))
+        logger.info("Successful calibrations: %d", sum(1 for e in calibrated_embryos if e.get('calibration') is not None))
 
         # ====================================================================
         # SESSION COMPLETE
         # ====================================================================
-        print(f"\n{'='*70}")
-        print("✓ MULTI-EMBRYO CALIBRATION SESSION COMPLETE")
-        print(f"{'='*70}")
-        print(f"\nResults:")
-        print(f"  Database: {output_database_path_resolved}")
-        print(f"  Images: {image_dir}/")
-        print(f"  Total embryos: {len(calibrated_embryos)}")
+        logger.info("=" * 70)
+        logger.info("MULTI-EMBRYO CALIBRATION SESSION COMPLETE")
+        logger.info("=" * 70)
+        logger.info("Database: %s", output_database_path_resolved)
+        logger.info("Images: %s/", image_dir)
+        logger.info("Total embryos: %d", len(calibrated_embryos))
 
         return output_database_path_resolved
 

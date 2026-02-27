@@ -51,8 +51,8 @@ def cmd_stats(args):
     db_path = Path(args.db) if args.db else DEFAULT_DB_PATH
 
     if not db_path.exists():
-        print(f"Database not found: {db_path}")
-        print("Run 'python -m gently.dataset.cli aggregate' first.")
+        logger.error("Database not found: %s", db_path)
+        logger.error("Run 'python -m gently.dataset.cli aggregate' first.")
         sys.exit(1)
 
     conn = get_connection(db_path)
@@ -83,8 +83,8 @@ def cmd_serve(args):
     db_path = Path(args.db) if args.db else DEFAULT_DB_PATH
 
     if not db_path.exists():
-        print(f"Database not found: {db_path}")
-        print("Run 'python -m gently.dataset.cli aggregate' first.")
+        logger.error("Database not found: %s", db_path)
+        logger.error("Run 'python -m gently.dataset.cli aggregate' first.")
         sys.exit(1)
 
     try:
@@ -92,8 +92,8 @@ def cmd_serve(args):
         explorer = DatasetExplorer(db_path=db_path, port=args.port)
         explorer.run()
     except ImportError as e:
-        print(f"Error importing explorer: {e}")
-        print("Make sure FastAPI is installed: pip install fastapi uvicorn")
+        logger.error("Error importing explorer: %s", e)
+        logger.error("Make sure FastAPI is installed: pip install fastapi uvicorn")
         sys.exit(1)
 
 
@@ -102,7 +102,7 @@ def cmd_query(args):
     db_path = Path(args.db) if args.db else DEFAULT_DB_PATH
 
     if not db_path.exists():
-        print(f"Database not found: {db_path}")
+        logger.error("Database not found: %s", db_path)
         sys.exit(1)
 
     conn = get_connection(db_path)

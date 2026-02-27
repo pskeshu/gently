@@ -4,8 +4,11 @@ Volume Viewing Tools
 Tools for viewing and listing acquired lightsheet volumes.
 """
 
+import logging
 from typing import Dict, Optional
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import require_copilot, get_embryo_or_error
@@ -184,12 +187,12 @@ async def view_volume(
     # Load the volume
     try:
         volume = tifffile.imread(str(volume_path))
-        print(f"  Loaded volume: {volume.shape}, dtype={volume.dtype}")
+        logger.info("Loaded volume: %s, dtype=%s", volume.shape, volume.dtype)
     except Exception as e:
         return f"Error loading volume: {e}"
 
     # Open in napari
-    print(f"  Opening napari viewer...")
+    logger.info("Opening napari viewer...")
     viewer = napari.Viewer(title=title)
 
     # Add volume with appropriate settings

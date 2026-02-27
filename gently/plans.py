@@ -18,6 +18,7 @@ All plans use standard Bluesky plan stubs:
     - bps.open_run() / bps.close_run() # Data collection boundaries
 """
 
+import logging
 import time
 import numpy as np
 import matplotlib.pyplot as plt
@@ -29,6 +30,8 @@ import bluesky.preprocessors as bpp
 from pathlib import Path
 import json
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 # =======================
@@ -426,14 +429,14 @@ def focus_sweep_plan(lightsheet_snap,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'='*70}")
-        print(f"  FOCUS SWEEP: {len(galvo_positions)} positions")
-        print(f"  Galvo Y range: [{min(galvo_positions):.4f}, {max(galvo_positions):.4f}] deg")
-        print(f"  ROI detection: {'enabled' if roi_detection else 'disabled'}")
-        print(f"{'='*70}\n")
+        logger.info("=" * 70)
+        logger.info("FOCUS SWEEP: %d positions", len(galvo_positions))
+        logger.info("Galvo Y range: [%.4f, %.4f] deg", min(galvo_positions), max(galvo_positions))
+        logger.info("ROI detection: %s", 'enabled' if roi_detection else 'disabled')
+        logger.info("=" * 70)
 
         for idx, galvo_y in enumerate(galvo_positions):
-            print(f"  [{idx+1}/{len(galvo_positions)}] Galvo Y = {galvo_y:.4f} deg", end='... ')
+            logger.info("[%d/%d] Galvo Y = %.4f deg", idx + 1, len(galvo_positions), galvo_y)
 
             # Set galvo Y position
             lightsheet_snap.set_y_position(galvo_y)
@@ -464,7 +467,7 @@ def focus_sweep_plan(lightsheet_snap,
             results['focus_scores'].append(focus_score)
             results['rois'].append(roi)
 
-            print(f"Score: {focus_score:.2e}")
+            logger.debug("Score: %.2e", focus_score)
 
     yield from inner()
 
@@ -475,11 +478,9 @@ def focus_sweep_plan(lightsheet_snap,
     results['best_score'] = scores[best_idx]
     results['best_image'] = results['images'][best_idx]
 
-    print(f"\n{'─'*70}")
-    print(f"  BEST FOCUS: Position {best_idx+1}/{len(galvo_positions)}")
-    print(f"  Galvo Y = {results['best_position']:.4f} deg")
-    print(f"  Score = {results['best_score']:.2e}")
-    print(f"{'─'*70}\n")
+    logger.info("BEST FOCUS: Position %d/%d", best_idx + 1, len(galvo_positions))
+    logger.info("Galvo Y = %.4f deg", results['best_position'])
+    logger.info("Score = %.2e", results['best_score'])
 
     return results
 
@@ -537,17 +538,17 @@ def calibrate_piezo_galvo_plan(lightsheet_snap,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'='*70}")
-        print(f"  PIEZO-GALVO CALIBRATION")
-        print(f"  Piezo positions: {len(piezo_positions)}")
-        print(f"  Initial galvo: {initial_galvo_position:.4f} deg")
-        print(f"  Search range: ±{search_range_deg:.4f} deg")
-        print(f"{'='*70}\n")
+        logger.info("=" * 70)
+        logger.info("PIEZO-GALVO CALIBRATION")
+        logger.info("Piezo positions: %d", len(piezo_positions))
+        logger.info("Initial galvo: %.4f deg", initial_galvo_position)
+        logger.info("Search range: +/-%.4f deg", search_range_deg)
+        logger.info("=" * 70)
 
         current_galvo_guess = initial_galvo_position
 
         for piezo_idx, piezo_z in enumerate(piezo_positions):
-            print(f"\n[PIEZO {piezo_idx+1}/{len(piezo_positions)}] Z = {piezo_z:.2f} µm")
+            logger.info("[PIEZO %d/%d] Z = %.2f um", piezo_idx + 1, len(piezo_positions), piezo_z)
 
             # Generate galvo sweep positions around current guess
             galvo_sweep = np.linspace(
@@ -575,7 +576,7 @@ def calibrate_piezo_galvo_plan(lightsheet_snap,
             # Update guess for next iteration (assume roughly linear)
             current_galvo_guess = best_galvo
 
-            print(f"  → Best galvo Y: {best_galvo:.6f} deg (score: {best_score:.2e})")
+            logger.info("Best galvo Y: %.6f deg (score: %.2e)", best_galvo, best_score)
 
     yield from inner()
 
@@ -601,14 +602,13 @@ def calibrate_piezo_galvo_plan(lightsheet_snap,
         'equation': f"galvo_y = {slope:.6e} * piezo_z + {offset:.6f}"
     }
 
-    print(f"\n{'='*70}")
-    print(f"  CALIBRATION RESULTS")
-    print(f"{'='*70}")
-    print(f"  Slope:  {slope:.6e} deg/µm")
-    print(f"  Offset: {offset:.6f} deg")
-    print(f"  RMSE:   {rmse:.6e} deg")
-    print(f"  Equation: galvo_y = {slope:.6e} * piezo_z + {offset:.6f}")
-    print(f"{'='*70}\n")
+    logger.info("=" * 70)
+    logger.info("CALIBRATION RESULTS")
+    logger.info("Slope: %.6e deg/um", slope)
+    logger.info("Offset: %.6f deg", offset)
+    logger.info("RMSE: %.6e deg", rmse)
+    logger.info("Equation: galvo_y = %.6e * piezo_z + %.6f", slope, offset)
+    logger.info("=" * 70)
 
     return results
 
@@ -658,21 +658,21 @@ def mark_embryo_interactive_plan(bottom_camera,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'='*70}")
-        print(f"  MARKING EMBRYO #{embryo_number}")
-        print(f"{'='*70}\n")
+        logger.info("=" * 70)
+        logger.info("MARKING EMBRYO #%d", embryo_number)
+        logger.info("=" * 70)
 
         # Capture initial image
-        print("  Capturing initial image...")
+        logger.info("Capturing initial image...")
         yield from bps.trigger_and_read([bottom_camera])
         initial_image = bottom_camera.read()[bottom_camera.name]['value']
 
         # Get current stage position
         initial_stage_pos = xy_stage.read()[xy_stage.name]['value']
-        print(f"  Initial stage: ({initial_stage_pos[0]:.2f}, {initial_stage_pos[1]:.2f}) µm")
+        logger.info("Initial stage: (%.2f, %.2f) um", initial_stage_pos[0], initial_stage_pos[1])
 
         # Display interactive marking interface
-        print(f"\n  ⚡ INTERACTIVE MARKING - Please click on embryo #{embryo_number}")
+        logger.info("INTERACTIVE MARKING - Please click on embryo #%d", embryo_number)
 
         from matplotlib.widgets import Button
 
@@ -699,7 +699,7 @@ def mark_embryo_interactive_plan(bottom_camera,
                 ax.plot(event.xdata, event.ydata, 'o', color='lime',
                        markersize=15, markeredgewidth=3, markeredgecolor='white')
                 fig.canvas.draw()
-                print(f"  ✓ Marked at pixel ({event.xdata:.0f}, {event.ydata:.0f})")
+                logger.info("Marked at pixel (%.0f, %.0f)", event.xdata, event.ydata)
 
         def on_done(event):
             plt.close(fig)
@@ -715,11 +715,11 @@ def mark_embryo_interactive_plan(bottom_camera,
         plt.show()
 
         if embryo_position[0] is None:
-            print("  ⚠ No embryo marked!")
+            logger.warning("No embryo marked!")
             return {'success': False}
 
         # Center the embryo (using plan stub for proper Bluesky message flow)
-        print(f"\n  Moving stage to center embryo...")
+        logger.info("Moving stage to center embryo...")
         yield from move_to_pixel_plan(
             xy_stage,
             bottom_camera,
@@ -730,12 +730,12 @@ def mark_embryo_interactive_plan(bottom_camera,
         time.sleep(0.5)
 
         # Capture confirmation image
-        print("  Capturing confirmation image...")
+        logger.info("Capturing confirmation image...")
         yield from bps.trigger_and_read([bottom_camera])
         centered_image = bottom_camera.read()[bottom_camera.name]['value']
 
         final_stage_pos = xy_stage.read()[xy_stage.name]['value']
-        print(f"  Final stage: ({final_stage_pos[0]:.2f}, {final_stage_pos[1]:.2f}) µm")
+        logger.info("Final stage: (%.2f, %.2f) um", final_stage_pos[0], final_stage_pos[1])
 
         results['success'] = True
         results['embryo_number'] = embryo_number
@@ -746,8 +746,7 @@ def mark_embryo_interactive_plan(bottom_camera,
         results['centered_image'] = centered_image
         results['timestamp'] = time.time()
 
-        print(f"  ✓ Embryo #{embryo_number} centered!")
-        print(f"{'='*70}\n")
+        logger.info("Embryo #%d centered!", embryo_number)
 
     results = {}
     yield from inner()
@@ -825,16 +824,16 @@ def acquire_single_volume_plan(volume_scanner,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'='*70}")
-        print(f"  VOLUME ACQUISITION")
-        print(f"  Slices: {num_slices}, Exposure: {exposure_ms} ms")
-        print(f"  Galvo: {galvo_amplitude:.3f} deg amplitude, {galvo_center:.4f} deg center")
-        print(f"  Piezo: {piezo_amplitude:.2f} µm amplitude, {piezo_center:.2f} µm center")
-        print(f"  Lasers: {laser_config}")
-        print(f"{'='*70}\n")
+        logger.info("=" * 70)
+        logger.info("VOLUME ACQUISITION")
+        logger.info("Slices: %d, Exposure: %.1f ms", num_slices, exposure_ms)
+        logger.info("Galvo: %.3f deg amplitude, %.4f deg center", galvo_amplitude, galvo_center)
+        logger.info("Piezo: %.2f um amplitude, %.2f um center", piezo_amplitude, piezo_center)
+        logger.info("Lasers: %s", laser_config)
+        logger.info("=" * 70)
 
         # Configure volume scanner
-        print("  Configuring hardware...")
+        logger.info("Configuring hardware...")
         volume_scanner.configure(
             num_slices=num_slices,
             exposure_ms=exposure_ms,
@@ -847,7 +846,7 @@ def acquire_single_volume_plan(volume_scanner,
         )
 
         # Acquire volume
-        print("  Triggering acquisition...")
+        logger.info("Triggering acquisition...")
         start_time = time.time()
         yield from bps.trigger_and_read([volume_scanner])
         elapsed = time.time() - start_time
@@ -855,10 +854,7 @@ def acquire_single_volume_plan(volume_scanner,
         # Get volume data
         volume_data = volume_scanner.read()[volume_scanner.name]['value']
 
-        print(f"\n  ✓ Volume acquired!")
-        print(f"  Shape: {volume_data.shape}")
-        print(f"  Time: {elapsed:.2f} s")
-        print(f"{'='*70}\n")
+        logger.info("Volume acquired! Shape: %s, Time: %.2f s", volume_data.shape, elapsed)
 
         results['volume'] = volume_data
         results['shape'] = volume_data.shape
@@ -912,14 +908,14 @@ def timelapse_volume_plan(volume_scanner,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'='*70}")
-        print(f"  TIME-LAPSE VOLUME ACQUISITION")
-        print(f"  Timepoints: {num_timepoints}")
-        print(f"  Interval: {interval_seconds} s")
-        print(f"{'='*70}\n")
+        logger.info("=" * 70)
+        logger.info("TIME-LAPSE VOLUME ACQUISITION")
+        logger.info("Timepoints: %d", num_timepoints)
+        logger.info("Interval: %d s", interval_seconds)
+        logger.info("=" * 70)
 
         for tp in range(num_timepoints):
-            print(f"\n[TIMEPOINT {tp+1}/{num_timepoints}]")
+            logger.info("[TIMEPOINT %d/%d]", tp + 1, num_timepoints)
 
             # Acquire volume
             vol_results = yield from acquire_single_volume_plan(
@@ -933,13 +929,10 @@ def timelapse_volume_plan(volume_scanner,
 
             # Wait for next timepoint (except after last one)
             if tp < num_timepoints - 1:
-                print(f"  Waiting {interval_seconds} s until next timepoint...")
+                logger.info("Waiting %d s until next timepoint...", interval_seconds)
                 yield from bps.sleep(interval_seconds)
 
-        print(f"\n{'='*70}")
-        print(f"  TIME-LAPSE COMPLETE")
-        print(f"  Total volumes: {len(results['volumes'])}")
-        print(f"{'='*70}\n")
+        logger.info("TIME-LAPSE COMPLETE - Total volumes: %d", len(results['volumes']))
 
     yield from inner()
     return results
@@ -1008,15 +1001,15 @@ def multi_embryo_calibration_workflow(bottom_camera,
 
     @bpp.run_decorator(md=_md)
     def inner():
-        print(f"\n{'#'*70}")
-        print(f"  MULTI-EMBRYO CALIBRATION WORKFLOW")
-        print(f"  Number of embryos: {num_embryos}")
-        print(f"{'#'*70}\n")
+        logger.info("#" * 70)
+        logger.info("MULTI-EMBRYO CALIBRATION WORKFLOW")
+        logger.info("Number of embryos: %d", num_embryos)
+        logger.info("#" * 70)
 
         for emb_num in range(1, num_embryos + 1):
-            print(f"\n{'#'*70}")
-            print(f"  EMBRYO {emb_num}/{num_embryos}")
-            print(f"{'#'*70}\n")
+            logger.info("#" * 70)
+            logger.info("EMBRYO %d/%d", emb_num, num_embryos)
+            logger.info("#" * 70)
 
             # Mark and center embryo
             marking_results = yield from mark_embryo_interactive_plan(
@@ -1026,7 +1019,7 @@ def multi_embryo_calibration_workflow(bottom_camera,
             )
 
             if not marking_results.get('success', False):
-                print(f"  ⚠ Skipping embryo {emb_num}")
+                logger.warning("Skipping embryo %d", emb_num)
                 continue
 
             # Perform calibration
@@ -1046,12 +1039,9 @@ def multi_embryo_calibration_workflow(bottom_camera,
 
             results['embryos'].append(embryo_data)
 
-            print(f"\n  ✓ Embryo {emb_num} calibration complete!")
+            logger.info("Embryo %d calibration complete!", emb_num)
 
-        print(f"\n{'#'*70}")
-        print(f"  WORKFLOW COMPLETE")
-        print(f"  Calibrated {len(results['embryos'])}/{num_embryos} embryos")
-        print(f"{'#'*70}\n")
+        logger.info("WORKFLOW COMPLETE - Calibrated %d/%d embryos", len(results['embryos']), num_embryos)
 
     yield from inner()
     return results

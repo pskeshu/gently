@@ -2,10 +2,13 @@
 Bluesky plan synthesis from natural language goals
 """
 
+import logging
 from typing import Dict, List, Optional
 from jinja2 import Template
 import ast
 import re
+
+logger = logging.getLogger(__name__)
 
 
 class PlanValidator:
@@ -184,7 +187,7 @@ def adaptive_timelapse_plan(
     for timepoint in range(num_timepoints):
         # Check if experiment should continue
         if copilot.should_stop_experiment():
-            print(f"Copilot ending experiment at timepoint {timepoint}")
+            logger.info("Copilot ending experiment at timepoint %s", timepoint)
             break
 
         # Get embryo acquisition order (priority queue)

@@ -9,10 +9,13 @@ Separated from plans to maintain clean architecture - plans orchestrate devices,
 detection modules handle image analysis.
 """
 
+import logging
 import numpy as np
 from typing import Optional, Tuple, List
 from scipy.ndimage import uniform_filter, gaussian_filter, sobel
 from scipy.ndimage.measurements import center_of_mass, label
+
+logger = logging.getLogger(__name__)
 from scipy.ndimage import binary_opening, binary_closing
 
 
@@ -128,7 +131,7 @@ def detect_embryo_roi(image: np.ndarray,
             return None
 
     except Exception as e:
-        print(f"Embryo ROI detection failed: {e}")
+        logger.error("Embryo ROI detection failed: %s", e)
         return None
 
 
@@ -243,7 +246,7 @@ def detect_multiple_embryos(image: np.ndarray,
         return [r['roi'] for r in selected_regions]
 
     except Exception as e:
-        print(f"Multiple embryo detection failed: {e}")
+        logger.error("Multiple embryo detection failed: %s", e)
         return []
 
 

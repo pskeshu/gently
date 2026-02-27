@@ -10,9 +10,12 @@ both hardware control and SAM detection in a single HTTP process.
 """
 
 import asyncio
+import logging
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import aiohttp
+
+logger = logging.getLogger(__name__)
 
 from gently.coordinates import (
     pixel_to_stage_position,
@@ -738,12 +741,12 @@ class QueueServerClient:
 
         original_points_set = set(tuple(p) for p in original_points)
 
-        print("\n  [INTERACTIVE] Edit embryos in napari:")
-        print("    - Press '2' or click 'Add points' to add new embryos")
-        print("    - Press '3' or click 'Select points' to select existing")
-        print("    - Press Delete/Backspace to remove selected points")
-        print("    - Drag points to move them")
-        print("    - Close window when done\n")
+        logger.info("[INTERACTIVE] Edit embryos in napari:")
+        logger.info("  - Press '2' or click 'Add points' to add new embryos")
+        logger.info("  - Press '3' or click 'Select points' to select existing")
+        logger.info("  - Press Delete/Backspace to remove selected points")
+        logger.info("  - Drag points to move them")
+        logger.info("  - Close window when done")
 
         # Run napari (blocking - waits for user to close window)
         napari.run()
@@ -816,10 +819,8 @@ class QueueServerClient:
         added = len(final_points_set - original_points_set)
         removed = len(original_points_set - final_points_set)
 
-        print(f"  Edit complete:")
-        print(f"    Original: {len(embryos)} embryos")
-        print(f"    Final: {len(final_embryos)} embryos")
-        print(f"    Added: {added}, Removed: {removed}")
+        logger.info("Edit complete: Original: %d, Final: %d, Added: %d, Removed: %d",
+                     len(embryos), len(final_embryos), added, removed)
 
         return final_embryos
 
@@ -884,8 +885,8 @@ class QueueServerClient:
         self._ensure_connected()
 
         try:
-            print("  Calling /api/detect_embryos (server-side capture + SAM)...")
-            print(f"  Parameters: brightness_percentile={brightness_percentile}, area={min_area}-{max_area}")
+            logger.info("Calling /api/detect_embryos (server-side capture + SAM)...")
+            logger.info("Parameters: brightness_percentile=%s, area=%s-%s", brightness_percentile, min_area, max_area)
 
             # Build request payload
             payload = {
@@ -926,12 +927,12 @@ class QueueServerClient:
 
             # If no image but editor requested, capture one for display
             if image is None and open_editor:
-                print("  Capturing image for napari editor...")
+                logger.info("Capturing image for napari editor...")
                 image = await self.capture_bottom_image(exposure_ms=exposure_ms)
 
             # Open napari editor if requested (runs on client side for main thread)
             if open_editor and image is not None:
-                print("  Opening napari editor for review/editing...")
+                logger.info("Opening napari editor for review/editing...")
                 embryos = await self._edit_embryos_in_napari(
                     image, embryos, stage_pos, pixel_size_um, objective_mag
                 )
@@ -999,18 +1000,18 @@ class QueueServerClient:
         try:
             # Capture image via queue server
             if exposure_ms:
-                print(f"  Setting exposure to {exposure_ms} ms...")
-            print("  Capturing bottom camera image...")
+                logger.info("Setting exposure to %s ms...", exposure_ms)
+            logger.info("Capturing bottom camera image...")
             image = await self.capture_bottom_image(exposure_ms=exposure_ms)
             if image.shape == (100, 100):
                 return {'error': 'Failed to capture image'}
 
-            print(f"  Image shape: {image.shape}")
+            logger.info("Image shape: %s", image.shape)
 
             # Get stage position
-            print("  Reading stage position...")
+            logger.info("Reading stage position...")
             stage_pos = await self.get_stage_position()
-            print(f"  Stage position: {stage_pos}")
+            logger.info("Stage position: %s", stage_pos)
 
             # Convert existing embryos to pixel positions for display
             display_embryos = None
@@ -1040,10 +1041,10 @@ class QueueServerClient:
                         'pixel_x': pixel_x,
                         'pixel_y': pixel_y,
                     })
-                print(f"  Showing {len(display_embryos)} existing embryos")
+                logger.info("Showing %d existing embryos", len(display_embryos))
 
             # Run manual marking client-side (napari requires main thread)
-            print("  Opening napari window for manual marking...")
+            logger.info("Opening napari window for manual marking...")
             import napari
 
             um_per_pixel = get_um_per_pixel(pixel_size_um, objective_mag)
@@ -1088,8 +1089,8 @@ class QueueServerClient:
             )
             new_points_layer.mode = 'add'  # Start in add mode
 
-            print("\n  [INTERACTIVE] Click on embryo centers in the napari window.")
-            print("  Close the window when done marking.\n")
+            logger.info("[INTERACTIVE] Click on embryo centers in the napari window.")
+            logger.info("Close the window when done marking.")
 
             # Run napari (blocking)
             napari.run()
@@ -1123,7 +1124,7 @@ class QueueServerClient:
                     'source': 'manual_marking'
                 })
 
-            print(f"  Marked {len(embryos)} embryos")
+            logger.info("Marked %d embryos", len(embryos))
 
             return {
                 'success': True,
@@ -1174,7 +1175,7 @@ class QueueServerClient:
             Updated embryo list with added/removed counts
         """
         try:
-            print("  Opening napari embryo editor...")
+            logger.info("Opening napari embryo editor...")
             edited_embryos = await self._edit_embryos_in_napari(
                 image, embryos, stage_position, pixel_size_um, objective_mag
             )
@@ -1224,8 +1225,8 @@ class QueueServerClient:
         try:
             if image is None:
                 if exposure_ms:
-                    print(f"  Setting exposure to {exposure_ms} ms...")
-                print("  Capturing image...")
+                    logger.info("Setting exposure to %s ms...", exposure_ms)
+                logger.info("Capturing image...")
                 image = await self.capture_bottom_image(exposure_ms=exposure_ms)
 
             result = {'success': True}
@@ -1255,13 +1256,13 @@ class QueueServerClient:
                     tifffile.imwrite(save_path, image)
 
                 result['saved_to'] = save_path
-                print(f"  Saved image to: {save_path}")
+                logger.info("Saved image to: %s", save_path)
 
             # Show if requested (using napari client-side)
             if show:
                 import napari
 
-                print(f"  Opening napari viewer (shape: {image.shape})...")
+                logger.info("Opening napari viewer (shape: %s)...", image.shape)
 
                 viewer = napari.Viewer(title=title)
                 viewer.add_image(image, name='Image', colormap='gray')
@@ -1417,13 +1418,13 @@ class QueueServerClient:
                     tifffile.imwrite(save_path, image)
 
                 result['saved_to'] = save_path
-                print(f"  Saved image to: {save_path}")
+                logger.info("Saved image to: %s", save_path)
 
             # Show if requested (using napari client-side)
             if show:
                 import napari
 
-                print(f"  Opening napari viewer with {len(embryos)} embryos...")
+                logger.info("Opening napari viewer with %d embryos...", len(embryos))
 
                 viewer = napari.Viewer(title=title)
                 viewer.add_image(image, name='Image', colormap='gray')
@@ -1443,7 +1444,7 @@ class QueueServerClient:
                     colors.append(color_palette[i % len(color_palette)])
 
                     embryo_id = embryo.get('embryo_id', embryo.get('id', i))
-                    print(f"    {embryo_id} at pixel ({px:.0f}, {py:.0f})")
+                    logger.debug("%s at pixel (%.0f, %.0f)", embryo_id, px, py)
 
                 # Add points layer for embryos
                 if points:

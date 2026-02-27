@@ -2,9 +2,12 @@
 Supports the visual aspects of the gently library
 """
 
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 import napari
+
+logger = logging.getLogger(__name__)
 
 
 def setup_napari_live_view(title: str = "DiSPIM Live View"):
@@ -177,7 +180,7 @@ def create_simple_focus_plotter(title: str = "Focus Analysis"):
             plt.pause(0.001)  # Small pause to allow GUI update
 
         except Exception as e:
-            print(f"Error updating focus plot: {e}")
+            logger.error("Error updating focus plot: %s", e)
 
     # Add helper methods to the function
     update_plot.save_plot = lambda filename: fig.savefig(filename, dpi=150, bbox_inches='tight')
@@ -237,5 +240,5 @@ def add_focus_analysis_markers(plotter, coarse_best: float = None, fine_best: fl
         plt.draw()
 
     except Exception as e:
-        print(f"Error adding analysis markers: {e}")
+        logger.error("Error adding analysis markers: %s", e)
 

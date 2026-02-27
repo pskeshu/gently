@@ -4,10 +4,13 @@ Acquisition Tools
 Tools for acquiring lightsheet volumes and images from the microscope.
 """
 
+import logging
 from typing import Dict, Optional
 import asyncio
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from ..tool_registry import tool, ToolCategory, ToolExample
 from ..tool_helpers import get_embryo_or_error
@@ -131,7 +134,7 @@ async def acquire_volume(
                             metadata=acq_metadata,
                         )
                 except Exception as store_err:
-                    print(f"  Warning: GentlyStore write failed (non-fatal): {store_err}")
+                    logger.warning("GentlyStore write failed (non-fatal): %s", store_err)
 
             # Push max projection to viz server
             if copilot.viz_server and volume is not None:
@@ -157,7 +160,7 @@ async def acquire_volume(
                         }
                     )
                 except Exception as viz_err:
-                    print(f"  Warning: Failed to push volume to viz: {viz_err}")
+                    logger.warning("Failed to push volume to viz: %s", viz_err)
 
             # Build response
             shape_str = str(result.get('shape', 'unknown'))
@@ -331,7 +334,7 @@ async def batch_lightsheet(
     if not active_embryos:
         return "No active embryos to capture. All embryos are marked as skipped."
 
-    print(f"  Capturing lightsheet from {len(active_embryos)} embryos...")
+    logger.info("Capturing lightsheet from %d embryos...", len(active_embryos))
 
     for embryo_id, embryo in active_embryos:
         try:
@@ -339,7 +342,7 @@ async def batch_lightsheet(
             if embryo.stage_position:
                 x = embryo.stage_position.get('x', 0)
                 y = embryo.stage_position.get('y', 0)
-                print(f"  Moving to {embryo_id} at ({x:.1f}, {y:.1f})...")
+                logger.info("Moving to %s at (%.1f, %.1f)...", embryo_id, x, y)
                 await client.move_to_position(x, y)
                 # Wait for stage to settle
                 await asyncio.sleep(0.5)
@@ -360,7 +363,7 @@ async def batch_lightsheet(
                     embryo_galvo = embryo.calibration['galvo_center']
 
             # Capture lightsheet
-            print(f"  Capturing {embryo_id} at piezo={piezo_position:.1f}\u03bcm, galvo={embryo_galvo:.2f}...")
+            logger.info("Capturing %s at piezo=%.1f um, galvo=%.2f...", embryo_id, piezo_position, embryo_galvo)
             result = await client.capture_lightsheet_image(
                 piezo_position=piezo_position,
                 galvo_position=embryo_galvo
@@ -392,12 +395,12 @@ async def batch_lightsheet(
         save_path = save_dir / f"{eid}.tiff"
         tifffile.imwrite(str(save_path), img)
 
-    print(f"  Saved {len(images)} images to {save_dir}")
+    logger.info("Saved %d images to %s", len(images), save_dir)
 
     # Open single napari viewer with all images as a stack
     import napari
     import numpy as np
-    print(f"  Opening napari with {len(images)} embryo images as stack...")
+    logger.info("Opening napari with %d embryo images as stack...", len(images))
 
     # Stack images into a single array for slider navigation
     image_stack = np.stack(images, axis=0)
@@ -412,9 +415,9 @@ async def batch_lightsheet(
     )
 
     # Print embryo ID mapping for reference
-    print("  Slider index \u2192 Embryo ID:")
+    logger.info("Slider index -> Embryo ID:")
     for i, eid in enumerate(embryo_ids):
-        print(f"    {i}: {eid}")
+        logger.info("  %d: %s", i, eid)
 
     napari.run()
 

@@ -49,6 +49,7 @@ from .core import (
     get_event_bus,
     get_service_registry,
 )
+from .log_config import configure_logging
 from .settings import settings
 from .store import GentlyStore
 from .agent.tool_registry import ToolRegistry, get_tool_registry
@@ -95,6 +96,8 @@ class Gently:
             If True, use TiledStore for persistent storage on disk
             If False, use in-memory DatabrokerStore
         """
+        configure_logging(level="INFO")
+
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
 

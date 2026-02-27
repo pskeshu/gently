@@ -12,9 +12,11 @@ Usage:
 """
 
 import asyncio
-import json
 import logging
+import json
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List, Tuple, Dict
@@ -1252,9 +1254,9 @@ class DatasetExplorer:
     def run(self):
         """Start the server."""
         import uvicorn
-        print(f"\n=== Embryo Dataset Explorer ===")
-        print(f"Database: {self.db_path}")
-        print(f"Open http://localhost:{self.port} in your browser\n")
+        logger.info("=== Embryo Dataset Explorer ===")
+        logger.info("Database: %s", self.db_path)
+        logger.info("Open http://localhost:%d in your browser", self.port)
         uvicorn.run(self.app, host=self.host, port=self.port)
 
 

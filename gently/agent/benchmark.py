@@ -320,7 +320,7 @@ def print_benchmark_results(results: BenchmarkResults):
     if results.avg_file_size_mb > 0:
         lines.append(f"  File size:  {results.avg_file_size_mb:.1f} MB avg")
 
-    print("\n".join(lines))
+    logger.info("\n".join(lines))
 
 
 def save_benchmark_csv(results: BenchmarkResults, path: Path):

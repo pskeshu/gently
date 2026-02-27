@@ -5,10 +5,13 @@ Tools for microscope piezo-galvo calibration including adaptive focus sweeps,
 binary edge search, and full/fast calibration routines.
 """
 
+import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import json
 import asyncio
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 
@@ -80,11 +83,11 @@ async def _adaptive_focus_sweep(
     # Get adaptive range from prior
     sparse_range = session_prior.get_reduced_sweep_range(base_range_um=5.0)
 
-    print(f"\n  === ADAPTIVE {galvo_name.upper()} FOCUS SWEEP at galvo={galvo_pos:.3f}° ===")
-    print(f"  Using adaptive range: ±{sparse_range:.1f}µm (prior: {session_prior.num_calibrations} calibrations)")
+    logger.info("=== ADAPTIVE %s FOCUS SWEEP at galvo=%.3f deg ===", galvo_name.upper(), galvo_pos)
+    logger.info("Using adaptive range: +/-%.1f um (prior: %d calibrations)", sparse_range, session_prior.num_calibrations)
 
     # --- PHASE 1: SPARSE SURVEY ---
-    print(f"  Phase 1: Sparse survey ±{sparse_range:.1f}µm, {SPARSE_STEP}µm steps...")
+    logger.info("Phase 1: Sparse survey +/-%.1f um, %.1f um steps...", sparse_range, SPARSE_STEP)
 
     sparse_state = AdaptiveSweepState()
     sparse_positions = np.arange(
@@ -125,14 +128,14 @@ async def _adaptive_focus_sweep(
                 )
 
             if decision['should_stop']:
-                print(f"    Early stop: {decision['reason']} (confidence: {decision['confidence']:.2f})")
+                logger.info("Early stop: %s (confidence: %.2f)", decision['reason'], decision['confidence'])
                 break
 
     sparse_best, sparse_r2 = sparse_state.get_best_position()
-    print(f"    Sparse best: {sparse_best:.1f}µm (R²={sparse_r2:.3f}, {len(sparse_state.positions)} points)")
+    logger.info("Sparse best: %.1f um (R2=%.3f, %d points)", sparse_best, sparse_r2, len(sparse_state.positions))
 
     # --- PHASE 2: DENSE REFINEMENT ---
-    print(f"  Phase 2: Dense refinement ±{DENSE_RANGE}µm around {sparse_best:.1f}µm, {DENSE_STEP}µm steps...")
+    logger.info("Phase 2: Dense refinement +/-%.1f um around %.1f um, %.1f um steps...", DENSE_RANGE, sparse_best, DENSE_STEP)
 
     dense_state = AdaptiveSweepState()
     dense_positions = np.arange(
@@ -155,7 +158,7 @@ async def _adaptive_focus_sweep(
             # Add to adaptive state and check for early stopping
             decision = dense_state.add_point(float(piezo), float(score))
 
-            print(f"    piezo={piezo:.1f}: score={score:.2e}")
+            logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
             if copilot.viz_server:
@@ -175,7 +178,7 @@ async def _adaptive_focus_sweep(
                 )
 
             if decision['should_stop']:
-                print(f"    Early stop: {decision['reason']} (confidence: {decision['confidence']:.2f})")
+                logger.info("Early stop: %s (confidence: %.2f)", decision['reason'], decision['confidence'])
                 break
 
     # Get final result
@@ -204,8 +207,8 @@ async def _adaptive_focus_sweep(
     else:
         fit_quality = "fallback"
 
-    print(f"    → Best focus: piezo={best_piezo:.2f}µm (R²={r_squared:.3f}, {fit_quality})")
-    print(f"    Total exposures: {total_exposures} (sparse: {len(sparse_state.positions)}, dense: {len(dense_state.positions)})")
+    logger.info("Best focus: piezo=%.2f um (R2=%.3f, %s)", best_piezo, r_squared, fit_quality)
+    logger.info("Total exposures: %d (sparse: %d, dense: %d)", total_exposures, len(sparse_state.positions), len(dense_state.positions))
 
     # Build result dict
     result_dict = {
@@ -250,7 +253,7 @@ async def _adaptive_focus_sweep(
                 }
             )
         except Exception as plot_err:
-            print(f"    Warning: Failed to generate focus plot: {plot_err}")
+            logger.warning("Failed to generate focus plot: %s", plot_err)
 
     return result_dict, total_exposures
 
@@ -301,8 +304,8 @@ async def _fine_focus_sweep(
     MIN_R_SQUARED = 0.75
     total_exposures = 0
 
-    print(f"\n  === FINE-ONLY {galvo_name.upper()} FOCUS SWEEP at galvo={galvo_pos:.3f}° ===")
-    print(f"  Sweeping ±{FINE_RANGE}µm around heuristic ({expected_piezo:.1f}µm), {FINE_STEP}µm steps...")
+    logger.info("=== FINE-ONLY %s FOCUS SWEEP at galvo=%.3f deg ===", galvo_name.upper(), galvo_pos)
+    logger.info("Sweeping +/-%.1f um around heuristic (%.1f um), %.1f um steps...", FINE_RANGE, expected_piezo, FINE_STEP)
 
     positions = np.arange(
         expected_piezo - FINE_RANGE,
@@ -323,7 +326,7 @@ async def _fine_focus_sweep(
             score = calculate_focus_score(img, algorithm='fft_bandpass')
             piezo_scores.append((float(piezo), float(score)))
 
-            print(f"    piezo={piezo:.1f}: score={score:.2e}")
+            logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
             if copilot.viz_server:
@@ -355,7 +358,7 @@ async def _fine_focus_sweep(
             # Clamp to measured range
             best_piezo = max(min(best_piezo, positions_arr.max()), positions_arr.min())
         except Exception as fit_err:
-            print(f"    Warning: Gaussian fit failed ({fit_err}), using max score position")
+            logger.warning("Gaussian fit failed (%s), using max score position", fit_err)
             best_idx = np.argmax(scores_arr)
             best_piezo = float(positions_arr[best_idx])
             r_squared = 0.0
@@ -378,8 +381,8 @@ async def _fine_focus_sweep(
         fit_quality = "fallback"
 
     max_score = max(s for _, s in piezo_scores) if piezo_scores else 0.0
-    print(f"    → Best focus: piezo={best_piezo:.2f}µm (R²={r_squared:.3f}, {fit_quality})")
-    print(f"    Total exposures: {total_exposures}")
+    logger.info("Best focus: piezo=%.2f um (R2=%.3f, %s)", best_piezo, r_squared, fit_quality)
+    logger.info("Total exposures: %d", total_exposures)
 
     # Build result dict
     result_dict = {
@@ -419,7 +422,7 @@ async def _fine_focus_sweep(
                 }
             )
         except Exception as plot_err:
-            print(f"    Warning: Failed to generate focus plot: {plot_err}")
+            logger.warning("Failed to generate focus plot: %s", plot_err)
 
     return result_dict, total_exposures
 
@@ -479,11 +482,11 @@ async def hybrid_focus_selection(
 
     if second_best_ratio < fft_confidence_threshold:
         # FFT is confident - best is >15% better than second
-        print(f"    FFT confident: position {best_idx} (ratio {confidence_ratio:.2f})")
+        logger.info("FFT confident: position %d (ratio %.2f)", best_idx, confidence_ratio)
         return best_idx, 'fft', confidence_ratio
 
     # Stage 2: FFT ambiguous - ask Vision
-    print(f"    FFT ambiguous (ratio {confidence_ratio:.2f}), consulting Vision...")
+    logger.info("FFT ambiguous (ratio %.2f), consulting Vision...", confidence_ratio)
 
     import tempfile
     from pathlib import Path
@@ -504,7 +507,7 @@ async def hybrid_focus_selection(
         vision_idx, vision_label, reasoning = await claude_vision.select_best_focus(
             montage_path, offsets, labels
         )
-        print(f"    Vision selected: {vision_label} ({reasoning})")
+        logger.info("Vision selected: %s (%s)", vision_label, reasoning)
 
         # Push montage to viz server
         if copilot.viz_server:
@@ -580,7 +583,7 @@ async def binary_edge_search(
     last_visible = 0.0
     exposures = 0
 
-    print(f"    Binary edge search ({direction}): range 0 to {high:.3f}°")
+    logger.info("Binary edge search (%s): range 0 to %.3f deg", direction, high)
 
     for i in range(num_iterations):
         mid = (low + high) / 2
@@ -619,7 +622,7 @@ async def binary_edge_search(
             except Exception:
                 pass
 
-        print(f"      iter {i+1}: galvo={mid:.3f}°, visible={visible}, features={feature_score}")
+        logger.debug("iter %d: galvo=%.3f deg, visible=%s, features=%s", i + 1, mid, visible, feature_score)
 
         if visible:
             last_visible = mid
@@ -689,18 +692,18 @@ async def fast_calibrate_embryo(
     total_exposures = 0
     HEURISTIC_SLOPE = 100.0  # Default µm/degree
 
-    print(f"\n=== FAST CALIBRATION: {embryo_id} ===")
+    logger.info("=== FAST CALIBRATION: %s ===", embryo_id)
 
     # Check if this is bootstrap (first embryo) or fast mode
     is_bootstrap = not session_prior.is_ready_for_fast_calibration()
 
     if is_bootstrap:
-        print(f"  Mode: BOOTSTRAP (establishing session slope)")
+        logger.info("Mode: BOOTSTRAP (establishing session slope)")
     else:
-        print(f"  Mode: FAST (using session slope {session_prior.slope_um_per_deg:.2f} µm/°)")
+        logger.info("Mode: FAST (using session slope %.2f um/deg)", session_prior.slope_um_per_deg)
 
     # --- STEP 1: Binary Edge Detection ---
-    print(f"\n  Step 1: Binary edge detection...")
+    logger.info("Step 1: Binary edge detection...")
 
     # Start with heuristic piezo at galvo=0
     piezo_heuristic = session_prior.offset_um if session_prior.num_calibrations > 0 else 0.0
@@ -715,7 +718,7 @@ async def fast_calibrate_embryo(
     )
     total_exposures += exp_bottom
 
-    print(f"  Edges detected: top={galvo_top:.3f}°, bottom={galvo_bottom:.3f}°")
+    logger.info("Edges detected: top=%.3f deg, bottom=%.3f deg", galvo_top, galvo_bottom)
 
     # Validate edges
     if galvo_top >= galvo_bottom:
@@ -725,7 +728,7 @@ async def fast_calibrate_embryo(
     galvo_extent = galvo_bottom - galvo_top
 
     # --- STEP 2: Focus at Center Position ---
-    print(f"\n  Step 2: Focus at center (galvo={galvo_center:.3f}°)...")
+    logger.info("Step 2: Focus at center (galvo=%.3f deg)...", galvo_center)
 
     # Use session slope or heuristic
     slope = session_prior.slope_um_per_deg if session_prior.is_ready_for_fast_calibration() else HEURISTIC_SLOPE
@@ -749,7 +752,7 @@ async def fast_calibrate_embryo(
             focus_images.append(np.zeros((100, 100), dtype=np.uint8))
 
     # --- STEP 3: Hybrid Focus Selection ---
-    print(f"\n  Step 3: Hybrid focus selection...")
+    logger.info("Step 3: Hybrid focus selection...")
 
     best_idx, method, confidence = await hybrid_focus_selection(
         focus_images, focus_offsets, claude_vision, copilot, embryo_id
@@ -758,11 +761,11 @@ async def fast_calibrate_embryo(
     embryo_offset = focus_offsets[best_idx]
     piezo_center = piezo_expected + embryo_offset
 
-    print(f"  Selected: offset {embryo_offset:+.1f}µm via {method}")
+    logger.info("Selected: offset %+.1f um via %s", embryo_offset, method)
 
     # --- STEP 4: Refinement if Edge Picked ---
     if best_idx in [0, len(focus_offsets) - 1]:
-        print(f"\n  Step 4: Refining (edge position picked)...")
+        logger.info("Step 4: Refining (edge position picked)...")
 
         # Extend search in direction of edge
         if best_idx == 0:
@@ -788,13 +791,13 @@ async def fast_calibrate_embryo(
         )
         embryo_offset = focus_offsets[best_idx]
         piezo_center = piezo_expected + embryo_offset
-        print(f"  Refined: offset {embryo_offset:+.1f}µm via {method}")
+        logger.info("Refined: offset %+.1f um via %s", embryo_offset, method)
     else:
-        print(f"\n  Step 4: Skipped (center position picked)")
+        logger.info("Step 4: Skipped (center position picked)")
 
     # --- STEP 5: Bootstrap - Establish Session Slope ---
     if is_bootstrap:
-        print(f"\n  Step 5: Bootstrap - calibrating second position for slope...")
+        logger.info("Step 5: Bootstrap - calibrating second position for slope...")
 
         # Pick second position 30% away from center
         galvo_second = galvo_center + 0.3 * galvo_extent
@@ -826,7 +829,7 @@ async def fast_calibrate_embryo(
 
         # Lock session slope
         session_prior.lock_session_slope(calibrated_slope, 0.85, embryo_id)
-        print(f"  Session slope locked: {calibrated_slope:.2f} µm/° (bootstrap embryo: {embryo_id})")
+        logger.info("Session slope locked: %.2f um/deg (bootstrap embryo: %s)", calibrated_slope, embryo_id)
     else:
         # Fast mode - use session slope, calculate offset
         calibrated_slope = session_prior.slope_um_per_deg
@@ -870,7 +873,7 @@ async def fast_calibrate_embryo(
   Total exposures: {total_exposures}
   Recommended slices: {recommended_slices}"""
 
-    print(f"\n{msg}")
+    logger.info("%s", msg)
     return True, msg, total_exposures
 
 
@@ -940,16 +943,16 @@ async def calibrate_embryo(
     if session_prior.num_calibrations > 0 and session_prior.r_squared_mean >= 0.75:
         HEURISTIC_SLOPE = session_prior.slope_um_per_deg
         HEURISTIC_OFFSET = session_prior.offset_um
-        print(f"  Using session prior: {HEURISTIC_SLOPE:.1f} \u00b5m/deg, offset {HEURISTIC_OFFSET:.1f} \u00b5m")
-        print(f"    Prior from {session_prior.num_calibrations} embryo(s), R\u00b2={session_prior.r_squared_mean:.3f}")
+        logger.info("Using session prior: %.1f um/deg, offset %.1f um", HEURISTIC_SLOPE, HEURISTIC_OFFSET)
+        logger.info("Prior from %d embryo(s), R2=%.3f", session_prior.num_calibrations, session_prior.r_squared_mean)
     elif embryo.calibration and embryo.calibration.get('slope_um_per_deg'):
         HEURISTIC_SLOPE = embryo.calibration['slope_um_per_deg']
         HEURISTIC_OFFSET = embryo.calibration.get('offset_um', 0.0)
-        print(f"  Using previous embryo calibration: {HEURISTIC_SLOPE:.1f} \u00b5m/deg, offset {HEURISTIC_OFFSET:.1f} \u00b5m")
+        logger.info("Using previous embryo calibration: %.1f um/deg, offset %.1f um", HEURISTIC_SLOPE, HEURISTIC_OFFSET)
     else:
         HEURISTIC_SLOPE = 100.0  # Default empirical value
         HEURISTIC_OFFSET = 0.0
-        print(f"  Using default heuristic: {HEURISTIC_SLOPE:.1f} \u00b5m/deg")
+        logger.info("Using default heuristic: %.1f um/deg", HEURISTIC_SLOPE)
 
     # Track total exposures during calibration
     total_exposures = 0
@@ -958,7 +961,7 @@ async def calibrate_embryo(
         # First move to embryo position
         pos = embryo.stage_position
         if pos and pos.get('x') is not None and pos.get('y') is not None:
-            print(f"  Moving to {embryo_id} position...")
+            logger.info("Moving to %s position...", embryo_id)
             await client.move_to_position(pos['x'], pos['y'])
 
         # Initialize Claude client for vision
@@ -996,7 +999,7 @@ async def calibrate_embryo(
             try:
                 # Claude now returns (visible, feature_score, description)
                 visible, feature_score, description = await claude_vision.detect_embryo_presence(temp_path)
-                print(f"    galvo={galvo_pos:+.3f}\u00b0: {'VISIBLE' if visible else 'EMPTY'} (features={feature_score}/10) - {description[:40]}...")
+                logger.debug("galvo=%+.3f deg: %s (features=%s/10) - %s...", galvo_pos, 'VISIBLE' if visible else 'EMPTY', feature_score, description[:40])
 
                 # Record for optimal focus position selection
                 edge_detection_data.append({
@@ -1030,36 +1033,34 @@ async def calibrate_embryo(
             # Use provided galvo positions or defaults
             detected_top = galvo_top if galvo_top is not None else -0.15
             detected_bottom = galvo_bottom if galvo_bottom is not None else 0.15
-            print(f"\n  Skipping edge detection, using galvo range: {detected_top:.3f}\u00b0 to {detected_bottom:.3f}\u00b0")
+            logger.info("Skipping edge detection, using galvo range: %.3f deg to %.3f deg", detected_top, detected_bottom)
         else:
-            print(f"\n  Phase 1: Detecting embryo Z extent with Claude vision...")
+            logger.info("Phase 1: Detecting embryo Z extent with Claude vision...")
 
             # Detect TOP edge (sweep from center toward negative)
-            print(f"\n  Detecting TOP edge (sweeping galvo toward negative)...")
+            logger.info("Detecting TOP edge (sweeping galvo toward negative)...")
             detected_top = 0.0
             for galvo in np.arange(0.0, -edge_max_range - edge_step/2, -edge_step):
                 visible = await check_embryo_at_position(galvo)
                 if visible:
                     detected_top = galvo
                 else:
-                    print(f"    \u2192 Embryo disappeared at galvo={galvo:.3f}\u00b0")
+                    logger.info("Embryo disappeared at galvo=%.3f deg", galvo)
                     break
 
             # Detect BOTTOM edge (sweep from center toward positive)
-            print(f"\n  Detecting BOTTOM edge (sweeping galvo toward positive)...")
+            logger.info("Detecting BOTTOM edge (sweeping galvo toward positive)...")
             detected_bottom = 0.0
             for galvo in np.arange(0.0, edge_max_range + edge_step/2, edge_step):
                 visible = await check_embryo_at_position(galvo)
                 if visible:
                     detected_bottom = galvo
                 else:
-                    print(f"    \u2192 Embryo disappeared at galvo={galvo:.3f}\u00b0")
+                    logger.info("Embryo disappeared at galvo=%.3f deg", galvo)
                     break
 
-            print(f"\n  Detected embryo extent:")
-            print(f"    Top edge: galvo={detected_top:.3f}\u00b0")
-            print(f"    Bottom edge: galvo={detected_bottom:.3f}\u00b0")
-            print(f"    Range: {detected_bottom - detected_top:.3f}\u00b0 (~{(detected_bottom - detected_top) * 100:.0f}\u00b5m)")
+            logger.info("Detected embryo extent: top=%.3f deg, bottom=%.3f deg, range=%.3f deg (~%.0f um)",
+                         detected_top, detected_bottom, detected_bottom - detected_top, (detected_bottom - detected_top) * 100)
 
         # === PHASE 2: SELECT OPTIMAL FOCUS POSITIONS ===
         # Use Claude's feature richness scores to find best positions for calibration
@@ -1103,18 +1104,15 @@ async def calibrate_embryo(
                     actual_separation = abs(calib_bottom - calib_top) / galvo_range * 100
                     use_fine_only = True  # Feature-rich positions, use fine-only sweep
 
-                    print(f"\n  Optimal focus positions (selected by Claude feature richness):")
-                    print(f"    Position 1: galvo={calib_top:.3f}\u00b0 (features={score_top}/10)")
-                    print(f"    Position 2: galvo={calib_bottom:.3f}\u00b0 (features={score_bottom}/10)")
-                    print(f"    Separation: {actual_separation:.0f}% of embryo range")
-                    print(f"    \u2192 Using FINE-ONLY focus sweeps (heuristic is good enough)")
+                    logger.info("Optimal focus positions (selected by Claude feature richness):")
+                    logger.info("Position 1: galvo=%.3f deg (features=%s/10)", calib_top, score_top)
+                    logger.info("Position 2: galvo=%.3f deg (features=%s/10)", calib_bottom, score_bottom)
+                    logger.info("Separation: %.0f%% of embryo range -> Using FINE-ONLY focus sweeps", actual_separation)
                 else:
                     # Only one good position found, fall back to inset
                     calib_top = detected_top + galvo_range * inset_fraction
                     calib_bottom = detected_bottom - galvo_range * inset_fraction
-                    print(f"\n  Calibration positions (fallback - only 1 feature-rich position found):")
-                    print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
-                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
+                    logger.info("Calibration positions (fallback): top=%.3f deg, bottom=%.3f deg", calib_top, calib_bottom)
             else:
                 # Not enough good positions (score >= 6), try positions with any visibility
                 visible_positions = [p for p in edge_detection_data if p['visible']]
@@ -1135,33 +1133,30 @@ async def calibrate_embryo(
                             calib_top, calib_bottom = calib_pos_1['galvo'], calib_pos_2['galvo']
                         else:
                             calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
-                        print(f"\n  Calibration positions (moderate features, using adaptive sweep):")
-                        print(f"    Top: galvo={calib_top:.3f}\u00b0 (features={calib_pos_1['feature_score']}/10)")
-                        print(f"    Bottom: galvo={calib_bottom:.3f}\u00b0 (features={calib_pos_2['feature_score']}/10)")
+                        logger.info("Calibration positions (moderate features): top=%.3f deg (features=%s/10), bottom=%.3f deg (features=%s/10)",
+                                     calib_top, calib_pos_1['feature_score'], calib_bottom, calib_pos_2['feature_score'])
                     else:
                         calib_top = detected_top + galvo_range * inset_fraction
                         calib_bottom = detected_bottom - galvo_range * inset_fraction
                 else:
                     calib_top = detected_top + galvo_range * inset_fraction
                     calib_bottom = detected_bottom - galvo_range * inset_fraction
-                    print(f"\n  Calibration positions (fallback to {inset_fraction*100:.0f}% inset):")
-                    print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
-                    print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
+                    logger.info("Calibration positions (fallback to %.0f%% inset): top=%.3f deg, bottom=%.3f deg",
+                                 inset_fraction * 100, calib_top, calib_bottom)
         else:
             # No edge detection data, use traditional inset method
             calib_top = detected_top + galvo_range * inset_fraction
             calib_bottom = detected_bottom - galvo_range * inset_fraction
-            print(f"\n  Calibration positions (interior, {inset_fraction*100:.0f}% inset from edges):")
-            print(f"    Top calibration: galvo={calib_top:.3f}\u00b0")
-            print(f"    Bottom calibration: galvo={calib_bottom:.3f}\u00b0")
+            logger.info("Calibration positions (interior, %.0f%% inset): top=%.3f deg, bottom=%.3f deg",
+                         inset_fraction * 100, calib_top, calib_bottom)
 
         # === PHASE 3: FOCUS SWEEPS AT CALIBRATION POSITIONS ===
         # Use fine-only if we found feature-rich positions, otherwise adaptive sweep
 
         if use_fine_only:
-            print(f"\n  Phase 2: Fine-only focus sweeps at feature-rich positions...")
+            logger.info("Phase 2: Fine-only focus sweeps at feature-rich positions...")
         else:
-            print(f"\n  Phase 2: Adaptive focus sweeps at calibration positions...")
+            logger.info("Phase 2: Adaptive focus sweeps at calibration positions...")
 
         results = {}
 
@@ -1200,7 +1195,7 @@ async def calibrate_embryo(
 
             # Check for sweep failure
             if result_dict['r_squared'] < 0.5:
-                print(f"  Warning: Low confidence for {galvo_name} (R\u00b2={result_dict['r_squared']:.3f})")
+                logger.warning("Low confidence for %s (R2=%.3f)", galvo_name, result_dict['r_squared'])
 
         # === PHASE 4: CALCULATE 2-POINT LINEAR CALIBRATION ===
         g_top = results['top']['galvo']
@@ -1258,7 +1253,7 @@ async def calibrate_embryo(
             r_squared=avg_r_squared,
             extent_deg=extent_deg,
         )
-        print(f"\n  Updated session prior (now {session_prior.num_calibrations} embryo(s), avg R\u00b2={session_prior.r_squared_mean:.3f})")
+        logger.info("Updated session prior (now %d embryo(s), avg R2=%.3f)", session_prior.num_calibrations, session_prior.r_squared_mean)
 
         # Add to focus history
         for name in ['top', 'bottom']:
@@ -1306,7 +1301,7 @@ async def calibrate_embryo(
                     }
                 )
             except Exception as plot_err:
-                print(f"  Warning: Failed to generate calibration summary plot: {plot_err}")
+                logger.warning("Failed to generate calibration summary plot: %s", plot_err)
 
         copilot._mark_significant_action("calibration")
 
@@ -1367,9 +1362,9 @@ async def calibrate_all_embryos(
 
     results = []
     for i, eid in enumerate(ids_to_calibrate, 1):
-        print(f"\n{'='*60}")
-        print(f"Calibrating {eid} ({i}/{len(ids_to_calibrate)})")
-        print(f"{'='*60}")
+        logger.info("=" * 60)
+        logger.info("Calibrating %s (%d/%d)", eid, i, len(ids_to_calibrate))
+        logger.info("=" * 60)
 
         result = await calibrate_embryo(
             embryo_id=eid,

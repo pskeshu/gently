@@ -25,6 +25,7 @@ from datetime import datetime
 
 import yaml
 
+from gently.log_config import configure_logging
 from gently.agent import MicroscopyCopilot, QueueServerClient
 from gently.agent.logger import CopilotLogger
 from gently.organisms import load_organism
@@ -112,6 +113,8 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False):
+    configure_logging(level="INFO")
+
     # Load organism module from config
     config_path = Path(__file__).parent / "config" / "config.yml"
     if config_path.exists():
@@ -353,7 +356,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         copilot.viz_server.set_context_store(context_store)
 
     ws_scheme = "wss" if cert_path else "ws"
-    ws_url = f"{ws_scheme}://localhost:8080/ws/copilot"
+    ws_url = f"{ws_scheme}://localhost:{settings.network.viz_port}/ws/copilot"
 
     # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
     # takes over the terminal.
@@ -427,5 +430,5 @@ if __name__ == "__main__":
             resume_session=resume_id,
             pick_session=pick_session,
         ))
-    except KeyboardInterrupt:
-        pass  # Clean exit on Ctrl+C
+    except (KeyboardInterrupt, RuntimeError, SystemExit):
+        pass  # Clean exit on Ctrl+C (suppresses asyncio cleanup noise on Windows)
