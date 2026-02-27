@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..settings import settings
+
 from ..context.model import (
     Campaign,
     Expectation,
@@ -162,7 +164,7 @@ class IngestionCapability:
             Claude API client for extraction. If None, ingestion is disabled.
         """
         self.claude = claude_client
-        self.model = "claude-sonnet-4-5-20250929"  # Fast, good at extraction
+        self.model = settings.models.medium  # Fast, good at extraction
 
     @property
     def available(self) -> bool:

@@ -14,6 +14,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
+from ..settings import settings
+
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -366,7 +368,7 @@ class PipelineBuilder:
     def vlm_analyze(
         self,
         prompt: str,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = settings.models.perception,
         max_tokens: int = 1024,
     ) -> 'PipelineBuilder':
         """Add VLM analysis step"""

@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import anthropic
 import numpy as np
 
+from ...settings import settings
 from .session import (
     CandidateStage,
     StageComparison,
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 # Subagent uses a faster, cheaper model for focused comparisons
-SUBAGENT_MODEL = "claude-haiku-4-5-20251001"
+SUBAGENT_MODEL = settings.models.fast
 
 
 # Limited tools for subagents (focused comparison only)

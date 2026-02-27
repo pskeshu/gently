@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import anthropic
 
+from ..settings import settings
 from .detector import Detector, DetectionResult, ConfidenceLevel
 from .state import EmbryoState
 from ..core import EventType, get_event_bus
@@ -147,8 +148,8 @@ class DetectionVerifier:
     def __init__(
         self,
         claude_client: anthropic.Anthropic,
-        model: str = "claude-haiku-4-5-20251001",
-        ensemble_model: str = "claude-haiku-4-5-20251001",
+        model: str = settings.models.fast,
+        ensemble_model: str = settings.models.fast,
         ensemble_size: int = 50,
         ensemble_threshold: float = 0.70,
         event_bus=None,

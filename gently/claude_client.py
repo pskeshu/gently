@@ -21,6 +21,8 @@ from pathlib import Path
 from typing import Optional, Tuple, Dict
 import anthropic
 
+from .settings import settings
+
 
 # ============================================================================
 # CLAUDE VISION PROMPTS (from calibration_plans.py)
@@ -125,7 +127,7 @@ class AsyncClaudeClient:
     def __init__(
         self,
         api_key: Optional[str] = None,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = settings.models.perception,
         max_tokens: int = 100,
         timeout: float = 30.0
     ):

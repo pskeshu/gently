@@ -18,6 +18,7 @@ import anthropic
 from typing import Dict, List, Tuple, Optional
 import os
 
+from gently.settings import settings
 from gently.coordinates import (
     pixel_to_stage_position,
     get_um_per_pixel,
@@ -755,7 +756,7 @@ Respond in JSON:
 
         try:
             message = self.claude_client.messages.create(
-                model="claude-opus-4-5-20251101",
+                model=settings.models.perception,
                 max_tokens=8000,
                 thinking={"type": "enabled", "budget_tokens": 5000},
                 messages=[{
@@ -815,7 +816,7 @@ Respond in JSON:
 
         try:
             message = self.claude_client.messages.create(
-                model="claude-opus-4-5-20251101",
+                model=settings.models.perception,
                 max_tokens=6000,
                 thinking={"type": "enabled", "budget_tokens": 4000},
                 messages=[{

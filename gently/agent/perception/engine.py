@@ -15,6 +15,7 @@ from typing import Any, Callable, Dict, List, Optional
 import anthropic
 import numpy as np
 
+from ...settings import settings
 from .session import (
     Observation,
     ObservedFeatures,
@@ -205,7 +206,7 @@ class PerceptionEngine:
     Just: show examples, show image, ask what stage.
     """
 
-    MODEL = "claude-opus-4-5-20251101"
+    MODEL = settings.models.perception
 
     def __init__(
         self,

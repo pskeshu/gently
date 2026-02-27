@@ -21,8 +21,10 @@ from .peer_client import PeerClient
 
 logger = logging.getLogger(__name__)
 
-REAPER_INTERVAL = 10.0  # seconds
-STATUS_REFRESH_INTERVAL = 30.0  # seconds
+from ..settings import settings
+
+REAPER_INTERVAL = settings.mesh.reaper_interval_s
+STATUS_REFRESH_INTERVAL = settings.mesh.status_refresh_s
 
 
 class MeshService(Service):
@@ -46,10 +48,10 @@ class MeshService(Service):
     def __init__(
         self,
         instance_id: str,
-        viz_port: int = 8080,
+        viz_port: int = settings.network.viz_port,
         capability_provider: Callable[[], dict] = lambda: {},
         status_provider: Callable[[], dict] = lambda: {},
-        mesh_port: int = 19547,
+        mesh_port: int = settings.network.mesh_port,
         pairing_manager=None,
         audit_log=None,
     ):
@@ -58,7 +60,7 @@ class MeshService(Service):
         super().__init__(
             name="mesh",
             service_type="mesh",
-            host="0.0.0.0",
+            host=settings.network.mesh_bind,
             port=mesh_port,
         )
         self.instance_id = instance_id

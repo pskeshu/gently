@@ -17,15 +17,16 @@ import ssl
 from typing import Dict, List, Optional
 
 from ...tool_registry import tool, ToolCategory, ToolExample
+from ....settings import settings
 
 logger = logging.getLogger(__name__)
 
 # Timeout for external API calls (seconds)
-_API_TIMEOUT = 10
+_API_TIMEOUT = settings.timeouts.api_call
 
 # NCBI E-utilities polite-access parameters
-_NCBI_TOOL = "gently"
-_NCBI_EMAIL = "pskeshu@gmail.com"
+_NCBI_TOOL = settings.api.ncbi_tool
+_NCBI_EMAIL = settings.api.ncbi_email
 
 
 def _ssl_context() -> ssl.SSLContext:

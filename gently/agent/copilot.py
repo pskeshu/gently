@@ -18,6 +18,8 @@ from pathlib import Path
 import anthropic
 import numpy as np
 
+from ..settings import settings
+
 if TYPE_CHECKING:
     from ..visualization.server import VisualizationServer
 
@@ -52,7 +54,7 @@ class MicroscopyCopilot:
         self,
         api_key: Optional[str] = None,
         storage_path: Path = Path("./experiment_data"),
-        model: str = "claude-opus-4-6",
+        model: str = settings.models.main,
         microscope_client=None,
         session_id: Optional[str] = None,
         store: GentlyStore = None,
@@ -504,7 +506,7 @@ Write a brief status summary. Examples:
         try:
             response = await asyncio.to_thread(
                 self.claude.messages.create,
-                model="claude-haiku-4-5-20251001",
+                model=settings.models.fast,
                 max_tokens=150,
                 messages=[{"role": "user", "content": prompt}]
             )
@@ -802,7 +804,7 @@ Write a brief status summary. Examples:
 
     # ===== Visualization Server Methods =====
 
-    async def start_viz_server(self, port: int = 8080, ssl_certfile=None, ssl_keyfile=None):
+    async def start_viz_server(self, port: int = settings.network.viz_port, ssl_certfile=None, ssl_keyfile=None):
         """
         Start the visualization server for real-time feedback.
 
@@ -2233,7 +2235,7 @@ Respond with ONLY: VALID or BLANK"""
 
             response = await asyncio.to_thread(
                 self.claude.messages.create,
-                model="claude-haiku-4-5-20251001",
+                model=settings.models.fast,
                 max_tokens=10,
                 messages=[{
                     "role": "user",

@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+from ..settings import settings
 from .pipeline import AnalysisStep, AnalysisResult, StepType
 
 logger = logging.getLogger(__name__)
@@ -360,7 +361,7 @@ class VLMStep(AnalysisStep):
     def __init__(
         self,
         prompt: str,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = settings.models.perception,
         max_tokens: int = 1024,
         name: str = "vlm_analysis",
         api_key: Optional[str] = None,

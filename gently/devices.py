@@ -30,6 +30,7 @@ from collections import OrderedDict
 from typing import Dict, Tuple
 import numpy as np
 
+from .settings import settings
 
 from ophyd.status import Status
 
@@ -1494,7 +1495,7 @@ class DiSPIMVolumeScanner:
 
                 # Collect images
                 images = []
-                timeout_s = 15  # Fixed 15 second timeout for volume acquisition
+                timeout_s = settings.timeouts.volume_acquisition
                 start_time = time.time()
 
                 while self.core.getRemainingImageCount() > 0 or self.core.isSequenceRunning():

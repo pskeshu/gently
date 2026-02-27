@@ -17,13 +17,15 @@ import socket
 import time
 from typing import Callable, Optional
 
+from ..settings import settings
+
 logger = logging.getLogger(__name__)
 
-MESH_PORT = 19547
+MESH_PORT = settings.network.mesh_port
 MESH_MAGIC = "GENTLY_MESH"
 MESH_PROTOCOL_VERSION = 2  # bumped for signed heartbeats
-BROADCAST_INTERVAL = 5.0  # seconds
-REPLAY_WINDOW = 30.0  # seconds — reject packets older than this
+BROADCAST_INTERVAL = settings.mesh.broadcast_interval_s
+REPLAY_WINDOW = settings.mesh.replay_window_s
 
 
 def _sign_packet(payload: dict, udp_sign_key: str) -> bytes:
@@ -155,7 +157,7 @@ class MeshDiscovery:
         self,
         instance_id: str,
         hostname: str,
-        viz_port: int = 8080,
+        viz_port: int = settings.network.viz_port,
         mesh_port: int = MESH_PORT,
         pairing_manager=None,
         audit_log=None,

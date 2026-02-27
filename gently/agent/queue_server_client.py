@@ -21,6 +21,7 @@ from gently.coordinates import (
     DEFAULT_PIXEL_SIZE_UM,
     DEFAULT_OBJECTIVE_MAG,
 )
+from gently.settings import settings
 
 
 class QueueServerClient:
@@ -50,7 +51,7 @@ class QueueServerClient:
 
     def __init__(
         self,
-        http_url: str = "http://127.0.0.1:60610",
+        http_url: str = f"http://{settings.network.device_host}:{settings.network.device_port}",
     ):
         """
         Parameters
@@ -218,7 +219,7 @@ class QueueServerClient:
         self,
         plan_name: str,
         kwargs: Dict = None,
-        timeout: float = 300
+        timeout: float = settings.timeouts.plan_execution
     ) -> Dict:
         """
         Submit a plan and wait for completion.
@@ -404,7 +405,7 @@ class QueueServerClient:
                 'lightsheet_snap': 'lightsheet_snap',
                 'piezo_positions': piezo_positions
             },
-            timeout=300
+            timeout=settings.timeouts.plan_execution
         )
 
         if result.get('success'):
@@ -447,7 +448,7 @@ class QueueServerClient:
                 'piezo_position': piezo_position,
                 'galvo_position': galvo_position
             },
-            timeout=60
+            timeout=settings.timeouts.rpc_call
         )
 
         if result.get('success'):
@@ -1519,7 +1520,7 @@ class QueueServerClient:
 
 
 async def create_queue_server_client(
-    http_url: str = "http://127.0.0.1:60610",
+    http_url: str = f"http://{settings.network.device_host}:{settings.network.device_port}",
 ) -> Optional[QueueServerClient]:
     """
     Create and connect a device layer client.

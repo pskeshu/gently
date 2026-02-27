@@ -15,6 +15,7 @@ import logging
 import uuid
 from typing import Any, Callable, Coroutine, Optional
 
+from ..settings import settings
 from .gap_assessment import assess_gaps, ContextGapReport
 from .model import Confidence, Learning
 from .onboarding import (
@@ -411,7 +412,7 @@ class StartupWizard:
             try:
                 resp = await asyncio.to_thread(
                     self.claude_client.messages.create,
-                    model="claude-sonnet-4-5-20250929",
+                    model=settings.models.medium,
                     max_tokens=150,
                     messages=[{"role": "user", "content": prompt}],
                 )

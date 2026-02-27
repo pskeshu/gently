@@ -29,6 +29,7 @@ from gently.agent import MicroscopyCopilot, QueueServerClient
 from gently.agent.logger import CopilotLogger
 from gently.organisms import load_organism
 from gently.hardware import load_hardware
+from gently.settings import settings
 from gently.store import GentlyStore
 
 
@@ -122,7 +123,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     load_hardware(config.get("hardware", "dispim"))
 
     # Storage directory (unified with GentlyStore)
-    storage_dir = Path("D:/Gently2")
+    storage_dir = settings.storage.base_path
     storage_dir.mkdir(exist_ok=True)
 
     # Create unified store (GentlyStore) early for session queries
@@ -174,7 +175,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # Connect to device layer
     client = None
     if not offline:
-        client = QueueServerClient(http_url="http://127.0.0.1:60610")
+        client = QueueServerClient(http_url=f"http://{settings.network.device_host}:{settings.network.device_port}")
         connected = await client.connect()
         if not connected:
             await client.disconnect()
@@ -206,12 +207,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
     # Start visualization server for real-time feedback
     await copilot.start_viz_server(
-        port=8080,
+        port=settings.network.viz_port,
         ssl_certfile=str(cert_path) if cert_path else None,
         ssl_keyfile=str(key_path) if key_path else None,
     )
     scheme = "https" if cert_path else "http"
-    viz_url = f"{scheme}://localhost:8080" if copilot.viz_server is not None else None
+    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None

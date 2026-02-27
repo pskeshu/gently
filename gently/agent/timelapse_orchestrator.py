@@ -19,6 +19,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 import traceback
 
 from ..core import EventType, get_event_bus
+from ..settings import settings
 from .error_log import GlobalErrorLog
 from gently.organisms import get_organism
 
@@ -26,7 +27,7 @@ if TYPE_CHECKING:
     from ..store import GentlyStore
 
 # Default trace directory
-TRACE_BASE_PATH = Path("D:/Gently/traces")
+TRACE_BASE_PATH = settings.storage.traces_dir
 
 logger = logging.getLogger(__name__)
 
@@ -516,7 +517,7 @@ class TimelapseOrchestrator:
                     session_id=self._session_id,
                     name=f"timelapse_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
                     method="vlm_stage_classification",
-                    model_name="claude-opus-4-5-20251101",
+                    model_name=settings.models.perception,
                     source="live",
                     config={"stop_condition": stop_condition, "interval": base_interval_seconds},
                 )

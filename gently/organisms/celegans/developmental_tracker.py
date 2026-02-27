@@ -16,6 +16,8 @@ from enum import Enum
 
 import anthropic
 
+from ...settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -193,7 +195,7 @@ class DevelopmentalTracker:
     def __init__(
         self,
         claude_client: Optional[anthropic.Anthropic] = None,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = settings.models.perception,
     ):
         """
         Parameters

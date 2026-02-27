@@ -29,10 +29,12 @@ from typing import Any, Dict, Optional, TYPE_CHECKING
 if TYPE_CHECKING:
     from .embryo_dataset import EmbryoDataset
 
+from ..settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Default base path for trace files
-TRACE_BASE_PATH = Path("D:/Gently/traces")
+TRACE_BASE_PATH = settings.storage.traces_dir
 
 
 class TracePersister:

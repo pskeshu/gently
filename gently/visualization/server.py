@@ -28,6 +28,8 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from ..settings import settings
+
 logger = logging.getLogger(__name__)
 
 # Optional imports
@@ -95,11 +97,11 @@ class VisualizationServer:
 
     def __init__(
         self,
-        host: str = "0.0.0.0",
-        port: int = 8080,
+        host: str = settings.network.viz_host,
+        port: int = settings.network.viz_port,
         data_store=None,
         event_bus=None,
-        sessions_dir: str = "D:/Gently/sessions",
+        sessions_dir: str = str(settings.storage.sessions_dir),
         gently_store=None,
         ssl_certfile: str = None,
         ssl_keyfile: str = None,
@@ -539,7 +541,7 @@ class VisualizationServer:
 
 # Convenience function
 def create_visualization_server(
-    port: int = 8080,
+    port: int = settings.network.viz_port,
     data_store=None,
     event_bus=None,
     gently_store=None,

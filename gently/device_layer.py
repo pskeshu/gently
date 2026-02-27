@@ -35,6 +35,8 @@ if str(project_root) not in sys.path:
 from aiohttp import web
 import yaml
 
+from .settings import settings
+
 # Bluesky imports
 from bluesky import RunEngine
 from bluesky.callbacks.best_effort import BestEffortCallback
@@ -905,7 +907,7 @@ class DeviceLayerServer:
     # Server Lifecycle
     # =========================================================================
 
-    async def run(self, host: str = '127.0.0.1', port: int = 60610):
+    async def run(self, host: str = settings.network.device_host, port: int = settings.network.device_port):
         """Start the server"""
         await self.initialize()
 
@@ -979,7 +981,7 @@ class DeviceLayerServer:
             print("Device layer stopped.")
 
 
-async def main(port: int = 60610, sam_device: str = "cuda"):
+async def main(port: int = settings.network.device_port, sam_device: str = "cuda"):
     server = DeviceLayerServer(sam_device=sam_device)
     await server.run(port=port)
 
@@ -988,7 +990,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Gently Device Layer Server")
-    parser.add_argument("--port", type=int, default=60610, help="HTTP port")
+    parser.add_argument("--port", type=int, default=settings.network.device_port, help="HTTP port")
     parser.add_argument("--sam-device", default="cuda", choices=["cuda", "cpu"],
                         help="Device for SAM model (default: cuda)")
 

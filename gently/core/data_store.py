@@ -17,6 +17,8 @@ import logging
 import uuid
 import numpy as np
 
+from ..settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -580,7 +582,7 @@ class TiledStore(DataStore):
 
     def __init__(
         self,
-        storage_path: str = "D:/Gently",
+        storage_path: str = str(settings.storage.base_path),
         catalog_name: str = "gently",
     ):
         from pathlib import Path
@@ -888,7 +890,7 @@ _global_store: Optional[DataStore] = None
 
 
 def get_data_store(
-    storage_path: str = "D:/Gently",
+    storage_path: str = str(settings.storage.base_path),
     catalog_name: str = "gently",
     use_tiled: bool = True,
 ) -> DataStore:

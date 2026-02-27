@@ -7,6 +7,7 @@ from typing import List, Dict, Optional, Callable
 from datetime import datetime
 import anthropic
 
+from ..settings import settings
 from .detector import Detector, DetectionResult, ConfidenceLevel
 from .detector_registry import DetectorRegistry
 from .state import EmbryoState
@@ -23,7 +24,7 @@ class DetectionQueue:
         self,
         registry: DetectorRegistry,
         claude_client: anthropic.Anthropic,
-        model: str = "claude-opus-4-5-20251101",
+        model: str = settings.models.perception,
         on_detection_callback: Optional[Callable] = None,
         on_evaluation_callback: Optional[Callable] = None
     ):

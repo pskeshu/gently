@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from ..settings import settings
 from .gap_assessment import ContextGapReport, GapLayer
 from .model import (
     Campaign,
@@ -292,7 +293,7 @@ async def _extract_with_llm(
     try:
         api_response = await asyncio.to_thread(
             claude_client.messages.create,
-            model="claude-sonnet-4-5-20250929",
+            model=settings.models.medium,
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
         )

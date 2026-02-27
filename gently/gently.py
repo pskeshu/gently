@@ -49,6 +49,7 @@ from .core import (
     get_event_bus,
     get_service_registry,
 )
+from .settings import settings
 from .store import GentlyStore
 from .agent.tool_registry import ToolRegistry, get_tool_registry
 from .analysis import (
@@ -77,7 +78,7 @@ class Gently:
 
     def __init__(
         self,
-        storage_path: Path = Path("D:/Gently"),
+        storage_path: Path = settings.storage.base_path,
         catalog_name: str = "gently",
         use_persistent_storage: bool = True,
     ):
@@ -159,7 +160,7 @@ class Gently:
                 name="queue_server",
                 service_type="http",
                 host="localhost",
-                port=60610,
+                port=settings.network.device_port,
                 metadata={'description': 'Bluesky queue server'},
             ),
         ]
@@ -535,7 +536,7 @@ class Gently:
     # Visualization Server
     # =========================================================================
 
-    async def start_visualization_server(self, port: int = 8080):
+    async def start_visualization_server(self, port: int = settings.network.viz_port):
         """
         Start the web-based visualization server
 
