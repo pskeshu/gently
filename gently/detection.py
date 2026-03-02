@@ -12,11 +12,9 @@ detection modules handle image analysis.
 import logging
 import numpy as np
 from typing import Optional, Tuple, List
-from scipy.ndimage import uniform_filter, gaussian_filter, sobel
-from scipy.ndimage.measurements import center_of_mass, label
+from scipy.ndimage import uniform_filter, gaussian_filter, sobel, label, binary_opening, binary_closing
 
 logger = logging.getLogger(__name__)
-from scipy.ndimage import binary_opening, binary_closing
 
 
 def detect_embryo_roi(image: np.ndarray,

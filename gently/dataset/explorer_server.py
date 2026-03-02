@@ -29,10 +29,16 @@ from pydantic import BaseModel
 
 from .schema import get_connection, get_database_stats, DEFAULT_DB_PATH
 from .embryo_dataset import EmbryoDataset
-from gently.imaging import normalize_to_uint8
-from gently.imaging import image_to_base64 as _image_to_base64
+from gently.imaging import (
+    normalize_to_uint8,
+    image_to_base64 as _image_to_base64,
+    load_volume,
+    compute_crop_bounds,
+    apply_crop_bounds,
+    projection_three_view,
+)
 
-# Lazy imports for projection functions
+# Lazy imports for explorer-specific projection functions
 tifffile = None
 PIL_Image = None
 
@@ -48,10 +54,6 @@ def ensure_projection_deps():
         PIL_Image = _Image
 
 
-# =============================================================================
-# Projection Functions (from projection_explorer.py)
-# =============================================================================
-
 def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np.ndarray:
     """Normalize image to 0-255 uint8 using percentile scaling."""
     return normalize_to_uint8(img, method="percentile", p_low=p_low, p_high=p_high)
@@ -60,46 +62,6 @@ def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np
 def image_to_base64(img: np.ndarray, format: str = "JPEG", quality: int = 90) -> str:
     """Convert numpy array to base64-encoded image."""
     return _image_to_base64(img, format=format, quality=quality, ensure_rgb=True)
-
-
-def load_volume(path: Path) -> np.ndarray:
-    """Load a volume from TIFF file, extract View A."""
-    ensure_projection_deps()
-    vol = tifffile.imread(str(path))
-    vol = np.squeeze(vol)
-    if vol.ndim == 3:
-        z_depth, height, width = vol.shape
-        # Extract View A (left half) if dual-view format
-        if width > height * 2:
-            vol = vol[:, :, :width // 2]
-    return vol
-
-
-def compute_crop_bounds(volume: np.ndarray, padding: int = 20, sigma_mult: float = 3.5) -> Tuple[int, int, int, int]:
-    """Compute crop bounds for 3D volume using center-of-mass of bright pixels."""
-    if volume.ndim != 3:
-        return (0, volume.shape[0], 0, volume.shape[1])
-    max_proj = np.max(volume, axis=0).astype(np.float32)
-    threshold = np.percentile(max_proj, 95)
-    mask = max_proj > threshold
-    y_coords, x_coords = np.where(mask)
-    if len(y_coords) < 10:
-        return (0, volume.shape[1], 0, volume.shape[2])
-    cy, cx = np.mean(y_coords), np.mean(x_coords)
-    y_std = max(np.std(y_coords), 20)
-    x_std = max(np.std(x_coords), 20)
-    y_min = int(max(0, cy - sigma_mult * y_std - padding))
-    y_max = int(min(volume.shape[1], cy + sigma_mult * y_std + padding))
-    x_min = int(max(0, cx - sigma_mult * x_std - padding))
-    x_max = int(min(volume.shape[2], cx + sigma_mult * x_std + padding))
-    return (y_min, y_max, x_min, x_max)
-
-
-def apply_crop_bounds(volume: np.ndarray, bounds: Tuple[int, int, int, int]) -> np.ndarray:
-    """Apply pre-computed crop bounds to a volume."""
-    y_min, y_max, x_min, x_max = bounds
-    return volume[:, max(0, y_min):min(volume.shape[1], y_max),
-                     max(0, x_min):min(volume.shape[2], x_max)]
 
 
 def find_outer_boundary(img: np.ndarray, percentile: float = 50) -> np.ndarray:
@@ -210,39 +172,6 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
     h_sep = np.ones((2, row_width), dtype=np.uint8) * 64
     montage = np.concatenate([rows[0], h_sep, rows[1]], axis=0)
     return montage, f"Multi-slice montage ({n_slices} slices)"
-
-
-def projection_three_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
-    """Three orthogonal views with axis alignment."""
-    ensure_projection_deps()
-    if volume.ndim != 3:
-        return normalize_image(volume), "2D input"
-    z_depth, height, width = volume.shape
-    xy_proj = normalize_image(np.max(volume, axis=0))
-    xz_proj = normalize_image(np.max(volume, axis=1))
-    yz_proj = normalize_image(np.max(volume, axis=2))
-    xy_h, xy_w = xy_proj.shape
-    z_display_h = max(xy_h // 3, int(z_depth * 3))
-    pil_xz = PIL_Image.fromarray(xz_proj)
-    pil_xz = pil_xz.resize((xy_w, z_display_h), PIL_Image.Resampling.LANCZOS)
-    xz_scaled = np.array(pil_xz)
-    yz_rotated = yz_proj.T
-    z_display_w = z_display_h
-    pil_yz = PIL_Image.fromarray(yz_rotated)
-    pil_yz = pil_yz.resize((z_display_w, xy_h), PIL_Image.Resampling.LANCZOS)
-    yz_scaled = np.array(pil_yz)
-    sep = 3
-    v_sep = np.ones((xy_h, sep), dtype=np.uint8) * 128
-    top_row = np.concatenate([xy_proj, v_sep, yz_scaled], axis=1)
-    total_width = top_row.shape[1]
-    if xz_scaled.shape[1] < total_width:
-        pad = np.zeros((xz_scaled.shape[0], total_width - xz_scaled.shape[1]), dtype=np.uint8)
-        bottom_row = np.concatenate([xz_scaled, pad], axis=1)
-    else:
-        bottom_row = xz_scaled[:, :total_width]
-    h_sep = np.ones((sep, total_width), dtype=np.uint8) * 128
-    combined = np.concatenate([top_row, h_sep, bottom_row], axis=0)
-    return combined, "Three-view: [XY|YZ] top, [XZ] bottom"
 
 
 def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,

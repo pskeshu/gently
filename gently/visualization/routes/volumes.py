@@ -36,7 +36,7 @@ def create_router(server) -> APIRouter:
         Returns:
             List of projections with method name, description, and base64 PNG data
         """
-        from gently.agent.perception.projection import projection_three_view
+        from gently.imaging import projection_three_view
 
         # Look up volume path (timelapse tracker + GentlyStore fallback)
         volume_path = server._resolve_volume_path(embryo_id, timepoint)

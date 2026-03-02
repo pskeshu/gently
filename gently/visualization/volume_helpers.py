@@ -42,7 +42,7 @@ def load_volume_from_disk(volume_path: str) -> np.ndarray:
         Cropped 3D numpy array (Z, H, W)
     """
     import tifffile
-    from gently.agent.perception.projection import (
+    from gently.imaging import (
         compute_crop_bounds,
         apply_crop_bounds,
     )

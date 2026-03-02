@@ -29,7 +29,7 @@ from .session import (
     ReasoningStep,
 )
 from .example_store import ExampleStore
-from .projection import render_volume_view
+from gently.imaging import render_volume_view
 
 logger = logging.getLogger(__name__)
 

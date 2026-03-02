@@ -30,7 +30,7 @@ from .session import (
     PhaseTrace,
 )
 from .example_store import ExampleStore
-from .projection import render_volume_view
+from gently.imaging import render_volume_view
 from .stages import STAGES
 from .verification import VerificationEngine
 from gently.organisms import get_organism

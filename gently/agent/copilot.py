@@ -789,7 +789,7 @@ class MicroscopyCopilot:
 
         if self.viz_server and volume is not None:
             try:
-                from gently.agent.perception.projection import (
+                from gently.imaging import (
                     projection_three_view,
                     compute_crop_bounds,
                     apply_crop_bounds,

@@ -173,14 +173,6 @@ __all__ = [
     "timelapse_volume_plan",
     "multi_embryo_calibration_workflow",
 
-    # Calibration plans (conditionally imported)
-    "verify_embryo_centered",
-    "detect_embryo_edge",
-    "calibrate_focus_at_position",
-    "calibrate_embryo_piezo_galvo",
-    "EMBRYO_CENTERING_PROMPT",
-    "EMBRYO_EDGE_PROMPT",
-
     # Configuration classes and utilities
     "HardwareProfile",
     "CameraMode",
@@ -212,6 +204,17 @@ __all__ = [
     "DEFAULT_PIXEL_SIZE_UM",
     "DEFAULT_OBJECTIVE_MAG",
 ]
+
+# Add calibration plan names if available
+if _CALIBRATION_PLANS_AVAILABLE:
+    __all__.extend([
+        "verify_embryo_centered",
+        "detect_embryo_edge",
+        "calibrate_focus_at_position",
+        "calibrate_embryo_piezo_galvo",
+        "EMBRYO_CENTERING_PROMPT",
+        "EMBRYO_EDGE_PROMPT",
+    ])
 
 # Add visualization functions if available
 if _VISUALIZATION_AVAILABLE:

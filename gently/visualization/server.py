@@ -262,7 +262,7 @@ class VisualizationServer(Service):
         metadata: Optional[Dict] = None
     ) -> ImageData:
         """Convert numpy array to ImageData with base64 PNG"""
-        from gently.agent.perception.projection import (
+        from gently.imaging import (
             projection_three_view,
             compute_crop_bounds,
             apply_crop_bounds,

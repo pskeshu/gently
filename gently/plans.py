@@ -32,7 +32,6 @@ import logging
 import time
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import OrderedDict
 from typing import Any, Dict, Generator, List, Tuple, Optional
 import bluesky.plan_stubs as bps
 import bluesky.plans as bp

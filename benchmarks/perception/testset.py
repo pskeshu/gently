@@ -124,7 +124,7 @@ def _create_three_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
     """
     _ensure_dependencies()
 
-    from gently.agent.perception.projection import (
+    from gently.imaging import (
         projection_three_view,
         compute_crop_bounds,
         apply_crop_bounds,
