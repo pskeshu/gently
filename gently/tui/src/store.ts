@@ -92,6 +92,7 @@ export interface TuiState {
   browserPeers: BrowserPeer[];
   peerCampaignItems: BrowserPlanItem[];
   peerCampaignMeta: { hostname: string; campaign_id: string } | null;
+  campaignBrowserOpen: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -155,6 +156,7 @@ export interface TuiActions {
   setBrowserPeers: (peers: BrowserPeer[]) => void;
   setPeerCampaignItems: (items: BrowserPlanItem[], hostname: string, campaign_id: string) => void;
   clearPeerCampaignItems: () => void;
+  setCampaignBrowserOpen: (open: boolean) => void;
 }
 
 export type TuiStore = TuiState & TuiActions;
@@ -259,6 +261,7 @@ export function createTuiStore() {
     browserPeers: [],
     peerCampaignItems: [],
     peerCampaignMeta: null,
+    campaignBrowserOpen: false,
 
     // Connection
     setConnected: (meta) =>
@@ -529,5 +532,6 @@ export function createTuiStore() {
       set({ peerCampaignItems: items, peerCampaignMeta: { hostname, campaign_id } }),
     clearPeerCampaignItems: () =>
       set({ peerCampaignItems: [], peerCampaignMeta: null }),
+    setCampaignBrowserOpen: (open) => set({ campaignBrowserOpen: open }),
   }));
 }

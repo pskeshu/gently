@@ -24,6 +24,7 @@ import { setTheme, listThemes } from "../theme.js";
 import { Header } from "./Header.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ActiveMessage } from "./ChatPane.js";
+import { CampaignBrowser } from "./CampaignBrowser.js";
 import { ChoicePicker } from "./ChoicePicker.js";
 import { CommandInput } from "./CommandInput.js";
 import { StatusBar } from "./StatusBar.js";
@@ -98,6 +99,13 @@ export function App({ wsUrl, store }: AppProps) {
       if (isSlashCommand(text)) {
         // Handle /theme locally
         if (handleThemeCommand(text)) return;
+        // Bare /campaign opens interactive browser
+        const trimmed = text.trim();
+        if (trimmed === "/campaign" || trimmed === "/campaigns") {
+          store.getState().setCampaignBrowserOpen(true);
+          send({ type: "browse", target: "campaigns" });
+          return;
+        }
         // Other commands go to server
         send({ type: "command", command: text });
         return;
@@ -248,6 +256,16 @@ export function App({ wsUrl, store }: AppProps) {
         streamCharsReceived={state.streamCharsReceived}
       />
 
+      {/* ── Campaign browser (when /campaign is invoked) ──────── */}
+      {state.campaignBrowserOpen ? (
+        <CampaignBrowser
+          campaigns={state.browserCampaigns}
+          theme={state.theme}
+          send={send}
+          onClose={() => store.getState().setCampaignBrowserOpen(false)}
+        />
+      ) : null}
+
       {/* ── Choice picker (when copilot asks a question) ──────── */}
       {state.pendingChoice ? (
         <ChoicePicker
@@ -258,8 +276,8 @@ export function App({ wsUrl, store }: AppProps) {
         />
       ) : null}
 
-      {/* ── Persistent input bar (hidden when picker active) ── */}
-      {!state.pendingChoice ? (
+      {/* ── Persistent input bar (hidden when picker/browser active) ── */}
+      {!state.pendingChoice && !state.campaignBrowserOpen ? (
         <CommandInput
           commands={state.commands}
           theme={state.theme}
