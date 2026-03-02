@@ -1,5 +1,5 @@
 """
-Visualization Tools for diSPIM Microscopy
+Visualization Tools for diSPIM
 =========================================
 
 Provides:

@@ -2,7 +2,7 @@
 Gently DiSPIM Detection
 =======================
 
-Embryo detection and object identification utilities for DiSPIM microscopy.
+Embryo detection and object identification utilities for diSPIM imaging.
 Provides ROI detection and object finding for sparse bottom camera images.
 
 Separated from plans to maintain clean architecture - plans orchestrate devices,

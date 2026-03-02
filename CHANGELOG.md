@@ -210,6 +210,65 @@ notifications:
 
 ---
 
+## v0.8.6
+
+TUI: extracted campaign browser from StatusBar into a dedicated
+`CampaignBrowser` component. StatusBar keeps a read-only summary,
+`/campaign` opens the full interactive tree with actions (share,
+pause/resume), subcampaign expansion, and keyboard navigation.
+
+---
+
+## v0.9.0
+
+Internal restructuring. No new user-facing features — this is about
+making the codebase easier to work in.
+
+Five refactoring passes (P1–P5):
+
+**P1 — Module decomposition**
+- Split `copilot.py` (1,600 lines) into 3 delegate classes:
+  `ConversationManager`, `ToolDispatcher`, `ExperimentDelegate`.
+- Split `hardware_tools.py` into 5 domain-specific tool modules.
+- Split `context/store.py` into mixin modules by domain.
+- Consolidated duplicated image encoding into `gently/imaging.py`.
+
+**P2 — Logging and configuration**
+- Replaced ~530 `print()` calls with structured logging.
+- Centralized hardcoded config into `gently/settings.py` with env
+  overrides.
+
+**P3 — Service architecture**
+- `VisualizationServer` and `DeviceLayerServer` now extend the `Service`
+  base class — lifecycle state machine, health checks, double-start
+  guards for free.
+- Migrated `ServiceClient` from `httpx` to `aiohttp`, matching the rest
+  of the codebase.
+
+**P4 — Error handling and type safety**
+- `gently/exceptions.py`: 16 domain exception classes under `GentlyError`
+  (hardware, calibration, perception, storage, network, copilot).
+- Converted ~25 bare `except Exception` handlers to specific types.
+- Consolidated duplicate prompt strings in `claude_client.py`.
+- Deleted orphaned `plans_qserver.py` (moved utility plans to `plans.py`).
+- `gently/store_types.py`: 8 TypedDict definitions for `GentlyStore`
+  return values.
+
+**P5 — Packaging and documentation**
+- Added `pyproject.toml` with setuptools packaging, optional dependency
+  groups, and `gently` console script entry point.
+- Updated `.gitignore` for mesh artifacts, LaTeX files, electron/.
+- Synced version strings across 4 locations.
+- Generated reference docs: `docs/COMMANDS.md` (24 slash commands),
+  `docs/TOOLS.md` (68 run-mode + 27 plan-mode tools),
+  `scripts/README.md`, `examples/README.md`.
+
+The goal was to get the codebase to a state where you can grep for
+something and find it in one place. Exceptions have types, services have
+a lifecycle, config has a home, and the docs match the code.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:

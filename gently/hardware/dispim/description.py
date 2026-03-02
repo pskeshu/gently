@@ -6,7 +6,7 @@ Microscopy system capabilities, parameters, and safety limits.
 """
 
 HARDWARE_DESCRIPTION = """
-# diSPIM Microscopy System
+# diSPIM System
 
 Dual-view Inverted Selective Plane Illumination Microscopy (diSPIM) for high-speed 3D imaging.
 

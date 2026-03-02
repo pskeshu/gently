@@ -2,7 +2,7 @@
 Gently DiSPIM Analysis Algorithms
 =================================
 
-Optional and advanced analysis algorithms for DiSPIM microscopy.
+Optional and advanced analysis algorithms for diSPIM imaging.
 These are additional focus algorithms and advanced curve fitting functions
 that are not essential for the basic autofocus workflow.
 

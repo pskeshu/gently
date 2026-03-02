@@ -2,7 +2,7 @@
 Gently DiSPIM
 ============
 
-Device-agnostic Bluesky plans and Ophyd devices for DiSPIM microscopy.
+Device-agnostic Bluesky plans and Ophyd devices for diSPIM imaging.
 Built around atomic microscope actions that compose into complex experimental workflows.
 
 Key Components:
@@ -137,7 +137,7 @@ from .core import (
     get_data_store,
 )
 
-__version__ = "0.8.6"
+__version__ = "0.9.0"
 __all__ = [
     # Main entry point
     "Gently",

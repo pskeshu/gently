@@ -1,7 +1,7 @@
 """
 Conversational Microscopy Copilot
 
-AI agent that acts as a scientific collaborator for diSPIM microscopy experiments.
+AI agent that acts as a scientific collaborator for diSPIM experiments.
 """
 
 from .copilot import MicroscopyCopilot
