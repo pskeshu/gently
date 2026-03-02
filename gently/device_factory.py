@@ -40,7 +40,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
     >>> from client import get_mmc
     >>> from bluesky import RunEngine
     >>> from gently.agent import MicroscopyCopilot
-    >>> from gently.agent.device_factory import create_devices_from_mmcore
+    >>> from gently.device_factory import create_devices_from_mmcore
     >>>
     >>> core = get_mmc()
     >>> devices = create_devices_from_mmcore(core)

@@ -158,7 +158,7 @@ class MeshService(Service):
             instance_id=peer_id,
             hostname=data.get("hostname", ""),
             ip_address=sender_ip,
-            viz_port=data.get("viz_port", 8080),
+            viz_port=data.get("viz_port", settings.network.viz_port),
             first_seen=now,
             last_seen=now,
             is_trusted=trusted,

@@ -45,7 +45,7 @@ def load_organism(name: str) -> ModuleType:
     global _active_organism
     module = importlib.import_module(f"gently.organisms.{name}")
     _active_organism = module
-    logger.info(f"Loaded organism module: {name} ({module.ORGANISM_DISPLAY_NAME})")
+    logger.info("Loaded organism module: %s (%s)", name, module.ORGANISM_DISPLAY_NAME)
     return module
 
 

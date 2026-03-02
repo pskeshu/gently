@@ -8,7 +8,7 @@ from .copilot import MicroscopyCopilot
 from .state import EmbryoState, ExperimentState, ImageRecord
 from .plan_synthesis import PlanSynthesizer, PlanValidator
 from .perception import PerceptionManager, PerceptionResult, PerceptionSession
-from .device_factory import create_devices_from_mmcore
+from gently.device_factory import create_devices_from_mmcore
 from .queue_server_client import QueueServerClient
 from .tool_registry import ToolRegistry, get_tool_registry, tool, ToolCategory
 from .benchmark import run_benchmark, BenchmarkResults, print_benchmark_results

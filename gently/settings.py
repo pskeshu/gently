@@ -44,6 +44,9 @@ class MeshSettings:
     replay_window_s: float = field(default_factory=lambda: _env("MESH_REPLAY_WINDOW", 30.0))
     reaper_interval_s: float = field(default_factory=lambda: _env("MESH_REAPER_INTERVAL", 10.0))
     status_refresh_s: float = field(default_factory=lambda: _env("MESH_STATUS_REFRESH", 30.0))
+    fetch_timeout_s: float = field(default_factory=lambda: _env("MESH_FETCH_TIMEOUT", 5.0))
+    stale_threshold_s: float = field(default_factory=lambda: _env("MESH_STALE_THRESHOLD", 15.0))
+    dead_threshold_s: float = field(default_factory=lambda: _env("MESH_DEAD_THRESHOLD", 30.0))
 
 
 @dataclass(frozen=True)

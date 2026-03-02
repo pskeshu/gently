@@ -145,7 +145,7 @@ class DeviceLayerServer(Service):
 
         # [3/5] Create Ophyd devices
         logger.info("[3/5] Creating Ophyd devices...")
-        from gently.agent.device_factory import create_devices_from_mmcore
+        from gently.device_factory import create_devices_from_mmcore
         # Suppress rich console output to avoid Unicode issues on Windows
         import io
         old_stdout = sys.stdout
@@ -288,7 +288,7 @@ class DeviceLayerServer(Service):
         """
         if self._sam_detector is None:
             logger.info("Loading SAM detector (%s on %s)...", self._sam_model_type, self._sam_device)
-            from gently.agent.sam_detection import SAMEmbryoDetector
+            from gently.sam_detection import SAMEmbryoDetector
 
             self._sam_detector = SAMEmbryoDetector(
                 sam_checkpoint=self._sam_checkpoint,
@@ -1025,8 +1025,8 @@ if __name__ == "__main__":
 
     configure_logging(level="INFO")
 
-    print("\nStarting Gently Device Layer...")
-    print("This server provides unified hardware control + SAM detection.\n")
+    logger.info("Starting Gently Device Layer...")
+    logger.info("This server provides unified hardware control + SAM detection.")
 
     try:
         asyncio.run(main(port=args.port, sam_device=args.sam_device))

@@ -45,7 +45,7 @@ def load_hardware(name: str) -> ModuleType:
     global _active_hardware
     module = importlib.import_module(f"gently.hardware.{name}")
     _active_hardware = module
-    logger.info(f"Loaded hardware module: {name}")
+    logger.info("Loaded hardware module: %s", name)
     return module
 
 

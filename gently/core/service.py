@@ -285,65 +285,6 @@ def set_service_registry(registry: ServiceRegistry):
 
 
 # =============================================================================
-# Common Service Implementations
-# =============================================================================
-
-class HTTPService(Service):
-    """
-    Base class for HTTP-based services
-
-    Provides a standard pattern for REST/HTTP services.
-    """
-
-    def __init__(
-        self,
-        name: str,
-        host: str = "localhost",
-        port: int = 8000,
-    ):
-        super().__init__(name=name, service_type="http", host=host, port=port)
-        self._app = None
-        self._server = None
-
-    async def on_start(self):
-        """Start the HTTP server"""
-        try:
-            import uvicorn
-            from fastapi import FastAPI
-
-            # Create FastAPI app
-            self._app = FastAPI(title=self.name)
-            self.setup_routes(self._app)
-
-            # Create server config
-            config = uvicorn.Config(
-                self._app,
-                host=self.host,
-                port=self.port,
-                log_level="warning",
-            )
-            self._server = uvicorn.Server(config)
-
-            # Start in background task
-            asyncio.create_task(self._server.serve())
-            logger.info(f"HTTP service {self.name} started on {self.host}:{self.port}")
-
-        except ImportError:
-            logger.warning("uvicorn/fastapi not available, HTTP service not started")
-
-    async def on_stop(self):
-        """Stop the HTTP server"""
-        if self._server:
-            self._server.should_exit = True
-            self._server = None
-
-    @abstractmethod
-    def setup_routes(self, app):
-        """Setup FastAPI routes - implement in subclass"""
-        pass
-
-
-# =============================================================================
 # Service Client for Communication
 # =============================================================================
 

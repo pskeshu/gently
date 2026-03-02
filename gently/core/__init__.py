@@ -33,7 +33,7 @@ from .service import (
     ServiceInfo,
     ServiceRegistry,
     ServiceClient,
-    HTTPService,
+
     get_service_registry,
     set_service_registry,
 )
@@ -61,7 +61,7 @@ __all__ = [
     'ServiceInfo',
     'ServiceRegistry',
     'ServiceClient',
-    'HTTPService',
+
     'get_service_registry',
     'set_service_registry',
 ]

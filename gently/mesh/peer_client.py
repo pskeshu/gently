@@ -15,10 +15,9 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 
 from .models import PeerInfo
+from ..settings import settings
 
 logger = logging.getLogger(__name__)
-
-FETCH_TIMEOUT = 5  # seconds
 
 
 class PeerClient:
@@ -32,7 +31,7 @@ class PeerClient:
 
     async def _ensure_session(self):
         if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=FETCH_TIMEOUT)
+            timeout = aiohttp.ClientTimeout(total=settings.mesh.fetch_timeout_s)
             # Use permissive SSL context — we verify by cert fingerprint, not CA chain
             ssl_ctx = ssl.create_default_context()
             ssl_ctx.check_hostname = False

@@ -315,7 +315,7 @@ class EventBus:
         # Schedule async handlers
         self._dispatch_async(event)
 
-        logger.debug(f"Published: {event}")
+        logger.debug("Published: %s", event)
         return event
 
     def publish_event(self, event: Event) -> Event:
@@ -338,7 +338,7 @@ class EventBus:
         self._dispatch_sync(event)
         self._dispatch_async(event)
 
-        logger.debug(f"Published: {event}")
+        logger.debug("Published: %s", event)
         return event
 
     def _dispatch_sync(self, event: Event):
@@ -356,7 +356,7 @@ class EventBus:
             try:
                 handler(event)
             except Exception as e:
-                logger.error(f"Handler error for {event}: {e}")
+                logger.error("Handler error for %s: %s", event, e)
 
     def _dispatch_async(self, event: Event):
         """Dispatch event to async handlers"""
@@ -395,7 +395,7 @@ class EventBus:
                             lambda c=coro: asyncio.ensure_future(c, loop=loop)
                         )
             except Exception as e:
-                logger.error(f"Async handler error for {event}: {e}")
+                logger.error("Async handler error for %s: %s", event, e)
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop):
         """Set the event loop to use for async handlers"""

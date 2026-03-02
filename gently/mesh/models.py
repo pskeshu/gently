@@ -11,6 +11,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..settings import settings
+
 
 @dataclass
 class PeerCapability:
@@ -100,7 +102,7 @@ class PeerInfo:
     instance_id: str = ""
     hostname: str = ""
     ip_address: str = ""
-    viz_port: int = 8080
+    viz_port: int = field(default_factory=lambda: settings.network.viz_port)
     capabilities: PeerCapability = field(default_factory=PeerCapability)
     status: PeerStatus = field(default_factory=PeerStatus)
     first_seen: float = field(default_factory=time.time)
@@ -117,13 +119,13 @@ class PeerInfo:
 
     @property
     def is_stale(self) -> bool:
-        """True if no heartbeat for >15s."""
-        return (time.time() - self.last_seen) > 15.0
+        """True if no heartbeat beyond the stale threshold."""
+        return (time.time() - self.last_seen) > settings.mesh.stale_threshold_s
 
     @property
     def is_dead(self) -> bool:
-        """True if no heartbeat for >30s."""
-        return (time.time() - self.last_seen) > 30.0
+        """True if no heartbeat beyond the dead threshold."""
+        return (time.time() - self.last_seen) > settings.mesh.dead_threshold_s
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -150,7 +152,7 @@ class PeerInfo:
             instance_id=d.get("instance_id", ""),
             hostname=d.get("hostname", ""),
             ip_address=d.get("ip_address", ""),
-            viz_port=d.get("viz_port", 8080),
+            viz_port=d.get("viz_port", settings.network.viz_port),
             capabilities=PeerCapability.from_dict(d.get("capabilities", {})),
             status=PeerStatus.from_dict(d.get("status", {})),
             first_seen=d.get("first_seen", time.time()),
