@@ -269,6 +269,38 @@ a lifecycle, config has a home, and the docs match the code.
 
 ---
 
+## v0.9.1
+
+Continued internal cleanup (P6–P7). Still no user-facing changes.
+
+**P6 — Architectural fixes**
+- Fixed layer violation: moved `device_factory.py` and `sam_detection.py`
+  out of `agent/` (application layer) to the root package (infrastructure
+  layer), where `device_layer.py` can import them without reaching upward.
+- Split `devices.py` (1,813 lines, 12 Ophyd classes) into
+  `gently/devices/` package — one module per device domain (stage, camera,
+  piezo, scanner, optical, acquisition). Re-exports preserve existing
+  import paths.
+- Moved hardcoded mesh constants (port 8080, timeouts, stale/dead
+  thresholds) into `settings.py` with `GENTLY_*` env var overrides.
+- Removed dead `HTTPService` base class (never subclassed).
+
+**P7 — Dead code removal**
+- Deleted `gently/visualization.py` (245 lines) — shadowed by the
+  `gently/visualization/` package, completely unreachable since the
+  package was created.
+- Deleted `gently/capabilities/` module (6 files, ~1,300 lines) —
+  abandoned abstraction layer with zero external consumers.
+- Removed deprecated `pixel_to_stage_offset()` from `coordinates.py` —
+  all callers had been migrated to the replacement functions.
+- Fixed broken visualization imports in `__init__.py` that silently failed
+  on every import (requested symbols that neither the dead file nor the
+  package exported).
+
+Net: ~3,500 lines removed across P6–P7.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:
