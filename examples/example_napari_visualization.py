@@ -45,15 +45,21 @@ from gently import (
     FitFunction
 )
 
-# Import napari visualization
+# Import visualization utilities
 from gently.visualization import (
-    setup_napari_callback,
-    create_napari_viewer,
-    enable_focus_sweep_visualization,
-    enable_embryo_detection_visualization,
-    enable_full_visualization,
-    NAPARI_AVAILABLE
+    EmbryoMarker,
+    mark_embryos_napari,
+    generate_focus_curve_plot,
+    generate_calibration_summary_plot,
+    generate_edge_detection_plot,
 )
+
+# Napari availability check
+try:
+    import napari
+    NAPARI_AVAILABLE = True
+except ImportError:
+    NAPARI_AVAILABLE = False
 
 
 def check_napari_installation():

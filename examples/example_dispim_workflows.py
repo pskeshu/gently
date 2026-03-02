@@ -44,14 +44,9 @@ from gently import (
 
 # Import optional napari visualization
 try:
-    from gently import (
-        setup_napari_callback,
-        enable_focus_sweep_visualization,
-        enable_full_visualization,
-        NAPARI_AVAILABLE
-    )
+    import napari
+    NAPARI_AVAILABLE = True
 except ImportError:
-    # Napari not available
     NAPARI_AVAILABLE = False
 
 

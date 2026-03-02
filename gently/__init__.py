@@ -107,22 +107,19 @@ try:
 except ImportError:
     _COORDINATES_AVAILABLE = False
 
-# Visualization utilities - optional napari integration
+# Visualization utilities - plots and embryo marking
 try:
     from .visualization import (
-        setup_napari_callback,
-        create_napari_viewer,
-        enable_focus_sweep_visualization,
-        enable_embryo_detection_visualization,
-        enable_full_visualization,
-        NapariCallback,
-        NAPARI_AVAILABLE
+        EmbryoMarker,
+        mark_embryos_napari,
+        get_visualization_server,
+        generate_focus_curve_plot,
+        generate_calibration_summary_plot,
+        generate_edge_detection_plot,
     )
     _VISUALIZATION_AVAILABLE = True
 except ImportError:
-    # Napari not available - visualization features disabled
     _VISUALIZATION_AVAILABLE = False
-    NAPARI_AVAILABLE = False
 
 # Main entry point
 from .gently import Gently, create_gently
@@ -220,11 +217,10 @@ __all__ = [
 if _VISUALIZATION_AVAILABLE:
     __all__.extend([
         # Visualization functions
-        "setup_napari_callback",
-        "create_napari_viewer",
-        "enable_focus_sweep_visualization",
-        "enable_embryo_detection_visualization", 
-        "enable_full_visualization",
-        "NapariCallback",
-        "NAPARI_AVAILABLE"
+        "EmbryoMarker",
+        "mark_embryos_napari",
+        "get_visualization_server",
+        "generate_focus_curve_plot",
+        "generate_calibration_summary_plot",
+        "generate_edge_detection_plot",
     ])
