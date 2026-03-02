@@ -39,6 +39,7 @@ from aiohttp import web
 import yaml
 
 from .core.service import Service
+from .exceptions import HardwareError, AcquisitionError
 from .log_config import configure_logging
 from .settings import settings
 
@@ -231,7 +232,7 @@ class DeviceLayerServer(Service):
     def _load_plans(self):
         """Load available plans"""
         try:
-            from gently.plans_qserver import (
+            from gently.plans import (
                 move_stage_plan,
                 read_stage_plan,
                 capture_bottom_image_plan,

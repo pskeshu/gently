@@ -22,76 +22,7 @@ from typing import Optional, Tuple, Dict
 import anthropic
 
 from .settings import settings
-
-
-# ============================================================================
-# CLAUDE VISION PROMPTS (from calibration_plans.py)
-# ============================================================================
-
-EMBRYO_CENTERING_PROMPT = """You are an expert microscopist examining a diSPIM light sheet microscopy image of a biological embryo sample.
-
-This image shows ONE camera view from the diSPIM system. You should look for an embryo structure somewhere in the field of view. The embryo will appear as a brighter structure against a dark background, but the signal may be MODERATE (not necessarily super bright).
-
-IMPORTANT CONTEXT:
-- This is a REAL microscopy image with typical noise and artifacts
-- Room lighting may cause some background glow (this is normal - ignore it)
-- Embryos appear as irregularly-shaped bright regions, NOT perfectly uniform
-- The embryo does NOT need to be perfectly centered, just reasonably visible in the frame
-- Signal levels are moderate - don't expect extremely bright fluorescence
-
-YOUR TASK:
-Determine if an embryo structure is visible in this image that we can use for calibration.
-
-WHAT TO LOOK FOR (be forgiving):
-✓ EMBRYO VISIBLE:
-  - ANY distinct structure brighter than the background (doesn't need to be super bright)
-  - Some defined boundary or edge (even if irregular or somewhat soft)
-  - Structure appears biological (rounded, irregular, or oblong shape)
-  - Structure is not cut off at the edge of the frame
-  - You can distinguish the embryo from background even if contrast is moderate
-
-✗ NO USABLE EMBRYO:
-  - Absolutely no structure visible, only uniform background
-  - Frame is completely empty or saturated
-  - No contrast at all between any structures and background
-  - Any visible structure is completely cut off at frame edge
-
-RESPOND FORMAT:
-Line 1: "yes" if ANY embryo structure is visible that we can work with, "no" only if truly absent
-Line 2: Brief description of what you see (1-2 sentences)
-
-Example response:
-yes
-An irregularly-shaped embryo structure is visible in the left-center region with moderate brightness and defined boundaries against the dark background."""
-
-EMBRYO_EDGE_PROMPT = """You are an expert microscopist specializing in diSPIM light sheet microscopy of embryos.
-
-This image shows ONE camera view of an embryo captured with light sheet illumination. We are trying to determine if the embryo is still visible at this Z position.
-
-YOUR TASK:
-1. Determine if there is ANY embryo structure visible in this image
-2. Rate the "feature richness" - how good this slice would be for focus calibration
-
-WHAT COUNTS AS VISIBLE:
-✓ YES: Any distinct embryo structure, even if faint or partial
-✗ NO: Completely empty/uniform background, only noise
-
-FEATURE RICHNESS (1-10):
-- 10: Dense nuclei/cells clearly visible, lots of structure detail
-- 7-9: Good structure visibility, multiple features present
-- 4-6: Moderate features, some structure but sparse
-- 1-3: Very sparse, edge of embryo, minimal features
-- 0: No embryo visible (use when answering "no")
-
-RESPOND FORMAT:
-Line 1: "yes" or "no" (embryo visible)
-Line 2: Feature richness score (1-10, or 0 if not visible)
-Line 3: Brief description
-
-Example:
-yes
-8
-Dense region with multiple visible nuclei and clear cellular boundaries."""
+from .calibration_plans import EMBRYO_CENTERING_PROMPT, EMBRYO_EDGE_PROMPT
 
 
 # ============================================================================

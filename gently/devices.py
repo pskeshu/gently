@@ -33,6 +33,7 @@ from typing import Dict, Tuple
 import numpy as np
 
 from .settings import settings
+from .exceptions import HardwareError, DeviceTimeoutError, StageMovementError, AcquisitionError
 
 
 from ophyd.status import Status
@@ -86,7 +87,7 @@ class DiSPIMZstage:
             try:
                 self.core.setPosition(self.name, position)
                 self.core.waitForDevice(self.name)
-            except Exception as exc:
+            except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
             else:
                 status.set_finished()
@@ -95,12 +96,12 @@ class DiSPIMZstage:
         threading.Thread(target=wait).start()
 
         return status
-    
+
     def read(self):
         """Read current Z stage position - required for Bluesky"""
         try:
             value = self.core.getPosition(self.name)
-        except Exception as e:
+        except (RuntimeError, HardwareError) as e:
             logger.error("Failed to read position from %s: %s", self.name, e)
             value = 0.0
 
@@ -177,7 +178,7 @@ class DiSPIMXYStage:
                     # Set XY position using MM core
                     self.core.setXYPosition(x, y)
                     self.core.waitForDevice(self.name)
-                except Exception as exc:
+                except (RuntimeError, StageMovementError) as exc:
                     status.set_exception(exc)
                 else:
                     status.set_finished()
@@ -318,12 +319,12 @@ class DiSPIMCamera:
                 # Set camera and snap
                 self.core.setCameraDevice(self.name)
                 self.core.snapImage()
-                
+
                 # Use _safe_obtain to transfer numpy array properly
                 self._last_image = _safe_obtain(self.core.getImage())
                 self._last_image_time = time.time()
 
-            except Exception as exc:
+            except (RuntimeError, AcquisitionError) as exc:
                 status.set_exception(exc)
 
             else:
@@ -480,12 +481,12 @@ class DiSPIMCamera:
         except:
             return 0.01  # Default 10ms
     
-    @exposure_time.setter 
+    @exposure_time.setter
     def exposure_time(self, value_ms):
         """Set exposure time in milliseconds"""
         try:
             self.core.setExposure(value_ms)
-        except Exception as e:
+        except (RuntimeError, HardwareError) as e:
             logger.error("Failed to set exposure: %s", e)
 
 
@@ -616,7 +617,7 @@ class DiSPIMFDrive:
             try:
                 self.core.setPosition(self.name, position)
                 self.core.waitForDevice(self.name)
-            except Exception as exc:
+            except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
             else:
                 status.set_finished()
@@ -630,7 +631,7 @@ class DiSPIMFDrive:
         """Read current F-drive position - required for Bluesky"""
         try:
             value = self.core.getPosition(self.name)
-        except Exception as e:
+        except (RuntimeError, HardwareError) as e:
             logger.error("Failed to read position from %s: %s", self.name, e)
 
         data = OrderedDict()
@@ -696,7 +697,7 @@ class DiSPIMPiezo:
             try:
                 self.core.setPosition(self.name, position)
                 self.core.waitForDevice(self.name)
-            except Exception as exc:
+            except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
             else:
                 status.set_finished()
@@ -710,7 +711,7 @@ class DiSPIMPiezo:
         """Read current piezo position - required for Bluesky"""
         try:
             value = self.core.getPosition(self.name)
-        except Exception as e:
+        except (RuntimeError, HardwareError) as e:
             logger.error("Failed to read position from %s: %s", self.name, e)
             value = 0.0
 
@@ -838,7 +839,7 @@ class _ScannerAxisOffset:
                     self.scanner.name, self.property_name, float(value)
                 )
                 self.scanner.core.waitForDevice(self.scanner.name)
-            except Exception as exc:
+            except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
             else:
                 status.set_finished()
@@ -853,7 +854,7 @@ class _ScannerAxisOffset:
             value = float(self.scanner.core.getProperty(
                 self.scanner.name, self.property_name
             ))
-        except Exception:
+        except (RuntimeError, HardwareError):
             value = 0.0
 
         return OrderedDict({
@@ -923,7 +924,7 @@ class DiSPIMScanner:
                     # Scanner uses galvo position interface for AB axes
                     self.core.setGalvoPosition(self.name, a_pos, b_pos)
                     self.core.waitForDevice(self.name)
-                except Exception as exc:
+                except (RuntimeError, StageMovementError) as exc:
                     status.set_exception(exc)
                 else:
                     status.set_finished()
@@ -943,7 +944,7 @@ class DiSPIMScanner:
         try:
             # getGalvoPosition returns tuple (a, b) voltages for galvo device
             ab_pos = np.array(self.core.getGalvoPosition(self.name))
-        except Exception as e:
+        except (RuntimeError, HardwareError) as e:
             logger.error("Failed to read scanner positions from %s: %s", self.name, e)
             ab_pos = np.array([0.0, 0.0])
 

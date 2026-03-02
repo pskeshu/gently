@@ -25,6 +25,7 @@ from gently.coordinates import (
     DEFAULT_OBJECTIVE_MAG,
 )
 from gently.settings import settings
+from gently.exceptions import DeviceLayerError, NetworkError, AcquisitionError
 
 
 class QueueServerClient:
@@ -95,8 +96,8 @@ class QueueServerClient:
                     await resp.json()  # Validate response
                     self._qs_connected = True
                 else:
-                    raise Exception(f"HTTP {resp.status}")
-        except Exception:
+                    raise NetworkError(f"HTTP {resp.status}")
+        except (aiohttp.ClientError, NetworkError):
             self._qs_connected = False
 
         # Check SAM availability (via HTTP, same server)
@@ -106,7 +107,7 @@ class QueueServerClient:
                     if resp.status == 200:
                         sam_status = await resp.json()
                         self._sam_available = sam_status.get('available', False)
-            except Exception:
+            except aiohttp.ClientError:
                 self._sam_available = False
 
         return self._qs_connected
@@ -283,6 +284,13 @@ class QueueServerClient:
 
         except asyncio.TimeoutError:
             return {'success': False, 'error': f'Plan timed out after {timeout}s'}
+        except aiohttp.ClientError as e:
+            import traceback
+            return {
+                'success': False,
+                'error': str(NetworkError(f"Device layer request failed: {e}")),
+                'traceback': traceback.format_exc()
+            }
         except Exception as e:
             import traceback
             return {
@@ -953,6 +961,13 @@ class QueueServerClient:
 
         except asyncio.TimeoutError:
             return {'success': False, 'error': 'Detection timed out (5 min limit)'}
+        except aiohttp.ClientError as e:
+            import traceback
+            return {
+                'error': str(NetworkError(f"Device layer request failed: {e}")),
+                'traceback': traceback.format_exc(),
+                'success': False
+            }
         except Exception as e:
             import traceback
             return {
@@ -1135,6 +1150,7 @@ class QueueServerClient:
             }
 
         except Exception as e:
+            logger.debug("manual_mark_embryos failed with %s: %s", type(e).__name__, e)
             import traceback
             return {
                 'error': str(e),
@@ -1188,6 +1204,7 @@ class QueueServerClient:
             }
 
         except Exception as e:
+            logger.debug("edit_embryos failed with %s: %s", type(e).__name__, e)
             import traceback
             return {
                 'error': str(e),
@@ -1310,6 +1327,7 @@ class QueueServerClient:
             return result
 
         except Exception as e:
+            logger.debug("view_image failed with %s: %s", type(e).__name__, e)
             return {'error': str(e)}
 
     async def view_detected_embryos(
@@ -1352,6 +1370,7 @@ class QueueServerClient:
             )
 
         except Exception as e:
+            logger.debug("view_detected_embryos failed with %s: %s", type(e).__name__, e)
             import traceback
             return {'error': str(e), 'traceback': traceback.format_exc()}
 
@@ -1462,6 +1481,7 @@ class QueueServerClient:
             return result
 
         except Exception as e:
+            logger.debug("view_embryos failed with %s: %s", type(e).__name__, e)
             import traceback
             return {'error': str(e), 'traceback': traceback.format_exc()}
 
@@ -1494,6 +1514,8 @@ class QueueServerClient:
                         }
                     else:
                         status['queue_server'] = {'error': f'HTTP {resp.status}'}
+            except aiohttp.ClientError as e:
+                status['queue_server'] = {'error': str(e)}
             except Exception as e:
                 status['queue_server'] = {'error': str(e)}
         else:
@@ -1512,6 +1534,8 @@ class QueueServerClient:
                         }
                     else:
                         status['sam_server'] = {'error': f'HTTP {resp.status}'}
+            except aiohttp.ClientError as e:
+                status['sam_server'] = {'error': str(e)}
             except Exception as e:
                 status['sam_server'] = {'error': str(e)}
         else:

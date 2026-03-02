@@ -22,6 +22,7 @@ from pathlib import Path
 import anthropic
 import numpy as np
 
+from ..exceptions import StorageError, CopilotError
 from ..settings import settings
 
 if TYPE_CHECKING:
@@ -777,6 +778,8 @@ class MicroscopyCopilot:
                         self.session_id, embryo_id, timepoint, volume,
                         metadata=acq_metadata,
                     )
+            except StorageError:
+                raise
             except Exception as e:
                 logger.error(f"GentlyStore write failed: {e}")
 
@@ -939,6 +942,9 @@ Respond with ONLY: VALID or BLANK"""
 
             return is_blank
 
+        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
+            logger.error(f"[BLANK_CHECK] Claude API error for {embryo_id}: {e}")
+            return False
         except Exception as e:
             logger.error(f"[BLANK_CHECK] Error checking {embryo_id}: {e}")
             return False

@@ -1,8 +1,11 @@
 """
-Bluesky Plans for diSPIM Calibration
-=====================================
+Claude Vision-guided piezo-galvo calibration workflows.
 
-Complete calibration workflow plans for embryo-based piezo-galvo calibration.
+These run on the COPILOT SIDE (require Claude API access for Vision).
+They use binary edge search, hybrid focus selection, and VLM verification.
+
+For hardware-only plans (no AI), see plans.py.
+For multi-embryo orchestration, see multi_embryo_plans.py.
 
 Plans included:
 - verify_embryo_centered: Check if embryo is visible at center

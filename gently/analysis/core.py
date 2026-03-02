@@ -18,6 +18,8 @@ from scipy import optimize, stats
 from scipy.ndimage import gaussian_filter, sobel
 import warnings
 
+from ..exceptions import FocusFitError
+
 
 class FocusAlgorithm(Enum):
     """Focus scoring algorithms available"""
@@ -493,7 +495,7 @@ def analyze_focus_stack(positions: List[float], images: List[np.ndarray],
                 best_position = positions[best_idx]
                 best_score = scores[best_idx]
 
-        except Exception as fit_error:
+        except (FocusFitError, Exception) as fit_error:
             # Fallback to highest measured score
             best_idx = np.argmax(scores)
             best_position = positions[best_idx]
@@ -563,6 +565,8 @@ def fit_focus_curve(positions: np.ndarray, scores: np.ndarray,
 
         return fitted_positions, fitted_scores, fit_params, r_squared
 
+    except (optimize.OptimizeWarning, RuntimeError, ValueError) as e:
+        raise FocusFitError(f"Curve fitting failed: {e}") from e
     except Exception as e:
         logging.getLogger(__name__).error(f"Curve fitting failed: {e}")
         raise

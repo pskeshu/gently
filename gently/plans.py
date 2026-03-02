@@ -1,11 +1,21 @@
 """
-Gently DiSPIM Bluesky Plans
-===========================
+Core Bluesky plans for DiSPIM hardware control.
 
-Device-agnostic Bluesky plans for DiSPIM microscopy workflows.
-All plans use Ophyd device interfaces - no direct mmcore calls.
+These plans run on the DEVICE LAYER SERVER (no Claude API access).
+They are "dumb" — they follow fixed sequences without AI guidance.
+
+For AI-guided calibration, see calibration_plans.py (runs on copilot side).
+For multi-embryo orchestration, see multi_embryo_plans.py.
+For agent planning context (campaigns, plan items), see context/_plans.py.
+
+Plan hierarchy:
+    plans.py                  → Device-side Bluesky plans (focus, acquire, calibrate)
+    calibration_plans.py      → Copilot-side Vision-guided calibration
+    multi_embryo_plans.py     → Loops calibration_plans over multiple embryos
+    context/_plans.py         → Agent memory (PlanItem CRUD, unrelated to hardware)
 
 Organization:
+- Utility Plans: Move, read, capture (simple device operations)
 - Focus Analysis: FFT bandpass scoring, embryo ROI detection
 - Calibration Plans: Piezo-galvo calibration, focus sweeps
 - Embryo Detection: Interactive marking, automated centering
@@ -23,7 +33,7 @@ import time
 import numpy as np
 import matplotlib.pyplot as plt
 from collections import OrderedDict
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, Generator, List, Tuple, Optional
 import bluesky.plan_stubs as bps
 import bluesky.plans as bp
 import bluesky.preprocessors as bpp
@@ -1045,3 +1055,82 @@ def multi_embryo_calibration_workflow(bottom_camera,
 
     yield from inner()
     return results
+
+
+# =============================================================================
+# Utility Plans (simple device operations for HTTP API)
+# =============================================================================
+
+def move_stage_plan(xy_stage, x: float, y: float) -> Generator[Any, Any, dict]:
+    """Move XY stage to specified position."""
+    yield from bps.mv(xy_stage, [x, y])
+    return {'x': x, 'y': y, 'success': True}
+
+
+def read_stage_plan(xy_stage) -> Generator[Any, Any, None]:
+    """Read current XY stage position."""
+    yield from bp.count([xy_stage], num=1)
+
+
+def read_piezo_plan(piezo) -> Generator[Any, Any, None]:
+    """Read current piezo position."""
+    yield from bp.count([piezo], num=1)
+
+
+def capture_bottom_image_plan(bottom_camera, led=None) -> Generator[Any, Any, None]:
+    """Capture a single image from the bottom camera."""
+    if led is not None:
+        try:
+            yield from bps.mv(led, 'Open')
+        except Exception:
+            pass
+    yield from bp.count([bottom_camera], num=1)
+    if led is not None:
+        try:
+            yield from bps.mv(led, 'Closed')
+        except Exception:
+            pass
+
+
+def capture_lightsheet_image_plan(
+    lightsheet_snap,
+    scanner,
+    piezo,
+    laser_control,
+    piezo_position: float = 50.0,
+    galvo_position: float = 0.0,
+    laser_config: str = "488 and 561"
+) -> Generator[Any, Any, None]:
+    """Capture a single lightsheet image at specified piezo/galvo positions."""
+    yield from bps.mv(piezo, piezo_position)
+    yield from bps.mv(scanner.sa_offset_y, galvo_position)
+    lightsheet_snap.configure(y_position_deg=galvo_position)
+    yield from bps.mv(laser_control, laser_config)
+    try:
+        yield from bp.count([lightsheet_snap], num=1)
+    finally:
+        yield from bps.mv(laser_control, "ALL OFF")
+
+
+def move_piezo_plan(piezo, position: float) -> Generator[Any, Any, dict]:
+    """Move piezo to specified position."""
+    yield from bps.mv(piezo, position)
+    return {'position': position, 'success': True}
+
+
+def move_scanner_plan(scanner, offset_y: float) -> Generator[Any, Any, dict]:
+    """Move scanner galvo to specified offset."""
+    yield from bps.mv(scanner.sa_offset_y, offset_y)
+    return {'offset_y': offset_y, 'success': True}
+
+
+def set_laser_plan(laser_control, state: str = 'ON') -> Generator[Any, Any, dict]:
+    """Set laser state."""
+    yield from bps.mv(laser_control.state, state)
+    return {'state': state, 'success': True}
+
+
+def set_led_plan(led, state: str = 'Open') -> Generator[Any, Any, dict]:
+    """Set LED state."""
+    yield from bps.mv(led, state)
+    return {'state': state, 'success': True}

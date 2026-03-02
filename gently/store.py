@@ -40,6 +40,11 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from .store_types import (
+    SessionInfo, EmbryoInfo, VolumeInfo, ProjectionInfo,
+    PerceptionRunInfo, PredictionInfo, GroundTruthEntry, StoreStats,
+)
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -253,7 +258,7 @@ class GentlyStore:
         logger.info(f"Created session {session_id}")
         return session_id
 
-    def get_session(self, session_id: str) -> Optional[dict]:
+    def get_session(self, session_id: str) -> Optional[SessionInfo]:
         """Return session row as dict, or None."""
         row = self._conn.execute(
             "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
@@ -265,7 +270,7 @@ class GentlyStore:
             d["metadata"] = json.loads(d["metadata"])
         return d
 
-    def list_sessions(self) -> List[dict]:
+    def list_sessions(self) -> List[SessionInfo]:
         """Return all sessions ordered by last_active descending."""
         rows = self._conn.execute(
             "SELECT * FROM sessions ORDER BY last_active DESC"
@@ -335,7 +340,7 @@ class GentlyStore:
                  position_x, position_y, cal_json, now),
             )
 
-    def get_embryo(self, session_id: str, embryo_id: str) -> Optional[dict]:
+    def get_embryo(self, session_id: str, embryo_id: str) -> Optional[EmbryoInfo]:
         row = self._conn.execute(
             "SELECT * FROM embryos WHERE session_id = ? AND embryo_id = ?",
             (session_id, embryo_id),
@@ -347,7 +352,7 @@ class GentlyStore:
             d["calibration"] = json.loads(d["calibration"])
         return d
 
-    def list_embryos(self, session_id: str) -> List[dict]:
+    def list_embryos(self, session_id: str) -> List[EmbryoInfo]:
         rows = self._conn.execute(
             "SELECT * FROM embryos WHERE session_id = ? ORDER BY embryo_id",
             (session_id,),
@@ -522,7 +527,7 @@ class GentlyStore:
 
     def list_volumes(
         self, session_id: str, embryo_id: str = None
-    ) -> List[dict]:
+    ) -> List[VolumeInfo]:
         """List volume metadata rows for a session (optionally filtered)."""
         if embryo_id:
             rows = self._conn.execute(
@@ -676,7 +681,7 @@ class GentlyStore:
 
     def list_projections(
         self, session_id: str, embryo_id: str
-    ) -> List[dict]:
+    ) -> List[ProjectionInfo]:
         rows = self._conn.execute(
             "SELECT * FROM projections "
             "WHERE session_id = ? AND embryo_id = ? ORDER BY timepoint",
@@ -792,7 +797,7 @@ class GentlyStore:
         session_id: str,
         embryo_id: str = None,
         run_id: int = None,
-    ) -> List[dict]:
+    ) -> List[PredictionInfo]:
         """Query predictions with optional filters."""
         clauses = ["session_id = ?"]
         params: list = [session_id]
@@ -849,7 +854,7 @@ class GentlyStore:
                  end_timepoint, annotator, notes),
             )
 
-    def get_ground_truth(self, session_id: str, embryo_id: str) -> List[dict]:
+    def get_ground_truth(self, session_id: str, embryo_id: str) -> List[GroundTruthEntry]:
         rows = self._conn.execute(
             "SELECT * FROM ground_truth "
             "WHERE session_id = ? AND embryo_id = ? ORDER BY start_timepoint",
@@ -861,7 +866,7 @@ class GentlyStore:
     # Utility
     # ==================================================================
 
-    def stats(self) -> dict:
+    def stats(self) -> StoreStats:
         """Return counts and disk-usage summary."""
         tables = ["sessions", "embryos", "volumes", "projections",
                   "perception_runs", "predictions", "ground_truth"]
