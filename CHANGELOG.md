@@ -219,6 +219,28 @@ pause/resume), subcampaign expansion, and keyboard navigation.
 
 ---
 
+## v0.9.2
+
+More dead code removal and a layer violation fix (P8).
+
+- Deleted 4 orphaned files (~1,175 lines): `agent/logger.py`,
+  `agent/visualization.py`, `dataset/trace_persister.py`,
+  `analysis/algorithms.py` — all defined classes/functions that nothing
+  imported.
+- Fixed `visualization/ → agent/` layer violation: projection utilities
+  (`projection_three_view`, `compute_crop_bounds`, etc.) lived in
+  `agent/perception/projection.py` but were needed by 4 files in
+  `visualization/`. Moved them into `gently/imaging.py` where they
+  belong. Updated 9 import sites, deleted the old file.
+- Deduplicated `dataset/explorer_server.py`: replaced 6 copy-pasted
+  projection functions with imports from `gently.imaging`.
+- Cleaned dead imports (`center_of_mass`, `OrderedDict`), fixed
+  deprecated `scipy.ndimage.measurements` path.
+- Fixed `__all__` in `__init__.py`: calibration plan names now
+  conditionally added to match their conditional import.
+
+---
+
 ## v0.9.0
 
 Internal restructuring. No new user-facing features — this is about

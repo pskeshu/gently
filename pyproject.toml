@@ -4,7 +4,7 @@ build-backend = "setuptools.backends._legacy:_Backend"
 
 [project]
 name = "gently"
-version = "0.9.1"
+version = "0.9.2"
 description = "AI-powered control framework for diSPIM light-sheet imaging"
 readme = "docs/README.md"
 license = {text = "MIT"}
