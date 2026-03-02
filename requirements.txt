@@ -1,5 +1,6 @@
 # Gently Copilot
 # Install: pip install -r requirements.txt
+# Canonical source: pyproject.toml [project.dependencies]
 
 # AI / LLM
 anthropic>=0.39.0

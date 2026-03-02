@@ -1,5 +1,6 @@
 # Gently Device Layer (microscope computer)
 # Install: pip install -r requirements_device.txt
+# Canonical source: pyproject.toml [project.optional-dependencies.device]
 
 # Hardware control
 pymmcore>=11.1.1

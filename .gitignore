@@ -117,3 +117,26 @@ nul
 # Backup files
 *_backup.py
 *_backup/
+
+# Mesh networking runtime artifacts (generated at startup, NEVER commit keys)
+config/mesh_*.pem
+config/mesh_key.pem
+config/mesh_cert.pem
+config/mesh_instance_id
+config/mesh_audit.jsonl
+config/mesh_trusted_peers.json
+
+# LaTeX build artifacts
+*.aux
+*.out
+*.toc
+paper/*.log
+paper/*.pdf
+paper/*.synctex.gz
+
+# Dead Electron app
+electron/
+
+# Root-level one-off documents
+/stage_definitions_for_review.pdf
+/stage_definitions_for_review.txt

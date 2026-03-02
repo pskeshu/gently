@@ -405,8 +405,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
                 pass
 
 
-if __name__ == "__main__":
-    # Check for API key
+def cli_main():
+    """Sync entry point for ``gently`` console script (pyproject.toml)."""
     if not os.getenv("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY not set")
         print("Set with: set ANTHROPIC_API_KEY=your-key")
@@ -419,7 +419,6 @@ if __name__ == "__main__":
                         help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
     args = parser.parse_args()
 
-    # Determine resume mode
     pick_session = (args.resume == "__PICK__")
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
@@ -431,4 +430,8 @@ if __name__ == "__main__":
             pick_session=pick_session,
         ))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
-        pass  # Clean exit on Ctrl+C (suppresses asyncio cleanup noise on Windows)
+        pass
+
+
+if __name__ == "__main__":
+    cli_main()
