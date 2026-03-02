@@ -106,6 +106,25 @@ class EventType(Enum):
     MESH_CERT_PIN_FAILURE = auto()
     MESH_SCOPE_DENIED = auto()
 
+    # Mesh topology events
+    MESH_PEER_OFFLINE = auto()      # peer marked offline in verse map (kept in map)
+    MESH_PEER_RETURNED = auto()     # previously offline peer came back online
+
+    # ML pipeline events
+    ML_PIPELINE_CREATED = auto()
+    ML_TRAINING_STARTED = auto()
+    ML_TRAINING_PROGRESS = auto()   # per-epoch updates
+    ML_TRAINING_COMPLETED = auto()
+    ML_TRAINING_FAILED = auto()
+    ML_EVALUATION_COMPLETED = auto()
+    ML_SUBAGENT_STATUS = auto()     # subagent thinking/planning updates
+
+    # Bulk transfer events
+    TRANSFER_STARTED = auto()
+    TRANSFER_PROGRESS = auto()
+    TRANSFER_COMPLETED = auto()
+    TRANSFER_FAILED = auto()
+
 
 @dataclass
 class Event:

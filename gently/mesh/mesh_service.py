@@ -3,13 +3,15 @@ MeshService — main orchestrator for peer discovery and status exchange.
 
 Subclasses the existing Service base class, managing:
 - UDP discovery (broadcast + listen via MeshDiscovery)
-- Peer reaping (remove dead peers)
+- Persistent verse map (topology survives restarts)
+- Peer reaping (mark offline, don't delete trusted peers)
 - Status refresh (HTTP fetch from live peers)
 """
 
 import asyncio
 import logging
 import time
+from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
 from gently.core.event_bus import EventType
@@ -18,6 +20,7 @@ from gently.core.service import Service
 from .discovery import MeshDiscovery
 from .models import PeerCapability, PeerInfo, PeerStatus
 from .peer_client import PeerClient
+from .verse_map import VerseMap
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +46,8 @@ class MeshService(Service):
         Returns a PeerStatus dict for this node.
     mesh_port : int
         UDP port for broadcast discovery (default 19547).
+    config_dir : Path, optional
+        Directory for persistent config files (verse map).
     """
 
     def __init__(
@@ -54,6 +59,7 @@ class MeshService(Service):
         mesh_port: int = settings.network.mesh_port,
         pairing_manager=None,
         audit_log=None,
+        config_dir: Optional[Path] = None,
     ):
         import socket as _socket
 
@@ -78,6 +84,11 @@ class MeshService(Service):
         self._reaper_task: Optional[asyncio.Task] = None
         self._refresh_task: Optional[asyncio.Task] = None
         self._cleanup_task: Optional[asyncio.Task] = None
+
+        # Persistent verse map
+        if config_dir is None:
+            config_dir = settings.storage.base_path / "config"
+        self._verse_map = VerseMap(config_dir)
 
     # ------------------------------------------------------------------
     # Service lifecycle
@@ -154,6 +165,9 @@ class MeshService(Service):
             cert_fp = self._pairing_manager.get_cert_fingerprint_for_peer(peer_id)
             tls_enabled = bool(cert_fp)
 
+        # Check if this is a returning peer (was in verse map as offline)
+        was_offline = self._verse_map.was_online(peer_id)
+
         peer = PeerInfo(
             instance_id=peer_id,
             hostname=data.get("hostname", ""),
@@ -167,19 +181,34 @@ class MeshService(Service):
         )
         self._peers[peer_id] = peer
 
-        self._emit_event(EventType.MESH_PEER_DISCOVERED, {
-            "instance_id": peer_id,
-            "hostname": peer.hostname,
-            "ip_address": sender_ip,
-            "is_trusted": trusted,
-            "udp_verified": verified,
-            "tls_enabled": tls_enabled,
-        })
+        # Update verse map
+        self._verse_map.on_peer_discovered(peer)
 
-        logger.info(
-            f"Mesh: discovered peer {peer.hostname} ({peer_id[:8]}) at {sender_ip} "
-            f"[trusted={trusted}, udp_verified={verified}, tls={tls_enabled}]"
-        )
+        if was_offline:
+            # Previously offline peer returned
+            self._verse_map.on_peer_returned(peer_id)
+            self._emit_event(EventType.MESH_PEER_RETURNED, {
+                "instance_id": peer_id,
+                "hostname": peer.hostname,
+                "ip_address": sender_ip,
+                "is_trusted": trusted,
+            })
+            logger.info(
+                f"Mesh: peer returned {peer.hostname} ({peer_id[:8]}) at {sender_ip}"
+            )
+        else:
+            self._emit_event(EventType.MESH_PEER_DISCOVERED, {
+                "instance_id": peer_id,
+                "hostname": peer.hostname,
+                "ip_address": sender_ip,
+                "is_trusted": trusted,
+                "udp_verified": verified,
+                "tls_enabled": tls_enabled,
+            })
+            logger.info(
+                f"Mesh: discovered peer {peer.hostname} ({peer_id[:8]}) at {sender_ip} "
+                f"[trusted={trusted}, udp_verified={verified}, tls={tls_enabled}]"
+            )
 
         # Only fetch status from trusted peers
         if trusted:
@@ -212,14 +241,30 @@ class MeshService(Service):
     # ------------------------------------------------------------------
 
     async def _reaper_loop(self):
-        """Periodically remove dead peers."""
+        """Periodically mark dead peers as offline (trusted) or remove (untrusted)."""
         while True:
             await asyncio.sleep(REAPER_INTERVAL)
             dead = [pid for pid, p in self._peers.items() if p.is_dead]
             for pid in dead:
-                peer = self._peers.pop(pid, None)
-                if peer:
-                    # Let discovery re-discover this peer if it comes back
+                peer = self._peers.get(pid)
+                if not peer:
+                    continue
+
+                if peer.is_trusted:
+                    # Trusted peer: mark offline in verse map, remove from live
+                    # registry, but let discovery re-discover if it returns
+                    self._peers.pop(pid, None)
+                    self._verse_map.on_peer_offline(pid)
+                    if self._discovery:
+                        self._discovery.forget_peer(pid)
+                    self._emit_event(EventType.MESH_PEER_OFFLINE, {
+                        "instance_id": pid,
+                        "hostname": peer.hostname,
+                    })
+                    logger.info(f"Mesh: peer offline {peer.hostname} ({pid[:8]}) — kept in verse map")
+                else:
+                    # Untrusted peer: fully remove
+                    self._peers.pop(pid, None)
                     if self._discovery:
                         self._discovery.forget_peer(pid)
                     self._emit_event(EventType.MESH_PEER_LOST, {
@@ -257,6 +302,9 @@ class MeshService(Service):
 
         peer.capabilities = PeerCapability.from_dict(caps_data)
         peer.status = PeerStatus.from_dict(status_data)
+
+        # Update verse map with latest capabilities
+        self._verse_map.on_peer_updated(peer)
 
         self._emit_event(EventType.MESH_PEER_UPDATED, {
             "instance_id": peer.instance_id,
@@ -349,6 +397,11 @@ class MeshService(Service):
             if p.hostname.lower() == hostname_lower:
                 return p
         return None
+
+    @property
+    def verse_map(self) -> VerseMap:
+        """Expose the verse map for routes and tools."""
+        return self._verse_map
 
     @property
     def peer_count(self) -> int:

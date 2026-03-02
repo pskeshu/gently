@@ -287,4 +287,199 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
             "status": session.status,
         })
 
+    # ------------------------------------------------------------------
+    # Verse map routes (scope: status)
+    # ------------------------------------------------------------------
+
+    @router.get("/api/mesh/verse-map", dependencies=[Depends(_make_auth_dep("status"))])
+    async def verse_map():
+        """Full persistent topology — includes offline peers."""
+        vm = mesh_service.verse_map
+        peers = vm.get_all_peers()
+        return JSONResponse({
+            "peers": [p.to_dict() for p in peers],
+            "online_count": len(vm.get_online_peers()),
+            "offline_count": len(vm.get_offline_peers()),
+            "total_count": len(peers),
+        })
+
+    @router.get(
+        "/api/mesh/verse-map/resources/{capability}",
+        dependencies=[Depends(_make_auth_dep("status"))],
+    )
+    async def verse_map_resources(capability: str):
+        """Find peers matching a capability (route-finding)."""
+        vm = mesh_service.verse_map
+        peers = vm.find_resource(capability)
+        return JSONResponse({
+            "capability": capability,
+            "peers": [p.to_dict() for p in peers],
+            "count": len(peers),
+        })
+
+    # ------------------------------------------------------------------
+    # Data catalog routes (scope: data)
+    # ------------------------------------------------------------------
+
+    @router.get("/api/data/sessions", dependencies=[Depends(_make_auth_dep("data"))])
+    async def data_sessions():
+        """List all sessions with counts."""
+        store = getattr(viz_server, "gently_store", None)
+        if store is None:
+            return JSONResponse({"sessions": [], "count": 0})
+        try:
+            sessions = store.list_sessions()
+            result = []
+            for s in sessions:
+                sid = s.session_id if hasattr(s, "session_id") else s.get("session_id", "")
+                name = s.name if hasattr(s, "name") else s.get("name", "")
+                created = s.created_at if hasattr(s, "created_at") else s.get("created_at", "")
+                last_active = s.last_active if hasattr(s, "last_active") else s.get("last_active", "")
+                embryos = store.list_embryos(sid)
+                vol_count = 0
+                for e in embryos:
+                    eid = e.embryo_id if hasattr(e, "embryo_id") else e.get("embryo_id", "")
+                    vol_count += len(store.list_volumes(sid, eid))
+                result.append({
+                    "session_id": sid,
+                    "name": name,
+                    "embryo_count": len(embryos),
+                    "volume_count": vol_count,
+                    "created_at": created,
+                    "last_active": last_active,
+                })
+            return JSONResponse({"sessions": result, "count": len(result)})
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @router.get("/api/data/sessions/{session_id}", dependencies=[Depends(_make_auth_dep("data"))])
+    async def data_session_detail(session_id: str):
+        """Detailed session info with embryo list."""
+        store = getattr(viz_server, "gently_store", None)
+        if store is None:
+            raise HTTPException(status_code=404, detail="No data store")
+        try:
+            session = store.get_session(session_id)
+            if session is None:
+                raise HTTPException(status_code=404, detail="Session not found")
+            embryos = store.list_embryos(session_id)
+            embryo_list = []
+            total_vols = 0
+            for e in embryos:
+                eid = e.embryo_id if hasattr(e, "embryo_id") else e.get("embryo_id", "")
+                nickname = e.nickname if hasattr(e, "nickname") else e.get("nickname", "")
+                vols = store.list_volumes(session_id, eid)
+                vol_count = len(vols)
+                total_vols += vol_count
+                has_gt = False
+                stages = []
+                try:
+                    gts = store.get_ground_truth(session_id, eid)
+                    has_gt = len(gts) > 0
+                    stages = list({
+                        (gt.stage if hasattr(gt, "stage") else gt.get("stage", ""))
+                        for gt in gts
+                    })
+                except Exception:
+                    pass
+                embryo_list.append({
+                    "embryo_id": eid,
+                    "nickname": nickname,
+                    "volume_count": vol_count,
+                    "has_ground_truth": has_gt,
+                    "stages_annotated": stages,
+                })
+            sname = session.name if hasattr(session, "name") else session.get("name", "")
+            return JSONResponse({
+                "session_id": session_id,
+                "name": sname,
+                "embryos": embryo_list,
+                "total_volumes": total_vols,
+            })
+        except HTTPException:
+            raise
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @router.get("/api/data/coverage", dependencies=[Depends(_make_auth_dep("data"))])
+    async def data_coverage():
+        """Annotation coverage summary across all sessions."""
+        store = getattr(viz_server, "gently_store", None)
+        if store is None:
+            return JSONResponse({
+                "total_embryos": 0, "annotated_embryos": 0,
+                "coverage_pct": 0.0, "stage_counts": {}, "imbalance_ratio": 0.0, "gaps": [],
+            })
+        try:
+            sessions = store.list_sessions()
+            total_embryos = 0
+            annotated_embryos = 0
+            stage_counts = {}
+            for s in sessions:
+                sid = s.session_id if hasattr(s, "session_id") else s.get("session_id", "")
+                embryos = store.list_embryos(sid)
+                total_embryos += len(embryos)
+                for e in embryos:
+                    eid = e.embryo_id if hasattr(e, "embryo_id") else e.get("embryo_id", "")
+                    try:
+                        gts = store.get_ground_truth(sid, eid)
+                        if gts:
+                            annotated_embryos += 1
+                            for gt in gts:
+                                stage = gt.stage if hasattr(gt, "stage") else gt.get("stage", "")
+                                if stage:
+                                    stage_counts[stage] = stage_counts.get(stage, 0) + 1
+                    except Exception:
+                        pass
+            coverage_pct = (annotated_embryos / total_embryos * 100) if total_embryos else 0.0
+            counts = list(stage_counts.values())
+            imbalance_ratio = (max(counts) / min(counts)) if counts and min(counts) > 0 else 0.0
+            # Find stages with notably low counts
+            avg = sum(counts) / len(counts) if counts else 0
+            gaps = [s for s, c in stage_counts.items() if c < avg * 0.5]
+            return JSONResponse({
+                "total_embryos": total_embryos,
+                "annotated_embryos": annotated_embryos,
+                "coverage_pct": round(coverage_pct, 1),
+                "stage_counts": stage_counts,
+                "imbalance_ratio": round(imbalance_ratio, 2),
+                "gaps": gaps,
+            })
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
+    @router.get("/api/data/stages", dependencies=[Depends(_make_auth_dep("data"))])
+    async def data_stages():
+        """Stage distribution across all sessions."""
+        store = getattr(viz_server, "gently_store", None)
+        if store is None:
+            return JSONResponse({"stage_distribution": {}, "by_session": {}})
+        try:
+            sessions = store.list_sessions()
+            total_dist = {}
+            by_session = {}
+            for s in sessions:
+                sid = s.session_id if hasattr(s, "session_id") else s.get("session_id", "")
+                session_dist = {}
+                embryos = store.list_embryos(sid)
+                for e in embryos:
+                    eid = e.embryo_id if hasattr(e, "embryo_id") else e.get("embryo_id", "")
+                    try:
+                        gts = store.get_ground_truth(sid, eid)
+                        for gt in gts:
+                            stage = gt.stage if hasattr(gt, "stage") else gt.get("stage", "")
+                            if stage:
+                                total_dist[stage] = total_dist.get(stage, 0) + 1
+                                session_dist[stage] = session_dist.get(stage, 0) + 1
+                    except Exception:
+                        pass
+                if session_dist:
+                    by_session[sid] = session_dist
+            return JSONResponse({
+                "stage_distribution": total_dist,
+                "by_session": by_session,
+            })
+        except Exception as e:
+            return JSONResponse({"error": str(e)}, status_code=500)
+
     viz_server.app.include_router(router)

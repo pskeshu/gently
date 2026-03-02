@@ -89,6 +89,23 @@ class ApiSettings:
 
 
 @dataclass(frozen=True)
+class MlSettings:
+    """Machine learning training parameters."""
+    model_cache_dir: Path = field(default_factory=lambda: _env("ML_MODEL_CACHE", Path("models")))
+    default_batch_size: int = field(default_factory=lambda: _env("ML_BATCH_SIZE", 32))
+    default_epochs: int = field(default_factory=lambda: _env("ML_EPOCHS", 50))
+    default_lr: float = field(default_factory=lambda: _env("ML_LR", 1e-4))
+
+
+@dataclass(frozen=True)
+class TransferSettings:
+    """Bulk transfer protocol parameters."""
+    transfer_port: int = field(default_factory=lambda: _env("TRANSFER_PORT", 19548))
+    chunk_size: int = field(default_factory=lambda: _env("TRANSFER_CHUNK_SIZE", 1048576))  # 1MB
+    max_concurrent_transfers: int = field(default_factory=lambda: _env("TRANSFER_MAX_CONCURRENT", 4))
+
+
+@dataclass(frozen=True)
 class Settings:
     """Top-level settings container."""
     network: NetworkSettings = field(default_factory=NetworkSettings)
@@ -97,6 +114,8 @@ class Settings:
     storage: StorageSettings = field(default_factory=StorageSettings)
     timeouts: TimeoutSettings = field(default_factory=TimeoutSettings)
     api: ApiSettings = field(default_factory=ApiSettings)
+    ml: MlSettings = field(default_factory=MlSettings)
+    transfer: TransferSettings = field(default_factory=TransferSettings)
 
 
 # Singleton — import this everywhere

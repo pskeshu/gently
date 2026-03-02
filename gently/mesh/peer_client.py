@@ -313,6 +313,79 @@ class PeerClient:
         )
         return resp is not None
 
+    # ------------------------------------------------------------------
+    # Data catalog methods (Phase 2 — requires "data" scope)
+    # ------------------------------------------------------------------
+
+    async def fetch_peer_sessions(self, peer: PeerInfo) -> Optional[List]:
+        """GET /api/data/sessions from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/data/sessions"
+        headers = self._auth_headers(peer)
+        ssl_fp = self._ssl_for_peer(peer)
+        try:
+            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+                if resp.status == 200:
+                    self._log_pinning_success(peer, ssl_fp)
+                    data = await resp.json()
+                    return data.get("sessions", [])
+        except aiohttp.ServerFingerprintMismatch as e:
+            self._log_pinning_failure(peer, e)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch sessions from {peer.instance_id[:8]}: {e}")
+        return None
+
+    async def fetch_peer_session_detail(self, peer: PeerInfo, session_id: str) -> Optional[Dict]:
+        """GET /api/data/sessions/{id} from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/data/sessions/{session_id}"
+        headers = self._auth_headers(peer)
+        ssl_fp = self._ssl_for_peer(peer)
+        try:
+            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+                if resp.status == 200:
+                    self._log_pinning_success(peer, ssl_fp)
+                    return await resp.json()
+        except aiohttp.ServerFingerprintMismatch as e:
+            self._log_pinning_failure(peer, e)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch session detail from {peer.instance_id[:8]}: {e}")
+        return None
+
+    async def fetch_peer_coverage(self, peer: PeerInfo) -> Optional[Dict]:
+        """GET /api/data/coverage from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/data/coverage"
+        headers = self._auth_headers(peer)
+        ssl_fp = self._ssl_for_peer(peer)
+        try:
+            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+                if resp.status == 200:
+                    self._log_pinning_success(peer, ssl_fp)
+                    return await resp.json()
+        except aiohttp.ServerFingerprintMismatch as e:
+            self._log_pinning_failure(peer, e)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch coverage from {peer.instance_id[:8]}: {e}")
+        return None
+
+    async def fetch_peer_stage_distribution(self, peer: PeerInfo) -> Optional[Dict]:
+        """GET /api/data/stages from a peer."""
+        await self._ensure_session()
+        url = f"{peer.base_url}/api/data/stages"
+        headers = self._auth_headers(peer)
+        ssl_fp = self._ssl_for_peer(peer)
+        try:
+            async with self._session.get(url, headers=headers, ssl=ssl_fp) as resp:
+                if resp.status == 200:
+                    self._log_pinning_success(peer, ssl_fp)
+                    return await resp.json()
+        except aiohttp.ServerFingerprintMismatch as e:
+            self._log_pinning_failure(peer, e)
+        except (aiohttp.ClientError, asyncio.TimeoutError, OSError) as e:
+            logger.debug(f"Failed to fetch stage distribution from {peer.instance_id[:8]}: {e}")
+        return None
+
     async def close(self):
         """Clean up the HTTP session."""
         if self._session and not self._session.closed:

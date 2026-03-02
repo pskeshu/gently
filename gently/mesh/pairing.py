@@ -33,8 +33,8 @@ RATE_LIMIT_WINDOW = 3600.0  # 1 hour
 RATE_LIMIT_MAX = 10  # max attempts per IP per window
 RATE_LIMIT_MAX_BACKOFF = 60.0  # max backoff seconds
 
-# Phase 4: capability scopes
-ALL_SCOPES = ["status", "campaigns", "campaigns:admin"]
+# Capability scopes
+ALL_SCOPES = ["status", "campaigns", "campaigns:admin", "data", "ml"]
 DEFAULT_SCOPES = list(ALL_SCOPES)
 
 

@@ -22,6 +22,7 @@ from .model import (
 )
 
 from ._intentions import IntentionsMixin
+from ._ml_pipelines import MlPipelinesMixin
 from ._plans import PlansMixin
 from ._understanding import UnderstandingMixin
 
@@ -263,7 +264,7 @@ CREATE INDEX IF NOT EXISTS idx_plan_snapshots_version ON plan_snapshots(campaign
 # ContextStore
 # ---------------------------------------------------------------------------
 
-class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin):
+class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesMixin):
     """
     SQLite-backed storage for the agent's context.
 

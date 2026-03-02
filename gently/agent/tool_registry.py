@@ -36,6 +36,8 @@ class ToolCategory(Enum):
     HARDWARE = auto()         # Direct hardware control
     DATA = auto()             # Data/Databroker operations
     UTILITY = auto()          # Utility functions
+    ML = auto()               # Machine learning training
+    TRANSFER = auto()         # Bulk data transfer
 
 
 @dataclass

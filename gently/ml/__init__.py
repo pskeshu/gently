@@ -1,0 +1,33 @@
+"""
+Gently ML — Structured machine learning training framework.
+
+Provides:
+- Architecture registry with suitability metadata
+- Local single-GPU trainer (subprocess-based)
+- Dataset loading from GentlyStore
+- Evaluation metrics and reporting
+- Federated averaging for distributed training
+"""
+
+from .models import (
+    DataSplit,
+    MLPipeline,
+    ModelArchitectureType,
+    ModelConfig,
+    TrainingConfig,
+    TrainingRun,
+    TrainingStatus,
+)
+from .architectures import ARCHITECTURE_REGISTRY, get_suitable_architectures
+
+__all__ = [
+    "ARCHITECTURE_REGISTRY",
+    "DataSplit",
+    "MLPipeline",
+    "ModelArchitectureType",
+    "ModelConfig",
+    "TrainingConfig",
+    "TrainingRun",
+    "TrainingStatus",
+    "get_suitable_architectures",
+]
