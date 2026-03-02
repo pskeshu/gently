@@ -28,6 +28,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 
+from ..core.service import Service
 from ..settings import settings
 
 logger = logging.getLogger(__name__)
@@ -71,7 +72,7 @@ __all__ = [
 ]
 
 
-class VisualizationServer:
+class VisualizationServer(Service):
     """
     Web-based visualization server for microscopy data
 
@@ -106,14 +107,13 @@ class VisualizationServer:
         ssl_certfile: str = None,
         ssl_keyfile: str = None,
     ):
+        super().__init__(name="visualization", service_type="http", host=host, port=port)
         if not FASTAPI_AVAILABLE:
             raise ImportError(
                 "FastAPI is required for visualization server. "
                 "Install with: pip install fastapi uvicorn"
             )
 
-        self.host = host
-        self.port = port
         self.data_store = data_store
         self.event_bus = event_bus
         self._ssl_certfile = ssl_certfile
@@ -393,7 +393,7 @@ class VisualizationServer:
 
         logger.info(f"Pushed 3D volume {uid} ({volume.shape}) to {len(self.manager.active_connections)} clients")
 
-    async def start(self):
+    async def on_start(self):
         """Start the visualization server"""
         # Set the event loop on the event bus so async handlers work
         # even when events are published from sync code
@@ -456,7 +456,7 @@ class VisualizationServer:
 
         logger.info(f"Visualization server running at {scheme}://{self.host}:{self.port}")
 
-    async def stop(self):
+    async def on_stop(self):
         """Stop the visualization server"""
         if self._server:
             self._server.should_exit = True
@@ -473,6 +473,12 @@ class VisualizationServer:
             self._server = None
             self._server_task = None
         logger.info("Visualization server stopped")
+
+    async def health_check(self) -> Dict:
+        """Return health status with connected client count."""
+        base = await super().health_check()
+        base['connected_clients'] = len(self.manager.active_connections)
+        return base
 
     async def run_forever(self):
         """Run the server until interrupted."""

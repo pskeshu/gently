@@ -38,6 +38,7 @@ if str(project_root) not in sys.path:
 from aiohttp import web
 import yaml
 
+from .core.service import Service
 from .log_config import configure_logging
 from .settings import settings
 
@@ -54,7 +55,7 @@ class PlanRequest:
     future: asyncio.Future = field(default_factory=lambda: asyncio.get_event_loop().create_future())
 
 
-class DeviceLayerServer:
+class DeviceLayerServer(Service):
     """
     Consolidated device layer: MMCore + Ophyd + RunEngine + SAM.
 
@@ -62,7 +63,14 @@ class DeviceLayerServer:
     Provides HTTP API for plan submission and SAM detection.
     """
 
-    def __init__(self, config_path: str = "config/config.yml", sam_device: str = "cuda"):
+    def __init__(
+        self,
+        config_path: str = "config/config.yml",
+        sam_device: str = "cuda",
+        host: str = settings.network.device_host,
+        port: int = settings.network.device_port,
+    ):
+        super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
         self.config = None
         self.core = None
@@ -92,6 +100,11 @@ class DeviceLayerServer:
         # being serialized to JSON lists (which can turn a 400MB uint16 volume
         # into ~2GB of JSON text).
         self._volume_dir: Optional[str] = None
+
+        # Server lifecycle objects (populated in on_start)
+        self._app = None
+        self._runner = None
+        self._executor_task = None
 
     async def initialize(self):
         """Initialize hardware and RunEngine"""
@@ -911,71 +924,92 @@ class DeviceLayerServer:
     # Server Lifecycle
     # =========================================================================
 
-    async def run(self, host: str = settings.network.device_host, port: int = settings.network.device_port):
-        """Start the server"""
+    async def on_start(self):
+        """Initialize hardware and start the HTTP server."""
         await self.initialize()
 
         # Create web app
-        app = web.Application()
+        self._app = web.Application()
 
         # Core endpoints (carried forward from simple_server.py)
-        app.router.add_get('/api/status', self.handle_status)
-        app.router.add_post('/api/queue/item/add', self.handle_submit_plan)
-        app.router.add_get('/api/history', self.handle_get_history)
-        app.router.add_get('/api/devices', self.handle_get_devices)
-        app.router.add_get('/api/plans', self.handle_get_plans)
-        app.router.add_get('/api/led/status', self.handle_get_led_status)
-        app.router.add_post('/api/led/set', self.handle_set_led)
-        app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
-        app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
-        app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
-        app.router.add_get('/api/plan_log', self.handle_get_plan_log)
-        app.router.add_post('/session/configure', self.handle_session_configure)
+        self._app.router.add_get('/api/status', self.handle_status)
+        self._app.router.add_post('/api/queue/item/add', self.handle_submit_plan)
+        self._app.router.add_get('/api/history', self.handle_get_history)
+        self._app.router.add_get('/api/devices', self.handle_get_devices)
+        self._app.router.add_get('/api/plans', self.handle_get_plans)
+        self._app.router.add_get('/api/led/status', self.handle_get_led_status)
+        self._app.router.add_post('/api/led/set', self.handle_set_led)
+        self._app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
+        self._app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
+        self._app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
+        self._app.router.add_get('/api/plan_log', self.handle_get_plan_log)
+        self._app.router.add_post('/session/configure', self.handle_session_configure)
 
         # SAM endpoints (new - replaces RPyC sam_server.py)
-        app.router.add_get('/api/sam/status', self.handle_sam_status)
-        app.router.add_post('/api/detect_embryos', self.handle_detect_embryos)
+        self._app.router.add_get('/api/sam/status', self.handle_sam_status)
+        self._app.router.add_post('/api/detect_embryos', self.handle_detect_embryos)
 
         # Start plan executor
-        executor_task = asyncio.create_task(self._plan_executor())
+        self._executor_task = asyncio.create_task(self._plan_executor())
 
         # Start web server
-        runner = web.AppRunner(app)
-        await runner.setup()
-        site = web.TCPSite(runner, host, port)
+        self._runner = web.AppRunner(self._app)
+        await self._runner.setup()
+        site = web.TCPSite(self._runner, self.host, self.port)
 
         logger.info("=" * 60)
-        logger.info("HTTP API available at http://%s:%d", host, port)
+        logger.info("HTTP API available at http://%s:%d", self.host, self.port)
         logger.info("=" * 60)
         logger.info("Endpoints: GET /api/status, GET /api/devices, GET /api/plans, POST /api/queue/item/add, ...")
-        logger.info("Press Ctrl+C to stop")
 
         await site.start()
 
+    async def on_stop(self):
+        """Shut down the HTTP server and plan executor."""
+        logger.info("Shutting down...")
+        self._running = False
+        if self._executor_task:
+            self._executor_task.cancel()
+            try:
+                await self._executor_task
+            except asyncio.CancelledError:
+                pass
+        if self._runner:
+            await self._runner.cleanup()
+        logger.info("Device layer stopped.")
+
+    async def health_check(self) -> Dict:
+        """Return health status with device count, queue size, SAM status."""
+        base = await super().health_check()
+        base['device_count'] = len(self.devices)
+        base['queue_size'] = self._plan_queue.qsize()
+        base['sam_loaded'] = self._sam_detector is not None
+        return base
+
+    async def run(self, host: str = None, port: int = None):
+        """Start the server and run until interrupted."""
+        if host is not None:
+            self.host = host
+        if port is not None:
+            self.port = port
+
+        await self.start()
+
         # Keep running with proper shutdown handling
-        # Use an Event for clean shutdown (works on Windows)
         self._shutdown_event = asyncio.Event()
+        logger.info("Press Ctrl+C to stop")
 
         try:
-            # Wait for shutdown signal
             await self._shutdown_event.wait()
         except asyncio.CancelledError:
             pass
         finally:
-            logger.info("Shutting down...")
-            self._running = False
-            executor_task.cancel()
-            try:
-                await executor_task
-            except asyncio.CancelledError:
-                pass
-            await runner.cleanup()
-            logger.info("Device layer stopped.")
+            await self.stop()
 
 
 async def main(port: int = settings.network.device_port, sam_device: str = "cuda"):
-    server = DeviceLayerServer(sam_device=sam_device)
-    await server.run(port=port)
+    server = DeviceLayerServer(sam_device=sam_device, port=port)
+    await server.run()
 
 
 if __name__ == "__main__":

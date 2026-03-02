@@ -17,6 +17,8 @@ from datetime import datetime
 from enum import Enum, auto
 from typing import Any, Callable, Dict, List, Optional, Type
 
+import aiohttp
+
 from .event_bus import EventType, get_event_bus, Event
 
 logger = logging.getLogger(__name__)
@@ -382,20 +384,18 @@ class ServiceClient:
 
     async def _connect_http(self, info: ServiceInfo):
         """Connect to HTTP service"""
-        try:
-            import httpx
-            return httpx.AsyncClient(
-                base_url=f"http://{info.host}:{info.port}",
-                timeout=30.0,
-            )
-        except ImportError:
-            raise RuntimeError("httpx not available")
+        base_url = f"http://{info.host}:{info.port}"
+        timeout = aiohttp.ClientTimeout(total=30.0)
+        session = aiohttp.ClientSession(timeout=timeout)
+        return {"base_url": base_url, "session": session}
 
     async def disconnect(self, service_name: str):
         """Disconnect from a service"""
         if service_name in self._connections:
             conn = self._connections.pop(service_name)
-            if hasattr(conn, 'close'):
+            if isinstance(conn, dict) and "session" in conn:
+                await conn["session"].close()
+            elif hasattr(conn, 'close'):
                 if asyncio.iscoroutinefunction(conn.close):
                     await conn.close()
                 else:
@@ -441,9 +441,10 @@ class ServiceClient:
 
         elif info.service_type == "http":
             # HTTP call (assume POST to /{method})
-            response = await conn.post(f"/{method}", json=kwargs)
-            response.raise_for_status()
-            return response.json()
+            url = f"{conn['base_url']}/{method}"
+            async with conn["session"].post(url, json=kwargs) as resp:
+                resp.raise_for_status()
+                return await resp.json()
 
     def __contains__(self, service_name: str) -> bool:
         return service_name in self._connections
