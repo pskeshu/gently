@@ -151,5 +151,34 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
             # Client requesting current presence list
             await server.manager.broadcast_presence()
 
+        # Embryo marking messages
+        elif msg_type == "embryo_marked":
+            session_id = data.get("session_id")
+            marker = data.get("marker")
+            if session_id and marker and hasattr(server, '_marking_sessions'):
+                session = server._marking_sessions.get(session_id)
+                if session:
+                    session["markers"].append(marker)
+                    logger.info(f"Embryo marked: #{marker['number']} at ({marker['pixelX']}, {marker['pixelY']})")
+
+        elif msg_type == "marking_update":
+            session_id = data.get("session_id")
+            markers = data.get("markers", [])
+            if session_id and hasattr(server, '_marking_sessions'):
+                session = server._marking_sessions.get(session_id)
+                if session:
+                    session["markers"] = markers
+                    logger.info(f"Marking updated: {len(markers)} embryo(s)")
+
+        elif msg_type == "marking_done":
+            session_id = data.get("session_id")
+            markers = data.get("markers", [])
+            if session_id and hasattr(server, '_marking_sessions'):
+                session = server._marking_sessions.get(session_id)
+                if session:
+                    session["markers"] = markers
+                    session["complete"].set()
+                    logger.info(f"Marking complete: {len(markers)} embryo(s)")
+
     except json.JSONDecodeError:
         logger.warning(f"Invalid JSON received: {message[:100]}")

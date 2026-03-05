@@ -345,6 +345,120 @@ class VisualizationServer(Service):
 
         logger.debug(f"Pushed image {uid} ({data_type}) to {len(self.manager.active_connections)} clients")
 
+    async def start_marking_session(
+        self,
+        image: np.ndarray,
+        initial_stage_position: tuple = (0.0, 0.0),
+        pixel_size_um: float = 0.65,
+    ) -> str:
+        """
+        Start an embryo marking session in the web UI.
+
+        Broadcasts the bottom camera image to all clients and waits
+        for the user to mark embryo positions via clicks.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Bottom camera overview image (2D grayscale or RGB)
+        initial_stage_position : tuple
+            Initial XY stage position in micrometers
+        pixel_size_um : float
+            Pixel size in micrometers/pixel
+
+        Returns
+        -------
+        str
+            Session ID for this marking session
+        """
+        import uuid
+
+        if not hasattr(self, '_marking_sessions'):
+            self._marking_sessions = {}
+
+        session_id = str(uuid.uuid4())[:8]
+        self._marking_sessions[session_id] = {
+            "markers": [],
+            "complete": asyncio.Event(),
+            "initial_stage_position": initial_stage_position,
+            "pixel_size_um": pixel_size_um,
+            "image_shape": image.shape,
+        }
+
+        # Encode image as base64 PNG
+        from PIL import Image as PILImage
+        img = image
+        if img.dtype != np.uint8:
+            img = ((img - img.min()) / max(img.max() - img.min(), 1) * 255).astype(np.uint8)
+        pil_img = PILImage.fromarray(img)
+        buf = io.BytesIO()
+        pil_img.save(buf, format='PNG')
+        b64 = base64.b64encode(buf.getvalue()).decode('ascii')
+
+        h, w = image.shape[:2]
+
+        # Broadcast to all clients
+        await self.manager.broadcast({
+            "type": "marking_image",
+            "data": {
+                "session_id": session_id,
+                "image_b64": b64,
+                "width": w,
+                "height": h,
+            }
+        })
+
+        logger.info(f"Marking session {session_id} started, image {w}x{h} sent to {len(self.manager.active_connections)} clients")
+        return session_id
+
+    async def wait_for_marking(self, session_id: str, timeout: float = None) -> list:
+        """
+        Wait for a marking session to complete.
+
+        Parameters
+        ----------
+        session_id : str
+            Session ID from start_marking_session
+        timeout : float, optional
+            Timeout in seconds (None = wait forever)
+
+        Returns
+        -------
+        list of dict
+            Marked embryos with pixel positions and stage positions
+        """
+        session = self._marking_sessions.get(session_id)
+        if not session:
+            return []
+
+        try:
+            await asyncio.wait_for(session["complete"].wait(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.warning(f"Marking session {session_id} timed out")
+
+        markers = session["markers"]
+        initial_pos = session["initial_stage_position"]
+        pixel_size = session["pixel_size_um"]
+        h, w = session["image_shape"][:2]
+        center_x, center_y = w / 2, h / 2
+
+        # Convert to embryo entries compatible with EmbryoMarker format
+        embryos = []
+        for m in markers:
+            px, py = m["pixelX"], m["pixelY"]
+            embryos.append({
+                "embryo_number": m["number"],
+                "embryo_id": f"embryo_{m['number']:03d}",
+                "pixel_position": (px, py),
+                "initial_stage_position": initial_pos,
+                "marking_timestamp": m.get("timestamp", datetime.now().isoformat()),
+            })
+
+        # Clean up
+        del self._marking_sessions[session_id]
+
+        return embryos
+
     async def push_volume_3d(
         self,
         volume: np.ndarray,

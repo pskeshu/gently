@@ -27,7 +27,6 @@ import yaml
 
 from gently.log_config import configure_logging
 from gently.agent import MicroscopyCopilot, QueueServerClient
-from gently.agent.logger import CopilotLogger
 from gently.organisms import load_organism
 from gently.hardware import load_hardware
 from gently.settings import settings
@@ -171,9 +170,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     log_dir = storage_dir / "logs"
     log_dir.mkdir(exist_ok=True)
 
-    # Initialize logger
+    # Log file path for launch info
     session_name = datetime.now().strftime("%Y%m%d")
-    logger = CopilotLogger(log_dir, session_name=session_name)
+    log_file = log_dir / f"{session_name}.log"
 
     # Connect to device layer
     client = None
@@ -208,14 +207,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     except Exception:
         pass
 
-    # Start visualization server for real-time feedback
-    await copilot.start_viz_server(
-        port=settings.network.viz_port,
-        ssl_certfile=str(cert_path) if cert_path else None,
-        ssl_keyfile=str(key_path) if key_path else None,
-    )
-    scheme = "https" if cert_path else "http"
-    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
+    # Start visualization server for real-time feedback (plain HTTP for easy browser access)
+    await copilot.start_viz_server(port=settings.network.viz_port)
+    viz_url = f"http://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None
@@ -339,7 +333,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         "offline": offline or (client is None),
         "store_path": str(storage_dir),
         "viz_url": viz_url,
-        "log_path": str(logger.log_file),
+        "log_path": str(log_file),
         "resumed": session_to_resume is not None,
         "mesh_service": mesh,
     })

@@ -2319,6 +2319,262 @@ kbd {
 }
 
 /* ========================================
+   EMBRYOS TAB - Subtab Bar
+   ======================================== */
+
+.embryos-subtab-bar {
+    display: flex;
+    gap: 0;
+    border-bottom: 1px solid var(--border);
+    padding: 0 1.5rem;
+    background: var(--bg-card);
+}
+
+.embryos-subtab {
+    padding: 0.6rem 1.2rem;
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-weight: 500;
+    border-bottom: 2px solid transparent;
+    transition: color 0.2s, border-color 0.2s;
+    user-select: none;
+}
+
+.embryos-subtab:hover {
+    color: var(--text);
+}
+
+.embryos-subtab.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+.embryos-subtab .marking-badge {
+    font-size: 0.7rem;
+    margin-left: 0.3rem;
+}
+
+/* ========================================
+   EMBRYOS TAB - Marking
+   ======================================== */
+
+.marking-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.marking-placeholder {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    color: var(--text-muted);
+}
+
+.marking-placeholder-icon {
+    font-size: 2.5rem;
+    opacity: 0.4;
+}
+
+.marking-placeholder-text {
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.marking-placeholder-hint {
+    font-size: 0.8rem;
+    max-width: 360px;
+    text-align: center;
+    line-height: 1.5;
+}
+
+.marking-active {
+    flex: 1;
+    display: flex;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    min-height: 0;
+}
+
+.marking-viewer {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.marking-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.5rem 0.75rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 0.5rem;
+}
+
+.marking-instructions {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.marking-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.marking-action-btn {
+    padding: 0.35rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 0.8rem;
+    transition: background 0.15s;
+}
+
+.marking-action-btn:hover:not(:disabled) {
+    background: var(--bg-hover);
+}
+
+.marking-action-btn:disabled {
+    opacity: 0.4;
+    cursor: default;
+}
+
+.marking-done-btn {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+}
+
+.marking-done-btn:hover:not(:disabled) {
+    filter: brightness(1.1);
+    background: var(--accent);
+}
+
+.marking-image-container {
+    flex: 1;
+    position: relative;
+    background: #111;
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+}
+
+.marking-image-container img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.marking-image-container canvas {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    cursor: crosshair;
+    pointer-events: auto;
+}
+
+/* Marking sidebar */
+.marking-sidebar {
+    width: 220px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.marking-sidebar-header {
+    padding: 0.6rem 0.75rem;
+    font-size: 0.85rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+}
+
+.marking-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+
+.marking-list-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    padding: 1.5rem 0.5rem;
+}
+
+.marking-list-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    border-radius: 6px;
+    font-size: 0.8rem;
+}
+
+.marking-list-item:hover {
+    background: var(--bg-hover);
+}
+
+.marking-number {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.marking-coords {
+    flex: 1;
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.75rem;
+}
+
+.marking-remove-btn {
+    border: none;
+    background: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0 0.2rem;
+    opacity: 0;
+    transition: opacity 0.15s;
+}
+
+.marking-list-item:hover .marking-remove-btn {
+    opacity: 1;
+}
+
+.marking-remove-btn:hover {
+    color: #ff6b6b;
+}
+
+/* ========================================
    EMBRYOS TAB - Timelapse Tracking
    ======================================== */
 

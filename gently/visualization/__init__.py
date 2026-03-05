@@ -8,7 +8,7 @@ Provides:
 - Plot generation utilities for real-time feedback
 """
 
-from .embryo_marker import EmbryoMarker, mark_embryos_napari
+from .embryo_marker import EmbryoMarker, mark_embryos_napari, mark_embryos_web
 from .plots import (
     generate_focus_curve_plot,
     generate_calibration_summary_plot,
@@ -23,6 +23,7 @@ def get_visualization_server():
 __all__ = [
     'EmbryoMarker',
     'mark_embryos_napari',
+    'mark_embryos_web',
     'get_visualization_server',
     'generate_focus_curve_plot',
     'generate_calibration_summary_plot',

@@ -28,6 +28,7 @@ from bluesky.preprocessors import finalize_wrapper, run_wrapper
 # Import existing calibration infrastructure
 from .calibration_plans import calibrate_embryo_piezo_galvo
 from .visualization import mark_embryos_napari
+from .visualization.embryo_marker import mark_embryos_web
 from .database import (
     export_multi_embryo_database,
     add_embryo_to_database,
@@ -401,20 +402,35 @@ def multi_embryo_calibration_session_plan(
             logger.info("Saved overview: %s", overview_path.name)
 
             logger.info("Launching interactive embryo marking...")
-            logger.info("(This will open napari window - may have threading issues)")
 
-            # Interactive marking with napari (may fail with Qt threading error!)
-            try:
-                marked_embryos = mark_embryos_napari(
-                    image=overview_image,
-                    initial_stage_position=tuple(initial_stage_pos),
-                    pixel_size_um=bottom_camera.effective_pixel_size,
-                    save_image_path=image_dir / f"all_embryos_marked_{timestamp}.png"
+            # Prefer web-based marking (no Qt dependency, works remotely)
+            viz_server = kwargs.get('viz_server')
+            if viz_server is not None:
+                import asyncio
+                logger.info("Using web-based marking via visualization server")
+                marked_embryos = asyncio.get_event_loop().run_until_complete(
+                    mark_embryos_web(
+                        viz_server=viz_server,
+                        image=overview_image,
+                        initial_stage_position=tuple(initial_stage_pos),
+                        pixel_size_um=bottom_camera.effective_pixel_size,
+                        save_image_path=image_dir / f"all_embryos_marked_{timestamp}.png"
+                    )
                 )
-            except Exception as e:
-                logger.error("Interactive marking failed (likely Qt threading issue): %s", e)
-                logger.error("Solution: Capture overview and mark embryos BEFORE calling this plan")
-                raise
+            else:
+                # Fallback to napari (may fail with Qt threading error)
+                logger.warning("No viz_server available, falling back to napari")
+                try:
+                    marked_embryos = mark_embryos_napari(
+                        image=overview_image,
+                        initial_stage_position=tuple(initial_stage_pos),
+                        pixel_size_um=bottom_camera.effective_pixel_size,
+                        save_image_path=image_dir / f"all_embryos_marked_{timestamp}.png"
+                    )
+                except Exception as e:
+                    logger.error("Interactive marking failed: %s", e)
+                    logger.error("Solution: Capture overview and mark embryos BEFORE calling this plan")
+                    raise
 
         if len(marked_embryos) == 0:
             logger.error("No embryos marked! Aborting session.")

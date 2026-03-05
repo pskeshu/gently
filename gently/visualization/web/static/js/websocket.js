@@ -75,6 +75,15 @@ function handleMessage(msg) {
 
     } else if (msg.type === 'timelapse_state') {
         ClientEventBus.emit('TIMELAPSE_STATE', msg.data);
+    } else if (msg.type === 'marking_image') {
+        // Server is requesting embryo marking
+        if (typeof MarkingManager !== 'undefined') {
+            MarkingManager.handleMarkingImage(msg.data);
+            // Auto-switch to marking subtab
+            MarkingManager.switchSubtab('marking');
+            // Switch to embryos tab if not already there
+            if (state.tab !== 'embryos') switchTab('embryos');
+        }
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
     } else if (msg.type === 'presence') {

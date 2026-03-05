@@ -995,7 +995,7 @@ Respond in JSON:
         try:
             import napari
         except ImportError:
-            logger.warning("napari not installed. Install with: pip install napari[all]")
+            logger.debug("napari not installed (optional - web visualization available)")
             return None
 
         viewer = napari.Viewer(title="Embryo Detection - Review Required")

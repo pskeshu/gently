@@ -208,6 +208,17 @@
 
     <!-- Embryos Tab (default landing page) -->
     <div id="embryos-content" class="tab-content active">
+        <!-- Subtab bar -->
+        <div class="embryos-subtab-bar">
+            <div class="embryos-subtab active" data-subtab="monitoring" onclick="MarkingManager.switchSubtab('monitoring')">Monitoring</div>
+            <div class="embryos-subtab" data-subtab="marking" onclick="MarkingManager.switchSubtab('marking')">
+                Marking
+                <span class="tab-badge marking-badge" id="marking-count" style="display:none">0</span>
+            </div>
+        </div>
+
+        <!-- Monitoring subtab (existing content) -->
+        <div id="embryos-monitoring">
         <div class="embryos-container">
             <div class="embryos-header-panel" id="embryos-header-panel">
                 <div class="embryos-header-bar" onclick="EmbryosManager.toggleHeaderPanel()">
@@ -256,6 +267,42 @@
                     <div class="reasoning-empty">
                         <div class="reasoning-empty-icon">&#x1F50D;</div>
                         <div class="reasoning-empty-text">Select an embryo to view analysis history</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Marking subtab -->
+        <div id="embryos-marking" style="display:none">
+            <div class="marking-container">
+                <!-- Placeholder when no marking session is active -->
+                <div class="marking-placeholder" id="marking-placeholder">
+                    <div class="marking-placeholder-icon">&#x1F4CD;</div>
+                    <div class="marking-placeholder-text">No marking session active</div>
+                    <div class="marking-placeholder-hint">Start a multi-embryo calibration from the copilot to begin marking embryo positions.</div>
+                </div>
+
+                <!-- Active marking UI -->
+                <div class="marking-active" id="marking-active" style="display:none">
+                    <div class="marking-viewer">
+                        <div class="marking-toolbar">
+                            <span class="marking-instructions" id="marking-instructions">Click on each embryo center.</span>
+                            <div class="marking-actions">
+                                <button class="marking-action-btn" onclick="MarkingManager.clearAll()">Clear All</button>
+                                <button class="marking-action-btn marking-done-btn" onclick="MarkingManager.done()">Done</button>
+                            </div>
+                        </div>
+                        <div class="marking-image-container" id="marking-image-container">
+                            <img id="marking-image" src="" alt="Bottom camera overview" style="display:none">
+                            <canvas id="marking-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="marking-sidebar">
+                        <div class="marking-sidebar-header">Marked Embryos</div>
+                        <div class="marking-list" id="marking-list">
+                            <div class="marking-list-empty">No embryos marked yet</div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -317,6 +364,7 @@
     <script src="/static/js/projection-viewer.js"></script>
     <script src="/static/js/experiment-strip.js"></script>
     <script src="/static/js/narrative.js"></script>
+    <script src="/static/js/marking.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/app.js"></script>
