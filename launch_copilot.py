@@ -11,6 +11,8 @@ Usage:
     python launch_copilot.py --resume             # Interactive session picker
     python launch_copilot.py --resume latest      # Resume most recent session
     python launch_copilot.py --resume <id>        # Resume specific session
+    python launch_copilot.py -v                   # Verbose (INFO) logging
+    python launch_copilot.py --debug              # Debug logging
 """
 
 import asyncio
@@ -111,8 +113,8 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     return None
 
 
-async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False):
-    configure_logging(level="INFO")
+async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING"):
+    configure_logging(level=log_level)
 
     # Load organism module from config
     config_path = Path(__file__).parent / "config" / "config.yml"
@@ -207,9 +209,14 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     except Exception:
         pass
 
-    # Start visualization server for real-time feedback (plain HTTP for easy browser access)
-    await copilot.start_viz_server(port=settings.network.viz_port)
-    viz_url = f"http://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
+    # Start visualization server for real-time feedback
+    await copilot.start_viz_server(
+        port=settings.network.viz_port,
+        ssl_certfile=str(cert_path) if cert_path else None,
+        ssl_keyfile=str(key_path) if key_path else None,
+    )
+    scheme = "https" if cert_path else "http"
+    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None
@@ -411,7 +418,15 @@ def cli_main():
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
     parser.add_argument("--resume", nargs="?", const="__PICK__", metavar="ID",
                         help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (INFO) logging")
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
     args = parser.parse_args()
+
+    log_level = "WARNING"
+    if args.verbose:
+        log_level = "INFO"
+    if args.debug:
+        log_level = "DEBUG"
 
     pick_session = (args.resume == "__PICK__")
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
@@ -422,6 +437,7 @@ def cli_main():
             show_sessions=args.sessions,
             resume_session=resume_id,
             pick_session=pick_session,
+            log_level=log_level,
         ))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass
