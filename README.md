@@ -20,7 +20,7 @@ There's a useful distinction between [workflows and agents](https://www.anthropi
 
 **Agentic approach**: The microscope exposed as tools an agent calls autonomously. Flexible, but risky without safety guarantees.
 
-Gently supports both. Our **orchestrator agent** (copilot) and **perception agent** operate agentically, while **calibration workflows** use VLMs at specific decision points (coverage detection, focus assessment). The safety architecture makes either pattern safe to experiment with.
+Gently supports both. Our **orchestrator agent** and **perception agent** operate agentically, while **calibration workflows** use VLMs at specific decision points (coverage detection, focus assessment). The safety architecture makes either pattern safe to experiment with.
 
 ## Safety Stack
 
@@ -49,7 +49,7 @@ Our **agent-developing-agent methodology**: coding agents generate perception sy
 - **Hardware**: Dual-view selective plane illumination microscope (diSPIM)
 - **Sample**: *C. elegans* embryo development (8 morphological stages)
 - **Perception**: VLM-based stage classification with full reasoning traces
-- **Interface**: Natural language copilot for biologists
+- **Interface**: Natural language agent for biologists
 
 ### Sample-Oriented Interface
 
@@ -61,9 +61,7 @@ The sample is the basic unit of data, not the image or the acquisition. Each sam
 
 This design makes AI decision-making fully observable, addressing a key barrier to AI adoption in scientific instrumentation.
 
-Currently, the sample abstraction is the `Embryo` object for *C. elegans* work. The pattern generalizes to other sample types, though UI/UX for different samples remains to be explored.
-
-The architecture is designed for generalization to other microscopy platforms.
+Currently, the sample abstraction is the `Embryo` object for *C. elegans* work. The pattern generalizes to other sample types through the plugin system — organism and hardware modules are swappable.
 
 ## Quick Start
 
@@ -94,7 +92,7 @@ cd ../..
 # 1. Start the device layer (hardware control + SAM detection)
 python start_device_layer.py
 
-# 2. Launch the copilot
+# 2. Launch the agent
 python launch_copilot.py
 
 # Or launch without hardware (for development / review)
@@ -105,29 +103,52 @@ python launch_copilot.py --resume            # interactive picker
 python launch_copilot.py --resume latest     # most recent session
 python launch_copilot.py --resume <id>       # specific session
 
-# List saved sessions
-python launch_copilot.py --sessions
+# Verbose / debug logging
+python launch_copilot.py -v                  # INFO level
+python launch_copilot.py --debug             # DEBUG level
 ```
 
 ## Architecture
 
+Four layers with strict downward-only dependencies. The **harness** (reusable agent framework) is separated from the **application** (microscopy agent), with organism and hardware as swappable plugins.
+
 ```
 gently/
-├── agent/              # Copilot, tool registry, timelapse orchestrator
-│   ├── perception/     # VLM-based perception with reasoning traces
-│   ├── plan_mode/      # Campaign planning tools
-│   └── tools/          # Tool definitions for the copilot
-├── context/            # Persistent agent memory (learnings, campaigns, plan items)
-├── organisms/          # Organism modules (C. elegans stages, biology, detectors)
-├── hardware/           # Hardware modules (diSPIM description)
-├── tui/                # Ink terminal UI (Node.js / React)
-├── visualization/      # Web-based monitoring and viz server
-├── store.py            # GentlyStore — unified data storage (SQLite + files)
-├── device_layer.py     # Device layer server (MMCore + Bluesky + SAM)
-├── devices.py          # Ophyd device wrappers with safety limits
-├── plans.py            # Bluesky plans for acquisition workflows
-└── imaging.py          # Projection and image compression utilities
+├── core/                  # Layer 1: Foundation — zero domain knowledge
+│   ├── event_bus.py       #   Async pub/sub messaging
+│   ├── store.py           #   GentlyStore (SQLite + files)
+│   ├── imaging.py         #   Projection, normalization, encoding
+│   └── coordinates.py     #   Pixel/stage transforms
+│
+├── harness/               # Layer 2: Reusable agent framework
+│   ├── tools/             #   @tool decorator, ToolRegistry
+│   ├── perception/        #   VLM-based observation with reasoning traces
+│   ├── memory/            #   Persistent agent mind (campaigns, learnings)
+│   ├── prompts/           #   Prompt engineering and context injection
+│   ├── detection/         #   Event detection framework
+│   ├── session/           #   Session lifecycle, interaction logging
+│   ├── plan_mode/         #   Experimental design mode
+│   ├── conversation.py    #   LLM conversation management
+│   ├── bridge.py          #   WebSocket adapter
+│   └── protocols.py       #   OrganismProtocol, HardwareProtocol
+│
+├── organisms/             # Layer 3: Swappable domain plugins
+│   └── celegans/          #   C. elegans stages, biology, detectors
+├── hardware/
+│   └── dispim/            #   diSPIM devices, plans, config, device layer
+│
+├── app/                   # Layer 4: The microscopy agent
+│   ├── agent.py           #   MicroscopyAgent orchestrator
+│   ├── tools/             #   19 domain-specific tool modules
+│   └── orchestration/     #   Timelapse, plan synthesis, ML subagent
+│
+├── ui/web/                # FastAPI viz server + web assets
+├── mesh/                  # Distributed multi-instrument coordination
+├── ml/                    # ML training infrastructure
+└── analysis/              # Focus analysis utilities
 ```
+
+Building a different microscopy agent (e.g. confocal + Drosophila) means writing a new organism plugin, a new hardware plugin, and optionally custom tools — the harness, core, and analysis layers are reused unchanged.
 
 ## Contributing
 
@@ -142,7 +163,7 @@ We welcome contributions across the project:
 - **Performance**: Making things faster and more efficient.
 
 **AI & Agents**
-- **Agent/perception**: Experiment freely. The safety stack has your back.
+- **Agent/perception**: Experiment freely. The safety stack has your back. The harness layer (`gently/harness/`) is designed for reuse.
 - **Design patterns**: Reusable patterns for LLM/agentic control in microscopy. If it can be a module, even better.
 - **Cognitive models**: Thinking cognitively about microscopy and implementing cognitive computing models.
 - **Local LLMs**: We currently use cloud providers. Support for local models would be valuable.
@@ -151,15 +172,15 @@ We welcome contributions across the project:
 **Architecture & Scope**
 - **System architecture**: Ideas on how to structure agentic microscopy systems.
 - **Sample abstractions**: The `Embryo` object is our first sample type. What works for cells, tissue, other specimens?
-- **Other microscopy platforms**: Porting to confocal, widefield, other light-sheet systems. Electron microscopy?
+- **Other microscopy platforms**: Write a new hardware plugin (`gently/hardware/<name>/`) and organism plugin (`gently/organisms/<name>/`). Confocal, widefield, other light-sheet systems, electron microscopy.
 - **Multi-modal integration**: Combining microscopy with other data sources (genomics, proteomics, etc.).
 
 **Human Interface**
-- **UI/UX**: The web interface, copilot experience, and visualization all need work.
+- **UI/UX**: The web interface, agent experience, and visualization all need work.
 - **HCI research**: How do biologists work with intelligent instruments?
 - **Documentation**: Tutorials, examples, better explanations for newcomers.
 - **Accessibility**: Making the interface accessible to users with disabilities.
-- **Internationalization**: Supporting other languages for the copilot.
+- **Internationalization**: Supporting other languages for the agent.
 
 Coding agents are welcome contributors.
 
