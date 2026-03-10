@@ -2,16 +2,9 @@
 """
 Start the Gently Device Layer
 
-Unified server for all hardware control:
-- Direct MMCore initialization (no external Micro-Manager process needed)
-- Ophyd device abstraction
-- Bluesky RunEngine for plan execution
-- SAM embryo detection via HTTP
-
-This replaces the previous architecture requiring 3 processes:
-- start_server.py (MMCore RPyC) - ELIMINATED
-- backend/simple_server.py (HTTP API) - REPLACED
-- backend/sam_server.py (SAM RPyC) - REPLACED
+Launches the hardware control server for the configured hardware module.
+The hardware module (e.g., dispim, twophoton) provides its own device layer
+implementation via create_device_layer().
 
 Usage:
     python start_device_layer.py
@@ -26,6 +19,8 @@ import signal
 import sys
 from pathlib import Path
 
+import yaml
+
 # Ensure project root is in path
 project_root = Path(__file__).parent
 if str(project_root) not in sys.path:
@@ -34,7 +29,7 @@ if str(project_root) not in sys.path:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Gently Device Layer - Unified Hardware Server",
+        description="Gently Device Layer - Hardware Server",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -43,9 +38,9 @@ Examples:
     python start_device_layer.py --sam-device cpu
 
 The server provides:
-    - HTTP API on port 60610 for plan submission
-    - Direct MMCore control (no external Micro-Manager needed)
-    - SAM embryo detection via /api/detect_embryos
+    - HTTP API on the specified port for plan submission
+    - Hardware control via the configured hardware module
+    - SAM embryo detection via /api/detect_embryos (if supported)
         """
     )
     parser.add_argument(
@@ -68,24 +63,41 @@ The server provides:
 
     args = parser.parse_args()
 
+    # Load config to determine hardware type
+    config_path = Path(args.config)
+    if config_path.exists():
+        with open(config_path) as f:
+            config = yaml.safe_load(f) or {}
+    else:
+        config = {}
+
+    hardware_name = config.get("hardware", "dispim")
+
     print("\n" + "=" * 60)
     print("GENTLY DEVICE LAYER")
     print("=" * 60)
     print(f"\nConfiguration:")
+    print(f"  Hardware:    {hardware_name}")
     print(f"  HTTP Port:   {args.port}")
     print(f"  SAM Device:  {args.sam_device}")
     print(f"  Config:      {args.config}")
     print()
 
-    # Import and run server
-    from gently.hardware.dispim.device_layer import DeviceLayerServer
+    # Load hardware module and create device layer
+    from gently.hardware import load_hardware
+    hw = load_hardware(hardware_name)
+
+    if not hasattr(hw, 'create_device_layer'):
+        print(f"Error: Hardware module '{hardware_name}' does not provide create_device_layer().")
+        print("The hardware module must implement this factory function.")
+        sys.exit(1)
+
+    server = hw.create_device_layer({
+        'config_path': args.config,
+        'sam_device': args.sam_device,
+    })
 
     async def run_server():
-        server = DeviceLayerServer(
-            config_path=args.config,
-            sam_device=args.sam_device
-        )
-
         # Set up signal handling within the async context
         loop = asyncio.get_running_loop()
 

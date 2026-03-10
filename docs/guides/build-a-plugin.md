@@ -10,7 +10,7 @@ Gently has four layers with strict downward-only dependencies:
 core/       → Foundation: event bus, data store, imaging, coordinates
 harness/    → Reusable agent framework: tools, perception, memory, detection, plan mode
 organisms/  → Organism plugins (biology, stages, perception prompts)
-hardware/   → Hardware plugins (device control, acquisition plans)
+hardware/   → Hardware plugins (device control, acquisition plans, client)
 app/        → The microscopy agent: domain tools, orchestration
 ```
 
@@ -18,7 +18,7 @@ Plugins live in Layer 3. They implement protocols defined by the harness (Layer 
 
 ## The Plugin Protocols
 
-Two runtime-checkable protocols define the plugin contracts. Both are in `gently/harness/protocols.py`.
+Three protocols define the plugin contracts. All are in `gently/harness/protocols.py`.
 
 ### OrganismProtocol
 
@@ -40,10 +40,52 @@ class OrganismProtocol(Protocol):
 ```python
 @runtime_checkable
 class HardwareProtocol(Protocol):
-    HARDWARE_NAME: str              # e.g. "confocal"
-    HARDWARE_DISPLAY_NAME: str      # e.g. "Spinning Disk Confocal"
+    HARDWARE_NAME: str              # e.g. "twophoton"
+    HARDWARE_DISPLAY_NAME: str      # e.g. "Two-Photon Microscope"
     HARDWARE_DESCRIPTION: str       # Markdown capabilities text
+    CAPABILITIES: set               # e.g. {"xy_stage", "z_stack", "fluorescence"}
 ```
+
+Standard capability names: `xy_stage`, `z_control`, `volume`, `snap`, `z_stack`, `dual_view`, `autofocus`, `detection`, `fluorescence`, `transmitted`.
+
+### MicroscopeClientProtocol
+
+Defines the generic interface that the agent and tools use to talk to hardware:
+
+```python
+@runtime_checkable
+class MicroscopeClientProtocol(Protocol):
+    is_connected: bool
+    has_sam: bool
+
+    async def connect(self) -> bool: ...
+    async def disconnect(self) -> None: ...
+    async def get_status(self) -> dict: ...
+    async def move_to_position(self, x: float, y: float) -> dict: ...
+    async def get_stage_position(self) -> tuple: ...
+    async def get_z_position(self) -> float: ...
+    async def acquire(self, **params) -> dict: ...
+    async def snap(self, **params) -> dict: ...
+    async def detect_samples(self, **kwargs) -> dict: ...
+```
+
+Hardware-specific operations (like diSPIM's `capture_lightsheet_image` or a 2P's `acquire_zstack`) live on the concrete client class, not the protocol.
+
+### Hardware Factory Functions
+
+Hardware modules must also provide two factory functions:
+
+```python
+def create_device_layer(config: dict):
+    """Create the hardware control server. Returns a server with .run(port=N)."""
+    ...
+
+def create_client(http_url: str):
+    """Create an HTTP client for the device layer. Returns a client with .connect()."""
+    ...
+```
+
+These are called by `start_device_layer.py` and `launch_gently.py` respectively, so the framework never imports hardware-specific code directly.
 
 ## Tutorial: Create a Drosophila Organism Plugin
 
@@ -190,61 +232,136 @@ In `config/config.yml`:
 organism: "drosophila"
 ```
 
-Or modify `launch_gently.py` to accept it as an argument. The loader in `gently/organisms/__init__.py` dynamically imports `gently.organisms.drosophila`.
+The loader in `gently/organisms/__init__.py` dynamically imports `gently.organisms.drosophila`.
 
-## Tutorial: Create a Simulated Hardware Plugin
+## Tutorial: Create a Two-Photon Hardware Plugin
 
-For development and testing, a hardware stub that returns synthetic images.
+This example shows a complete hardware plugin for a two-photon microscope. Even if you only plan to use `--offline` initially, providing the full structure makes it easy to add hardware control later.
 
 ### 1. Create the plugin directory
 
 ```
-gently/hardware/simulator/
+gently/hardware/twophoton/
 ├── __init__.py
-└── description.py
+├── description.py
+└── calibration.py     # Hardware-specific calibration model (optional)
 ```
 
 ### 2. Write the hardware description
 
 ```python
-# gently/hardware/simulator/description.py
+# gently/hardware/twophoton/description.py
 
 HARDWARE_DESCRIPTION = """
-## Simulated Microscope
+## Two-Photon Microscope
 
-A software-only microscope simulator for development and testing.
+Point-scanning two-photon fluorescence microscope for deep tissue imaging.
 
 ### Capabilities
-- Simulated XY stage positioning
-- Synthetic fluorescence image generation
-- Configurable noise levels and sample density
-- No physical hardware required
+- XY positioning via motorized stage
+- Z-stacking via objective piezo or Z-motor
+- Two-photon excitation with Ti:Sapphire laser (700-1050nm tunable)
+- Power modulation via Pockels cell
+- PMT detection (non-descanned)
+- 488nm and 561nm single-photon channels (optional)
 
-### Limitations
-- Images are procedurally generated, not from real specimens
-- No real optical effects (PSF, aberrations, scattering)
-- Timing is instantaneous (no hardware settle time)
+### Acquisition Modes
+- Single-plane snap at current Z
+- Z-stack: sequential planes with configurable step size and range
+- Timelapse Z-stacks
+
+### Safety
+- Pockels cell blanking on error (prevents tissue damage)
+- Laser shutter interlock
+- Power limits enforced at all times
+- Z-motor bounds checking
 """
 ```
 
-### 3. Wire it up
+### 3. Wire it up with capabilities and factories
 
 ```python
-# gently/hardware/simulator/__init__.py
+# gently/hardware/twophoton/__init__.py
 from .description import HARDWARE_DESCRIPTION
 
-HARDWARE_NAME = "simulator"
-HARDWARE_DISPLAY_NAME = "Simulated Microscope"
+HARDWARE_NAME = "twophoton"
+HARDWARE_DISPLAY_NAME = "Two-Photon Microscope"
+CAPABILITIES = {
+    "xy_stage",
+    "z_control",
+    "z_stack",
+    "snap",
+    "fluorescence",
+}
+
+
+def create_device_layer(config: dict):
+    """Create the 2P device layer server."""
+    from .device_layer import TwoPhotonDeviceLayer
+    return TwoPhotonDeviceLayer(
+        config_path=config.get('config_path', 'config/config.yml'),
+    )
+
+
+def create_client(http_url: str):
+    """Create an HTTP client for the 2P device layer."""
+    from .client import TwoPhotonClient
+    return TwoPhotonClient(http_url=http_url)
 ```
 
-### 4. Select the plugin
+### 4. Define hardware-specific calibration (optional)
+
+Each hardware type has its own calibration model. For 2P, it's simpler than diSPIM — just Z-range finding:
+
+```python
+# gently/hardware/twophoton/calibration.py
+from dataclasses import dataclass
+from typing import Optional
+
+@dataclass
+class TwoPhotonCalibration:
+    """Z-axis calibration for a two-photon microscope."""
+    z_top: float = 0.0        # Top of sample (µm)
+    z_bottom: float = 100.0   # Bottom of sample (µm)
+    optimal_z: float = 50.0   # Best focal plane (µm)
+    optimal_power: float = 10.0  # Laser power (mW)
+
+    def to_dict(self) -> dict:
+        return {
+            'z_top': self.z_top,
+            'z_bottom': self.z_bottom,
+            'optimal_z': self.optimal_z,
+            'optimal_power': self.optimal_power,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> 'TwoPhotonCalibration':
+        return cls(**{k: data[k] for k in cls.__dataclass_fields__ if k in data})
+```
+
+The framework stores calibration as an opaque dict in `EmbryoState.calibration` — your hardware tools interpret it.
+
+### 5. Select the plugin
 
 ```yaml
 # config/config.yml
-hardware: "simulator"
+hardware: "twophoton"
 ```
 
-With `--offline`, the hardware plugin only provides its description text to the agent's system prompt. For online use with simulated hardware, you'd implement device classes following the patterns in `gently/hardware/dispim/devices/`.
+### 6. What happens at launch
+
+When you run `python start_device_layer.py`, the framework:
+1. Reads `config.yml` to find `hardware: "twophoton"`
+2. Calls `load_hardware("twophoton")` → imports `gently.hardware.twophoton`
+3. Calls `hw.create_device_layer(config)` → gets your server
+4. Calls `server.run(port=60610)` → starts your HTTP API
+
+When you run `python launch_gently.py`:
+1. Calls `hw.create_client(http_url)` → gets your client
+2. Passes the client to `MicroscopyAgent`
+3. Tools receive it via `context['client']`
+
+With `--offline`, no client is created. The hardware module's `HARDWARE_DESCRIPTION` and `CAPABILITIES` are still loaded into the agent's system prompt.
 
 ## Adding Custom Tools
 
@@ -283,6 +400,20 @@ async def measure_wing_disc(
 - Return a string — this becomes the tool result the LLM sees
 - Tools can be async or sync
 
+Hardware-specific tools (acquisition, calibration, focus) should live alongside their hardware module or in `app/tools/` with appropriate capability checks:
+
+```python
+@tool(name="acquire_zstack", requires_microscope=True)
+async def acquire_zstack(embryo_id: str, num_planes: int = 50,
+                         z_step_um: float = 1.0, context: dict = None) -> str:
+    client = context.get("client")
+    # This tool only works with a 2P client
+    result = await client.acquire_zstack(
+        num_planes=num_planes, z_step_um=z_step_um
+    )
+    ...
+```
+
 Register your tools by importing them in your app's tool setup. See `gently/app/tools/` for examples across all categories.
 
 ## Adding Reference Images for Perception
@@ -314,11 +445,34 @@ The `metadata.json` provides context for each reference image:
 
 The perception engine's `ExampleStore` loads these automatically and includes them as few-shot examples in VLM classification prompts.
 
+## Focus and Calibration Data Model
+
+The harness provides a generic `FocusDataPoint` for tracking focus measurements:
+
+```python
+@dataclass
+class FocusDataPoint:
+    z: float               # Primary focus axis (µm)
+    secondary_axis: float  # Second axis (galvo for diSPIM, 0.0 for single-axis)
+    score: float           # Focus quality
+    r_squared: float       # Fit quality (0-1)
+    timestamp: datetime
+    method: str            # 'calibration', 'fine_focus', 'manual'
+    algorithm: str         # 'fft_bandpass', 'gradient', etc.
+```
+
+For single-axis systems (2P, confocal), set `secondary_axis=0.0`. The harness tracks focus history per-embryo and provides drift analysis and interpolation.
+
+Hardware-specific calibration models (like diSPIM's `CalibrationPrior` with piezo-galvo slope fitting) live in the hardware module, not the harness. Store calibration data as a dict in `EmbryoState.calibration` — your tools interpret the keys.
+
 ## Testing Your Plugin
 
 ```bash
 # Verify the plugin loads
 python -c "from gently.organisms import load_organism; m = load_organism('drosophila'); print(m.ORGANISM_DISPLAY_NAME)"
+
+# Verify hardware capabilities
+python -c "from gently.hardware import load_hardware; hw = load_hardware('twophoton'); print(hw.CAPABILITIES)"
 
 # Launch offline to test the full agent
 python launch_gently.py --offline
@@ -334,7 +488,7 @@ In the agent, try:
 | Plugin | Location | What to study |
 |--------|----------|---------------|
 | C. elegans organism | `gently/organisms/celegans/` | Stage definitions, biology text, perception prompt |
-| diSPIM hardware | `gently/hardware/dispim/` | Device classes, acquisition plans, safety limits |
+| diSPIM hardware | `gently/hardware/dispim/` | Device classes, acquisition plans, safety limits, calibration model, client factory |
 
 ## Next Steps
 

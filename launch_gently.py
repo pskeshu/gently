@@ -29,9 +29,8 @@ import yaml
 
 from gently.log_config import configure_logging
 from gently.app.agent import MicroscopyAgent
-from gently.app.queue_server_client import QueueServerClient
 from gently.organisms import load_organism
-from gently.hardware import load_hardware
+from gently.hardware import load_hardware, get_hardware
 from gently.settings import settings
 from gently.core.store import GentlyStore
 
@@ -177,10 +176,17 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     session_name = datetime.now().strftime("%Y%m%d")
     log_file = log_dir / f"{session_name}.log"
 
-    # Connect to device layer
+    # Connect to device layer via hardware module's client factory
     client = None
     if not offline:
-        client = QueueServerClient(http_url=f"http://{settings.network.device_host}:{settings.network.device_port}")
+        hw = get_hardware()
+        http_url = f"http://{settings.network.device_host}:{settings.network.device_port}"
+        if hasattr(hw, 'create_client'):
+            client = hw.create_client(http_url=http_url)
+        else:
+            # Fallback for hardware modules without create_client
+            from gently.app.queue_server_client import QueueServerClient
+            client = QueueServerClient(http_url=http_url)
         connected = await client.connect()
         if not connected:
             await client.disconnect()

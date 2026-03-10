@@ -9,6 +9,11 @@ from typing import Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
+# Re-export CalibrationPrior from its hardware-specific home for backward compat.
+# CalibrationPrior is diSPIM-specific (piezo-galvo linear fit). Other hardware
+# modules will define their own calibration models.
+from gently.hardware.dispim.calibration import CalibrationPrior
+
 
 @dataclass
 class FocusDataPoint:
@@ -17,212 +22,61 @@ class FocusDataPoint:
 
     Each time focus is measured (via fine_focus, calibration, or manual adjustment),
     a FocusDataPoint is recorded. Over a timelapse, these accumulate to reveal:
-    - The piezo-galvo relationship for each embryo
+    - The Z vs secondary-axis relationship for each sample
     - Focus drift over time (sample settling, temperature changes)
     - Quality trends (degrading R² might indicate sample issues)
 
-    This enables sample-aware microscopy where each embryo has its own
+    This enables sample-aware microscopy where each sample has its own
     learned focus profile that improves over time.
+
+    The axes are named generically:
+    - z: primary focus axis (µm) — piezo for diSPIM, Z-motor for 2P/confocal
+    - secondary_axis: optional second axis — galvo for diSPIM, unused (0.0) for single-axis systems
     """
-    galvo: float           # Galvo position (V or degrees)
-    piezo: float           # Optimal piezo position (µm)
+    z: float               # Primary focus position (µm)
+    secondary_axis: float  # Secondary axis position (galvo deg for diSPIM, 0.0 otherwise)
     score: float           # Focus quality score (algorithm-dependent)
     r_squared: float       # Gaussian fit quality (0-1), higher = more reliable
     timestamp: datetime    # When this measurement was made
     method: str            # 'calibration', 'fine_focus', 'manual'
     algorithm: str = 'fft_bandpass'  # Focus algorithm used
 
+    # Backward-compatible properties for code that uses the old field names
+    @property
+    def piezo(self) -> float:
+        return self.z
+
+    @property
+    def galvo(self) -> float:
+        return self.secondary_axis
+
     def to_dict(self) -> Dict:
         """Serialize for JSON storage"""
         return {
-            'galvo': self.galvo,
-            'piezo': self.piezo,
+            'z': self.z,
+            'secondary_axis': self.secondary_axis,
             'score': self.score,
             'r_squared': self.r_squared,
             'timestamp': self.timestamp.isoformat(),
             'method': self.method,
             'algorithm': self.algorithm,
+            # Backward-compatible keys for existing serialized data
+            'galvo': self.secondary_axis,
+            'piezo': self.z,
         }
 
     @classmethod
     def from_dict(cls, data: Dict) -> 'FocusDataPoint':
-        """Deserialize from JSON"""
+        """Deserialize from JSON. Handles both old (galvo/piezo) and new (z/secondary_axis) keys."""
         return cls(
-            galvo=data['galvo'],
-            piezo=data['piezo'],
+            z=data.get('z', data.get('piezo', 0.0)),
+            secondary_axis=data.get('secondary_axis', data.get('galvo', 0.0)),
             score=data['score'],
             r_squared=data['r_squared'],
             timestamp=datetime.fromisoformat(data['timestamp']),
             method=data['method'],
             algorithm=data.get('algorithm', 'fft_bandpass'),
         )
-
-
-@dataclass
-class CalibrationPrior:
-    """
-    Session-level calibration prior learned from previously calibrated embryos.
-
-    Enables informed initialization for subsequent embryos, reducing calibration
-    time by using cross-embryo learning. The prior is updated after each
-    successful calibration using an exponential moving average.
-    """
-    # Linear relationship: piezo = slope * galvo + offset
-    slope_um_per_deg: float = 100.0  # Default heuristic
-    offset_um: float = 0.0
-
-    # Confidence metrics
-    r_squared_mean: float = 0.0  # Average R-squared from contributing calibrations
-    num_calibrations: int = 0    # Number of embryos contributing to prior
-
-    # Observed ranges (for adaptive sweep window sizing)
-    slope_min: float = 90.0
-    slope_max: float = 110.0
-    offset_min: float = -20.0
-    offset_max: float = 20.0
-
-    # Edge detection statistics
-    typical_extent_deg: float = 0.3   # Average embryo Z extent in degrees
-    extent_std_deg: float = 0.1       # Variation in extent
-
-    # Timestamp for staleness checking
-    last_updated: Optional[datetime] = None
-
-    # Fast calibration: lock slope after first embryo bootstrap
-    session_slope_locked: bool = False
-    bootstrap_embryo_id: Optional[str] = None  # Which embryo established the slope
-
-    def lock_session_slope(self, slope: float, r_squared: float, embryo_id: str):
-        """
-        Lock the session slope after first embryo bootstrap calibration.
-
-        Once locked, subsequent embryos will use this slope and only
-        calibrate their individual offset.
-
-        Parameters
-        ----------
-        slope : float
-            Calibrated slope from bootstrap embryo (µm/deg)
-        r_squared : float
-            Fit quality from bootstrap calibration
-        embryo_id : str
-            ID of the embryo used for bootstrap
-        """
-        self.slope_um_per_deg = slope
-        self.r_squared_mean = r_squared
-        self.session_slope_locked = True
-        self.bootstrap_embryo_id = embryo_id
-        self.num_calibrations = 1
-        self.last_updated = datetime.now()
-
-    def is_ready_for_fast_calibration(self) -> bool:
-        """Check if session slope is locked and ready for fast per-embryo calibration."""
-        return self.session_slope_locked and self.r_squared_mean >= 0.75
-
-    def update_from_calibration(
-        self,
-        slope: float,
-        offset: float,
-        r_squared: float,
-        extent_deg: float,
-        alpha: float = 0.3
-    ):
-        """
-        Update prior with new calibration result using exponential moving average.
-
-        Parameters
-        ----------
-        slope : float
-            Calibrated slope (µm/deg)
-        offset : float
-            Calibrated offset (µm)
-        r_squared : float
-            Average R-squared from top/bottom calibration
-        extent_deg : float
-            Detected embryo Z extent in degrees
-        alpha : float
-            Weighting for new data (higher = faster adaptation)
-        """
-        if self.num_calibrations == 0:
-            # First calibration - use directly
-            self.slope_um_per_deg = slope
-            self.offset_um = offset
-            self.r_squared_mean = r_squared
-            self.typical_extent_deg = extent_deg
-        else:
-            # Exponential moving average
-            self.slope_um_per_deg = alpha * slope + (1 - alpha) * self.slope_um_per_deg
-            self.offset_um = alpha * offset + (1 - alpha) * self.offset_um
-            self.r_squared_mean = alpha * r_squared + (1 - alpha) * self.r_squared_mean
-            self.typical_extent_deg = alpha * extent_deg + (1 - alpha) * self.typical_extent_deg
-
-        # Update ranges (expand if needed)
-        self.slope_min = min(self.slope_min, slope - 5)
-        self.slope_max = max(self.slope_max, slope + 5)
-        self.offset_min = min(self.offset_min, offset - 5)
-        self.offset_max = max(self.offset_max, offset + 5)
-
-        self.num_calibrations += 1
-        self.last_updated = datetime.now()
-
-    def get_reduced_sweep_range(self, base_range_um: float = 5.0) -> float:
-        """
-        Get adaptive sweep range based on prior confidence.
-
-        Returns a reduced range for subsequent embryos when we have
-        high-confidence priors from previous calibrations.
-
-        Parameters
-        ----------
-        base_range_um : float
-            Full sweep range for first embryo (default 5µm - tight range)
-
-        Returns
-        -------
-        float
-            Reduced sweep range based on confidence
-        """
-        # 5µm is already a tight range - return as-is
-        return base_range_um
-
-    def to_dict(self) -> Dict:
-        """Serialize for JSON storage"""
-        return {
-            'slope_um_per_deg': self.slope_um_per_deg,
-            'offset_um': self.offset_um,
-            'r_squared_mean': self.r_squared_mean,
-            'num_calibrations': self.num_calibrations,
-            'slope_min': self.slope_min,
-            'slope_max': self.slope_max,
-            'offset_min': self.offset_min,
-            'offset_max': self.offset_max,
-            'typical_extent_deg': self.typical_extent_deg,
-            'extent_std_deg': self.extent_std_deg,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
-            'session_slope_locked': self.session_slope_locked,
-            'bootstrap_embryo_id': self.bootstrap_embryo_id,
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'CalibrationPrior':
-        """Deserialize from JSON"""
-        prior = cls(
-            slope_um_per_deg=data.get('slope_um_per_deg', 100.0),
-            offset_um=data.get('offset_um', 0.0),
-            r_squared_mean=data.get('r_squared_mean', 0.0),
-            num_calibrations=data.get('num_calibrations', 0),
-            slope_min=data.get('slope_min', 90.0),
-            slope_max=data.get('slope_max', 110.0),
-            offset_min=data.get('offset_min', -20.0),
-            offset_max=data.get('offset_max', 20.0),
-            typical_extent_deg=data.get('typical_extent_deg', 0.3),
-            extent_std_deg=data.get('extent_std_deg', 0.1),
-            session_slope_locked=data.get('session_slope_locked', False),
-            bootstrap_embryo_id=data.get('bootstrap_embryo_id'),
-        )
-        if data.get('last_updated'):
-            prior.last_updated = datetime.fromisoformat(data['last_updated'])
-        return prior
 
 
 @dataclass
@@ -312,21 +166,24 @@ class EmbryoState:
     focus_history: List[FocusDataPoint] = field(default_factory=list)
     # Each focus operation adds a datapoint, building a focus map for this embryo
 
-    def add_focus_datapoint(self, galvo: float, piezo: float, score: float,
-                            r_squared: float, method: str, algorithm: str = 'fft_bandpass'):
+    def add_focus_datapoint(self, z: float = None, secondary_axis: float = 0.0,
+                            score: float = 0.0, r_squared: float = 0.0,
+                            method: str = 'manual', algorithm: str = 'fft_bandpass',
+                            # Backward-compatible kwargs
+                            galvo: float = None, piezo: float = None):
         """
         Record a focus measurement for this embryo.
 
         Called by fine_focus, calibrate_embryo, or manual focus operations.
-        Over time, this builds a focus map showing the piezo-galvo relationship
-        and any drift that occurs during long timelapses.
+        Over time, this builds a focus map showing the Z vs secondary-axis
+        relationship and any drift that occurs during long timelapses.
 
         Parameters
         ----------
-        galvo : float
-            Galvo position where focus was measured
-        piezo : float
-            Optimal piezo position found
+        z : float
+            Primary focus axis position (µm). For diSPIM: piezo position.
+        secondary_axis : float
+            Secondary axis position. For diSPIM: galvo position. Default 0.0.
         score : float
             Focus quality score
         r_squared : float
@@ -335,10 +192,20 @@ class EmbryoState:
             How focus was determined: 'fine_focus', 'calibration', 'manual'
         algorithm : str
             Focus algorithm used: 'fft_bandpass', 'gradient', etc.
+        galvo : float, optional
+            Backward-compatible alias for secondary_axis
+        piezo : float, optional
+            Backward-compatible alias for z
         """
+        # Support old kwarg names
+        if z is None:
+            z = piezo if piezo is not None else 0.0
+        if galvo is not None:
+            secondary_axis = galvo
+
         self.focus_history.append(FocusDataPoint(
-            galvo=galvo,
-            piezo=piezo,
+            z=z,
+            secondary_axis=secondary_axis,
             score=score,
             r_squared=r_squared,
             timestamp=datetime.now(),
@@ -346,20 +213,23 @@ class EmbryoState:
             algorithm=algorithm,
         ))
 
-    def get_focus_at_galvo(self, galvo_position: float,
-                           max_age_hours: Optional[float] = None,
-                           min_r_squared: float = 0.5) -> Optional[float]:
+    def get_focus_at_secondary(self, secondary_position: float,
+                               max_age_hours: Optional[float] = None,
+                               min_r_squared: float = 0.5) -> Optional[float]:
         """
-        Get the best piezo position for a given galvo position.
+        Get the best Z position for a given secondary axis position.
 
         Uses accumulated focus data with optional time weighting.
-        If multiple measurements exist at similar galvo positions,
+        If multiple measurements exist at similar secondary positions,
         uses the most recent high-quality one.
+
+        For diSPIM: secondary=galvo, returns optimal piezo position.
+        For single-axis systems: call with secondary_position=0.0.
 
         Parameters
         ----------
-        galvo_position : float
-            Target galvo position
+        secondary_position : float
+            Target secondary axis position
         max_age_hours : float, optional
             Only consider measurements within this time window
         min_r_squared : float
@@ -368,7 +238,7 @@ class EmbryoState:
         Returns
         -------
         float or None
-            Optimal piezo position, or None if no suitable data
+            Optimal Z position, or None if no suitable data
         """
         if not self.focus_history:
             return None
@@ -387,13 +257,13 @@ class EmbryoState:
                 if age_hours > max_age_hours:
                     continue
 
-            # Weight by galvo proximity and recency
-            galvo_distance = abs(fp.galvo - galvo_position)
+            # Weight by secondary axis proximity and recency
+            axis_distance = abs(fp.secondary_axis - secondary_position)
             age_hours = (now - fp.timestamp).total_seconds() / 3600
 
             candidates.append({
-                'piezo': fp.piezo,
-                'galvo_distance': galvo_distance,
+                'z': fp.z,
+                'axis_distance': axis_distance,
                 'age_hours': age_hours,
                 'r_squared': fp.r_squared,
             })
@@ -401,24 +271,32 @@ class EmbryoState:
         if not candidates:
             return None
 
-        # If we have exact galvo matches, use the most recent
-        exact_matches = [c for c in candidates if c['galvo_distance'] < 0.01]
+        # If we have exact matches, use the most recent
+        exact_matches = [c for c in candidates if c['axis_distance'] < 0.01]
         if exact_matches:
             # Sort by recency, return most recent
             exact_matches.sort(key=lambda x: x['age_hours'])
-            return exact_matches[0]['piezo']
+            return exact_matches[0]['z']
 
         # Otherwise, interpolate from nearby measurements
-        # Sort by galvo distance
-        candidates.sort(key=lambda x: x['galvo_distance'])
-        return candidates[0]['piezo']  # Return closest galvo match
+        # Sort by axis distance
+        candidates.sort(key=lambda x: x['axis_distance'])
+        return candidates[0]['z']  # Return closest match
 
-    def get_piezo_galvo_fit(self, max_age_hours: Optional[float] = None,
-                            min_r_squared: float = 0.5) -> Optional[Tuple[float, float]]:
+    # Backward-compatible alias
+    def get_focus_at_galvo(self, galvo_position: float, **kwargs) -> Optional[float]:
+        """Backward-compatible alias for get_focus_at_secondary."""
+        return self.get_focus_at_secondary(galvo_position, **kwargs)
+
+    def get_z_axis_fit(self, max_age_hours: Optional[float] = None,
+                       min_r_squared: float = 0.5) -> Optional[Tuple[float, float]]:
         """
-        Fit a linear relationship between piezo and galvo from accumulated data.
+        Fit a linear relationship between Z and secondary axis from accumulated data.
 
-        Returns slope and intercept: piezo = slope * galvo + intercept
+        Returns slope and intercept: z = slope * secondary_axis + intercept
+
+        For diSPIM: this is the piezo-galvo relationship.
+        For single-axis systems: returns None (no secondary axis to fit against).
 
         Parameters
         ----------
@@ -436,8 +314,8 @@ class EmbryoState:
             return None
 
         now = datetime.now()
-        galvos = []
-        piezos = []
+        secondary = []
+        zs = []
 
         for fp in self.focus_history:
             if fp.r_squared < min_r_squared:
@@ -446,32 +324,40 @@ class EmbryoState:
                 age_hours = (now - fp.timestamp).total_seconds() / 3600
                 if age_hours > max_age_hours:
                     continue
-            galvos.append(fp.galvo)
-            piezos.append(fp.piezo)
+            secondary.append(fp.secondary_axis)
+            zs.append(fp.z)
 
-        if len(galvos) < 2:
+        if len(secondary) < 2:
             return None
 
-        # Linear fit: piezo = slope * galvo + intercept
-        galvos = np.array(galvos)
-        piezos = np.array(piezos)
+        # Linear fit: z = slope * secondary_axis + intercept
+        secondary = np.array(secondary)
+        zs = np.array(zs)
 
         # Use polyfit for linear regression
         try:
-            coeffs = np.polyfit(galvos, piezos, 1)
+            coeffs = np.polyfit(secondary, zs, 1)
             return (float(coeffs[0]), float(coeffs[1]))  # slope, intercept
         except Exception:
             return None
 
-    def get_focus_drift_rate(self, galvo_position: float = 0.0,
+    # Backward-compatible alias
+    def get_piezo_galvo_fit(self, **kwargs) -> Optional[Tuple[float, float]]:
+        """Backward-compatible alias for get_z_axis_fit."""
+        return self.get_z_axis_fit(**kwargs)
+
+    def get_focus_drift_rate(self, secondary_position: float = 0.0,
+                             galvo_position: float = None,
                              min_measurements: int = 3) -> Optional[float]:
         """
-        Calculate how fast focus is drifting (µm/hour) at a given galvo position.
+        Calculate how fast focus is drifting (µm/hour) at a given secondary axis position.
 
         Parameters
         ----------
-        galvo_position : float
-            Galvo position to analyze drift at
+        secondary_position : float
+            Secondary axis position to analyze drift at
+        galvo_position : float, optional
+            Backward-compatible alias for secondary_position
         min_measurements : int
             Minimum datapoints needed for drift calculation
 
@@ -480,9 +366,11 @@ class EmbryoState:
         float or None
             Drift rate in µm/hour, or None if insufficient data
         """
-        # Get measurements at similar galvo position
+        if galvo_position is not None:
+            secondary_position = galvo_position
+        # Get measurements at similar secondary axis position
         relevant = [fp for fp in self.focus_history
-                    if abs(fp.galvo - galvo_position) < 0.1 and fp.r_squared >= 0.5]
+                    if abs(fp.secondary_axis - secondary_position) < 0.1 and fp.r_squared >= 0.5]
 
         if len(relevant) < min_measurements:
             return None
@@ -490,27 +378,28 @@ class EmbryoState:
         # Sort by time
         relevant.sort(key=lambda x: x.timestamp)
 
-        # Calculate drift rate using linear regression on time vs piezo
+        # Calculate drift rate using linear regression on time vs Z
         times_hours = []
-        piezos = []
+        z_positions = []
         t0 = relevant[0].timestamp
 
         for fp in relevant:
             hours = (fp.timestamp - t0).total_seconds() / 3600
             times_hours.append(hours)
-            piezos.append(fp.piezo)
+            z_positions.append(fp.z)
 
         if times_hours[-1] - times_hours[0] < 0.1:  # Less than 6 minutes span
             return None
 
         try:
-            coeffs = np.polyfit(times_hours, piezos, 1)
+            coeffs = np.polyfit(times_hours, z_positions, 1)
             return float(coeffs[0])  # slope = µm/hour
         except Exception:
             return None
 
     def needs_refocus(self, max_age_minutes: float = 60,
-                      galvo_position: float = 0.0) -> bool:
+                      secondary_position: float = 0.0,
+                      galvo_position: float = None) -> bool:
         """
         Determine if this embryo needs focus re-measurement.
 
@@ -518,22 +407,27 @@ class EmbryoState:
         ----------
         max_age_minutes : float
             Focus data older than this is considered stale
-        galvo_position : float
-            Galvo position to check
+        secondary_position : float
+            Secondary axis position to check
+        galvo_position : float, optional
+            Backward-compatible alias for secondary_position
 
         Returns
         -------
         bool
             True if focus should be re-measured
         """
+        if galvo_position is not None:
+            secondary_position = galvo_position
+
         if not self.focus_history:
             return True
 
         now = datetime.now()
 
-        # Find most recent high-quality measurement at this galvo
+        # Find most recent high-quality measurement at this secondary position
         for fp in reversed(self.focus_history):
-            if abs(fp.galvo - galvo_position) < 0.1 and fp.r_squared >= 0.5:
+            if abs(fp.secondary_axis - secondary_position) < 0.1 and fp.r_squared >= 0.5:
                 age_minutes = (now - fp.timestamp).total_seconds() / 60
                 return age_minutes > max_age_minutes
 
@@ -551,21 +445,21 @@ class EmbryoState:
         # Time span
         span_hours = (last.timestamp - first.timestamp).total_seconds() / 3600
 
-        # Drift at galvo=0
-        drift = self.get_focus_drift_rate(galvo_position=0.0)
+        # Drift at secondary_axis=0
+        drift = self.get_focus_drift_rate(secondary_position=0.0)
 
         lines = [
             f"Focus history: {n_points} measurements over {span_hours:.1f} hours",
-            f"Latest: piezo={last.piezo:.2f}µm @ galvo={last.galvo:.2f} (R²={last.r_squared:.3f})",
+            f"Latest: z={last.z:.2f}µm @ secondary={last.secondary_axis:.2f} (R²={last.r_squared:.3f})",
         ]
 
         if drift is not None:
             lines.append(f"Drift rate: {drift:.3f} µm/hour")
 
-        fit = self.get_piezo_galvo_fit()
+        fit = self.get_z_axis_fit()
         if fit:
             slope, intercept = fit
-            lines.append(f"Piezo-galvo fit: piezo = {slope:.2f}*galvo + {intercept:.2f}")
+            lines.append(f"Z-axis fit: z = {slope:.2f}*secondary + {intercept:.2f}")
 
         return "\n".join(lines)
 
