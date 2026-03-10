@@ -219,6 +219,41 @@ pause/resume), subcampaign expansion, and keyboard navigation.
 
 ---
 
+## v0.10.0
+
+Distributed ML, data reasoning, and quality-of-life fixes.
+
+**Distributed ML Mesh**
+- Verse map for mesh-wide data coordination — nodes advertise what data
+  they have, so the mesh knows where to route ML jobs.
+- Data reasoning engine: coverage assessment, quality scoring, gap
+  planning. The agent can evaluate whether there's enough data to train
+  and what's missing.
+- ML engine: architecture registry, data loader, trainer, evaluation
+  pipeline. Supports federated averaging across mesh peers.
+- Bulk transfer protocol for moving volumes between nodes (chunked,
+  resumable, tracked).
+
+**Web UI Embryo Marking**
+- Replaced napari-based embryo marking with a browser-based UI served
+  from the viz server. No more native GUI dependency.
+
+**Launch Fixes**
+- Fixed TLS mismatch: viz server now uses the self-signed cert, so
+  `wss://` connections from the TUI work correctly. Eliminates the
+  "Invalid HTTP request" errors from uvicorn.
+- Default log level changed from INFO to WARNING — quiet terminal.
+- Added `-v`/`--verbose` (INFO) and `--debug` (DEBUG) CLI flags.
+- Uvicorn warnings suppressed when not in verbose mode.
+
+**Packaging**
+- Moved device, ML, and testing deps from optional to core requirements.
+- Added `requirements-cuda.txt` for GPU setups.
+
++8,500 lines, 68 files.
+
+---
+
 ## v0.9.2
 
 More dead code removal and a layer violation fix (P8).
