@@ -268,6 +268,10 @@ class MicroscopyCopilot:
         self.context_store = context_store
         self.conversation.context_store = context_store
         self.prompts.context_store = context_store
+        # Create agent memory harness
+        from .memory import AgentMemory
+        self.memory = AgentMemory(context_store, session_id=self.session_id)
+        self.prompts.memory = self.memory
 
     def enter_plan_mode(self) -> str:
         """Switch to plan mode (experimental design)."""

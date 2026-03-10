@@ -48,6 +48,12 @@ class CopilotBridge:
         """Store launch metadata to include in the connect message."""
         self._launch_info = info
 
+    def get_session_briefing(self) -> str:
+        """Generate briefing for new sessions. Returns '' if not applicable."""
+        if not hasattr(self.copilot, 'memory') or not self.copilot.memory:
+            return ""
+        return self.copilot.memory.get_session_briefing()
+
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""
         from gently.context.startup_wizard import StartupWizard

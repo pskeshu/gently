@@ -149,6 +149,7 @@ PLAN_MODE_GUIDELINES = """\
 def build_plan_prompt(
     context_summary: Optional[str] = None,
     active_plan_summary: Optional[str] = None,
+    memory_awareness: Optional[str] = None,
 ) -> str:
     """
     Build the system prompt for plan mode.
@@ -159,6 +160,8 @@ def build_plan_prompt(
         Summary of current session context (campaigns, learnings).
     active_plan_summary : str, optional
         Summary of any active experimental plan and its progress.
+    memory_awareness : str, optional
+        Lightweight summary of persistent memory for the agent.
 
     Returns
     -------
@@ -175,6 +178,8 @@ def build_plan_prompt(
     hardware_display = hardware.HARDWARE_DISPLAY_NAME
 
     # Build context sections
+    memory_section = f"\n{memory_awareness}\n" if memory_awareness else ""
+
     context_section = ""
     if context_summary:
         context_section = f"\n# Current Context\n\n{context_summary}\n"
@@ -195,4 +200,4 @@ You are designing experiments for {organism_display} {sample_plural} on a
 {hardware_description}
 
 {PLAN_MODE_GUIDELINES}
-{context_section}{plan_section}"""
+{memory_section}{context_section}{plan_section}"""

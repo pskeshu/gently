@@ -360,6 +360,19 @@ def create_router(server) -> APIRouter:
                         "wizard_complete": True,
                     })
 
+            # ── Auto-briefing for new sessions with existing context ──
+            wizard_ran = wizard is not None and wizard.needed
+            if not wizard_ran:
+                briefing = bridge.get_session_briefing()
+                if briefing:
+                    await send_fn({"type": "stream_start"})
+                    await send_fn({"type": "text", "text": briefing})
+                    await send_fn({
+                        "type": "stream_end",
+                        "tokens": {"input_tokens": 0, "output_tokens": 0,
+                                   "total_tokens": 0, "api_calls": 0},
+                    })
+
             # ── Main REPL loop ────────────────────────────────────
             while True:
                 try:

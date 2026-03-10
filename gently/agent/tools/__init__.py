@@ -20,6 +20,8 @@ from . import focus_tools
 from . import interaction_tools
 from . import detection_tools
 from . import plan_execution_tools
+from . import memory_tools
+from ..plan_mode.tools import lab_context as _lab_context  # query_lab_history in run mode
 
 # Import tool registry utilities
 from ..tool_registry import get_tool_registry, ToolCategory

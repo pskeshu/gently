@@ -36,8 +36,14 @@ class PromptManager:
         self._context_summary_time: Optional[datetime] = None
         self._context_summary_ttl: int = 300  # 5 minutes
 
+        # Memory awareness caching
+        self._memory_awareness_cache: Optional[str] = None
+        self._memory_awareness_time: Optional[datetime] = None
+        self._memory_awareness_ttl: int = 600  # 10 minutes
+
         # Set by copilot after construction
         self.context_store = None
+        self.memory = None  # AgentMemory instance
 
     def update_system_prompt(self, experiment, client, mode: str,
                              context_summary: str = None) -> str:
@@ -60,11 +66,14 @@ class PromptManager:
         str
             The built system prompt
         """
+        memory_awareness = self.get_cached_memory_awareness()
+
         if mode == "plan":
             active_plan = self.get_active_plan_summary()
             return build_plan_prompt(
                 context_summary=context_summary,
                 active_plan_summary=active_plan,
+                memory_awareness=memory_awareness,
             )
 
         # Execution mode
@@ -77,7 +86,8 @@ class PromptManager:
             connection_status = None
 
         return build_system_prompt(
-            experiment, connection_status, context_summary
+            experiment, connection_status, context_summary,
+            memory_awareness=memory_awareness,
         )
 
     def get_tools_for_mode(self, mode: str, has_microscope: bool) -> list:
@@ -116,6 +126,18 @@ class PromptManager:
             return [t for t in all_tools if t["name"] in plan_tool_names]
         else:
             return registry.get_claude_schemas(has_microscope=has_microscope)
+
+    def get_cached_memory_awareness(self) -> str:
+        """Get memory awareness summary with caching (10-minute TTL)."""
+        if not self.memory:
+            return ""
+        now = datetime.now()
+        if (self._memory_awareness_cache is None or
+            self._memory_awareness_time is None or
+            (now - self._memory_awareness_time).total_seconds() > self._memory_awareness_ttl):
+            self._memory_awareness_cache = self.memory.get_awareness_summary()
+            self._memory_awareness_time = now
+        return self._memory_awareness_cache
 
     def get_active_plan_summary(self) -> Optional[str]:
         """Get a summary of the active experimental plan, if any."""
@@ -304,9 +326,11 @@ Write a brief status summary. Examples:
         return self._context_summary_cache
 
     def invalidate_context_cache(self):
-        """Invalidate the context summary cache to force regeneration."""
+        """Invalidate the context summary and memory awareness caches."""
         self._context_summary_cache = None
         self._context_summary_time = None
+        self._memory_awareness_cache = None
+        self._memory_awareness_time = None
 
     def get_cached_system_prompt(self, system_prompt: str) -> list:
         """Get system prompt formatted for Anthropic prompt caching.

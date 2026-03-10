@@ -210,7 +210,8 @@ The copilot includes a powerful adaptive timelapse system that runs in the backg
 def build_system_prompt(
     experiment_state: ExperimentState,
     connection_status: dict = None,
-    context_summary: str = None
+    context_summary: str = None,
+    memory_awareness: str = None,
 ) -> str:
     """
     Build complete system prompt for Claude
@@ -259,6 +260,9 @@ the microscope is not connected and suggest they start the server or check the c
 
 You cannot perform hardware operations. Inform users if they request hardware actions."""
 
+    # Build memory section (persistent knowledge from previous sessions)
+    memory_section = f"\n{memory_awareness}\n" if memory_awareness else ""
+
     # Build context section (session awareness from AI summary)
     if context_summary:
         context_section = f"""
@@ -295,7 +299,7 @@ Your role is to:
 5. Adapt acquisition parameters dynamically based on what you observe
 
 {connection_section}
-
+{memory_section}
 {biology_knowledge}
 
 {hardware_description}
