@@ -38,8 +38,8 @@ if 'pymmcore' not in sys.modules:
     sys.modules['pymmcore'] = MockPyMMCore()
 
 # Import after mocking
-from gently.devices import DiSPIMCamera, DiSPIMZstage
-from gently.plans import recursive_focus_single_round
+from gently.hardware.dispim.devices import DiSPIMCamera, DiSPIMZstage
+from gently.hardware.dispim.plans.acquisition import recursive_focus_single_round
 from bluesky import RunEngine
 import bluesky.plan_stubs as bps
 

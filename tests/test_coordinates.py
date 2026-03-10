@@ -14,7 +14,7 @@ Tests cover:
 
 import pytest
 
-from gently.coordinates import (
+from gently.core.coordinates import (
     get_um_per_pixel,
     pixel_to_stage_position,
     stage_to_pixel_position,

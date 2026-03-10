@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gently - Microscopy Visualization</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="header">
+        <div class="header-left">
+            <h1>Gently Microscopy</h1>
+            <div class="session-id-container">
+                <a href="/review" class="session-id-link" id="session-id-link" title="View in Session Review"></a>
+                <button class="session-copy-btn" id="session-copy-btn" onclick="copySessionId()" title="Copy session ID">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="header-right">
+            <!-- Campaigns link -->
+            <a href="/campaigns" class="header-nav-link" title="View experimental plans">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2"/>
+                    <rect x="9" y="3" width="6" height="4" rx="1"/>
+                </svg>
+                Plans
+            </a>
+            <!-- Detection alert -->
+            <div class="header-alert hidden" id="header-alert" onclick="ExperimentStrip.handleAlertClick()">
+                <span class="alert-badge" id="header-alert-badge">!</span>
+                <span class="alert-text" id="header-alert-text">New detection</span>
+            </div>
+            <!-- Presence indicators -->
+            <div class="presence-container" id="presence-container">
+                <!-- Avatars rendered by PresenceManager -->
+            </div>
+            <!-- Theme toggle -->
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme" data-tooltip="Toggle dark/light theme">
+                <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line>
+                    <line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line>
+                    <line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+            <!-- Connection status -->
+            <div class="status-item">
+                <span id="status-text">Connecting...</span>
+                <div class="status-dot" id="status-dot"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="tabs">
+        <div class="tab active" data-tab="embryos">
+            Embryos
+            <span class="tab-badge" id="embryos-count">0</span>
+        </div>
+        <div class="tab" data-tab="main">
+            Live View
+        </div>
+        <div class="tab" data-tab="calibration">
+            Calibration
+            <span class="tab-badge" id="calibration-count">0</span>
+        </div>
+        <div class="tab" data-tab="events">
+            System
+            <span class="tab-badge" id="events-count">0</span>
+        </div>
+    </div>
+
+    <!-- Main Tab (Live View) -->
+    <div id="main-content" class="tab-content">
+        <div class="live-view">
+            <!-- Main viewer area -->
+            <div class="live-viewer">
+                <div class="viewer-header">
+                    <div class="viewer-info" id="viewer-info" style="display: none;">
+                        <span class="info-embryo" id="info-embryo"></span>
+                        <span class="info-separator">·</span>
+                        <span class="info-type" id="info-type"></span>
+                        <span class="info-separator">·</span>
+                        <span class="info-uid" id="info-uid"></span>
+                    </div>
+                    <span class="info-time" id="image-time"></span>
+                </div>
+                <div class="viewer-with-slider">
+                    <div class="image-container" id="main-image-container">
+                        <img id="main-image" style="display: none;">
+                        <div class="placeholder" id="placeholder">Waiting for images...</div>
+                        <div class="zoom-controls" id="zoom-controls">
+                            <button class="zoom-btn" id="zoom-in" title="Zoom In (+)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                            </button>
+                            <button class="zoom-btn" id="zoom-reset" title="Reset Zoom (Dbl-click)">1:1</button>
+                            <button class="zoom-btn" id="zoom-out" title="Zoom Out (-)">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="main-zoom-indicator" id="main-zoom-indicator">100%</div>
+                    </div>
+                    <div class="z-slider-container" id="z-slider-container">
+                        <div class="z-slider-label">Z</div>
+                        <div class="z-slider-value" id="z-slider-value">0</div>
+                        <input type="range" class="z-slider" id="z-slider" min="0" max="0" value="0" orient="vertical">
+                        <div class="z-slider-info" id="z-slider-info">0 / 0</div>
+                    </div>
+                </div>
+            </div>
+            <!-- Bottom strip: Recent images -->
+            <div class="recent-strip" id="recent-strip">
+                <div class="recent-strip-inner" id="recent-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Calibration Tab -->
+    <div id="calibration-content" class="tab-content">
+        <div class="calibration-container">
+            <!-- Left sidebar: Embryo list -->
+            <div class="calibration-sidebar" id="calibration-sidebar">
+                <div class="calibration-sidebar-header">Embryos</div>
+                <div class="calibration-embryo-cards" id="calibration-embryo-cards">
+                    <div class="empty-state-small">No calibration images yet</div>
+                </div>
+            </div>
+            <!-- Right panel: Images for selected embryo -->
+            <div class="calibration-panel" id="calibration-panel">
+                <div class="calibration-empty">
+                    <div class="calibration-empty-icon">&#x1F4F7;</div>
+                    <div class="calibration-empty-text">Select an embryo to view calibration images</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Events Tab -->
+    <div id="events-content" class="tab-content">
+        <div class="events-container">
+            <div class="events-toolbar">
+                <div class="search-container">
+                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" class="event-search" id="event-search" placeholder="Search events..." autocomplete="off">
+                    <button class="search-clear" id="search-clear" aria-label="Clear search">&times;</button>
+                </div>
+                <select class="event-filter" id="event-type-filter">
+                    <option value="">All Events</option>
+                    <optgroup label="Perception">
+                        <option value="DETECTOR_EVALUATED">DETECTOR_EVALUATED</option>
+                        <option value="HATCHING_DETECTED">HATCHING_DETECTED</option>
+                    </optgroup>
+                    <optgroup label="Acquisition">
+                        <option value="VOLUME_ACQUIRED">VOLUME_ACQUIRED</option>
+                        <option value="ACQUISITION_STARTED">ACQUISITION_STARTED</option>
+                        <option value="ACQUISITION_COMPLETED">ACQUISITION_COMPLETED</option>
+                        <option value="ACQUISITION_STOPPED">ACQUISITION_STOPPED</option>
+                        <option value="ACQUISITION_FAILED">ACQUISITION_FAILED</option>
+                    </optgroup>
+                    <optgroup label="Session">
+                        <option value="SESSION_STARTED">SESSION_STARTED</option>
+                        <option value="SESSION_RESTORED">SESSION_RESTORED</option>
+                        <option value="SESSION_SAVED">SESSION_SAVED</option>
+                    </optgroup>
+                </select>
+                <select class="event-filter" id="event-source-filter">
+                    <option value="">All Sources</option>
+                </select>
+                <button class="event-btn" id="clear-events-btn">Clear</button>
+                <span class="events-stats" id="events-stats">0 events</span>
+            </div>
+            <div class="events-table-container">
+                <table class="events-table">
+                    <thead>
+                        <tr>
+                            <th class="col-time">Time</th>
+                            <th class="col-type">Event Type</th>
+                            <th class="col-source">Source</th>
+                            <th class="col-data">Data</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-tbody">
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Embryos Tab (default landing page) -->
+    <div id="embryos-content" class="tab-content active">
+        <!-- Subtab bar -->
+        <div class="embryos-subtab-bar">
+            <div class="embryos-subtab active" data-subtab="monitoring" onclick="MarkingManager.switchSubtab('monitoring')">Monitoring</div>
+            <div class="embryos-subtab" data-subtab="marking" onclick="MarkingManager.switchSubtab('marking')">
+                Marking
+                <span class="tab-badge marking-badge" id="marking-count" style="display:none">0</span>
+            </div>
+        </div>
+
+        <!-- Monitoring subtab (existing content) -->
+        <div id="embryos-monitoring">
+        <div class="embryos-container">
+            <div class="embryos-header-panel" id="embryos-header-panel">
+                <div class="embryos-header-bar" onclick="EmbryosManager.toggleHeaderPanel()">
+                    <div class="header-left">
+                        <h2 class="embryos-title">Embryo Monitoring</h2>
+                        <div class="timelapse-status" id="timelapse-status">
+                            <span class="status-indicator" id="timelapse-indicator"></span>
+                            <span class="status-text" id="timelapse-status-text">No active timelapse</span>
+                        </div>
+                    </div>
+                    <div class="header-stats" id="header-stats">
+                        <!-- Stats rendered dynamically -->
+                    </div>
+                    <span class="header-toggle">&#x25BC;</span>
+                </div>
+                <div class="header-dropdown" id="header-dropdown">
+                    <div class="narrative-content" id="narrative-content">
+                        <div class="narrative-loading" id="narrative-loading" style="display: none;">
+                            <div class="spinner"></div>
+                            <span>Generating summary...</span>
+                        </div>
+                        <div id="narrative-body">
+                            <div class="narrative-section">
+                                <p class="narrative-text" id="narrative-status-text">No active experiment. Start a timelapse to see AI-generated summaries here.</p>
+                            </div>
+                        </div>
+                        <div class="narrative-actions">
+                            <button class="narrative-action-btn" onclick="NarrativeManager.refresh()">Refresh Summary</button>
+                            <button class="narrative-action-btn" onclick="NarrativeManager.showSinceLastCheck()">Since Last Check</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="embryos-body">
+                <!-- Left sidebar: Embryo list (~25%) -->
+                <div class="embryo-list" id="embryo-list">
+                    <div class="embryo-list-header">Embryos</div>
+                    <div class="embryo-cards" id="embryo-cards">
+                        <div class="empty-state" id="embryos-empty">No active timelapse</div>
+                    </div>
+                </div>
+
+                <!-- Right panel: VLM analysis detail (~75%) -->
+                <div class="reasoning-panel" id="reasoning-panel">
+                    <div class="reasoning-empty">
+                        <div class="reasoning-empty-icon">&#x1F50D;</div>
+                        <div class="reasoning-empty-text">Select an embryo to view analysis history</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </div>
+
+        <!-- Marking subtab -->
+        <div id="embryos-marking" style="display:none">
+            <div class="marking-container">
+                <!-- Placeholder when no marking session is active -->
+                <div class="marking-placeholder" id="marking-placeholder">
+                    <div class="marking-placeholder-icon">&#x1F4CD;</div>
+                    <div class="marking-placeholder-text">No marking session active</div>
+                    <div class="marking-placeholder-hint">Start a multi-embryo calibration from the copilot to begin marking embryo positions.</div>
+                </div>
+
+                <!-- Active marking UI -->
+                <div class="marking-active" id="marking-active" style="display:none">
+                    <div class="marking-viewer">
+                        <div class="marking-toolbar">
+                            <span class="marking-instructions" id="marking-instructions">Click on each embryo center.</span>
+                            <div class="marking-actions">
+                                <button class="marking-action-btn" onclick="MarkingManager.clearAll()">Clear All</button>
+                                <button class="marking-action-btn marking-done-btn" onclick="MarkingManager.done()">Done</button>
+                            </div>
+                        </div>
+                        <div class="marking-image-container" id="marking-image-container">
+                            <img id="marking-image" src="" alt="Bottom camera overview" style="display:none">
+                            <canvas id="marking-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div class="marking-sidebar">
+                        <div class="marking-sidebar-header">Marked Embryos</div>
+                        <div class="marking-list" id="marking-list">
+                            <div class="marking-list-empty">No embryos marked yet</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Lightbox Modal -->
+    <div id="lightbox-overlay" class="lightbox-overlay">
+        <div class="lightbox-container">
+            <div class="lightbox-header">
+                <span class="lightbox-title" id="lightbox-title">Image</span>
+                <button class="lightbox-close" id="lightbox-close" aria-label="Close lightbox">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                </button>
+            </div>
+            <div class="lightbox-main">
+                <button class="lightbox-nav" id="lightbox-prev" aria-label="Previous image" data-tooltip="Previous (←)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15,18 9,12 15,6"></polyline>
+                    </svg>
+                </button>
+                <div class="lightbox-image-wrapper" id="lightbox-image-wrapper">
+                    <img id="lightbox-image" src="" alt="Lightbox image">
+                    <div class="lightbox-zoom-indicator" id="lightbox-zoom-indicator">100%</div>
+                    <span class="lightbox-position" id="lightbox-position">1 of 1</span>
+                </div>
+                <button class="lightbox-nav" id="lightbox-next" aria-label="Next image" data-tooltip="Next (→)">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="9,18 15,12 9,6"></polyline>
+                    </svg>
+                </button>
+            </div>
+            <div class="lightbox-info-panel" id="lightbox-info-panel">
+                <div class="lightbox-metadata">
+                    <span class="lb-info-item"><span class="info-label">Type</span> <span id="lb-info-type">-</span></span>
+                    <span class="lb-info-item"><span class="info-label">Embryo</span> <span id="lb-info-embryo" class="accent">-</span></span>
+                    <span class="lb-info-item"><span class="info-label">Shape</span> <span id="lb-info-shape">-</span></span>
+                    <span class="lb-info-item"><span class="info-label">Time</span> <span id="lb-info-time">-</span></span>
+                </div>
+            </div>
+            <div class="lightbox-thumbnail-strip" id="lightbox-thumbnails">
+                <!-- Thumbnails rendered dynamically -->
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/event-bus.js"></script>
+    <script src="/static/js/websocket.js"></script>
+    <script src="/static/js/zoom-pan.js"></script>
+    <script src="/static/js/lightbox.js"></script>
+    <script src="/static/js/timepoint-player.js"></script>
+    <script src="/static/js/viewer.js"></script>
+    <script src="/static/js/gallery.js"></script>
+    <script src="/static/js/events.js"></script>
+    <script src="/static/js/embryos.js"></script>
+    <script src="/static/js/projection-viewer.js"></script>
+    <script src="/static/js/experiment-strip.js"></script>
+    <script src="/static/js/narrative.js"></script>
+    <script src="/static/js/marking.js"></script>
+    <!-- Three.js for 3D volume viewer -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

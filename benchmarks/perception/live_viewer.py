@@ -815,9 +815,9 @@ class LiveBenchmarkRunner:
     async def run(self):
         """Run the benchmark with live updates."""
         import anthropic
-        from gently.agent.perception.engine import PerceptionEngine
-        from gently.agent.perception.session import PerceptionSession
-        from gently.agent.perception.stages import DevelopmentalStage
+        from gently.harness.perception.engine import PerceptionEngine
+        from gently.harness.perception.session import PerceptionSession
+        from gently.harness.perception.stages import DevelopmentalStage
 
         # Update status
         benchmark_state["status"] = "running"
@@ -953,7 +953,7 @@ class LiveBenchmarkRunner:
 
     async def _run_perception_with_streaming(self, engine, session, test_case):
         """Run perception and stream trace steps."""
-        from gently.agent.perception.session import ReasoningStep
+        from gently.harness.perception.session import ReasoningStep
 
         # We need to hook into the reasoning trace
         # For now, run perception and stream the trace after

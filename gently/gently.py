@@ -51,8 +51,8 @@ from .core import (
 )
 from .log_config import configure_logging
 from .settings import settings
-from .store import GentlyStore
-from .agent.tool_registry import ToolRegistry, get_tool_registry
+from .core.store import GentlyStore
+from .harness.tools.registry import ToolRegistry, get_tool_registry
 from .analysis import (
     Pipeline,
     PipelineBuilder,
@@ -527,7 +527,7 @@ class Gently:
             The copilot instance
         """
         if self._copilot is None:
-            from .agent.copilot import MicroscopyCopilot
+            from .app.agent import MicroscopyCopilot
             self._copilot = MicroscopyCopilot(
                 storage_path=self.storage_path,
                 store=self._store,
@@ -554,7 +554,7 @@ class Gently:
             Running server instance
         """
         if self._viz_server is None:
-            from .visualization.server import VisualizationServer
+            from .ui.web.server import VisualizationServer
             self._viz_server = VisualizationServer(
                 port=port,
                 data_store=self._data_store,

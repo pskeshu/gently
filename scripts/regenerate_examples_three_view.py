@@ -19,7 +19,7 @@ from PIL import Image
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from gently.imaging import (
+from gently.core.imaging import (
     projection_three_view,
     compute_crop_bounds,
     apply_crop_bounds,

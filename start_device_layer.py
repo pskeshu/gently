@@ -78,7 +78,7 @@ The server provides:
     print()
 
     # Import and run server
-    from gently.device_layer import DeviceLayerServer
+    from gently.hardware.dispim.device_layer import DeviceLayerServer
 
     async def run_server():
         server = DeviceLayerServer(

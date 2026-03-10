@@ -46,7 +46,7 @@ from gently import (
 )
 
 # Import visualization utilities
-from gently.visualization import (
+from gently.ui.web import (
     EmbryoMarker,
     mark_embryos_napari,
     generate_focus_curve_plot,

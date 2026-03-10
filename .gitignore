@@ -97,6 +97,9 @@ spim_*.png
 *_analysis.png
 bottom_camera_*.png
 
+# HuggingFace benchmark data (large volumes)
+benchmarks/data/hf-benchmark/
+
 # Output directories (experiment data, calibration artifacts)
 experiment_data/
 dispim_data/
@@ -140,3 +143,5 @@ electron/
 # Root-level one-off documents
 /stage_definitions_for_review.pdf
 /stage_definitions_for_review.txt
+gently/ui/tui/node_modules/
+gently/ui/tui/dist/

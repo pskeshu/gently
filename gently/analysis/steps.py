@@ -374,7 +374,7 @@ class VLMStep(AnalysisStep):
 
     def _encode_image(self, image: np.ndarray) -> str:
         """Encode image to base64 JPEG."""
-        from gently.imaging import normalize_to_uint8, image_to_base64
+        from gently.core.imaging import normalize_to_uint8, image_to_base64
         img = normalize_to_uint8(image, method="minmax")
         return image_to_base64(img, format="JPEG", quality=85)
 

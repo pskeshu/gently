@@ -219,6 +219,42 @@ pause/resume), subcampaign expansion, and keyboard navigation.
 
 ---
 
+## v0.11.0
+
+Library restructure — separated the agentic harness from the application.
+
+**Four-Layer Architecture**
+Gently is now organized into four layers with strict downward-only dependencies:
+1. **Foundation** (`gently/core/`) — event bus, data stores, imaging, coordinates
+2. **Harness** (`gently/harness/`) — reusable agent framework (tools, conversation,
+   perception, memory, prompts, detection, session management)
+3. **Domain Plugins** (`gently/organisms/`, `gently/hardware/`) — swappable organism
+   and hardware knowledge
+4. **Application** (`gently/app/`) — the microscopy agent product, domain tools,
+   orchestration
+
+**Key Moves**
+- `gently/agent/` split: framework → `harness/`, app code → `app/`
+- `gently/context/` → `harness/memory/` (agent's persistent mind lives with the harness)
+- Root-level diSPIM files (`config.py`, `device_layer.py`, `plans.py`, `devices/`,
+  etc.) → `hardware/dispim/` (they're plugin code, not framework)
+- `gently/visualization/` → `gently/ui/web/`
+- `gently/imaging.py`, `coordinates.py`, `store.py` → `gently/core/`
+
+**Plugin Contracts**
+- Added `harness/protocols.py` with `OrganismProtocol` and `HardwareProtocol`
+  defining what plugins must export.
+- Removed hardcoded `from gently.organisms.celegans...` imports from harness layer.
+  All organism/hardware access now goes through `get_organism()`/`get_hardware()`.
+
+**Naming**
+- `copilot` → `agent` throughout (class names, files, routes)
+- Backward-compat shims at old locations (`gently.agent`, `gently.context`)
+
+317 tests pass.
+
+---
+
 ## v0.10.0
 
 Distributed ML, data reasoning, and quality-of-life fixes.

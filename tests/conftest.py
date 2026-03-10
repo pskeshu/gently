@@ -19,7 +19,7 @@ def config_dir(tmp_path):
 @pytest.fixture
 def store(tmp_path):
     """Fresh GentlyStore for tests."""
-    from gently.store import GentlyStore
+    from gently.core.store import GentlyStore
     s = GentlyStore(tmp_path / "gently_test")
     yield s
     s.close()
@@ -28,7 +28,7 @@ def store(tmp_path):
 @pytest.fixture
 def context_store(tmp_path):
     """Fresh ContextStore for tests."""
-    from gently.context.store import ContextStore
+    from gently.harness.memory.store import ContextStore
     cs = ContextStore(tmp_path / "context_test.db")
     yield cs
     cs.close()

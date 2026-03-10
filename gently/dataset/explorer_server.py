@@ -29,7 +29,7 @@ from pydantic import BaseModel
 
 from .schema import get_connection, get_database_stats, DEFAULT_DB_PATH
 from .embryo_dataset import EmbryoDataset
-from gently.imaging import (
+from gently.core.imaging import (
     normalize_to_uint8,
     image_to_base64 as _image_to_base64,
     load_volume,

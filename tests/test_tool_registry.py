@@ -17,7 +17,7 @@ import asyncio
 
 import pytest
 
-from gently.agent.tool_registry import (
+from gently.harness.tools.registry import (
     ToolRegistry,
     ToolCategory,
     ToolParameter,

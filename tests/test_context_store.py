@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from gently.context.model import (
+from gently.harness.memory.model import (
     Confidence,
     Learning,
     Observation,
@@ -299,7 +299,7 @@ class TestReset:
 
 class TestContextManager:
     def test_context_manager(self, tmp_path):
-        from gently.context.store import ContextStore
+        from gently.harness.memory.store import ContextStore
         with ContextStore(tmp_path / "ctx.db") as cs:
             cs.create_campaign(description="Test")
             assert len(cs.get_active_campaigns()) == 1

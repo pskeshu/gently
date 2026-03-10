@@ -93,7 +93,7 @@ class PredictionResult:
     @property
     def is_adjacent_correct(self) -> bool:
         """Check if prediction is within 1 stage of ground truth."""
-        from gently.agent.perception.stages import DevelopmentalStage
+        from gently.harness.perception.stages import DevelopmentalStage
 
         if self.ground_truth_stage is None:
             return False
@@ -237,8 +237,8 @@ class PerceptionBenchmark:
 
         # Lazy import to avoid circular dependencies
         import anthropic
-        from gently.agent.perception.engine import PerceptionEngine
-        from gently.agent.perception.example_store import ExampleStore
+        from gently.harness.perception.engine import PerceptionEngine
+        from gently.harness.perception.example_store import ExampleStore
 
         client = anthropic.Anthropic()
 
@@ -273,7 +273,7 @@ class PerceptionBenchmark:
         EmbryoResult
             Results for this embryo
         """
-        from gently.agent.perception.session import PerceptionSession
+        from gently.harness.perception.session import PerceptionSession
 
         start_time = datetime.now()
         result = EmbryoResult(embryo_id=embryo_id)

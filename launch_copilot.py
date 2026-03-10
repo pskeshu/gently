@@ -32,7 +32,7 @@ from gently.agent import MicroscopyCopilot, QueueServerClient
 from gently.organisms import load_organism
 from gently.hardware import load_hardware
 from gently.settings import settings
-from gently.store import GentlyStore
+from gently.core.store import GentlyStore
 
 
 def _format_elapsed(last_active: str) -> str:
@@ -331,7 +331,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # ── End mesh ────────────────────────────────────────────────────
 
     # Attach the copilot bridge to the viz server
-    from gently.agent.copilot_bridge import CopilotBridge
+    from gently.harness.bridge import CopilotBridge
     bridge = CopilotBridge(copilot)
 
     bridge.set_launch_info({
@@ -346,7 +346,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     })
 
     # Initialize startup wizard (gap-driven onboarding)
-    from gently.context import ContextStore as CtxStore
+    from gently.harness.memory import ContextStore as CtxStore
     context_db = storage_dir / "context" / "agent_mind.db"
     context_store = CtxStore(context_db)
     copilot.set_context_store(context_store)

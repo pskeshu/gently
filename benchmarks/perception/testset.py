@@ -52,7 +52,12 @@ def _discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dic
     if not session_dir.exists():
         return {}
 
-    tif_files = list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
+    tif_files = (
+        list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
+        + list(session_dir.glob("**/*.tif")) + list(session_dir.glob("**/*.tiff"))
+    )
+    # Deduplicate (flat + recursive may overlap)
+    tif_files = list({f.resolve(): f for f in tif_files}.values())
     embryo_volumes = {}
 
     for f in tif_files:
@@ -124,7 +129,7 @@ def _create_three_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
     """
     _ensure_dependencies()
 
-    from gently.imaging import (
+    from gently.core.imaging import (
         projection_three_view,
         compute_crop_bounds,
         apply_crop_bounds,

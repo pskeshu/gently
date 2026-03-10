@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 import tifffile
 
-from gently.store import GentlyStore
+from gently.core.store import GentlyStore
 
 
 @pytest.fixture
@@ -697,7 +697,7 @@ class TestResolveFileRefs:
     def test_resolve_file_ref_dict(self, tmp_path):
         """A file ref dict should be resolved to numpy array."""
         try:
-            from gently.agent.queue_server_client import QueueServerClient
+            from gently.app.queue_server_client import QueueServerClient
         except ImportError:
             pytest.skip("QueueServerClient not importable")
 
@@ -722,7 +722,7 @@ class TestResolveFileRefs:
     def test_resolve_file_refs_nested(self, tmp_path):
         """_resolve_file_refs should walk nested dicts and replace file refs."""
         try:
-            from gently.agent.queue_server_client import QueueServerClient
+            from gently.app.queue_server_client import QueueServerClient
         except ImportError:
             pytest.skip("QueueServerClient not importable")
 
@@ -756,7 +756,7 @@ class TestResolveFileRefs:
     def test_is_file_ref(self):
         """Test file ref detection."""
         try:
-            from gently.agent.queue_server_client import QueueServerClient
+            from gently.app.queue_server_client import QueueServerClient
         except ImportError:
             pytest.skip("QueueServerClient not importable")
 
