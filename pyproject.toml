@@ -53,7 +53,7 @@ sam = [
 ]
 
 [project.scripts]
-gently = "launch_copilot:cli_main"
+gently = "launch_gently:cli_main"
 
 [tool.setuptools.packages.find]
 include = ["gently*"]

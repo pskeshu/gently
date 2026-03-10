@@ -93,19 +93,19 @@ cd ../..
 python start_device_layer.py
 
 # 2. Launch the agent
-python launch_copilot.py
+python launch_gently.py
 
 # Or launch without hardware (for development / review)
-python launch_copilot.py --offline
+python launch_gently.py --offline
 
 # Resume a previous session
-python launch_copilot.py --resume            # interactive picker
-python launch_copilot.py --resume latest     # most recent session
-python launch_copilot.py --resume <id>       # specific session
+python launch_gently.py --resume            # interactive picker
+python launch_gently.py --resume latest     # most recent session
+python launch_gently.py --resume <id>       # specific session
 
 # Verbose / debug logging
-python launch_copilot.py -v                  # INFO level
-python launch_copilot.py --debug             # DEBUG level
+python launch_gently.py -v                  # INFO level
+python launch_gently.py --debug             # DEBUG level
 ```
 
 ## Architecture
