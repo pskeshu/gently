@@ -225,60 +225,20 @@ class AgentMemory:
         return "\n".join(lines) if len(lines) > 1 else ""
 
     def _briefing_broad(self) -> str:
-        """Broad briefing when no campaign is linked."""
+        """Broad briefing when no campaign is linked — kept minimal."""
         root_campaigns = self.store.get_root_campaigns()
-        learnings = self.store.get_learnings(limit=10)
-        focus = self.store.get_state("current_focus")
-        questions = self.store.get_open_questions()
+        learnings = self.store.get_learnings(limit=100)
 
         if not root_campaigns and not learnings:
             return ""
 
-        lines = ["## Session Briefing"]
-
-        if focus:
-            lines.append(f"**Current focus**: {focus}")
-
+        parts = []
         if root_campaigns:
-            lines.append("\n**Active campaigns**:")
-            for c in root_campaigns[:5]:
-                name = _friendly_name(c)
-                progress = f" — {c.progress}" if c.progress else ""
-                # Show phases inline
-                phases_str = ""
-                try:
-                    phases = self.store.get_subcampaigns(c.id)
-                    if phases:
-                        phase_names = [_short_name(p) for p in phases]
-                        phases_str = f"\n    Phases: {', '.join(phase_names)}"
-                except Exception:
-                    pass
-                try:
-                    status = self.store.get_plan_status(c.id)
-                    if status["total"] > 0:
-                        lines.append(
-                            f"  - {name}{progress} "
-                            f"({status['completed']}/{status['total']} items)"
-                        )
-                    else:
-                        lines.append(f"  - {name}{progress}")
-                except Exception:
-                    lines.append(f"  - {name}{progress}")
-                if phases_str:
-                    lines.append(phases_str)
-
+            parts.append(f"{len(root_campaigns)} campaigns")
         if learnings:
-            lines.append("\n**Recent learnings**:")
-            for l in learnings[:5]:
-                conf = l.confidence.value if l.confidence else "?"
-                lines.append(f"  - [{conf}] {l.content[:150]}")
+            parts.append(f"{len(learnings)} learnings")
 
-        if questions:
-            lines.append("\n**Open questions**:")
-            for q in questions[:3]:
-                lines.append(f"  - {q.content[:100]}")
-
-        return "\n".join(lines) if len(lines) > 1 else ""
+        return f"{', '.join(parts)} loaded. Use recall tools for details."
 
     # ------------------------------------------------------------------
     # Recall layer — used by tools and briefing
