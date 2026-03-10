@@ -3,7 +3,7 @@ AgentMemory — The agent's interface to its persistent memory.
 
 Wraps ContextStore with agent-facing query and formatting methods.
 Used by tools (memory_tools.py), prompt builder (prompt_manager.py),
-and session briefing (copilot_bridge.py).
+and session briefing (agent_bridge.py).
 
 This is the single source of truth for how the agent accesses its
 accumulated knowledge across sessions.

@@ -98,7 +98,7 @@ class PairingManager:
         self._trusted: Dict[str, TrustedPeer] = {}  # keyed by instance_id
         self._trust_file = config_dir / "mesh_trusted_peers.json"
 
-        # Phase 2: TLS cert fingerprint (set by launch_copilot after cert gen)
+        # Phase 2: TLS cert fingerprint (set by launch_gently after cert gen)
         self.cert_fingerprint: str = ""
 
         # Phase 2: UDP signing key (derived from instance_id)

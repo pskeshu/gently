@@ -526,7 +526,7 @@ class VisualizationServer(Service):
         except OSError:
             raise OSError(
                 f"Port {self.port} is already in use. "
-                "Is another instance of the copilot running? "
+                "Is another instance of the agent running? "
                 "Close it first and try again."
             )
         finally:

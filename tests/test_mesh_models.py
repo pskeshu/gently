@@ -99,7 +99,7 @@ class TestPeerStatus:
     def test_defaults(self):
         status = PeerStatus.from_dict({})
         assert status.acquisition_status == "idle"
-        assert status.copilot_mode == "run"
+        assert status.agent_mode == "run"
 
 
 class TestPeerInfo:

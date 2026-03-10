@@ -28,7 +28,7 @@ Multiple independent layers of protection:
 
 | Layer | Protection |
 |-------|------------|
-| **Process Isolation** | HTTP API separates copilot from device layer. Client crashes don't affect the microscope. |
+| **Process Isolation** | HTTP API separates agent from device layer. Client crashes don't affect the microscope. |
 | **Device Limits** | Hard bounds validated in `set()` before any motion. Stage, piezo, galvo all protected. |
 | **Plan Constraints** | Bluesky plans use a restricted vocabulary of safe primitives. |
 | **Templated Actions** | Agents work with `Embryo` objects, not raw coordinates. |

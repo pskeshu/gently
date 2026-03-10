@@ -1,5 +1,5 @@
 """
-Tool Plugin System for Microscopy Copilot
+Tool Plugin System for Microscopy Agent
 
 Provides a decorator-based tool registration system that:
 - Eliminates the rigid if/elif chain
@@ -213,7 +213,7 @@ def _extract_parameters_from_function(func: Callable) -> List[ToolParameter]:
 
 class ToolRegistry:
     """
-    Central registry for all copilot tools
+    Central registry for all agent tools
 
     Features:
     - Decorator-based registration
@@ -224,7 +224,7 @@ class ToolRegistry:
 
     def __init__(self):
         self._tools: Dict[str, ToolDefinition] = {}
-        self._context: Dict[str, Any] = {}  # Shared context (copilot, client, etc.)
+        self._context: Dict[str, Any] = {}  # Shared context (agent, client, etc.)
 
     def set_context(self, key: str, value: Any):
         """Set shared context available to all tools"""
@@ -403,7 +403,7 @@ class ToolRegistry:
         tool_input : dict
             Tool input parameters
         context : dict, optional
-            Execution context (copilot, client, etc.)
+            Execution context (agent, client, etc.)
 
         Returns
         -------
@@ -415,7 +415,7 @@ class ToolRegistry:
             raise ValueError(f"Unknown tool: {tool_name}")
 
         # Determine execution context:
-        # 1. Use explicit context parameter if provided (from copilot.execute_tool)
+        # 1. Use explicit context parameter if provided (from agent.execute_tool)
         # 2. Check if context was passed in tool_input (from nested tool calls via wrapper)
         # 3. Fall back to stored registry context
         if context is not None:

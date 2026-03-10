@@ -149,10 +149,10 @@ def yes_no_cancel_options(
     ]
 
 
-def embryo_options(copilot) -> List[Dict[str, str]]:
+def embryo_options(agent) -> List[Dict[str, str]]:
     """Generate options from available embryos"""
     options = []
-    for eid, embryo in copilot.experiment.embryos.items():
+    for eid, embryo in agent.experiment.embryos.items():
         label = eid
         if embryo.nickname:
             label = f"{eid} ({embryo.nickname})"

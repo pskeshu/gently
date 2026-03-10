@@ -3,12 +3,12 @@
  *
  * Architecture:
  *   <Static>         Completed messages — rendered once, scroll up naturally
- *   <ActiveMessage>  Currently streaming copilot/tool message (re-renders on each chunk)
- *   <ChoicePicker>   Interactive picker when copilot asks a question
+ *   <ActiveMessage>  Currently streaming agent/tool message (re-renders on each chunk)
+ *   <ChoicePicker>   Interactive picker when agent asks a question
  *   <CommandInput>   Always-visible input bar at the bottom
  *   <StatusBar>      Notifications
  *
- * The input bar is ALWAYS active. When the copilot is streaming, new
+ * The input bar is ALWAYS active. When the agent is streaming, new
  * messages are queued and auto-sent once the stream finishes.
  */
 
@@ -42,7 +42,7 @@ export function App({ wsUrl, store }: AppProps) {
   useKeyboard(store, send);
 
   // ------------------------------------------------------------------
-  // Send a message (or queue it if copilot is busy)
+  // Send a message (or queue it if agent is busy)
   // ------------------------------------------------------------------
   // ------------------------------------------------------------------
   // Handle /theme locally (no server round-trip needed)
@@ -112,7 +112,7 @@ export function App({ wsUrl, store }: AppProps) {
       }
 
       if (store.getState().isStreaming) {
-        // Copilot is busy — queue the message
+        // Agent is busy — queue the message
         store.getState().enqueueMessage(text);
       } else {
         store.getState().addUserMessage(text);
@@ -266,7 +266,7 @@ export function App({ wsUrl, store }: AppProps) {
         />
       ) : null}
 
-      {/* ── Choice picker (when copilot asks a question) ──────── */}
+      {/* ── Choice picker (when agent asks a question) ──────── */}
       {state.pendingChoice ? (
         <ChoicePicker
           choice={state.pendingChoice}
@@ -303,7 +303,7 @@ export function App({ wsUrl, store }: AppProps) {
         notification={state.notification}
         onClearNotification={handleClearNotification}
         wizardActive={state.wizardActive}
-        copilotMode={state.copilotMode}
+        agentMode={state.agentMode}
         browserOpen={state.browserOpen}
         onCloseBrowser={handleCloseBrowser}
         send={send}

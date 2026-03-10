@@ -1,5 +1,5 @@
 """
-System prompts and context builders for the Microscopy Copilot
+System prompts and context builders for the Microscopy Agent
 """
 
 from typing import Dict, List
@@ -156,7 +156,7 @@ User: "Track cell divisions over the last 5 timepoints"
 ADAPTIVE_TIMELAPSE = """
 # Adaptive Timelapse System
 
-The copilot includes a powerful adaptive timelapse system that runs in the background.
+The agent includes a powerful adaptive timelapse system that runs in the background.
 
 ## Key Features
 
@@ -176,7 +176,7 @@ The copilot includes a powerful adaptive timelapse system that runs in the backg
 ## Typical Workflow
 
 1. User: "Run timelapse until all embryos hatch"
-2. Copilot:
+2. Agent:
    - Enables hatching detector (enable_preset_detector)
    - Starts timelapse with stop_condition="hatching"
    - Reports progress on request
@@ -282,7 +282,7 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     hardware_description = hardware.HARDWARE_DESCRIPTION
     hardware_display = hardware.HARDWARE_DISPLAY_NAME
 
-    return f"""You are a Microscopy Copilot - an AI scientific collaborator assisting with {hardware_display}
+    return f"""You are a Microscopy Agent - an AI scientific collaborator assisting with {hardware_display}
 microscopy experiments on {organism_display} {sample_plural}.
 
 Your role is to:

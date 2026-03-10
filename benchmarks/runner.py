@@ -1,10 +1,10 @@
 """
 Benchmark Runner
 
-CLI for running benchmarks against copilot.
+CLI for running benchmarks against the agent.
 
 Usage:
-    python -m benchmarks.runner copilot --tags timelapse
+    python -m benchmarks.runner agent --tags timelapse
     python -m benchmarks.runner compare before.json after.json
 """
 
@@ -20,20 +20,20 @@ logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 
-async def run_copilot_benchmark(args):
-    """Run copilot tool-calling benchmark"""
-    from .copilot.evaluator import CopilotEvaluator
+async def run_agent_benchmark(args):
+    """Run agent tool-calling benchmark"""
+    from .agent.evaluator import AgentEvaluator
 
     # Parse tags
     tags = args.tags.split(",") if args.tags else None
 
     # Initialize evaluator
-    evaluator = CopilotEvaluator()
+    evaluator = AgentEvaluator()
 
-    # TODO: Initialize copilot
+    # TODO: Initialize agent
     # For now, show what would be tested
     logger.info("=" * 60)
-    logger.info("COPILOT BENCHMARK")
+    logger.info("AGENT BENCHMARK")
     logger.info("=" * 60)
 
     cases = evaluator.test_cases
@@ -50,15 +50,15 @@ async def run_copilot_benchmark(args):
         logger.info(f"      Expected: {case['expected_tool']}")
 
     logger.info("\n" + "=" * 60)
-    logger.info("NOTE: Actual benchmark execution requires copilot integration.")
-    logger.info("Add --run flag once copilot.get_tool_call() is implemented.")
+    logger.info("NOTE: Actual benchmark execution requires agent integration.")
+    logger.info("Add --run flag once agent.get_tool_call() is implemented.")
     logger.info("=" * 60)
 
     if args.run:
         # TODO: Actually run the benchmark
-        # copilot = MicroscopyCopilot(...)
-        # report = await evaluator.run_benchmark(copilot, tags=tags)
-        logger.error("Copilot dry-run mode not yet implemented")
+        # agent = MicroscopyAgent(...)
+        # report = await evaluator.run_benchmark(agent, tags=tags)
+        logger.error("Agent dry-run mode not yet implemented")
         return 1
 
     return 0
@@ -66,7 +66,7 @@ async def run_copilot_benchmark(args):
 
 def compare_reports(args):
     """Compare two benchmark reports"""
-    from .copilot.evaluator import BenchmarkReport, compare_reports as _compare
+    from .agent.evaluator import BenchmarkReport, compare_reports as _compare
 
     with open(args.before) as f:
         before_data = json.load(f)
@@ -121,11 +121,11 @@ def main():
     parser = argparse.ArgumentParser(description="Gently Benchmark Runner")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
-    # Copilot benchmark
-    copilot_parser = subparsers.add_parser("copilot", help="Run copilot benchmarks")
-    copilot_parser.add_argument("--tags", help="Comma-separated tags to filter")
-    copilot_parser.add_argument("--run", action="store_true", help="Actually run (vs dry-run)")
-    copilot_parser.add_argument("--output", help="Output file for results")
+    # Agent benchmark
+    agent_parser = subparsers.add_parser("agent", help="Run agent benchmarks")
+    agent_parser.add_argument("--tags", help="Comma-separated tags to filter")
+    agent_parser.add_argument("--run", action="store_true", help="Actually run (vs dry-run)")
+    agent_parser.add_argument("--output", help="Output file for results")
 
     # Compare reports
     compare_parser = subparsers.add_parser("compare", help="Compare two reports")
@@ -134,8 +134,8 @@ def main():
 
     args = parser.parse_args()
 
-    if args.command == "copilot":
-        return asyncio.run(run_copilot_benchmark(args))
+    if args.command == "agent":
+        return asyncio.run(run_agent_benchmark(args))
     elif args.command == "compare":
         return compare_reports(args)
     else:

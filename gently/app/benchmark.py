@@ -10,7 +10,7 @@ Measures the full pipeline latency:
 All benchmark data is stored in a temporary directory and cleaned up
 after the benchmark completes. No data persists to the user's session.
 
-Usage from copilot CLI:
+Usage from agent CLI:
     /benchmark
     /benchmark --volumes 10 --slices 50
 """
@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 if TYPE_CHECKING:
-    from .copilot import MicroscopyCopilot
+    from .agent import MicroscopyAgent
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +108,7 @@ class BenchmarkResults:
         sizes = [t.file_size_mb for t in self.successful if t.file_size_mb > 0]
         return statistics.mean(sizes) if sizes else 0.0
 
-    # Convenience properties used by copilot_bridge /benchmark handler
+    # Convenience properties used by bridge /benchmark handler
     @property
     def n_volumes(self) -> int:
         return len(self.timings)
@@ -131,7 +131,7 @@ class BenchmarkResults:
 
 
 async def run_benchmark(
-    copilot: "MicroscopyCopilot",
+    agent: "MicroscopyAgent",
     num_volumes: int = 5,
     num_slices: int = 50,
     exposure_ms: float = 10.0,
@@ -157,10 +157,10 @@ async def run_benchmark(
     if n_warmup is not None:
         warmup = n_warmup
 
-    if not copilot.client or not copilot.client.is_connected:
+    if not agent.client or not agent.client.is_connected:
         raise RuntimeError("Microscope not connected. Cannot run hardware benchmark.")
 
-    embryos = list(copilot.experiment.embryos.values()) if copilot.experiment.embryos else []
+    embryos = list(agent.experiment.embryos.values()) if agent.experiment.embryos else []
     use_synthetic = len(embryos) == 0
     embryo_ids = ["benchmark_pos"] if use_synthetic else [e.embryo_id for e in embryos]
 
@@ -171,7 +171,7 @@ async def run_benchmark(
         started_at=datetime.now().isoformat(),
     )
 
-    viz_server = getattr(copilot, '_viz_server', None)
+    viz_server = getattr(agent, '_viz_server', None)
     has_viz = viz_server is not None
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gently_benchmark_"))
@@ -223,13 +223,13 @@ async def run_benchmark(
                     piezo_amp, piezo_center = 25.0, 50.0
 
                 if embryo and embryo.position:
-                    await copilot.client.move_stage(
+                    await agent.client.move_stage(
                         embryo.position['x'], embryo.position['y']
                     )
 
                 # Stage 1: Acquisition
                 t0 = time.perf_counter()
-                result = await copilot.client.acquire_volume(
+                result = await agent.client.acquire_volume(
                     num_slices=num_slices,
                     exposure_ms=exposure_ms,
                     galvo_amplitude=galvo_amp,

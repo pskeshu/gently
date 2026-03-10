@@ -31,7 +31,6 @@ from .session import (
 )
 from .example_store import ExampleStore
 from gently.core.imaging import render_volume_view, clip_and_project
-from .stages import STAGES
 from .verification import VerificationEngine
 from gently.organisms import get_organism
 
@@ -384,7 +383,7 @@ class PerceptionEngine:
             return {}
 
         examples = {}
-        for stage in STAGES:
+        for stage in get_organism().STAGES:
             stage_examples = self.example_store.get_stage_examples_with_descriptions(
                 stage, max_examples=2
             )
@@ -1066,7 +1065,7 @@ class PerceptionEngine:
         })
 
         examples = self._load_all_examples()
-        for stage in STAGES:
+        for stage in get_organism().STAGES:
             if stage in examples:
                 stage_desc = ""
                 if self.example_store:
@@ -1222,7 +1221,7 @@ WARNING - POTENTIAL DEVELOPMENTAL ARREST:
                 raise ValueError("No JSON found in response")
 
             stage = data.get("stage", "early")
-            if stage not in STAGES:
+            if stage not in get_organism().STAGES:
                 stage = "early"
 
             # Parse observed features

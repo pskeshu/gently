@@ -8,7 +8,7 @@ from typing import Dict, Optional
 import json
 
 from gently.harness.tools.registry import tool, ToolCategory
-from gently.harness.tools.helpers import require_copilot, get_embryo_or_error
+from gently.harness.tools.helpers import require_agent, get_embryo_or_error
 from gently.harness.detection.detector import (
     Detector, DetectorConditions, DetectorActions,
     DetectionMode, ConfidenceLevel
@@ -22,11 +22,11 @@ from gently.harness.detection.detector import (
 )
 def list_detectors(filter: str = "all", context: Dict = None) -> str:
     """List all detectors"""
-    copilot = context.get('copilot') if context else None
-    if not copilot:
-        return "Error: No copilot context"
+    agent = context.get('agent') if context else None
+    if not agent:
+        return "Error: No agent context"
 
-    registry = copilot.detector_registry
+    registry = agent.detector_registry
 
     if filter == 'enabled':
         detectors = registry.list_enabled()
@@ -71,15 +71,15 @@ def enable_disable_detector(
     context: Dict
 ) -> str:
     """Enable or disable detector"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
     if enabled:
-        success = copilot.detector_registry.enable(detector_name)
+        success = agent.detector_registry.enable(detector_name)
         action = "enabled"
     else:
-        success = copilot.detector_registry.disable(detector_name)
+        success = agent.detector_registry.disable(detector_name)
         action = "disabled"
 
     if success:
@@ -95,14 +95,14 @@ def enable_disable_detector(
 )
 def remove_detector(detector_name: str, context: Dict) -> str:
     """Remove detector"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    success = copilot.detector_registry.remove(detector_name)
+    success = agent.detector_registry.remove(detector_name)
 
     if success:
-        copilot._mark_significant_action("detector_config")
+        agent._mark_significant_action("detector_config")
         return f"Detector '{detector_name}' removed"
     else:
         return f"Detector '{detector_name}' not found"
@@ -125,7 +125,7 @@ def add_detector(
     context: Dict = None
 ) -> str:
     """Add a new detector"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
@@ -172,8 +172,8 @@ def add_detector(
                 ),
             )
 
-        copilot.detector_registry.add(detector)
-        copilot._mark_significant_action("detector_config")
+        agent.detector_registry.add(detector)
+        agent._mark_significant_action("detector_config")
         stop_info = " (will stop timelapse)" if detector.actions.stop_timelapse else ""
         return f"Added detector '{name}' with action mode '{action_mode}'{stop_info}"
 
@@ -194,7 +194,7 @@ def enable_preset_detector(
     context: Dict = None
 ) -> str:
     """Enable a preset detector for adaptive experiments"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
@@ -209,13 +209,13 @@ def enable_preset_detector(
     preset_data = presets[preset]
 
     # Check if already exists
-    existing = copilot.detector_registry.get(preset)
+    existing = agent.detector_registry.get(preset)
     if existing:
         existing.enabled = True
         # Ensure preset critical settings are applied (mode and stop_timelapse)
         existing.actions.mode = DetectionMode(action_mode)
         existing.actions.stop_timelapse = preset_data.get('stop_timelapse', False)
-        copilot.detector_registry.save()
+        agent.detector_registry.save()
         return f"Enabled existing '{preset}' detector (mode={action_mode}, stop_timelapse={existing.actions.stop_timelapse})"
 
     # Create detector from preset
@@ -237,8 +237,8 @@ def enable_preset_detector(
         confidence_threshold=ConfidenceLevel(preset_data.get('confidence_threshold', 'MEDIUM')),
     )
 
-    copilot.detector_registry.add(detector)
-    copilot._mark_significant_action("detector_config")
+    agent.detector_registry.add(detector)
+    agent._mark_significant_action("detector_config")
 
     return (
         f"Enabled '{preset}' detector\n"
@@ -259,12 +259,12 @@ async def generate_detector_prompt(
     context: Dict = None
 ) -> str:
     """Generate detector prompt using Claude"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
     try:
-        prompt = await copilot._generate_detector_prompt(
+        prompt = await agent._generate_detector_prompt(
             description=detector_description,
             additional_context=context_info
         )
@@ -285,20 +285,20 @@ async def test_detector(
     context: Dict = None
 ) -> str:
     """Test detector on embryo"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    detector = copilot.detector_registry.get(detector_name)
+    detector = agent.detector_registry.get(detector_name)
     if not detector:
         return f"Detector '{detector_name}' not found"
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
     try:
-        result = await copilot._run_detector_test(
+        result = await agent._run_detector_test(
             detector=detector,
             embryo_id=embryo.id,
             timepoint=timepoint
@@ -337,22 +337,22 @@ def query_timeline_events(
     session_id : str
         Session filter: "current" (default), "all", or specific session ID
     context : Dict
-        Tool context with copilot reference
+        Tool context with agent reference
 
     Returns
     -------
     str
         Formatted list of timeline events
     """
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    if not hasattr(copilot, 'timeline_manager') or copilot.timeline_manager is None:
+    if not hasattr(agent, 'timeline_manager') or agent.timeline_manager is None:
         return "Timeline not available"
 
     try:
-        events = copilot.timeline_manager.get_events(
+        events = agent.timeline_manager.get_events(
             event_type=event_type,
             embryo_id=embryo_id,
             session_id=session_id,

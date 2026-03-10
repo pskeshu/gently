@@ -6,7 +6,7 @@
  *
  * Messages are split into two lists:
  *   - `completedMessages` — finished, rendered via <Static> (never re-render)
- *   - `activeMessage`     — the currently-streaming copilot/tool message
+ *   - `activeMessage`     — the currently-streaming agent/tool message
  *
  * This split is what gives us the persistent-input-bar behaviour:
  * completed content scrolls up, active content + input stays at the bottom.
@@ -58,7 +58,7 @@ export interface TuiState {
   completedMessages: ChatEntry[];
   activeMessage: ChatEntry | null;
 
-  // Queue: messages typed while copilot is busy
+  // Queue: messages typed while agent is busy
   messageQueue: string[];
 
   // Active choice picker (null when none)
@@ -74,13 +74,13 @@ export interface TuiState {
   // Notifications
   notification: { level: string; title: string; body?: string } | null;
 
-  // Whether copilot is currently streaming a response
+  // Whether agent is currently streaming a response
   isStreaming: boolean;
   streamStartedAt: number; // timestamp when current stream began
   streamCharsReceived: number; // chars received in current stream
 
-  // Copilot mode ("run" or "plan")
-  copilotMode: string;
+  // Agent mode ("run" or "plan")
+  agentMode: string;
 
   // Startup wizard
   wizardActive: boolean;
@@ -124,7 +124,7 @@ export interface TuiActions {
 
   addUserMessage: (text: string) => void;
   addUserSelection: (text: string) => void;
-  appendCopilotText: (text: string) => void;
+  appendAgentText: (text: string) => void;
   showThinking: () => void;
   addToolStart: (toolName: string, toolInput: Record<string, unknown>, toolLabel?: string) => void;
   addToolCall: (toolName: string, duration?: number) => void;
@@ -148,7 +148,7 @@ export interface TuiActions {
 
   setPeerCount: (count: number) => void;
   setWizardActive: (active: boolean) => void;
-  setCopilotMode: (mode: string) => void;
+  setAgentMode: (mode: string) => void;
 
   // Browser panel
   setBrowserOpen: (open: boolean) => void;
@@ -253,7 +253,7 @@ export function createTuiStore() {
     isStreaming: false,
     streamStartedAt: 0,
     streamCharsReceived: 0,
-    copilotMode: "run",
+    agentMode: "run",
     wizardActive: false,
     wizardWeight: "none",
     browserOpen: false,
@@ -281,7 +281,7 @@ export function createTuiStore() {
         vizUrl: meta.vizUrl,
         logPath: meta.logPath,
         resumed: meta.resumed,
-        copilotMode: meta.mode ?? "run",
+        agentMode: meta.mode ?? "run",
         wizardActive: meta.wizard?.wizard_needed ?? false,
         wizardWeight: meta.wizard?.conversation_weight ?? "none",
       }),
@@ -308,7 +308,7 @@ export function createTuiStore() {
           // Show a thinking indicator while waiting for first response chunk
           activeMessage: {
             id: nextId(),
-            role: "copilot",
+            role: "agent",
             text: "",
             timestamp: Date.now(),
             isThinking: true,
@@ -329,10 +329,10 @@ export function createTuiStore() {
         ],
       })),
 
-    appendCopilotText: (text) =>
+    appendAgentText: (text) =>
       set((s) => {
-        if (s.activeMessage && s.activeMessage.role === "copilot") {
-          // Append to current streaming copilot message (clears thinking state)
+        if (s.activeMessage && s.activeMessage.role === "agent") {
+          // Append to current streaming agent message (clears thinking state)
           return {
             activeMessage: {
               ...s.activeMessage,
@@ -343,13 +343,13 @@ export function createTuiStore() {
             streamCharsReceived: s.streamCharsReceived + text.length,
           };
         }
-        // Commit previous active message, start new copilot message
+        // Commit previous active message, start new agent message
         const { completedMessages } = commitActive(s);
         return {
           completedMessages,
           activeMessage: {
             id: nextId(),
-            role: "copilot",
+            role: "agent",
             text,
             timestamp: Date.now(),
             isStreaming: true,
@@ -365,7 +365,7 @@ export function createTuiStore() {
           completedMessages,
           activeMessage: {
             id: nextId(),
-            role: "copilot",
+            role: "agent",
             text: "",
             timestamp: Date.now(),
             isThinking: true,
@@ -398,7 +398,7 @@ export function createTuiStore() {
       set((s) => {
         // Show thinking indicator after tool completes if stream is still active
         const thinkingMessage: ChatEntry | null = s.isStreaming
-          ? { id: nextId(), role: "copilot", text: "", timestamp: Date.now(), isThinking: true }
+          ? { id: nextId(), role: "agent", text: "", timestamp: Date.now(), isThinking: true }
           : null;
 
         // Build display text: tool name + summary + meaningful duration
@@ -522,7 +522,7 @@ export function createTuiStore() {
 
     setPeerCount: (count) => set({ peerCount: count }),
     setWizardActive: (active) => set({ wizardActive: active }),
-    setCopilotMode: (mode) => set({ copilotMode: mode }),
+    setAgentMode: (mode) => set({ agentMode: mode }),
 
     // Browser panel
     setBrowserOpen: (open) => set({ browserOpen: open }),

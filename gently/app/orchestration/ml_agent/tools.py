@@ -2,7 +2,7 @@
 ML-specific tools for the ML subagent.
 
 These are registered on the subagent's tool registry and also
-available to the copilot in plan mode.
+available to the agent in plan mode.
 """
 
 import json

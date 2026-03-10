@@ -1,7 +1,7 @@
 """
 Agent Tools Package
 
-Tools organized by category for the microscopy copilot.
+Tools organized by category for the microscopy agent.
 All tools are automatically registered via the @tool decorator when imported.
 """
 
@@ -28,7 +28,7 @@ from gently.harness.tools.registry import get_tool_registry, ToolCategory
 
 # Re-export helper utilities for convenience
 from gently.harness.tools.helpers import (
-    require_copilot, get_embryo_or_error, require_microscope,
+    require_agent, get_embryo_or_error, require_microscope,
     require_interaction_logger, require_developmental_tracker,
     require_timelapse_orchestrator, require_databroker,
     get_timestamp_string, format_duration

@@ -1,5 +1,5 @@
 """
-Queue Server Client for MicroscopyCopilot
+Queue Server Client for MicroscopyAgent
 
 Provides async interface to the Gently Device Layer:
 - Hardware control via Bluesky plans (HTTP API)
@@ -976,7 +976,7 @@ class QueueServerClient:
                 'success': False
             }
 
-    # Alias for compatibility with existing copilot code
+    # Alias for compatibility with existing agent code
     capture_and_detect_embryos = detect_embryos
 
     async def manual_mark_embryos(

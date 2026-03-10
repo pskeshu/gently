@@ -29,7 +29,7 @@ from .hardware_common import select_best_view, crop_to_embryo_roi, select_view_a
 
 async def _adaptive_focus_sweep(
     client,
-    copilot,
+    agent,
     embryo_id: str,
     galvo_name: str,
     galvo_pos: float,
@@ -49,8 +49,8 @@ async def _adaptive_focus_sweep(
     ----------
     client : QueueServerClient
         Microscope client for image capture
-    copilot : MicroscopyCopilot
-        Copilot for viz server access
+    agent : MicroscopyAgent
+        Agent for viz server access
     embryo_id : str
         Embryo identifier for viz metadata
     galvo_name : str
@@ -111,8 +111,8 @@ async def _adaptive_focus_sweep(
             decision = sparse_state.add_point(float(piezo), float(score))
 
             # Push to viz server
-            if copilot.viz_server:
-                copilot.push_viz(
+            if agent.viz_server:
+                agent.push_viz(
                     array=img,
                     uid=f"focus_sparse_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -161,8 +161,8 @@ async def _adaptive_focus_sweep(
             logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
-            if copilot.viz_server:
-                copilot.push_viz(
+            if agent.viz_server:
+                agent.push_viz(
                     array=img,
                     uid=f"focus_dense_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -220,7 +220,7 @@ async def _adaptive_focus_sweep(
     }
 
     # Push focus curve plot
-    if copilot.viz_server and len(dense_state.positions) >= 4:
+    if agent.viz_server and len(dense_state.positions) >= 4:
         try:
             positions = np.array(dense_state.positions)
             scores = np.array(dense_state.scores)
@@ -238,7 +238,7 @@ async def _adaptive_focus_sweep(
                 r_squared=r_squared,
                 title=f'{embryo_id} - {galvo_name.upper()} Focus Curve (Adaptive)',
             )
-            copilot.push_viz(
+            agent.push_viz(
                 array=plot_img,
                 uid=f"focus_curve_{embryo_id}_{galvo_name}",
                 data_type="focus_plot",
@@ -260,7 +260,7 @@ async def _adaptive_focus_sweep(
 
 async def _fine_focus_sweep(
     client,
-    copilot,
+    agent,
     embryo_id: str,
     galvo_name: str,
     galvo_pos: float,
@@ -278,8 +278,8 @@ async def _fine_focus_sweep(
     ----------
     client : QueueServerClient
         Microscope client for image capture
-    copilot : MicroscopyCopilot
-        Copilot for viz server access
+    agent : MicroscopyAgent
+        Agent for viz server access
     embryo_id : str
         Embryo identifier for viz metadata
     galvo_name : str
@@ -329,8 +329,8 @@ async def _fine_focus_sweep(
             logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
-            if copilot.viz_server:
-                copilot.push_viz(
+            if agent.viz_server:
+                agent.push_viz(
                     array=img,
                     uid=f"focus_fine_{embryo_id}_{galvo_name}_{piezo:.1f}",
                     data_type="focus_sweep",
@@ -394,7 +394,7 @@ async def _fine_focus_sweep(
     }
 
     # Push focus curve plot
-    if copilot.viz_server and len(piezo_scores) >= 4:
+    if agent.viz_server and len(piezo_scores) >= 4:
         try:
             positions_arr = np.array([p for p, _ in piezo_scores])
             scores_arr = np.array([s for _, s in piezo_scores])
@@ -407,7 +407,7 @@ async def _fine_focus_sweep(
                 r_squared=r_squared,
                 title=f'{embryo_id} - {galvo_name.upper()} Focus Curve (Fine-Only)',
             )
-            copilot.push_viz(
+            agent.push_viz(
                 array=plot_img,
                 uid=f"focus_curve_{embryo_id}_{galvo_name}",
                 data_type="focus_plot",
@@ -435,7 +435,7 @@ async def hybrid_focus_selection(
     images: List[np.ndarray],
     offsets: List[float],
     claude_vision,
-    copilot,
+    agent,
     embryo_id: str,
     fft_confidence_threshold: float = 0.85
 ) -> Tuple[int, str, float]:
@@ -453,7 +453,7 @@ async def hybrid_focus_selection(
         Piezo offsets in µm for each image
     claude_vision : AsyncClaudeClient
         Vision API client
-    copilot : MicroscopyCopilot
+    agent : MicroscopyAgent
         For viz server access
     embryo_id : str
         Embryo identifier for logging
@@ -510,8 +510,8 @@ async def hybrid_focus_selection(
         logger.info("Vision selected: %s (%s)", vision_label, reasoning)
 
         # Push montage to viz server
-        if copilot.viz_server:
-            copilot.push_viz(
+        if agent.viz_server:
+            agent.push_viz(
                 array=montage,
                 uid=f"focus_montage_{embryo_id}",
                 data_type="focus_montage",
@@ -538,7 +538,7 @@ async def binary_edge_search(
     client,
     claude_vision,
     direction: str,
-    copilot,
+    agent,
     embryo_id: str,
     piezo_heuristic: float,
     max_range: float = 0.25,
@@ -558,7 +558,7 @@ async def binary_edge_search(
         Vision API client
     direction : str
         'top' (negative galvo) or 'bottom' (positive galvo)
-    copilot : MicroscopyCopilot
+    agent : MicroscopyAgent
         For viz server and state
     embryo_id : str
         Embryo identifier
@@ -659,7 +659,7 @@ async def fast_calibrate_embryo(
     embryo_id : str
         Embryo to calibrate
     context : Dict
-        Tool context with copilot and client
+        Tool context with agent and client
     z_buffer_um : float
         Z padding above/below embryo for volume acquisition
 
@@ -670,21 +670,21 @@ async def fast_calibrate_embryo(
     """
     from gently.hardware.dispim.claude_client import AsyncClaudeClient
 
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return False, "Error: No copilot context", 0
+    if not agent:
+        return False, "Error: No agent context", 0
 
     if not client or not getattr(client, 'is_connected', False):
         return False, f"Error: Not connected to microscope server", 0
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return False, err, 0
 
     # Get session prior
-    session_prior = copilot.calibration_prior
+    session_prior = agent.calibration_prior
 
     # Initialize Claude Vision client
     claude_vision = AsyncClaudeClient()
@@ -709,12 +709,12 @@ async def fast_calibrate_embryo(
     piezo_heuristic = session_prior.offset_um if session_prior.num_calibrations > 0 else 0.0
 
     galvo_top, exp_top = await binary_edge_search(
-        client, claude_vision, 'top', copilot, embryo_id, piezo_heuristic
+        client, claude_vision, 'top', agent, embryo_id, piezo_heuristic
     )
     total_exposures += exp_top
 
     galvo_bottom, exp_bottom = await binary_edge_search(
-        client, claude_vision, 'bottom', copilot, embryo_id, piezo_heuristic
+        client, claude_vision, 'bottom', agent, embryo_id, piezo_heuristic
     )
     total_exposures += exp_bottom
 
@@ -755,7 +755,7 @@ async def fast_calibrate_embryo(
     logger.info("Step 3: Hybrid focus selection...")
 
     best_idx, method, confidence = await hybrid_focus_selection(
-        focus_images, focus_offsets, claude_vision, copilot, embryo_id
+        focus_images, focus_offsets, claude_vision, agent, embryo_id
     )
 
     embryo_offset = focus_offsets[best_idx]
@@ -787,7 +787,7 @@ async def fast_calibrate_embryo(
 
         # Re-run hybrid selection
         best_idx, method, confidence = await hybrid_focus_selection(
-            focus_images, focus_offsets, claude_vision, copilot, embryo_id
+            focus_images, focus_offsets, claude_vision, agent, embryo_id
         )
         embryo_offset = focus_offsets[best_idx]
         piezo_center = piezo_expected + embryo_offset
@@ -819,7 +819,7 @@ async def fast_calibrate_embryo(
                 focus_images_2.append(np.zeros((100, 100), dtype=np.uint8))
 
         best_idx_2, _, _ = await hybrid_focus_selection(
-            focus_images_2, [-2.0, 0.0, 2.0], claude_vision, copilot, embryo_id
+            focus_images_2, [-2.0, 0.0, 2.0], claude_vision, agent, embryo_id
         )
         piezo_second = piezo_expected_second + [-2.0, 0.0, 2.0][best_idx_2]
 
@@ -863,7 +863,7 @@ async def fast_calibrate_embryo(
         'recommended_slices': recommended_slices,
     }
 
-    copilot._save_state()
+    agent._save_state()
 
     msg = f"""\u2713 Fast calibration complete for {embryo_id}
   Mode: {'BOOTSTRAP' if is_bootstrap else 'FAST'}
@@ -922,21 +922,21 @@ async def calibrate_embryo(
     from gently.analysis.core import calculate_focus_score, fit_focus_curve, FitFunction
     from gently.hardware.dispim.claude_client import AsyncClaudeClient
 
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     if not client or not getattr(client, 'is_connected', False):
         return f"Error: Not connected to microscope server. Cannot calibrate {embryo_id}."
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
     # Get session-level calibration prior for cross-embryo learning
-    session_prior = copilot.experiment.calibration_prior
+    session_prior = agent.experiment.calibration_prior
 
     # Heuristic calibration for edge detection sweeps
     # Priority: 1) Session prior (cross-embryo learning), 2) Embryo's own calibration, 3) Default
@@ -1010,8 +1010,8 @@ async def calibrate_embryo(
                 })
 
                 # Push edge detection image to viz server
-                if copilot.viz_server:
-                    copilot.push_viz(
+                if agent.viz_server:
+                    agent.push_viz(
                         array=img_norm,
                         uid=f"edge_detect_{embryo_id}_{galvo_pos:.3f}",
                         data_type="edge_detection",
@@ -1168,7 +1168,7 @@ async def calibrate_embryo(
                 # Fine-only sweep - heuristic is good enough at feature-rich positions
                 result_dict, sweep_exposures = await _fine_focus_sweep(
                     client=client,
-                    copilot=copilot,
+                    agent=agent,
                     embryo_id=embryo_id,
                     galvo_name=galvo_name,
                     galvo_pos=galvo_pos,
@@ -1180,7 +1180,7 @@ async def calibrate_embryo(
                 # Adaptive sweep with early stopping for lower-confidence positions
                 result_dict, sweep_exposures = await _adaptive_focus_sweep(
                     client=client,
-                    copilot=copilot,
+                    agent=agent,
                     embryo_id=embryo_id,
                     galvo_name=galvo_name,
                     galvo_pos=galvo_pos,
@@ -1271,7 +1271,7 @@ async def calibrate_embryo(
             embryo.record_exposure(exposure_ms=50.0, num_frames=total_exposures)
 
         # Push calibration summary plot to viz server
-        if copilot.viz_server:
+        if agent.viz_server:
             try:
                 summary_plot = generate_calibration_summary_plot(
                     embryo_id=embryo_id,
@@ -1284,7 +1284,7 @@ async def calibrate_embryo(
                     r_squared_top=results['top']['r_squared'],
                     r_squared_bottom=results['bottom']['r_squared'],
                 )
-                copilot.push_viz(
+                agent.push_viz(
                     array=summary_plot,
                     uid=f"calibration_summary_{embryo_id}",
                     data_type="calibration_summary",
@@ -1303,7 +1303,7 @@ async def calibrate_embryo(
             except Exception as plot_err:
                 logger.warning("Failed to generate calibration summary plot: %s", plot_err)
 
-        copilot._mark_significant_action("calibration")
+        agent._mark_significant_action("calibration")
 
         return (
             f"\u2713 Calibrated {embryo_id}\n"
@@ -1346,16 +1346,16 @@ async def calibrate_all_embryos(
     context: Dict = None
 ) -> str:
     """Calibrate all embryos sequentially with Claude vision"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     # Get embryos to calibrate
     if embryo_ids:
         ids_to_calibrate = embryo_ids
     else:
-        ids_to_calibrate = list(copilot.experiment.embryos.keys())
+        ids_to_calibrate = list(agent.experiment.embryos.keys())
 
     if not ids_to_calibrate:
         return "No embryos to calibrate. Detect embryos first."

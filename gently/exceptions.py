@@ -21,7 +21,7 @@ Base:
     │   ├── DeviceLayerError   — Device layer HTTP API errors
     │   ├── MeshPeerError      — Mesh peer communication errors
     │   └── ServiceUnavailableError
-    └── CopilotError           — Agent/conversation failures
+    └── AgentError             — Agent/conversation failures
         ├── ToolExecutionError
         └── PlanSynthesisError
 """
@@ -113,14 +113,14 @@ class ServiceUnavailableError(NetworkError):
     pass
 
 
-class CopilotError(GentlyError):
+class AgentError(GentlyError):
     """Agent/conversation failure."""
     pass
 
-class ToolExecutionError(CopilotError):
+class ToolExecutionError(AgentError):
     """A tool call failed during execution."""
     pass
 
-class PlanSynthesisError(CopilotError):
+class PlanSynthesisError(AgentError):
     """Plan synthesis (natural language → Bluesky plan) failed."""
     pass

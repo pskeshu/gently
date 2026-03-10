@@ -169,11 +169,11 @@ async def validate_plan(
     context: Dict = None,
 ) -> str:
     """Validate a plan and return errors/warnings."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     campaign = store.get_campaign(campaign_id)
     if not campaign:
         return f"Campaign '{campaign_id}' not found"

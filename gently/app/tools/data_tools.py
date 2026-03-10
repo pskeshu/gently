@@ -7,7 +7,7 @@ Tools for querying and retrieving data from Bluesky/Databroker.
 from typing import Dict, List
 
 from gently.harness.tools.registry import tool, ToolCategory
-from gently.harness.tools.helpers import require_copilot
+from gently.harness.tools.helpers import require_agent
 
 
 @tool(
@@ -22,13 +22,13 @@ def list_runs(
     context: Dict = None
 ) -> str:
     """List recent runs"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot or not copilot.databroker:
+    if not agent or not agent.databroker:
         return "Databroker not available"
 
     try:
-        db = copilot.databroker
+        db = agent.databroker
 
         query = {}
         if embryo_id:
@@ -71,13 +71,13 @@ def get_run_data(
     context: Dict = None
 ) -> str:
     """Get run data"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot or not copilot.databroker:
+    if not agent or not agent.databroker:
         return "Databroker not available"
 
     try:
-        db = copilot.databroker
+        db = agent.databroker
 
         if run_id.startswith('-'):
             run = db[int(run_id)]
@@ -115,13 +115,13 @@ async def get_run_image(
     context: Dict = None
 ) -> str:
     """Get run image"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot or not copilot.databroker:
+    if not agent or not agent.databroker:
         return "Databroker not available"
 
     try:
-        db = copilot.databroker
+        db = agent.databroker
 
         if run_id.startswith('-'):
             run = db[int(run_id)]
@@ -145,7 +145,7 @@ async def get_run_image(
         result = f"Retrieved image from {detector}\nShape: {shape}"
 
         if analyze and analysis_prompt:
-            analysis = await copilot._analyze_image_with_vision(
+            analysis = await agent._analyze_image_with_vision(
                 image=image,
                 prompt=analysis_prompt
             )
@@ -170,13 +170,13 @@ def search_runs(
     context: Dict = None
 ) -> str:
     """Search runs"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot or not copilot.databroker:
+    if not agent or not agent.databroker:
         return "Databroker not available"
 
     try:
-        db = copilot.databroker
+        db = agent.databroker
 
         query = metadata or {}
 

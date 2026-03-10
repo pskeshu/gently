@@ -249,7 +249,7 @@ class PlanItem:
     genetic crosses, analyses, and decision points. Imaging items carry
     an ImagingSpec; non-imaging items carry a BenchSpec.
 
-    Dependencies between items (depends_on) enable the copilot to track
+    Dependencies between items (depends_on) enable the agent to track
     what's blocked and what's newly unblocked.
     """
     id: str

@@ -1,7 +1,7 @@
 """
 Research tools — literature search, strain/gene databases.
 
-These tools let the copilot search external knowledge sources to
+These tools let the agent search external knowledge sources to
 inform experimental design. Results are returned as context for the
 LLM to interpret, not as final answers.
 
@@ -871,7 +871,7 @@ async def _fetch_url_text(url: str) -> Optional[str]:
             async with session.get(
                 url,
                 timeout=aiohttp.ClientTimeout(total=20),
-                headers={"User-Agent": "gently/1.0 (microscopy copilot; mailto:" + _NCBI_EMAIL + ")"},
+                headers={"User-Agent": "gently/1.0 (microscopy agent; mailto:" + _NCBI_EMAIL + ")"},
             ) as resp:
                 if resp.status != 200:
                     return None
@@ -1157,7 +1157,7 @@ async def _doi_to_pmid(doi: str) -> Optional[str]:
         "citation text (e.g. 'Rapti et al 2019'). Retrieves full text "
         "from PubMed Central when available, checks Unpaywall for open "
         "access versions, reads local PDFs, or falls back to the abstract. "
-        "Returns structured text for the copilot to analyze."
+        "Returns structured text for the agent to analyze."
     ),
     category=ToolCategory.UTILITY,
     examples=[

@@ -1,7 +1,7 @@
 """
 Lab context tools — query the lab's own history and capabilities.
 
-These tools let the copilot search past sessions, existing campaigns,
+These tools let the agent search past sessions, existing campaigns,
 learnings, and hardware specs to inform experimental design.
 """
 
@@ -30,11 +30,11 @@ async def query_lab_history(
     context: Dict = None,
 ) -> str:
     """Search lab history for relevant context."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "No lab history available (context store not connected)"
 
-    store = copilot.context_store
+    store = agent.context_store
     query_lower = query.lower()
 
     results = []

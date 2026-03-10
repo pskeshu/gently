@@ -146,7 +146,7 @@ def adaptive_timelapse_plan(
     volume_scanner,
     xy_stage,
     embryo_database,
-    copilot,
+    agent,
     num_timepoints={{ num_timepoints }},
     metadata=None
 ):
@@ -163,8 +163,8 @@ def adaptive_timelapse_plan(
         XY positioning stage
     embryo_database : dict
         Embryo positions and calibrations
-    copilot : MicroscopyCopilot
-        AI copilot for decisions
+    agent : MicroscopyAgent
+        AI agent for decisions
     num_timepoints : int
         Maximum number of timepoints
     metadata : dict, optional
@@ -179,29 +179,29 @@ def adaptive_timelapse_plan(
         'goal': '{{ goal }}',
         'start_time': datetime.now().isoformat(),
         'embryo_ids': {{ embryo_ids }},
-        'copilot_generated': True,
+        'agent_generated': True,
     }
     if metadata:
         _md.update(metadata)
 
     for timepoint in range(num_timepoints):
         # Check if experiment should continue
-        if copilot.should_stop_experiment():
-            logger.info("Copilot ending experiment at timepoint %s", timepoint)
+        if agent.should_stop_experiment():
+            logger.info("Agent ending experiment at timepoint %s", timepoint)
             break
 
         # Get embryo acquisition order (priority queue)
-        embryo_order = copilot.get_embryo_acquisition_order()
+        embryo_order = agent.get_embryo_acquisition_order()
 
         for embryo_id in embryo_order:
-            embryo_state = copilot.experiment.embryos[embryo_id]
+            embryo_state = agent.experiment.embryos[embryo_id]
 
             # Check if should skip this embryo
             if embryo_state.should_skip:
                 continue
 
-            # Get adaptive parameters from copilot
-            params = copilot.decide_parameters(embryo_id, timepoint)
+            # Get adaptive parameters from agent
+            params = agent.decide_parameters(embryo_id, timepoint)
 
             # Move to embryo position
             pos = embryo_state.stage_position
@@ -224,11 +224,11 @@ def adaptive_timelapse_plan(
                 md={'embryo_id': embryo_id, 'timepoint': timepoint, **_md}
             )
 
-            # Notify copilot of new data (will trigger analysis)
-            copilot.on_volume_acquired(embryo_id, timepoint, volume_scanner)
+            # Notify agent of new data (will trigger analysis)
+            agent.on_volume_acquired(embryo_id, timepoint, volume_scanner)
 
         # Determine next interval (adaptive)
-        next_interval = copilot.decide_next_interval(timepoint)
+        next_interval = agent.decide_next_interval(timepoint)
 
         # Wait for interval
         if timepoint < num_timepoints - 1:
@@ -244,7 +244,7 @@ def single_highres_scan_plan(
     volume_scanner,
     xy_stage,
     embryo_id,
-    copilot,
+    agent,
     metadata=None
 ):
     """
@@ -254,7 +254,7 @@ def single_highres_scan_plan(
     """
     import bluesky.plan_stubs as bps
 
-    embryo_state = copilot.experiment.embryos[embryo_id]
+    embryo_state = agent.experiment.embryos[embryo_id]
 
     # Move to position
     pos = embryo_state.stage_position
@@ -275,15 +275,15 @@ def single_highres_scan_plan(
         'plan_name': 'single_highres',
         'embryo_id': embryo_id,
         'goal': '{{ goal }}',
-        'copilot_generated': True,
+        'agent_generated': True,
     }
     if metadata:
         _md.update(metadata)
 
     yield from bps.trigger_and_read([volume_scanner], md=_md)
 
-    # Notify copilot
-    copilot.on_volume_acquired(embryo_id, 0, volume_scanner)
+    # Notify agent
+    agent.on_volume_acquired(embryo_id, 0, volume_scanner)
 ''')
 
     def get_template(self, plan_type: str) -> PlanTemplate:

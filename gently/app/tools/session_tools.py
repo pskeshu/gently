@@ -8,7 +8,7 @@ from typing import Dict, List
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import (
-    require_copilot, get_embryo_or_error,
+    require_agent, get_embryo_or_error,
     require_interaction_logger
 )
 
@@ -24,12 +24,12 @@ async def assess_image_quality(
     context: Dict = None
 ) -> str:
     """Assess image quality and suggest improvements"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
     if embryo_id:
-        embryo, err = get_embryo_or_error(copilot, embryo_id)
+        embryo, err = get_embryo_or_error(agent, embryo_id)
         if err:
             return err
         if not embryo.recent_images:
@@ -77,8 +77,8 @@ OVERALL: [GOOD/ACCEPTABLE/POOR]
 SUGGESTIONS: [List specific parameter adjustments if any aspect is POOR]"""
 
     try:
-        response = copilot.claude.messages.create(
-            model=copilot.model,
+        response = agent.claude.messages.create(
+            model=agent.model,
             max_tokens=800,
             messages=[{
                 "role": "user",
@@ -136,16 +136,16 @@ SUGGESTIONS: [List specific parameter adjustments if any aspect is POOR]"""
 
 @tool(
     name="get_session_stats",
-    description="Get statistics for the current copilot session including interactions, corrections, and tool usage",
+    description="Get statistics for the current agent session including interactions, corrections, and tool usage",
     category=ToolCategory.DATA,
 )
 def get_session_stats(context: Dict = None) -> str:
     """Get session statistics from interaction logger"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    logger, err = require_interaction_logger(copilot)
+    logger, err = require_interaction_logger(agent)
     if err:
         return err
 
@@ -173,15 +173,15 @@ def compare_embryo_development(
     context: Dict = None
 ) -> str:
     """Compare embryo development"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
     if embryo_ids:
-        embryos = [copilot.experiment.get_embryo_by_any_name(eid) for eid in embryo_ids]
+        embryos = [agent.experiment.get_embryo_by_any_name(eid) for eid in embryo_ids]
         embryos = [e for e in embryos if e is not None]
     else:
-        embryos = list(copilot.experiment.embryos.values())
+        embryos = list(agent.experiment.embryos.values())
 
     if not embryos:
         return "No embryos found."
@@ -195,8 +195,8 @@ def compare_embryo_development(
         stage = "unknown"
         hatching_est = "N/A"
 
-        if hasattr(copilot, 'developmental_tracker') and copilot.developmental_tracker:
-            current = copilot.developmental_tracker.get_current_stage(embryo.id)
+        if hasattr(agent, 'developmental_tracker') and agent.developmental_tracker:
+            current = agent.developmental_tracker.get_current_stage(embryo.id)
             if current:
                 stage = current.stage.value
                 if current.predicted_minutes_to_hatching:
@@ -225,7 +225,7 @@ def compare_embryo_development(
 
 @tool(
     name="analyze_corrections",
-    description="Analyze user corrections from interaction logs to identify patterns in copilot mistakes",
+    description="Analyze user corrections from interaction logs to identify patterns in agent mistakes",
     category=ToolCategory.DATA,
 )
 def analyze_corrections(
@@ -233,11 +233,11 @@ def analyze_corrections(
     context: Dict = None
 ) -> str:
     """Analyze correction patterns"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    logger, err = require_interaction_logger(copilot)
+    logger, err = require_interaction_logger(agent)
     if err:
         return err
 
@@ -295,11 +295,11 @@ def export_interaction_log(
     context: Dict = None
 ) -> str:
     """Export interaction log"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    logger, err = require_interaction_logger(copilot)
+    logger, err = require_interaction_logger(agent)
     if err:
         return err
 
@@ -368,11 +368,11 @@ def import_embryos_from_session(
     context : dict
         Execution context
     """
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    result = copilot.import_embryos_from_session(
+    result = agent.import_embryos_from_session(
         session_id=session_id,
         clear_existing=clear_existing
     )
@@ -425,11 +425,11 @@ def list_sessions(
     context : dict
         Execution context
     """
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    all_sessions = copilot.list_sessions()
+    all_sessions = agent.list_sessions()
 
     if not all_sessions:
         return "No sessions found."

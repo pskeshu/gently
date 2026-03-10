@@ -1,8 +1,8 @@
 /**
- * Single chat message — user, copilot, system, or tool.
+ * Single chat message — user, agent, system, or tool.
  *
  * User messages get a distinctive left-border highlight and bold
- * treatment so they stand out from copilot responses — similar
+ * treatment so they stand out from agent responses — similar
  * to how Claude Code renders user vs assistant messages.
  */
 
@@ -49,16 +49,16 @@ export function MessageBubble({ entry, theme }: MessageBubbleProps) {
         </Box>
       );
 
-    case "copilot":
+    case "agent":
       return (
         <Box flexDirection="column" marginBottom={1}>
           <Box>
-            <Text bold color={theme.copilot}>
-              {"✦ Copilot"}
+            <Text bold color={theme.agent}>
+              {"✦ Gently"}
             </Text>
             <Text color={theme.muted}> {time}</Text>
             {entry.isStreaming ? (
-              <Text color={theme.copilot}> ▍</Text>
+              <Text color={theme.agent}> ▍</Text>
             ) : null}
           </Box>
           <Box paddingLeft={2}>

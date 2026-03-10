@@ -28,7 +28,7 @@ export function useKeyboard(
     if (key.tab && key.shift) {
       const s = store.getState();
       if (s.isStreaming) return; // Don't switch while streaming
-      const cmd = s.copilotMode === "plan" ? "/plan exit" : "/plan";
+      const cmd = s.agentMode === "plan" ? "/plan exit" : "/plan";
       send({ type: "command", command: cmd });
     }
   });

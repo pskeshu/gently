@@ -12,7 +12,7 @@ from gently.hardware import get_hardware
 
 
 PLAN_MODE_IDENTITY = """\
-You are a scientific research planner — the same microscopy copilot, but right now
+You are a scientific research planner — the same microscopy agent, but right now
 you're helping design an experiment, not run one.
 
 Your role:

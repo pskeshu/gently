@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-Launch the Microscopy Copilot
+Launch the Microscopy Agent
 
 Conversational AI agent for diSPIM microscope control.
 
 Usage:
-    python launch_copilot.py                      # Ink TUI (default)
-    python launch_copilot.py --offline
-    python launch_copilot.py --sessions           # List sessions and exit
-    python launch_copilot.py --resume             # Interactive session picker
-    python launch_copilot.py --resume latest      # Resume most recent session
-    python launch_copilot.py --resume <id>        # Resume specific session
-    python launch_copilot.py -v                   # Verbose (INFO) logging
-    python launch_copilot.py --debug              # Debug logging
+    python launch_gently.py                      # Ink TUI (default)
+    python launch_gently.py --offline
+    python launch_gently.py --sessions           # List sessions and exit
+    python launch_gently.py --resume             # Interactive session picker
+    python launch_gently.py --resume latest      # Resume most recent session
+    python launch_gently.py --resume <id>        # Resume specific session
+    python launch_gently.py -v                   # Verbose (INFO) logging
+    python launch_gently.py --debug              # Debug logging
 """
 
 import asyncio
@@ -28,7 +28,8 @@ from datetime import datetime
 import yaml
 
 from gently.log_config import configure_logging
-from gently.agent import MicroscopyCopilot, QueueServerClient
+from gently.app.agent import MicroscopyAgent
+from gently.app.queue_server_client import QueueServerClient
 from gently.organisms import load_organism
 from gently.hardware import load_hardware
 from gently.settings import settings
@@ -83,7 +84,7 @@ def list_sessions(store: GentlyStore):
         time_str = f"  ({item['time']})" if item["time"] else ""
         print(f"  {item['session_id']}  {item['embryo_count']} embryos{time_str}")
     print()
-    print("Use: python launch_copilot.py --resume <id>")
+    print("Use: python launch_gently.py --resume <id>")
 
 
 def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
@@ -192,8 +193,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         except Exception:
             pass
 
-    # Create copilot
-    copilot = MicroscopyCopilot(
+    # Create agent
+    agent = MicroscopyAgent(
         microscope_client=client,
         storage_path=storage_dir,
         session_id=session_to_resume,
@@ -210,13 +211,13 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         pass
 
     # Start visualization server for real-time feedback
-    await copilot.start_viz_server(
+    await agent.start_viz_server(
         port=settings.network.viz_port,
         ssl_certfile=str(cert_path) if cert_path else None,
         ssl_keyfile=str(key_path) if key_path else None,
     )
     scheme = "https" if cert_path else "http"
-    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if copilot.viz_server is not None else None
+    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if agent.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None
@@ -283,12 +284,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         def _status_provider():
             import gently as _gently
             return {
-                "session_id": copilot.session_id or "",
+                "session_id": agent.session_id or "",
                 "acquisition_status": "idle",
-                "embryo_count": len(copilot.experiment.embryos),
+                "embryo_count": len(agent.experiment.embryos),
                 "total_timepoints": 0,
                 "uptime_seconds": 0.0,
-                "copilot_mode": copilot.mode,
+                "agent_mode": agent.mode,
                 "active_plan": "",
                 "version": getattr(_gently, "__version__", "dev"),
             }
@@ -319,9 +320,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             audit_log=audit_log,
         )
 
-        if copilot.viz_server is not None:
-            register_mesh_routes(copilot.viz_server, mesh, audit_log=audit_log)
-            copilot.viz_server.mesh_service = mesh
+        if agent.viz_server is not None:
+            register_mesh_routes(agent.viz_server, mesh, audit_log=audit_log)
+            agent.viz_server.mesh_service = mesh
 
         await mesh.start()
     except Exception as e:
@@ -330,9 +331,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         mesh = None
     # ── End mesh ────────────────────────────────────────────────────
 
-    # Attach the copilot bridge to the viz server
-    from gently.harness.bridge import CopilotBridge
-    bridge = CopilotBridge(copilot)
+    # Attach the agent bridge to the viz server
+    from gently.harness.bridge import AgentBridge
+    bridge = AgentBridge(agent)
 
     bridge.set_launch_info({
         "device_connected": client.is_connected if client else False,
@@ -349,15 +350,15 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     from gently.harness.memory import ContextStore as CtxStore
     context_db = storage_dir / "context" / "agent_mind.db"
     context_store = CtxStore(context_db)
-    copilot.set_context_store(context_store)
-    bridge.init_wizard(context_store=context_store, claude_client=copilot.claude)
+    agent.set_context_store(context_store)
+    bridge.init_wizard(context_store=context_store, claude_client=agent.claude)
 
-    if copilot.viz_server is not None:
-        copilot.viz_server.copilot_bridge = bridge
-        copilot.viz_server.set_context_store(context_store)
+    if agent.viz_server is not None:
+        agent.viz_server.agent_bridge = bridge
+        agent.viz_server.set_context_store(context_store)
 
     ws_scheme = "wss" if cert_path else "ws"
-    ws_url = f"{ws_scheme}://localhost:{settings.network.viz_port}/ws/copilot"
+    ws_url = f"{ws_scheme}://localhost:{settings.network.viz_port}/ws/agent"
 
     # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
     # takes over the terminal.
@@ -399,9 +400,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             except (asyncio.CancelledError, RuntimeError, OSError, Exception):
                 pass
         # Cleanup: stop viz server gracefully
-        if copilot.viz_server is not None:
+        if agent.viz_server is not None:
             try:
-                await copilot.viz_server.stop()
+                await agent.viz_server.stop()
             except (asyncio.CancelledError, RuntimeError, OSError, Exception):
                 pass
 
@@ -413,7 +414,7 @@ def cli_main():
         print("Set with: set ANTHROPIC_API_KEY=your-key")
         exit(1)
 
-    parser = argparse.ArgumentParser(description="Launch Microscopy Copilot")
+    parser = argparse.ArgumentParser(description="Launch Microscopy Agent")
     parser.add_argument("--offline", action="store_true", help="Run without server connections")
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
     parser.add_argument("--resume", nargs="?", const="__PICK__", metavar="ID",

@@ -24,7 +24,7 @@ def configure_logging(
 ):
     """Configure root logger for the Gently system.
 
-    Call once at startup (launch_copilot.py or gently.py).
+    Call once at startup (launch_agent.py or gently.py).
     Explicit arguments take priority over env vars.
     """
     level = level or os.environ.get("GENTLY_LOG_LEVEL", "INFO")

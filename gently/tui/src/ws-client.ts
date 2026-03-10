@@ -1,7 +1,7 @@
 /**
  * WebSocket client with auto-reconnect and typed message handling.
  *
- * Connects to the Python viz server at /ws/copilot and dispatches
+ * Connects to the Python viz server at /ws/agent and dispatches
  * incoming messages to a callback.
  */
 

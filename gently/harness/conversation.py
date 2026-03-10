@@ -1,7 +1,7 @@
 """
 ConversationManager - LLM conversation, tool execution, and token tracking.
 
-Extracted from copilot.py to separate conversation mechanics from
+Extracted from agent.py to separate conversation mechanics from
 experiment orchestration and session persistence.
 """
 
@@ -42,7 +42,7 @@ class ConversationManager:
         self.cache_creation_tokens: int = 0
         self.cache_read_tokens: int = 0
 
-        # Set by copilot after construction
+        # Set by agent after construction
         self.interaction_logger = None
         self.choice_handler = None
         self.context_store = None  # for tool_label
@@ -96,7 +96,7 @@ class ConversationManager:
 
         # Simple commands
         if message_lower in ["stop", "pause", "halt"]:
-            # Note: run_engine is on copilot, but this path is rarely used
+            # Note: run_engine is on agent, but this path is rarely used
             # and the experiment status update is the important part
             experiment.acquisition_status = "paused"
             return "Acquisition paused. What would you like to do next?"
@@ -655,8 +655,8 @@ class ConversationManager:
         tool_input : dict
             Tool input parameters
         context : dict, optional
-            Execution context (copilot, client, etc.).
-            If None, uses self._tool_context (set by copilot).
+            Execution context (agent, client, etc.).
+            If None, uses self._tool_context (set by agent).
         """
         ctx = context or self._tool_context
         return await self._tool_registry.execute(tool_name, tool_input, ctx)

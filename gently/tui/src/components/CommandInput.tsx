@@ -1,7 +1,7 @@
 /**
  * Persistent input bar — always at the bottom, always accepts typing.
  *
- * When the copilot is streaming, new messages are queued and sent
+ * When the agent is streaming, new messages are queued and sent
  * automatically once the stream finishes. A queue indicator shows
  * how many messages are waiting.
  *

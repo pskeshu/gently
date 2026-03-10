@@ -4,7 +4,7 @@ Timelapse Orchestrator for Adaptive Multi-Embryo Acquisition
 Manages background timelapse acquisition with:
 - Per-embryo stop conditions (e.g., hatching detection)
 - Dynamic interval adjustment
-- Non-blocking operation (copilot stays responsive)
+- Non-blocking operation (agent stays responsive)
 - Event-driven status updates
 """
 
@@ -371,7 +371,7 @@ class TimelapseOrchestrator:
     """
     Background timelapse manager
 
-    Runs independently of copilot conversation. The copilot can:
+    Runs independently of agent conversation. The agent can:
     - Query status anytime via get_status()
     - Modify parameters via modify_embryo()
     - Stop embryos or entire timelapse via stop()
@@ -746,7 +746,7 @@ class TimelapseOrchestrator:
                     timestamp=acquisition_timestamp
                 )
 
-                # Note: VOLUME_ACQUIRED event is emitted by the callback (copilot.on_volume_acquired)
+                # Note: VOLUME_ACQUIRED event is emitted by the callback (agent.on_volume_acquired)
                 # to avoid duplicate events and include more metadata
 
                 # Callback for volume/image processing

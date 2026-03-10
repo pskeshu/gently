@@ -170,7 +170,7 @@ class PeerStatus:
     embryo_count: int = 0
     total_timepoints: int = 0
     uptime_seconds: float = 0.0
-    copilot_mode: str = "run"
+    agent_mode: str = "run"
     active_plan: str = ""
     version: str = ""
 
@@ -181,7 +181,7 @@ class PeerStatus:
             "embryo_count": self.embryo_count,
             "total_timepoints": self.total_timepoints,
             "uptime_seconds": self.uptime_seconds,
-            "copilot_mode": self.copilot_mode,
+            "agent_mode": self.agent_mode,
             "active_plan": self.active_plan,
             "version": self.version,
         }
@@ -194,7 +194,7 @@ class PeerStatus:
             embryo_count=d.get("embryo_count", 0),
             total_timepoints=d.get("total_timepoints", 0),
             uptime_seconds=d.get("uptime_seconds", 0.0),
-            copilot_mode=d.get("copilot_mode", "run"),
+            agent_mode=d.get("agent_mode", "run"),
             active_plan=d.get("active_plan", ""),
             version=d.get("version", ""),
         )

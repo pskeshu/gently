@@ -12,7 +12,7 @@ from .images import create_router as create_images_router
 from .volumes import create_router as create_volumes_router
 from .data import create_router as create_data_router
 from .websocket import create_router as create_websocket_router
-from .agent_ws import create_router as create_copilot_ws_router
+from .agent_ws import create_router as create_agent_ws_router
 from .campaigns import create_router as create_campaigns_router
 
 
@@ -26,7 +26,7 @@ def register_all_routes(server):
         create_volumes_router,
         create_data_router,
         create_websocket_router,
-        create_copilot_ws_router,
+        create_agent_ws_router,
     ):
         router = factory(server)
         server.app.include_router(router)

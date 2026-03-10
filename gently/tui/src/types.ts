@@ -2,7 +2,7 @@
  * Shared TypeScript types for the Gently TUI.
  *
  * Mirrors the WebSocket message protocol between the Ink TUI
- * and the Python copilot backend.
+ * and the Python agent backend.
  */
 
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ export interface ConnectedMessage {
   resumed: boolean;
   // Mesh peers
   peer_count?: number;
-  // Copilot mode
+  // Agent mode
   mode?: string;
   // Startup wizard metadata
   wizard?: WizardMeta;
@@ -192,7 +192,7 @@ export type ClientMessage =
 // UI models
 // ---------------------------------------------------------------------------
 
-export type MessageRole = "user" | "copilot" | "system" | "tool";
+export type MessageRole = "user" | "agent" | "system" | "tool";
 
 export interface ChatEntry {
   id: string;
@@ -282,7 +282,7 @@ export interface ThemeColors {
   secondary: string;
   accent: string;
   user: string;
-  copilot: string;
+  agent: string;
   system: string;
   tool: string;
   success: string;

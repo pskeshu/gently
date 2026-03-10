@@ -4,13 +4,13 @@ Core Bluesky plans for DiSPIM hardware control.
 These plans run on the DEVICE LAYER SERVER (no Claude API access).
 They are "dumb" — they follow fixed sequences without AI guidance.
 
-For AI-guided calibration, see calibration_plans.py (runs on copilot side).
+For AI-guided calibration, see calibration_plans.py (runs on agent side).
 For multi-embryo orchestration, see multi_embryo_plans.py.
 For agent planning context (campaigns, plan items), see context/_plans.py.
 
 Plan hierarchy:
     plans.py                  → Device-side Bluesky plans (focus, acquire, calibrate)
-    calibration_plans.py      → Copilot-side Vision-guided calibration
+    calibration_plans.py      → Agent-side Vision-guided calibration
     multi_embryo_plans.py     → Loops calibration_plans over multiple embryos
     context/_plans.py         → Agent memory (PlanItem CRUD, unrelated to hardware)
 

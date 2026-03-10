@@ -1,7 +1,7 @@
 """
 MLSubagent — Autonomous background agent for ML training tasks.
 
-Spawned by the copilot via asyncio.create_task(). Runs its own tool
+Spawned by the agent via asyncio.create_task(). Runs its own tool
 execution loop, communicating back via the event bus.
 """
 

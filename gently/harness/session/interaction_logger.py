@@ -1,10 +1,10 @@
 """
-Structured Interaction Logger for Copilot Sessions
+Structured Interaction Logger for Agent Sessions
 
-Logs structured records of all copilot interactions for:
+Logs structured records of all agent interactions for:
 - Post-hoc analysis of usage patterns
 - Identifying recurring issues and corrections
-- Research into self-improving copilot systems
+- Research into self-improving agent systems
 
 Each interaction captures:
 - User prompt and system state at time of request
@@ -38,9 +38,9 @@ class ToolCallRecord:
 @dataclass
 class InteractionRecord:
     """
-    Complete record of a single user<->copilot interaction
+    Complete record of a single user<->agent interaction
 
-    An interaction is one user message and the copilot's response,
+    An interaction is one user message and the agent's response,
     including any tool calls made during that response.
     """
     # Unique ID for this interaction
@@ -94,13 +94,13 @@ class InteractionRecord:
 
 class InteractionLogger:
     """
-    Logs structured interaction records for copilot sessions
+    Logs structured interaction records for agent sessions
 
     Automatically detects correction patterns to identify when
-    the copilot's response didn't match user intent.
+    the agent's response didn't match user intent.
     """
 
-    # Phrases that indicate the user is correcting the copilot
+    # Phrases that indicate the user is correcting the agent
     CORRECTION_INDICATORS = [
         "no,",
         "no ",

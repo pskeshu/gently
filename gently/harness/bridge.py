@@ -1,5 +1,5 @@
 """
-Copilot Bridge - WebSocket adapter for MicroscopyCopilot
+Agent Bridge - WebSocket adapter for MicroscopyAgent
 
 Wraps the async-generator-based handle_message_stream() into a
 future-based API suitable for WebSocket communication. Converts
@@ -18,9 +18,9 @@ from .commands import get_command_registry, CommandCategory
 logger = logging.getLogger(__name__)
 
 
-class CopilotBridge:
+class AgentBridge:
     """
-    Thin adapter between MicroscopyCopilot and a WebSocket transport.
+    Thin adapter between MicroscopyAgent and a WebSocket transport.
 
     Converts ``handle_message_stream()`` (an async generator that uses
     ``asend()`` for choice responses) into a callback-driven API:
@@ -33,12 +33,12 @@ class CopilotBridge:
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        The copilot instance to wrap.
+    agent : MicroscopyAgent
+        The agent instance to wrap.
     """
 
-    def __init__(self, copilot):
-        self.copilot = copilot
+    def __init__(self, agent):
+        self.agent = agent
         self._active_stream: Optional[asyncio.Task] = None
         self._launch_info: Dict[str, Any] = {}
         self._wizard = None  # StartupWizard, set by init_wizard()
@@ -50,9 +50,9 @@ class CopilotBridge:
 
     def get_session_briefing(self) -> str:
         """Generate briefing for new sessions. Returns '' if not applicable."""
-        if not hasattr(self.copilot, 'memory') or not self.copilot.memory:
+        if not hasattr(self.agent, 'memory') or not self.agent.memory:
             return ""
-        return self.copilot.memory.get_session_briefing()
+        return self.agent.memory.get_session_briefing()
 
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""
@@ -60,7 +60,7 @@ class CopilotBridge:
         self._context_store = context_store
         self._wizard = StartupWizard(
             context_store=context_store,
-            session_id=self.copilot.session_id,
+            session_id=self.agent.session_id,
             claude_client=claude_client,
         )
 
@@ -71,7 +71,7 @@ class CopilotBridge:
         choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
     ) -> None:
         """
-        Stream a copilot response over WebSocket.
+        Stream an agent response over WebSocket.
 
         Parameters
         ----------
@@ -83,7 +83,7 @@ class CopilotBridge:
             Called with choice_data dict; must return a Future that
             resolves to the user's selected option ID string.
         """
-        stream_iter = self.copilot.handle_message_stream(message).__aiter__()
+        stream_iter = self.agent.handle_message_stream(message).__aiter__()
         pending_choice_result = None
 
         try:
@@ -99,7 +99,7 @@ class CopilotBridge:
                     await send_fn({
                         "type": "stream_end",
                         "tokens": self._get_token_snapshot(),
-                        "mode": self.copilot.mode,
+                        "mode": self.agent.mode,
                     })
                     return
 
@@ -134,7 +134,7 @@ class CopilotBridge:
         """
         Execute a slash command and send the result.
 
-        Delegates to the copilot's command handling. For commands that
+        Delegates to the agent's command handling. For commands that
         need Rich rendering, we return structured data instead.
 
         Parameters
@@ -261,11 +261,11 @@ class CopilotBridge:
 
         if cmd == "/sessions":
             sessions = []
-            if hasattr(self.copilot, 'store') and self.copilot.store:
-                raw = self.copilot.store.list_sessions()
+            if hasattr(self.agent, 'store') and self.agent.store:
+                raw = self.agent.store.list_sessions()
                 for s in raw:
                     sid = s.get("session_id", "unknown")
-                    embryos = self.copilot.store.list_embryos(sid)
+                    embryos = self.agent.store.list_embryos(sid)
                     sessions.append({
                         "session_id": sid,
                         "name": s.get("name", ""),
@@ -317,12 +317,12 @@ class CopilotBridge:
             return
 
         if cmd == "/save":
-            success = self.copilot.save_session()
+            success = self.agent.save_session()
             if success:
                 await send_fn({
                     "type": "command_result",
                     "command": "/save",
-                    "content": {"text": f"Session saved: {self.copilot.session_id}"},
+                    "content": {"text": f"Session saved: {self.agent.session_id}"},
                 })
             else:
                 await send_fn({
@@ -359,7 +359,7 @@ class CopilotBridge:
             return
 
         if cmd == "/wizard":
-            # Handled by the WebSocket route (copilot_ws.py), not the bridge.
+            # Handled by the WebSocket route (agent_ws.py), not the bridge.
             # If we reach here, it means the wizard loop called handle_command
             # — i.e. /wizard was typed while the wizard is already running.
             await send_fn({
@@ -484,33 +484,33 @@ class CopilotBridge:
             subcmd = parts[1].strip().lower() if len(parts) > 1 else None
 
             if subcmd == "exit":
-                msg = self.copilot.exit_plan_mode()
+                msg = self.agent.exit_plan_mode()
                 await send_fn({
                     "type": "command_result",
                     "command": "/plan",
                     "content": {
                         "text": msg,
-                        "mode": self.copilot.mode,
+                        "mode": self.agent.mode,
                     },
                 })
             elif subcmd == "status":
-                summary = self.copilot._get_active_plan_summary()
+                summary = self.agent._get_active_plan_summary()
                 if summary:
-                    text = f"Mode: {self.copilot.mode}\n\n{summary}"
+                    text = f"Mode: {self.agent.mode}\n\n{summary}"
                 else:
-                    text = f"Mode: {self.copilot.mode}\nNo active campaigns found."
+                    text = f"Mode: {self.agent.mode}\nNo active campaigns found."
                 await send_fn({
                     "type": "command_result",
                     "command": "/plan",
                     "content": {
                         "text": text,
-                        "mode": self.copilot.mode,
+                        "mode": self.agent.mode,
                     },
                 })
             else:
                 # Enter plan mode (or show status if already in it)
-                if self.copilot.mode == "plan":
-                    summary = self.copilot._get_active_plan_summary()
+                if self.agent.mode == "plan":
+                    summary = self.agent._get_active_plan_summary()
                     text = "Already in plan mode."
                     if summary:
                         text += f"\n\n{summary}"
@@ -524,7 +524,7 @@ class CopilotBridge:
                         },
                     })
                 else:
-                    msg = self.copilot.enter_plan_mode()
+                    msg = self.agent.enter_plan_mode()
                     await send_fn({
                         "type": "command_result",
                         "command": "/plan",
@@ -547,10 +547,10 @@ class CopilotBridge:
             parts = command.strip().split(maxsplit=1)
             if len(parts) > 1:
                 session_id = parts[1].strip()
-                success = self.copilot.resume_session(session_id)
+                success = self.agent.resume_session(session_id)
                 if success:
-                    embryo_count = len(self.copilot.experiment.embryos)
-                    msg_count = len(self.copilot.conversation_history)
+                    embryo_count = len(self.agent.experiment.embryos)
+                    msg_count = len(self.agent.conversation_history)
                     await send_fn({
                         "type": "command_result",
                         "command": "/resume",
@@ -605,7 +605,7 @@ class CopilotBridge:
                 else:
                     session_id = arg
 
-                result = self.copilot.import_embryos_from_session(session_id)
+                result = self.agent.import_embryos_from_session(session_id)
                 if result.get("success"):
                     imported = result.get("imported", [])
                     skipped = result.get("skipped", [])
@@ -665,7 +665,7 @@ class CopilotBridge:
                 else:
                     i += 1
 
-            session_id = self.copilot.session_id
+            session_id = self.agent.session_id
             if not session_id:
                 await send_fn({
                     "type": "command_result",
@@ -676,7 +676,7 @@ class CopilotBridge:
 
             try:
                 from gently.app.video_maker import discover_volumes, create_timelapse_video
-                storage_path = self.copilot.storage_path
+                storage_path = self.agent.storage_path
                 session_images_dir = storage_path / "images" / session_id
 
                 if not session_images_dir.exists():
@@ -758,7 +758,7 @@ class CopilotBridge:
                     "content": {"text": f"Running benchmark ({n_volumes} volumes, {n_slices} slices, {n_warmup} warmup)..."},
                 })
                 results = await run_benchmark(
-                    self.copilot,
+                    self.agent,
                     n_volumes=n_volumes,
                     n_slices=n_slices,
                     n_warmup=n_warmup,
@@ -822,11 +822,11 @@ class CopilotBridge:
 
     def _get_status_data(self) -> dict:
         """Build structured status data."""
-        exp = self.copilot.experiment
-        client = self.copilot.client
+        exp = self.agent.experiment
+        client = self.agent.client
 
         return {
-            "session_id": self.copilot.session_id,
+            "session_id": self.agent.session_id,
             "connected": client.is_connected if client else False,
             "embryo_count": len(exp.embryos),
             "embryo_ids": list(exp.embryos.keys()),
@@ -835,7 +835,7 @@ class CopilotBridge:
 
     def _get_embryos_data(self, embryo_id: str = None) -> dict:
         """Build structured embryo data."""
-        exp = self.copilot.experiment
+        exp = self.agent.experiment
         if embryo_id:
             embryo = exp.get_embryo_by_any_name(embryo_id)
             if embryo:
@@ -863,8 +863,8 @@ class CopilotBridge:
         return self._get_token_snapshot()
 
     def _get_token_snapshot(self) -> dict:
-        """Current token usage from the copilot."""
-        c = self.copilot
+        """Current token usage from the agent."""
+        c = self.agent
         input_t = getattr(c, "total_input_tokens", 0)
         output_t = getattr(c, "total_output_tokens", 0)
         api_calls = getattr(c, "api_call_count", 0)
@@ -878,15 +878,15 @@ class CopilotBridge:
     def get_connect_metadata(self) -> dict:
         """Metadata sent to the TUI on connect."""
         import gently
-        exp = self.copilot.experiment
+        exp = self.agent.experiment
         meta = {
-            "session_id": self.copilot.session_id,
+            "session_id": self.agent.session_id,
             "commands": self.get_commands_json(),
             "version": getattr(gently, "__version__", "dev"),
             "tokens": self._get_token_snapshot(),
             "embryo_count": len(exp.embryos),
             "campaign_count": self._get_campaign_count(),
-            # Launch info fields (set by launch_copilot.py for TUI mode)
+            # Launch info fields (set by launch_agent.py for TUI mode)
             "device_connected": self._launch_info.get("device_connected", False),
             "sam_available": self._launch_info.get("sam_available", False),
             "offline": self._launch_info.get("offline", False),
@@ -894,7 +894,7 @@ class CopilotBridge:
             "viz_url": self._launch_info.get("viz_url", None),
             "log_path": self._launch_info.get("log_path", ""),
             "resumed": self._launch_info.get("resumed", False),
-            "mode": self.copilot.mode,
+            "mode": self.agent.mode,
             "peer_count": self._get_peer_count(),
         }
         # Wizard metadata (if initialized)
@@ -930,7 +930,7 @@ class CopilotBridge:
                 caps.append(f"{p.capabilities.storage_free_gb:.0f}GB free")
 
             cap_str = ", ".join(caps) if caps else "no special capabilities"
-            status = p.status.copilot_mode or "unknown"
+            status = p.status.agent_mode or "unknown"
             embryos = p.status.embryo_count
 
             stale = " (stale)" if p.is_stale else ""
@@ -954,11 +954,11 @@ class CopilotBridge:
     def _get_sessions_list(self) -> list:
         """Return a list of saved sessions with metadata."""
         sessions = []
-        if hasattr(self.copilot, "store") and self.copilot.store:
-            raw = self.copilot.store.list_sessions()
+        if hasattr(self.agent, "store") and self.agent.store:
+            raw = self.agent.store.list_sessions()
             for s in raw:
                 sid = s.get("session_id", "unknown")
-                embryos = self.copilot.store.list_embryos(sid)
+                embryos = self.agent.store.list_embryos(sid)
                 sessions.append({
                     "session_id": sid,
                     "name": s.get("name", ""),
@@ -969,7 +969,7 @@ class CopilotBridge:
 
     def _get_timelapse_data(self) -> dict:
         """Build structured timelapse status."""
-        orch = getattr(self.copilot, "timelapse_orchestrator", None)
+        orch = getattr(self.agent, "timelapse_orchestrator", None)
         if not orch:
             return {"text": "No timelapse running."}
 
@@ -978,7 +978,7 @@ class CopilotBridge:
 
     def _get_timeline_data(self, args: list) -> dict:
         """Build structured timeline data."""
-        tm = getattr(self.copilot, "timeline_manager", None)
+        tm = getattr(self.agent, "timeline_manager", None)
         if not tm:
             return {"text": "Timeline not available."}
 
@@ -1028,7 +1028,7 @@ class CopilotBridge:
 
     def _get_detectors_data(self) -> dict:
         """Build structured detector/perception data."""
-        pm = getattr(self.copilot, "perception_manager", None)
+        pm = getattr(self.agent, "perception_manager", None)
         if not pm or not pm.sessions:
             return {"text": "No active perception sessions."}
 
@@ -1630,7 +1630,7 @@ class CopilotBridge:
 
     def _get_history_data(self) -> dict:
         """Build structured conversation history."""
-        history = self.copilot.conversation_history[-20:]  # Last 20 messages
+        history = self.agent.conversation_history[-20:]  # Last 20 messages
         if not history:
             return {"text": "No conversation history."}
 
@@ -1650,7 +1650,7 @@ class CopilotBridge:
             # Truncate long messages
             if len(content) > 120:
                 content = content[:117] + "..."
-            prefix = "You" if role == "user" else "Copilot"
+            prefix = "You" if role == "user" else "Agent"
             lines.append(f"  [{prefix}] {content}")
 
         return {"text": "\n".join(lines)}

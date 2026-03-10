@@ -1,7 +1,7 @@
 """
 Plan → Execution Bridge — run-mode tools for executing plan items.
 
-These tools let the copilot translate structured plan items into
+These tools let the agent translate structured plan items into
 live microscope actions: configure acquisition, enable detectors,
 start timelapses, and track completion.
 """
@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import (
-    require_copilot,
+    require_agent,
     require_timelapse_orchestrator,
 )
 
@@ -45,11 +45,11 @@ async def execute_plan_item(
     context: Dict = None,
 ) -> str:
     """Execute a planned imaging item."""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    cs = getattr(copilot, "context_store", None)
+    cs = getattr(agent, "context_store", None)
     if not cs:
         return "Error: Context store not available"
 
@@ -80,7 +80,7 @@ async def execute_plan_item(
     actions: List[str] = []
 
     # 4. Configure acquisition params on the experiment state
-    experiment = getattr(copilot, "experiment", None)
+    experiment = getattr(agent, "experiment", None)
     if experiment and embryo_ids:
         if spec.num_slices:
             for eid in embryo_ids:
@@ -99,7 +99,7 @@ async def execute_plan_item(
 
     # 5. Enable detectors
     if spec.detectors:
-        detector_registry = getattr(copilot, "detector_registry", None)
+        detector_registry = getattr(agent, "detector_registry", None)
         if detector_registry:
             for det_name in spec.detectors:
                 try:
@@ -109,7 +109,7 @@ async def execute_plan_item(
                     actions.append(f"detector '{det_name}' failed: {e}")
 
     # 6. Link session to campaign
-    session_id = getattr(copilot, "session_id", None)
+    session_id = getattr(agent, "session_id", None)
     if session_id:
         try:
             cs.link_session_campaign(session_id, item.campaign_id)
@@ -126,7 +126,7 @@ async def execute_plan_item(
     actions.append(f"plan item status → in_progress")
 
     # 8. Start timelapse via orchestrator
-    orchestrator = getattr(copilot, "timelapse_orchestrator", None)
+    orchestrator = getattr(agent, "timelapse_orchestrator", None)
     if orchestrator:
         try:
             stop_cond = spec.stop_condition or "manual"
@@ -195,11 +195,11 @@ async def complete_current_plan_item(
     context: Dict = None,
 ) -> str:
     """Complete a plan item and report newly unblocked items."""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    cs = getattr(copilot, "context_store", None)
+    cs = getattr(agent, "context_store", None)
     if not cs:
         return "Error: Context store not available"
 

@@ -8,7 +8,7 @@ from typing import Dict
 import json
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_copilot, get_embryo_or_error
+from gently.harness.tools.helpers import require_agent, get_embryo_or_error
 
 
 @tool(
@@ -26,10 +26,10 @@ Returns all embryo IDs with their coordinates - no parameters needed.""",
 )
 def get_experiment_summary(context: Dict) -> str:
     """Get full experiment summary"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
-    return copilot.experiment.get_summary()
+    return agent.experiment.get_summary()
 
 
 @tool(
@@ -46,13 +46,13 @@ The embryo_id can be like "embryo_1", "embryo_3", etc.""",
 )
 def query_embryo_status(embryo_id: str, context: Dict) -> str:
     """Query embryo status"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
-        return f"{err}. Available: {list(copilot.experiment.embryos.keys())}"
+        return f"{err}. Available: {list(agent.experiment.embryos.keys())}"
 
     return json.dumps(embryo.to_dict(), indent=2)
 
@@ -69,11 +69,11 @@ Requires a reason to document why the embryo is being skipped. Can be resumed la
 )
 def skip_embryo(embryo_id: str, reason: str, context: Dict) -> str:
     """Skip embryo in future acquisitions"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
@@ -95,16 +95,16 @@ Unlike skip_embryo, this completely removes the embryo from tracking. Use carefu
 )
 def remove_embryo(embryo_id: str, context: Dict) -> str:
     """Remove embryo from experiment completely"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
     actual_id = embryo.id
-    if copilot.experiment.remove_embryo(actual_id):
+    if agent.experiment.remove_embryo(actual_id):
         return f"Removed {actual_id} from experiment"
     else:
         return f"Failed to remove {embryo_id}"
@@ -121,11 +121,11 @@ Use when user wants to start imaging an embryo again after it was skipped (e.g.,
 )
 def resume_embryo(embryo_id: str, context: Dict) -> str:
     """Resume skipped embryo"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
@@ -147,11 +147,11 @@ Nicknames make conversation more natural - you can then refer to embryos by nick
 )
 def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
     """Assign nickname to embryo"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
@@ -183,11 +183,11 @@ def modify_parameters(
     context: Dict
 ) -> str:
     """Modify embryo acquisition parameters"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 

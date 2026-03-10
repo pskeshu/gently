@@ -34,7 +34,7 @@ interface StatusBarProps {
   notification: { level: string; title: string; body?: string } | null;
   onClearNotification: () => void;
   wizardActive?: boolean;
-  copilotMode?: string;
+  agentMode?: string;
   // Browser mode
   browserOpen: boolean;
   onCloseBrowser: () => void;
@@ -74,7 +74,7 @@ export function StatusBar({
   notification,
   onClearNotification,
   wizardActive,
-  copilotMode = "run",
+  agentMode = "run",
   browserOpen,
   onCloseBrowser,
   send,
@@ -311,7 +311,7 @@ export function StatusBar({
     return (
       <Box justifyContent="space-between">
         <Box>
-          <ModeBadge mode={copilotMode} theme={theme} />
+          <ModeBadge mode={agentMode} theme={theme} />
           {sep}
           <Text color={levelColor} bold>
             {notification.title}
@@ -332,7 +332,7 @@ export function StatusBar({
     return (
       <Box justifyContent="space-between">
         <Box>
-          <ModeBadge mode={copilotMode} theme={theme} />
+          <ModeBadge mode={agentMode} theme={theme} />
           {sep}
           <Text color={theme.info} bold>setting up</Text>
           <Text color={theme.muted}> — answer a few questions to get started</Text>
@@ -370,7 +370,7 @@ export function StatusBar({
       {/* Status line (always at the bottom) */}
       <Box justifyContent="space-between">
         <Box>
-          <ModeBadge mode={copilotMode} theme={theme} />
+          <ModeBadge mode={agentMode} theme={theme} />
           {sep}
           <Text color={deviceDot.color}>{deviceDot.char}</Text>
           <Text color={theme.muted}> {deviceDot.label}</Text>

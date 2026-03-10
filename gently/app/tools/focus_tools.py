@@ -78,10 +78,10 @@ async def fine_focus(
     embryo_id : str, optional
         Embryo to associate this focus measurement with. If provided, logs to embryo's focus_history.
     context : dict
-        Execution context with client and copilot
+        Execution context with client and agent
     """
     client = context.get('client')
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
     if not client:
         return "Error: No microscope client connected"
@@ -167,8 +167,8 @@ async def fine_focus(
 
         # Log focus datapoint to embryo's focus_history if embryo_id provided
         logged_to_embryo = False
-        if embryo_id and copilot:
-            embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+        if embryo_id and agent:
+            embryo = agent.experiment.get_embryo_by_any_name(embryo_id)
             if embryo:
                 embryo.add_focus_datapoint(
                     galvo=galvo_position,
@@ -307,14 +307,14 @@ async def get_focus_history(
     embryo_id : str
         Embryo to query focus history for
     context : dict
-        Execution context with copilot
+        Execution context with agent
     """
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot:
-        return "Error: No copilot context available"
+    if not agent:
+        return "Error: No agent context available"
 
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+    embryo = agent.experiment.get_embryo_by_any_name(embryo_id)
     if not embryo:
         return f"Error: Embryo '{embryo_id}' not found"
 

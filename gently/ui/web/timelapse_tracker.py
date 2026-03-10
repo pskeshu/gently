@@ -45,7 +45,7 @@ class TimelapseStateTracker:
             self.total_timepoints = 0
 
         elif event_type == "SESSION_RESTORED":
-            # Capture session ID when copilot resumes a session
+            # Capture session ID when agent resumes a session
             self.session_id = data.get("session_id")
 
         elif event_type == "ACQUISITION_STARTED":

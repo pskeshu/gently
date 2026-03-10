@@ -6,7 +6,7 @@ This is the unified entry point that integrates all system components:
 - Session Management
 - Analysis Pipelines
 - Tool Registry
-- Copilot
+- Agent
 
 Usage:
     from gently import Gently
@@ -130,8 +130,8 @@ class Gently:
             'morphology_analysis': create_morphology_analysis_pipeline(),
         }
 
-        # Copilot instance (lazy loaded)
-        self._copilot = None
+        # Agent instance (lazy loaded)
+        self._agent = None
 
         # Visualization server (lazy loaded)
         self._viz_server = None
@@ -509,31 +509,31 @@ class Gently:
         self._event_bus.publish(event_type, data, source="gently")
 
     # =========================================================================
-    # Copilot Access
+    # Agent Access
     # =========================================================================
 
-    def get_copilot(self, **kwargs):
+    def get_agent(self, **kwargs):
         """
-        Get or create the copilot instance
+        Get or create the agent instance
 
         Parameters
         ----------
         **kwargs
-            Arguments passed to MicroscopyCopilot constructor
+            Arguments passed to MicroscopyAgent constructor
 
         Returns
         -------
-        MicroscopyCopilot
-            The copilot instance
+        MicroscopyAgent
+            The agent instance
         """
-        if self._copilot is None:
-            from .app.agent import MicroscopyCopilot
-            self._copilot = MicroscopyCopilot(
+        if self._agent is None:
+            from .app.agent import MicroscopyAgent
+            self._agent = MicroscopyAgent(
                 storage_path=self.storage_path,
                 store=self._store,
                 **kwargs
             )
-        return self._copilot
+        return self._agent
 
     # =========================================================================
     # Visualization Server

@@ -11,7 +11,10 @@ from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 import numpy as np
 
-from .stages import STAGES, STAGE_CRITERIA, TRANSITION_ZONES, DevelopmentalStage
+def _get_stages():
+    """Lazy import of stage definitions from the active organism plugin."""
+    from .stages import STAGES, STAGE_CRITERIA, TRANSITION_ZONES, DevelopmentalStage
+    return STAGES, STAGE_CRITERIA, TRANSITION_ZONES, DevelopmentalStage
 
 
 @dataclass
@@ -226,6 +229,7 @@ class PerceptionSession:
             time_in_stage = 0.0
 
         # Get expected duration for this stage from STAGE_CRITERIA
+        _, STAGE_CRITERIA, _, _ = _get_stages()
         stage_info = STAGE_CRITERIA.get(current_stage, {})
         expected_duration = stage_info.get("typical_duration_min")
 

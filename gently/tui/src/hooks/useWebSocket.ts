@@ -57,7 +57,7 @@ export function useWebSocket(
               s.setWizardActive(false);
             }
             if (msg.mode && typeof msg.mode === "string") {
-              s.setCopilotMode(msg.mode);
+              s.setAgentMode(msg.mode);
             }
             break;
 
@@ -67,7 +67,7 @@ export function useWebSocket(
             break;
 
           case "text":
-            s.appendCopilotText(msg.text);
+            s.appendAgentText(msg.text);
             break;
 
           case "tool_start":
@@ -95,7 +95,7 @@ export function useWebSocket(
             }
             // Mode switch — update status bar silently, no chat message
             if (msg.content?.mode && typeof msg.content.mode === "string") {
-              s.setCopilotMode(msg.content.mode);
+              s.setAgentMode(msg.content.mode);
               if (msg.command === "/plan") break;
             }
             const text = msg.error

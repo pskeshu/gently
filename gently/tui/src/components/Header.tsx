@@ -15,7 +15,7 @@ export function Header({ theme }: HeaderProps) {
   return (
     <Box paddingX={1}>
       <Text bold color={theme.primary}>
-        ✦ Gently Copilot
+        ✦ Gently
       </Text>
     </Box>
   );

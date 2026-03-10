@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_copilot
+from gently.harness.tools.helpers import require_agent
 from gently.core.coordinates import (
     stage_to_pixel_position,
     get_um_per_pixel,
@@ -45,11 +45,11 @@ async def detect_embryos(
     context: Dict = None
 ) -> str:
     """Detect embryos automatically"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     if not client:
         return "Error: Microscope not connected. Cannot detect embryos in offline mode."
@@ -77,7 +77,7 @@ async def detect_embryos(
                     'x': emb.get('stage_x_um', emb.get('stage_x', 0)),
                     'y': emb.get('stage_y_um', emb.get('stage_y', 0))
                 }
-                copilot.experiment.add_embryo(
+                agent.experiment.add_embryo(
                     embryo_id=emb['embryo_id'],
                     position=position,
                     confidence=emb.get('confidence', 0.0),
@@ -115,11 +115,11 @@ async def manual_mark_embryos(
     context: Dict = None
 ) -> str:
     """Manual embryo marking - shows existing embryos, adds new ones with unique IDs"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     if not client:
         return "Error: Microscope not connected. Cannot mark embryos in offline mode."
@@ -127,7 +127,7 @@ async def manual_mark_embryos(
     try:
         # Build list of existing embryos with their stage positions
         existing_embryos = []
-        for embryo_id, embryo_state in copilot.experiment.embryos.items():
+        for embryo_id, embryo_state in agent.experiment.embryos.items():
             pos = embryo_state.stage_position or {}
             existing_embryos.append({
                 'embryo_id': embryo_id,
@@ -147,7 +147,7 @@ async def manual_mark_embryos(
                 return "No embryos marked. Close the window after clicking on embryo centers."
 
             # Find next available embryo ID
-            existing_ids = set(copilot.experiment.embryos.keys())
+            existing_ids = set(agent.experiment.embryos.keys())
             max_num = 0
             for eid in existing_ids:
                 if eid.startswith('embryo_'):
@@ -171,7 +171,7 @@ async def manual_mark_embryos(
 
                 emb['embryo_id'] = new_id
 
-                copilot.experiment.add_embryo(
+                agent.experiment.add_embryo(
                     embryo_id=new_id,
                     position=position,
                     confidence=emb.get('confidence', 1.0),
@@ -206,16 +206,16 @@ async def edit_embryos(
     context: Dict = None
 ) -> str:
     """Interactive embryo editor - add, remove, or move embryo positions in napari"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     if not client:
         return "Error: Microscope not connected. Cannot edit embryos in offline mode."
 
-    if not copilot.experiment.embryos:
+    if not agent.experiment.embryos:
         return "No embryos to edit. Run detect_embryos or manual_mark_embryos first."
 
     try:
@@ -235,7 +235,7 @@ async def edit_embryos(
         existing_embryos = []
         um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py
 
-        for embryo_id, embryo_state in copilot.experiment.embryos.items():
+        for embryo_id, embryo_state in agent.experiment.embryos.items():
             if embryo_state.should_skip:
                 continue  # Don't show skipped embryos
 
@@ -274,7 +274,7 @@ async def edit_embryos(
 
             # Clear existing embryos and rebuild from edit result
             # Keep track of which were removed
-            old_ids = set(copilot.experiment.embryos.keys())
+            old_ids = set(agent.experiment.embryos.keys())
 
             # Find next available embryo ID for new ones
             max_num = 0
@@ -303,12 +303,12 @@ async def edit_embryos(
                 }
 
                 # Update or add embryo
-                if emb_id in copilot.experiment.embryos:
+                if emb_id in agent.experiment.embryos:
                     # Update existing
-                    copilot.experiment.embryos[emb_id].stage_position = position
+                    agent.experiment.embryos[emb_id].stage_position = position
                 else:
                     # Add new
-                    copilot.experiment.add_embryo(
+                    agent.experiment.add_embryo(
                         embryo_id=emb_id,
                         position=position,
                         confidence=emb.get('confidence', 1.0),
@@ -320,8 +320,8 @@ async def edit_embryos(
             # Remove embryos that were deleted in editor
             removed_ids = old_ids - new_ids
             for rid in removed_ids:
-                if rid in copilot.experiment.embryos:
-                    del copilot.experiment.embryos[rid]
+                if rid in agent.experiment.embryos:
+                    del agent.experiment.embryos[rid]
 
             # Build summary
             summary = f"Edit complete: {len(new_ids)} embryos"
@@ -357,16 +357,16 @@ async def show_detected_embryos(
     context: Dict = None
 ) -> str:
     """Show detected embryos visualization using experiment.embryos as source of truth"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     if not client:
         return "Error: Microscope not connected. Cannot show embryos in offline mode."
 
-    if not copilot.experiment.embryos:
+    if not agent.experiment.embryos:
         return "No embryos in experiment. Run detect_embryos first."
 
     try:
@@ -383,7 +383,7 @@ async def show_detected_embryos(
         image_center_y = image.shape[0] / 2
 
         embryos = []
-        for embryo_id, embryo_state in copilot.experiment.embryos.items():
+        for embryo_id, embryo_state in agent.experiment.embryos.items():
             pos = embryo_state.stage_position or {}
 
             stage_x = pos.get('x', current_stage[0])

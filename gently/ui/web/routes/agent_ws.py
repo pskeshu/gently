@@ -1,7 +1,7 @@
 """
-Copilot WebSocket route — /ws/copilot
+Agent WebSocket route — /ws/agent
 
-Provides the TUI ↔ Python copilot bridge. The Ink TUI connects here
+Provides the TUI ↔ agent bridge. The Ink TUI connects here
 to send chat messages and receive streaming responses, tool calls,
 choice pickers, command results, and notifications.
 """
@@ -18,12 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 def create_router(server) -> APIRouter:
-    """Create the /ws/copilot router.
+    """Create the /ws/agent router.
 
     Parameters
     ----------
     server : VisualizationServer
-        Must have a ``copilot_bridge`` attribute (set by launch_copilot.py
+        Must have a ``agent_bridge`` attribute (set by launch_gently.py
         after the bridge is created).
     """
     router = APIRouter()
@@ -120,15 +120,15 @@ def create_router(server) -> APIRouter:
             return wizard_task.exception()
         return None
 
-    @router.websocket("/ws/copilot")
-    async def copilot_websocket(websocket: WebSocket):
+    @router.websocket("/ws/agent")
+    async def agent_websocket(websocket: WebSocket):
         await websocket.accept()
 
-        bridge = getattr(server, "copilot_bridge", None)
+        bridge = getattr(server, "agent_bridge", None)
         if bridge is None:
             await websocket.send_json({
                 "type": "error",
-                "error": "Copilot bridge not initialized",
+                "error": "Agent bridge not initialized",
             })
             await websocket.close()
             return
@@ -476,7 +476,7 @@ def create_router(server) -> APIRouter:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            logger.error(f"Copilot WS error: {e}", exc_info=True)
+            logger.error(f"Agent WS error: {e}", exc_info=True)
         finally:
             # Unsubscribe from mesh events
             for unsub in _mesh_unsubs:
@@ -554,7 +554,7 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                     "hostname": p.hostname,
                     "ip_address": p.ip_address,
                     "viz_port": p.viz_port,
-                    "mode": p.status.copilot_mode if p.status else "unknown",
+                    "mode": p.status.agent_mode if p.status else "unknown",
                     "embryo_count": p.status.embryo_count if p.status else 0,
                     "is_trusted": p.is_trusted,
                     "tls_enabled": p.tls_enabled,
@@ -594,7 +594,7 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                     "hostname": p.hostname,
                     "ip_address": p.ip_address,
                     "viz_port": p.viz_port,
-                    "mode": p.status.copilot_mode if p.status else "unknown",
+                    "mode": p.status.agent_mode if p.status else "unknown",
                     "embryo_count": p.status.embryo_count if p.status else 0,
                     "is_trusted": p.is_trusted,
                     "tls_enabled": p.tls_enabled,

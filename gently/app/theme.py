@@ -1,5 +1,5 @@
 """
-Theme system for Microscopy Copilot
+Theme system for Microscopy Agent
 
 Provides multiple color themes with dark/light variants
 and runtime switching support via /theme command.
@@ -22,7 +22,7 @@ class Theme:
 
     # Semantic colors for different message types
     user: str
-    copilot: str
+    agent: str
     system: str
     tool: str
 
@@ -39,7 +39,7 @@ class Theme:
     icon_warning: str = "!"
     icon_info: str = ">"
     icon_user: str = "You"
-    icon_copilot: str = "Copilot"
+    icon_agent: str = "Agent"
     icon_tool: str = "Tool"
     icon_system: str = "System"
 
@@ -52,7 +52,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#06B6D4",
         accent="#F59E0B",
         user="#10B981",
-        copilot="#3B82F6",
+        agent="#3B82F6",
         system="#F59E0B",
         tool="#EC4899",
         success="#22C55E",
@@ -68,7 +68,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#0891B2",
         accent="#D97706",
         user="#059669",
-        copilot="#2563EB",
+        agent="#2563EB",
         system="#D97706",
         tool="#DB2777",
         success="#16A34A",
@@ -84,7 +84,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#2E7D32",
         accent="#FF8F00",
         user="#2E7D32",
-        copilot="#1565C0",
+        agent="#1565C0",
         system="#6A1B9A",
         tool="#00838F",
         success="#2E7D32",
@@ -100,7 +100,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#388E3C",
         accent="#F57C00",
         user="#2E7D32",
-        copilot="#1565C0",
+        agent="#1565C0",
         system="#7B1FA2",
         tool="#00838F",
         success="#388E3C",
@@ -116,7 +116,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#1F2937",
         accent="#D97706",
         user="#059669",
-        copilot="#D97706",
+        agent="#D97706",
         system="#6B7280",
         tool="#7C3AED",
         success="#10B981",
@@ -132,7 +132,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#374151",
         accent="#B45309",
         user="#047857",
-        copilot="#B45309",
+        agent="#B45309",
         system="#4B5563",
         tool="#6D28D9",
         success="#059669",
@@ -148,7 +148,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#E5E7EB",
         accent="#FFFFFF",
         user="#22C55E",
-        copilot="#FFFFFF",
+        agent="#FFFFFF",
         system="#EAB308",
         tool="#06B6D4",
         success="#22C55E",
@@ -164,7 +164,7 @@ THEMES: Dict[str, Theme] = {
         secondary="#374151",
         accent="#111827",
         user="#16A34A",
-        copilot="#111827",
+        agent="#111827",
         system="#CA8A04",
         tool="#0891B2",
         success="#16A34A",

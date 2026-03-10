@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "description": "Tool calling accuracy benchmarks for Microscopy Copilot",
+  "description": "Tool calling accuracy benchmarks for Microscopy Agent",
   "test_cases": [
     {
       "id": "stage_classification_quick",

@@ -11,10 +11,10 @@ from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 
 def _get_memory(context: Dict):
     """Extract AgentMemory from tool context."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "memory") or not copilot.memory:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "memory") or not agent.memory:
         return None
-    return copilot.memory
+    return agent.memory
 
 
 @tool(

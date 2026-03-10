@@ -8,7 +8,7 @@ from typing import Dict, List
 
 from gently.harness.tools.registry import tool, ToolCategory
 from gently.harness.tools.helpers import (
-    require_copilot, get_embryo_or_error,
+    require_agent, get_embryo_or_error,
     require_timelapse_orchestrator, require_developmental_tracker
 )
 
@@ -26,13 +26,13 @@ async def generate_bluesky_plan(
     context: Dict = None
 ) -> str:
     """Generate Bluesky plan"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
     try:
-        result = await copilot._generate_bluesky_plan(
+        result = await agent._generate_bluesky_plan(
             goal=goal,
             embryo_ids=embryo_ids,
             plan_type=plan_type,
@@ -46,7 +46,7 @@ async def generate_bluesky_plan(
 
 @tool(
     name="start_adaptive_timelapse",
-    description="Start an adaptive timelapse that runs in the background. Copilot remains responsive while acquisition continues.",
+    description="Start an adaptive timelapse that runs in the background. Agent remains responsive while acquisition continues.",
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
@@ -58,11 +58,11 @@ async def start_adaptive_timelapse(
     context: Dict = None
 ) -> str:
     """Start adaptive timelapse in background"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return err
 
@@ -76,10 +76,10 @@ async def start_adaptive_timelapse(
 
         # Best-effort auto-link to a matching plan item (Feature 3)
         try:
-            cs = getattr(copilot, "context_store", None)
+            cs = getattr(agent, "context_store", None)
             if cs:
                 from .plan_execution_tools import try_auto_link_plan_item
-                session_id = getattr(copilot, "session_id", None)
+                session_id = getattr(agent, "session_id", None)
                 if session_id:
                     linked = try_auto_link_plan_item(
                         cs, session_id, stop_condition, interval_seconds,
@@ -101,11 +101,11 @@ async def start_adaptive_timelapse(
 )
 def get_timelapse_status(context: Dict = None) -> str:
     """Get timelapse status"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return err
 
@@ -160,11 +160,11 @@ async def modify_timelapse_embryo(
     context: Dict = None
 ) -> str:
     """Modify embryo parameters during timelapse (stop condition only - interval is global)"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running."
 
@@ -192,11 +192,11 @@ async def add_embryo_to_timelapse(
     context: Dict = None
 ) -> str:
     """Add an embryo to a running timelapse (uses global interval)"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running. Use start_adaptive_timelapse first."
 
@@ -223,11 +223,11 @@ async def stop_timelapse_embryo(
     context: Dict = None
 ) -> str:
     """Stop imaging a specific embryo"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running."
 
@@ -249,11 +249,11 @@ async def stop_timelapse(
     context: Dict = None
 ) -> str:
     """Stop entire timelapse"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running."
 
@@ -272,11 +272,11 @@ async def stop_timelapse(
 )
 async def pause_timelapse(context: Dict = None) -> str:
     """Pause timelapse"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running."
 
@@ -295,11 +295,11 @@ async def pause_timelapse(context: Dict = None) -> str:
 )
 async def resume_timelapse(context: Dict = None) -> str:
     """Resume timelapse"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse to resume."
 
@@ -348,11 +348,11 @@ def add_stop_condition(
     str
         Confirmation message with new stop condition description
     """
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return "No timelapse running."
 
@@ -394,11 +394,11 @@ def add_interval_speedup_rule(
     context: Dict = None
 ) -> str:
     """Add interval speedup rule based on developmental stage"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return err
 
@@ -425,11 +425,11 @@ def enable_pre_hatching_speedup(
     context: Dict = None
 ) -> str:
     """Enable pre-hatching speedup based on developmental stage"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    orchestrator, err = require_timelapse_orchestrator(copilot)
+    orchestrator, err = require_timelapse_orchestrator(agent)
     if err:
         return err
 
@@ -458,11 +458,11 @@ async def classify_embryo_stage(
     context: Dict = None
 ) -> str:
     """Classify embryo stage"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
@@ -472,11 +472,11 @@ async def classify_embryo_stage(
     latest = embryo.recent_images[-1]
 
     # Initialize tracker if needed
-    if not hasattr(copilot, 'developmental_tracker') or copilot.developmental_tracker is None:
+    if not hasattr(agent, 'developmental_tracker') or agent.developmental_tracker is None:
         from ..developmental_tracker import DevelopmentalTracker
-        copilot.developmental_tracker = DevelopmentalTracker(
-            claude_client=copilot.claude,
-            model=copilot.model,
+        agent.developmental_tracker = DevelopmentalTracker(
+            claude_client=agent.claude,
+            model=agent.model,
         )
 
     recent = []
@@ -486,7 +486,7 @@ async def classify_embryo_stage(
             'b64_image': img.max_projection_b64,
         })
 
-    result = copilot.developmental_tracker.classify_stage(
+    result = agent.developmental_tracker.classify_stage(
         image_b64=latest.max_projection_b64,
         embryo_id=embryo.id,
         timepoint=latest.timepoint,
@@ -517,11 +517,11 @@ def get_stage_history(
     context: Dict = None
 ) -> str:
     """Get stage history"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    tracker, err = require_developmental_tracker(copilot)
+    tracker, err = require_developmental_tracker(agent)
     if err:
         return err
 
@@ -555,16 +555,16 @@ def predict_hatching(
     context: Dict = None
 ) -> str:
     """Predict hatching time with confidence intervals"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    tracker, err = require_developmental_tracker(copilot)
+    tracker, err = require_developmental_tracker(agent)
     if err:
         return err
 
     if all_embryos:
-        embryo_ids = list(copilot.experiment.embryos.keys())
+        embryo_ids = list(agent.experiment.embryos.keys())
         predictions = tracker.get_all_predictions(embryo_ids)
 
         if not predictions:

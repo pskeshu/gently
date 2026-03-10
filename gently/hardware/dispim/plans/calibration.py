@@ -1,7 +1,7 @@
 """
 Claude Vision-guided piezo-galvo calibration workflows.
 
-These run on the COPILOT SIDE (require Claude API access for Vision).
+These run on the AGENT SIDE (require Claude API access for Vision).
 They use binary edge search, hybrid focus selection, and VLM verification.
 
 For hardware-only plans (no AI), see plans.py.

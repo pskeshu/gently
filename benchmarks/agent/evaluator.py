@@ -1,5 +1,5 @@
 """
-Copilot Tool Calling Evaluator
+Agent Tool Calling Evaluator
 
 Measures tool selection accuracy and parameter correctness.
 """
@@ -82,13 +82,13 @@ class BenchmarkReport:
         }
 
 
-class CopilotEvaluator:
+class AgentEvaluator:
     """
-    Evaluates copilot tool calling accuracy
+    Evaluates agent tool calling accuracy
 
     Usage:
-        evaluator = CopilotEvaluator()
-        report = await evaluator.run_benchmark(copilot, test_cases)
+        evaluator = AgentEvaluator()
+        report = await evaluator.run_benchmark(agent, test_cases)
         print(f"Tool accuracy: {report.tool_accuracy:.1%}")
     """
 
@@ -110,17 +110,17 @@ class CopilotEvaluator:
 
     async def run_benchmark(
         self,
-        copilot,
+        agent,
         tags: Optional[List[str]] = None,
         max_cases: Optional[int] = None,
     ) -> BenchmarkReport:
         """
-        Run benchmark against copilot
+        Run benchmark against agent
 
         Parameters
         ----------
-        copilot : MicroscopyCopilot
-            Copilot instance to evaluate
+        agent : MicroscopyAgent
+            Agent instance to evaluate
         tags : list, optional
             Only run test cases with these tags
         max_cases : int, optional
@@ -140,7 +140,7 @@ class CopilotEvaluator:
 
         results = []
         for case in cases:
-            result = await self._evaluate_case(copilot, case)
+            result = await self._evaluate_case(agent, case)
             results.append(result)
             logger.info(f"[{'PASS' if result.passed else 'FAIL'}] {case['id']}")
 
@@ -162,7 +162,7 @@ class CopilotEvaluator:
             metadata={"version": self.version, "tags": tags},
         )
 
-    async def _evaluate_case(self, copilot, case: Dict) -> EvalResult:
+    async def _evaluate_case(self, agent, case: Dict) -> EvalResult:
         """Evaluate a single test case"""
         test_id = case["id"]
         query = case["query"]
@@ -170,11 +170,11 @@ class CopilotEvaluator:
         expected_params = case.get("expected_params", {})
 
         try:
-            # Get tool call from copilot (without executing)
+            # Get tool call from agent (without executing)
             import time
             start = time.perf_counter()
 
-            tool_call = await self._get_tool_call(copilot, query)
+            tool_call = await self._get_tool_call(agent, query)
 
             latency_ms = (time.perf_counter() - start) * 1000
 
@@ -238,14 +238,14 @@ class CopilotEvaluator:
                 error=str(e),
             )
 
-    async def _get_tool_call(self, copilot, query: str) -> Optional[Dict]:
+    async def _get_tool_call(self, agent, query: str) -> Optional[Dict]:
         """
         Get the tool call Claude would make for a query
 
-        Uses copilot.get_tool_call() which makes a real API call
+        Uses agent.get_tool_call() which makes a real API call
         but doesn't execute the selected tool (dry-run mode).
         """
-        return await copilot.get_tool_call(query)
+        return await agent.get_tool_call(query)
 
 
 def compare_reports(before: BenchmarkReport, after: BenchmarkReport) -> Dict:

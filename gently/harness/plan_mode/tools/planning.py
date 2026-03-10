@@ -1,7 +1,7 @@
 """
 Planning tools — create and manage experimental plans.
 
-These tools let the copilot build structured plans from
+These tools let the agent build structured plans from
 scientific conversations: campaigns, phases, plan items,
 and their dependencies.
 """
@@ -45,8 +45,8 @@ async def create_campaign(
     context: Dict = None,
 ) -> str:
     """Create a campaign or sub-campaign (phase)."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
     # Fix year in shorthand — models sometimes hallucinate the wrong year
@@ -56,7 +56,7 @@ async def create_campaign(
         current_year = str(datetime.now().year)
         shorthand = re.sub(r'-20\d{2}$', f'-{current_year}', shorthand)
 
-    store = copilot.context_store
+    store = agent.context_store
     cid = store.create_campaign(
         description=description,
         shorthand=shorthand,
@@ -124,11 +124,11 @@ async def create_plan_item(
     If phase_number is given (e.g. 1), the item is added to the Nth
     subcampaign (phase) of campaign_id instead of the root campaign.
     """
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     # Resolve phase_number → subcampaign ID
     target_campaign_id = campaign_id
@@ -206,11 +206,11 @@ async def update_plan_item(
     """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
     or phase.task reference (e.g. '1.3'). campaign_id scopes resolution
     when using shorthand refs with multiple plans."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     # Resolve natural references
     item = store.resolve_plan_item(item_id, campaign_id=campaign_id)
@@ -262,11 +262,11 @@ async def link_plan_items(
 ) -> str:
     """Add a dependency between plan items. campaign_id scopes resolution
     when using shorthand refs (e.g. '1.3') with multiple plans."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     # Resolve natural references
     item = store.resolve_plan_item(item_id, campaign_id=campaign_id)
@@ -306,11 +306,11 @@ async def get_plan_item_tool(
     context: Dict = None,
 ) -> str:
     """Look up a plan item by natural reference."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     item = store.resolve_plan_item(ref, campaign_id=campaign_id)
     if not item:
         return f"No plan item matching '{ref}' found"
@@ -343,11 +343,11 @@ async def propose_plan(
     context: Dict = None,
 ) -> str:
     """Render the full plan for review."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     campaign = store.resolve_campaign(campaign_id)
     if not campaign:
         return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
@@ -502,11 +502,11 @@ async def get_plan_status(
     context: Dict = None,
 ) -> str:
     """Get plan progress summary."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     campaign = store.resolve_campaign(campaign_id)
     if not campaign:
         return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
@@ -574,13 +574,13 @@ async def batch_update_status(
     context: Dict = None,
 ) -> str:
     """Batch-update status of plan items."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
     from gently.harness.memory.model import PlanItemStatus
 
-    store = copilot.context_store
+    store = agent.context_store
 
     # Resolve phase number to a campaign ID
     target_campaign_id = campaign_id
@@ -654,11 +654,11 @@ async def batch_update_spec(
     context: Dict = None,
 ) -> str:
     """Batch-update a spec field on imaging items."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     # Validate field name against ImagingSpec
     from gently.harness.memory.model import ImagingSpec
@@ -732,11 +732,11 @@ async def move_plan_item(
     context: Dict = None,
 ) -> str:
     """Move a plan item to a different phase."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     item = store.resolve_plan_item(item_ref, campaign_id=campaign_id)
     if not item:
@@ -792,11 +792,11 @@ async def delete_plan_item_tool(
     context: Dict = None,
 ) -> str:
     """Delete a plan item."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     item = store.resolve_plan_item(item_ref, campaign_id=campaign_id)
     if not item:
@@ -849,11 +849,11 @@ async def reorder_plan_items(
     context: Dict = None,
 ) -> str:
     """Reorder plan items within a phase."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     target_campaign_id = campaign_id
     if phase_number is not None:
@@ -914,11 +914,11 @@ async def update_phase(
     context: Dict = None,
 ) -> str:
     """Update a phase's metadata."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     phase = store.get_nth_subcampaign(campaign_id, phase_number)
     if not phase:
         return f"Phase {phase_number} not found under campaign {campaign_id}"
@@ -955,11 +955,11 @@ async def delete_phase(
     context: Dict = None,
 ) -> str:
     """Delete a phase and its contents."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     phase = store.get_nth_subcampaign(campaign_id, phase_number)
     if not phase:
         return f"Phase {phase_number} not found under campaign {campaign_id}"
@@ -1008,11 +1008,11 @@ async def export_plan(
     context: Dict = None,
 ) -> str:
     """Export a plan as a shareable markdown document."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     campaign = store.resolve_campaign(campaign_id)
     if not campaign:
         return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
@@ -1114,7 +1114,7 @@ async def export_plan(
         lines.append("")
 
     lines.append("---")
-    lines.append("*Generated by Gently Copilot*")
+    lines.append("*Generated by Gently Agent*")
 
     return "\n".join(lines)
 
@@ -1304,11 +1304,11 @@ async def snapshot_plan(
     context: Dict = None,
 ) -> str:
     """Save a snapshot of the current plan."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     campaign = store.resolve_campaign(campaign_id)
     if not campaign:
         return f"Campaign '{campaign_id}' not found. Try a shorthand, name, or UUID."
@@ -1343,11 +1343,11 @@ async def list_plan_versions(
     context: Dict = None,
 ) -> str:
     """List saved plan versions."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     snapshots = store.list_plan_snapshots(campaign_id)
 
     if not snapshots:
@@ -1396,11 +1396,11 @@ async def restore_plan_version(
     context: Dict = None,
 ) -> str:
     """Restore a plan to a previous snapshot."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     if not version_id and version_number is None:
         return "Provide either version_id or version_number"

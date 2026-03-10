@@ -1,5 +1,5 @@
 """
-Main Microscopy Copilot implementation
+Main Microscopy Agent implementation
 
 Thin coordinator that delegates to:
 - ConversationManager: LLM calls, tool execution, token tracking
@@ -22,7 +22,7 @@ from pathlib import Path
 import anthropic
 import numpy as np
 
-from ..exceptions import StorageError, CopilotError
+from ..exceptions import StorageError, AgentError
 from ..settings import settings
 
 if TYPE_CHECKING:
@@ -45,9 +45,9 @@ from ..harness.session.manager import SessionManager
 from ..harness.prompts.manager import PromptManager
 
 
-class MicroscopyCopilot:
+class MicroscopyAgent:
     """
-    Conversational AI copilot for microscopy experiments
+    Conversational AI agent for microscopy experiments
 
     This is the main class that orchestrates:
     - Conversation with user via Claude API
@@ -83,7 +83,7 @@ class MicroscopyCopilot:
             Unified data store (SQLite + filesystem). Required.
         """
         if store is None:
-            raise ValueError("GentlyStore is required. Pass store=GentlyStore(path) to copilot.")
+            raise ValueError("GentlyStore is required. Pass store=GentlyStore(path) to agent.")
 
         # API client with interleaved thinking support
         self.claude = anthropic.Anthropic(
@@ -156,7 +156,7 @@ class MicroscopyCopilot:
         )
         # Wire tool execution context
         self.conversation._tool_context = {
-            'copilot': self,
+            'agent': self,
             'client': getattr(self, 'client', None),
             'databroker': getattr(self, 'databroker', None),
         }
@@ -264,7 +264,7 @@ class MicroscopyCopilot:
     # ===== Mode Management =====
 
     def set_context_store(self, context_store) -> None:
-        """Attach the context store (agent's mind) to the copilot."""
+        """Attach the context store (agent's mind) to the agent."""
         self.context_store = context_store
         self.conversation.context_store = context_store
         self.prompts.context_store = context_store
@@ -280,7 +280,7 @@ class MicroscopyCopilot:
         self.mode = "plan"
         import gently.harness.plan_mode.tools  # noqa: F401
         self._update_system_prompt()
-        emit(EventType.STATUS_CHANGED, {"field": "copilot_mode", "value": "plan"}, source="copilot")
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "plan"}, source="agent")
         logger.info("Entered plan mode")
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
@@ -290,7 +290,7 @@ class MicroscopyCopilot:
             return "Already in run mode."
         self.mode = "run"
         self._update_system_prompt()
-        emit(EventType.STATUS_CHANGED, {"field": "copilot_mode", "value": "run"}, source="copilot")
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "run"}, source="agent")
         logger.info("Exited plan mode")
         return "Back to run mode."
 
@@ -303,7 +303,7 @@ class MicroscopyCopilot:
         )
 
     def _get_active_plan_summary(self) -> Optional[str]:
-        """Delegation shim for copilot_bridge access."""
+        """Delegation shim for agent bridge access."""
         return self.prompts.get_active_plan_summary()
 
     def _get_tools_for_mode(self) -> list:
@@ -511,7 +511,7 @@ class MicroscopyCopilot:
         self._event_bus.publish(
             event_type=event_type,
             data=data or {},
-            source="copilot",
+            source="agent",
         )
 
     def _mark_significant_action(self, action_type: str):
@@ -536,7 +536,7 @@ class MicroscopyCopilot:
         Returns
         -------
         str
-            Response from copilot
+            Response from agent
         """
         if quick_response := self.conversation.try_quick_response(
             user_message, self.experiment, self.mode,

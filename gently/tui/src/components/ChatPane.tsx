@@ -72,7 +72,7 @@ export function ActiveMessage({ entry, theme, tokens, streamStartedAt, streamCha
 
     return (
       <Box marginBottom={1}>
-        <Text color={theme.copilot}>
+        <Text color={theme.agent}>
           <Spinner type="dots" />
         </Text>
         <Text color={theme.muted}>

@@ -2,11 +2,11 @@
 
 ## Background: What Exists Today
 
-Gently is a microscopy copilot — an LLM-powered assistant for researchers running diSPIM light-sheet microscopy experiments. The system has two separate data layers:
+Gently is a microscopy agent — an LLM-powered assistant for researchers running diSPIM light-sheet microscopy experiments. The system has two separate data layers:
 
 1. **GentlyStore** (`gently/store.py`) — Raw experiment data: images, embryo positions, acquisition parameters, sessions. This is the "what happened" layer.
 
-2. **ContextStore** (`gently/context/store.py`) — The agent's "mind": learnings, campaigns, session intents, observations, expectations, watchpoints, questions. This is the "what the copilot knows/believes/wants" layer. Backed by SQLite at `<storage_dir>/context/agent_mind.db`.
+2. **ContextStore** (`gently/context/store.py`) — The agent's "mind": learnings, campaigns, session intents, observations, expectations, watchpoints, questions. This is the "what the agent knows/believes/wants" layer. Backed by SQLite at `<storage_dir>/context/agent_mind.db`.
 
 The ContextStore has a rich hierarchical data model defined in `gently/context/model.py`:
 
@@ -41,7 +41,7 @@ The wizard writes to the ContextStore: `Learning` entries for lab identity, `Cam
 
 ### The System Prompt
 
-The copilot's system prompt is built by `build_system_prompt()` in `gently/agent/prompts.py`:
+The agent's system prompt is built by `build_system_prompt()` in `gently/agent/prompts.py`:
 
 ```python
 def build_system_prompt(
@@ -64,11 +64,11 @@ It assembles:
 10. Optional `context_summary` — AI-generated summary of timelapse status and recent events
 11. Tool use guidelines and behavior rules
 
-The `context_summary` parameter is populated by `_get_cached_context_summary()` in `copilot.py`, which calls `_gather_context_data()` to collect timelapse status, timeline events, and detection results, then asks Haiku to summarize. This is cached for 5 minutes.
+The `context_summary` parameter is populated by `_get_cached_context_summary()` in `agent.py`, which calls `_gather_context_data()` to collect timelapse status, timeline events, and detection results, then asks Haiku to summarize. This is cached for 5 minutes.
 
-The copilot is instantiated in `copilot.py`:
+The agent is instantiated in `agent.py`:
 ```python
-class MicroscopyCopilot:
+class MicroscopyAgent:
     def __init__(self, api_key, storage_path, model, microscope_client, session_id, store: GentlyStore):
 ```
 
@@ -76,15 +76,15 @@ The `_update_system_prompt()` method (line 264) rebuilds the prompt and is calle
 
 ### The Wiring Gap
 
-In `launch_copilot.py` (line 203-206):
+In `launch_agent.py` (line 203-206):
 ```python
 context_store = CtxStore(context_db)
-bridge.init_wizard(context_store=context_store, claude_client=copilot.claude)
+bridge.init_wizard(context_store=context_store, claude_client=agent.claude)
 ```
 
-The ContextStore is created and passed to the wizard, but **NOT to the copilot**. The copilot has no reference to the ContextStore. It cannot read learnings, campaigns, or session intents. The wizard writes to the store, but the data is never surfaced in the system prompt.
+The ContextStore is created and passed to the wizard, but **NOT to the agent**. The agent has no reference to the ContextStore. It cannot read learnings, campaigns, or session intents. The wizard writes to the store, but the data is never surfaced in the system prompt.
 
-**Result**: When the user asks "what's the session context?", the copilot only knows about hardware status and experiment state. It doesn't know the researcher works with C. elegans, their research campaign, or their session plan — even though the wizard just collected all of that.
+**Result**: When the user asks "what's the session context?", the agent only knows about hardware status and experiment state. It doesn't know the researcher works with C. elegans, their research campaign, or their session plan — even though the wizard just collected all of that.
 
 ---
 
@@ -92,11 +92,11 @@ The ContextStore is created and passed to the wizard, but **NOT to the copilot**
 
 ### Disconnect 1: Context Store → System Prompt (read path)
 
-`load_active()` returns a `Context` object described as "what gets passed to the agent each thinking cycle." But nothing calls it. The copilot's system prompt is built from `ExperimentState` (hardware/embryo data) and a timelapse summary — never from the ContextStore.
+`load_active()` returns a `Context` object described as "what gets passed to the agent each thinking cycle." But nothing calls it. The agent's system prompt is built from `ExperimentState` (hardware/embryo data) and a timelapse summary — never from the ContextStore.
 
-### Disconnect 2: System Prompt ← Copilot (write path)
+### Disconnect 2: System Prompt ← Agent (write path)
 
-`ContextUpdates` is designed as "what the agent returns after thinking" — new observations, expectations, triggered watchpoints. But nothing processes it. The copilot doesn't write observations, doesn't set expectations, doesn't track watchpoints. The context store only grows during onboarding.
+`ContextUpdates` is designed as "what the agent returns after thinking" — new observations, expectations, triggered watchpoints. But nothing processes it. The agent doesn't write observations, doesn't set expectations, doesn't track watchpoints. The context store only grows during onboarding.
 
 ### Disconnect 3: Static prompt vs dynamic identity
 
@@ -108,7 +108,7 @@ The system prompt hardcodes "C. elegans embryos" and includes a C. elegans stagi
 
 ### Phase 1: Read Path (inject context into prompt) — DO THIS FIRST
 
-Wire `load_active()` into the system prompt so the copilot knows what the wizard collected.
+Wire `load_active()` into the system prompt so the agent knows what the wizard collected.
 
 **Files to modify:**
 
@@ -142,19 +142,19 @@ Wire `load_active()` into the system prompt so the copilot knows what the wizard
    - Insert between connection status and biology sections (the "who you're working with" before "what you know about science")
    - Only include if non-empty
 
-3. **`gently/agent/copilot.py`** — Give copilot access to ContextStore
+3. **`gently/agent/agent.py`** — Give agent access to ContextStore
    - Add `self.context_store: Optional[ContextStore] = None` in `__init__` (after line 96)
    - Add `set_context_store(context_store: ContextStore)` method
    - In `_update_system_prompt()` (line 264): call `self.context_store.build_context_preamble(self.session_id)` and pass as `researcher_context`
 
-4. **`launch_copilot.py`** — Connect the dots (one line after line 206):
+4. **`launch_agent.py`** — Connect the dots (one line after line 206):
    ```python
-   copilot.set_context_store(context_store)
+   agent.set_context_store(context_store)
    ```
 
-5. **`gently/visualization/routes/copilot_ws.py`** — After wizard completes (before REPL loop), call `copilot._update_system_prompt()` so the prompt picks up what the wizard just stored. Find the spot after `_run_wizard()` returns and before the main message loop.
+5. **`gently/visualization/routes/agent_ws.py`** — After wizard completes (before REPL loop), call `agent._update_system_prompt()` so the prompt picks up what the wizard just stored. Find the spot after `_run_wizard()` returns and before the main message loop.
 
-**Verification**: `/reset-context` → restart → wizard collects organism + campaign + intent → ask "what's the session context?" → copilot should now mention organism, campaign, and session plan.
+**Verification**: `/reset-context` → restart → wizard collects organism + campaign + intent → ask "what's the session context?" → agent should now mention organism, campaign, and session plan.
 
 ### Phase 2: Knowledge Modules (context-driven prompt composition)
 
@@ -176,11 +176,11 @@ Replace hardcoded biology with organism-specific modules.
 
 4. Future: LLM-generate a biology primer for novel organisms at onboarding time, cache as a learning in the ContextStore.
 
-### Phase 3: Write Path (copilot updates context)
+### Phase 3: Write Path (agent updates context)
 
-Let the copilot write back to the context store after each interaction.
+Let the agent write back to the context store after each interaction.
 
-1. After each copilot response (or after significant tool calls), run a lightweight extraction:
+1. After each agent response (or after significant tool calls), run a lightweight extraction:
    - "Based on this interaction, did you learn anything new? Make any observations? Form any expectations?"
    - Use the existing `ContextUpdates` dataclass
 
@@ -193,7 +193,7 @@ Let the copilot write back to the context store after each interaction.
 
 ### Phase 4: Attention Loop (watchpoints and expectations)
 
-The copilot actively monitors its context:
+The agent actively monitors its context:
 
 1. After each observation, check active watchpoints — trigger if condition met
 2. Compare observations against pending expectations — mark confirmed/surprised
@@ -212,15 +212,15 @@ The copilot actively monitors its context:
 | `gently/context/startup_wizard.py` | Conversational onboarding at startup | `StartupWizard.run()` — writes Learnings, Campaigns, SessionIntent |
 | `gently/context/onboarding.py` | LLM extraction from free-text responses | `process_onboarding_response()` |
 | `gently/agent/prompts.py` | System prompt construction | `build_system_prompt()` (line 370) |
-| `gently/agent/copilot.py` | Main copilot class | `_update_system_prompt()` (line 264), `_gather_context_data()` (line 287) |
-| `gently/agent/copilot_bridge.py` | WebSocket adapter, command handling | `init_wizard()`, `handle_command()` |
-| `gently/visualization/routes/copilot_ws.py` | WebSocket route, wizard loop, REPL loop | `_run_wizard()`, main message loop |
-| `launch_copilot.py` | Entry point — creates copilot, store, bridge, TUI | Lines 203-206: ContextStore creation |
+| `gently/agent/agent.py` | Main agent class | `_update_system_prompt()` (line 264), `_gather_context_data()` (line 287) |
+| `gently/agent/agent_bridge.py` | WebSocket adapter, command handling | `init_wizard()`, `handle_command()` |
+| `gently/visualization/routes/agent_ws.py` | WebSocket route, wizard loop, REPL loop | `_run_wizard()`, main message loop |
+| `launch_agent.py` | Entry point — creates agent, store, bridge, TUI | Lines 203-206: ContextStore creation |
 
 ## Current State (as of this commit)
 
 - Startup wizard: fully working, collects organism/campaign/intent via choice pickers
-- ContextStore: has data after wizard runs, but copilot never reads it
+- ContextStore: has data after wizard runs, but agent never reads it
 - System prompt: hardcodes C. elegans biology and diSPIM hardware
 - Choice pickers: auto-append "Something else..." with inline text input (general TUI feature)
 - Commands: `/reset-context` clears the store, `/wizard` re-runs the wizard

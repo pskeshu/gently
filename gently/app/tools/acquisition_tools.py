@@ -40,13 +40,13 @@ async def acquire_volume(
     context: Dict = None
 ) -> str:
     """Acquire single volume - moves to embryo first, uses calibration"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 
@@ -100,12 +100,12 @@ async def acquire_volume(
             embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
 
             # Store in GentlyStore (dual-write during transition)
-            if copilot.store and copilot.session_id:
+            if agent.store and agent.session_id:
                 try:
                     from pathlib import Path as _Path
                     pos = embryo.stage_position or {}
-                    copilot.store.register_embryo(
-                        copilot.session_id, embryo_id,
+                    agent.store.register_embryo(
+                        agent.session_id, embryo_id,
                         position_x=pos.get('x'), position_y=pos.get('y'),
                         calibration=embryo.calibration,
                     )
@@ -123,21 +123,21 @@ async def acquire_volume(
                     }
                     volume_path_ref = result.get('volume_path')
                     if volume_path_ref is not None:
-                        copilot.store.register_volume(
-                            copilot.session_id, embryo_id, timepoint,
+                        agent.store.register_volume(
+                            agent.session_id, embryo_id, timepoint,
                             incoming_path=_Path(volume_path_ref),
                             metadata=acq_metadata,
                         )
                     elif volume is not None:
-                        copilot.store.put_volume(
-                            copilot.session_id, embryo_id, timepoint, volume,
+                        agent.store.put_volume(
+                            agent.session_id, embryo_id, timepoint, volume,
                             metadata=acq_metadata,
                         )
                 except Exception as store_err:
                     logger.warning("GentlyStore write failed (non-fatal): %s", store_err)
 
             # Push max projection to viz server
-            if copilot.viz_server and volume is not None:
+            if agent.viz_server and volume is not None:
                 try:
                     # Create max intensity projection (View A only)
                     vol = volume
@@ -146,8 +146,8 @@ async def acquire_volume(
                         vol = vol[0]  # View A
                     max_proj = np.max(vol, axis=0)
                     # Include session_id in UID to ensure uniqueness across sessions
-                    session_prefix = f"{copilot.session_id[:8]}_" if copilot.session_id else ""
-                    copilot.push_viz(
+                    session_prefix = f"{agent.session_id[:8]}_" if agent.session_id else ""
+                    agent.push_viz(
                         array=max_proj,
                         uid=f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}",
                         data_type="volume_projection",
@@ -208,13 +208,13 @@ async def capture_lightsheet(
 ) -> str:
     """Capture and optionally display a single lightsheet image"""
     client = context.get('client')
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
     try:
         embryo = None
         # If embryo_id specified, get the embryo and move to its position
-        if embryo_id and copilot:
-            embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+        if embryo_id and agent:
+            embryo = agent.experiment.get_embryo_by_any_name(embryo_id)
             if embryo and embryo.stage_position:
                 # Move stage to embryo's position
                 await client.move_to_position(
@@ -312,13 +312,13 @@ async def batch_lightsheet(
     context: Dict = None
 ) -> str:
     """Capture lightsheet images from all embryos and show in single napari viewer"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot or not client:
-        return "Error: Copilot or microscope not available"
+    if not agent or not client:
+        return "Error: Agent or microscope not available"
 
-    if not copilot.experiment.embryos:
+    if not agent.experiment.embryos:
         return "No embryos in experiment. Run detect_embryos first."
 
     # Collect images from all embryos
@@ -327,7 +327,7 @@ async def batch_lightsheet(
     errors = []
 
     active_embryos = [
-        (eid, emb) for eid, emb in copilot.experiment.embryos.items()
+        (eid, emb) for eid, emb in agent.experiment.embryos.items()
         if not emb.should_skip
     ]
 

@@ -1,12 +1,12 @@
 # Slash Command Reference
 
-All commands are registered in `gently/agent/command_registry.py`.
+All commands are registered in `gently/harness/commands.py`.
 
 ## Navigation
 
 | Command | Description |
 |---------|-------------|
-| `/quit` | Exit the copilot (aliases: `/exit`, `/q`) |
+| `/quit` | Exit the agent (aliases: `/exit`, `/q`) |
 | `/clear` | Clear screen and show welcome banner |
 | `/help [command]` | Show help for all commands or a specific command |
 
@@ -47,7 +47,7 @@ All commands are registered in `gently/agent/command_registry.py`.
 | Command | Description |
 |---------|-------------|
 | `/theme [name]` | Switch color theme (vibrant, scientific, claude, monochrome) |
-| `/history` | Show conversation history with the copilot |
+| `/history` | Show conversation history with the agent |
 | `/tokens` | Show API token usage statistics and estimated cost |
 
 ## Diagnostics

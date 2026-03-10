@@ -24,13 +24,13 @@ This only moves XY - piezo/galvo are controlled separately during acquisition. M
 )
 async def move_to_embryo(embryo_id: str, context: Dict) -> str:
     """Move stage to embryo position"""
-    copilot = context.get('copilot')
+    agent = context.get('agent')
     client = context.get('client')
 
-    if not copilot:
-        return "Error: No copilot context"
+    if not agent:
+        return "Error: No agent context"
 
-    embryo, err = get_embryo_or_error(copilot, embryo_id)
+    embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
         return err
 

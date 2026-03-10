@@ -1,7 +1,7 @@
 """
 SessionManager - Session persistence and lifecycle.
 
-Extracted from copilot.py to separate session management
+Extracted from agent.py to separate session management
 from conversation and experiment orchestration.
 """
 
@@ -18,7 +18,7 @@ class SessionManager:
     Manages session creation, saving, resuming, and listing.
 
     Works with GentlyStore for persistence. Does not hold references
-    back to copilot — receives data as parameters instead.
+    back to agent — receives data as parameters instead.
     """
 
     def __init__(self, store, storage_path):

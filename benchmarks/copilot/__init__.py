@@ -1,1 +1,0 @@
-"""Copilot tool-calling benchmarks"""

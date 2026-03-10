@@ -9,9 +9,9 @@ from typing import Any, Dict, Optional, Tuple
 from datetime import datetime
 
 
-def require_copilot(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
+def require_agent(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
     """
-    Extract copilot from context or return error message
+    Extract agent from context or return error message
 
     Parameters
     ----------
@@ -21,22 +21,22 @@ def require_copilot(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
     Returns
     -------
     tuple
-        (copilot, None) if found, (None, error_message) if not
+        (agent, None) if found, (None, error_message) if not
     """
-    copilot = context.get('copilot')
-    if not copilot:
-        return None, "Error: No copilot context"
-    return copilot, None
+    agent = context.get('agent')
+    if not agent:
+        return None, "Error: No agent context"
+    return agent, None
 
 
-def get_embryo_or_error(copilot, embryo_id: str) -> Tuple[Optional[Any], Optional[str]]:
+def get_embryo_or_error(agent, embryo_id: str) -> Tuple[Optional[Any], Optional[str]]:
     """
     Get embryo by any name or return error message
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        Copilot instance
+    agent : MicroscopyAgent
+        Agent instance
     embryo_id : str
         Embryo ID, nickname, or label
 
@@ -45,7 +45,7 @@ def get_embryo_or_error(copilot, embryo_id: str) -> Tuple[Optional[Any], Optiona
     tuple
         (embryo, None) if found, (None, error_message) if not
     """
-    embryo = copilot.experiment.get_embryo_by_any_name(embryo_id)
+    embryo = agent.experiment.get_embryo_by_any_name(embryo_id)
     if not embryo:
         return None, f"Embryo '{embryo_id}' not found"
     return embryo, None
@@ -71,80 +71,80 @@ def require_microscope(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
     return client, None
 
 
-def require_interaction_logger(copilot) -> Tuple[Optional[Any], Optional[str]]:
+def require_interaction_logger(agent) -> Tuple[Optional[Any], Optional[str]]:
     """
     Get interaction logger or return error message
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        Copilot instance
+    agent : MicroscopyAgent
+        Agent instance
 
     Returns
     -------
     tuple
         (logger, None) if available, (None, error_message) if not
     """
-    if not hasattr(copilot, 'interaction_logger') or not copilot.interaction_logger:
+    if not hasattr(agent, 'interaction_logger') or not agent.interaction_logger:
         return None, "Interaction logging not enabled."
-    return copilot.interaction_logger, None
+    return agent.interaction_logger, None
 
 
-def require_developmental_tracker(copilot) -> Tuple[Optional[Any], Optional[str]]:
+def require_developmental_tracker(agent) -> Tuple[Optional[Any], Optional[str]]:
     """
     Get developmental tracker or return error message
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        Copilot instance
+    agent : MicroscopyAgent
+        Agent instance
 
     Returns
     -------
     tuple
         (tracker, None) if available, (None, error_message) if not
     """
-    if not hasattr(copilot, 'developmental_tracker') or not copilot.developmental_tracker:
+    if not hasattr(agent, 'developmental_tracker') or not agent.developmental_tracker:
         return None, "No stage classifications recorded yet. Use classify_embryo_stage first."
-    return copilot.developmental_tracker, None
+    return agent.developmental_tracker, None
 
 
-def require_timelapse_orchestrator(copilot) -> Tuple[Optional[Any], Optional[str]]:
+def require_timelapse_orchestrator(agent) -> Tuple[Optional[Any], Optional[str]]:
     """
     Get timelapse orchestrator or return error message
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        Copilot instance
+    agent : MicroscopyAgent
+        Agent instance
 
     Returns
     -------
     tuple
         (orchestrator, None) if available, (None, error_message) if not
     """
-    if not hasattr(copilot, 'timelapse_orchestrator') or copilot.timelapse_orchestrator is None:
+    if not hasattr(agent, 'timelapse_orchestrator') or agent.timelapse_orchestrator is None:
         return None, "Timelapse orchestrator not initialized."
-    return copilot.timelapse_orchestrator, None
+    return agent.timelapse_orchestrator, None
 
 
-def require_databroker(copilot) -> Tuple[Optional[Any], Optional[str]]:
+def require_databroker(agent) -> Tuple[Optional[Any], Optional[str]]:
     """
     Get databroker connection or return error message
 
     Parameters
     ----------
-    copilot : MicroscopyCopilot
-        Copilot instance
+    agent : MicroscopyAgent
+        Agent instance
 
     Returns
     -------
     tuple
         (databroker, None) if available, (None, error_message) if not
     """
-    if not hasattr(copilot, 'databroker') or copilot.databroker is None:
+    if not hasattr(agent, 'databroker') or agent.databroker is None:
         return None, "No databroker connection. Data persistence not available."
-    return copilot.databroker, None
+    return agent.databroker, None
 
 
 def get_timestamp_string() -> str:

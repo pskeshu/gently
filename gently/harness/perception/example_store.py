@@ -16,9 +16,13 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
-from .stages import STAGES
-
 logger = logging.getLogger(__name__)
+
+
+def _get_stages():
+    """Lazy import of STAGES from the active organism plugin."""
+    from .stages import STAGES
+    return STAGES
 
 
 class ExampleStore:
@@ -42,11 +46,13 @@ class ExampleStore:
             blank_biological/
         metadata.json
 
-    Stage definitions are imported from stages.py (single source of truth).
+    Stage definitions come from the active organism plugin.
     """
 
-    # Supported developmental stages (imported from stages.py)
-    STAGES = STAGES  # Re-export for backwards compatibility
+    @property
+    def STAGES(self):
+        """Supported developmental stages from active organism plugin."""
+        return _get_stages()
 
     # Supported anomaly types
     ANOMALY_TYPES = ["dead_embryo", "blank_technical", "blank_biological"]

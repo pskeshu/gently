@@ -11,7 +11,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_copilot, get_embryo_or_error
+from gently.harness.tools.helpers import require_agent, get_embryo_or_error
 from gently.core.coordinates import stage_to_pixel_position, get_um_per_pixel
 
 
@@ -37,7 +37,7 @@ async def view_image(
 ) -> str:
     """Capture and display bottom camera image with embryo annotations"""
     client = context.get('client')
-    copilot = context.get('copilot')
+    agent = context.get('agent')
 
     try:
         image = await client.capture_bottom_image(exposure_ms=exposure_ms)
@@ -50,12 +50,12 @@ async def view_image(
 
         # Prepare embryo annotations if requested
         embryo_annotations = []
-        if show_embryos and copilot and copilot.experiment.embryos:
+        if show_embryos and agent and agent.experiment.embryos:
             um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py
             image_center_x = image.shape[1] / 2
             image_center_y = image.shape[0] / 2
 
-            for embryo_id, embryo in copilot.experiment.embryos.items():
+            for embryo_id, embryo in agent.experiment.embryos.items():
                 if embryo.stage_position:
                     # Convert stage position to pixel position using centralized function
                     emb_x = embryo.stage_position.get('x', 0)
@@ -127,7 +127,7 @@ async def view_volume(
     import numpy as np
     from pathlib import Path
 
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
@@ -145,16 +145,16 @@ async def view_volume(
 
     elif embryo_id:
         # Get volume for embryo from GentlyStore
-        session_id = copilot.session_id
+        session_id = agent.session_id
 
         if timepoint is not None:
             # Try to find specific timepoint via GentlyStore
-            volume_path = copilot.store.get_volume_path(session_id, embryo_id, timepoint)
+            volume_path = agent.store.get_volume_path(session_id, embryo_id, timepoint)
             if volume_path and volume_path.exists():
                 title = f"{embryo_id} - t{timepoint:04d}"
             else:
                 # Check recent_images as fallback
-                embryo, err = get_embryo_or_error(copilot, embryo_id)
+                embryo, err = get_embryo_or_error(agent, embryo_id)
                 if err:
                     return err
                 if embryo.recent_images:
@@ -165,19 +165,19 @@ async def view_volume(
 
                 if not volume_path or not volume_path.exists():
                     # List available timepoints from store
-                    volumes = copilot.store.list_volumes(session_id, embryo_id)
+                    volumes = agent.store.list_volumes(session_id, embryo_id)
                     available = sorted([v['timepoint'] for v in volumes])
                     return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
         else:
             # Find latest volume from store
-            volumes = copilot.store.list_volumes(session_id, embryo_id)
+            volumes = agent.store.list_volumes(session_id, embryo_id)
             if not volumes:
                 return f"No volumes found for {embryo_id} in session {session_id}"
 
             # Find highest timepoint
             latest = max(volumes, key=lambda v: v['timepoint'])
             latest_tp = latest['timepoint']
-            volume_path = copilot.store.get_volume_path(session_id, embryo_id, latest_tp)
+            volume_path = agent.store.get_volume_path(session_id, embryo_id, latest_tp)
 
             title = f"{embryo_id} - t{latest_tp:04d}"
 
@@ -229,15 +229,15 @@ async def list_volumes(
     context: Dict = None
 ) -> str:
     """List available volumes"""
-    copilot, err = require_copilot(context)
+    agent, err = require_agent(context)
     if err:
         return err
 
-    session_id = copilot.session_id
+    session_id = agent.session_id
     lines = []
 
     # Get volumes from GentlyStore
-    all_volumes_list = copilot.store.list_volumes(session_id, embryo_id)
+    all_volumes_list = agent.store.list_volumes(session_id, embryo_id)
 
     # Group by embryo_id
     all_volumes = {}  # embryo_id -> list of volume records
@@ -263,7 +263,7 @@ async def list_volumes(
 
         for vol in volumes:
             tp = vol['timepoint']
-            path = copilot.store.get_volume_path(session_id, embryo_id, tp)
+            path = agent.store.get_volume_path(session_id, embryo_id, tp)
             if path and path.exists():
                 size_mb = path.stat().st_size / (1024 * 1024)
                 lines.append(f"  t{tp:04d}: {path.name} ({size_mb:.1f} MB)")
@@ -287,7 +287,7 @@ async def list_volumes(
             # Calculate total size
             total_size = 0
             for vol in volumes:
-                path = copilot.store.get_volume_path(session_id, eid, vol['timepoint'])
+                path = agent.store.get_volume_path(session_id, eid, vol['timepoint'])
                 if path and path.exists():
                     total_size += path.stat().st_size / (1024 * 1024)
             lines.append(f"\n{eid}: {len(volumes)} volume(s) [{tp_range}] ({total_size:.1f} MB total)")
@@ -295,7 +295,7 @@ async def list_volumes(
             # Show last few timepoints
             for vol in volumes[-3:]:
                 tp = vol['timepoint']
-                path = copilot.store.get_volume_path(session_id, eid, tp)
+                path = agent.store.get_volume_path(session_id, eid, tp)
                 if path and path.exists():
                     size_mb = path.stat().st_size / (1024 * 1024)
                     lines.append(f"    t{tp:04d}: {size_mb:.1f} MB")

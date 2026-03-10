@@ -1,5 +1,5 @@
 """
-Device Factory for MicroscopyCopilot
+Device Factory for MicroscopyAgent
 
 Helper functions to create Ophyd devices from Micro-Manager core for hardware control.
 """
@@ -39,14 +39,14 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
     -------
     >>> from client import get_mmc
     >>> from bluesky import RunEngine
-    >>> from gently.agent import MicroscopyCopilot
+    >>> from gently.app.agent import MicroscopyAgent
     >>> from gently.device_factory import create_devices_from_mmcore
     >>>
     >>> core = get_mmc()
     >>> devices = create_devices_from_mmcore(core)
     >>> RE = RunEngine({})
     >>>
-    >>> copilot = MicroscopyCopilot(
+    >>> agent = MicroscopyAgent(
     ...     run_engine=RE,
     ...     devices=devices
     ... )

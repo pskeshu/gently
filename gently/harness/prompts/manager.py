@@ -1,7 +1,7 @@
 """
 PromptManager - System prompt construction and context summarization.
 
-Extracted from copilot.py to separate prompt-building logic from
+Extracted from agent.py to separate prompt-building logic from
 conversation mechanics and session persistence.
 """
 
@@ -24,7 +24,7 @@ class PromptManager:
     Builds system prompts, selects tools per mode, and generates
     context summaries for session awareness.
 
-    Does not hold back-references to copilot — receives data as parameters.
+    Does not hold back-references to agent — receives data as parameters.
     """
 
     def __init__(self, claude_client, model):
@@ -41,7 +41,7 @@ class PromptManager:
         self._memory_awareness_time: Optional[datetime] = None
         self._memory_awareness_ttl: int = 600  # 10 minutes
 
-        # Set by copilot after construction
+        # Set by agent after construction
         self.context_store = None
         self.memory = None  # AgentMemory instance
 

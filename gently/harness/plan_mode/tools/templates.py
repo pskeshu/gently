@@ -37,11 +37,11 @@ async def save_plan_template(
     context: Dict = None,
 ) -> str:
     """Save a campaign as a reusable template."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     try:
         tid = store.save_plan_template(
@@ -70,11 +70,11 @@ async def list_templates(
     context: Dict = None,
 ) -> str:
     """List available plan templates."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
     templates = store.list_plan_templates()
 
     if not templates:
@@ -116,11 +116,11 @@ async def apply_template(
     context: Dict = None,
 ) -> str:
     """Instantiate a template into a new campaign."""
-    copilot = context.get("copilot") if context else None
-    if not copilot or not hasattr(copilot, "context_store") or not copilot.context_store:
+    agent = context.get("agent") if context else None
+    if not agent or not hasattr(agent, "context_store") or not agent.context_store:
         return "Error: Context store not available"
 
-    store = copilot.context_store
+    store = agent.context_store
 
     try:
         new_campaign_id = store.apply_plan_template(

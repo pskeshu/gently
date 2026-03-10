@@ -6,7 +6,7 @@
  * Ink <App> component which owns the WebSocket connection.
  *
  * Modes:
- *   node dist/index.js --ws-url ws://localhost:8080/ws/copilot
+ *   node dist/index.js --ws-url ws://localhost:8080/ws/agent
  *   node dist/index.js --pick-session '<json>'   (standalone picker)
  */
 
@@ -23,7 +23,7 @@ import { createTuiStore } from "./store.js";
 
 function parseArgs(): { wsUrl: string; pickSession: string | null } {
   const args = process.argv.slice(2);
-  let wsUrl = "ws://localhost:8080/ws/copilot";
+  let wsUrl = "ws://localhost:8080/ws/agent";
   let pickSession: string | null = null;
 
   for (let i = 0; i < args.length; i++) {

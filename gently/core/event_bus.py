@@ -34,7 +34,7 @@ class EventType(Enum):
     # Acquisition events
     ACQUISITION_STARTED = auto()
     ACQUISITION_COMPLETED = auto()
-    ACQUISITION_STOPPED = auto()  # Manual stop from copilot/user
+    ACQUISITION_STOPPED = auto()  # Manual stop from agent/user
     ACQUISITION_FAILED = auto()
     VOLUME_ACQUIRED = auto()
     IMAGE_ACQUIRED = auto()

@@ -2,21 +2,21 @@
 
 ## Overview
 
-Plan mode transforms the microscopy copilot from a pure execution agent ("detect embryos, acquire volume, run timelapse") into a **scientific research collaborator** that helps design complete experimental plans before touching hardware.
+Plan mode transforms the microscopy agent from a pure execution agent ("detect embryos, acquire volume, run timelapse") into a **scientific research collaborator** that helps design complete experimental plans before touching hardware.
 
-When a researcher says "I want to investigate nerve ring formation," the copilot should reason through the full scientific workflow: strains, reporters, controls, imaging strategy, bench validations, perturbation experiments, timeline — not just "start a timelapse."
+When a researcher says "I want to investigate nerve ring formation," the agent should reason through the full scientific workflow: strains, reporters, controls, imaging strategy, bench validations, perturbation experiments, timeline — not just "start a timelapse."
 
-The output is a **structured, living plan** stored in the data model (campaigns, plan items, imaging specs) that the copilot actively tracks across weeks of work. When the researcher sits down to image, the copilot already knows exactly what to do.
+The output is a **structured, living plan** stored in the data model (campaigns, plan items, imaging specs) that the agent actively tracks across weeks of work. When the researcher sits down to image, the agent already knows exactly what to do.
 
 ---
 
 ## Problem Statement
 
-The current copilot has two gaps:
+The current agent has two gaps:
 
 1. **No upstream reasoning.** It jumps from a scientific question directly to microscope operations. There's no mode where it helps design the experiment — what strains to use, what controls to run, what developmental window to target, what complementary experiments to perform outside of imaging.
 
-2. **No downstream tracking.** Even when the researcher has a plan in their head, the copilot doesn't track progress across sessions. Each session starts fresh. There's no "you're on session 3 of 5 for the wild-type data collection" or "the genetic cross you started last week — is it done yet?"
+2. **No downstream tracking.** Even when the researcher has a plan in their head, the agent doesn't track progress across sessions. Each session starts fresh. There's no "you're on session 3 of 5 for the wild-type data collection" or "the genetic cross you started last week — is it done yet?"
 
 The data model (Campaign with hierarchy, PlannedSession with parameters) already exists to hold this information. What's missing is the reasoning layer that populates it and the tracking layer that maintains it.
 
@@ -24,13 +24,13 @@ The data model (Campaign with hierarchy, PlannedSession with parameters) already
 
 ## What Plan Mode Is
 
-A dedicated conversational mode where the copilot acts as a scientific advisor. It has a different personality, different system prompt, and different tool set than execution mode.
+A dedicated conversational mode where the agent acts as a scientific advisor. It has a different personality, different system prompt, and different tool set than execution mode.
 
 **Execution mode:** "Act immediately. Call tools first, explain after. Don't describe what you would do — do it."
 
 **Plan mode:** "Reason carefully. Ask questions. Search the literature. Understand before proposing. Challenge assumptions. Think about controls the researcher might not have considered."
 
-Plan mode produces a structured research plan that decomposes into campaigns, phases, and plan items — both imaging sessions and non-imaging work (bench assays, genetic crosses, analysis). Each imaging item carries a complete specification (strain, acquisition parameters, timing, stop conditions, success criteria) so the copilot can auto-configure when it's time to execute.
+Plan mode produces a structured research plan that decomposes into campaigns, phases, and plan items — both imaging sessions and non-imaging work (bench assays, genetic crosses, analysis). Each imaging item carries a complete specification (strain, acquisition parameters, timing, stop conditions, success criteria) so the agent can auto-configure when it's time to execute.
 
 ---
 
@@ -39,7 +39,7 @@ Plan mode produces a structured research plan that decomposes into campaigns, ph
 - Not a separate application — same message loop, different prompt and tools
 - Not a rigid wizard — free-form conversation with natural phases
 - Not imaging-only — reasons about the full experimental workflow
-- Not a one-time output — produces a living document the copilot maintains
+- Not a one-time output — produces a living document the agent maintains
 
 ---
 
@@ -47,7 +47,7 @@ Plan mode produces a structured research plan that decomposes into campaigns, ph
 
 ### 1. Natural Language Detection
 
-The copilot detects planning-level questions and offers to enter plan mode:
+The agent detects planning-level questions and offers to enter plan mode:
 
 - "I want to investigate nerve ring formation"
 - "Help me design an experiment for..."
@@ -75,10 +75,10 @@ When creating a new campaign during onboarding, offer: "Want to design a full ex
 
 ### Mode Switching
 
-The copilot gets a `self.mode` attribute:
+The agent gets a `self.mode` attribute:
 
 ```python
-class CopilotMode(str, Enum):
+class AgentMode(str, Enum):
     EXECUTION = "execution"    # Current behavior
     PLAN = "plan"              # Experimental design mode
 ```
@@ -86,7 +86,7 @@ class CopilotMode(str, Enum):
 The main message loop (`_call_claude_stream()`) selects prompt and tools based on mode:
 
 ```python
-if self.mode == CopilotMode.PLAN:
+if self.mode == AgentMode.PLAN:
     system_prompt = build_plan_prompt(context, lab_context)
     tools = get_plan_tools()
 else:
@@ -112,7 +112,7 @@ gently/agent/plan_mode/
 ## Plan Mode System Prompt
 
 ```
-You are a scientific research planner — the same microscopy copilot,
+You are a scientific research planner — the same microscopy agent,
 but right now you're helping design an experiment, not run one.
 
 Your role:
@@ -159,7 +159,7 @@ For non-imaging items (bench work, genetics, analysis):
 {hardware_description}
 ```
 
-The prompt includes organism biology knowledge and hardware description (from the existing modules) so the copilot can reason about developmental timing and hardware capabilities.
+The prompt includes organism biology knowledge and hardware description (from the existing modules) so the agent can reason about developmental timing and hardware capabilities.
 
 ---
 
@@ -200,16 +200,16 @@ The prompt includes organism biology knowledge and hardware description (from th
 
 ## Conversation Flow
 
-Not a rigid sequence — a natural conversation with phases. The copilot drives the conversation but follows the researcher's lead.
+Not a rigid sequence — a natural conversation with phases. The agent drives the conversation but follows the researcher's lead.
 
 ### Phase 1: UNDERSTAND
 
-The copilot asks questions to understand the scientific goal.
+The agent asks questions to understand the scientific goal.
 
 ```
 Researcher: "I want to investigate nerve ring formation"
 
-Copilot: "Interesting — nerve ring assembly is a great target for
+Agent: "Interesting — nerve ring assembly is a great target for
 live imaging. A few questions to help me design the right approach:
 
 What's driving this? Is this:
@@ -226,10 +226,10 @@ Follow-up questions depending on the answer:
 
 ### Phase 2: RESEARCH
 
-The copilot searches literature and lab history to inform the design.
+The agent searches literature and lab history to inform the design.
 
 ```
-Copilot: [searches literature for "nerve ring formation C. elegans
+Agent: [searches literature for "nerve ring formation C. elegans
 live imaging"]
 
 "I found some relevant work:
@@ -252,10 +252,10 @@ and we get true 3D, which they didn't have."
 
 ### Phase 3: DESIGN
 
-The copilot proposes a complete experimental plan.
+The agent proposes a complete experimental plan.
 
 ```
-Copilot: "Here's what I'm thinking — a 4-phase plan over about
+Agent: "Here's what I'm thinking — a 4-phase plan over about
 8 weeks..."
 
 [renders structured plan document — see Plan Document section]
@@ -280,7 +280,7 @@ Iterate based on researcher feedback.
 Researcher: "We don't have the sax-3 strain, but we have unc-6.
 Also, can we skip the EM?"
 
-Copilot: "Good call on unc-6 — it's upstream in the same pathway,
+Agent: "Good call on unc-6 — it's upstream in the same pathway,
 and the nerve ring phenotype is well-characterized (Wadsworth et al.).
 
 I'll swap sax-3 for unc-6 and remove the EM validation. Instead,
@@ -298,7 +298,7 @@ days for a homozygous line."
 Write the plan to the data model.
 
 ```
-Copilot: "Plan looks good. I'll save it now.
+Agent: "Plan looks good. I'll save it now.
 
 Created:
   Campaign: 'Nerve ring formation study' (nrf-2026)
@@ -432,7 +432,7 @@ session_2_item = PlanItem(
 )
 ```
 
-When loading, the copilot resolves inheritance: merge parent spec with local overrides. If the researcher changes exposure in session 1's spec after the pilot, it propagates to all inherited sessions automatically.
+When loading, the agent resolves inheritance: merge parent spec with local overrides. If the researcher changes exposure in session 1's spec after the pilot, it propagates to all inherited sessions automatically.
 
 ---
 
@@ -544,7 +544,7 @@ Is today WT session 3?
 
 ### During a Session
 
-When the copilot finishes a timelapse:
+When the agent finishes a timelapse:
 
 ```
 → Links session_id to the PlanItem
@@ -563,7 +563,7 @@ The researcher reports bench work progress conversationally:
 ```
 Researcher: "The cross is done, I have homozygous unc-6; rab-3p::GFP"
 
-Copilot:
+Agent:
   → Updates PlanItem "Cross OH904 × unc-6" → completed
   → outcome = "Homozygous line established"
   → Checks dependencies: Phase 3 imaging items are now unblocked
@@ -574,7 +574,7 @@ Copilot:
 
 ### Decision Points
 
-When all dependencies of a decision point are met, the copilot raises it:
+When all dependencies of a decision point are met, the agent raises it:
 
 ```
 Both Phase 1 items are done. Decision needed:
@@ -596,7 +596,7 @@ The decision outcome is recorded on the PlanItem and downstream phases adjust.
 
 ### Auto-Configuration at Session Start
 
-When the researcher starts a planned imaging session, the copilot pre-loads everything from the ImagingSpec:
+When the researcher starts a planned imaging session, the agent pre-loads everything from the ImagingSpec:
 
 ```
 Starting: WT session 3 — Nerve Ring Formation Study, Phase 2
@@ -623,7 +623,7 @@ Ready to detect embryos and start?
 
 ### Learning Across Sessions
 
-After each session, the copilot can propose plan updates:
+After each session, the agent can propose plan updates:
 
 ```
 Session 2 complete. 3 of 4 embryos reached pretzel successfully.
@@ -642,13 +642,13 @@ Update the plan?
 
 ## Plan Evolution
 
-Plans change. The copilot handles modifications naturally:
+Plans change. The agent handles modifications naturally:
 
 ```
 Researcher: "Actually, let's skip the behavioral assay and add
              a temperature series instead"
 
-Copilot:
+Agent:
   → PlanItem "Chemotaxis assay" → status = "skipped"
   → Creates new PlanItem(type="imaging", title="Temperature series
     — 25°C matched conditions")
@@ -776,17 +776,17 @@ When the researcher exits plan mode and starts executing:
    - Configures acquisition parameters
    - Enables detectors
    - Sets stop conditions and adaptive intervals
-3. The copilot's session context includes the plan status
-4. After the session, the copilot updates the PlanItem and campaign progress
-5. If a decision point is ready, the copilot raises it at the next session start
+3. The agent's session context includes the plan status
+4. After the session, the agent updates the PlanItem and campaign progress
+5. If a decision point is ready, the agent raises it at the next session start
 
-The plan lives in the background during execution mode — the copilot is always aware of where the researcher is in their experimental plan.
+The plan lives in the background during execution mode — the agent is always aware of where the researcher is in their experimental plan.
 
 ---
 
 ## Summary
 
-Plan mode adds a **scientific reasoning layer** upstream of microscope control. The copilot becomes a research collaborator that:
+Plan mode adds a **scientific reasoning layer** upstream of microscope control. The agent becomes a research collaborator that:
 
 1. Helps design experiments from scientific questions
 2. Reasons about strains, controls, validations, and non-imaging work
@@ -796,4 +796,4 @@ Plan mode adds a **scientific reasoning layer** upstream of microscope control. 
 6. Auto-configures the microscope when it's time to execute
 7. Learns from completed sessions and suggests plan adjustments
 
-The key principle: **the plan is a living document**, not a one-time output. The copilot maintains it, tracks it, and uses it to be a better collaborator over the lifetime of a research project.
+The key principle: **the plan is a living document**, not a one-time output. The agent maintains it, tracks it, and uses it to be a better collaborator over the lifetime of a research project.

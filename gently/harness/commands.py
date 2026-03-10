@@ -1,5 +1,5 @@
 """
-Unified Slash Command Registry for Microscopy Copilot CLI
+Unified Slash Command Registry for Microscopy Agent CLI
 
 Provides a single source of truth for:
 - Command definitions with metadata
@@ -157,7 +157,7 @@ class CommandRegistry:
     def generate_help_markdown(self) -> str:
         """Generate complete help text in markdown format"""
         lines = [
-            "# Copilot Commands",
+            "# Agent Commands",
             "",
             "## Natural Language",
             "Just type what you want! Examples:",
@@ -284,8 +284,8 @@ def _register_default_commands(registry: CommandRegistry) -> None:
     # === Navigation Commands ===
     registry.register(CommandDefinition(
         name="/quit",
-        description="Exit the copilot",
-        help_text="Exit the interactive copilot session.",
+        description="Exit the agent",
+        help_text="Exit the interactive agent session.",
         aliases=["/exit", "/q"],
         category=CommandCategory.NAVIGATION,
     ))
@@ -483,7 +483,7 @@ Options:
     registry.register(CommandDefinition(
         name="/history",
         description="Show conversation history",
-        help_text="Display recent conversation history with the copilot.",
+        help_text="Display recent conversation history with the agent.",
         category=CommandCategory.APPEARANCE,
     ))
 
@@ -574,9 +574,9 @@ Use plan mode (/plan) to create and modify campaigns.""",
     registry.register(CommandDefinition(
         name="/plan",
         description="Switch to plan mode for experimental design",
-        help_text="""Enter plan mode to design experiments with the copilot.
+        help_text="""Enter plan mode to design experiments with the agent.
 
-In plan mode, the copilot acts as a scientific collaborator — helping
+In plan mode, the agent acts as a scientific collaborator — helping
 design campaigns, choose strains, set imaging parameters, plan controls,
 and track progress across sessions.
 

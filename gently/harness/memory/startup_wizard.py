@@ -37,7 +37,7 @@ class StartupWizard:
     context_store : ContextStore
         The agent's mind database.
     session_id : str
-        Current copilot session ID.
+        Current agent session ID.
     claude_client : optional
         Anthropic client for LLM extraction.  May be ``None``
         (falls back to basic keyword extraction).
@@ -121,7 +121,7 @@ class StartupWizard:
         """First launch: just ask the organism. Research program emerges from conversation."""
 
         # What organism?
-        await self._say(send_fn, "Hi! I'm your microscopy copilot. What organism do you work with?")
+        await self._say(send_fn, "Hi! I'm your microscopy agent. What organism do you work with?")
 
         organism_choices = {
             "_type": "single",
@@ -403,7 +403,7 @@ class StartupWizard:
                 context_parts.append(f"Session plan: {plan}")
             context_str = "\n".join(context_parts)
             prompt = (
-                f"You are a microscopy copilot. Onboarding just finished. "
+                f"You are a microscopy agent. Onboarding just finished. "
                 f"Here's what you know:\n\n{context_str}\n\n"
                 f"Write a brief (2-3 sentences max) ready message. Summarize "
                 f"what you understood and offer to help. Be specific to their "
