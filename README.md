@@ -108,6 +108,15 @@ python launch_gently.py -v                  # INFO level
 python launch_gently.py --debug             # DEBUG level
 ```
 
+## Guides
+
+| Guide | Audience | What you'll learn |
+|-------|----------|-------------------|
+| [Try Without Hardware](docs/guides/try-offline.md) | Everyone | Run the agent in 10 minutes — conversation, plan mode, perception |
+| [What Gently Can Do](docs/guides/capabilities.md) | Everyone | Perception, detection, plan mode, memory, mesh, safety |
+| [Build a Plugin](docs/guides/build-a-plugin.md) | Developers | Create organism and hardware plugins for other modalities |
+| [Hardware Setup](docs/guides/hardware-setup.md) | Labs | Connect a diSPIM, start the device layer, first acquisition |
+
 ## Architecture
 
 Four layers with strict downward-only dependencies. The **harness** (reusable agent framework) is separated from the **application** (microscopy agent), with organism and hardware as swappable plugins.
