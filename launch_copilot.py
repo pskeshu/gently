@@ -366,13 +366,8 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         # Self-signed cert: tell Node.js to accept it for localhost
         tui_env = {**os.environ, "NODE_TLS_REJECT_UNAUTHORIZED": "0"}
 
-    node_args = ["node"]
-    if cert_path:
-        node_args.append("--no-warnings")
-    node_args.extend([str(tui_dist), "--ws-url", ws_url])
-
     tui_proc = subprocess.Popen(
-        node_args,
+        ["node", str(tui_dist), "--ws-url", ws_url],
         stdin=sys.stdin,
         stdout=sys.stdout,
         stderr=sys.stderr,
