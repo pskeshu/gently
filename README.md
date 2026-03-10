@@ -1,8 +1,8 @@
 # Gently
 
-Safe agentic microscopy with vision language models.
+Agentic harness for microscopy.
 
-**Status**: Under active development.
+**Status**: v0.11.0 — actively developed at Shroff Lab, Janelia.
 
 ![Safety Architecture](docs/images/safety_architecture.png)
 
