@@ -46,16 +46,21 @@ async def view_image(
         if image is None or image.shape == (100, 100):
             return "Failed to capture image from bottom camera"
 
-        # Archive the bottom camera image
-        if snap.get('image_path') and agent and agent.store and agent.session_id:
-            try:
-                agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'])
-            except Exception:
-                pass
-
         # Get current stage position for coordinate conversion
         stage_pos = await client.get_stage_position()
+
+        # Archive the bottom camera image with metadata
+        if snap.get('image_path') and agent and agent.store and agent.session_id:
+            try:
+                from gently.harness.tools.helpers import build_snapshot_metadata
+                meta = build_snapshot_metadata(
+                    stage_pos, image.shape,
+                    agent.experiment if agent else None)
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", snap['image_path'],
+                    metadata=meta)
+            except Exception:
+                pass
 
         # Prepare embryo annotations if requested
         embryo_annotations = []

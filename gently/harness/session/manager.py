@@ -65,7 +65,11 @@ class SessionManager:
 
         self._session_id = session_id
 
-        # Load and restore conversation history + embryo state
+        # Resume strategy:
+        #   - Conversation history: JSON snapshot only (DB doesn't store it)
+        #   - Embryo state: JSON snapshot is primary (has full params like
+        #     interval, num_slices, priority, etc.). DB embryo table fills
+        #     in any embryos that exist in the DB but not the snapshot.
         snapshot = self.store.load_session_snapshot(session_id)
         conversation_history = []
 

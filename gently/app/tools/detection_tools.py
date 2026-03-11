@@ -140,11 +140,18 @@ async def manual_mark_embryos(
             existing_embryos=existing_embryos if existing_embryos else None
         )
 
-        # Archive bottom camera image from marking
+        # Archive bottom camera image from marking with metadata
         if result.get('image_path') and agent.store and agent.session_id:
             try:
+                from gently.harness.tools.helpers import build_snapshot_metadata
+                stage_pos = result.get('stage_position', (0, 0))
+                img = result.get('image')
+                meta = build_snapshot_metadata(
+                    stage_pos, img.shape, agent.experiment,
+                ) if img is not None else None
                 agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", result['image_path'])
+                    agent.session_id, "bottom_camera", result['image_path'],
+                    metadata=meta)
             except Exception:
                 pass
 
@@ -233,16 +240,20 @@ async def edit_embryos(
         if image is None:
             return "Failed to capture image for editing."
 
-        # Archive the bottom camera image
-        if snap.get('image_path') and agent.store and agent.session_id:
-            try:
-                agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'])
-            except Exception:
-                pass
-
         # Get current stage position
         stage_pos = await client.get_stage_position()
+
+        # Archive the bottom camera image with metadata
+        if snap.get('image_path') and agent.store and agent.session_id:
+            try:
+                from gently.harness.tools.helpers import build_snapshot_metadata
+                meta = build_snapshot_metadata(
+                    stage_pos, image.shape, agent.experiment)
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", snap['image_path'],
+                    metadata=meta)
+            except Exception:
+                pass
 
         # Get current image dimensions for pixel coordinate calculation
         image_center_x = image.shape[1] / 2
@@ -392,15 +403,19 @@ async def show_detected_embryos(
         if image is None or image.shape == (100, 100):
             return "Failed to capture image for visualization."
 
-        # Archive the bottom camera image
+        current_stage = await client.get_stage_position()
+
+        # Archive the bottom camera image with metadata
         if snap.get('image_path') and agent.store and agent.session_id:
             try:
+                from gently.harness.tools.helpers import build_snapshot_metadata
+                meta = build_snapshot_metadata(
+                    current_stage, image.shape, agent.experiment)
                 agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'])
+                    agent.session_id, "bottom_camera", snap['image_path'],
+                    metadata=meta)
             except Exception:
                 pass
-
-        current_stage = await client.get_stage_position()
 
         # Calculate pixel positions from experiment embryo positions
         um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py

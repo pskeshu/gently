@@ -5,7 +5,7 @@ This module provides common validation and extraction patterns
 used across multiple tools to reduce code duplication.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
 
 
@@ -181,3 +181,75 @@ def format_duration(seconds: float) -> str:
     else:
         hours = seconds / 3600
         return f"{hours:.1f}h"
+
+
+def build_snapshot_metadata(
+    stage_position: Tuple[float, float],
+    image_shape: Tuple[int, ...],
+    experiment=None,
+    pixel_size_um: float = 6.5,
+    objective_mag: float = 10.0,
+    safety_limits: Optional[Dict] = None,
+) -> Dict:
+    """Build metadata dict for a bottom camera snapshot.
+
+    Captures everything needed to reconstruct embryo positions
+    from the image later (training, annotation, replay).
+
+    Parameters
+    ----------
+    stage_position : (x, y)
+        XY stage coordinates at time of capture.
+    image_shape : tuple
+        Shape of the captured image (H, W) or (H, W, C).
+    experiment : ExperimentState, optional
+        If provided, all embryo positions are included.
+    pixel_size_um : float
+        Camera sensor pixel size in micrometers.
+    objective_mag : float
+        Objective magnification on the bottom camera.
+    safety_limits : dict, optional
+        Stage safety perimeter, e.g.
+        ``{"x": (500, 2500), "y": (-1000, 1000)}``.
+        If None, uses diSPIM hardware defaults.
+
+    Returns
+    -------
+    dict
+        Metadata suitable for ``GentlyStore.register_snapshot()``.
+    """
+    um_per_pixel = pixel_size_um / objective_mag
+    h, w = image_shape[0], image_shape[1]
+
+    if safety_limits is None:
+        # Default diSPIM XY stage limits (µm)
+        safety_limits = {"x": (500.0, 2500.0), "y": (-1000.0, 1000.0)}
+
+    meta: Dict[str, Any] = {
+        "stage_x": stage_position[0],
+        "stage_y": stage_position[1],
+        "image_width": w,
+        "image_height": h,
+        "coordinate_transform": {
+            "pixel_size_um": pixel_size_um,
+            "objective_mag": objective_mag,
+            "um_per_pixel": um_per_pixel,
+            "image_center_x": w / 2,
+            "image_center_y": h / 2,
+        },
+        "safety_perimeter": safety_limits,
+    }
+
+    if experiment and experiment.embryos:
+        embryos: List[Dict] = []
+        for eid, emb in experiment.embryos.items():
+            pos = emb.stage_position or {}
+            embryos.append({
+                "embryo_id": eid,
+                "stage_x": pos.get("x"),
+                "stage_y": pos.get("y"),
+                "nickname": getattr(emb, "nickname", None),
+            })
+        meta["embryos"] = embryos
+
+    return meta
