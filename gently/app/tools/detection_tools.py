@@ -140,6 +140,14 @@ async def manual_mark_embryos(
             existing_embryos=existing_embryos if existing_embryos else None
         )
 
+        # Archive bottom camera image from marking
+        if result.get('image_path') and agent.store and agent.session_id:
+            try:
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", result['image_path'])
+            except Exception:
+                pass
+
         if result.get('success'):
             embryos = result.get('embryos', [])
 
@@ -220,9 +228,18 @@ async def edit_embryos(
 
     try:
         # Capture fresh image
-        image = await client.capture_bottom_image(exposure_ms=exposure_ms)
+        snap = await client.capture_bottom_image(exposure_ms=exposure_ms)
+        image = snap['image']
         if image is None:
             return "Failed to capture image for editing."
+
+        # Archive the bottom camera image
+        if snap.get('image_path') and agent.store and agent.session_id:
+            try:
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", snap['image_path'])
+            except Exception:
+                pass
 
         # Get current stage position
         stage_pos = await client.get_stage_position()
@@ -370,9 +387,18 @@ async def show_detected_embryos(
         return "No embryos in experiment. Run detect_embryos first."
 
     try:
-        image = await client.capture_bottom_image()
+        snap = await client.capture_bottom_image()
+        image = snap['image']
         if image is None or image.shape == (100, 100):
             return "Failed to capture image for visualization."
+
+        # Archive the bottom camera image
+        if snap.get('image_path') and agent.store and agent.session_id:
+            try:
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", snap['image_path'])
+            except Exception:
+                pass
 
         current_stage = await client.get_stage_position()
 

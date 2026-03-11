@@ -40,10 +40,19 @@ async def view_image(
     agent = context.get('agent')
 
     try:
-        image = await client.capture_bottom_image(exposure_ms=exposure_ms)
+        snap = await client.capture_bottom_image(exposure_ms=exposure_ms)
+        image = snap['image']
 
         if image is None or image.shape == (100, 100):
             return "Failed to capture image from bottom camera"
+
+        # Archive the bottom camera image
+        if snap.get('image_path') and agent and agent.store and agent.session_id:
+            try:
+                agent.store.register_snapshot(
+                    agent.session_id, "bottom_camera", snap['image_path'])
+            except Exception:
+                pass
 
         # Get current stage position for coordinate conversion
         stage_pos = await client.get_stage_position()

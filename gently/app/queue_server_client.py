@@ -480,6 +480,14 @@ class QueueServerClient:
                             image_data, volume_path = self._resolve_file_ref(image_data)
                         else:
                             image_data = np.array(image_data)
+                        # Clean up staging file — lightsheet snaps are
+                        # transient (calibration / focus).  The volume
+                        # acquisition path goes through acquire_volume().
+                        if volume_path is not None:
+                            try:
+                                volume_path.unlink(missing_ok=True)
+                            except OSError:
+                                pass
                         ret = {
                             'image': image_data,
                             'piezo_position': piezo_position,
@@ -487,8 +495,6 @@ class QueueServerClient:
                             'run_uid': run_uid,
                             'success': True,
                         }
-                        if volume_path is not None:
-                            ret['volume_path'] = volume_path
                         return ret
 
             # Plan succeeded but no image data available
@@ -658,7 +664,7 @@ class QueueServerClient:
             async with session.get(f"{self.http_url}/api/camera/exposure") as response:
                 return await response.json()
 
-    async def capture_bottom_image(self, use_led: bool = False, exposure_ms: float = None) -> np.ndarray:
+    async def capture_bottom_image(self, use_led: bool = False, exposure_ms: float = None) -> dict:
         """
         Capture image from bottom camera.
 
@@ -671,8 +677,9 @@ class QueueServerClient:
 
         Returns
         -------
-        np.ndarray
-            2D image array
+        dict
+            ``{'image': np.ndarray, 'image_path': Path | None}``.
+            *image_path* is set when the device wrote a staging TIFF.
         """
         # Set exposure if specified
         if exposure_ms is not None:
@@ -696,11 +703,11 @@ class QueueServerClient:
                     if key in data:
                         val = data[key]
                         if self._is_file_ref(val):
-                            arr, _ = self._resolve_file_ref(val)
-                            return arr
-                        return np.array(val)
+                            arr, fpath = self._resolve_file_ref(val)
+                            return {'image': arr, 'image_path': fpath}
+                        return {'image': np.array(val), 'image_path': None}
 
-        return np.zeros((100, 100), dtype=np.uint16)
+        return {'image': np.zeros((100, 100), dtype=np.uint16), 'image_path': None}
 
     # =========================================================================
     # Napari Embryo Editing (client-side)
@@ -936,7 +943,14 @@ class QueueServerClient:
             # If no image but editor requested, capture one for display
             if image is None and open_editor:
                 logger.info("Capturing image for napari editor...")
-                image = await self.capture_bottom_image(exposure_ms=exposure_ms)
+                snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
+                image = snap['image']
+                # Transient — clean up staging file
+                if snap.get('image_path'):
+                    try:
+                        snap['image_path'].unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
             # Open napari editor if requested (runs on client side for main thread)
             if open_editor and image is not None:
@@ -1017,7 +1031,9 @@ class QueueServerClient:
             if exposure_ms:
                 logger.info("Setting exposure to %s ms...", exposure_ms)
             logger.info("Capturing bottom camera image...")
-            image = await self.capture_bottom_image(exposure_ms=exposure_ms)
+            snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
+            image = snap['image']
+            image_path = snap.get('image_path')
             if image.shape == (100, 100):
                 return {'error': 'Failed to capture image'}
 
@@ -1146,12 +1162,19 @@ class QueueServerClient:
                 'embryos': embryos,
                 'num_embryos': len(embryos),
                 'image': image,
+                'image_path': image_path,
                 'stage_position': list(stage_pos)
             }
 
         except Exception as e:
             logger.debug("manual_mark_embryos failed with %s: %s", type(e).__name__, e)
             import traceback
+            # Clean up staging file on failure
+            if 'image_path' in dir() and image_path:
+                try:
+                    image_path.unlink(missing_ok=True)
+                except OSError:
+                    pass
             return {
                 'error': str(e),
                 'traceback': traceback.format_exc(),
@@ -1244,7 +1267,14 @@ class QueueServerClient:
                 if exposure_ms:
                     logger.info("Setting exposure to %s ms...", exposure_ms)
                 logger.info("Capturing image...")
-                image = await self.capture_bottom_image(exposure_ms=exposure_ms)
+                snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
+                image = snap['image']
+                # Transient view — clean up staging file
+                if snap.get('image_path'):
+                    try:
+                        snap['image_path'].unlink(missing_ok=True)
+                    except OSError:
+                        pass
 
             result = {'success': True}
 

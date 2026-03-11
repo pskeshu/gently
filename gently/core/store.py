@@ -16,6 +16,7 @@ Directory layout under *root*::
     incoming/                          # staging for device-written TIFFs
     volumes/{session_id}/{embryo_id}_t{tp:04d}.tif
     projections/{session_id}/{embryo_id}_t{tp:04d}.jpg
+    snapshots/{session_id}/{source}_{timestamp}.tif
     traces/{session_id}/{embryo_id}_t{tp:04d}.json
     sessions/{session_id}.json
 
@@ -156,7 +157,20 @@ CREATE TABLE IF NOT EXISTS ground_truth (
     FOREIGN KEY (session_id) REFERENCES sessions(session_id)
 );
 
+CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id   TEXT NOT NULL,
+    source       TEXT NOT NULL,   -- 'bottom_camera', 'lightsheet', etc.
+    file_path    TEXT NOT NULL,
+    width        INTEGER,
+    height       INTEGER,
+    metadata     TEXT,
+    captured_at  TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+);
+
 -- Indexes
+CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots(session_id, source);
 CREATE INDEX IF NOT EXISTS idx_volumes_acquired ON volumes(acquired_at);
 CREATE INDEX IF NOT EXISTS idx_predictions_run ON predictions(run_id);
 CREATE INDEX IF NOT EXISTS idx_predictions_embryo
@@ -501,6 +515,132 @@ class GentlyStore:
             f"register_volume: {incoming_path.name} -> {canonical}"
         )
         return canonical
+
+    # ------------------------------------------------------------------
+    # Snapshots (bottom camera, etc.)
+    # ------------------------------------------------------------------
+
+    def _snapshot_dir(self, session_id: str) -> Path:
+        d = self.root / "snapshots" / session_id
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def register_snapshot(
+        self,
+        session_id: str,
+        source: str,
+        incoming_path: Path,
+        metadata: dict = None,
+    ) -> Path:
+        """Move a transient TIFF from *incoming/* to ``snapshots/{session}/``.
+
+        Parameters
+        ----------
+        session_id : str
+            Current session identifier.
+        source : str
+            Camera/source name, e.g. ``"bottom_camera"``.
+        incoming_path : Path
+            Path to the file in the incoming staging directory.
+        metadata : dict, optional
+            Extra metadata to store in the DB row.
+
+        Returns
+        -------
+        Path
+            Canonical path after the move.
+        """
+        incoming_path = Path(incoming_path)
+        if not incoming_path.exists():
+            raise FileNotFoundError(f"Snapshot file not found: {incoming_path}")
+
+        snap_dir = self._snapshot_dir(session_id)
+        now = self._now()
+        # Use original stem (UUID) to avoid collisions
+        canonical = snap_dir / f"{source}_{incoming_path.stem}.tif"
+
+        try:
+            incoming_path.rename(canonical)
+        except OSError:
+            shutil.copy2(str(incoming_path), str(canonical))
+            incoming_path.unlink()
+
+        # Read shape for DB record
+        import tifffile
+        arr = tifffile.imread(str(canonical))
+
+        with self._tx():
+            self._conn.execute(
+                "INSERT INTO snapshots "
+                "(session_id, source, file_path, width, height, metadata, captured_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    session_id, source,
+                    self._rel_path(canonical),
+                    arr.shape[-1] if arr.ndim >= 2 else None,
+                    arr.shape[-2] if arr.ndim >= 2 else None,
+                    json.dumps(metadata) if metadata else None,
+                    now,
+                ),
+            )
+        logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
+        return canonical
+
+    def list_snapshots(
+        self, session_id: str, source: str = None
+    ) -> List[Dict[str, Any]]:
+        """List snapshot records for a session, optionally filtered by source."""
+        if source:
+            rows = self._conn.execute(
+                "SELECT * FROM snapshots WHERE session_id = ? AND source = ? "
+                "ORDER BY captured_at",
+                (session_id, source),
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM snapshots WHERE session_id = ? ORDER BY captured_at",
+                (session_id,),
+            ).fetchall()
+        cols = [d[0] for d in self._conn.execute(
+            "SELECT * FROM snapshots LIMIT 0"
+        ).description or []]
+        return [dict(zip(cols, row)) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Incoming cleanup
+    # ------------------------------------------------------------------
+
+    def cleanup_incoming(self, max_age_seconds: float = 300) -> int:
+        """Delete stale files from the incoming staging directory.
+
+        Files older than *max_age_seconds* (default 5 min) are assumed
+        orphaned — read into memory but never registered or moved.
+
+        Returns the number of files deleted.
+        """
+        import time
+
+        incoming = self.incoming_dir
+        if not incoming.exists():
+            return 0
+
+        cutoff = time.time() - max_age_seconds
+        deleted = 0
+        for f in incoming.iterdir():
+            if f.is_file() and f.stat().st_mtime < cutoff:
+                try:
+                    f.unlink()
+                    deleted += 1
+                    logger.debug("cleanup_incoming: deleted %s", f.name)
+                except OSError as e:
+                    logger.warning("cleanup_incoming: could not delete %s: %s", f.name, e)
+        if deleted:
+            logger.info("cleanup_incoming: removed %d stale file(s)", deleted)
+        return deleted
+
+    # ------------------------------------------------------------------
+    # Volume retrieval
+    # ------------------------------------------------------------------
 
     def get_volume(
         self, session_id: str, embryo_id: str, timepoint: int

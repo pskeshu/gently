@@ -661,6 +661,13 @@ class TimelapseOrchestrator:
                     await self._acquire_embryo(embryo_state, round_time=round_time)
                     await asyncio.sleep(0.5)
 
+                # Periodically purge orphaned staging files (every 10 rounds)
+                if self._store and target_round % 10 == 0:
+                    try:
+                        self._store.cleanup_incoming()
+                    except Exception:
+                        pass
+
         except asyncio.CancelledError:
             logger.info("Timelapse cancelled")
             self._status = TimelapseStatus.IDLE
