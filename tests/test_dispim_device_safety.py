@@ -525,7 +525,150 @@ class TestVolumeScanner:
 
 
 # ===========================================================================
-# 4. ERROR CLEANUP — LASER/LED AUTO-DISABLE
+# 4. HAPPY-PATH CLEANUP — LASER/LED OFF AFTER SUCCESS
+# ===========================================================================
+
+class TestVolumeScannerHappyPathCleanup:
+    """Volume scanner must disable lasers and reset state after successful acquisition."""
+
+    def _make_volume_scanner(self):
+        core = make_core()
+        core._available_configs["Laser"] = ["488 and 561", "ALL OFF"]
+
+        scanner = make_scanner(core=core)
+        from gently.hardware.dispim.devices.camera import DiSPIMCamera
+        camera = DiSPIMCamera("Camera", core)
+        piezo = make_piezo(core=core)
+        laser = make_laser(core=core)
+
+        from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+        vs = DiSPIMVolumeScanner(
+            scanner=scanner, camera=camera, piezo=piezo,
+            laser_control=laser, core=core
+        )
+        vs.configure(
+            num_slices=5, exposure_ms=5.0,
+            galvo_amplitude=1.0, galvo_center=0.0,
+            piezo_amplitude=50.0, piezo_center=0.0,
+        )
+        return vs, core
+
+    def test_lasers_disabled_after_successful_acquisition(self):
+        """Lasers must be turned off after normal acquisition completes."""
+        vs, core = self._make_volume_scanner()
+        status = vs.trigger()
+        status.wait(timeout=5)
+        assert status.success
+
+        laser_off_calls = [
+            c for c in core.call_log
+            if c[0] == 'setConfig' and c[1] == 'Laser' and c[2] == 'ALL OFF'
+        ]
+        assert len(laser_off_calls) >= 1, "Lasers must be disabled after successful acquisition"
+
+    def test_spim_state_idle_after_successful_acquisition(self):
+        """SPIM state machine must return to Idle after normal acquisition."""
+        vs, core = self._make_volume_scanner()
+        status = vs.trigger()
+        status.wait(timeout=5)
+
+        # Both scanner and piezo should be set to Idle
+        idle_calls = [
+            c for c in core.call_log
+            if c[0] == 'setProperty' and c[2] == 'SPIMState' and c[3] == 'Idle'
+        ]
+        assert len(idle_calls) >= 2, "Both scanner and piezo SPIM state must be reset to Idle"
+
+    def test_camera_trigger_mode_reset_after_acquisition(self):
+        """Camera must return to INTERNAL trigger after volume acquisition."""
+        vs, core = self._make_volume_scanner()
+        status = vs.trigger()
+        status.wait(timeout=5)
+
+        trigger_resets = [
+            c for c in core.call_log
+            if c[0] == 'setProperty' and c[2] == 'TRIGGER SOURCE' and c[3] == 'INTERNAL'
+        ]
+        assert len(trigger_resets) >= 1, "Camera must be reset to INTERNAL trigger after acquisition"
+
+    def test_laser_sequence_on_then_off(self):
+        """Lasers must be enabled THEN disabled — verify ordering."""
+        vs, core = self._make_volume_scanner()
+        status = vs.trigger()
+        status.wait(timeout=5)
+
+        laser_calls = [
+            c for c in core.call_log
+            if c[0] == 'setConfig' and c[1] == 'Laser'
+        ]
+        configs = [c[2] for c in laser_calls]
+        assert configs == ["488 and 561", "ALL OFF"], \
+            f"Expected laser on then off, got: {configs}"
+
+
+# ===========================================================================
+# 5. TIMEOUT PROTECTION
+# ===========================================================================
+
+class TestVolumeScannerTimeout:
+    """Volume scanner must not hang if image collection stalls."""
+
+    def test_timeout_when_images_never_arrive(self):
+        """If camera never delivers images, acquisition must timeout."""
+        core = make_core()
+        core._available_configs["Laser"] = ["488 and 561", "ALL OFF"]
+
+        # Override: startSequenceAcquisition runs but delivers no images
+        def stalling_start(camera, count, interval, stopOnOverflow):
+            core.call_log.append(('startSequenceAcquisition', camera, count))
+            core._sequence_running = True
+            core._circular_buffer = []  # No images delivered
+
+        # Override: sequence stays "running" forever
+        def always_running():
+            return core._sequence_running
+        core.startSequenceAcquisition = stalling_start
+        core.isSequenceRunning = always_running
+
+        scanner = make_scanner(core=core)
+        from gently.hardware.dispim.devices.camera import DiSPIMCamera
+        camera = DiSPIMCamera("Camera", core)
+        piezo = make_piezo(core=core)
+        laser = make_laser(core=core)
+
+        from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+        vs = DiSPIMVolumeScanner(
+            scanner=scanner, camera=camera, piezo=piezo,
+            laser_control=laser, core=core
+        )
+        vs.configure(
+            num_slices=10, exposure_ms=5.0,
+            galvo_amplitude=1.0, galvo_center=0.0,
+            piezo_amplitude=50.0, piezo_center=0.0,
+        )
+
+        # Shorten timeout (frozen dataclass — bypass with object.__setattr__)
+        from gently.settings import settings
+        original = settings.timeouts.volume_acquisition
+        object.__setattr__(settings.timeouts, 'volume_acquisition', 0.5)
+
+        try:
+            status = vs.trigger()
+            with pytest.raises(TimeoutError):
+                status.wait(timeout=5)
+
+            # Even on timeout, lasers must be off
+            laser_off = [
+                c for c in core.call_log
+                if c[0] == 'setConfig' and c[1] == 'Laser' and c[2] == 'ALL OFF'
+            ]
+            assert len(laser_off) >= 1, "Lasers must be disabled even on timeout"
+        finally:
+            object.__setattr__(settings.timeouts, 'volume_acquisition', original)
+
+
+# ===========================================================================
+# 6. ERROR CLEANUP — LASER/LED AUTO-DISABLE ON FAILURE
 # ===========================================================================
 
 class TestVolumeScannerErrorCleanup:
@@ -590,6 +733,10 @@ class TestVolumeScannerErrorCleanup:
         assert len(idle_calls) >= 1, "SPIM state must be reset to Idle on error"
 
 
+# ===========================================================================
+# 7. LED CLEANUP ON BOTTOM CAMERA
+# ===========================================================================
+
 class TestBottomCameraLEDCleanup:
     """Bottom camera must turn LED off even when capture fails."""
 
@@ -644,7 +791,7 @@ class TestBottomCameraLEDCleanup:
 
 
 # ===========================================================================
-# 5. CALIBRATION PRIOR
+# 8. CALIBRATION PRIOR
 # ===========================================================================
 
 class TestCalibrationPrior:
@@ -705,7 +852,7 @@ class TestCalibrationPrior:
 
 
 # ===========================================================================
-# 6. ROUNDING / PRECISION
+# 9. ROUNDING / PRECISION
 # ===========================================================================
 
 class TestPositionRounding:
