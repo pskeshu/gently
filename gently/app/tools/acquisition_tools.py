@@ -100,6 +100,7 @@ async def acquire_volume(
             embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
 
             # Store in GentlyStore (dual-write during transition)
+            saved_path = None
             if agent.store and agent.session_id:
                 try:
                     from pathlib import Path as _Path
@@ -123,14 +124,14 @@ async def acquire_volume(
                     }
                     volume_path_ref = result.get('volume_path')
                     if volume_path_ref is not None:
-                        agent.store.register_volume(
+                        saved_path = agent.store.register_volume(
                             agent.session_id, embryo_id, timepoint,
                             incoming_path=_Path(volume_path_ref),
                             metadata=acq_metadata,
                             volume_data=volume,
                         )
                     elif volume is not None:
-                        agent.store.put_volume(
+                        saved_path = agent.store.put_volume(
                             agent.session_id, embryo_id, timepoint, volume,
                             metadata=acq_metadata,
                         )

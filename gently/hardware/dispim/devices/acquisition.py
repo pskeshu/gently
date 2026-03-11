@@ -227,7 +227,7 @@ class DiSPIMVolumeScanner:
                     # Critical: disable lasers even on error
                     self.core.setConfig(self.laser_control.group_name, "ALL OFF")
                     self.core.waitForConfig(self.laser_control.group_name, "ALL OFF")
-                except:
+                except Exception:
                     pass
                 status.set_exception(exc)
             else:

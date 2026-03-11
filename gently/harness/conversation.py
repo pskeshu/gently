@@ -386,41 +386,6 @@ class ConversationManager:
 
         return results
 
-    async def _execute_tools(self, content_blocks) -> List[Dict]:
-        """
-        Execute Claude's tool calls (without logging).
-
-        Parameters
-        ----------
-        content_blocks : list
-            Content blocks from Claude response
-
-        Returns
-        -------
-        list of dict
-            Tool result content blocks
-        """
-        results = []
-
-        for block in content_blocks:
-            if block.type == "tool_use":
-                try:
-                    result = await self._execute_single_tool(block.name, block.input)
-                    results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result
-                    })
-                except Exception as e:
-                    results.append({
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": f"Error: {str(e)}",
-                        "is_error": True
-                    })
-
-        return results
-
     # ===== Streaming API Call =====
 
     async def call_claude_stream(self, system_prompt, tools,

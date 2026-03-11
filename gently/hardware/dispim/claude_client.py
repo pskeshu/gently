@@ -24,6 +24,14 @@ import anthropic
 from gently.settings import settings
 from .plans.calibration import EMBRYO_CENTERING_PROMPT, EMBRYO_EDGE_PROMPT
 
+_MEDIA_TYPE_MAP = {
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+}
+
 
 # ============================================================================
 # ASYNC CLAUDE CLIENT
@@ -171,15 +179,7 @@ class AsyncClaudeClient:
         image_data = self.encode_image(image_path)
 
         # Get media type from file extension
-        ext = image_path.suffix.lower()
-        media_type_map = {
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp'
-        }
-        media_type = media_type_map.get(ext, 'image/png')
+        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), 'image/png')
 
         # Prepare prompt
         prompt = custom_prompt if custom_prompt else EMBRYO_CENTERING_PROMPT
@@ -271,15 +271,7 @@ class AsyncClaudeClient:
         image_data = self.encode_image(image_path)
 
         # Get media type
-        ext = image_path.suffix.lower()
-        media_type_map = {
-            '.png': 'image/png',
-            '.jpg': 'image/jpeg',
-            '.jpeg': 'image/jpeg',
-            '.gif': 'image/gif',
-            '.webp': 'image/webp'
-        }
-        media_type = media_type_map.get(ext, 'image/png')
+        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), 'image/png')
 
         # Prepare prompt
         prompt = custom_prompt if custom_prompt else EMBRYO_EDGE_PROMPT

@@ -37,7 +37,7 @@ class SessionManager:
         self.store.create_session(self._session_id)
         logger.info(f"Created new session: {self._session_id}")
 
-    def _resume_session(self, session_id: str, experiment) -> bool:
+    def _resume_session(self, session_id: str, experiment):
         """
         Resume a session from GentlyStore.
 

@@ -319,7 +319,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
         mesh = MeshService(
             instance_id=instance_id,
-            viz_port=8080,
+            viz_port=settings.network.viz_port,
             capability_provider=_capability_provider,
             status_provider=_status_provider,
             pairing_manager=pairing_mgr,

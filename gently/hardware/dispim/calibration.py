@@ -122,26 +122,6 @@ class CalibrationPrior:
         self.num_calibrations += 1
         self.last_updated = datetime.now()
 
-    def get_reduced_sweep_range(self, base_range_um: float = 5.0) -> float:
-        """
-        Get adaptive sweep range based on prior confidence.
-
-        Returns a reduced range for subsequent embryos when we have
-        high-confidence priors from previous calibrations.
-
-        Parameters
-        ----------
-        base_range_um : float
-            Full sweep range for first embryo (default 5µm - tight range)
-
-        Returns
-        -------
-        float
-            Reduced sweep range based on confidence
-        """
-        # 5µm is already a tight range - return as-is
-        return base_range_um
-
     def to_dict(self) -> Dict:
         """Serialize for JSON storage"""
         return {

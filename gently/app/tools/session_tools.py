@@ -452,7 +452,7 @@ def list_sessions(
                 from datetime import datetime
                 dt = datetime.fromisoformat(last_active.replace('Z', '+00:00'))
                 last_active = dt.strftime("%Y-%m-%d %H:%M")
-            except:
+            except Exception:
                 last_active = last_active[:16]
 
         lines.append(f"{session_id:<40} {embryo_count:<8} {msg_count:<10} {last_active}")

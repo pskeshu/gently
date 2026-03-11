@@ -583,19 +583,20 @@ class SAMEmbryoDetector:
 
         return results
 
+    @staticmethod
+    def _to_rgb8(image: np.ndarray) -> np.ndarray:
+        """Convert image to 8-bit RGB for SAM."""
+        if image.dtype == np.uint16:
+            image = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
+        else:
+            image = image.astype(np.uint8)
+        if image.ndim == 2:
+            return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+        return image
+
     def _detect_with_sam(self, image: np.ndarray) -> Tuple[List[Dict], np.ndarray]:
         """Run SAM automatic segmentation (extracted from test script)"""
-        # Convert to 8-bit
-        if image.dtype == np.uint16:
-            image_8bit = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
-        else:
-            image_8bit = image.astype(np.uint8)
-
-        # Convert grayscale to RGB for SAM
-        if len(image_8bit.shape) == 2:
-            image_rgb = cv2.cvtColor(image_8bit, cv2.COLOR_GRAY2RGB)
-        else:
-            image_rgb = image_8bit
+        image_rgb = self._to_rgb8(image)
 
         # Generate masks
         masks = self._mask_generator.generate(image_rgb)
@@ -878,17 +879,7 @@ Respond in JSON:
 
     def _segment_with_sam(self, image: np.ndarray, predictor, point: Tuple) -> Optional[Dict]:
         """Use SAM predictor to segment region (from test script)"""
-        # Convert image
-        if image.dtype == np.uint16:
-            image_8bit = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
-        else:
-            image_8bit = image.astype(np.uint8)
-
-        if len(image_8bit.shape) == 2:
-            image_rgb = cv2.cvtColor(image_8bit, cv2.COLOR_GRAY2RGB)
-        else:
-            image_rgb = image_8bit
-
+        image_rgb = self._to_rgb8(image)
         predictor.set_image(image_rgb)
 
         point_coords = np.array([[point[0], point[1]]])

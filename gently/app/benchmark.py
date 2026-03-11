@@ -171,7 +171,7 @@ async def run_benchmark(
         started_at=datetime.now().isoformat(),
     )
 
-    viz_server = getattr(agent, '_viz_server', None)
+    viz_server = getattr(agent, 'viz_server', None)
     has_viz = viz_server is not None
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gently_benchmark_"))

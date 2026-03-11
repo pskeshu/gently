@@ -248,6 +248,18 @@ class GentlyStore:
             # Outside root — store as-is
             return str(absolute_path)
 
+    def _ensure_subdir(self, *parts: str) -> Path:
+        """Create and return a subdirectory under root."""
+        d = self.root.joinpath(*parts)
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    @staticmethod
+    def _parse_json_field(d: dict, field: str):
+        """Decode a JSON string field in-place, if present."""
+        if d.get(field):
+            d[field] = json.loads(d[field])
+
     def _abs_path(self, rel_path: str) -> Path:
         """Convert root-relative string to absolute path."""
         p = Path(rel_path)
@@ -282,8 +294,7 @@ class GentlyStore:
         if row is None:
             return None
         d = dict(row)
-        if d.get("metadata"):
-            d["metadata"] = json.loads(d["metadata"])
+        self._parse_json_field(d, "metadata")
         return d
 
     def list_sessions(self) -> List[SessionInfo]:
@@ -294,8 +305,7 @@ class GentlyStore:
         result = []
         for row in rows:
             d = dict(row)
-            if d.get("metadata"):
-                d["metadata"] = json.loads(d["metadata"])
+            self._parse_json_field(d, "metadata")
             result.append(d)
         return result
 
@@ -364,8 +374,7 @@ class GentlyStore:
         if row is None:
             return None
         d = dict(row)
-        if d.get("calibration"):
-            d["calibration"] = json.loads(d["calibration"])
+        self._parse_json_field(d, "calibration")
         return d
 
     def list_embryos(self, session_id: str) -> List[EmbryoInfo]:
@@ -376,8 +385,7 @@ class GentlyStore:
         result = []
         for row in rows:
             d = dict(row)
-            if d.get("calibration"):
-                d["calibration"] = json.loads(d["calibration"])
+            self._parse_json_field(d, "calibration")
             result.append(d)
         return result
 
@@ -386,17 +394,13 @@ class GentlyStore:
     # ==================================================================
 
     def _volume_dir(self, session_id: str) -> Path:
-        d = self.root / "volumes" / session_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self._ensure_subdir("volumes", session_id)
 
     def _volume_filename(self, embryo_id: str, timepoint: int) -> str:
         return f"{embryo_id}_t{timepoint:04d}.tif"
 
     def _projection_dir(self, session_id: str) -> Path:
-        d = self.root / "projections" / session_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self._ensure_subdir("projections", session_id)
 
     def _projection_filename(self, embryo_id: str, timepoint: int) -> str:
         return f"{embryo_id}_t{timepoint:04d}.jpg"
@@ -529,9 +533,7 @@ class GentlyStore:
     # ------------------------------------------------------------------
 
     def _snapshot_dir(self, session_id: str) -> Path:
-        d = self.root / "snapshots" / session_id
-        d.mkdir(parents=True, exist_ok=True)
-        return d
+        return self._ensure_subdir("snapshots", session_id)
 
     def register_snapshot(
         self,

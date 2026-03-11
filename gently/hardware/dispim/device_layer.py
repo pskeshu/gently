@@ -45,7 +45,7 @@ from gently.settings import settings
 
 # Bluesky imports
 from bluesky import RunEngine
-from bluesky.callbacks.best_effort import BestEffortCallback
+# BestEffortCallback removed — unused
 
 
 @dataclass

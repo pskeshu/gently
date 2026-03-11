@@ -33,7 +33,7 @@ class DiSPIMLED:
         """Get available LED configurations"""
         try:
             return list(self.core.getAvailableConfigs(self.group_name))
-        except:
+        except Exception:
             return []
 
     def set(self, state: str):
@@ -62,7 +62,7 @@ class DiSPIMLED:
         """Read current LED configuration - required for Bluesky"""
         try:
             current_config = self.core.getCurrentConfig(self.group_name)
-        except:
+        except Exception:
             current_config = 'unknown'
 
         data = OrderedDict()
@@ -111,7 +111,7 @@ class DiSPIMLaserControl:
         """Get available laser configurations"""
         try:
             return list(self.core.getAvailableConfigs(self.group_name))
-        except:
+        except Exception:
             return []
 
     def set(self, config_name: str):
@@ -140,7 +140,7 @@ class DiSPIMLaserControl:
         """Read current laser configuration - required for Bluesky"""
         try:
             current_config = self.core.getCurrentConfig(self.group_name)
-        except:
+        except Exception:
             current_config = 'unknown'
 
         data = OrderedDict()

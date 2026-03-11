@@ -77,8 +77,6 @@ class Gently:
     def __init__(
         self,
         storage_path: Path = settings.storage.base_path,
-        catalog_name: str = "gently",
-        use_persistent_storage: bool = True,
     ):
         """
         Initialize the Gently system
@@ -87,10 +85,6 @@ class Gently:
         ----------
         storage_path : Path
             Base path for all data storage (default: D:/Gently)
-        catalog_name : str
-            Legacy parameter, ignored.
-        use_persistent_storage : bool
-            Legacy parameter, ignored. GentlyStore always persists.
         """
         configure_logging(level="INFO")
 
@@ -103,9 +97,6 @@ class Gently:
 
         # Initialize GentlyStore (unified storage)
         self._store = GentlyStore(self.storage_path)
-
-        # Legacy stub — old DataStore API is removed; use GentlyStore instead
-        self._data_store = None
 
         # Current session ID (set by start_session or resume_session)
         self._current_session_id: Optional[str] = None
@@ -366,7 +357,6 @@ class Gently:
                            f"Available: {list(self._pipelines.keys())}")
 
         pipe = self._pipelines[pipeline]
-        pipe.set_data_store(self._data_store)
 
         result = await pipe.execute(data, context=context)
 
@@ -401,71 +391,6 @@ class Gently:
     def register_pipeline(self, name: str, pipeline: Pipeline):
         """Register a custom pipeline"""
         self._pipelines[name] = pipeline
-
-    # =========================================================================
-    # Data Operations
-    # =========================================================================
-
-    def store(
-        self,
-        data: Any,
-        data_type: str,
-        metadata: Optional[Dict] = None,
-        parent_uid: Optional[str] = None,
-    ) -> str:
-        """
-        Store data with UID tracking
-
-        Parameters
-        ----------
-        data : any
-            Data to store
-        data_type : str
-            Type of data (volume, image, analysis, etc.)
-        metadata : dict, optional
-            Additional metadata
-        parent_uid : str, optional
-            Parent UID for lineage
-
-        Returns
-        -------
-        str
-            UID of stored data
-        """
-        ref = self._data_store.store(
-            data=data,
-            data_type=data_type,
-            metadata=metadata,
-            parent_uid=parent_uid,
-        )
-
-        self._event_bus.publish(
-            EventType.DATA_STORED,
-            {'uid': ref.uid, 'data_type': data_type},
-            source="gently",
-        )
-
-        return ref.uid
-
-    def retrieve(self, uid: str) -> Any:
-        """
-        Retrieve data by UID
-
-        Parameters
-        ----------
-        uid : str
-            UID of data to retrieve
-
-        Returns
-        -------
-        any
-            The stored data
-        """
-        return self._data_store.retrieve(uid)
-
-    def get_lineage(self, uid: str) -> List:
-        """Get data lineage (parent chain)"""
-        return self._data_store.get_lineage(uid)
 
     # =========================================================================
     # Event Handling
@@ -542,7 +467,7 @@ class Gently:
             from .ui.web.server import VisualizationServer
             self._viz_server = VisualizationServer(
                 port=port,
-                data_store=self._data_store,
+                data_store=None,  # Legacy DataStore removed; viz uses event bus
                 event_bus=self._event_bus,
             )
             await self._viz_server.start()

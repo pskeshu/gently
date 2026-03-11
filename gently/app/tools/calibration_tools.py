@@ -80,11 +80,10 @@ async def _adaptive_focus_sweep(
     DENSE_RANGE = 3.0  # µm - narrow window around peak
     MIN_R_SQUARED = 0.75
 
-    # Get adaptive range from prior
-    sparse_range = session_prior.get_reduced_sweep_range(base_range_um=5.0)
+    sparse_range = 5.0  # µm sweep range
 
     logger.info("=== ADAPTIVE %s FOCUS SWEEP at galvo=%.3f deg ===", galvo_name.upper(), galvo_pos)
-    logger.info("Using adaptive range: +/-%.1f um (prior: %d calibrations)", sparse_range, session_prior.num_calibrations)
+    logger.info("Using range: +/-%.1f um (prior: %d calibrations)", sparse_range, session_prior.num_calibrations)
 
     # --- PHASE 1: SPARSE SURVEY ---
     logger.info("Phase 1: Sparse survey +/-%.1f um, %.1f um steps...", sparse_range, SPARSE_STEP)

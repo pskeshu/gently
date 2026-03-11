@@ -197,7 +197,7 @@ class DiSPIMCamera:
         """Get current exposure time"""
         try:
             return self.core.getExposure()
-        except:
+        except Exception:
             return 0.01  # Default 10ms
 
     @exposure_time.setter
@@ -404,7 +404,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
                 if self.use_led:
                     try:
                         self.led_control.set("Closed").wait(timeout=5)
-                    except:
+                    except Exception:
                         pass
                 status.set_exception(exc)
             else:
