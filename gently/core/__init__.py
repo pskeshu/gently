@@ -2,19 +2,10 @@
 Core infrastructure for Gently microscope control system
 
 Provides:
-- DataStore: UID-based data persistence through Databroker
+- GentlyStore: Unified data persistence (SQLite + filesystem)
 - EventBus: Async message passing between components
 - Service: Base class and registry for services
 """
-
-from .data_store import (
-    DataReference,
-    DataStore,
-    DatabrokerStore,
-    TiledStore,
-    get_data_store,
-    set_data_store,
-)
 
 from .event_bus import (
     Event,
@@ -39,13 +30,6 @@ from .service import (
 )
 
 __all__ = [
-    # Data store
-    'DataReference',
-    'DataStore',
-    'DatabrokerStore',
-    'TiledStore',
-    'get_data_store',
-    'set_data_store',
     # Event bus
     'Event',
     'EventType',

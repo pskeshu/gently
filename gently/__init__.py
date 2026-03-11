@@ -15,12 +15,9 @@ from .harness.memory.interface import AgentMemory
 
 # Core infrastructure
 from .core import (
-    TiledStore,
-    DatabrokerStore,
     EventBus,
     EventType,
     get_event_bus,
-    get_data_store,
 )
 
 # Core utilities
@@ -90,12 +87,9 @@ __all__ = [
     "AgentMemory",
 
     # Core infrastructure
-    "TiledStore",
-    "DatabrokerStore",
     "EventBus",
     "EventType",
     "get_event_bus",
-    "get_data_store",
     "GentlyStore",
 
     # Imaging

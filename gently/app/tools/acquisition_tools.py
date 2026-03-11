@@ -127,6 +127,7 @@ async def acquire_volume(
                             agent.session_id, embryo_id, timepoint,
                             incoming_path=_Path(volume_path_ref),
                             metadata=acq_metadata,
+                            volume_data=volume,
                         )
                     elif volume is not None:
                         agent.store.put_volume(

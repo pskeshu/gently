@@ -38,14 +38,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .core import (
-    DatabrokerStore,
-    TiledStore,
     EventBus,
     EventType,
     ServiceRegistry,
     ServiceClient,
     ServiceInfo,
-    get_data_store,
     get_event_bus,
     get_service_registry,
 )
@@ -91,24 +88,14 @@ class Gently:
         storage_path : Path
             Base path for all data storage (default: D:/Gently)
         catalog_name : str
-            Databroker/Tiled catalog name
+            Legacy parameter, ignored.
         use_persistent_storage : bool
-            If True, use TiledStore for persistent storage on disk
-            If False, use in-memory DatabrokerStore
+            Legacy parameter, ignored. GentlyStore always persists.
         """
         configure_logging(level="INFO")
 
         self.storage_path = Path(storage_path)
         self.storage_path.mkdir(parents=True, exist_ok=True)
-
-        # Initialize data store with persistent storage
-        if use_persistent_storage:
-            self._data_store = TiledStore(
-                storage_path=str(self.storage_path),
-                catalog_name=catalog_name,
-            )
-        else:
-            self._data_store = DatabrokerStore(catalog_name=catalog_name)
 
         self._event_bus = get_event_bus()
         self._services = get_service_registry()
@@ -116,6 +103,9 @@ class Gently:
 
         # Initialize GentlyStore (unified storage)
         self._store = GentlyStore(self.storage_path)
+
+        # Legacy stub — old DataStore API is removed; use GentlyStore instead
+        self._data_store = None
 
         # Current session ID (set by start_session or resume_session)
         self._current_session_id: Optional[str] = None
@@ -174,11 +164,6 @@ class Gently:
     # =========================================================================
     # Properties for accessing components
     # =========================================================================
-
-    @property
-    def data_store(self) -> DatabrokerStore:
-        """Access the UID-based data store"""
-        return self._data_store
 
     @property
     def event_bus(self) -> EventBus:

@@ -177,6 +177,8 @@ CREATE INDEX IF NOT EXISTS idx_predictions_embryo
     ON predictions(session_id, embryo_id, timepoint);
 CREATE INDEX IF NOT EXISTS idx_predictions_stage ON predictions(predicted_stage);
 CREATE INDEX IF NOT EXISTS idx_runs_session ON perception_runs(session_id);
+CREATE INDEX IF NOT EXISTS idx_predictions_created ON predictions(created_at);
+CREATE INDEX IF NOT EXISTS idx_embryos_session ON embryos(session_id, created_at);
 
 -- Views
 CREATE VIEW IF NOT EXISTS v_latest_prediction AS
@@ -458,6 +460,7 @@ class GentlyStore:
         timepoint: int,
         incoming_path: Path,
         metadata: dict = None,
+        volume_data: np.ndarray = None,
     ) -> Path:
         """
         Zero-copy path: rename an existing TIFF to canonical location.
@@ -472,14 +475,15 @@ class GentlyStore:
         ----------
         incoming_path : Path
             Path to the already-written TIFF file.
+        volume_data : np.ndarray, optional
+            Already-loaded volume array.  When provided the moved file
+            is **not** re-read from disk, saving one full TIFF decode.
 
         Returns
         -------
         Path
             Canonical path after rename.
         """
-        import tifffile
-
         incoming_path = Path(incoming_path)
         if not incoming_path.exists():
             raise FileNotFoundError(f"Incoming file not found: {incoming_path}")
@@ -497,8 +501,12 @@ class GentlyStore:
             shutil.copy2(str(incoming_path), str(canonical))
             incoming_path.unlink()
 
-        # Read for projection generation + shape/dtype info
-        volume = tifffile.imread(str(canonical))
+        # Use caller-provided array or read from disk
+        if volume_data is not None:
+            volume = volume_data
+        else:
+            import tifffile
+            volume = tifffile.imread(str(canonical))
 
         proj_path = self._generate_projection(session_id, embryo_id, timepoint, volume)
 

@@ -776,6 +776,7 @@ class MicroscopyAgent:
                         self.session_id, embryo_id, timepoint,
                         incoming_path=Path(volume_path),
                         metadata=acq_metadata,
+                        volume_data=volume,
                     )
                 else:
                     stored_path = self.store.put_volume(

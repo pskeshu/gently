@@ -256,6 +256,7 @@ async def run_benchmark(
                 if volume_path:
                     canonical_path = temp_store.register_volume(
                         benchmark_session, embryo_id, tp, Path(volume_path),
+                        volume_data=volume,
                     )
                     timing.file_size_mb = canonical_path.stat().st_size / (1024 * 1024)
                 elif volume is not None:
