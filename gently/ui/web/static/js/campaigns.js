@@ -441,13 +441,18 @@ function renderCampaignCard(tree) {
         phasesHtml += '</div>';
     }
 
+    const descParts = (c.description || '').split(' — ');
+    const cardTitle = descParts[0] || c.shorthand;
+    const cardSub = descParts.length > 1 ? descParts.slice(1).join(' — ') : '';
+
     return `<div class="campaign-card" data-status="${c.status}">
         <div class="campaign-card-header">
             <div class="campaign-title-row">
                 ${c.shorthand ? `<span class="campaign-shorthand">${esc(c.shorthand)}</span>` : ''}
-                <span class="campaign-name">${esc(c.description)}</span>
+                <span class="campaign-name">${esc(cardTitle)}</span>
                 <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
             </div>
+            ${cardSub ? `<div class="campaign-subtitle">${esc(cardSub)}</div>` : ''}
         </div>
         ${c.target ? `<div class="campaign-target">${esc(c.target)}</div>` : ''}
         ${total > 0 ? `<div class="campaign-progress">
@@ -482,13 +487,18 @@ function renderPlanDoc() {
     let html = '<div class="plan-doc">';
 
     // Title card
+    const descParts = (campaign.description || '').split(' — ');
+    const titleMain = descParts[0] || campaign.shorthand;
+    const titleSub = descParts.length > 1 ? descParts.slice(1).join(' — ') : '';
+
     html += `<div class="plan-title-card" id="plan-title-card">
         <div class="plan-title-card-header">
-            ${campaign.shorthand ? `<span class="plan-title-card-shorthand">${esc(campaign.shorthand)}</span>` : ''}
-            <span class="plan-title-card-name">${esc(campaign.description)}</span>
-            <span class="plan-title-card-status">
+            <div class="plan-title-card-top">
+                ${campaign.shorthand ? `<span class="plan-title-card-shorthand">${esc(campaign.shorthand)}</span>` : ''}
                 <span class="status-badge status-${campaign.status}">${STATUS_LABELS[campaign.status] || campaign.status}</span>
-            </span>
+            </div>
+            <span class="plan-title-card-name">${esc(titleMain)}</span>
+            ${titleSub ? `<span class="plan-title-card-subtitle">${esc(titleSub)}</span>` : ''}
         </div>
         ${campaign.target ? `<div class="plan-title-card-target">${esc(campaign.target)}</div>` : ''}
         <div class="plan-title-card-stats">
@@ -960,7 +970,7 @@ function updateHeader() {
         $printBtn?.classList.add('hidden');
     } else {
         const campaign = state.docData?.document?.campaign;
-        if ($headerTitle) $headerTitle.textContent = campaign?.description || campaign?.shorthand || 'Plan';
+        if ($headerTitle) $headerTitle.textContent = campaign?.shorthand || 'Plan';
         if ($headerBreadcrumb) $headerBreadcrumb.textContent = '';
         // Show version dropdown if we have versions
         if (state.versions.length > 0) {
