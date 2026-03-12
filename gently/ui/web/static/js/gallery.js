@@ -33,6 +33,291 @@ function openSnapshotsLightbox(index) {
 // Calibration Profile View - SVG Z-scan visualization
 // ==========================================
 
+// ==========================================
+// CalibrationCharts - SVG chart rendering for focus curves & calibration summary
+// ==========================================
+
+const CalibrationCharts = {
+    CHART_W: 380,
+    CHART_H: 220,
+    MARGIN: { top: 28, right: 20, bottom: 36, left: 44 },
+
+    /**
+     * Render a focus curve chart from sweep data points.
+     * @param {Array} points - [{piezo, score}, ...] sorted by piezo
+     * @param {string} galvoName - 'top' or 'bottom'
+     * @param {number|null} bestPiezo - optimal piezo position
+     * @param {number|null} rSquared - fit quality
+     */
+    renderFocusCurve(points, galvoName, bestPiezo, rSquared) {
+        if (!points || points.length < 2) return '';
+
+        const M = this.MARGIN;
+        const W = this.CHART_W;
+        const H = this.CHART_H;
+        const pw = W - M.left - M.right;
+        const ph = H - M.top - M.bottom;
+
+        // Normalize scores to 0-1 range (absolute values are meaningless)
+        const piezos = points.map(p => p.piezo);
+        const rawScores = points.map(p => p.score);
+        const rawMin = Math.min(...rawScores);
+        const rawMax = Math.max(...rawScores);
+        const rawRange = rawMax - rawMin || 1;
+        const normPoints = points.map(p => ({
+            piezo: p.piezo,
+            score: (p.score - rawMin) / rawRange
+        }));
+
+        // Data ranges
+        const pMin = Math.min(...piezos);
+        const pMax = Math.max(...piezos);
+        const pPad = (pMax - pMin) * 0.08 || 1;
+        const pRange = [pMin - pPad, pMax + pPad];
+        const sRange = [-0.08, 1.12]; // normalized 0-1 with padding
+
+        const xScale = v => M.left + (v - pRange[0]) / (pRange[1] - pRange[0]) * pw;
+        const yScale = v => M.top + ph - (v - sRange[0]) / (sRange[1] - sRange[0]) * ph;
+
+        let svg = `<svg class="cal-chart-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+        // Grid lines
+        svg += this._renderGrid(M, pw, ph, pRange, sRange, xScale, yScale);
+
+        // Gaussian fit curve (on normalized data)
+        const fitParams = this._estimateGaussian(normPoints);
+        if (fitParams) {
+            const fitPoints = [];
+            const steps = 80;
+            for (let i = 0; i <= steps; i++) {
+                const x = pRange[0] + (pRange[1] - pRange[0]) * i / steps;
+                const y = fitParams.a * Math.exp(-((x - fitParams.mu) ** 2) / (2 * fitParams.sigma ** 2)) + fitParams.c;
+                fitPoints.push(`${xScale(x).toFixed(1)},${yScale(y).toFixed(1)}`);
+            }
+            svg += `<polyline points="${fitPoints.join(' ')}" fill="none"
+                     stroke="var(--accent-orange, #f97316)" stroke-width="2" stroke-opacity="0.8"/>`;
+        }
+
+        // Best position line
+        if (bestPiezo != null && bestPiezo >= pRange[0] && bestPiezo <= pRange[1]) {
+            const bx = xScale(bestPiezo);
+            svg += `<line x1="${bx}" y1="${M.top}" x2="${bx}" y2="${M.top + ph}"
+                     stroke="var(--accent-green, #22c55e)" stroke-width="1.5" stroke-dasharray="4,3" opacity="0.8"/>`;
+            // Clamp label position to stay within SVG
+            const labelX = Math.min(Math.max(bx, M.left + 30), W - M.right - 30);
+            svg += `<text x="${labelX}" y="${M.top - 6}" text-anchor="middle"
+                     class="cal-chart-label" fill="var(--accent-green, #22c55e)"
+                     font-size="9">${bestPiezo.toFixed(1)} µm</text>`;
+        }
+
+        // Data points (normalized)
+        normPoints.forEach(p => {
+            svg += `<circle cx="${xScale(p.piezo).toFixed(1)}" cy="${yScale(p.score).toFixed(1)}"
+                     r="4" fill="var(--accent, #3b82f6)" stroke="var(--bg-card)" stroke-width="1"/>`;
+        });
+
+        // Title
+        const label = galvoName ? galvoName.toUpperCase() : '';
+        const r2Text = rSquared != null ? `  R²=${rSquared.toFixed(3)}` : '';
+        svg += `<text x="${M.left + pw / 2}" y="16" text-anchor="middle"
+                 class="cal-chart-title">${label} Focus Curve</text>`;
+        if (r2Text) {
+            svg += `<text x="${W - M.right}" y="16" text-anchor="end"
+                     class="cal-chart-tick" font-size="9" opacity="0.6">${r2Text.trim()}</text>`;
+        }
+
+        // Axes labels
+        svg += `<text x="${M.left + pw / 2}" y="${H - 4}" text-anchor="middle"
+                 class="cal-chart-label">Piezo (µm)</text>`;
+        svg += `<text x="10" y="${M.top + ph / 2}" text-anchor="middle"
+                 class="cal-chart-label" transform="rotate(-90, 10, ${M.top + ph / 2})">Score</text>`;
+
+        svg += '</svg>';
+        return svg;
+    },
+
+    /**
+     * Render calibration summary (piezo vs galvo linear fit).
+     */
+    renderCalibrationSummary(info) {
+        if (info.focusTopGalvo == null || info.focusBotGalvo == null) return '';
+
+        const M = this.MARGIN;
+        const W = this.CHART_W;
+        const H = this.CHART_H;
+        const pw = W - M.left - M.right;
+        const ph = H - M.top - M.bottom;
+
+        // Get the two calibration points
+        const g1 = info.focusTopGalvo, g2 = info.focusBotGalvo;
+        // Compute piezo from slope/offset
+        const p1 = info.slope * g1 + info.offset;
+        const p2 = info.slope * g2 + info.offset;
+
+        const galvos = [g1, g2];
+        const piezos = [p1, p2];
+
+        const gMin = Math.min(...galvos), gMax = Math.max(...galvos);
+        const pMin = Math.min(...piezos), pMax = Math.max(...piezos);
+        const gPad = (gMax - gMin) * 0.25 || 0.05;
+        const pPad = (pMax - pMin) * 0.25 || 2;
+        const gRange = [gMin - gPad, gMax + gPad];
+        const pRange = [pMin - pPad, pMax + pPad];
+
+        const xScale = v => M.left + (v - gRange[0]) / (gRange[1] - gRange[0]) * pw;
+        const yScale = v => M.top + ph - (v - pRange[0]) / (pRange[1] - pRange[0]) * ph;
+
+        let svg = `<svg class="cal-chart-svg" viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+
+        // Grid
+        svg += this._renderGrid(M, pw, ph, gRange, pRange, xScale, yScale);
+
+        // Linear fit line (extend beyond points)
+        const fitG0 = gRange[0], fitG1 = gRange[1];
+        const fitP0 = info.slope * fitG0 + info.offset;
+        const fitP1 = info.slope * fitG1 + info.offset;
+        svg += `<line x1="${xScale(fitG0)}" y1="${yScale(fitP0)}" x2="${xScale(fitG1)}" y2="${yScale(fitP1)}"
+                 stroke="var(--accent-orange, #f97316)" stroke-width="2" opacity="0.8"/>`;
+
+        // Data points with labels
+        galvos.forEach((g, i) => {
+            const px = xScale(g), py = yScale(piezos[i]);
+            const label = i === 0 ? 'Top' : 'Bottom';
+            const r2 = i === 0 ? info.rSquaredTop : info.rSquaredBot;
+            const r2Str = r2 != null ? `R²=${r2.toFixed(3)}` : '';
+            svg += `<circle cx="${px}" cy="${py}" r="5"
+                     fill="var(--accent, #3b82f6)" stroke="var(--bg-card)" stroke-width="1.5"/>`;
+            // Position label left of point if near right edge
+            const nearRight = px > M.left + pw * 0.65;
+            const tx = nearRight ? px - 8 : px + 8;
+            const anchor = nearRight ? 'end' : 'start';
+            svg += `<text x="${tx}" y="${py + (i === 0 ? -8 : 14)}"
+                     text-anchor="${anchor}" class="cal-chart-label" font-size="9">${label} ${r2Str}</text>`;
+        });
+
+        // Title
+        svg += `<text x="${M.left + pw / 2}" y="16" text-anchor="middle"
+                 class="cal-chart-title">Piezo-Galvo Calibration</text>`;
+
+        // Equation
+        const eq = `piezo = ${info.slope.toFixed(1)}·galvo + ${info.offset.toFixed(1)}`;
+        svg += `<text x="${M.left + pw / 2}" y="${H - 4}" text-anchor="middle"
+                 class="cal-chart-label" font-size="9" opacity="0.7">${eq}</text>`;
+
+        // Axis labels
+        svg += `<text x="${M.left + pw / 2}" y="${H - 16}" text-anchor="middle"
+                 class="cal-chart-label">Galvo (deg)</text>`;
+        svg += `<text x="12" y="${M.top + ph / 2}" text-anchor="middle"
+                 class="cal-chart-label" transform="rotate(-90, 12, ${M.top + ph / 2})">Piezo (µm)</text>`;
+
+        svg += '</svg>';
+        return svg;
+    },
+
+    /** Estimate Gaussian params from data: y = a * exp(-(x-mu)^2/(2*sigma^2)) + c */
+    _estimateGaussian(points) {
+        if (points.length < 3) return null;
+
+        const sorted = [...points].sort((a, b) => a.piezo - b.piezo);
+        const scores = sorted.map(p => p.score);
+        const piezos = sorted.map(p => p.piezo);
+
+        const c = Math.min(...scores);
+        const maxIdx = scores.indexOf(Math.max(...scores));
+        const mu = piezos[maxIdx];
+        const a = scores[maxIdx] - c;
+        if (a <= 0) return null;
+
+        // Estimate sigma from half-max width
+        const halfMax = c + a / 2;
+        let left = mu, right = mu;
+        for (let i = maxIdx; i >= 0; i--) {
+            if (scores[i] <= halfMax) { left = piezos[i]; break; }
+            if (i === 0) left = piezos[0];
+        }
+        for (let i = maxIdx; i < scores.length; i++) {
+            if (scores[i] <= halfMax) { right = piezos[i]; break; }
+            if (i === scores.length - 1) right = piezos[i];
+        }
+        const fwhm = Math.abs(right - left) || (piezos[piezos.length - 1] - piezos[0]) * 0.3;
+        const sigma = fwhm / 2.355; // FWHM = 2*sqrt(2*ln2)*sigma
+
+        return sigma > 0 ? { a, mu, sigma, c } : null;
+    },
+
+    /** Render grid lines and tick labels */
+    _renderGrid(M, pw, ph, xRange, yRange, xScale, yScale) {
+        let svg = '';
+        const xTicks = this._niceTicks(xRange[0], xRange[1], 5);
+        const yTicks = this._niceTicks(yRange[0], yRange[1], 4);
+
+        // Horizontal grid + Y labels
+        yTicks.forEach(v => {
+            const y = yScale(v);
+            if (y < M.top || y > M.top + ph) return;
+            svg += `<line x1="${M.left}" y1="${y}" x2="${M.left + pw}" y2="${y}"
+                     stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>`;
+            svg += `<text x="${M.left - 6}" y="${y + 3}" text-anchor="end"
+                     class="cal-chart-tick">${this._formatTick(v)}</text>`;
+        });
+
+        // Vertical grid + X labels
+        xTicks.forEach(v => {
+            const x = xScale(v);
+            if (x < M.left || x > M.left + pw) return;
+            svg += `<line x1="${x}" y1="${M.top}" x2="${x}" y2="${M.top + ph}"
+                     stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>`;
+            svg += `<text x="${x}" y="${M.top + ph + 14}" text-anchor="middle"
+                     class="cal-chart-tick">${this._formatTick(v)}</text>`;
+        });
+
+        // Border
+        svg += `<rect x="${M.left}" y="${M.top}" width="${pw}" height="${ph}"
+                 fill="none" stroke="var(--border)" stroke-width="0.5" opacity="0.3"/>`;
+
+        return svg;
+    },
+
+    /** Generate nice round tick values */
+    _niceTicks(min, max, targetCount) {
+        const range = max - min;
+        if (range <= 0) return [min];
+        const rough = range / targetCount;
+        const mag = Math.pow(10, Math.floor(Math.log10(rough)));
+        const norm = rough / mag;
+        let step;
+        if (norm < 1.5) step = mag;
+        else if (norm < 3.5) step = 2 * mag;
+        else if (norm < 7.5) step = 5 * mag;
+        else step = 10 * mag;
+
+        const ticks = [];
+        let v = Math.ceil(min / step) * step;
+        while (v <= max) {
+            ticks.push(v);
+            v += step;
+        }
+        return ticks;
+    },
+
+    /** Format tick values: use SI-like abbreviation for large numbers */
+    _formatTick(v) {
+        const abs = Math.abs(v);
+        if (abs >= 1e12) return (v / 1e12).toFixed(1) + 'T';
+        if (abs >= 1e9) return (v / 1e9).toFixed(1) + 'G';
+        if (abs >= 1e6) return (v / 1e6).toFixed(1) + 'M';
+        if (abs >= 1e4) return (v / 1e3).toFixed(1) + 'k';
+        if (abs >= 100) return v.toFixed(0);
+        if (abs >= 1) return v.toFixed(1);
+        if (abs >= 0.01) return v.toFixed(2);
+        return v.toFixed(3);
+    }
+};
+
+// ==========================================
+// CalibrationProfileView - SVG Z-scan visualization
+// ==========================================
+
 const CalibrationProfileView = {
     SVG_WIDTH: 520,
     SVG_HEIGHT: 480,
@@ -95,7 +380,7 @@ const CalibrationProfileView = {
                     ${this._renderResultsCard(calibInfo)}
                 </div>
                 <div class="cal-profile-detail" id="cal-profile-detail">
-                    ${this._renderDetailDefault(focusPlots, summaries, calibInfo)}
+                    ${this._renderDetailDefault(focusPlots, summaries, calibInfo, sweepData)}
                 </div>
             </div>
         `;
@@ -424,32 +709,80 @@ const CalibrationProfileView = {
         `;
     },
 
-    _renderDetailDefault(focusPlots, summaries, info) {
+    _renderDetailDefault(focusPlots, summaries, info, sweepData) {
         let html = '';
 
-        // Show focus plots
-        if (focusPlots.length > 0) {
-            const latest = focusPlots.slice(-2).reverse(); // Show up to 2 (top + bottom)
+        // Build focus curves from sweep data (grouped by galvo_name)
+        if (sweepData && sweepData.length > 0) {
+            const byGalvo = {};
+            sweepData.forEach(s => {
+                const name = s.galvo_name || 'unknown';
+                if (!byGalvo[name]) byGalvo[name] = [];
+                byGalvo[name].push({ piezo: s.piezo, score: s.score });
+            });
+
+            // Get best_piezo and r_squared from focus_plot metadata
+            const focusMeta = {};
+            focusPlots.forEach(fp => {
+                const m = fp.metadata || {};
+                if (m.galvo_name) {
+                    focusMeta[m.galvo_name] = {
+                        bestPiezo: m.best_piezo ?? null,
+                        rSquared: m.r_squared ?? null
+                    };
+                }
+            });
+
+            // Render chart for each galvo position (top, bottom)
+            for (const [name, points] of Object.entries(byGalvo)) {
+                const sorted = points.sort((a, b) => a.piezo - b.piezo);
+                const meta = focusMeta[name] || {};
+                const chartSvg = CalibrationCharts.renderFocusCurve(
+                    sorted, name, meta.bestPiezo, meta.rSquared
+                );
+                if (chartSvg) {
+                    html += `
+                        <div class="cal-detail-card">
+                            <div class="cal-detail-card-title">Focus Curve — ${name.toUpperCase()}</div>
+                            <div class="cal-chart-container">${chartSvg}</div>
+                        </div>
+                    `;
+                }
+            }
+        } else if (focusPlots.length > 0) {
+            // Fallback: show matplotlib PNGs if no sweep data available
+            const latest = focusPlots.slice(-2).reverse();
             latest.forEach((img, i) => {
                 const label = i === 0 ? 'Focus Curve (latest)' : 'Focus Curve';
                 html += `
                     <div class="cal-detail-card">
                         <div class="cal-detail-card-title">${label}</div>
                         <img class="cal-detail-img" src="data:image/png;base64,${img.base64_png}"
-                             alt="focus curve" onclick="CalibrationManager.openLightbox(0)"/>
+                             alt="focus curve"/>
                     </div>
                 `;
             });
         }
 
-        // Show calibration summary
-        if (summaries.length > 0) {
+        // Render calibration summary chart from metadata
+        if (info.slope != null && info.focusTopGalvo != null) {
+            const chartSvg = CalibrationCharts.renderCalibrationSummary(info);
+            if (chartSvg) {
+                html += `
+                    <div class="cal-detail-card">
+                        <div class="cal-detail-card-title">Calibration Summary</div>
+                        <div class="cal-chart-container">${chartSvg}</div>
+                    </div>
+                `;
+            }
+        } else if (summaries.length > 0) {
+            // Fallback: show matplotlib PNG
             const latest = summaries[summaries.length - 1];
             html += `
                 <div class="cal-detail-card">
                     <div class="cal-detail-card-title">Calibration Summary</div>
                     <img class="cal-detail-img" src="data:image/png;base64,${latest.base64_png}"
-                         alt="calibration summary" onclick="CalibrationManager.openLightbox(0)"/>
+                         alt="calibration summary"/>
                 </div>
             `;
         }

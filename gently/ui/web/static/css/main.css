@@ -923,7 +923,9 @@ body {
     display: flex;
     gap: 16px;
     height: calc(100vh - 160px);
+    max-height: calc(100vh - 160px);
     min-height: 400px;
+    overflow: hidden;
 }
 
 .cal-profile-svg-area {
@@ -944,10 +946,13 @@ body {
 .cal-profile-detail {
     flex: 2;
     overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: block;
     min-width: 250px;
+    max-height: calc(100vh - 160px);
+}
+
+.cal-profile-detail > * + * {
+    margin-top: 12px;
 }
 
 /* SVG slice line interactions */
@@ -994,6 +999,32 @@ body {
     display: block;
     background: var(--img-bg);
     cursor: pointer;
+}
+
+/* SVG Chart styling */
+.cal-chart-container {
+    padding: 8px;
+}
+
+.cal-chart-svg {
+    width: 100%;
+    height: auto;
+}
+
+.cal-chart-title {
+    font-size: 11px;
+    font-weight: 600;
+    fill: var(--text);
+}
+
+.cal-chart-label {
+    font-size: 10px;
+    fill: var(--text-muted);
+}
+
+.cal-chart-tick {
+    font-size: 9px;
+    fill: var(--text-muted);
 }
 
 .cal-detail-meta {
