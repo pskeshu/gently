@@ -876,10 +876,236 @@ body {
 }
 
 .calibration-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     font-size: 16px;
     font-weight: 600;
     margin-bottom: 16px;
     color: var(--text);
+}
+
+/* Calibration View Switcher */
+.cal-view-switcher {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-dark);
+    border-radius: 8px;
+    padding: 2px;
+    border: 1px solid var(--border);
+}
+
+.cal-view-btn {
+    padding: 0.25rem 0.75rem;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.cal-view-btn:hover {
+    color: var(--text);
+    background: var(--bg-hover);
+}
+
+.cal-view-btn.active {
+    color: var(--text);
+    background: var(--bg-card);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+
+/* Z-Stack Profile View */
+.cal-profile-container {
+    display: flex;
+    gap: 16px;
+    height: calc(100vh - 160px);
+    min-height: 400px;
+}
+
+.cal-profile-svg-area {
+    flex: 3;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.cal-profile-svg {
+    width: 100%;
+    height: auto;
+    flex: 1;
+    min-height: 0;
+}
+
+.cal-profile-detail {
+    flex: 2;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 250px;
+}
+
+/* SVG slice line interactions */
+.cal-slice-line {
+    transition: opacity 0.15s ease, stroke-width 0.15s ease;
+}
+
+.cal-slice-line:hover {
+    stroke-width: 3 !important;
+    opacity: 1 !important;
+    filter: drop-shadow(0 0 4px currentColor);
+}
+
+.cal-slice-line.selected {
+    stroke: var(--accent) !important;
+    stroke-width: 2.5 !important;
+    opacity: 1 !important;
+}
+
+.cal-slice-line.focus-pos {
+    filter: drop-shadow(0 0 3px var(--accent-green));
+}
+
+/* Detail cards */
+.cal-detail-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.cal-detail-card-title {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+}
+
+.cal-detail-img {
+    width: 100%;
+    display: block;
+    background: var(--img-bg);
+    cursor: pointer;
+}
+
+.cal-detail-meta {
+    padding: 10px 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.cal-meta-item {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.cal-meta-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.cal-meta-value {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+    font-family: monospace;
+}
+
+.cal-detail-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 120px;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* Results card */
+.cal-results-card {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.cal-result {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.cal-result-label {
+    font-size: 9px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.cal-result-value {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    font-family: monospace;
+}
+
+/* Sidebar type badges */
+.card-types {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+    margin-top: 4px;
+}
+
+.card-type-badge {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(96, 165, 250, 0.15);
+    color: var(--accent);
+}
+
+.card-type-badge.done {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--accent-green);
+}
+
+.calibration-embryo-card.selected .card-type-badge {
+    background: rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Profile fallback */
+.cal-profile-fallback {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.cal-profile-fallback-msg {
+    color: var(--text-muted);
+    font-size: 13px;
+    font-style: italic;
+}
+
+.cal-profile-fallback-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 12px;
 }
 
 .empty-state-small {

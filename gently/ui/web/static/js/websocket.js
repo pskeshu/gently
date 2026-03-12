@@ -6,6 +6,43 @@
 let _wsReconnectDelay = 1000;  // Start at 1s
 const _WS_MAX_DELAY = 30000;   // Max 30s
 
+/**
+ * Load initial data via parallel REST calls (much faster than WebSocket).
+ * Called on page load and on WebSocket reconnect.
+ */
+let _initialDataLoaded = false;
+
+function loadInitialData() {
+    if (_initialDataLoaded) return;
+    _initialDataLoaded = true;
+
+    // Fire all three in parallel
+    fetch('/api/snapshots')
+        .then(r => r.json())
+        .then(data => {
+            state.snapshots = data.snapshots || [];
+            updateMainCount();
+            renderRecentList();
+        })
+        .catch(e => console.warn('Failed to load snapshots:', e));
+
+    fetch('/api/calibration')
+        .then(r => r.json())
+        .then(data => {
+            state.calibration = data.calibration || [];
+            updateCalibrationCount();
+            renderCalibrationGallery();
+        })
+        .catch(e => console.warn('Failed to load calibration:', e));
+
+    fetch('/api/embryos')
+        .then(r => r.json())
+        .then(data => {
+            state.embryos = data.embryos || [];
+        })
+        .catch(e => console.warn('Failed to load embryos:', e));
+}
+
 function connectWebSocket() {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     state.ws = new WebSocket(`${protocol}//${location.host}/ws`);
@@ -21,14 +58,13 @@ function connectWebSocket() {
             PresenceManager.sendJoin();
         }
 
-        // Request initial data
-        state.ws.send(JSON.stringify({type: 'get_embryos'}));
-        state.ws.send(JSON.stringify({type: 'get_snapshots'}));
-        state.ws.send(JSON.stringify({type: 'get_calibration'}));
+        // Load initial data via REST (parallel, fast) if not already loaded
+        loadInitialData();
     };
 
     state.ws.onclose = () => {
         state.connected = false;
+        _initialDataLoaded = false;  // Allow reload on reconnect
         document.getElementById('status-text').textContent = 'Disconnected';
         document.getElementById('status-dot').classList.remove('connected');
         // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
@@ -57,7 +93,7 @@ function handleMessage(msg) {
     } else if (msg.type === 'calibration') {
         state.calibration = msg.data || [];
         updateCalibrationCount();
-        if (state.tab === 'calibration') renderCalibrationGallery();
+        renderCalibrationGallery();
     } else if (msg.type === 'embryos') {
         state.embryos = msg.data || [];
     } else if (msg.type === 'event') {

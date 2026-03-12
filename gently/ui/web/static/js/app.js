@@ -371,6 +371,8 @@ const KeyboardShortcuts = {
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
         't': () => ThemeManager.toggle(),
+        'p': () => { if (state.tab === 'calibration') CalibrationManager.switchView('profile'); },
+        'g': () => { if (state.tab === 'calibration') CalibrationManager.switchView('gallery'); },
     },
 
     init() {
