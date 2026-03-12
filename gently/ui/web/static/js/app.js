@@ -72,18 +72,31 @@ function copySessionId() {
 
     const sessionId = sessionLink.textContent;
 
-    navigator.clipboard.writeText(sessionId).then(() => {
-        // Visual feedback - briefly show green checkmark state
+    function onCopied() {
         copyBtn.classList.add('copied');
         copyBtn.title = 'Copied!';
-
         setTimeout(() => {
             copyBtn.classList.remove('copied');
             copyBtn.title = 'Copy session ID';
         }, 1500);
-    }).catch(err => {
-        console.error('Failed to copy session ID:', err);
-    });
+    }
+
+    // clipboard API requires secure context; fall back for plain HTTP
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(sessionId).then(onCopied).catch(err => {
+            console.error('Failed to copy session ID:', err);
+        });
+    } else {
+        const ta = document.createElement('textarea');
+        ta.value = sessionId;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        ta.remove();
+        onCopied();
+    }
 }
 
 /**

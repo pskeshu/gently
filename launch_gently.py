@@ -226,13 +226,10 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     except Exception:
         pass
 
-    # Start visualization server for real-time feedback
-    await agent.start_viz_server(
-        port=settings.network.viz_port,
-        ssl_certfile=str(cert_path) if cert_path else None,
-        ssl_keyfile=str(key_path) if key_path else None,
-    )
-    scheme = "https" if cert_path else "http"
+    # Start visualization server for real-time feedback (plain HTTP —
+    # self-signed certs trigger browser "unsafe" warnings for visitors).
+    await agent.start_viz_server(port=settings.network.viz_port)
+    scheme = "http"
     viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if agent.viz_server is not None else None
 
     # ── Mesh discovery ──────────────────────────────────────────────
@@ -373,22 +370,15 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         agent.viz_server.agent_bridge = bridge
         agent.viz_server.set_context_store(context_store)
 
-    ws_scheme = "wss" if cert_path else "ws"
-    ws_url = f"{ws_scheme}://localhost:{settings.network.viz_port}/ws/agent"
+    ws_url = f"ws://localhost:{settings.network.viz_port}/ws/agent"
 
     # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
     # takes over the terminal.
-    tui_env = None
-    if cert_path:
-        # Self-signed cert: tell Node.js to accept it for localhost
-        tui_env = {**os.environ, "NODE_TLS_REJECT_UNAUTHORIZED": "0"}
-
     tui_proc = subprocess.Popen(
         ["node", str(tui_dist), "--ws-url", ws_url],
         stdin=sys.stdin,
         stdout=sys.stdout,
         stderr=sys.stderr,
-        env=tui_env,
     )
 
     try:
