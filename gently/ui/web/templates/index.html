@@ -183,52 +183,73 @@
     <div id="events-content" class="tab-content">
         <div class="events-container">
             <div class="events-toolbar">
-                <div class="search-container">
-                    <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="11" cy="11" r="8"></circle>
-                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
-                    </svg>
-                    <input type="text" class="event-search" id="event-search" placeholder="Search events..." autocomplete="off">
-                    <button class="search-clear" id="search-clear" aria-label="Clear search">&times;</button>
+                <div class="system-view-switcher">
+                    <button class="view-btn active" data-system-view="log" title="Event log">Log</button>
+                    <button class="view-btn" data-system-view="timeline" title="Timeline">Timeline</button>
+                    <button class="view-btn" data-system-view="summary" title="Summary">Summary</button>
                 </div>
-                <select class="event-filter" id="event-type-filter">
-                    <option value="">All Events</option>
-                    <optgroup label="Perception">
-                        <option value="DETECTOR_EVALUATED">DETECTOR_EVALUATED</option>
-                        <option value="HATCHING_DETECTED">HATCHING_DETECTED</option>
-                    </optgroup>
-                    <optgroup label="Acquisition">
-                        <option value="VOLUME_ACQUIRED">VOLUME_ACQUIRED</option>
-                        <option value="ACQUISITION_STARTED">ACQUISITION_STARTED</option>
-                        <option value="ACQUISITION_COMPLETED">ACQUISITION_COMPLETED</option>
-                        <option value="ACQUISITION_STOPPED">ACQUISITION_STOPPED</option>
-                        <option value="ACQUISITION_FAILED">ACQUISITION_FAILED</option>
-                    </optgroup>
-                    <optgroup label="Session">
-                        <option value="SESSION_STARTED">SESSION_STARTED</option>
-                        <option value="SESSION_RESTORED">SESSION_RESTORED</option>
-                        <option value="SESSION_SAVED">SESSION_SAVED</option>
-                    </optgroup>
-                </select>
-                <select class="event-filter" id="event-source-filter">
-                    <option value="">All Sources</option>
-                </select>
-                <button class="event-btn" id="clear-events-btn">Clear</button>
+                <div class="events-toolbar-filters" id="events-toolbar-filters">
+                    <div class="search-container">
+                        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"></circle>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                        </svg>
+                        <input type="text" class="event-search" id="event-search" placeholder="Search events..." autocomplete="off">
+                        <button class="search-clear" id="search-clear" aria-label="Clear search">&times;</button>
+                    </div>
+                    <select class="event-filter" id="event-type-filter">
+                        <option value="">All Events</option>
+                        <optgroup label="Perception">
+                            <option value="DETECTOR_EVALUATED">DETECTOR_EVALUATED</option>
+                            <option value="HATCHING_DETECTED">HATCHING_DETECTED</option>
+                        </optgroup>
+                        <optgroup label="Acquisition">
+                            <option value="VOLUME_ACQUIRED">VOLUME_ACQUIRED</option>
+                            <option value="ACQUISITION_STARTED">ACQUISITION_STARTED</option>
+                            <option value="ACQUISITION_COMPLETED">ACQUISITION_COMPLETED</option>
+                            <option value="ACQUISITION_STOPPED">ACQUISITION_STOPPED</option>
+                            <option value="ACQUISITION_FAILED">ACQUISITION_FAILED</option>
+                        </optgroup>
+                        <optgroup label="Session">
+                            <option value="SESSION_STARTED">SESSION_STARTED</option>
+                            <option value="SESSION_RESTORED">SESSION_RESTORED</option>
+                            <option value="SESSION_SAVED">SESSION_SAVED</option>
+                        </optgroup>
+                    </select>
+                    <select class="event-filter" id="event-source-filter">
+                        <option value="">All Sources</option>
+                    </select>
+                    <button class="event-btn" id="clear-events-btn">Clear</button>
+                </div>
                 <span class="events-stats" id="events-stats">0 events</span>
             </div>
-            <div class="events-table-container">
-                <table class="events-table">
-                    <thead>
-                        <tr>
-                            <th class="col-time">Time</th>
-                            <th class="col-type">Event Type</th>
-                            <th class="col-source">Source</th>
-                            <th class="col-data">Data</th>
-                        </tr>
-                    </thead>
-                    <tbody id="events-tbody">
-                    </tbody>
-                </table>
+
+            <!-- Log view (existing table) -->
+            <div class="system-view active" id="system-view-log">
+                <div class="events-table-container">
+                    <table class="events-table">
+                        <thead>
+                            <tr>
+                                <th class="col-time">Time</th>
+                                <th class="col-type">Event Type</th>
+                                <th class="col-source">Source</th>
+                                <th class="col-data">Data</th>
+                            </tr>
+                        </thead>
+                        <tbody id="events-tbody">
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Timeline view -->
+            <div class="system-view" id="system-view-timeline">
+                <div class="timeline-container" id="timeline-container"></div>
+            </div>
+
+            <!-- Summary view -->
+            <div class="system-view" id="system-view-summary">
+                <div class="summary-container" id="summary-container"></div>
             </div>
         </div>
     </div>

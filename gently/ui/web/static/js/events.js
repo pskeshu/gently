@@ -325,6 +325,220 @@ async function fetchInitialEvents() {
     }
 }
 
+// ==========================================
+// System View Switching
+// ==========================================
+
+let currentSystemView = 'log';
+
+function switchSystemView(viewName) {
+    if (!['log', 'timeline', 'summary'].includes(viewName)) return;
+    currentSystemView = viewName;
+
+    // Toggle view containers
+    document.querySelectorAll('.system-view').forEach(el => {
+        el.classList.toggle('active', el.id === `system-view-${viewName}`);
+    });
+
+    // Toggle buttons
+    document.querySelectorAll('[data-system-view]').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.systemView === viewName);
+    });
+
+    // Show/hide log-specific filters
+    const filters = document.getElementById('events-toolbar-filters');
+    if (filters) filters.style.display = viewName === 'log' ? '' : 'none';
+
+    // Render active view
+    if (viewName === 'timeline') renderTimelineView();
+    else if (viewName === 'summary') renderSummaryView();
+}
+
+// ==========================================
+// Timeline View
+// ==========================================
+
+function renderTimelineView() {
+    const container = document.getElementById('timeline-container');
+    if (!container) return;
+
+    const events = state.allEvents;
+    if (events.length === 0) {
+        container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:3rem; font-size:0.85rem;">No events yet</div>';
+        return;
+    }
+
+    // Group by source
+    const bySource = {};
+    events.forEach((e, i) => {
+        const src = e.source || 'unknown';
+        if (!bySource[src]) bySource[src] = [];
+        bySource[src].push({ ...e, _idx: i });
+    });
+
+    // Time range
+    const timestamps = events.map(e => new Date(e.timestamp).getTime()).filter(t => !isNaN(t));
+    const minT = Math.min(...timestamps);
+    const maxT = Math.max(...timestamps);
+    const range = maxT - minT || 1;
+
+    let html = '';
+
+    // Swim lanes per source
+    for (const [source, srcEvents] of Object.entries(bySource).sort()) {
+        html += `<div class="timeline-swim-lane">`;
+        html += `<div class="timeline-lane-header">${source} <span style="opacity:0.5">(${srcEvents.length})</span></div>`;
+        html += `<div class="timeline-lane-track">`;
+
+        const sorted = [...srcEvents].sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+        for (const evt of sorted) {
+            const badge = getEventBadgeClass(evt.event_type);
+            const time = formatEventTime(evt.timestamp);
+            const shortType = evt.event_type.replace(/_/g, ' ').toLowerCase()
+                .split(' ').map(w => w[0]).join('').toUpperCase();
+            html += `<div class="timeline-event ${badge}" data-evt-idx="${evt._idx}" title="${evt.event_type}\n${time}">${shortType}</div>`;
+        }
+
+        html += `</div></div>`;
+    }
+
+    // Time axis
+    if (timestamps.length > 1) {
+        const startTime = formatEventTime(new Date(minT).toISOString());
+        const endTime = formatEventTime(new Date(maxT).toISOString());
+        const midTime = formatEventTime(new Date(minT + range / 2).toISOString());
+        html += `<div class="timeline-time-axis">
+            <span class="timeline-time-label">${startTime}</span>
+            <span class="timeline-time-label">${midTime}</span>
+            <span class="timeline-time-label">${endTime}</span>
+        </div>`;
+    }
+
+    // Detail panel (hidden until click)
+    html += `<div class="timeline-detail" id="timeline-detail"></div>`;
+
+    container.innerHTML = html;
+
+    // Click handlers
+    container.querySelectorAll('.timeline-event').forEach(el => {
+        el.addEventListener('click', () => {
+            const idx = parseInt(el.dataset.evtIdx);
+            const evt = state.allEvents[idx];
+            if (!evt) return;
+
+            // Toggle selection
+            const wasSelected = el.classList.contains('selected');
+            container.querySelectorAll('.timeline-event.selected').forEach(s => s.classList.remove('selected'));
+
+            const detail = document.getElementById('timeline-detail');
+            if (wasSelected) {
+                detail.innerHTML = '';
+                detail.classList.remove('visible');
+                return;
+            }
+
+            el.classList.add('selected');
+            const badge = getEventBadgeClass(evt.event_type);
+            const dataHtml = evt.data && Object.keys(evt.data).length > 0
+                ? `<pre>${JSON.stringify(evt.data, null, 2)}</pre>`
+                : '<span style="color:var(--text-muted)">No data</span>';
+
+            detail.innerHTML = `
+                <div class="timeline-detail-header">
+                    <span class="event-type-badge ${badge}">${evt.event_type}</span>
+                    <span class="timeline-detail-meta">${evt.source} &middot; ${formatEventTime(evt.timestamp)}</span>
+                </div>
+                <div class="timeline-detail-body">${dataHtml}</div>
+            `;
+            detail.classList.add('visible');
+        });
+    });
+}
+
+// ==========================================
+// Summary View
+// ==========================================
+
+function renderSummaryView() {
+    const container = document.getElementById('summary-container');
+    if (!container) return;
+
+    const events = state.allEvents;
+    const total = events.length;
+
+    // Count by category
+    const counts = { session: 0, acquisition: 0, perception: 0, cv: 0, analysis: 0, error: 0, other: 0 };
+    events.forEach(e => {
+        const cat = getEventBadgeClass(e.event_type);
+        if (cat in counts) counts[cat]++;
+        else counts.other++;
+    });
+
+    // Count by source
+    const sourceCounts = {};
+    events.forEach(e => {
+        const src = e.source || 'unknown';
+        sourceCounts[src] = (sourceCounts[src] || 0) + 1;
+    });
+
+    // Uptime
+    const sessionStart = events.slice().reverse().find(e => e.event_type === 'SESSION_STARTED');
+    let uptimeStr = '--';
+    if (sessionStart) {
+        const elapsed = (Date.now() - new Date(sessionStart.timestamp).getTime()) / 1000;
+        if (elapsed < 60) uptimeStr = `${Math.floor(elapsed)}s`;
+        else if (elapsed < 3600) uptimeStr = `${Math.floor(elapsed / 60)}m`;
+        else uptimeStr = `${Math.floor(elapsed / 3600)}h ${Math.floor((elapsed % 3600) / 60)}m`;
+    }
+
+    // Latest event
+    const latest = events[0];
+    const latestStr = latest ? `${latest.event_type} (${formatEventTime(latest.timestamp)})` : '--';
+
+    function card(label, count, cat, detail) {
+        const pct = total > 0 ? (count / total * 100) : 0;
+        return `<div class="summary-card ${cat}">
+            <div class="summary-card-header"><span class="summary-card-label">${label}</span></div>
+            <div class="summary-card-count">${count}</div>
+            ${detail ? `<div class="summary-card-detail">${detail}</div>` : ''}
+            <div class="summary-card-bar"><div class="summary-card-bar-fill" style="width:${pct}%"></div></div>
+        </div>`;
+    }
+
+    let html = '';
+
+    // Uptime card
+    html += `<div class="summary-card uptime">
+        <div class="summary-card-header"><span class="summary-card-label">Uptime</span></div>
+        <div class="summary-card-count">${uptimeStr}</div>
+        <div class="summary-card-detail">Latest: ${latestStr}</div>
+        <div class="summary-card-bar"><div class="summary-card-bar-fill" style="width:100%"></div></div>
+    </div>`;
+
+    html += card('Session', counts.session, 'session');
+    html += card('Acquisition', counts.acquisition, 'acquisition');
+    html += card('Perception', counts.perception, 'perception');
+    if (counts.error > 0) html += card('Errors', counts.error, 'error');
+
+    // Sources card
+    const sourceList = Object.entries(sourceCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([name, ct]) => `<li class="summary-source-item"><span class="summary-source-name">${name}</span><span class="summary-source-count">${ct}</span></li>`)
+        .join('');
+
+    html += `<div class="summary-card sources">
+        <div class="summary-card-header"><span class="summary-card-label">Sources</span></div>
+        <div class="summary-card-count">${Object.keys(sourceCounts).length}</div>
+        <ul class="summary-source-list">${sourceList}</ul>
+        <div class="summary-card-bar"><div class="summary-card-bar-fill" style="width:100%"></div></div>
+    </div>`;
+
+    // Total card
+    html += card('Total Events', total, 'session', `${MAX_EVENTS} max buffer`);
+
+    container.innerHTML = html;
+}
+
 // Initialize events tab listeners
 function initEventsTab() {
     // Initialize state
@@ -399,6 +613,11 @@ function initEventsTab() {
     if (clearBtn) {
         clearBtn.addEventListener('click', clearEvents);
     }
+
+    // System view switcher
+    document.querySelectorAll('[data-system-view]').forEach(btn => {
+        btn.addEventListener('click', () => switchSystemView(btn.dataset.systemView));
+    });
 
     // Fetch initial events from API
     fetchInitialEvents();
