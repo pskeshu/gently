@@ -479,6 +479,64 @@ const KeyboardShortcuts = {
 };
 
 // Event listeners
+// ==========================================
+// Connection Status Popover
+// ==========================================
+
+function toggleStatusPopover(event) {
+    event.stopPropagation();
+    const wrapper = document.getElementById('status-button').closest('.status-button-wrapper');
+    wrapper.classList.toggle('open');
+}
+
+let _microscopeConnected = false;
+
+function fetchDeviceStatus() {
+    fetch('/api/device-status')
+        .then(r => r.json())
+        .then(data => {
+            _microscopeConnected = data.microscope;
+            _setBadge('status-microscope-badge', data.microscope, 'Online', 'Offline');
+            updateTopLevelDot();
+        })
+        .catch(() => {
+            _setBadge('status-microscope-badge', false, '', '--');
+        });
+}
+
+function _setBadge(id, isOn, onText, offText) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = isOn ? onText : offText;
+    el.classList.toggle('online', isOn);
+    el.classList.toggle('offline', !isOn);
+}
+
+function updateGentlyStatus(connected) {
+    _setBadge('status-gently-badge', connected, 'Online', 'Offline');
+    updateTopLevelDot();
+}
+
+function updateTopLevelDot() {
+    const dot = document.getElementById('status-dot');
+    const text = document.getElementById('status-text');
+    if (!dot || !text) return;
+
+    const gentlyUp = state.connected;
+    const scopeUp = _microscopeConnected;
+
+    dot.classList.remove('connected', 'partial');
+    if (gentlyUp && scopeUp) {
+        dot.classList.add('connected');
+        text.textContent = 'Connected';
+    } else if (gentlyUp) {
+        dot.classList.add('partial');
+        text.textContent = 'Online';
+    } else {
+        text.textContent = 'Offline';
+    }
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // Initialize presence manager (before WebSocket so ID is ready)
     PresenceManager.init();
@@ -508,6 +566,18 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initialize events tab
     initEventsTab();
 
+    // Close status popover on outside click
+    document.addEventListener('click', (e) => {
+        const wrapper = document.getElementById('status-button')?.closest('.status-button-wrapper');
+        if (wrapper && !wrapper.contains(e.target)) {
+            wrapper.classList.remove('open');
+        }
+    });
+
     // Start WebSocket connection
     connectWebSocket();
+
+    // Fetch device status periodically
+    fetchDeviceStatus();
+    setInterval(fetchDeviceStatus, 15000);
 });

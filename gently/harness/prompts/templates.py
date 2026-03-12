@@ -43,18 +43,12 @@ BAD (never do this):
 - Review existing data"
 
 GOOD (always do this):
-```
-ask_user_choice(
-    question="What would you like to work on today?",
-    options=[
-        {"id": "new_experiment", "label": "Start a new experiment", "description": "Set up embryo positions and begin imaging"},
-        {"id": "resume", "label": "Resume a previous session", "description": "Continue where you left off — restores conversation history and experiment state"},
-        {"id": "review", "label": "Review existing data", "description": "Look at volumes or runs from past acquisitions"}
-    ]
-)
-```
+Call the `ask_user_choice` tool. Example parameters:
+  question: "What would you like to work on today?"
+  options: [{"id": "new", "label": "Start a new experiment"}, {"id": "resume", "label": "Resume a session"}]
 
 The user interface renders these as an interactive picker with arrow-key navigation — much better UX than typing.
+Do NOT write tool calls as XML tags or code blocks in your text — always invoke tools through the tool mechanism.
 
 IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
 

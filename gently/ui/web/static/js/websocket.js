@@ -50,8 +50,7 @@ function connectWebSocket() {
     state.ws.onopen = () => {
         state.connected = true;
         _wsReconnectDelay = 1000;  // Reset backoff on success
-        document.getElementById('status-text').textContent = 'Connected';
-        document.getElementById('status-dot').classList.add('connected');
+        updateGentlyStatus(true);
 
         // Send join message with presence info
         if (typeof PresenceManager !== 'undefined') {
@@ -65,8 +64,7 @@ function connectWebSocket() {
     state.ws.onclose = () => {
         state.connected = false;
         _initialDataLoaded = false;  // Allow reload on reconnect
-        document.getElementById('status-text').textContent = 'Disconnected';
-        document.getElementById('status-dot').classList.remove('connected');
+        updateGentlyStatus(false);
         // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 30s (capped)
         setTimeout(connectWebSocket, _wsReconnectDelay);
         _wsReconnectDelay = Math.min(_wsReconnectDelay * 2, _WS_MAX_DELAY);

@@ -25,6 +25,18 @@ def create_router(server) -> APIRouter:
             "timestamp": datetime.now().isoformat()
         }
 
+    @router.get("/api/device-status")
+    async def get_device_status():
+        """Get device connection status from agent bridge."""
+        bridge = getattr(server, "agent_bridge", None)
+        if bridge is None:
+            return {"gently": True, "microscope": False}
+        info = bridge._launch_info
+        return {
+            "gently": True,
+            "microscope": info.get("device_connected", False),
+        }
+
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: Optional[str] = None):
         """Get calibration images"""

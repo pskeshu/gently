@@ -1413,9 +1413,7 @@ const EmbryosManager = {
         const embryos = Object.values(this.state.embryos);
 
         if (embryos.length === 0) {
-            // Use smart empty state based on experiment status
-            const emptyType = this.state.status === 'RUNNING' ? 'waiting-first' : 'no-embryos';
-            container.innerHTML = this.renderSmartEmptyState(emptyType);
+            container.innerHTML = '';
             return;
         }
 

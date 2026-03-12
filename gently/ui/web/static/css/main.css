@@ -337,10 +337,118 @@ body {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #f85149;
+    background: var(--text-muted);
+    flex-shrink: 0;
+    opacity: 0.4;
 }
 
-.status-dot.connected { background: var(--accent-green); }
+.status-dot.connected { background: var(--accent-green); opacity: 1; }
+.status-dot.partial { background: var(--accent-green); opacity: 1; }
+
+/* Status button & popover */
+.status-button-wrapper {
+    position: relative;
+}
+
+.status-button {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.6rem 0.3rem 0.5rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    letter-spacing: 0.01em;
+}
+
+.status-button:hover {
+    border-color: var(--text-muted);
+    color: var(--text);
+}
+
+.status-button .status-dot {
+    width: 6px;
+    height: 6px;
+}
+
+.status-chevron {
+    opacity: 0.35;
+    transition: transform 0.2s ease;
+    margin-left: -0.1rem;
+}
+
+.status-button:hover .status-chevron {
+    opacity: 0.6;
+}
+
+.status-button-wrapper.open .status-chevron {
+    transform: rotate(180deg);
+}
+
+.status-popover {
+    display: none;
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 220px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.65rem 0;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.2), 0 0 1px rgba(0, 0, 0, 0.1);
+    z-index: 100;
+    animation: statusPopoverIn 0.12s ease-out;
+}
+
+@keyframes statusPopoverIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.status-button-wrapper.open .status-popover {
+    display: block;
+}
+
+.status-popover-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8rem;
+}
+
+.status-popover-label {
+    color: var(--text);
+    font-weight: 500;
+}
+
+.status-popover-value {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+}
+
+.status-popover-value .status-badge {
+    padding: 0.1rem 0.45rem;
+    border-radius: 10px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+.status-badge.online {
+    color: var(--accent-green);
+    background: rgba(74, 222, 128, 0.1);
+}
+
+.status-badge.offline {
+    color: var(--text-muted);
+    background: var(--bg-hover);
+}
 
 /* Theme Toggle Button */
 .theme-toggle {

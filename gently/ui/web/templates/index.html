@@ -64,10 +64,29 @@
                     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
                 </svg>
             </button>
-            <!-- Connection status -->
-            <div class="status-item">
-                <span id="status-text">Connecting...</span>
-                <div class="status-dot" id="status-dot"></div>
+            <!-- Connection status button -->
+            <div class="status-button-wrapper">
+                <button class="status-button" id="status-button" onclick="toggleStatusPopover(event)">
+                    <div class="status-dot" id="status-dot"></div>
+                    <span id="status-text">Connecting</span>
+                    <svg class="status-chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                        <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                </button>
+                <div class="status-popover" id="status-popover">
+                    <div class="status-popover-row">
+                        <span class="status-popover-label">Gently</span>
+                        <span class="status-popover-value">
+                            <span class="status-badge offline" id="status-gently-badge">Connecting</span>
+                        </span>
+                    </div>
+                    <div class="status-popover-row">
+                        <span class="status-popover-label">Microscope</span>
+                        <span class="status-popover-value">
+                            <span class="status-badge offline" id="status-microscope-badge">--</span>
+                        </span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
