@@ -48,6 +48,63 @@ const EmbryosManager = {
     currentDetailItem: null,  // Currently viewed item in detail panel
     detailPanelVisible: false,
 
+    // Multi-view system
+    currentView: 'default',  // 'default' | 'board' | 'filmstrip' | 'vitals'
+
+    // Dashboard config (loaded from localStorage)
+    dashboardConfig: {
+        defaultView: 'default',
+        board: {
+            columns: ['stage', 'confidence', 'rate', 'eta', 'sparkline', 'alert'],
+            sparklineLength: 20,
+            warnOvertimeRatio: 1.5,
+            criticalOvertimeRatio: 2.5
+        },
+        filmstrip: {
+            thumbnailSize: 56,
+            showStageLabels: true,
+            skipInterval: 1,
+            borderEncoding: 'stage'
+        },
+        vitals: {
+            temperatureModel: '20C',
+            showExpectedLine: true,
+            timeAxis: 'elapsed'
+        },
+        detail: {
+            imageSplitRatio: 40,
+            autoAdvance: false,
+            showContrastive: true
+        },
+        ambient: {
+            enabled: true,
+            sensitivity: 'normal',
+            audioTick: false
+        }
+    },
+
+    // Stage timing reference (20C, minutes from first cell division)
+    STAGE_TIMING: {
+        'early': 0, '1_cell': 0, '2_cell': 40, '4_cell': 70, 'bean': 120,
+        'comma': 180, '1_5_fold': 240, '2_fold': 360,
+        'pretzel': 420, '3_fold': 420, 'hatching': 510, 'hatched': 570
+    },
+
+    // Stage ordinal for sparkline/vitals
+    STAGE_ORDINAL: {
+        'early': 0, '1_cell': 0, '2_cell': 1, '4_cell': 2, 'bean': 3,
+        'comma': 4, '1_5_fold': 5, '2_fold': 6,
+        'pretzel': 7, '3_fold': 7, 'hatching': 8, 'hatched': 9
+    },
+
+    STAGE_COLORS: {
+        'early': '#8b949e', '1_cell': '#8b949e', '2_cell': '#8b949e', '4_cell': '#8b949e',
+        'bean': '#60a5fa', 'comma': '#60a5fa',
+        '1_5_fold': '#4ade80', '2_fold': '#4ade80',
+        'pretzel': '#c084fc', '3_fold': '#c084fc',
+        'hatching': '#fb923c', 'hatched': '#f472b6'
+    },
+
     // Badge state for new detection notifications
     newDetectionCount: 0,  // Count of NEW detections since user last viewed
     lastSeenDetectionTime: null,  // When user last viewed the Embryos tab
@@ -67,6 +124,8 @@ const EmbryosManager = {
     },
 
     init() {
+        // Load dashboard config from localStorage
+        this.loadDashboardConfig();
         // Restore state from localStorage
         this.loadState();
         // Load detection agreements
@@ -77,6 +136,8 @@ const EmbryosManager = {
         this.loadHeaderPanelState();
         // Start countdown update timer
         this.startCountdownUpdates();
+        // Set initial view from config
+        this.currentView = this.dashboardConfig.defaultView || 'default';
         // Initial render (reasoning will show loading until server reconciles)
         this.render();
         // Don't auto-open detail until we've reconciled with server
@@ -85,6 +146,12 @@ const EmbryosManager = {
         this.updateDetectionBadge();
         // Apply header panel state
         this.applyHeaderPanelState();
+        // Setup view switcher
+        this._setupViewSwitcher();
+        // Setup keyboard shortcuts for views
+        this._setupViewKeyboard();
+        // Start ambient pulse updates
+        this._startAmbientPulse();
 
         // Subscribe to events via ClientEventBus
         this._subscribeToEvents();
@@ -107,6 +174,595 @@ const EmbryosManager = {
         ClientEventBus.on('VERIFICATION_PROGRESS', (data) => this.handleVerificationProgress(data));
         ClientEventBus.on('VERIFICATION_COMPLETED', (data) => this.handleVerificationCompleted(data));
         ClientEventBus.on('TIMELAPSE_STATE', (data) => this.reconcileWithServerState(data));
+    },
+
+    // ==========================================
+    // View Switching System
+    // ==========================================
+
+    _setupViewSwitcher() {
+        const switcher = document.getElementById('view-switcher');
+        if (!switcher) return;
+        switcher.addEventListener('click', (e) => {
+            const btn = e.target.closest('.view-btn');
+            if (!btn) return;
+            this.switchView(btn.dataset.view);
+        });
+        // Set initial active state
+        this._updateViewButtons();
+        this.switchView(this.currentView);
+    },
+
+    _setupViewKeyboard() {
+        document.addEventListener('keydown', (e) => {
+            // Don't trigger in text inputs
+            if (e.target.matches('input, textarea, select, [contenteditable]')) return;
+            const viewMap = { '1': 'default', '2': 'board', '3': 'filmstrip', '4': 'vitals' };
+            if (viewMap[e.key]) {
+                e.preventDefault();
+                this.switchView(viewMap[e.key]);
+            }
+        });
+    },
+
+    switchView(viewName) {
+        if (!['default', 'board', 'filmstrip', 'vitals'].includes(viewName)) return;
+        this.currentView = viewName;
+        // Hide all view containers
+        ['default', 'board', 'filmstrip', 'vitals'].forEach(v => {
+            const el = document.getElementById(`view-${v}`);
+            if (el) el.style.display = 'none';
+        });
+        // Show active view
+        const activeEl = document.getElementById(`view-${viewName}`);
+        if (activeEl) {
+            activeEl.style.display = viewName === 'default' ? 'flex' : '';
+        }
+        // Update buttons
+        this._updateViewButtons();
+        // Render the active view's content
+        this._renderActiveView();
+    },
+
+    _updateViewButtons() {
+        document.querySelectorAll('.view-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.view === this.currentView);
+        });
+    },
+
+    _renderActiveView() {
+        switch (this.currentView) {
+            case 'default':
+                this.renderEmbryoCards();
+                this.renderReasoningPanel();
+                break;
+            case 'board':
+                this.renderBoardView();
+                break;
+            case 'filmstrip':
+                this.renderFilmstripView();
+                break;
+            case 'vitals':
+                this.renderVitalsView();
+                break;
+        }
+    },
+
+    // ==========================================
+    // Dashboard Config
+    // ==========================================
+
+    loadDashboardConfig() {
+        try {
+            const stored = localStorage.getItem('gently-dashboard-config');
+            if (stored) {
+                const parsed = JSON.parse(stored);
+                // Deep merge with defaults
+                this.dashboardConfig = this._deepMerge(this.dashboardConfig, parsed);
+            }
+        } catch (e) {
+            console.warn('Failed to load dashboard config:', e);
+        }
+    },
+
+    saveDashboardConfig() {
+        try {
+            localStorage.setItem('gently-dashboard-config', JSON.stringify(this.dashboardConfig));
+        } catch (e) {
+            console.warn('Failed to save dashboard config:', e);
+        }
+    },
+
+    _deepMerge(target, source) {
+        const result = { ...target };
+        for (const key of Object.keys(source)) {
+            if (source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])) {
+                result[key] = this._deepMerge(target[key] || {}, source[key]);
+            } else {
+                result[key] = source[key];
+            }
+        }
+        return result;
+    },
+
+    // ==========================================
+    // Ambient Heartbeat Pulse
+    // ==========================================
+
+    _startAmbientPulse() {
+        // Update every 10 seconds
+        this._ambientInterval = setInterval(() => this.updateAmbientPulse(), 10000);
+        this.updateAmbientPulse();
+    },
+
+    updateAmbientPulse() {
+        const el = document.getElementById('ambient-pulse');
+        if (!el) return;
+        if (!this.dashboardConfig.ambient.enabled) {
+            el.className = 'ambient-pulse';
+            return;
+        }
+        const health = this.computeHealthScore();
+        el.className = `ambient-pulse ${health}`;
+    },
+
+    computeHealthScore() {
+        const embryos = Object.values(this.state.embryos);
+        if (embryos.length === 0) return 'normal';
+
+        const sensitivity = this.dashboardConfig.ambient.sensitivity;
+        const warnThreshold = sensitivity === 'high' ? 1.2 : sensitivity === 'low' ? 2.0 : 1.5;
+
+        for (const embryo of embryos) {
+            const reasoning = this.detectionReasoning[embryo.embryoId];
+            if (!reasoning?.length) continue;
+            const latest = reasoning[reasoning.length - 1];
+
+            // Check for hatching
+            if (latest.stage === 'hatching' || latest.stage === 'hatched') return 'hatching';
+
+            // Check for arrested
+            const temporal = latest.temporal_analysis;
+            if (temporal?.is_potentially_arrested) return 'critical';
+        }
+
+        // Check for slow/uncertain embryos
+        for (const embryo of embryos) {
+            const reasoning = this.detectionReasoning[embryo.embryoId];
+            if (!reasoning?.length) continue;
+            const latest = reasoning[reasoning.length - 1];
+            const overtime = latest.temporal_analysis?.overtime_ratio;
+            if (overtime && overtime > warnThreshold) return 'warning';
+            if (this.normalizeConfidence(latest.confidence) === 'low') return 'warning';
+        }
+
+        return 'normal';
+    },
+
+    // ==========================================
+    // Board View
+    // ==========================================
+
+    renderBoardView() {
+        const container = document.getElementById('view-board');
+        if (!container) return;
+
+        const embryos = Object.values(this.state.embryos);
+        if (embryos.length === 0) {
+            container.innerHTML = `<div class="board-empty"><div class="reasoning-empty-icon">&#x1F4CA;</div><div class="reasoning-empty-text">No embryos to display</div></div>`;
+            return;
+        }
+
+        // Sort embryos
+        embryos.sort((a, b) => {
+            if (a.isComplete !== b.isComplete) return a.isComplete ? 1 : -1;
+            return a.embryoId.localeCompare(b.embryoId);
+        });
+
+        const cols = this.dashboardConfig.board.columns;
+        const headerHtml = `
+            <div class="board-header">
+                <span class="board-col board-col-embryo">Embryo</span>
+                ${cols.includes('stage') ? '<span class="board-col board-col-stage">Stage</span>' : ''}
+                ${cols.includes('confidence') ? '<span class="board-col board-col-conf">Conf</span>' : ''}
+                ${cols.includes('rate') ? '<span class="board-col board-col-rate">Rate</span>' : ''}
+                ${cols.includes('eta') ? '<span class="board-col board-col-eta">ETA</span>' : ''}
+                ${cols.includes('sparkline') ? '<span class="board-col board-col-spark">Progression</span>' : ''}
+                ${cols.includes('alert') ? '<span class="board-col board-col-alert">Alert</span>' : ''}
+            </div>
+        `;
+
+        const rowsHtml = embryos.map(embryo => this._renderBoardRow(embryo)).join('');
+
+        container.innerHTML = `
+            <div class="board-table">
+                ${headerHtml}
+                <div class="board-rows">${rowsHtml}</div>
+            </div>
+            <div class="board-detail" id="board-detail"></div>
+        `;
+
+        // Add click handlers
+        container.querySelectorAll('.board-row').forEach(row => {
+            row.addEventListener('click', () => {
+                const eid = row.dataset.embryoId;
+                this.selectedEmbryoId = eid;
+                // Toggle expansion
+                const detail = document.getElementById('board-detail');
+                const wasOpen = row.classList.contains('expanded');
+                container.querySelectorAll('.board-row').forEach(r => r.classList.remove('expanded'));
+                if (!wasOpen) {
+                    row.classList.add('expanded');
+                    this._renderBoardDetail(eid, detail);
+                } else {
+                    detail.innerHTML = '';
+                }
+            });
+        });
+    },
+
+    _renderBoardRow(embryo) {
+        const reasoning = this.detectionReasoning[embryo.embryoId] || [];
+        const latest = reasoning.length > 0 ? reasoning[reasoning.length - 1] : null;
+        const cols = this.dashboardConfig.board.columns;
+
+        // Stage
+        const stage = latest?.stage || embryo.current_stage || '—';
+        const stageIcon = this.getStageIcon(stage);
+        const stageName = this.formatStageName(stage);
+
+        // Confidence
+        const conf = latest ? this.normalizeConfidence(latest.confidence) : 'unknown';
+        const confDots = conf === 'high' ? '●●●' : conf === 'medium' ? '●●○' : conf === 'low' ? '●○○' : '○○○';
+        const confClass = conf === 'high' ? 'conf-high' : conf === 'medium' ? 'conf-med' : 'conf-low';
+
+        // Rate
+        const overtime = latest?.temporal_analysis?.overtime_ratio;
+        let rateText = '—';
+        let rateClass = '';
+        if (overtime != null) {
+            const rate = (1 / overtime).toFixed(1);
+            rateText = overtime < 0.9 ? `${rate}x↑` : overtime > 1.1 ? `${rate}x↓` : `${rate}x→`;
+            rateClass = overtime < 0.9 ? 'rate-fast' : overtime > 1.5 ? 'rate-slow' : 'rate-normal';
+        }
+
+        // ETA
+        let eta = '—';
+        if (stage && this.STAGE_TIMING[stage] != null) {
+            const stageMinutes = this.STAGE_TIMING[stage];
+            const hatchMinutes = this.STAGE_TIMING['hatched'] || 570;
+            const remaining = hatchMinutes - stageMinutes;
+            if (remaining > 0) {
+                const hours = (remaining / 60).toFixed(1);
+                eta = `~${hours}h`;
+            } else {
+                eta = 'done';
+            }
+        }
+
+        // Sparkline
+        const sparklineSvg = cols.includes('sparkline') ? this._renderBoardSparkline(reasoning) : '';
+
+        // Alert
+        const arrested = latest?.temporal_analysis?.is_potentially_arrested;
+        const slow = overtime && overtime > (this.dashboardConfig.board.warnOvertimeRatio || 1.5);
+        const lowConf = conf === 'low';
+        let alertHtml = '<span class="board-alert-none">—</span>';
+        if (arrested) {
+            alertHtml = '<span class="board-alert board-alert-critical">⚠ arrested</span>';
+        } else if (slow) {
+            alertHtml = `<span class="board-alert board-alert-warn">⚠ slow ${overtime.toFixed(1)}x</span>`;
+        } else if (lowConf) {
+            alertHtml = '<span class="board-alert board-alert-warn">⚠ low conf</span>';
+        }
+
+        const status = embryo.isComplete ? 'complete' : embryo.lastError ? 'error' : 'running';
+        const isExpanded = this.selectedEmbryoId === embryo.embryoId;
+
+        return `
+            <div class="board-row ${status} ${isExpanded ? 'expanded' : ''}" data-embryo-id="${embryo.embryoId}">
+                <span class="board-col board-col-embryo">
+                    <span class="board-status-dot ${status}">●</span>
+                    <span class="board-embryo-name">${embryo.embryoId.replace(/embryo_?/i, 'E')}</span>
+                </span>
+                ${cols.includes('stage') ? `<span class="board-col board-col-stage"><span class="board-stage-badge" style="color:${this.STAGE_COLORS[stage] || 'var(--text)'}">${stageIcon} ${stageName}</span></span>` : ''}
+                ${cols.includes('confidence') ? `<span class="board-col board-col-conf ${confClass}">${confDots}</span>` : ''}
+                ${cols.includes('rate') ? `<span class="board-col board-col-rate ${rateClass}">${rateText}</span>` : ''}
+                ${cols.includes('eta') ? `<span class="board-col board-col-eta">${eta}</span>` : ''}
+                ${cols.includes('sparkline') ? `<span class="board-col board-col-spark">${sparklineSvg}</span>` : ''}
+                ${cols.includes('alert') ? `<span class="board-col board-col-alert">${alertHtml}</span>` : ''}
+            </div>
+        `;
+    },
+
+    _renderBoardSparkline(reasoning) {
+        if (!reasoning.length) return '';
+        const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+        const maxItems = this.dashboardConfig.board.sparklineLength || 20;
+        const items = sorted.slice(-maxItems);
+
+        const width = 160;
+        const height = 28;
+        const maxOrd = 9; // hatched
+        const step = width / Math.max(items.length - 1, 1);
+
+        let pathD = '';
+        let lastColor = '#8b949e';
+        items.forEach((item, i) => {
+            const ord = this.STAGE_ORDINAL[item.stage] ?? 0;
+            const x = i * step;
+            const y = height - (ord / maxOrd) * (height - 4) - 2;
+            pathD += i === 0 ? `M${x},${y}` : `L${x},${y}`;
+            lastColor = this.STAGE_COLORS[item.stage] || '#8b949e';
+        });
+
+        return `<svg class="board-sparkline" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
+            <path d="${pathD}" fill="none" stroke="${lastColor}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.8"/>
+        </svg>`;
+    },
+
+    _renderBoardDetail(embryoId, container) {
+        if (!container) return;
+        const reasoning = this.detectionReasoning[embryoId] || [];
+        if (reasoning.length === 0) {
+            container.innerHTML = '<div class="board-detail-empty">No evaluations yet</div>';
+            return;
+        }
+        // Show latest evaluation detail
+        const sorted = [...reasoning].sort((a, b) => (b.timepoint ?? 0) - (a.timepoint ?? 0));
+        const latest = sorted[0];
+        this.currentDetailItem = latest;
+        container.innerHTML = `<div class="board-detail-content">${this.renderDetailPanel(latest)}</div>`;
+    },
+
+    // ==========================================
+    // Filmstrip View
+    // ==========================================
+
+    renderFilmstripView() {
+        const container = document.getElementById('view-filmstrip');
+        if (!container) return;
+
+        const embryos = Object.values(this.state.embryos);
+        if (embryos.length === 0) {
+            container.innerHTML = `<div class="board-empty"><div class="reasoning-empty-icon">&#x1F3AC;</div><div class="reasoning-empty-text">No embryos to display</div></div>`;
+            return;
+        }
+
+        embryos.sort((a, b) => a.embryoId.localeCompare(b.embryoId));
+        const config = this.dashboardConfig.filmstrip;
+        const thumbSize = config.thumbnailSize || 56;
+
+        let html = '<div class="filmstrip-container">';
+        for (const embryo of embryos) {
+            const reasoning = this.detectionReasoning[embryo.embryoId] || [];
+            const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+
+            // Apply skip interval
+            const skip = config.skipInterval || 1;
+            const filtered = skip > 1 ? sorted.filter((_, i) => i % skip === 0 || i === sorted.length - 1) : sorted;
+
+            const shortName = embryo.embryoId.replace(/embryo_?/i, 'E');
+            const latestStage = sorted.length > 0 ? this.formatStageName(sorted[sorted.length - 1].stage) : '—';
+
+            html += `<div class="filmstrip-row">`;
+            html += `<div class="filmstrip-label">
+                <span class="filmstrip-name">${shortName}</span>
+                <span class="filmstrip-stage">${latestStage}</span>
+                <span class="filmstrip-count">${reasoning.length} eval</span>
+            </div>`;
+            html += `<div class="filmstrip-thumbs">`;
+
+            for (const item of filtered) {
+                const imageUid = item.image_uid || item.projection_uid;
+                const stage = item.stage || '—';
+                const stageColor = this.STAGE_COLORS[stage] || '#8b949e';
+                const confNorm = this.normalizeConfidence(item.confidence);
+
+                html += `<div class="filmstrip-cell" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" title="T${item.timepoint} — ${this.formatStageName(stage)} — ${confNorm}">`;
+                if (imageUid) {
+                    html += `<img class="filmstrip-thumb" src="/api/images/${imageUid}/png?size=${thumbSize * 2}" loading="lazy" width="${thumbSize}" height="${thumbSize}" style="border-color:${stageColor}"/>`;
+                } else {
+                    html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px;border-color:${stageColor}">T${item.timepoint}</div>`;
+                }
+                if (config.showStageLabels) {
+                    html += `<span class="filmstrip-stage-label" style="color:${stageColor}">${this.formatStageName(stage)}</span>`;
+                }
+                html += `</div>`;
+            }
+
+            html += `</div></div>`;
+        }
+        html += '</div>';
+        html += '<div class="filmstrip-detail" id="filmstrip-detail"></div>';
+        container.innerHTML = html;
+
+        // Click handlers
+        container.querySelectorAll('.filmstrip-cell').forEach(cell => {
+            cell.addEventListener('click', () => {
+                const eid = cell.dataset.embryoId;
+                const tp = parseInt(cell.dataset.timepoint);
+                this.selectedEmbryoId = eid;
+                // Find the matching item
+                const reasoning = this.detectionReasoning[eid] || [];
+                const item = reasoning.find(r => r.timepoint === tp);
+                if (item) {
+                    container.querySelectorAll('.filmstrip-cell').forEach(c => c.classList.remove('active'));
+                    cell.classList.add('active');
+                    this.currentDetailItem = item;
+                    const detail = document.getElementById('filmstrip-detail');
+                    if (detail) {
+                        detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
+                    }
+                }
+            });
+        });
+    },
+
+    // ==========================================
+    // Vitals (Strip Chart) View
+    // ==========================================
+
+    renderVitalsView() {
+        const container = document.getElementById('view-vitals');
+        if (!container) return;
+
+        const embryos = Object.values(this.state.embryos);
+        if (embryos.length === 0) {
+            container.innerHTML = `<div class="board-empty"><div class="reasoning-empty-icon">&#x1F4C8;</div><div class="reasoning-empty-text">No embryos to display</div></div>`;
+            return;
+        }
+
+        embryos.sort((a, b) => a.embryoId.localeCompare(b.embryoId));
+
+        let html = '<div class="vitals-container">';
+        for (const embryo of embryos) {
+            html += this._renderVitalsStrip(embryo);
+        }
+        html += '</div>';
+        html += '<div class="vitals-detail" id="vitals-detail"></div>';
+        container.innerHTML = html;
+
+        // Click handlers on SVG data points
+        container.querySelectorAll('.vitals-point').forEach(pt => {
+            pt.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const eid = pt.dataset.embryoId;
+                const tp = parseInt(pt.dataset.timepoint);
+                this.selectedEmbryoId = eid;
+                const reasoning = this.detectionReasoning[eid] || [];
+                const item = reasoning.find(r => r.timepoint === tp);
+                if (item) {
+                    this.currentDetailItem = item;
+                    container.querySelectorAll('.vitals-point').forEach(p => p.classList.remove('active'));
+                    pt.classList.add('active');
+                    const detail = document.getElementById('vitals-detail');
+                    if (detail) {
+                        detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
+                    }
+                }
+            });
+        });
+    },
+
+    _renderVitalsStrip(embryo) {
+        const reasoning = this.detectionReasoning[embryo.embryoId] || [];
+        const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+
+        const shortName = embryo.embryoId.replace(/embryo_?/i, 'E');
+        const latest = sorted.length > 0 ? sorted[sorted.length - 1] : null;
+        const currentStage = latest?.stage || embryo.current_stage || '—';
+        const conf = latest ? this.normalizeConfidence(latest.confidence) : 'unknown';
+        const overtime = latest?.temporal_analysis?.overtime_ratio;
+        const rate = overtime ? (1 / overtime).toFixed(1) + 'x' : '—';
+        const arrested = latest?.temporal_analysis?.is_potentially_arrested;
+
+        // Status badge
+        let statusBadge = '<span class="vitals-status vitals-ok">ON TRACK</span>';
+        if (arrested) {
+            statusBadge = '<span class="vitals-status vitals-critical">ARRESTED</span>';
+        } else if (overtime && overtime > 1.5) {
+            statusBadge = `<span class="vitals-status vitals-warn">SLOW ${overtime.toFixed(1)}x</span>`;
+        }
+
+        // ETA
+        let eta = '—';
+        if (currentStage && this.STAGE_TIMING[currentStage] != null) {
+            const remaining = (this.STAGE_TIMING['hatched'] || 570) - this.STAGE_TIMING[currentStage];
+            if (remaining > 0) eta = `~${(remaining / 60).toFixed(1)}h`;
+            else eta = 'done';
+        }
+
+        // SVG chart
+        const svgWidth = 800;
+        const svgHeight = 140;
+        const padLeft = 60;
+        const padRight = 20;
+        const padTop = 10;
+        const padBottom = 25;
+        const chartW = svgWidth - padLeft - padRight;
+        const chartH = svgHeight - padTop - padBottom;
+
+        // Time range: 0 to max of (experiment duration, 10 hours)
+        const experimentStart = this.state.startedAt ? this.state.startedAt.getTime() : Date.now();
+        const maxMinutes = Math.max(
+            sorted.length > 0 ? ((Date.now() - experimentStart) / 60000) : 60,
+            120
+        );
+
+        // Stage labels for Y axis
+        const stages = ['early', 'bean', 'comma', '1_5_fold', '2_fold', 'pretzel', 'hatching', 'hatched'];
+        const stageLabels = ['Early', 'Bean', 'Comma', '1.5F', '2-Fold', 'Pretzel', 'Hatch', 'Done'];
+        const stageY = (stageName) => {
+            const ord = this.STAGE_ORDINAL[stageName] ?? 0;
+            return padTop + chartH - (ord / 9) * chartH;
+        };
+
+        // Y-axis labels
+        let yLabels = '';
+        stages.forEach((s, i) => {
+            const y = stageY(s);
+            yLabels += `<text x="${padLeft - 5}" y="${y + 3}" text-anchor="end" fill="var(--text-muted)" font-size="9">${stageLabels[i]}</text>`;
+            yLabels += `<line x1="${padLeft}" y1="${y}" x2="${svgWidth - padRight}" y2="${y}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>`;
+        });
+
+        // X-axis labels (time)
+        let xLabels = '';
+        const timeStep = maxMinutes > 300 ? 60 : 30;
+        for (let m = 0; m <= maxMinutes; m += timeStep) {
+            const x = padLeft + (m / maxMinutes) * chartW;
+            const label = m < 60 ? `${m}m` : `${(m / 60).toFixed(0)}h`;
+            xLabels += `<text x="${x}" y="${svgHeight - 3}" text-anchor="middle" fill="var(--text-muted)" font-size="9">${label}</text>`;
+            xLabels += `<line x1="${x}" y1="${padTop}" x2="${x}" y2="${svgHeight - padBottom}" stroke="var(--border)" stroke-width="0.5" stroke-dasharray="2,4"/>`;
+        }
+
+        // Actual trace
+        let actualPath = '';
+        let pointsHtml = '';
+        sorted.forEach((item, i) => {
+            const timestamp = item.timestamp ? new Date(item.timestamp).getTime() : experimentStart + (item.timepoint || 0) * (this.state.baseInterval || 120) * 1000;
+            const minutes = (timestamp - experimentStart) / 60000;
+            const x = padLeft + (minutes / maxMinutes) * chartW;
+            const y = stageY(item.stage);
+            actualPath += i === 0 ? `M${x},${y}` : `L${x},${y}`;
+            const color = this.STAGE_COLORS[item.stage] || '#8b949e';
+            pointsHtml += `<circle class="vitals-point" cx="${x}" cy="${y}" r="4" fill="${color}" stroke="var(--bg-card)" stroke-width="1.5" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" style="cursor:pointer"/>`;
+        });
+
+        // Expected trace
+        let expectedPath = '';
+        if (this.dashboardConfig.vitals.showExpectedLine) {
+            const expectedStages = ['early', 'bean', 'comma', '1_5_fold', '2_fold', 'pretzel', 'hatching', 'hatched'];
+            expectedStages.forEach((s, i) => {
+                const m = this.STAGE_TIMING[s] ?? 0;
+                if (m > maxMinutes) return;
+                const x = padLeft + (m / maxMinutes) * chartW;
+                const y = stageY(s);
+                expectedPath += i === 0 ? `M${x},${y}` : `L${x},${y}`;
+            });
+        }
+
+        const svg = `<svg class="vitals-chart" width="100%" viewBox="0 0 ${svgWidth} ${svgHeight}" preserveAspectRatio="xMidYMid meet">
+            ${yLabels}
+            ${xLabels}
+            ${expectedPath ? `<path d="${expectedPath}" fill="none" stroke="var(--text-muted)" stroke-width="1.5" stroke-dasharray="6,4" opacity="0.4"/>` : ''}
+            ${actualPath ? `<path d="${actualPath}" fill="none" stroke="${this.STAGE_COLORS[currentStage] || '#60a5fa'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>` : ''}
+            ${pointsHtml}
+        </svg>`;
+
+        return `
+            <div class="vitals-strip" data-embryo-id="${embryo.embryoId}">
+                <div class="vitals-info">
+                    <span class="vitals-name">${shortName}</span>
+                    <span class="vitals-stage" style="color:${this.STAGE_COLORS[currentStage] || 'var(--text)'}">${this.formatStageName(currentStage)}</span>
+                    <span class="vitals-conf">${conf}</span>
+                    <span class="vitals-rate">${rate}</span>
+                    <span class="vitals-eta">${eta}</span>
+                    ${statusBadge}
+                </div>
+                <div class="vitals-chart-container">${svg}</div>
+            </div>
+        `;
     },
 
     // Header panel collapse state
@@ -650,10 +1306,8 @@ const EmbryosManager = {
     render() {
         this.renderStatusBadge();
         this.renderSummary();
-        this.renderEmbryoCards();
-        this.renderReasoningPanel();
-        // Show first-run hints after a short delay to let the UI settle
-        setTimeout(() => this.showFirstRunHints(), 500);
+        this._renderActiveView();
+        this.updateAmbientPulse();
     },
 
     renderStatusBadge() {

@@ -39,4 +39,12 @@ def create_router(server) -> APIRouter:
             {"request": request, "campaign_id": campaign_id}
         )
 
+    @router.get("/settings", response_class=HTMLResponse)
+    async def settings_page(request: Request):
+        """Serve the dashboard settings page"""
+        return server.templates.TemplateResponse(
+            "settings.html",
+            {"request": request}
+        )
+
     return router

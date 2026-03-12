@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gently - Dashboard Settings</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <script>
+        const savedTheme = localStorage.getItem('gently-theme') || 'dark';
+        document.body.setAttribute('data-theme', savedTheme);
+    </script>
+
+    <div class="header">
+        <div class="header-left">
+            <a href="/" class="back-to-live">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Dashboard
+            </a>
+            <h1>Settings</h1>
+        </div>
+        <div class="header-right">
+            <button class="theme-toggle" id="theme-toggle" title="Toggle dark/light mode" aria-label="Toggle theme">
+                <svg class="theme-icon sun" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="5"></circle>
+                    <line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                    <line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                </svg>
+                <svg class="theme-icon moon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <div class="settings-layout">
+        <nav class="settings-nav" id="settings-nav">
+            <div class="settings-nav-group">
+                <div class="settings-nav-title">Dashboard</div>
+                <a class="settings-nav-item active" data-section="views" href="#views">Views</a>
+                <a class="settings-nav-item" data-section="alerts" href="#alerts">Alerts</a>
+                <a class="settings-nav-item" data-section="ambient" href="#ambient">Ambient Pulse</a>
+            </div>
+            <div class="settings-nav-group">
+                <div class="settings-nav-title">View Settings</div>
+                <a class="settings-nav-item" data-section="board" href="#board">Board View</a>
+                <a class="settings-nav-item" data-section="filmstrip" href="#filmstrip">Filmstrip View</a>
+                <a class="settings-nav-item" data-section="vitals" href="#vitals">Vitals View</a>
+                <a class="settings-nav-item" data-section="detail" href="#detail">Default View</a>
+            </div>
+        </nav>
+
+        <main class="settings-content" id="settings-content">
+            <!-- Views Section -->
+            <section class="settings-section" id="section-views">
+                <h2 class="settings-section-title">Dashboard Views</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Default view on load</label>
+                    <div class="settings-radio-group" id="cfg-defaultView">
+                        <label class="settings-radio"><input type="radio" name="defaultView" value="default"> Default</label>
+                        <label class="settings-radio"><input type="radio" name="defaultView" value="board"> Board</label>
+                        <label class="settings-radio"><input type="radio" name="defaultView" value="filmstrip"> Filmstrip</label>
+                        <label class="settings-radio"><input type="radio" name="defaultView" value="vitals"> Vitals</label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Alerts Section -->
+            <section class="settings-section" id="section-alerts">
+                <h2 class="settings-section-title">Alert Thresholds</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Warn (amber) when overtime ratio exceeds</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="cfg-warnOvertimeRatio" min="1" max="5" step="0.1" value="1.5">
+                        <span class="settings-unit">x</span>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Critical (red) when overtime ratio exceeds</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="cfg-criticalOvertimeRatio" min="1" max="10" step="0.1" value="2.5">
+                        <span class="settings-unit">x</span>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Ambient Section -->
+            <section class="settings-section" id="section-ambient">
+                <h2 class="settings-section-title">Ambient Pulse</h2>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-ambientEnabled" checked>
+                        Enable background health pulse
+                    </label>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-audioTick">
+                        Audio tick on acquisition
+                    </label>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Sensitivity</label>
+                    <div class="settings-radio-group" id="cfg-ambientSensitivity">
+                        <label class="settings-radio"><input type="radio" name="ambientSensitivity" value="low"> Low</label>
+                        <label class="settings-radio"><input type="radio" name="ambientSensitivity" value="normal"> Normal</label>
+                        <label class="settings-radio"><input type="radio" name="ambientSensitivity" value="high"> High</label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Board Section -->
+            <section class="settings-section" id="section-board">
+                <h2 class="settings-section-title">Board View</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Visible columns</label>
+                    <div class="settings-checkbox-group" id="cfg-boardColumns">
+                        <label class="settings-checkbox"><input type="checkbox" value="stage" checked> Stage</label>
+                        <label class="settings-checkbox"><input type="checkbox" value="confidence" checked> Confidence</label>
+                        <label class="settings-checkbox"><input type="checkbox" value="rate" checked> Rate</label>
+                        <label class="settings-checkbox"><input type="checkbox" value="eta" checked> ETA</label>
+                        <label class="settings-checkbox"><input type="checkbox" value="sparkline" checked> Sparkline</label>
+                        <label class="settings-checkbox"><input type="checkbox" value="alert" checked> Alert</label>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Sparkline length (evaluations)</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="cfg-sparklineLength" min="5" max="100" step="5" value="20">
+                    </div>
+                </div>
+            </section>
+
+            <!-- Filmstrip Section -->
+            <section class="settings-section" id="section-filmstrip">
+                <h2 class="settings-section-title">Filmstrip View</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Thumbnail size</label>
+                    <div class="settings-radio-group" id="cfg-thumbnailSize">
+                        <label class="settings-radio"><input type="radio" name="thumbnailSize" value="40"> Small</label>
+                        <label class="settings-radio"><input type="radio" name="thumbnailSize" value="56"> Medium</label>
+                        <label class="settings-radio"><input type="radio" name="thumbnailSize" value="72"> Large</label>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-showStageLabels" checked>
+                        Show stage labels below thumbnails
+                    </label>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Show every Nth timepoint</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="cfg-skipInterval" min="1" max="10" step="1" value="1">
+                        <span class="settings-hint">1 = show all</span>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Border color encoding</label>
+                    <div class="settings-radio-group" id="cfg-borderEncoding">
+                        <label class="settings-radio"><input type="radio" name="borderEncoding" value="stage"> Stage</label>
+                        <label class="settings-radio"><input type="radio" name="borderEncoding" value="confidence"> Confidence</label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Vitals Section -->
+            <section class="settings-section" id="section-vitals">
+                <h2 class="settings-section-title">Vitals View</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Temperature model</label>
+                    <div class="settings-radio-group" id="cfg-temperatureModel">
+                        <label class="settings-radio"><input type="radio" name="temperatureModel" value="20C"> 20°C</label>
+                        <label class="settings-radio"><input type="radio" name="temperatureModel" value="25C"> 25°C</label>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-showExpectedLine" checked>
+                        Show expected timing reference line
+                    </label>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Time axis</label>
+                    <div class="settings-radio-group" id="cfg-timeAxis">
+                        <label class="settings-radio"><input type="radio" name="timeAxis" value="elapsed"> Elapsed</label>
+                        <label class="settings-radio"><input type="radio" name="timeAxis" value="clock"> Clock time</label>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Default View Section -->
+            <section class="settings-section" id="section-detail">
+                <h2 class="settings-section-title">Default View</h2>
+                <div class="settings-field">
+                    <label class="settings-label">Image / reasoning split ratio</label>
+                    <div class="settings-input-row">
+                        <input type="range" class="settings-range" id="cfg-imageSplitRatio" min="20" max="70" step="5" value="40">
+                        <span class="settings-range-value" id="cfg-imageSplitRatio-display">40 / 60</span>
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-autoAdvance">
+                        Auto-advance to latest evaluation
+                    </label>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-checkbox">
+                        <input type="checkbox" id="cfg-showContrastive" checked>
+                        Show contrastive reasoning
+                    </label>
+                </div>
+            </section>
+
+            <div class="settings-save-bar">
+                <span class="settings-save-status" id="settings-save-status"></span>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/js/settings.js"></script>
+    <script>
+        // Theme toggle
+        const toggle = document.getElementById('theme-toggle');
+        if (toggle) {
+            toggle.addEventListener('click', () => {
+                const current = document.body.getAttribute('data-theme') || 'dark';
+                const next = current === 'dark' ? 'light' : 'dark';
+                document.body.setAttribute('data-theme', next);
+                localStorage.setItem('gently-theme', next);
+            });
+        }
+    </script>
+</body>
+</html>
