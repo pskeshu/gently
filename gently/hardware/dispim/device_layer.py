@@ -136,7 +136,7 @@ class DeviceLayerServer(Service):
         mm_config_path = os.path.join(mm_directory, mm_config)
         if not os.path.exists(mm_config_path):
             # Try config.yml directory
-            mm_config_path = mm_config
+            mm_config_path = os.path.join(os.path.dirname(self.config_path), mm_config)
 
         logger.info("Loading: %s", mm_config_path)
         self.core.loadSystemConfiguration(mm_config_path)

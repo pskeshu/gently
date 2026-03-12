@@ -33,6 +33,9 @@ from ..harness.state import ExperimentState, EmbryoState, ImageRecord
 from ..harness.orchestration.plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from ..harness.tools.registry import get_tool_registry
 from ..harness.perception import PerceptionManager
+
+# Import tools package to trigger @tool decorator registration
+from . import tools as _tools  # noqa: F401
 from ..harness.session.interaction_logger import InteractionLogger
 from .orchestration.timelapse import TimelapseOrchestrator
 from ..harness.session.timeline import TimelineManager
@@ -502,7 +505,14 @@ class MicroscopyAgent:
     # ===== Event Helpers =====
 
     def _has_microscope(self) -> bool:
-        """Check if microscope server connection is available."""
+        """Check if microscope server connection is available.
+
+        Returns True if a client exists (even if temporarily disconnected)
+        so that microscope tools remain in the Claude tool schema. The tools
+        themselves check connectivity and return an error if the device layer
+        is unreachable, which is better than Claude hallucinating XML tool
+        calls when the tools are missing from the schema.
+        """
         return self.client is not None
 
     def _emit_event(self, event_type: EventType, data: Optional[Dict] = None):
@@ -650,6 +660,9 @@ class MicroscopyAgent:
         """
         Import embryos from another session into the current experiment.
 
+        Reads embryo data from the store's database (primary) and falls back
+        to the JSON snapshot if needed.
+
         Parameters
         ----------
         session_id : str
@@ -662,16 +675,31 @@ class MicroscopyAgent:
         dict
             Import result with 'success', 'imported', 'skipped', 'errors'
         """
-        session_data = self.store.load_session_snapshot(session_id)
-        if not session_data:
-            return {
-                'success': False,
-                'error': f"Session not found: {session_id}",
-                'imported': [],
-                'skipped': [],
+        # Primary source: embryos table in DB
+        db_embryos = self.store.list_embryos(session_id) if self.store else []
+
+        # Build a unified dict keyed by embryo_id
+        embryo_states = {}
+        for row in db_embryos:
+            eid = row.get("embryo_id", "")
+            if not eid:
+                continue
+            embryo_states[eid] = {
+                "stage_position": {
+                    "x": row.get("position_x"),
+                    "y": row.get("position_y"),
+                },
+                "calibration": row.get("calibration") or {},
+                "uid": row.get("embryo_uid"),
+                "user_label": row.get("nickname"),
             }
 
-        embryo_states = session_data.get('embryo_states', {})
+        # Fallback: JSON snapshot (legacy path)
+        if not embryo_states:
+            session_data = self.store.load_session_snapshot(session_id)
+            if session_data:
+                embryo_states = session_data.get('embryo_states', {})
+
         if not embryo_states:
             return {
                 'success': False,
@@ -762,6 +790,7 @@ class MicroscopyAgent:
                     self.session_id, embryo_id,
                     position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
                     position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
+                    calibration=embryo.calibration,
                 )
                 acq_metadata = {
                     "num_slices": embryo.num_slices,

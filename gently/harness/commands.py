@@ -20,7 +20,7 @@ class CommandCategory(Enum):
     SESSION = auto()       # /sessions, /resume, /save, /import-embryos
     PLANNING = auto()      # /plan
     APPEARANCE = auto()    # /theme, /history, /tokens
-    DIAGNOSTICS = auto()   # /benchmark
+    DIAGNOSTICS = auto()   # /test-device
 
 
 @dataclass
@@ -496,8 +496,9 @@ Options:
 
     # === Diagnostics Commands ===
     registry.register(CommandDefinition(
-        name="/benchmark",
-        description="Run end-to-end FPS benchmark",
+        name="/test-device",
+        aliases=["/benchmark"],
+        description="Test device layer pipeline (acquisition FPS benchmark)",
         help_text="""Run end-to-end volume acquisition benchmark.
 
 Measures the full pipeline latency:

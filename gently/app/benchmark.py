@@ -140,6 +140,7 @@ async def run_benchmark(
     n_volumes: int = None,
     n_slices: int = None,
     n_warmup: int = None,
+    progress_fn: Optional[callable] = None,
 ) -> BenchmarkResults:
     """
     Run end-to-end volume acquisition benchmark.
@@ -147,7 +148,7 @@ async def run_benchmark(
     All data is stored in a temporary directory and cleaned up after
     the benchmark completes.
     """
-    from ..store import GentlyStore
+    from ..core.store import GentlyStore
 
     # Support bridge's keyword names
     if n_volumes is not None:
@@ -203,6 +204,12 @@ async def run_benchmark(
 
             status = "warmup" if is_warmup else f"{volume_idx + 1}/{num_volumes}"
             logger.info("Benchmark %s: embryo=%s tp=%d", status, embryo_id, tp)
+
+            if progress_fn:
+                if is_warmup:
+                    await progress_fn("warmup", i + 1, warmup, None)
+                else:
+                    await progress_fn("acquiring", volume_idx + 1, num_volumes, None)
 
             timing = VolumeTiming(
                 volume_idx=volume_idx,
@@ -288,6 +295,8 @@ async def run_benchmark(
 
             if not is_warmup:
                 results.timings.append(timing)
+                if progress_fn:
+                    await progress_fn("volume_done", volume_idx + 1, num_volumes, timing)
 
         results.completed_at = datetime.now().isoformat()
 

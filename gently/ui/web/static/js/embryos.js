@@ -487,8 +487,11 @@ const EmbryosManager = {
         // Update reasoning panel if this embryo is selected
         if (this.selectedEmbryoId === embryoId) {
             this.renderReasoningPanel();
-            // Auto-open the latest evaluation's detail
-            this.openLatestDetail();
+            // Only auto-open if no detail panel is currently visible
+            // (avoid hijacking scroll when user is reading something)
+            if (!this.detailPanelVisible) {
+                this.openLatestDetail();
+            }
         }
         this.saveState();
     },
@@ -771,14 +774,14 @@ const EmbryosManager = {
         container.innerHTML = embryos.map(embryo => this.renderEmbryoCard(embryo)).join('');
 
         // Add click handlers for selection
-        container.querySelectorAll('.embryo-card').forEach(card => {
+        container.querySelectorAll('.embryo-rail-item').forEach(card => {
             card.addEventListener('click', () => {
                 this.selectEmbryo(card.dataset.embryoId);
             });
         });
     },
 
-    // Minimal embryo card for sidebar (with selection support)
+    // Compact rail item for embryo switcher
     renderEmbryoCard(embryo) {
         const status = embryo.isComplete ? 'complete' :
                        embryo.lastError ? 'error' :
@@ -790,22 +793,15 @@ const EmbryosManager = {
         const stageIcon = embryo.current_stage ? this.getStageIcon(embryo.current_stage) : '🔬';
         const stageName = embryo.current_stage ? this.formatStageName(embryo.current_stage) : 'Acquiring';
 
-        // Timepoint display
-        const tpDisplay = `${embryo.timepoints} TP`;
+        // Short label: extract number from embryo_3 → "E3"
+        const shortLabel = embryo.embryoId.replace(/embryo_?/i, 'E');
 
         return `
-            <div class="embryo-card minimal ${status} ${isSelected ? 'selected' : ''}" data-embryo-id="${embryo.embryoId}">
-                <div class="card-info">
-                    <div class="card-name">${embryo.embryoId}</div>
-                    <div class="card-meta">
-                        <span class="card-stage">${stageIcon} ${stageName}</span>
-                        <span class="card-separator">·</span>
-                        <span class="card-tp">${tpDisplay}</span>
-                    </div>
-                </div>
-                <button class="card-play-btn" onclick="event.stopPropagation(); EmbryosManager.playEmbryoTimelapse('${embryo.embryoId}')" title="Play timelapse">
-                    <span class="play-icon">▶</span>
-                </button>
+            <div class="embryo-rail-item ${status} ${isSelected ? 'selected' : ''}"
+                 data-embryo-id="${embryo.embryoId}"
+                 title="${embryo.embryoId} — ${stageName} — ${embryo.timepoints} TP">
+                <span class="rail-icon">${stageIcon}</span>
+                <span class="rail-label">${shortLabel}</span>
             </div>
         `;
     },
@@ -1079,7 +1075,7 @@ const EmbryosManager = {
         this.selectedEmbryoId = embryoId;
 
         // Update card selection styles
-        document.querySelectorAll('.embryo-card').forEach(card => {
+        document.querySelectorAll('.embryo-rail-item').forEach(card => {
             card.classList.toggle('selected', card.dataset.embryoId === embryoId);
         });
 
@@ -1217,47 +1213,29 @@ const EmbryosManager = {
             </div>
         `;
 
+        // Merged compact info bar: embryo name + stage + stats + quick-jumps
+        const stageBadge = isPerceptionData && currentStage
+            ? `<span class="stage-icon">${this.getStageIcon(currentStage)}</span> ${this.formatStageName(currentStage)}`
+            : '';
+        const transitionsText = isPerceptionData
+            ? `${stageTransitions.length} transitions`
+            : `${positiveDetections.length} detections`;
+
         panel.innerHTML = `
             <div class="reasoning-header">
                 <div class="reasoning-embryo-info">
                     <span class="reasoning-status-dot ${statusClass}">${statusIcon}</span>
                     <span class="reasoning-embryo-name">${embryo.embryoId}</span>
-                    <span class="reasoning-condition">${this.formatStopCondition(embryo.stopCondition)}</span>
+                    ${stageBadge ? `<span class="reasoning-condition">${stageBadge}</span>` : ''}
+                    <span class="stat" style="margin-left: 0.5rem;">${transitionsText}</span>
+                    <span class="stat">${totalEvaluations} evals</span>
+                    <span class="stat">${embryo.timepoints} tp</span>
                 </div>
-                <div class="reasoning-stats">
-                    <span class="stat">${embryo.timepoints} timepoints</span>
-                    <span class="stat">${totalEvaluations} evaluations</span>
-                </div>
-            </div>
-            <div class="detection-summary-strip">
-                ${isPerceptionData ? `
-                    <div class="detection-summary-stat stage-stat">
-                        <span class="stat-value stage-value">
-                            ${currentStage ? `<span class="stage-icon">${this.getStageIcon(currentStage)}</span>` : ''}
-                            ${currentStage ? this.formatStageName(currentStage) : 'Unknown'}
-                        </span>
-                        <span class="stat-label">Current Stage</span>
-                    </div>
-                    <div class="detection-summary-stat">
-                        <span class="stat-value ${stageTransitions.length > 0 ? 'has-detections' : ''}">${stageTransitions.length}</span>
-                        <span class="stat-label">Transitions</span>
-                    </div>
-                ` : `
-                    <div class="detection-summary-stat">
-                        <span class="stat-value ${positiveDetections.length > 0 ? 'has-detections' : ''}">${positiveDetections.length}</span>
-                        <span class="stat-label">Detections</span>
-                    </div>
-                `}
-                <div class="detection-summary-stat">
-                    <span class="stat-value">${totalEvaluations}</span>
-                    <span class="stat-label">Evaluations</span>
-                </div>
-                <div class="detection-quick-jumps">
+                <div class="detection-quick-jumps" style="display:flex;gap:0.35rem;flex-wrap:nowrap;overflow-x:auto;">
                     ${quickJumpsHtml}
                 </div>
             </div>
             ${this.renderTimelineSparkline(reasoning, embryo.timepoints)}
-            ${emptyStateHtml}
             <div class="inline-detail-container" id="inline-detail-container"></div>
         `;
 
@@ -1518,11 +1496,11 @@ const EmbryosManager = {
                         <img class="expansion-image"
                              src="/api/images/${imageUid}/png"
                              alt="T${item.timepoint}"
-                             onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint})" />
+                             onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint}, true)" />
                     ` : '<div class="expansion-image-placeholder">No image</div>'}
                     <div class="expansion-text">
                         <div class="expansion-reasoning">${this.escapeHtml(truncatedReasoning)}</div>
-                        <button class="expansion-link" onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint})">
+                        <button class="expansion-link" onclick="event.stopPropagation(); EmbryosManager.openDetailPanel('${item.detector_name}', ${item.timepoint}, true)">
                             View full analysis &#x2192;
                         </button>
                     </div>
@@ -1597,16 +1575,17 @@ const EmbryosManager = {
 
     // Scroll to a specific detection - now opens detail panel directly
     scrollToDetection(timepoint, detectorName) {
-        this.openDetailPanel(detectorName, timepoint);
+        this.openDetailPanel(detectorName, timepoint, true);
     },
 
     // Show detail for a compact row (legacy - redirects to openDetailPanel)
     showDetectionDetail(detectorName, timepoint) {
-        this.openDetailPanel(detectorName, timepoint);
+        this.openDetailPanel(detectorName, timepoint, true);
     },
 
     // Open the detail panel inline in the reasoning panel
-    openDetailPanel(detectorName, timepoint) {
+    // userInitiated: true when user clicked, false when auto-opened by new data
+    openDetailPanel(detectorName, timepoint, userInitiated = false) {
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
         const item = reasoning.find(r =>
             r.detector_name === detectorName && r.timepoint === timepoint
@@ -1623,7 +1602,7 @@ const EmbryosManager = {
         // Highlight the selected eval dot
         this.highlightEvalDot(timepoint, detectorName);
 
-        this.renderInlineDetail(item);
+        this.renderInlineDetail(item, userInitiated);
     },
 
     // Highlight the currently selected eval dot in the timeline
@@ -1643,15 +1622,19 @@ const EmbryosManager = {
     },
 
     // Render detail content inline in the reasoning panel
-    renderInlineDetail(item) {
+    // scrollToIt: if true, scroll the detail into view (user-initiated actions only)
+    renderInlineDetail(item, scrollToIt = false) {
         const container = document.getElementById('inline-detail-container');
         if (!container) return;
 
         container.innerHTML = this.renderDetailPanel(item);
         container.classList.add('visible');
 
-        // Scroll the detail into view
-        container.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // Auto-scroll active dot into view in the horizontal strip
+        const activeDot = document.querySelector('.eval-dot.active');
+        if (activeDot) {
+            activeDot.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
     },
 
     // Render the detail panel content
@@ -1854,20 +1837,26 @@ const EmbryosManager = {
                 </button>
                 <button class="detail-close" onclick="EmbryosManager.closeDetailPanel()">&times;</button>
             </div>
-            <div class="detail-image-container">
-                ${imageHtml}
-            </div>
-            <div class="detail-verdict ${item.detected ? 'detected' : ''}">
-                <span class="verdict-stage">${item.stage ? this.formatStageName(item.stage) : (item.detected ? 'DETECTED' : 'Not detected')}</span>
-                <span class="verdict-confidence">${confDisplay} confidence</span>
-                ${transitionalHtml}
-            </div>
-            ${observedFeaturesHtml}
-            ${contrastiveHtml}
-            ${reasoningTraceHtml}
-            <div class="detail-reasoning">
-                <div class="reasoning-label">VLM Summary</div>
-                <div class="reasoning-text">${linkedReasoning}</div>
+            <div class="detail-split">
+                <div class="detail-split-left">
+                    <div class="detail-image-container">
+                        ${imageHtml}
+                    </div>
+                    <div class="detail-verdict ${item.detected ? 'detected' : ''}">
+                        <span class="verdict-stage">${item.stage ? this.formatStageName(item.stage) : (item.detected ? 'DETECTED' : 'Not detected')}</span>
+                        <span class="verdict-confidence">${confDisplay} confidence</span>
+                        ${transitionalHtml}
+                    </div>
+                    ${observedFeaturesHtml}
+                </div>
+                <div class="detail-split-right">
+                    ${contrastiveHtml}
+                    ${reasoningTraceHtml}
+                    <div class="detail-reasoning">
+                        <div class="reasoning-label">VLM Summary</div>
+                        <div class="reasoning-text">${linkedReasoning}</div>
+                    </div>
+                </div>
             </div>
             <div class="detail-actions">
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(-1)">&#x2190; Previous</button>
@@ -2512,7 +2501,7 @@ const EmbryosManager = {
                              title="${title}"
                              data-timepoint="${tp}"
                              data-detector="${detectorName}"
-                             onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
+                             onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp}, true)">
                             <span class="eval-dot-icon">${stageIcon}</span>
                         </div>`;
             }
@@ -2530,7 +2519,7 @@ const EmbryosManager = {
                          title="${title}"
                          data-timepoint="${tp}"
                          data-detector="${detectorName}"
-                         onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp})">
+                         onclick="EmbryosManager.openDetailPanel('${detectorName}', ${tp}, true)">
                         <span class="eval-dot-label">T${tp}</span>
                     </div>`;
         }).join('');
@@ -2984,7 +2973,7 @@ const EmbryosManager = {
         const embryo = this.state.embryos[embryoId];
         if (!embryo) return;
 
-        const card = document.querySelector(`.embryo-card[data-embryo-id="${embryoId}"]`);
+        const card = document.querySelector(`[data-embryo-id="${embryoId}"]`);
         if (card) {
             // Re-render just this card, preserving selection state
             const wasSelected = card.classList.contains('selected');
@@ -3238,7 +3227,7 @@ const EmbryosManager = {
 
         if (currentIdx > 0) {
             const prevItem = sorted[currentIdx - 1];
-            this.openDetailPanel(prevItem.detector_name, prevItem.timepoint);
+            this.openDetailPanel(prevItem.detector_name, prevItem.timepoint, true);
         }
     },
 
@@ -3260,7 +3249,7 @@ const EmbryosManager = {
 
         if (currentIdx >= 0 && currentIdx < sorted.length - 1) {
             const nextItem = sorted[currentIdx + 1];
-            this.openDetailPanel(nextItem.detector_name, nextItem.timepoint);
+            this.openDetailPanel(nextItem.detector_name, nextItem.timepoint, true);
         }
     },
 

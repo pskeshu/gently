@@ -17,6 +17,7 @@ Usage:
 
 import asyncio
 import json
+import logging
 import os
 import sys
 import shutil
@@ -33,6 +34,8 @@ from gently.organisms import load_organism
 from gently.hardware import load_hardware, get_hardware
 from gently.settings import settings
 from gently.core.store import GentlyStore
+
+logger = logging.getLogger(__name__)
 
 
 def _format_elapsed(last_active: str) -> str:
@@ -189,8 +192,15 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             client = QueueServerClient(http_url=http_url)
         connected = await client.connect()
         if not connected:
-            await client.disconnect()
-            client = None
+            # Keep client object (not None) so microscope tools remain in
+            # Claude's tool schema.  Tools check is_connected at runtime and
+            # return clear error messages. Setting client = None causes all
+            # requires_microscope tools to vanish from the schema, which
+            # makes Claude hallucinate XML tool calls as plain text.
+            logger.warning(
+                "Device layer not reachable at %s — microscope tools "
+                "available but will return errors until connected", http_url,
+            )
 
     # Configure device session for zero-copy volume transfer
     if client and client.is_connected:
@@ -344,7 +354,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     bridge.set_launch_info({
         "device_connected": client.is_connected if client else False,
         "sam_available": client.has_sam if client else False,
-        "offline": offline or (client is None),
+        "offline": offline or (client is None) or not client.is_connected,
         "store_path": str(storage_dir),
         "viz_url": viz_url,
         "log_path": str(log_file),

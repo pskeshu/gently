@@ -15,6 +15,7 @@ Usage:
 
 import asyncio
 import argparse
+import logging
 import signal
 import sys
 from pathlib import Path
@@ -62,6 +63,12 @@ The server provides:
     )
 
     args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+        stream=sys.stderr,
+    )
 
     # Load config to determine hardware type
     config_path = Path(args.config)

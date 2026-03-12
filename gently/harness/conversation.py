@@ -8,6 +8,7 @@ experiment orchestration and session persistence.
 import asyncio
 import json
 import logging
+import re
 import time
 from typing import Dict, List, Optional, Any
 
@@ -453,16 +454,48 @@ class ConversationManager:
         else:
             raise RuntimeError("API overloaded after multiple retries")
 
+        # Diagnostic: log stop_reason and tool block counts
+        tool_block_count = sum(
+            1 for b in final_message.content
+            if hasattr(b, 'type') and b.type == 'tool_use'
+        )
+        logger.warning(
+            "Claude response: stop_reason=%s, content_blocks=%d, tool_use_blocks=%d, tools_passed=%d, model=%s",
+            final_message.stop_reason, len(final_message.content),
+            tool_block_count, len(tools), self.model,
+        )
+        if tool_block_count > 0 and final_message.stop_reason != "tool_use":
+            logger.error(
+                "BUG: Claude returned %d tool_use blocks but stop_reason=%s (expected 'tool_use')",
+                tool_block_count, final_message.stop_reason,
+            )
+
         # Process events and yield text
+        full_text = []
         for event in events:
             if event.type == "content_block_delta":
                 if hasattr(event.delta, 'text'):
+                    full_text.append(event.delta.text)
                     yield {'type': 'text', 'text': event.delta.text}
+
+        # Detect fake XML tool calls in text (Claude writing tool_use as text)
+        joined_text = "".join(full_text)
+        if "<tool_use>" in joined_text or "<function_calls>" in joined_text:
+            logger.error(
+                "DETECTED: Claude wrote XML tool tags as plain text instead of "
+                "using API tool_use mechanism. stop_reason=%s, text_preview=%.200s",
+                final_message.stop_reason, joined_text[:200],
+            )
 
         response_content = final_message.content
 
         # Process tool calls if any
         if final_message.stop_reason == "tool_use":
+            # Brief pause so the TUI can flush the streamed text before
+            # the tool_start event commits it into <Static>.  Without this,
+            # Ink on Windows leaves "ghost" text in the dynamic area.
+            await asyncio.sleep(0.05)
+
             tool_results = []
             for block in response_content:
                 if hasattr(block, 'type') and block.type == "tool_use":

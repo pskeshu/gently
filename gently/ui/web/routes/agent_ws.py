@@ -407,9 +407,13 @@ def create_router(server) -> APIRouter:
                 elif msg_type == "choice_response":
                     request_id = data.get("request_id", "")
                     selected = data.get("selected", "")
-                    future = _choice_futures.pop(request_id, None)
-                    if future and not future.done():
-                        future.set_result(selected)
+                    # Check if bridge owns this choice (e.g. /import-embryos picker)
+                    if await bridge.handle_choice_response(request_id, selected, send_fn):
+                        pass  # bridge handled it
+                    else:
+                        future = _choice_futures.pop(request_id, None)
+                        if future and not future.done():
+                            future.set_result(selected)
 
                 elif msg_type == "cancel":
                     if active_task and not active_task.done():
@@ -457,7 +461,15 @@ def create_router(server) -> APIRouter:
                                     "wizard_complete": True,
                                 })
                     else:
-                        await bridge.handle_command(command, send_fn)
+                        try:
+                            await bridge.handle_command(command, send_fn, choice_futures=_choice_futures)
+                        except Exception as e:
+                            logger.error("Command '%s' failed: %s", command, e, exc_info=True)
+                            await send_fn({
+                                "type": "command_result",
+                                "command": command,
+                                "error": str(e),
+                            })
 
                 elif msg_type == "browse":
                     target = data.get("target", "")

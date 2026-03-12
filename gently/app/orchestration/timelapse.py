@@ -1446,12 +1446,12 @@ class TimelapseOrchestrator:
 
         try:
             import numpy as np
-            from .perception.projection import (
+            from gently.core.imaging import (
                 projection_three_view,
                 compute_crop_bounds,
                 apply_crop_bounds,
                 image_to_base64,
-                normalize_image,
+                normalize_to_uint8 as normalize_image,
             )
 
             # Handle 4D volumes: extract View A (first view)

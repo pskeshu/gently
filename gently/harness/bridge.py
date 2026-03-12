@@ -43,6 +43,38 @@ class AgentBridge:
         self._launch_info: Dict[str, Any] = {}
         self._wizard = None  # StartupWizard, set by init_wizard()
         self._active_remote: Optional[Dict[str, Any]] = None  # {"peer": PeerInfo, "campaign_id": str}
+        self._pending_import: Optional[Dict] = None  # For /import-embryos picker
+
+    async def handle_choice_response(self, request_id: str, selected: str, send_fn) -> bool:
+        """Handle a choice response that may belong to a bridge-initiated picker.
+
+        Returns True if this response was consumed, False if not ours.
+        """
+        if self._pending_import and self._pending_import.get("request_id") == request_id:
+            self._pending_import = None
+            if selected:
+                result = self.agent.import_embryos_from_session(selected)
+                if result.get("success"):
+                    imported = result.get("imported", [])
+                    skipped = result.get("skipped", [])
+                    lines = [f"Imported {len(imported)} embryo(s) from {selected[:8]}"]
+                    if imported:
+                        lines.append(f"  {', '.join(imported)}")
+                    if skipped:
+                        lines.append(f"  Skipped (exist): {', '.join(skipped)}")
+                    await send_fn({
+                        "type": "command_result",
+                        "command": "/import-embryos",
+                        "content": {"text": "\n".join(lines)},
+                    })
+                else:
+                    await send_fn({
+                        "type": "command_result",
+                        "command": "/import-embryos",
+                        "error": result.get("error", "Import failed"),
+                    })
+            return True
+        return False
 
     def set_launch_info(self, info: Dict[str, Any]) -> None:
         """Store launch metadata to include in the connect message."""
@@ -130,6 +162,7 @@ class AgentBridge:
         self,
         command: str,
         send_fn: Callable[[Dict], Coroutine],
+        choice_futures: Dict = None,
     ) -> None:
         """
         Execute a slash command and send the result.
@@ -147,6 +180,7 @@ class AgentBridge:
         registry = get_command_registry()
         cmd_name = command.strip().lower().split()[0]
         cmd_def = registry.get(cmd_name)
+        logger.info("handle_command: %s (resolved: %s)", cmd_name, cmd_def.name if cmd_def else "NOT FOUND")
 
         if not cmd_def:
             await send_fn({
@@ -629,16 +663,51 @@ class AgentBridge:
                 sessions = self._get_sessions_list()
                 sessions_with = [s for s in sessions if s["embryo_count"] > 0]
                 if sessions_with:
-                    lines = ["Sessions with embryos (use /import-embryos <id>):"]
+                    import uuid as _uuid
+                    request_id = f"import_embryos_{_uuid.uuid4().hex[:8]}"
+                    options = []
                     for s in sessions_with[:10]:
-                        lines.append(
-                            f"  {s['session_id']} — {s['embryo_count']} embryos"
-                        )
+                        sid = s["session_id"]
+                        count = s["embryo_count"]
+                        name = s.get("name", "")
+                        last_active = s.get("last_active", "")
+                        # Format datetime for display
+                        time_str = ""
+                        if last_active:
+                            try:
+                                from datetime import datetime
+                                dt = datetime.fromisoformat(last_active)
+                                time_str = dt.strftime("%b %d %H:%M")
+                            except (ValueError, TypeError):
+                                time_str = str(last_active)[:16]
+                        label = f"{sid[:8]} — {count} embryo{'s' if count != 1 else ''}"
+                        if time_str:
+                            label += f" ({time_str})"
+                        desc = f"Import embryos from session {sid}"
+                        if name:
+                            desc = name
+                        options.append({
+                            "id": sid,
+                            "label": label,
+                            "description": desc,
+                        })
                     await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "content": {"text": "\n".join(lines)},
+                        "type": "choice_request",
+                        "choice_data": {
+                            "_type": "single",
+                            "question": "Import embryos from which session?",
+                            "options": options,
+                            "allow_multiple": False,
+                        },
+                        "request_id": request_id,
                     })
+                    # Register a callback so the choice response triggers the import.
+                    # We can't await here (would deadlock the REPL loop), so we
+                    # store state for _handle_import_choice to pick up.
+                    self._pending_import = {
+                        "request_id": request_id,
+                        "send_fn": send_fn,
+                    }
                 else:
                     await send_fn({
                         "type": "command_result",
@@ -721,7 +790,7 @@ class AgentBridge:
                 })
             return
 
-        if cmd.startswith("/benchmark"):
+        if cmd.startswith("/test-device") or cmd.startswith("/benchmark"):
             parts = command.strip().split()
             n_volumes = 5
             n_slices = 50
@@ -752,40 +821,85 @@ class AgentBridge:
 
             try:
                 from gently.app.benchmark import run_benchmark
+
+                async def _benchmark_progress(stage, current, total, timing):
+                    if stage == "warmup":
+                        text = f"⏳ Warmup {current}/{total}..."
+                    elif stage == "acquiring":
+                        text = f"▶ Acquiring volume {current}/{total}..."
+                    elif stage == "volume_done":
+                        ok = "✓" if timing.success else "✗"
+                        parts = [f"{ok} Volume {current}/{total}"]
+                        if timing.success:
+                            parts.append(f"acq={timing.acquisition_time:.3f}s")
+                            parts.append(f"store={timing.storage_time:.3f}s")
+                            parts.append(f"total={timing.total_time:.3f}s")
+                        else:
+                            parts.append(f"error: {timing.error}")
+                        text = "  ".join(parts)
+                    else:
+                        return
+                    await send_fn({
+                        "type": "command_result",
+                        "command": "/test-device",
+                        "content": {"text": text},
+                    })
+
                 await send_fn({
                     "type": "command_result",
-                    "command": "/benchmark",
-                    "content": {"text": f"Running benchmark ({n_volumes} volumes, {n_slices} slices, {n_warmup} warmup)..."},
+                    "command": "/test-device",
+                    "content": {"text": f"Running device test ({n_volumes} volumes, {n_slices} slices, {n_warmup} warmup)..."},
                 })
                 results = await run_benchmark(
                     self.agent,
                     n_volumes=n_volumes,
                     n_slices=n_slices,
                     n_warmup=n_warmup,
+                    progress_fn=_benchmark_progress,
                 )
+
+                # Format summary table
+                total = results.total_stats
+                acq = results.acquisition_stats
+                stor = results.storage_stats
+                viz = results.viz_push_stats
                 lines = [
-                    "Benchmark Results",
-                    f"  Volumes: {results.n_volumes}",
-                    f"  Mean acquisition: {results.mean_acquisition:.3f}s",
-                    f"  Mean storage: {results.mean_storage:.3f}s",
-                    f"  Mean total: {results.mean_total:.3f}s",
-                    f"  FPS: {results.fps:.1f}",
+                    "━━━ Device Test Results ━━━",
+                    f"  {len(results.successful)}/{len(results.timings)} volumes OK",
+                    f"  Throughput: {results.fps:.2f} vol/s",
+                    "",
+                    "  Stage          Mean      Std       Min       Max",
+                    f"  Acquisition  {acq['mean']:.3f}s  {acq['std']:.3f}s  {acq['min']:.3f}s  {acq['max']:.3f}s",
+                    f"  Storage      {stor['mean']:.3f}s  {stor['std']:.3f}s  {stor['min']:.3f}s  {stor['max']:.3f}s",
                 ]
+                if viz['mean'] > 0:
+                    lines.append(
+                        f"  Viz push     {viz['mean']:.3f}s  {viz['std']:.3f}s  {viz['min']:.3f}s  {viz['max']:.3f}s"
+                    )
+                lines.extend([
+                    f"  Total        {total['mean']:.3f}s  {total['std']:.3f}s  {total['min']:.3f}s  {total['max']:.3f}s",
+                ])
+                if results.avg_file_size_mb > 0:
+                    lines.append(f"  File size:   {results.avg_file_size_mb:.1f} MB avg")
+                if results.failed:
+                    lines.append(f"  Failures:    {len(results.failed)}")
+
                 await send_fn({
                     "type": "command_result",
-                    "command": "/benchmark",
+                    "command": "/test-device",
                     "content": {"text": "\n".join(lines)},
                 })
-            except ImportError:
+            except ImportError as e:
+                logger.error("Benchmark import failed: %s", e, exc_info=True)
                 await send_fn({
                     "type": "command_result",
-                    "command": "/benchmark",
-                    "error": "Benchmark module not available.",
+                    "command": "/test-device",
+                    "error": f"Benchmark module not available: {e}",
                 })
             except Exception as e:
                 await send_fn({
                     "type": "command_result",
-                    "command": "/benchmark",
+                    "command": "/test-device",
                     "error": str(e),
                 })
             return

@@ -141,6 +141,7 @@ class SessionManager:
                 'experiment_data': experiment.to_dict(),
                 'system_prompt': system_prompt,
             })
+            self._sync_embryos_to_db(experiment)
             self.store.touch_session(self._session_id)
             return True
         except Exception as e:
@@ -157,9 +158,23 @@ class SessionManager:
                 'experiment_data': experiment.to_dict(),
                 'system_prompt': system_prompt,
             })
+            self._sync_embryos_to_db(experiment)
             self.store.touch_session(self._session_id)
         except Exception:
             pass  # Silent fail for auto-save
+
+    def _sync_embryos_to_db(self, experiment):
+        """Sync in-memory embryo state (positions, calibration) to the DB."""
+        for embryo_id, embryo in experiment.embryos.items():
+            pos = embryo.stage_position or {}
+            self.store.register_embryo(
+                self._session_id, embryo_id,
+                embryo_uid=getattr(embryo, 'uid', None),
+                nickname=getattr(embryo, 'user_label', None),
+                position_x=pos.get('x'),
+                position_y=pos.get('y'),
+                calibration=embryo.calibration,
+            )
 
     def list_sessions(self) -> List[Dict]:
         """
