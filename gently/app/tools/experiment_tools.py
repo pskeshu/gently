@@ -5,10 +5,27 @@ Tools for managing experiments and tracking embryo states.
 """
 
 from typing import Dict
+from datetime import datetime
 import json
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import require_agent, get_embryo_or_error
+
+
+@tool(
+    name="get_current_time",
+    description="""Get the current date and time. Use this when you need to know what time it is now,
+for example when the user says "image until 4pm" or "run for the next 2 hours" and you need to calculate durations.""",
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample("What time is it?", {}),
+        ToolExample("Image from now to 4pm", {}),
+    ],
+)
+def get_current_time(context: Dict) -> str:
+    """Get current date and time"""
+    now = datetime.now()
+    return f"Current time: {now.strftime('%Y-%m-%d %H:%M:%S')} ({now.strftime('%I:%M %p')})"
 
 
 @tool(

@@ -29,10 +29,12 @@ def create_router(server) -> APIRouter:
         bridge = getattr(server, "agent_bridge", None)
         if bridge is None:
             return {"gently": True, "microscope": False}
-        info = bridge._launch_info
+        # Check live connection state via client, not stale launch info
+        client = getattr(bridge.agent, "client", None) if bridge.agent else None
+        microscope_up = getattr(client, "is_connected", False) if client else False
         return {
             "gently": True,
-            "microscope": info.get("device_connected", False),
+            "microscope": microscope_up,
         }
 
     @router.get("/api/calibration")
