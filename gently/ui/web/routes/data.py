@@ -1,12 +1,10 @@
-"""Data routes - calibration, snapshots, embryos, sequence, status, events, narrative."""
+"""Data routes - calibration, snapshots, embryos, sequence, status, events."""
 
 import logging
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter
-
-from ..narrative import generate_narrative_summary
 
 logger = logging.getLogger(__name__)
 
@@ -193,10 +191,5 @@ def create_router(server) -> APIRouter:
             ],
             "total": len(events)
         }
-
-    @router.get("/api/narrative")
-    async def get_narrative(since: Optional[str] = None):
-        """Generate experiment narrative summary."""
-        return generate_narrative_summary(server.timelapse_tracker, since)
 
     return router

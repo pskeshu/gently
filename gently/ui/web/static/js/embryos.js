@@ -132,8 +132,6 @@ const EmbryosManager = {
         this.loadAgreements();
         // Load badge state (new detection count)
         this.loadBadgeState();
-        // Load header panel state
-        this.loadHeaderPanelState();
         // Start countdown update timer
         this.startCountdownUpdates();
         // Set initial view from config
@@ -144,8 +142,6 @@ const EmbryosManager = {
         // (prevents showing stale cached data from previous session)
         // Update badge on init
         this.updateDetectionBadge();
-        // Apply header panel state
-        this.applyHeaderPanelState();
         // Setup view switcher
         this._setupViewSwitcher();
         // Setup keyboard shortcuts for views
@@ -597,6 +593,16 @@ const EmbryosManager = {
                 }
             });
         });
+
+        // Convert vertical scroll to horizontal on filmstrip rows
+        container.querySelectorAll('.filmstrip-thumbs').forEach(thumbs => {
+            thumbs.addEventListener('wheel', (e) => {
+                if (e.deltaY !== 0) {
+                    e.preventDefault();
+                    thumbs.scrollLeft += e.deltaY;
+                }
+            }, { passive: false });
+        });
     },
 
     // ==========================================
@@ -766,30 +772,6 @@ const EmbryosManager = {
     },
 
     // Header panel collapse state
-    headerPanelExpanded: false,
-
-    toggleHeaderPanel() {
-        this.headerPanelExpanded = !this.headerPanelExpanded;
-        this.applyHeaderPanelState();
-        // Save preference
-        try {
-            localStorage.setItem('embryos-header-expanded', this.headerPanelExpanded);
-        } catch (e) {}
-    },
-
-    applyHeaderPanelState() {
-        const panel = document.getElementById('embryos-header-panel');
-        if (panel) {
-            panel.classList.toggle('expanded', this.headerPanelExpanded);
-        }
-    },
-
-    loadHeaderPanelState() {
-        try {
-            this.headerPanelExpanded = localStorage.getItem('embryos-header-expanded') === 'true';
-        } catch (e) {}
-    },
-
     // ==========================================
     // State Persistence
     // ==========================================
@@ -1139,15 +1121,19 @@ const EmbryosManager = {
             });
         }
 
-        this.updateEmbryoCard(embryoId);
-        // Update reasoning panel if this embryo is selected
-        if (this.selectedEmbryoId === embryoId) {
-            this.renderReasoningPanel();
-            // Only auto-open if no detail panel is currently visible
-            // (avoid hijacking scroll when user is reading something)
-            if (!this.detailPanelVisible) {
-                this.openLatestDetail();
+        if (this.currentView === 'default') {
+            this.updateEmbryoCard(embryoId);
+            // Update reasoning panel if this embryo is selected
+            if (this.selectedEmbryoId === embryoId) {
+                this.renderReasoningPanel();
+                // Only auto-open if no detail panel is currently visible
+                // (avoid hijacking scroll when user is reading something)
+                if (!this.detailPanelVisible) {
+                    this.openLatestDetail();
+                }
             }
+        } else {
+            this._renderActiveView();
         }
         this.saveState();
     },

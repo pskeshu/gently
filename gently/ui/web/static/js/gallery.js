@@ -447,22 +447,9 @@ const CalibrationProfileView = {
         const plotW = W - M.left - M.right;
         const plotH = H - M.top - M.bottom;
 
-        // Determine galvo range for Y-axis
-        let yMin, yMax;
-        const allGalvos = edgeData.map(d => d.galvo);
-        if (info.scanTop != null && info.scanBottom != null) {
-            yMin = info.scanTop - 0.02;
-            yMax = info.scanBottom + 0.02;
-        } else if (allGalvos.length > 0) {
-            const gMin = Math.min(...allGalvos);
-            const gMax = Math.max(...allGalvos);
-            const pad = (gMax - gMin) * 0.2 || 0.05;
-            yMin = gMin - pad;
-            yMax = gMax + pad;
-        } else {
-            yMin = -0.4;
-            yMax = 0.4;
-        }
+        // Fixed galvo Y-axis range so all embryos are directly comparable
+        const yMin = -0.50;
+        const yMax = 0.55;
 
         // Y-scale: galvo degrees → pixels (top=yMin, bottom=yMax)
         const yScale = (g) => M.top + plotH * ((g - yMin) / (yMax - yMin));
