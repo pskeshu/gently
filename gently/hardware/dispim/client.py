@@ -26,10 +26,6 @@ from gently.settings import settings
 from gently.exceptions import DeviceLayerError, NetworkError, AcquisitionError
 
 
-# Backward-compat alias
-QueueServerClient = None  # set at bottom of file
-
-
 class DiSPIMMicroscope(Microscope):
     """
     Client for Gently Device Layer Server.
@@ -866,15 +862,8 @@ class DiSPIMMicroscope(Microscope):
     # Status
     # =========================================================================
 
-    async def get_status(self) -> Dict:
-        """
-        Get server status.
-
-        Returns
-        -------
-        dict
-            Status information
-        """
+    async def _get_server_status(self) -> Dict:
+        """Query device layer and SAM server status via HTTP."""
         status = {}
 
         # Device Layer Server status
@@ -956,7 +945,7 @@ class DiSPIMMicroscope(Microscope):
         return await self.get_led_status()
 
     async def _plan_status(self, **kw) -> dict:
-        return await self.get_status()
+        return await self._get_server_status()
 
 
 # Backward-compat alias
