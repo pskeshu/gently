@@ -1159,7 +1159,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (typeof initViewSwitcher === 'function') {
         initViewSwitcher('calibration-view-switcher', (view) => CalibrationManager.switchView(view), {
             views: ['profile', 'gallery'],
-            guard: () => typeof state !== 'undefined' && state.tab === 'calibration'
+            guard: () => typeof state !== 'undefined' && state.tab === TABS.CALIBRATION
         });
     }
 });

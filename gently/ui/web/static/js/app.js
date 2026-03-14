@@ -6,7 +6,7 @@
 const state = {
     ws: null,
     connected: false,
-    tab: 'embryos',  // Default to Embryos tab
+    tab: TABS.EMBRYOS,  // Default to Embryos tab
     snapshots: [],
     calibration: [],
     embryos: [],
@@ -37,7 +37,7 @@ function updateStatusbar() {
     if (!_statusLeft) return;
 
     // Plans and Sessions tabs manage their own statusbar content
-    if (state.tab === 'plans' || state.tab === 'sessions') return;
+    if (state.tab === TABS.PLANS || state.tab === TABS.SESSIONS) return;
 
     const embryoCount = state.embryos?.length || 0;
     const imageCount = state.snapshots?.length || 0;
@@ -72,21 +72,21 @@ function switchTab(tabName) {
     if (content) content.classList.add('active');
 
     // Render galleries
-    if (tabName === 'calibration') renderCalibrationGallery();
-    if (tabName === 'events') renderEventsTable();
+    if (tabName === TABS.CALIBRATION) renderCalibrationGallery();
+    if (tabName === TABS.EVENTS) renderEventsTable();
 
     // Clear detection badge when viewing Embryos tab
-    if (tabName === 'embryos' && typeof EmbryosManager !== 'undefined') {
+    if (tabName === TABS.EMBRYOS && typeof EmbryosManager !== 'undefined') {
         EmbryosManager.clearDetectionBadge();
     }
 
     // Lazy-init Plans tab
-    if (tabName === 'plans' && typeof CampaignsApp !== 'undefined') {
+    if (tabName === TABS.PLANS && typeof CampaignsApp !== 'undefined') {
         CampaignsApp.init();
     }
 
     // Lazy-init Sessions tab
-    if (tabName === 'sessions' && typeof ReviewApp !== 'undefined') {
+    if (tabName === TABS.SESSIONS && typeof ReviewApp !== 'undefined') {
         ReviewApp.init();
     }
 
@@ -403,16 +403,16 @@ const KeyboardShortcuts = {
     enabled: true,
 
     shortcuts: {
-        '1': () => switchTab('embryos'),     // Embryos
-        '2': () => switchTab('events'),      // System
-        '3': () => switchTab('main'),        // Live View
-        '4': () => switchTab('calibration'), // Calibration
+        '1': () => switchTab(TABS.EMBRYOS),     // Embryos
+        '2': () => switchTab(TABS.EVENTS),      // System
+        '3': () => switchTab('main'),            // Live View
+        '4': () => switchTab(TABS.CALIBRATION),  // Calibration
         'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
         't': () => ThemeManager.toggle(),
-        'p': () => { if (state.tab === 'calibration') CalibrationManager.switchView('profile'); },
-        'g': () => { if (state.tab === 'calibration') CalibrationManager.switchView('gallery'); },
+        'p': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('profile'); },
+        'g': () => { if (state.tab === TABS.CALIBRATION) CalibrationManager.switchView('gallery'); },
     },
 
     init() {
@@ -623,9 +623,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === 'plans' || tab === 'sessions' || tab === 'embryos' || tab === 'calibration' || tab === 'events') {
+        if (tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS) {
             switchTab(tab);
-            if (tab === 'plans' && param && typeof openCampaign === 'function') {
+            if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);
             }
         }

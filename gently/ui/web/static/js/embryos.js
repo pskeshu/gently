@@ -16,7 +16,7 @@ const EmbryosManager = {
         baseInterval: 120
     },
 
-    // Detection reasoning cache (per-embryo, capped to prevent unbounded growth)
+    // Detection reasoning cache (per-embryo)
     detectionReasoning: {},  // embryo_id -> list of detection results with reasoning
     MAX_REASONING_PER_EMBRYO: 200,
 
@@ -28,6 +28,9 @@ const EmbryosManager = {
 
     // Expanded image states
     expandedImages: {},  // detection index -> true/false
+
+    // Cached DOM element references for countdown updates (invalidated on re-render)
+    _countdownCache: null,
 
     // Expanded reasoning states (for collapsible reasoning text)
     expandedReasoning: {},  // detection index -> true/false
@@ -192,6 +195,8 @@ const EmbryosManager = {
 
     _setupViewKeyboard() {
         document.addEventListener('keydown', (e) => {
+            // Only fire when embryos tab is active
+            if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
             // Don't trigger in text inputs
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
             const viewMap = { '1': 'default', '2': 'board', '3': 'filmstrip', '4': 'vitals' };
@@ -1326,6 +1331,9 @@ const EmbryosManager = {
     },
 
     renderSummary() {
+        // Invalidate countdown cache since we're rebuilding DOM
+        this._countdownCache = null;
+
         const statsEl = document.getElementById('header-stats');
         if (!statsEl) return;
 
@@ -1387,7 +1395,10 @@ const EmbryosManager = {
     },
 
     updateSummary() {
-        // Quick update for duration and countdown
+        // Quick targeted update for duration and countdown only.
+        // renderSummary() is intentionally NOT called here — it rebuilds the
+        // entire header-stats innerHTML and would overwrite these same elements.
+        // renderSummary() is called on full re-renders via render().
         const durationEl = document.getElementById('summary-duration');
         if (durationEl && this.state.startedAt) {
             durationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
@@ -1396,11 +1407,12 @@ const EmbryosManager = {
         if (countdownEl) {
             countdownEl.textContent = this.getNextCountdown();
         }
-        // Update stats
-        this.renderSummary();
     },
 
     renderEmbryoCards() {
+        // Invalidate countdown cache since we're rebuilding embryo card DOM
+        this._countdownCache = null;
+
         const container = document.getElementById('embryo-cards');
         if (!container) return;
 
@@ -3612,6 +3624,9 @@ const EmbryosManager = {
     },
 
     updateEmbryoCard(embryoId) {
+        // Invalidate countdown cache since card DOM is being replaced
+        this._countdownCache = null;
+
         const embryo = this.state.embryos[embryoId];
         if (!embryo) return;
 
@@ -3655,26 +3670,40 @@ const EmbryosManager = {
         }, 1000);
     },
 
+    _ensureCountdownCache() {
+        if (this._countdownCache) return this._countdownCache;
+        this._countdownCache = {
+            timelapseDuration: document.getElementById('timelapse-duration'),
+            summaryDuration: document.getElementById('summary-duration'),
+            miniCountdowns: {},  // embryoId -> element
+        };
+        // Cache per-embryo mini-countdown elements
+        document.querySelectorAll('.mini-countdown[data-embryo]').forEach(el => {
+            this._countdownCache.miniCountdowns[el.dataset.embryo] = el;
+        });
+        return this._countdownCache;
+    },
+
     updateCountdowns() {
         if (this.state.status !== 'RUNNING') return;
 
+        const cache = this._ensureCountdownCache();
+
         // Update main duration
-        const durationEl = document.getElementById('timelapse-duration');
-        if (durationEl && this.state.startedAt) {
-            durationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
+        if (cache.timelapseDuration && this.state.startedAt) {
+            cache.timelapseDuration.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
         }
 
         // Update summary duration
-        const summaryDurationEl = document.getElementById('summary-duration');
-        if (summaryDurationEl && this.state.startedAt) {
-            summaryDurationEl.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
+        if (cache.summaryDuration && this.state.startedAt) {
+            cache.summaryDuration.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
         }
 
         // Update per-embryo countdowns (compact cards use mini-countdown class)
         Object.values(this.state.embryos).forEach(embryo => {
             if (embryo.isComplete) return;
 
-            const countdownEl = document.querySelector(`.mini-countdown[data-embryo="${embryo.embryoId}"]`);
+            const countdownEl = cache.miniCountdowns[embryo.embryoId];
             if (countdownEl) {
                 const seconds = this.getSecondsUntilNext(embryo);
                 countdownEl.textContent = this.formatCountdown(seconds);

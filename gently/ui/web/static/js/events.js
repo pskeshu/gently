@@ -15,6 +15,11 @@ const MAX_EVENTS = 500;
 let searchQuery = '';
 let searchDebounceTimer = null;
 
+// Cached filtered count — maintained incrementally when adding events,
+// recomputed fully only when filters change.
+let _filteredCount = 0;
+let _filteredCountDirty = true;  // true = needs full recount
+
 // Image UID fields to look for in event data
 const IMAGE_UID_FIELDS = ['volume_uid', 'image_uid', 'uid', 'visualization_uid', 'segmentation_uid', 'source_uid', 'mask_uid'];
 
@@ -173,9 +178,26 @@ function addEventToTable(event, prepend = true) {
     }
 
     // Check filters
-    if (state.eventTypeFilter && event.event_type !== state.eventTypeFilter) return;
-    if (state.eventSourceFilter && event.source !== state.eventSourceFilter) return;
-    if (!eventMatchesSearch(event)) return;
+    const matchesFilter = (
+        (!state.eventTypeFilter || event.event_type === state.eventTypeFilter) &&
+        (!state.eventSourceFilter || event.source === state.eventSourceFilter) &&
+        eventMatchesSearch(event)
+    );
+
+    // Incrementally update filtered count for newly prepended events
+    if (prepend && matchesFilter && !_filteredCountDirty) {
+        _filteredCount++;
+        // If we trimmed an event, we can't know if it was filtered — mark dirty
+        if (state.allEvents.length > MAX_EVENTS) {
+            _filteredCountDirty = true;
+        }
+    }
+
+    if (!matchesFilter) {
+        // Still update the count display (total changed)
+        updateEventsCount();
+        return;
+    }
 
     const tbody = document.getElementById('events-tbody');
     if (!tbody) return;
@@ -244,6 +266,9 @@ function addEventToTable(event, prepend = true) {
 }
 
 function renderEventsTable() {
+    // Filters changed — mark count dirty so it gets recomputed
+    _filteredCountDirty = true;
+
     const tbody = document.getElementById('events-tbody');
     if (!tbody) return;
 
@@ -272,24 +297,33 @@ function updateSourceFilter() {
     select.value = currentValue;
 }
 
-function updateEventsCount() {
-    const badge = document.getElementById('events-count');
-    const stats = document.getElementById('events-stats');
-
-    const total = state.allEvents.length;
-    const filtered = state.allEvents.filter(e => {
+function _recomputeFilteredCount() {
+    _filteredCount = state.allEvents.filter(e => {
         if (state.eventTypeFilter && e.event_type !== state.eventTypeFilter) return false;
         if (state.eventSourceFilter && e.source !== state.eventSourceFilter) return false;
         if (!eventMatchesSearch(e)) return false;
         return true;
     }).length;
+    _filteredCountDirty = false;
+}
+
+function updateEventsCount() {
+    const badge = document.getElementById('events-count');
+    const stats = document.getElementById('events-stats');
+
+    const total = state.allEvents.length;
+
+    // Only do a full recount when filters have changed
+    if (_filteredCountDirty) {
+        _recomputeFilteredCount();
+    }
 
     if (badge) badge.textContent = total;
     if (stats) {
-        if (filtered === total) {
+        if (_filteredCount === total) {
             stats.textContent = `${total} events`;
         } else {
-            stats.textContent = `${filtered} / ${total} events`;
+            stats.textContent = `${_filteredCount} / ${total} events`;
         }
     }
 }
@@ -297,6 +331,8 @@ function updateEventsCount() {
 function clearEvents() {
     state.allEvents = [];
     state.eventSources.clear();
+    _filteredCount = 0;
+    _filteredCountDirty = false;
     const tbody = document.getElementById('events-tbody');
     if (tbody) tbody.innerHTML = '';
     updateSourceFilter();
@@ -568,7 +604,7 @@ function initEventsTab() {
 
         // Keyboard shortcut: Ctrl/Cmd + F to focus search when on events tab
         document.addEventListener('keydown', (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'f' && state.tab === 'events') {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f' && state.tab === TABS.EVENTS) {
                 e.preventDefault();
                 searchInput.focus();
                 searchInput.select();
@@ -615,7 +651,7 @@ function initEventsTab() {
     // System view switcher
     initViewSwitcher('system-view-switcher', switchSystemView, {
         views: ['log', 'timeline', 'summary'],
-        guard: () => state.tab === 'events'
+        guard: () => state.tab === TABS.EVENTS
     });
     updateViewButtons('system-view-switcher', 'log');
 

@@ -2,6 +2,9 @@
 //  Shared utilities – loaded before all other app scripts
 // ══════════════════════════════════════════════════════════
 
+// Tab and view name constants
+const TABS = { EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions' };
+
 /**
  * HTML-escape a string (safe for insertion into innerHTML).
  * Uses the browser's built-in text node escaping.
@@ -11,6 +14,20 @@ function escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = String(str);
     return div.innerHTML;
+}
+
+/**
+ * Format an ISO date string for display.
+ * @param {string} isoStr
+ * @returns {string} e.g. "Mar 14, 2:30 PM"
+ */
+function formatDate(isoStr) {
+    if (!isoStr) return '';
+    try {
+        const d = new Date(isoStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+            ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    } catch { return isoStr; }
 }
 
 /**
@@ -51,20 +68,6 @@ function updateViewButtons(containerId, activeView) {
     if (!container) return;
     container.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
     container.querySelector(`[data-view="${activeView}"]`)?.classList.add('active');
-}
-
-/**
- * Format an ISO date string for display.
- * @param {string} isoStr
- * @returns {string} e.g. "Mar 14, 2:30 PM"
- */
-function formatDate(isoStr) {
-    if (!isoStr) return '';
-    try {
-        const d = new Date(isoStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-            ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-    } catch { return isoStr; }
 }
 
 /**

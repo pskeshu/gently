@@ -106,6 +106,24 @@ function boot() {
         }
     });
 
+    // Delegated click handler — replaces inline onclick attributes
+    document.addEventListener('click', e => {
+        const el = e.target.closest('[data-action]');
+        if (!el) return;
+        const action = el.dataset.action;
+        const id = el.dataset.id;
+        switch (action) {
+            case 'select-item': selectItem(id); break;
+            case 'open-campaign': openCampaign(id); break;
+            case 'navigate-item': e.stopPropagation(); navigateToItem(id); break;
+            case 'filter-graph': filterGraphByType(el.dataset.filterType); break;
+            case 'view-version': viewVersion(el.dataset.versionId, el.dataset.isCurrent === 'true'); break;
+            case 'back-to-current': backToCurrent(); break;
+            case 'scroll-to': e.stopPropagation(); scrollCanvasTo(el.dataset.target); break;
+            case 'toggle-phase': toggleNavPhase(el); break;
+        }
+    });
+
     // Scroll-spy for plan view
     document.getElementById('canvas')?.addEventListener('scroll', onCanvasScroll, { passive: true });
 
@@ -115,8 +133,7 @@ function boot() {
     // Load campaigns — auto-selects first, or the specified one
     const initialId = window.INITIAL_CAMPAIGN_ID;
     if (initialId) {
-        // Skip auto-select in loadCampaigns; open specified campaign after
-        state.activeCampaignId = initialId; // prevents auto-select
+        state.activeCampaignId = initialId;
         loadCampaigns().then(() => openCampaign(initialId));
     } else {
         loadCampaigns();
@@ -291,7 +308,7 @@ function renderNavDashboard() {
         const c = tree.campaign;
         const total = tree.status?.total || 0;
         const isActive = state.activeCampaignId === c.id;
-        html += `<div class="nav-campaign-item ${isActive ? 'active' : ''}" onclick="openCampaign('${esc(c.id)}')">
+        html += `<div class="nav-campaign-item ${isActive ? 'active' : ''}" data-action="open-campaign" data-id="${esc(c.id)}">
             <span class="nav-status-dot st-${c.status || 'active'}"></span>
             <span class="nav-campaign-name">${esc(c.shorthand || c.description)}</span>
             ${total > 0 ? `<span class="nav-campaign-count">${total}</span>` : ''}
@@ -441,7 +458,7 @@ function renderDocItem(item, taskNum) {
     let refBadges = '';
     if (item.ref_numbers && item.ref_numbers.length > 0) {
         refBadges = item.ref_numbers.map(n =>
-            `<a class="ref-badge" onclick="event.stopPropagation(); scrollCanvasTo('ref-${n}')">[${n}]</a>`
+            `<a class="ref-badge" data-action="scroll-to" data-target="ref-${n}">[${n}]</a>`
         ).join('');
     }
 
@@ -449,13 +466,13 @@ function renderDocItem(item, taskNum) {
     let depLinks = '';
     if (item.dependencies && item.dependencies.length > 0) {
         const depStr = item.dependencies.map(d =>
-            `<a onclick="event.stopPropagation(); navigateToItem('${d.id}')">${esc(d.title)}</a>`
+            `<a data-action="navigate-item" data-id="${d.id}">${esc(d.title)}</a>`
         ).join(', ');
         depLinks += `<span class="doc-dep-link">\u2190 needs: ${depStr}</span>`;
     }
     if (item.dependents && item.dependents.length > 0) {
         const dntStr = item.dependents.map(d =>
-            `<a onclick="event.stopPropagation(); navigateToItem('${d.id}')">${esc(d.title)}</a>`
+            `<a data-action="navigate-item" data-id="${d.id}">${esc(d.title)}</a>`
         ).join(', ');
         depLinks += `<span class="doc-dep-link">\u2192 blocks: ${dntStr}</span>`;
     }
@@ -464,7 +481,7 @@ function renderDocItem(item, taskNum) {
         ? `<div class="doc-item-footer">${refBadges}${depLinks}</div>`
         : '';
 
-    return `<div class="doc-item" id="item-${item.id}" data-item-id="${item.id}" onclick="selectItem('${item.id}')">
+    return `<div class="doc-item" id="item-${item.id}" data-item-id="${item.id}" data-action="select-item" data-id="${item.id}">
         <span class="doc-item-status dot-${statusClass}">${dot}</span>
         <span class="doc-item-icon type-${item.type}">${icon}</span>
         <div class="doc-item-body">
@@ -540,7 +557,7 @@ function renderVersionHistory() {
             // Extract item count from summary (e.g. "...12 items total...")
             const itemMatch = (v.summary || '').match(/(\d+)\s+items?\s+total/);
             const itemCount = itemMatch ? itemMatch[1] + ' items' : '';
-            html += `<div class="version-entry ${isCurrent ? 'current' : ''}" onclick="viewVersion('${v.version_id}', ${isCurrent})">
+            html += `<div class="version-entry ${isCurrent ? 'current' : ''}" data-action="view-version" data-version-id="${v.version_id}" data-is-current="${isCurrent}">
                 <span class="version-entry-num">v${v.version_number || '?'}</span>
                 <span class="version-entry-label">${esc(label)}</span>
                 ${isCurrent ? '<span class="version-entry-current">Current</span>' : ''}
@@ -644,7 +661,7 @@ function renderInspector(data) {
         const chips = deps.map(d => {
             const dot = STATUS_DOTS[d.status] || '\u25CB';
             const dc = d.status || 'planned';
-            return `<span class="dep-chip" onclick="navigateToItem('${d.id}')">
+            return `<span class="dep-chip" data-action="navigate-item" data-id="${d.id}">
                 <span class="dep-chip-dot dot-${dc}">${dot}</span>
                 ${esc(d.title)}
             </span>`;
@@ -657,7 +674,7 @@ function renderInspector(data) {
         const chips = dnts.map(d => {
             const dot = STATUS_DOTS[d.status] || '\u25CB';
             const dc = d.status || 'planned';
-            return `<span class="dep-chip" onclick="navigateToItem('${d.id}')">
+            return `<span class="dep-chip" data-action="navigate-item" data-id="${d.id}">
                 <span class="dep-chip-dot dot-${dc}">${dot}</span>
                 ${esc(d.title)}
             </span>`;
@@ -722,7 +739,7 @@ function toggleVersionDropdown() {
     if (!$versionDropdown) return;
 
     if ($versionDropdown.classList.contains('hidden')) {
-        let html = `<div class="version-item ${!state.viewingSnapshotId ? 'active' : ''}" onclick="backToCurrent()">
+        let html = `<div class="version-item ${!state.viewingSnapshotId ? 'active' : ''}" data-action="back-to-current">
             <span class="version-num">Current</span>
             <div class="version-info"><div class="version-label-text">Live data</div></div>
         </div>`;
@@ -734,7 +751,7 @@ function toggleVersionDropdown() {
             const active = state.viewingSnapshotId === v.version_id;
             const label = v.label || v.summary || 'Snapshot';
             const date = v.created_at ? formatDate(v.created_at) : '';
-            html += `<div class="version-item ${active ? 'active' : ''}" onclick="viewVersion('${v.version_id}', false)">
+            html += `<div class="version-item ${active ? 'active' : ''}" data-action="view-version" data-version-id="${v.version_id}" data-is-current="false">
                 <span class="version-num">v${v.version_number || '?'}</span>
                 <div class="version-info">
                     <div class="version-label-text">${esc(label)}</div>
@@ -1095,7 +1112,7 @@ function renderBoardView() {
             const icon = TYPE_ICONS[item.type] || '';
             const spec = item.imaging_spec || item.bench_spec;
             const specLine = spec ? (spec.strain || spec.protocol || '') : '';
-            html += `<div class="board-card" onclick="selectItem('${item.id}')">
+            html += `<div class="board-card" data-action="select-item" data-id="${item.id}">
                 <div class="board-card-top">
                     <span class="board-card-icon">${icon}</span>
                     <span class="board-card-phase">P${item._phaseNum}</span>
@@ -1132,14 +1149,14 @@ function renderDecideView() {
     let html = '<div class="decide-view">';
     decisions.forEach(item => {
         const deps = (item.dependencies || []).map(d =>
-            `<span class="dep-chip" onclick="selectItem('${d.id}')">${STATUS_DOTS[d.status] || '○'} ${esc(d.title)}</span>`
+            `<span class="dep-chip" data-action="select-item" data-id="${d.id}">${STATUS_DOTS[d.status] || '○'} ${esc(d.title)}</span>`
         ).join('');
         const dependents = (item.dependents || []).map(d =>
-            `<span class="dep-chip" onclick="selectItem('${d.id}')">${esc(d.title)}</span>`
+            `<span class="dep-chip" data-action="select-item" data-id="${d.id}">${esc(d.title)}</span>`
         ).join('');
         const statusClass = item.status === 'completed' ? 'completed' : item.status === 'in_progress' ? 'active' : '';
 
-        html += `<div class="decide-card ${statusClass}" onclick="selectItem('${item.id}')">
+        html += `<div class="decide-card ${statusClass}" data-action="select-item" data-id="${item.id}">
             <div class="decide-phase">Phase ${item._phaseNum}</div>
             <div class="decide-header">
                 <span class="decide-status">${STATUS_DOTS[item.status] || '○'}</span>
@@ -1284,7 +1301,7 @@ function renderGraphView() {
         const icon = TYPE_ICONS[i.type] || '';
         const color = STATUS_COLORS[i.status] || STATUS_COLORS.planned;
         const statusLabel = STATUS_LABELS[i.status] || i.status;
-        nodes += `<g class="graph-node" onclick="selectItem('${i.id}')" data-item-id="${i.id}" data-item-type="${i.type}">
+        nodes += `<g class="graph-node" data-action="select-item" data-id="${i.id}" data-item-id="${i.id}" data-item-type="${i.type}">
             <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="10"
                   fill="var(--bg-card)" stroke="${color}" stroke-width="2" />
             <foreignObject x="${p.x + 10}" y="${p.y + 6}" width="${nodeW - 20}" height="${nodeH - 12}">
@@ -1300,12 +1317,12 @@ function renderGraphView() {
     // Type filter toolbar
     const types = [...new Set(items.map(i => i.type))];
     const typeButtons = types.map(t =>
-        `<button class="graph-filter-btn" data-filter-type="${t}" onclick="filterGraphByType('${t}')">${TYPE_ICONS[t] || ''} ${esc(t)}</button>`
+        `<button class="graph-filter-btn" data-action="filter-graph" data-filter-type="${t}">${TYPE_ICONS[t] || ''} ${esc(t)}</button>`
     ).join('');
 
     $canvasContent.innerHTML = `<div class="graph-view" id="graph-view-container">
         <div class="graph-toolbar">
-            <button class="graph-filter-btn active" data-filter-type="" onclick="filterGraphByType('')">All</button>
+            <button class="graph-filter-btn active" data-action="filter-graph" data-filter-type="">All</button>
             ${typeButtons}
         </div>
         <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
@@ -1408,17 +1425,12 @@ function renderMatrixView() {
     $canvasContent.innerHTML = html;
 }
 
-// Expose init and onclick-referenced functions to global scope
+// Expose only what's needed by other modules
+// - CampaignsApp.init: called from app.js to boot the campaigns page
+// - openCampaign: called from app.js hash router
+// All other actions are handled via data-action event delegation above.
 window.CampaignsApp = { init: boot };
 window.openCampaign = openCampaign;
-window.navigateToItem = navigateToItem;
-window.toggleNavPhase = toggleNavPhase;
-window.scrollCanvasTo = scrollCanvasTo;
-window.selectItem = selectItem;
-window.viewVersion = viewVersion;
-window.backToCurrent = backToCurrent;
-window.switchPlanView = switchPlanView;
-window.filterGraphByType = filterGraphByType;
 
 // Auto-init on standalone campaigns page (detected via data-page attribute)
 if (document.body?.dataset.page === 'campaigns') {
