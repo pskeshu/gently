@@ -81,6 +81,8 @@ async def create_campaign(
         "Use depends_on to set dependencies on other plan item IDs. "
         "Use phase_number (e.g. 1) to add the item to a specific phase "
         "instead of looking up the subcampaign ID. "
+        "Use estimated_days to indicate how many days this task takes "
+        "(e.g. 1 for a quick imaging session, 14 for strain expansion). "
         "Use references to cite literature, databases, or other sources "
         "(each with source, citation, and optional id/note)."
     ),
@@ -117,6 +119,7 @@ async def create_plan_item(
     phase_number: int = None,
     phase_order: int = -1,
     references: List[Dict] = None,
+    estimated_days: int = None,
     context: Dict = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
@@ -151,6 +154,7 @@ async def create_plan_item(
         depends_on=depends_on,
         phase_order=phase_order,
         references=references,
+        estimated_days=estimated_days,
     )
 
     # Include the human-friendly task number in the response
@@ -200,6 +204,7 @@ async def update_plan_item(
     outcome: str = None,
     spec: Dict = None,
     references: List[Dict] = None,
+    estimated_days: int = None,
     campaign_id: str = None,
     context: Dict = None,
 ) -> str:
@@ -229,6 +234,7 @@ async def update_plan_item(
         outcome=outcome,
         spec=spec,
         references=references,
+        estimated_days=estimated_days,
     )
     changes = []
     if status:

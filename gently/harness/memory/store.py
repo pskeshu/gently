@@ -187,6 +187,7 @@ CREATE TABLE IF NOT EXISTS plan_items (
     inherit_from TEXT,
     planned_session_id TEXT,
     session_id TEXT,
+    estimated_days INTEGER,
     phase_order INTEGER DEFAULT 0,
     "references" TEXT,
     created_at TEXT NOT NULL,
@@ -310,6 +311,10 @@ class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesM
         if "claimed_by_hostname" not in pi_cols:
             conn.execute("ALTER TABLE plan_items ADD COLUMN claimed_by_hostname TEXT")
             logger.info("Migration: added 'claimed_by_hostname' column to plan_items")
+
+        if "estimated_days" not in pi_cols:
+            conn.execute("ALTER TABLE plan_items ADD COLUMN estimated_days INTEGER")
+            logger.info("Migration: added 'estimated_days' column to plan_items")
 
         # Campaign participants table for mesh coordination
         conn.execute("""

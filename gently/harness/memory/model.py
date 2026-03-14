@@ -273,6 +273,9 @@ class PlanItem:
     session_id: Optional[str] = None          # → Actual session (once executed)
     inherit_from: Optional[str] = None        # PlanItem ID to inherit spec from
 
+    # Scheduling — relative timeline from Day 0
+    estimated_days: Optional[int] = None     # Duration in days (for Gantt/timeline views)
+
     # Ordering
     phase_order: int = 0
 

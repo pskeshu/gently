@@ -42,6 +42,7 @@ class PlansMixin:
         depends_on: Optional[List[str]] = None,
         item_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
+        estimated_days: Optional[int] = None,
     ) -> str:
         """Create a plan item. Returns its ID.
 
@@ -64,12 +65,12 @@ class PlansMixin:
             self._conn.execute(
                 "INSERT INTO plan_items "
                 "(id, campaign_id, type, title, description, spec, inherit_from, "
-                " planned_session_id, phase_order, \"references\", status, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
+                " planned_session_id, estimated_days, phase_order, \"references\", status, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
                     pid, campaign_id, type, title, description,
                     json.dumps(spec) if spec else None,
-                    inherit_from, planned_session_id, phase_order,
+                    inherit_from, planned_session_id, estimated_days, phase_order,
                     json.dumps(references) if references else None,
                     now, now,
                 ),
@@ -305,6 +306,7 @@ class PlansMixin:
         phase_order: Optional[int] = None,
         campaign_id: Optional[str] = None,
         references: Optional[List[Dict]] = None,
+        estimated_days: Optional[int] = None,
     ):
         """Update a plan item. Only non-None values are applied."""
         now = self._now()
@@ -317,6 +319,7 @@ class PlansMixin:
             ("planned_session_id", planned_session_id),
             ("session_id", session_id),
             ("campaign_id", campaign_id),
+            ("estimated_days", estimated_days),
         ]:
             if val is not None:
                 updates.append(f"{col} = ?")
@@ -959,6 +962,7 @@ class PlansMixin:
             planned_session_id=d.get("planned_session_id"),
             session_id=d.get("session_id"),
             inherit_from=d.get("inherit_from"),
+            estimated_days=d.get("estimated_days"),
             phase_order=d.get("phase_order", 0),
             created_at=datetime.fromisoformat(d["created_at"]),
             updated_at=datetime.fromisoformat(d["updated_at"]),

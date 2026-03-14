@@ -43,7 +43,7 @@ const SPEC_UNITS = {
 
 // ── State ────────────────────────────────────────────────
 const state = {
-    planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix'
+    planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix' | 'timeline'
     activeCampaignId: null,
     selectedItemId: null,
     allCampaigns: [],           // full tree list from /api/campaigns
@@ -335,6 +335,7 @@ function renderCanvas() {
         case 'decide': renderDecideView(); break;
         case 'graph': renderGraphView(); break;
         case 'matrix': renderMatrixView(); break;
+        case 'timeline': renderTimelinePlanView(); break;
         default: renderPlanDoc(); break;
     }
 }
@@ -1052,7 +1053,7 @@ const STATUS_COLORS = {
 
 function setupPlanViewSwitcher() {
     initViewSwitcher('plan-view-switcher', switchPlanView, {
-        views: ['doc', 'graph', 'board', 'decide', 'matrix'],
+        views: ['doc', 'graph', 'board', 'decide', 'matrix', 'timeline'],
         guard: () => !!state.docData
     });
 }
@@ -1119,6 +1120,7 @@ function renderBoardView() {
                 </div>
                 <div class="board-card-title">${esc(item.title)}</div>
                 ${specLine ? `<div class="board-card-spec">${esc(specLine)}</div>` : ''}
+                ${item.estimated_days ? `<div class="board-card-duration">${item.estimated_days}d</div>` : ''}
             </div>`;
         });
         html += '</div></div>';
@@ -1423,6 +1425,122 @@ function renderMatrixView() {
     html += `<td class="matrix-total">${grandTotal}</td></tr>`;
     html += '</tbody></table></div>';
     $canvasContent.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
+//  TIMELINE VIEW (Gantt-style relative timeline from Day 0)
+// ══════════════════════════════════════════════════════════
+
+function renderTimelinePlanView() {
+    const doc = state.docData?.document;
+    if (!doc) return;
+    const items = collectAllItems(doc);
+    if (items.length === 0) {
+        $canvasContent.innerHTML = '<div class="empty-state"><p>No items to schedule</p></div>';
+        return;
+    }
+
+    // Build dependency map and compute earliest start days via topological sort
+    const byId = {};
+    items.forEach(i => byId[i.id] = i);
+    const startDay = {};
+    const endDay = {};
+
+    // Topological order
+    const inDeg = {};
+    const out = {};
+    items.forEach(i => { inDeg[i.id] = 0; out[i.id] = []; });
+    items.forEach(i => {
+        (i.dependencies || []).forEach(d => {
+            if (byId[d.id]) {
+                out[d.id].push(i.id);
+                inDeg[i.id]++;
+            }
+        });
+    });
+
+    const queue = items.filter(i => inDeg[i.id] === 0).map(i => i.id);
+    queue.forEach(id => startDay[id] = 0);
+    let head = 0;
+    while (head < queue.length) {
+        const id = queue[head++];
+        const dur = byId[id].estimated_days || 1;
+        endDay[id] = startDay[id] + dur;
+        out[id].forEach(next => {
+            startDay[next] = Math.max(startDay[next] || 0, endDay[id]);
+            inDeg[next]--;
+            if (inDeg[next] === 0) queue.push(next);
+        });
+    }
+    // Handle cycles
+    items.forEach(i => {
+        if (startDay[i.id] === undefined) startDay[i.id] = 0;
+        if (endDay[i.id] === undefined) endDay[i.id] = (startDay[i.id] || 0) + (i.estimated_days || 1);
+    });
+
+    const totalDays = Math.max(1, ...Object.values(endDay));
+    const dayWidth = 36;
+    const rowHeight = 32;
+    const labelWidth = 220;
+    const headerHeight = 40;
+    const chartWidth = totalDays * dayWidth;
+
+    // Sort items by start day then phase
+    const sorted = [...items].sort((a, b) => (startDay[a.id] || 0) - (startDay[b.id] || 0) || a._phaseNum - b._phaseNum);
+
+    // Day header
+    let dayHeaders = '';
+    for (let d = 0; d < totalDays; d++) {
+        const isWeek = d % 7 === 0;
+        dayHeaders += `<div class="tl-day-header ${isWeek ? 'week' : ''}" style="left:${d * dayWidth}px;width:${dayWidth}px">
+            ${isWeek ? `W${Math.floor(d / 7) + 1}` : d + 1}
+        </div>`;
+    }
+
+    const chartHeight = sorted.length * rowHeight;
+
+    $canvasContent.innerHTML = `<div class="timeline-plan-view">
+        <div class="tl-header-row">
+            <div class="tl-corner">Task</div>
+            <div class="tl-header-scroll" id="tl-header-scroll">
+                <div class="tl-header-days" style="width:${chartWidth}px">${dayHeaders}</div>
+            </div>
+        </div>
+        <div class="tl-body">
+            <div class="tl-labels" style="height:${chartHeight}px">
+                ${sorted.map((item, idx) => {
+                    const icon = TYPE_ICONS[item.type] || '';
+                    const title = item.title.length > 28 ? item.title.slice(0, 26) + '…' : item.title;
+                    return `<div class="tl-label" style="top:${idx * rowHeight}px" data-action="select-item" data-id="${item.id}">
+                        <span class="tl-label-icon">${icon}</span>
+                        <span class="tl-label-phase">P${item._phaseNum}</span>
+                        <span class="tl-label-title">${esc(title)}</span>
+                    </div>`;
+                }).join('')}
+            </div>
+            <div class="tl-chart-scroll" id="tl-chart-scroll">
+                <div class="tl-chart" style="width:${chartWidth}px;height:${chartHeight}px;background:repeating-linear-gradient(90deg,var(--border) 0,var(--border) 1px,transparent 1px,transparent ${dayWidth}px)">
+                    ${sorted.map((item, idx) => {
+                        const start = startDay[item.id] || 0;
+                        const dur = item.estimated_days || 1;
+                        const color = STATUS_COLORS[item.status] || STATUS_COLORS.planned;
+                        return `<div class="tl-bar" style="top:${idx * rowHeight + 4}px;left:${start * dayWidth}px;width:${dur * dayWidth - 2}px;background:${color}"
+                                     data-action="select-item" data-id="${item.id}" title="Day ${start + 1}–${start + dur}: ${esc(item.title)} (${dur}d)">
+                            ${dur > 1 ? `<span class="tl-bar-text">${dur}d</span>` : ''}
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="tl-summary">Total: ${totalDays} days (${Math.ceil(totalDays / 7)} weeks) \u00B7 Critical path determines minimum duration</div>
+    </div>`;
+
+    // Sync horizontal scroll between header and chart
+    const chartScroll = document.getElementById('tl-chart-scroll');
+    const headerScroll = document.getElementById('tl-header-scroll');
+    if (chartScroll && headerScroll) {
+        chartScroll.addEventListener('scroll', () => { headerScroll.scrollLeft = chartScroll.scrollLeft; });
+    }
 }
 
 // Expose only what's needed by other modules
