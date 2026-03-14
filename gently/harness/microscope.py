@@ -155,10 +155,16 @@ class HTTPMicroscope(Microscope):
         self._session = None
         self._connected = False
         self._available_plans: Set[str] = set()
+        self._plan_schemas: list = []  # Anthropic tool-format schemas
 
     @property
     def plans(self) -> Set[str]:
         return self._available_plans
+
+    @property
+    def plan_schemas(self) -> list:
+        """Plan definitions in Anthropic tool-call format (name, description, input_schema)."""
+        return self._plan_schemas
 
     @property
     def is_connected(self) -> bool:
@@ -179,7 +185,17 @@ class HTTPMicroscope(Microscope):
                     return False
                 info = await resp.json()
 
-            self._available_plans = set(info.get("plans", []))
+            # Plans come as Anthropic tool schemas (list of dicts with name, description, input_schema)
+            plans_data = info.get("plans", [])
+            if plans_data and isinstance(plans_data[0], dict):
+                # New format: list of tool schemas
+                self._plan_schemas = plans_data
+                self._available_plans = {p["name"] for p in plans_data}
+            else:
+                # Legacy format: list of plan name strings
+                self._available_plans = set(plans_data)
+                self._plan_schemas = [{"name": p, "description": p, "input_schema": {"type": "object", "properties": {}}} for p in plans_data]
+
             self.DESCRIPTION = info.get("description", "")
             self._connected = True
 
@@ -253,3 +269,92 @@ class HTTPMicroscope(Microscope):
             json={"volume_dir": volume_dir},
         ) as resp:
             return await resp.json()
+
+
+def register_microscope_tools(microscope: Microscope, registry=None) -> int:
+    """
+    Auto-generate and register tools from a microscope's plan schemas.
+
+    Each plan becomes a tool that Claude can call. The tool's name,
+    description, and input_schema come directly from the device layer's
+    plan definitions (Anthropic tool format).
+
+    Parameters
+    ----------
+    microscope : Microscope
+        A connected microscope (must have plan_schemas populated).
+    registry : ToolRegistry, optional
+        Registry to add tools to. Uses global registry if None.
+
+    Returns
+    -------
+    int
+        Number of tools registered.
+    """
+    if registry is None:
+        from gently.harness.tools.registry import get_tool_registry
+        registry = get_tool_registry()
+
+    from gently.harness.tools.registry import ToolDefinition, ToolParameter, ToolCategory
+
+    schemas = getattr(microscope, 'plan_schemas', [])
+    if not schemas:
+        return 0
+
+    def _make_handler(pname):
+        """Create an async handler that delegates to microscope.execute()."""
+        async def handler(context: dict = None, **params):
+            ms = context.get('client') if context else microscope
+            if ms is None:
+                return "Error: microscope not connected"
+            result = await ms.execute(pname, **params)
+            if not result.get('success', False):
+                return f"Error: {result.get('error', 'unknown')}"
+            return result
+        handler.__name__ = f"microscope_{pname}"
+        return handler
+
+    count = 0
+    for schema in schemas:
+        plan_name = schema["name"]
+        tool_name = f"microscope_{plan_name}"
+
+        if registry.get(tool_name):
+            continue
+
+        # Convert input_schema properties to ToolParameters
+        input_schema = schema.get("input_schema", {})
+        properties = input_schema.get("properties", {})
+        required = set(input_schema.get("required", []))
+
+        tool_params = [
+            ToolParameter(
+                name=param_name,
+                type=param_def.get("type", "string"),
+                description=param_def.get("description", ""),
+                required=param_name in required,
+                default=param_def.get("default"),
+                enum=param_def.get("enum"),
+            )
+            for param_name, param_def in properties.items()
+        ]
+
+        tool_def = ToolDefinition(
+            name=tool_name,
+            description=schema.get("description", plan_name),
+            handler=_make_handler(plan_name),
+            parameters=tool_params,
+            category=ToolCategory.HARDWARE,
+            requires_microscope=True,
+            is_async=True,
+            tags=["auto-generated", "microscope-plan"],
+        )
+
+        # Register directly — register_function() would extract params from the
+        # handler signature (**params), but we have the proper schema from the device layer.
+        registry._tools[tool_name] = tool_def
+
+        count += 1
+        logger.info("Registered microscope tool: %s (%s)", tool_name, plan_name)
+
+    return count

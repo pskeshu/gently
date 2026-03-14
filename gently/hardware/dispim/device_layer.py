@@ -925,19 +925,123 @@ class DeviceLayerServer(Service):
     # Microscope API — generic plan-based interface
     # =========================================================================
 
-    # Maps generic plan names → (bluesky_plan_name, result_extractor)
-    # Extractors pull clean results from Bluesky documents.
-    PLAN_REGISTRY = {
-        "move":             ("move_stage_plan",              "_extract_move"),
-        "get_position":     ("read_stage_plan",              "_extract_position"),
-        "acquire":          ("acquire_single_volume_plan",   "_extract_volume"),
-        "snap":             ("capture_lightsheet_image_plan", "_extract_image"),
-        "detect_image":     ("capture_bottom_image_plan",    "_extract_image"),
-        "calibrate":        ("calibrate_piezo_galvo_plan",   "_extract_calibration"),
-        "set_illumination": ("set_led_plan",                 "_extract_success"),
-        "get_illumination": None,  # handled directly (no Bluesky plan)
-        "detect":           None,  # handled directly (SAM endpoint)
-        "status":           None,  # handled directly
+    # Plan schemas — each plan is described in Anthropic tool-call format
+    # so the agent can use them directly as tool definitions.
+    # "bluesky_plan" and "extractor" are internal (not sent to client).
+    PLAN_SCHEMAS = {
+        "move": {
+            "description": "Move XY stage to absolute position in micrometers.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number", "description": "X position in µm"},
+                    "y": {"type": "number", "description": "Y position in µm"},
+                },
+                "required": ["x", "y"],
+            },
+            "bluesky_plan": "move_stage_plan",
+            "extractor": "_extract_move",
+        },
+        "get_position": {
+            "description": "Read current XY stage position.",
+            "input_schema": {"type": "object", "properties": {}},
+            "bluesky_plan": "read_stage_plan",
+            "extractor": "_extract_position",
+        },
+        "acquire": {
+            "description": "Acquire a 3D volume via synchronized galvo-piezo scan.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "num_slices": {"type": "integer", "description": "Number of Z slices", "default": 50},
+                    "exposure_ms": {"type": "number", "description": "Camera exposure per slice in ms", "default": 10.0},
+                    "galvo_amplitude": {"type": "number", "description": "Galvo scan range in volts", "default": 0.5},
+                    "galvo_center": {"type": "number", "description": "Galvo center position in volts", "default": 0.0},
+                    "piezo_amplitude": {"type": "number", "description": "Piezo Z range in µm", "default": 25.0},
+                    "piezo_center": {"type": "number", "description": "Piezo center position in µm", "default": 50.0},
+                },
+            },
+            "bluesky_plan": "acquire_single_volume_plan",
+            "extractor": "_extract_volume",
+        },
+        "snap": {
+            "description": "Capture a single lightsheet image at specified Z and galvo position.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "piezo_position": {"type": "number", "description": "Z position in µm"},
+                    "galvo_position": {"type": "number", "description": "Galvo angle in volts"},
+                    "exposure_ms": {"type": "number", "description": "Camera exposure in ms", "default": 10.0},
+                },
+            },
+            "bluesky_plan": "capture_lightsheet_image_plan",
+            "extractor": "_extract_image",
+        },
+        "detect_image": {
+            "description": "Capture image from the bottom detection camera.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "use_led": {"type": "boolean", "description": "Turn on LED during capture", "default": False},
+                    "exposure_ms": {"type": "number", "description": "Camera exposure in ms"},
+                },
+            },
+            "bluesky_plan": "capture_bottom_image_plan",
+            "extractor": "_extract_image",
+        },
+        "calibrate": {
+            "description": "Run piezo-galvo calibration to find optimal focus parameters for an embryo.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "piezo_positions": {"type": "array", "items": {"type": "number"}, "description": "Piezo positions to sweep (µm)"},
+                    "galvo_positions": {"type": "array", "items": {"type": "number"}, "description": "Galvo positions to sweep (volts)"},
+                },
+            },
+            "bluesky_plan": "calibrate_piezo_galvo_plan",
+            "extractor": "_extract_calibration",
+        },
+        "set_illumination": {
+            "description": "Set LED illumination state for the detection camera.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "state": {"type": "string", "enum": ["Open", "Closed"], "description": "LED state"},
+                },
+                "required": ["state"],
+            },
+            "bluesky_plan": "set_led_plan",
+            "extractor": "_extract_success",
+        },
+        "get_illumination": {
+            "description": "Get current LED illumination status.",
+            "input_schema": {"type": "object", "properties": {}},
+            "bluesky_plan": None,
+            "extractor": None,
+        },
+        "detect": {
+            "description": "Detect embryos/samples in the current field of view using SAM segmentation.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "pixel_size_um": {"type": "number", "description": "Camera pixel size in µm", "default": 6.5},
+                    "objective_mag": {"type": "number", "description": "Objective magnification", "default": 10.0},
+                    "min_confidence": {"type": "number", "description": "Minimum detection confidence", "default": 0.7},
+                    "exposure_ms": {"type": "number", "description": "Camera exposure in ms"},
+                    "brightness_percentile": {"type": "number", "description": "Brightness threshold percentile", "default": 99.0},
+                    "min_area": {"type": "integer", "description": "Minimum embryo area in pixels", "default": 5000},
+                    "max_area": {"type": "integer", "description": "Maximum embryo area in pixels", "default": 150000},
+                },
+            },
+            "bluesky_plan": None,
+            "extractor": None,
+        },
+        "status": {
+            "description": "Get device layer status including loaded devices and queue state.",
+            "input_schema": {"type": "object", "properties": {}},
+            "bluesky_plan": None,
+            "extractor": None,
+        },
     }
 
     def _extract_from_events(self, documents: dict, candidate_keys: list) -> Any:
@@ -1004,25 +1108,27 @@ class DeviceLayerServer(Service):
         return {"success": True}
 
     async def handle_microscope_info(self, request):
-        """GET /api/microscope — handshake: what plans are available?"""
+        """GET /api/microscope — handshake: plans as Anthropic tool schemas."""
         from .description import HARDWARE_DESCRIPTION
         from . import HARDWARE_NAME, HARDWARE_DISPLAY_NAME
 
+        # Build plan list, filtering to actually-available plans
         available_plans = []
-        for plan_name, mapping in self.PLAN_REGISTRY.items():
-            if mapping is None:
-                # Directly handled plans are always available
-                available_plans.append(plan_name)
-            else:
-                bluesky_name, _ = mapping
-                if bluesky_name in self.plans:
-                    available_plans.append(plan_name)
+        for plan_name, schema in self.PLAN_SCHEMAS.items():
+            bluesky_name = schema.get("bluesky_plan")
+            if bluesky_name is None or bluesky_name in self.plans:
+                # Return client-facing fields (Anthropic tool format)
+                available_plans.append({
+                    "name": plan_name,
+                    "description": schema["description"],
+                    "input_schema": schema["input_schema"],
+                })
 
         return web.json_response({
             "name": HARDWARE_NAME,
             "display_name": HARDWARE_DISPLAY_NAME,
             "description": HARDWARE_DESCRIPTION,
-            "plans": sorted(available_plans),
+            "plans": available_plans,
         })
 
     async def handle_microscope_execute(self, request):
@@ -1041,18 +1147,19 @@ class DeviceLayerServer(Service):
                     {"success": False, "error": "No plan name provided"}, status=400
                 )
 
-            if plan_name not in self.PLAN_REGISTRY:
+            schema = self.PLAN_SCHEMAS.get(plan_name)
+            if schema is None:
                 return web.json_response(
-                    {"success": False, "error": f"Unknown plan: {plan_name}. Available: {sorted(self.PLAN_REGISTRY.keys())}"},
+                    {"success": False, "error": f"Unknown plan: {plan_name}"},
                     status=400,
                 )
 
-            mapping = self.PLAN_REGISTRY[plan_name]
+            bluesky_name = schema.get("bluesky_plan")
+            extractor_name = schema.get("extractor")
 
-            # Directly handled plans (not Bluesky)
-            if mapping is None:
+            # Directly handled plans (no Bluesky plan)
+            if bluesky_name is None:
                 if plan_name == "detect":
-                    # Forward to SAM detection handler
                     return await self.handle_detect_embryos(request)
                 elif plan_name == "get_illumination":
                     return await self.handle_get_led_status(request)
@@ -1060,11 +1167,9 @@ class DeviceLayerServer(Service):
                     return await self.handle_status(request)
                 return web.json_response({"success": False, "error": f"Plan '{plan_name}' not implemented"}, status=500)
 
-            bluesky_name, extractor_name = mapping
-
             if bluesky_name not in self.plans:
                 return web.json_response(
-                    {"success": False, "error": f"Bluesky plan '{bluesky_name}' not loaded"},
+                    {"success": False, "error": f"Hardware plan '{bluesky_name}' not loaded"},
                     status=500,
                 )
 
