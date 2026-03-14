@@ -44,6 +44,7 @@ const SPEC_UNITS = {
 // ── State ────────────────────────────────────────────────
 const state = {
     planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix' | 'timeline'
+    typeFilter: '',              // '' = all, or 'imaging', 'bench', etc.
     activeCampaignId: null,
     selectedItemId: null,
     allCampaigns: [],           // full tree list from /api/campaigns
@@ -116,7 +117,7 @@ function boot() {
             case 'select-item': selectItem(id); break;
             case 'open-campaign': openCampaign(id); break;
             case 'navigate-item': e.stopPropagation(); navigateToItem(id); break;
-            case 'filter-graph': filterGraphByType(el.dataset.filterType); break;
+            case 'filter-type': applyTypeFilter(el.dataset.filterType); break;
             case 'view-version': viewVersion(el.dataset.versionId, el.dataset.isCurrent === 'true'); break;
             case 'back-to-current': backToCurrent(); break;
             case 'scroll-to': e.stopPropagation(); scrollCanvasTo(el.dataset.target); break;
@@ -238,6 +239,7 @@ async function openCampaign(campaignId) {
     state.selectedItemId = null;
     state.viewingSnapshotId = null;
     state.planView = 'doc';
+    state.typeFilter = '';
     closeInspector();
     showLoading('Loading plan...');
 
@@ -1065,6 +1067,28 @@ function switchPlanView(viewName) {
     renderCanvas();
 }
 
+// Type filter — shared across views
+function buildTypeFilterBar(items) {
+    const types = [...new Set(items.map(i => i.type))];
+    const buttons = types.map(t =>
+        `<button class="graph-filter-btn ${state.typeFilter === t ? 'active' : ''}" data-action="filter-type" data-filter-type="${t}">${TYPE_ICONS[t] || ''} ${esc(t)}</button>`
+    ).join('');
+    return `<div class="type-filter-bar">
+        <button class="graph-filter-btn ${state.typeFilter === '' ? 'active' : ''}" data-action="filter-type" data-filter-type="">All</button>
+        ${buttons}
+    </div>`;
+}
+
+function applyTypeFilter(type) {
+    if (state.planView === 'graph') {
+        // Graph uses CSS dimming to preserve layout
+        filterGraphByType(type);
+    } else {
+        state.typeFilter = type;
+        renderCanvas();
+    }
+}
+
 // Collect all items from the document tree into a flat array
 function collectAllItems(node, phase, phaseNum) {
     const result = [];
@@ -1090,7 +1114,8 @@ function collectAllItems(node, phase, phaseNum) {
 function renderBoardView() {
     const doc = state.docData?.document;
     if (!doc) return;
-    const items = collectAllItems(doc);
+    const allItems = collectAllItems(doc);
+    const items = state.typeFilter ? allItems.filter(i => i.type === state.typeFilter) : allItems;
     const columns = ['planned', 'in_progress', 'completed', 'skipped', 'blocked'];
     const labels = { planned: 'Planned', in_progress: 'In Progress', completed: 'Completed', skipped: 'Skipped', blocked: 'Blocked' };
     const grouped = {};
@@ -1100,7 +1125,7 @@ function renderBoardView() {
         col.push(item);
     });
 
-    let html = '<div class="board-view">';
+    let html = buildTypeFilterBar(allItems) + '<div class="board-view">';
     columns.forEach(col => {
         const colItems = grouped[col];
         html += `<div class="board-column">
@@ -1316,17 +1341,8 @@ function renderGraphView() {
         </g>`;
     });
 
-    // Type filter toolbar
-    const types = [...new Set(items.map(i => i.type))];
-    const typeButtons = types.map(t =>
-        `<button class="graph-filter-btn" data-action="filter-graph" data-filter-type="${t}">${TYPE_ICONS[t] || ''} ${esc(t)}</button>`
-    ).join('');
-
     $canvasContent.innerHTML = `<div class="graph-view" id="graph-view-container">
-        <div class="graph-toolbar">
-            <button class="graph-filter-btn active" data-action="filter-graph" data-filter-type="">All</button>
-            ${typeButtons}
-        </div>
+        ${buildTypeFilterBar(items)}
         <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
             ${bands}${edges}${nodes}
         </svg>
@@ -1345,8 +1361,10 @@ function renderGraphView() {
     }
 }
 
+// filterGraphByType kept for graph-specific CSS dimming (preserves layout while filtering)
 function filterGraphByType(type) {
-    // Update button active states
+    state.typeFilter = type;
+    // Update shared filter bar
     document.querySelectorAll('.graph-filter-btn').forEach(b => {
         b.classList.toggle('active', b.dataset.filterType === type);
     });
@@ -1358,14 +1376,11 @@ function filterGraphByType(type) {
     document.querySelectorAll('.graph-edge').forEach(edge => {
         edge.classList.toggle('dimmed', type !== '');
     });
-    // Keep edges connected to highlighted nodes visible
     if (type) {
         const activeIds = new Set();
         document.querySelectorAll(`.graph-node:not(.dimmed)`).forEach(n => activeIds.add(n.dataset.itemId));
         document.querySelectorAll('.graph-edge').forEach(edge => {
-            const from = edge.dataset.from;
-            const to = edge.dataset.to;
-            if (activeIds.has(from) || activeIds.has(to)) {
+            if (activeIds.has(edge.dataset.from) || activeIds.has(edge.dataset.to)) {
                 edge.classList.remove('dimmed');
             }
         });
@@ -1379,12 +1394,14 @@ function filterGraphByType(type) {
 function renderMatrixView() {
     const doc = state.docData?.document;
     if (!doc) return;
+    const allItems = collectAllItems(doc);
     const phases = (doc.children || []).filter(c => c.children);
-    const types = ['imaging', 'bench', 'genetics', 'analysis', 'decision_point'];
+    const types = state.typeFilter ? [state.typeFilter] : ['imaging', 'bench', 'genetics', 'analysis', 'decision_point'];
     const typeLabels = { imaging: 'Imaging', bench: 'Bench', genetics: 'Genetics', analysis: 'Analysis', decision_point: 'Decisions' };
 
-    let html = '<div class="matrix-view"><table class="matrix-table"><thead><tr><th>Phase</th>';
-    types.forEach(t => html += `<th>${typeLabels[t]}</th>`);
+    let html = buildTypeFilterBar(allItems) + '<div class="matrix-view"><table class="matrix-table"><thead><tr><th>Phase</th>';
+    types.forEach(t => html += `<th>${typeLabels[t] || esc(t)}</th>`);
+    if (types.length > 1) html += '<th>Total</th>';
     html += '<th>Total</th></tr></thead><tbody>';
 
     const colTotals = {};
@@ -1414,7 +1431,8 @@ function renderMatrixView() {
                 html += `<td class="matrix-cell">${dots}<span class="matrix-count">${count}</span></td>`;
             }
         });
-        html += `<td class="matrix-total">${rowTotal}</td></tr>`;
+        if (types.length > 1) html += `<td class="matrix-total">${rowTotal}</td>`;
+        html += '</tr>';
     });
 
     // Totals row
@@ -1422,7 +1440,8 @@ function renderMatrixView() {
     types.forEach(t => {
         html += `<td class="matrix-total">${colTotals[t].total}</td>`;
     });
-    html += `<td class="matrix-total">${grandTotal}</td></tr>`;
+    if (types.length > 1) html += `<td class="matrix-total">${grandTotal}</td>`;
+    html += '</tr>';
     html += '</tbody></table></div>';
     $canvasContent.innerHTML = html;
 }
@@ -1434,11 +1453,13 @@ function renderMatrixView() {
 function renderTimelinePlanView() {
     const doc = state.docData?.document;
     if (!doc) return;
-    const items = collectAllItems(doc);
-    if (items.length === 0) {
+    const allItems = collectAllItems(doc);
+    if (allItems.length === 0) {
         $canvasContent.innerHTML = '<div class="empty-state"><p>No items to schedule</p></div>';
         return;
     }
+    // Compute schedule using ALL items (dependency chain), then filter for display
+    const items = allItems;
 
     // Build dependency map and compute earliest start days via topological sort
     const byId = {};
@@ -1486,7 +1507,15 @@ function renderTimelinePlanView() {
     const chartWidth = totalDays * dayWidth;
 
     // Sort items by start day then phase
-    const sorted = [...items].sort((a, b) => (startDay[a.id] || 0) - (startDay[b.id] || 0) || a._phaseNum - b._phaseNum);
+    const displayItems = state.typeFilter ? items.filter(i => i.type === state.typeFilter) : items;
+    const sorted = [...displayItems].sort((a, b) => (startDay[a.id] || 0) - (startDay[b.id] || 0) || a._phaseNum - b._phaseNum);
+
+    if (sorted.length === 0) {
+        $canvasContent.innerHTML = `${buildTypeFilterBar(allItems)}<div class="empty-state">
+            <p>No ${state.typeFilter || ''} items in this plan</p>
+        </div>`;
+        return;
+    }
 
     // Day header
     let dayHeaders = '';
@@ -1499,7 +1528,7 @@ function renderTimelinePlanView() {
 
     const chartHeight = sorted.length * rowHeight;
 
-    $canvasContent.innerHTML = `<div class="timeline-plan-view">
+    $canvasContent.innerHTML = `${buildTypeFilterBar(allItems)}<div class="timeline-plan-view">
         <div class="tl-header-row">
             <div class="tl-corner">Task</div>
             <div class="tl-header-scroll" id="tl-header-scroll">
