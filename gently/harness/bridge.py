@@ -39,7 +39,6 @@ class AgentBridge:
 
     def __init__(self, agent):
         self.agent = agent
-        self._active_stream: Optional[asyncio.Task] = None
         self._launch_info: Dict[str, Any] = {}
         self._wizard = None  # StartupWizard, set by init_wizard()
         self._active_remote: Optional[Dict[str, Any]] = None  # {"peer": PeerInfo, "campaign_id": str}
@@ -54,31 +53,21 @@ class AgentBridge:
             self._pending_import = None
             if selected:
                 result = self.agent.import_embryos_from_session(selected)
-                if result.get("success"):
-                    imported = result.get("imported", [])
-                    skipped = result.get("skipped", [])
-                    lines = [f"Imported {len(imported)} embryo(s) from {selected[:8]}"]
-                    if imported:
-                        lines.append(f"  {', '.join(imported)}")
-                    if skipped:
-                        lines.append(f"  Skipped (exist): {', '.join(skipped)}")
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "content": {"text": "\n".join(lines)},
-                    })
-                else:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "error": result.get("error", "Import failed"),
-                    })
+                await self._send_import_result(send_fn, result, selected[:8])
             return True
         return False
 
     def set_launch_info(self, info: Dict[str, Any]) -> None:
         """Store launch metadata to include in the connect message."""
         self._launch_info = info
+
+    def _require_context_store(self):
+        """Return the context store or None if unavailable."""
+        return getattr(self, "_context_store", None)
+
+    def _require_mesh(self):
+        """Return the mesh service or None if unavailable."""
+        return self._launch_info.get("mesh_service")
 
     def get_session_briefing(self) -> str:
         """Generate briefing for new sessions. Returns '' if not applicable."""
@@ -178,7 +167,8 @@ class AgentBridge:
             Called with the result dict.
         """
         registry = get_command_registry()
-        cmd_name = command.strip().lower().split()[0]
+        cmd = command.strip().lower()
+        cmd_name = cmd.split()[0]
         cmd_def = registry.get(cmd_name)
         logger.info("handle_command: %s (resolved: %s)", cmd_name, cmd_def.name if cmd_def else "NOT FOUND")
 
@@ -189,9 +179,6 @@ class AgentBridge:
                 "error": f"Unknown command: {cmd_name}",
             })
             return
-
-        # Handle commands that return structured data
-        cmd = command.strip().lower()
 
         if cmd in ("/quit", "/exit", "/q"):
             await send_fn({
@@ -294,22 +281,10 @@ class AgentBridge:
             return
 
         if cmd == "/sessions":
-            sessions = []
-            if hasattr(self.agent, 'store') and self.agent.store:
-                raw = self.agent.store.list_sessions()
-                for s in raw:
-                    sid = s.get("session_id", "unknown")
-                    embryos = self.agent.store.list_embryos(sid)
-                    sessions.append({
-                        "session_id": sid,
-                        "name": s.get("name", ""),
-                        "embryo_count": len(embryos) if embryos else 0,
-                        "last_active": s.get("last_active", ""),
-                    })
             await send_fn({
                 "type": "command_result",
                 "command": "/sessions",
-                "content": {"sessions": sessions},
+                "content": {"sessions": self._get_sessions_list()},
             })
             return
 
@@ -367,7 +342,7 @@ class AgentBridge:
             return
 
         if cmd == "/reset-context":
-            cs = getattr(self, "_context_store", None)
+            cs = self._require_context_store()
             if cs is None:
                 await send_fn({
                     "type": "command_result",
@@ -640,25 +615,7 @@ class AgentBridge:
                     session_id = arg
 
                 result = self.agent.import_embryos_from_session(session_id)
-                if result.get("success"):
-                    imported = result.get("imported", [])
-                    skipped = result.get("skipped", [])
-                    lines = [f"Imported {len(imported)} embryo(s) from {session_id}"]
-                    if imported:
-                        lines.append(f"  {', '.join(imported)}")
-                    if skipped:
-                        lines.append(f"  Skipped (exist): {', '.join(skipped)}")
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "content": {"text": "\n".join(lines)},
-                    })
-                else:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "error": result.get("error", "Import failed"),
-                    })
+                await self._send_import_result(send_fn, result, session_id)
             else:
                 sessions = self._get_sessions_list()
                 sessions_with = [s for s in sessions if s["embryo_count"] > 0]
@@ -1018,7 +975,7 @@ class AgentBridge:
 
     def _get_peers_data(self) -> dict:
         """Build structured mesh peer data for the /peers command."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None:
             return {"text": "Mesh not available."}
 
@@ -1057,12 +1014,12 @@ class AgentBridge:
 
     def _get_peer_count(self) -> int:
         """Return the number of live mesh peers."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is not None:
             try:
                 return mesh.peer_count
             except Exception:
-                pass
+                logger.debug("Failed to get peer count", exc_info=True)
         return 0
 
     def _get_sessions_list(self) -> list:
@@ -1080,6 +1037,28 @@ class AgentBridge:
                     "last_active": s.get("last_active", ""),
                 })
         return sessions
+
+    async def _send_import_result(self, send_fn, result: dict, session_label: str):
+        """Format and send an import-embryos result."""
+        if result.get("success"):
+            imported = result.get("imported", [])
+            skipped = result.get("skipped", [])
+            lines = [f"Imported {len(imported)} embryo(s) from {session_label}"]
+            if imported:
+                lines.append(f"  {', '.join(imported)}")
+            if skipped:
+                lines.append(f"  Skipped (exist): {', '.join(skipped)}")
+            await send_fn({
+                "type": "command_result",
+                "command": "/import-embryos",
+                "content": {"text": "\n".join(lines)},
+            })
+        else:
+            await send_fn({
+                "type": "command_result",
+                "command": "/import-embryos",
+                "error": result.get("error", "Import failed"),
+            })
 
     def _get_timelapse_data(self) -> dict:
         """Build structured timelapse status."""
@@ -1156,27 +1135,22 @@ class AgentBridge:
 
     def _get_campaign_count(self) -> int:
         """Count active root campaigns."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return 0
         try:
             return len(cs.get_root_campaigns())
         except Exception:
+            logger.debug("Failed to get campaign count", exc_info=True)
             return 0
 
     def _delete_campaign(self, campaign_id: str) -> dict:
         """Delete a campaign by ID or shorthand."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
 
-        # Resolve by shorthand if needed
-        campaign = cs.get_campaign(campaign_id)
-        if not campaign:
-            for c in cs.get_root_campaigns():
-                if c.shorthand and c.shorthand.lower() == campaign_id.lower():
-                    campaign = c
-                    break
+        campaign = cs.resolve_campaign(campaign_id)
         if not campaign:
             return {"text": f"Campaign '{campaign_id}' not found."}
 
@@ -1192,17 +1166,11 @@ class AgentBridge:
 
     def _rename_campaign(self, campaign_id: str, new_name: str) -> dict:
         """Rename a campaign's shorthand."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
 
-        # Resolve by shorthand if needed
-        campaign = cs.get_campaign(campaign_id)
-        if not campaign:
-            for c in cs.get_root_campaigns():
-                if c.shorthand and c.shorthand.lower() == campaign_id.lower():
-                    campaign = c
-                    break
+        campaign = cs.resolve_campaign(campaign_id)
         if not campaign:
             return {"text": f"Campaign '{campaign_id}' not found."}
 
@@ -1212,7 +1180,7 @@ class AgentBridge:
 
     def _share_campaign(self, campaign_ref: str) -> dict:
         """Share a campaign on the mesh."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
 
@@ -1226,7 +1194,7 @@ class AgentBridge:
 
     def _unshare_campaign(self, campaign_ref: str) -> dict:
         """Stop sharing a campaign on the mesh."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
 
@@ -1240,7 +1208,7 @@ class AgentBridge:
 
     def _pause_campaign(self, campaign_ref: str) -> dict:
         """Pause a campaign."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
         campaign = cs.resolve_campaign(campaign_ref)
@@ -1253,7 +1221,7 @@ class AgentBridge:
 
     def _resume_campaign(self, campaign_ref: str) -> dict:
         """Resume a paused campaign."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
         campaign = cs.resolve_campaign(campaign_ref)
@@ -1266,7 +1234,7 @@ class AgentBridge:
 
     async def _get_peer_campaigns(self, hostname: str) -> dict:
         """Fetch shared campaigns from a specific peer."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None:
             return {"text": "Mesh not available."}
 
@@ -1300,7 +1268,7 @@ class AgentBridge:
 
     async def _join_campaign(self, hostname: str, campaign_ref: str) -> dict:
         """Join a shared campaign on a remote peer."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None:
             return {"text": "Mesh not available."}
 
@@ -1327,7 +1295,7 @@ class AgentBridge:
         if self._active_remote is None:
             return {"text": "No active remote campaign. Use `/join-campaign <hostname> <id>` first."}
 
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None:
             return {"text": "Mesh not available."}
 
@@ -1353,7 +1321,7 @@ class AgentBridge:
 
     async def _pair_initiate(self, hostname: str, send_fn) -> dict:
         """Initiate pairing with a peer by hostname."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None:
             return {"text": "Mesh not available."}
         if mesh.pairing_manager is None:
@@ -1406,7 +1374,7 @@ class AgentBridge:
 
         # Start background polling for confirmation
         asyncio.create_task(self._pair_poll(
-            mesh, peer, pairing_id, nonce_local, nonce_remote, send_fn,
+            mesh, peer, pairing_id, send_fn,
         ))
 
         return {
@@ -1419,7 +1387,7 @@ class AgentBridge:
 
     async def _pair_accept(self, send_fn) -> dict:
         """Accept the most recent pending pairing request."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None or mesh.pairing_manager is None:
             return {"text": "Mesh/pairing not available."}
 
@@ -1447,7 +1415,7 @@ class AgentBridge:
 
     async def _pair_reject(self) -> dict:
         """Reject the most recent pending pairing request."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None or mesh.pairing_manager is None:
             return {"text": "Mesh/pairing not available."}
 
@@ -1462,7 +1430,7 @@ class AgentBridge:
 
     def _pair_list(self) -> dict:
         """List all trusted peers."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None or mesh.pairing_manager is None:
             return {"text": "Mesh/pairing not available."}
 
@@ -1484,7 +1452,7 @@ class AgentBridge:
 
     def _pair_scopes(self, hostname: str, scope_arg: str) -> dict:
         """View or set permission scopes for a peer."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None or mesh.pairing_manager is None:
             return {"text": "Mesh/pairing not available."}
 
@@ -1526,7 +1494,7 @@ class AgentBridge:
 
     def _pair_unpair(self, identifier: str) -> dict:
         """Remove trust for a peer."""
-        mesh = self._launch_info.get("mesh_service")
+        mesh = self._require_mesh()
         if mesh is None or mesh.pairing_manager is None:
             return {"text": "Mesh/pairing not available."}
 
@@ -1544,7 +1512,7 @@ class AgentBridge:
 
         return {"text": f"Unpaired from **{identifier}**. They will need to re-pair to access mesh services."}
 
-    async def _pair_poll(self, mesh, peer, pairing_id, nonce_local, nonce_remote, send_fn):
+    async def _pair_poll(self, mesh, peer, pairing_id, send_fn):
         """Background poll: wait for remote to confirm pairing."""
         pm = mesh.pairing_manager
         pc = mesh.peer_client
@@ -1600,7 +1568,7 @@ class AgentBridge:
 
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""
-        cs = getattr(self, "_context_store", None)
+        cs = self._require_context_store()
         if cs is None:
             return {"text": "Context store not available."}
 
