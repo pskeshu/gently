@@ -86,18 +86,8 @@ def _discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dic
 
 def _load_volume(path: Path) -> np.ndarray:
     """Load a volume from TIFF file."""
-    _ensure_dependencies()
-
-    vol = tifffile.imread(str(path))
-    vol = np.squeeze(vol)
-
-    if vol.ndim == 3:
-        z_depth, height, width = vol.shape
-        # Extract View A (left half) if dual-view format
-        if width > height * 2:
-            vol = vol[:, :, :width // 2]
-
-    return vol
+    from gently.core.imaging import load_volume
+    return load_volume(path)
 
 
 def _normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np.ndarray:

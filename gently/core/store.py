@@ -509,8 +509,8 @@ class GentlyStore:
         if volume_data is not None:
             volume = volume_data
         else:
-            import tifffile
-            volume = tifffile.imread(str(canonical))
+            from gently.core.imaging import load_volume
+            volume = load_volume(canonical)
 
         proj_path = self._generate_projection(session_id, embryo_id, timepoint, volume)
 

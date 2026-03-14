@@ -41,8 +41,8 @@ def load_volume_from_disk(volume_path: str) -> np.ndarray:
     Returns:
         Cropped 3D numpy array (Z, H, W)
     """
-    import tifffile
     from gently.core.imaging import (
+        load_volume,
         compute_crop_bounds,
         apply_crop_bounds,
     )
@@ -51,14 +51,7 @@ def load_volume_from_disk(volume_path: str) -> np.ndarray:
     if not path.exists():
         raise FileNotFoundError(f"Volume file not found: {volume_path}")
 
-    vol = tifffile.imread(str(path))
-    vol = np.squeeze(vol)
-
-    # Handle dual-view format (diSPIM)
-    if vol.ndim == 3:
-        z_depth, height, width = vol.shape
-        if width > height * 2:
-            vol = vol[:, :, :width // 2]
+    vol = load_volume(path)
 
     # Auto-crop to embryo region
     bounds = compute_crop_bounds(vol)
