@@ -42,7 +42,7 @@ def create_device_layer(config: dict):
 
 
 def create_client(http_url: str):
-    """Create an HTTP client for communicating with the diSPIM device layer.
+    """Create a Microscope for communicating with the diSPIM device layer.
 
     Parameters
     ----------
@@ -51,8 +51,12 @@ def create_client(http_url: str):
 
     Returns
     -------
-    QueueServerClient
-        The client instance (call .connect() before use)
+    DiSPIMMicroscope
+        The microscope instance (call .connect() before use)
     """
-    from .client import QueueServerClient
-    return QueueServerClient(http_url=http_url)
+    from .client import DiSPIMMicroscope
+    return DiSPIMMicroscope(http_url=http_url)
+
+
+# Alias for transition
+create_microscope = create_client

@@ -1,12 +1,8 @@
 """
-Queue Server Client for MicroscopyAgent
+diSPIM Microscope — HTTP client for the diSPIM device layer.
 
-Provides async interface to the Gently Device Layer:
-- Hardware control via Bluesky plans (HTTP API)
-- SAM embryo detection (HTTP API)
-
-This client connects to the unified device_layer.py server which provides
-both hardware control and SAM detection in a single HTTP process.
+Implements the Microscope protocol via HTTP requests to the unified
+device_layer.py server (Bluesky plans + SAM detection).
 """
 
 import asyncio
@@ -25,11 +21,16 @@ from gently.core.coordinates import (
     DEFAULT_PIXEL_SIZE_UM,
     DEFAULT_OBJECTIVE_MAG,
 )
+from gently.harness.microscope import Microscope
 from gently.settings import settings
 from gently.exceptions import DeviceLayerError, NetworkError, AcquisitionError
 
 
-class QueueServerClient:
+# Backward-compat alias
+QueueServerClient = None  # set at bottom of file
+
+
+class DiSPIMMicroscope(Microscope):
     """
     Client for Gently Device Layer Server.
 
@@ -916,23 +917,57 @@ class QueueServerClient:
         return status
 
 
+    # =========================================================================
+    # Microscope plan implementations
+    # These map plan names to the existing methods above, enabling
+    # microscope.execute("acquire", **params) alongside the direct methods.
+    # =========================================================================
+
+    async def _plan_move(self, x: float, y: float, **kw) -> dict:
+        return await self.move_to_position(x, y)
+
+    async def _plan_get_position(self, **kw) -> dict:
+        x, y = await self.get_stage_position()
+        try:
+            z = await self.get_piezo_position()
+        except Exception:
+            z = None
+        return {"success": True, "x": x, "y": y, "z": z}
+
+    async def _plan_acquire(self, **params) -> dict:
+        return await self.acquire_volume(**params)
+
+    async def _plan_snap(self, **params) -> dict:
+        return await self.capture_lightsheet_image(**params)
+
+    async def _plan_calibrate(self, **params) -> dict:
+        return await self.calibrate_piezo_galvo(**params)
+
+    async def _plan_detect(self, **params) -> dict:
+        return await self.detect_embryos(**params)
+
+    async def _plan_detect_image(self, **params) -> dict:
+        return await self.capture_bottom_image(**params)
+
+    async def _plan_set_illumination(self, state: str = "Closed", **kw) -> dict:
+        return await self.set_led(state)
+
+    async def _plan_get_illumination(self, **kw) -> dict:
+        return await self.get_led_status()
+
+    async def _plan_status(self, **kw) -> dict:
+        return await self.get_status()
+
+
+# Backward-compat alias
+QueueServerClient = DiSPIMMicroscope
+
+
 async def create_queue_server_client(
     http_url: str = f"http://{settings.network.device_host}:{settings.network.device_port}",
-) -> Optional[QueueServerClient]:
-    """
-    Create and connect a device layer client.
-
-    Parameters
-    ----------
-    http_url : str
-        Device Layer HTTP API URL
-
-    Returns
-    -------
-    QueueServerClient or None
-        Connected client, or None if connection failed
-    """
-    client = QueueServerClient(http_url=http_url)
+) -> Optional[DiSPIMMicroscope]:
+    """Create and connect a diSPIM microscope client."""
+    client = DiSPIMMicroscope(http_url=http_url)
     if await client.connect():
         return client
     return None
