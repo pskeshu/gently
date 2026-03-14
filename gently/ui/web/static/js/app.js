@@ -52,9 +52,8 @@ function updateMainCount() {
 }
 
 function updateCalibrationCount() {
-    const calCount = state.calibration.length;
-    const vol3dCount = state.volumes3d.length;
-    document.getElementById('calibration-count').textContent = calCount + vol3dCount;
+    const el = document.getElementById('calibration-count');
+    if (el) el.textContent = state.calibration.length + state.volumes3d.length;
 }
 
 function switchTab(tabName) {
