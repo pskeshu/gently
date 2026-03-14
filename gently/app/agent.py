@@ -129,8 +129,11 @@ class MicroscopyAgent:
             event_bus=self._event_bus,
         )
 
-        # Hardware interface via HTTP client
-        self.client = microscope_client
+        # Microscope interface (hardware abstraction)
+        self.microscope = microscope_client
+
+        # Backward-compat alias
+        self.client = self.microscope
 
         # Callbacks
         self.on_message_callback: Optional[Callable] = None
