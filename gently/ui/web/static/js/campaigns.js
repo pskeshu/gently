@@ -112,11 +112,15 @@ function boot() {
     // Plan view switcher
     setupPlanViewSwitcher();
 
-    // Load campaigns (will auto-select first or the specified one)
+    // Load campaigns — auto-selects first, or the specified one
     const initialId = window.INITIAL_CAMPAIGN_ID;
-    loadCampaigns().then(() => {
-        if (initialId) openCampaign(initialId);
-    });
+    if (initialId) {
+        // Skip auto-select in loadCampaigns; open specified campaign after
+        state.activeCampaignId = initialId; // prevents auto-select
+        loadCampaigns().then(() => openCampaign(initialId));
+    } else {
+        loadCampaigns();
+    }
 }
 
 
@@ -249,8 +253,8 @@ window.addEventListener('popstate', e => {
     const s = e.state;
     if (s && s.campaignId) {
         openCampaign(s.campaignId);
-    } else {
-        goToDashboard();
+    } else if (state.allCampaigns.length > 0) {
+        openCampaign(state.allCampaigns[0].campaign.id);
     }
 });
 
