@@ -18,7 +18,17 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 import traceback
 
+import numpy as np
+
 from gently.core import EventType, get_event_bus
+from gently.core.imaging import (
+    load_volume,
+    projection_three_view,
+    compute_crop_bounds,
+    apply_crop_bounds,
+    image_to_base64,
+    normalize_to_uint8,
+)
 from gently.settings import settings
 from gently.harness.error_log import GlobalErrorLog
 from gently.organisms import get_organism
@@ -430,7 +440,6 @@ class TimelapseOrchestrator:
 
         # Round-based scheduling (global timing for all embryos)
         self._base_interval_seconds: float = 120.0
-        self._timelapse_start_time: Optional[datetime] = None
         self._total_pause_duration: timedelta = timedelta(0)
         self._pause_start: Optional[datetime] = None
 
@@ -527,13 +536,12 @@ class TimelapseOrchestrator:
 
         # Initialize round-based scheduling (global timing for all embryos)
         self._base_interval_seconds = base_interval_seconds
-        self._timelapse_start_time = datetime.now()
+        self._started_at = datetime.now()
         self._total_pause_duration = timedelta(0)
         self._pause_start = None
 
         # Reset state (but preserve total timepoints from existing embryos)
         self._status = TimelapseStatus.RUNNING
-        self._started_at = self._timelapse_start_time
         self._total_timepoints = sum(e.timepoints_acquired for e in self._embryo_states.values())
         self._current_round = -1  # Will become 0 on first round
         self._paused = False
@@ -597,13 +605,13 @@ class TimelapseOrchestrator:
         datetime
             Scheduled time for the round
         """
-        base_time = self._timelapse_start_time + timedelta(seconds=round_num * self._base_interval_seconds)
+        base_time = self._started_at + timedelta(seconds=round_num * self._base_interval_seconds)
         return base_time + self._total_pause_duration
 
     def _get_elapsed_active_time(self) -> float:
         """Get elapsed time excluding pauses, in seconds"""
         now = datetime.now()
-        elapsed = (now - self._timelapse_start_time).total_seconds()
+        elapsed = (now - self._started_at).total_seconds()
         pause_seconds = self._total_pause_duration.total_seconds()
         return elapsed - pause_seconds
 
@@ -666,7 +674,7 @@ class TimelapseOrchestrator:
                     try:
                         self._store.cleanup_incoming()
                     except Exception:
-                        pass
+                        logger.debug("cleanup_incoming failed", exc_info=True)
 
         except asyncio.CancelledError:
             logger.info("Timelapse cancelled")
@@ -764,7 +772,6 @@ class TimelapseOrchestrator:
                     data = result.get('volume') if acquisition_mode == 'volume' else result.get('image')
                     if data is not None:
                         # Ensure data is numpy array
-                        import numpy as np
                         if not isinstance(data, np.ndarray):
                             data = np.array(data)
                         # For snap mode (2D), add Z dimension so store_volume works
@@ -946,7 +953,7 @@ class TimelapseOrchestrator:
         next_round_time = None
         seconds_until_next = None
 
-        if self._status == TimelapseStatus.RUNNING and self._timelapse_start_time:
+        if self._status == TimelapseStatus.RUNNING and self._started_at:
             next_round_time = self._get_round_scheduled_time(self._current_round + 1)
             seconds_until_next = max(0, (next_round_time - datetime.now()).total_seconds())
 
@@ -1377,6 +1384,56 @@ class TimelapseOrchestrator:
     # How often to recheck embryos marked as no_object (in timepoints)
     NO_OBJECT_RECHECK_INTERVAL = 10
 
+    def _serialize_result(self, embryo_id: str, timepoint: int, result) -> dict:
+        """Serialize a perception result to a dict (shared by trace, store, and events)."""
+        data = {
+            "session_id": self._session_id,
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "timestamp": datetime.now().isoformat(),
+            "predicted_stage": result.stage,
+            "confidence": result.confidence,
+            "reasoning": result.reasoning,
+            "is_hatching": getattr(result, 'is_hatching', False),
+            "is_transitional": getattr(result, 'is_transitional', False),
+            "transition_between": getattr(result, 'transition_between', None),
+        }
+        if result.observed_features:
+            data["observed_features"] = {
+                'shape': result.observed_features.shape,
+                'curvature': result.observed_features.curvature,
+                'shell_status': result.observed_features.shell_status,
+                'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
+                'emergence': result.observed_features.emergence,
+            }
+        if getattr(result, 'contrastive_reasoning', None):
+            data["contrastive_reasoning"] = {
+                'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
+                'why_not_next': result.contrastive_reasoning.why_not_next_stage,
+            }
+        if getattr(result, 'reasoning_trace', None):
+            data["reasoning_trace"] = result.reasoning_trace.to_dict()
+        return data
+
+    def _volume_to_b64(self, volume) -> tuple:
+        """Extract View A from volume and return (view_a, image_b64) or (None, None)."""
+        view_a = volume[0] if volume.ndim == 4 else volume
+
+        if view_a.ndim == 3:
+            z_depth, height, width = view_a.shape
+            if width > height * 2:
+                view_a = view_a[:, :, :width // 2]
+            bounds = compute_crop_bounds(view_a)
+            cropped = apply_crop_bounds(view_a, bounds)
+            three_view_img, _ = projection_three_view(cropped)
+            return view_a, image_to_base64(three_view_img)
+        elif view_a.ndim == 2:
+            img = normalize_to_uint8(view_a)
+            return view_a, image_to_base64(img)
+        else:
+            logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
+            return None, None
+
     async def _run_perception(
         self,
         embryo_id: str,
@@ -1385,173 +1442,60 @@ class TimelapseOrchestrator:
         embryo_state: EmbryoAcquisitionState,
         volume_uids: dict = None,
     ):
-        """
-        Run perception on acquired volume.
-
-        Creates a dual-view projection image (top + side MIPs from View A)
-        and sends to VLM for stage classification.
-
-        If the embryo was previously marked as no_object, perception is skipped
-        except for periodic rechecks (every NO_OBJECT_RECHECK_INTERVAL timepoints).
-
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo identifier
-        timepoint : int
-            Current timepoint number
-        volume : ndarray
-            Volume data - can be:
-            - 4D: (Views, Z, Y, X) - uses View A (index 0)
-            - 3D: (Z, Y, X) - may have dual-view in X dimension
-            - 2D: (Y, X) - single projection
-        embryo_state : EmbryoAcquisitionState
-            Current acquisition state
-        """
-        # Check if we should skip perception for no_object embryos
+        """Run perception on acquired volume and emit results."""
+        # Skip perception for no_object embryos (except periodic rechecks)
         if embryo_state.no_object_since_timepoint is not None:
-            timepoints_since_no_object = timepoint - embryo_state.no_object_since_timepoint
-            if timepoints_since_no_object % self.NO_OBJECT_RECHECK_INTERVAL != 0:
-                # Calculate next recheck timepoint
+            timepoints_since = timepoint - embryo_state.no_object_since_timepoint
+            if timepoints_since % self.NO_OBJECT_RECHECK_INTERVAL != 0:
                 next_recheck = embryo_state.no_object_since_timepoint + (
-                    (timepoints_since_no_object // self.NO_OBJECT_RECHECK_INTERVAL + 1)
+                    (timepoints_since // self.NO_OBJECT_RECHECK_INTERVAL + 1)
                     * self.NO_OBJECT_RECHECK_INTERVAL
                 )
-                timepoints_until_recheck = next_recheck - timepoint
-
-                logger.debug(
-                    f"Skipping perception for {embryo_id} t={timepoint} "
-                    f"(no_object since t={embryo_state.no_object_since_timepoint}, "
-                    f"next recheck at t={next_recheck})"
-                )
-
-                # Emit skipped event for viz server
                 self._emit_event(EventType.DETECTOR_EVALUATED, {
-                    'embryo_id': embryo_id,
-                    'timepoint': timepoint,
-                    'detector_name': 'perception',
-                    'stage': 'no_object',
-                    'is_hatching': False,
-                    'confidence': 1.0,
-                    'reasoning': f"Skipped (empty field). Rechecking in {timepoints_until_recheck} timepoint{'s' if timepoints_until_recheck != 1 else ''}.",
-                    'is_transitional': False,
-                    'transition_between': None,
-                    'skipped': True,  # Flag to indicate this was skipped
+                    'embryo_id': embryo_id, 'timepoint': timepoint,
+                    'detector_name': 'perception', 'stage': 'no_object',
+                    'is_hatching': False, 'confidence': 1.0,
+                    'reasoning': f"Skipped (empty field). Rechecking in {next_recheck - timepoint} timepoints.",
+                    'is_transitional': False, 'transition_between': None, 'skipped': True,
                 })
                 return
             else:
-                logger.info(
-                    f"Rechecking no_object embryo {embryo_id} at t={timepoint}"
-                )
+                logger.info(f"Rechecking no_object embryo {embryo_id} at t={timepoint}")
 
         try:
-            import numpy as np
-            from gently.core.imaging import (
-                projection_three_view,
-                compute_crop_bounds,
-                apply_crop_bounds,
-                image_to_base64,
-                normalize_to_uint8 as normalize_image,
-            )
-
-            # Handle 4D volumes: extract View A (first view)
-            if volume.ndim == 4:
-                # Shape: (Views, Z, Y, X)
-                view_a = volume[0]  # Extract View A -> (Z, Y, X)
-            else:
-                view_a = volume
-
-            # Handle 3D volumes
-            if view_a.ndim == 3:
-                z_depth, height, width = view_a.shape
-
-                # Check if width contains dual-view data (X = 2*width, views side-by-side)
-                # diSPIM format has width roughly 4x height when dual-view
-                if width > height * 2:
-                    # Extract View A (left half)
-                    view_a = view_a[:, :, :width // 2]
-
-                # Auto-crop to embryo region
-                bounds = compute_crop_bounds(view_a)
-                cropped = apply_crop_bounds(view_a, bounds)
-
-                # Generate three-view projection
-                three_view_img, _ = projection_three_view(cropped)
-                image_b64 = image_to_base64(three_view_img)
-
-            elif view_a.ndim == 2:
-                # Single 2D image - use as-is
-                img = normalize_image(view_a)
-                image_b64 = image_to_base64(img)
-            else:
-                logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
+            # Volume → projection → base64
+            view_a, image_b64 = self._volume_to_b64(volume)
+            if view_a is None:
                 return
 
-            # Run perception (pass view_a volume for view_embryo tool support)
+            # Run VLM perception
             result = await self.perception_manager.process_image(
-                embryo_id=embryo_id,
-                timepoint=timepoint,
-                image_b64=image_b64,
-                volume=view_a,
+                embryo_id=embryo_id, timepoint=timepoint,
+                image_b64=image_b64, volume=view_a,
             )
 
-            # Track no_object state for skipping future perception
+            # Track no_object state
             if result.stage == "no_object":
                 if embryo_state.no_object_since_timepoint is None:
                     embryo_state.no_object_since_timepoint = timepoint
-                    logger.info(
-                        f"Embryo {embryo_id} marked as no_object at t={timepoint}, "
-                        f"will skip perception until recheck at t={timepoint + self.NO_OBJECT_RECHECK_INTERVAL}"
-                    )
-            else:
-                # Object found - clear no_object state if it was set
-                if embryo_state.no_object_since_timepoint is not None:
-                    logger.info(
-                        f"Embryo {embryo_id} now has object (stage={result.stage}) at t={timepoint}, "
-                        f"resuming normal perception (was no_object since t={embryo_state.no_object_since_timepoint})"
-                    )
-                    embryo_state.no_object_since_timepoint = None
+                    logger.info(f"Embryo {embryo_id} marked as no_object at t={timepoint}")
+            elif embryo_state.no_object_since_timepoint is not None:
+                logger.info(f"Embryo {embryo_id} object found at t={timepoint}, resuming perception")
+                embryo_state.no_object_since_timepoint = None
 
-            # Persist trace to JSON file (if trace directory is available)
+            # Serialize result once, reuse for trace file, store, and events
+            result_data = self._serialize_result(embryo_id, timepoint, result)
+
+            # Persist trace to JSON file
             if self._trace_dir:
                 try:
-                    self._write_trace_file(embryo_id, timepoint, result)
-                except Exception as persist_error:
-                    logger.warning(f"Failed to write trace file: {persist_error}")
+                    self._write_trace_file(embryo_id, timepoint, result_data)
+                except Exception as e:
+                    logger.warning(f"Failed to write trace file: {e}")
 
-            # Persist prediction to GentlyStore (dual-write during transition)
+            # Persist prediction to GentlyStore
             if self._store and self._perception_run_id and self._session_id:
                 try:
-                    obs_features = None
-                    if result.observed_features:
-                        obs_features = {
-                            'shape': result.observed_features.shape,
-                            'curvature': result.observed_features.curvature,
-                            'shell_status': result.observed_features.shell_status,
-                            'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
-                            'emergence': result.observed_features.emergence,
-                        }
-
-                    trace_data = {
-                        "session_id": self._session_id,
-                        "embryo_id": embryo_id,
-                        "timepoint": timepoint,
-                        "timestamp": datetime.now().isoformat(),
-                        "predicted_stage": result.stage,
-                        "confidence": result.confidence,
-                        "reasoning": result.reasoning,
-                        "is_hatching": getattr(result, 'is_hatching', False),
-                        "is_transitional": getattr(result, 'is_transitional', False),
-                        "transition_between": getattr(result, 'transition_between', None),
-                    }
-                    if hasattr(result, 'contrastive_reasoning') and result.contrastive_reasoning:
-                        trace_data["contrastive_reasoning"] = {
-                            'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
-                            'why_not_next': result.contrastive_reasoning.why_not_next_stage,
-                        }
-                    if hasattr(result, 'reasoning_trace') and result.reasoning_trace:
-                        trace_data["reasoning_trace"] = result.reasoning_trace.to_dict()
-
                     self._store.store_prediction(
                         run_id=self._perception_run_id,
                         session_id=self._session_id,
@@ -1561,52 +1505,29 @@ class TimelapseOrchestrator:
                         confidence=result.confidence,
                         reasoning=result.reasoning,
                         is_transitional=getattr(result, 'is_transitional', False),
-                        trace_data=trace_data,
-                        observed_features=obs_features,
+                        trace_data=result_data,
+                        observed_features=result_data.get("observed_features"),
                     )
-                except Exception as store_error:
-                    logger.warning(f"Failed to store prediction in GentlyStore: {store_error}")
+                except Exception as e:
+                    logger.warning(f"Failed to store prediction: {e}")
 
-            # Emit perception event for viz server
+            # Build and emit perception event
             event_data = {
-                'embryo_id': embryo_id,
-                'timepoint': timepoint,
+                'embryo_id': embryo_id, 'timepoint': timepoint,
                 'detector_name': 'perception',
-                'stage': result.stage,
-                'is_hatching': result.is_hatching,
-                'confidence': result.confidence,
-                'reasoning': result.reasoning,
+                'stage': result.stage, 'is_hatching': result.is_hatching,
+                'confidence': result.confidence, 'reasoning': result.reasoning,
                 'is_transitional': result.is_transitional,
                 'transition_between': result.transition_between,
             }
-
-            # Include volume/projection UIDs for viz server image linking
             if volume_uids:
                 event_data['volume_uid'] = volume_uids.get('volume_uid')
                 event_data['projection_uid'] = volume_uids.get('projection_uid')
-
-            # Add observed features if available
-            if result.observed_features:
-                event_data['observed_features'] = {
-                    'shape': result.observed_features.shape,
-                    'curvature': result.observed_features.curvature,
-                    'shell_status': result.observed_features.shell_status,
-                    'body_segments': result.observed_features.body_segments_visible,
-                    'emergence': result.observed_features.emergence,
-                }
-
-            # Add contrastive reasoning if available
-            if result.contrastive_reasoning:
-                event_data['contrastive_reasoning'] = {
-                    'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
-                    'why_not_next': result.contrastive_reasoning.why_not_next_stage,
-                }
-
-            # Add reasoning trace if available (from interleaved reasoning)
-            if result.reasoning_trace:
-                event_data['reasoning_trace'] = result.reasoning_trace.to_dict()
-
-            # Add temporal analysis if available (for detecting arrested/stalled embryos)
+            # Copy serialized fields that are already computed
+            for key in ('observed_features', 'contrastive_reasoning', 'reasoning_trace'):
+                if key in result_data:
+                    event_data[key] = result_data[key]
+            # Add temporal analysis
             session = self.perception_manager.sessions.get(embryo_id)
             if session:
                 temporal = session.compute_temporal_analysis()
@@ -1615,21 +1536,15 @@ class TimelapseOrchestrator:
 
             self._emit_event(EventType.DETECTOR_EVALUATED, event_data)
 
-            # Check for hatching event
             if result.is_hatching:
                 self._emit_event(EventType.HATCHING_DETECTED, {
-                    'embryo_id': embryo_id,
-                    'timepoint': timepoint,
-                    'detector_name': 'hatching',
-                    'stage': result.stage,
+                    'embryo_id': embryo_id, 'timepoint': timepoint,
+                    'detector_name': 'hatching', 'stage': result.stage,
                     'confidence': result.confidence,
                 })
 
             # Check interval rules based on stage
-            self._check_interval_rules(
-                embryo_id=embryo_id,
-                stage=result.stage,
-            )
+            self._check_interval_rules(embryo_id=embryo_id, stage=result.stage)
 
             logger.info(
                 f"[{embryo_id}] T{timepoint}: stage={result.stage}, "
@@ -1638,82 +1553,12 @@ class TimelapseOrchestrator:
 
         except Exception as e:
             logger.error(f"Perception failed for {embryo_id}: {e}")
-            # Don't raise - perception failure shouldn't stop acquisition
 
-    def _write_trace_file(self, embryo_id: str, timepoint: int, result) -> Path:
-        """
-        Write perception trace to JSON file.
-
-        File format: {embryo_id}_T{timepoint:04d}.json
-        Location: D:/Gently/traces/{session_id}/
-
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo identifier
-        timepoint : int
-            Timepoint number
-        result : PerceptionResult
-            Perception result with stage, confidence, and traces
-
-        Returns
-        -------
-        Path
-            Path to the written trace file
-        """
-        timestamp = datetime.now()
-
-        # Build trace data
-        trace_data = {
-            # Identifiers
-            "session_id": self._session_id,
-            "embryo_id": embryo_id,
-            "timepoint": timepoint,
-            "timestamp": timestamp.isoformat(),
-
-            # Results
-            "predicted_stage": result.stage,
-            "confidence": result.confidence,
-            "reasoning": result.reasoning,
-            "is_hatching": getattr(result, 'is_hatching', False),
-            "is_transitional": getattr(result, 'is_transitional', False),
-            "transition_between": getattr(result, 'transition_between', None),
-        }
-
-        # Add observed features if available
-        if hasattr(result, 'observed_features') and result.observed_features:
-            trace_data["observed_features"] = {
-                'shape': result.observed_features.shape,
-                'curvature': result.observed_features.curvature,
-                'shell_status': result.observed_features.shell_status,
-                'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
-                'emergence': result.observed_features.emergence,
-            }
-
-        # Add contrastive reasoning if available
-        if hasattr(result, 'contrastive_reasoning') and result.contrastive_reasoning:
-            trace_data["contrastive_reasoning"] = {
-                'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
-                'why_not_next': result.contrastive_reasoning.why_not_next_stage,
-            }
-
-        # Add full reasoning trace if available
-        if hasattr(result, 'reasoning_trace') and result.reasoning_trace:
-            trace_data["reasoning_trace"] = result.reasoning_trace.to_dict()
-
-        # Add verification info if available
-        if hasattr(result, 'verification_triggered') and result.verification_triggered:
-            trace_data["verification"] = {
-                'triggered': True,
-                'result': result.verification_result.to_dict() if result.verification_result else None,
-            }
-
-        # Write JSON file
+    def _write_trace_file(self, embryo_id: str, timepoint: int, trace_data: dict) -> Path:
+        """Write perception trace to JSON file."""
         filename = f"{embryo_id}_T{timepoint:04d}.json"
         file_path = self._trace_dir / filename
-
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(trace_data, f, indent=2, ensure_ascii=False)
-
         logger.debug(f"Wrote trace: {file_path.name}")
         return file_path
