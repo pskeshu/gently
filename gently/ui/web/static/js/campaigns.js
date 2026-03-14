@@ -44,7 +44,6 @@ const SPEC_UNITS = {
 // ── State ────────────────────────────────────────────────
 const state = {
     planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix'
-    graphVertical: false,
     activeCampaignId: null,
     selectedItemId: null,
     allCampaigns: [],           // full tree list from /api/campaigns
@@ -1225,30 +1224,25 @@ function renderGraphView() {
         phaseMap[i._phaseNum].items.push(i);
     });
 
-    // Node sizing — larger nodes to show full text
+    // Node sizing — horizontal layout (left-to-right flow)
     const nodeW = 220, nodeH = 72, pad = 40;
-    const vert = state.graphVertical;
-    const gapMain = 100, gapCross = 28;
+    const gapX = 100, gapY = 28;
     const numLayers = Math.max(...Object.keys(layers).map(Number)) + 1;
     const maxPerLayer = Math.max(...Object.values(layers).map(l => l.length));
-
-    const mainSize = numLayers * (vert ? nodeH : nodeW) + (numLayers - 1) * gapMain + pad * 2;
-    const crossSize = maxPerLayer * (vert ? nodeW : nodeH) + (maxPerLayer - 1) * gapCross + pad * 2;
-    const svgW = vert ? crossSize : mainSize;
-    const svgH = vert ? mainSize : crossSize;
+    const svgW = numLayers * nodeW + (numLayers - 1) * gapX + pad * 2;
+    const svgH = maxPerLayer * nodeH + (maxPerLayer - 1) * gapY + pad * 2;
 
     // Assign positions
     const pos = {};
     Object.entries(layers).forEach(([d, layerItems]) => {
         const di = parseInt(d);
-        const crossTotal = layerItems.length * ((vert ? nodeW : nodeH) + gapCross) - gapCross;
-        const crossStart = ((vert ? svgW : svgH) - crossTotal) / 2;
+        const totalH = layerItems.length * (nodeH + gapY) - gapY;
+        const startY = (svgH - totalH) / 2;
         layerItems.forEach((item, idx) => {
-            const mainPos = pad + di * ((vert ? nodeH : nodeW) + gapMain);
-            const crossPos = crossStart + idx * ((vert ? nodeW : nodeH) + gapCross);
-            pos[item.id] = vert
-                ? { x: crossPos, y: mainPos }
-                : { x: mainPos, y: crossPos };
+            pos[item.id] = {
+                x: pad + di * (nodeW + gapX),
+                y: startY + idx * (nodeH + gapY)
+            };
         });
     });
 
@@ -1279,17 +1273,10 @@ function renderGraphView() {
             if (!pos[d.id] || !pos[i.id]) return;
             const from = pos[d.id];
             const to = pos[i.id];
-            if (vert) {
-                const x1 = from.x + nodeW / 2, y1 = from.y + nodeH;
-                const x2 = to.x + nodeW / 2, y2 = to.y;
-                const cy = (y1 + y2) / 2;
-                edges += `<path d="M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}" class="graph-edge" />`;
-            } else {
-                const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
-                const x2 = to.x, y2 = to.y + nodeH / 2;
-                const cx = (x1 + x2) / 2;
-                edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" />`;
-            }
+            const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
+            const x2 = to.x, y2 = to.y + nodeH / 2;
+            const cx = (x1 + x2) / 2;
+            edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" data-from="${d.id}" data-to="${i.id}" />`;
         });
     });
 
@@ -1301,7 +1288,7 @@ function renderGraphView() {
         const icon = TYPE_ICONS[i.type] || '';
         const color = STATUS_COLORS[i.status] || STATUS_COLORS.planned;
         const statusLabel = STATUS_LABELS[i.status] || i.status;
-        nodes += `<g class="graph-node" onclick="selectItem('${i.id}')" data-item-id="${i.id}">
+        nodes += `<g class="graph-node" onclick="selectItem('${i.id}')" data-item-id="${i.id}" data-item-type="${i.type}">
             <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="10"
                   fill="var(--bg-card)" stroke="${color}" stroke-width="2" />
             <foreignObject x="${p.x + 10}" y="${p.y + 6}" width="${nodeW - 20}" height="${nodeH - 12}">
@@ -1314,13 +1301,16 @@ function renderGraphView() {
         </g>`;
     });
 
-    // Layout toggle button
-    const toggleIcon = vert ? '↔' : '↕';
-    const toggleTitle = vert ? 'Switch to horizontal layout' : 'Switch to vertical layout';
+    // Type filter toolbar
+    const types = [...new Set(items.map(i => i.type))];
+    const typeButtons = types.map(t =>
+        `<button class="graph-filter-btn" data-filter-type="${t}" onclick="filterGraphByType('${t}')">${TYPE_ICONS[t] || ''} ${esc(t)}</button>`
+    ).join('');
 
     $canvasContent.innerHTML = `<div class="graph-view" id="graph-view-container">
         <div class="graph-toolbar">
-            <button class="graph-layout-toggle" onclick="toggleGraphLayout()" title="${toggleTitle}">${toggleIcon} ${vert ? 'Horizontal' : 'Vertical'}</button>
+            <button class="graph-filter-btn active" data-filter-type="" onclick="filterGraphByType('')">All</button>
+            ${typeButtons}
         </div>
         <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
             ${bands}${edges}${nodes}
@@ -1340,9 +1330,31 @@ function renderGraphView() {
     }
 }
 
-function toggleGraphLayout() {
-    state.graphVertical = !state.graphVertical;
-    renderGraphView();
+function filterGraphByType(type) {
+    // Update button active states
+    document.querySelectorAll('.graph-filter-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.filterType === type);
+    });
+    // Dim/highlight nodes and edges
+    document.querySelectorAll('.graph-node').forEach(node => {
+        const itemType = node.dataset.itemType || '';
+        node.classList.toggle('dimmed', type !== '' && itemType !== type);
+    });
+    document.querySelectorAll('.graph-edge').forEach(edge => {
+        edge.classList.toggle('dimmed', type !== '');
+    });
+    // Keep edges connected to highlighted nodes visible
+    if (type) {
+        const activeIds = new Set();
+        document.querySelectorAll(`.graph-node:not(.dimmed)`).forEach(n => activeIds.add(n.dataset.itemId));
+        document.querySelectorAll('.graph-edge').forEach(edge => {
+            const from = edge.dataset.from;
+            const to = edge.dataset.to;
+            if (activeIds.has(from) || activeIds.has(to)) {
+                edge.classList.remove('dimmed');
+            }
+        });
+    }
 }
 
 // ══════════════════════════════════════════════════════════
@@ -1410,7 +1422,7 @@ window.selectItem = selectItem;
 window.viewVersion = viewVersion;
 window.backToCurrent = backToCurrent;
 window.switchPlanView = switchPlanView;
-window.toggleGraphLayout = toggleGraphLayout;
+window.filterGraphByType = filterGraphByType;
 
 // Auto-init on standalone campaigns page (detected via data-page attribute)
 if (document.body?.dataset.page === 'campaigns') {

@@ -263,19 +263,32 @@
     display: flex;
     gap: 8px;
 }
-.graph-layout-toggle {
+.graph-filter-btn {
     background: var(--bg-hover);
-    border: 1px solid var(--border);
+    border: 1px solid transparent;
     border-radius: 6px;
-    padding: 4px 12px;
+    padding: 4px 10px;
     font-size: 0.72rem;
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s;
 }
-.graph-layout-toggle:hover {
+.graph-filter-btn:hover {
     border-color: var(--accent);
     color: var(--accent);
+}
+.graph-filter-btn.active {
+    background: var(--bg-card);
+    color: var(--text);
+    border-color: var(--border);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+}
+.graph-node.dimmed {
+    opacity: 0.15;
+    pointer-events: none;
+}
+.graph-edge.dimmed {
+    opacity: 0.08;
 }
 .graph-view svg {
     display: block;
