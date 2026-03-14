@@ -1086,18 +1086,13 @@ const CalibrationManager = {
             return;
         }
 
-        // Header with view switcher
+        // Header (view switcher is now in the static calibration header bar)
         const headerHtml = `
             <div class="calibration-panel-header">
                 <span>${this.selectedEmbryoId}</span>
-                <div class="cal-view-switcher">
-                    <button class="cal-view-btn ${this.currentView === 'profile' ? 'active' : ''}"
-                            data-view="profile" onclick="CalibrationManager.switchView('profile')">Profile</button>
-                    <button class="cal-view-btn ${this.currentView === 'gallery' ? 'active' : ''}"
-                            data-view="gallery" onclick="CalibrationManager.switchView('gallery')">Gallery</button>
-                </div>
             </div>
         `;
+        updateViewButtons('calibration-view-switcher', this.currentView);
 
         if (this.currentView === 'profile') {
             panel.innerHTML = headerHtml + CalibrationProfileView.render(this.selectedEmbryoId);
@@ -1157,6 +1152,17 @@ const CalibrationManager = {
         Lightbox.open(displayList, index, 'calibration');
     }
 };
+
+// Init calibration view switcher (uses shared utility from utils.js)
+// Defer calibration view-switcher init to DOMContentLoaded (needs DOM + utils.js ready)
+document.addEventListener('DOMContentLoaded', () => {
+    if (typeof initViewSwitcher === 'function') {
+        initViewSwitcher('calibration-view-switcher', (view) => CalibrationManager.switchView(view), {
+            views: ['profile', 'gallery'],
+            guard: () => typeof state !== 'undefined' && state.tab === 'calibration'
+        });
+    }
+});
 
 // Legacy wrappers kept for backward compatibility
 function renderCalibrationGallery() { CalibrationManager.render(); }

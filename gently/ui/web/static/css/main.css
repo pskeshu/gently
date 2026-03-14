@@ -1071,37 +1071,21 @@ a.tab-link.active {
     color: var(--text);
 }
 
-/* Calibration View Switcher */
-.cal-view-switcher {
+/* Calibration header bar */
+.calibration-header-bar {
     display: flex;
-    gap: 2px;
-    background: var(--bg-dark);
-    border-radius: 8px;
-    padding: 2px;
-    border: 1px solid var(--border);
-}
-
-.cal-view-btn {
-    padding: 0.25rem 0.75rem;
-    border: none;
-    background: transparent;
-    color: var(--text-muted);
-    font-size: 12px;
-    font-weight: 500;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-}
-
-.cal-view-btn:hover {
-    color: var(--text);
-    background: var(--bg-hover);
-}
-
-.cal-view-btn.active {
-    color: var(--text);
+    align-items: center;
+    gap: 1rem;
+    padding: 0.35rem 1rem;
     background: var(--bg-card);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.calibration-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0;
 }
 
 /* Z-Stack Profile View */
@@ -1428,15 +1412,6 @@ a.tab-link.active {
     display: flex;
     gap: 0.75rem;
     align-items: center;
-}
-
-/* System view switcher */
-.system-view-switcher {
-    display: flex;
-    gap: 2px;
-    background: var(--bg-dark);
-    border-radius: 8px;
-    padding: 2px;
 }
 
 .system-view { display: none; }

@@ -341,9 +341,7 @@ function switchSystemView(viewName) {
     });
 
     // Toggle buttons
-    document.querySelectorAll('[data-system-view]').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.systemView === viewName);
-    });
+    updateViewButtons('system-view-switcher', viewName);
 
     // Show/hide log-specific filters
     const filters = document.getElementById('events-toolbar-filters');
@@ -615,9 +613,11 @@ function initEventsTab() {
     }
 
     // System view switcher
-    document.querySelectorAll('[data-system-view]').forEach(btn => {
-        btn.addEventListener('click', () => switchSystemView(btn.dataset.systemView));
+    initViewSwitcher('system-view-switcher', switchSystemView, {
+        views: ['log', 'timeline', 'summary'],
+        guard: () => state.tab === 'events'
     });
+    updateViewButtons('system-view-switcher', 'log');
 
     // Fetch initial events from API
     fetchInitialEvents();

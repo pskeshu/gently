@@ -1249,26 +1249,16 @@ const STATUS_COLORS = {
 };
 
 function setupPlanViewSwitcher() {
-    const switcher = document.getElementById('plan-view-switcher');
-    if (!switcher) return;
-    switcher.addEventListener('click', e => {
-        const btn = e.target.closest('[data-plan-view]');
-        if (!btn || state.view !== 'plan') return;
-        switchPlanView(btn.dataset.planView);
-    });
-    document.addEventListener('keydown', e => {
-        if (state.view !== 'plan') return;
-        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-        const views = ['doc', 'graph', 'board', 'decide', 'matrix'];
-        const idx = parseInt(e.key) - 1;
-        if (idx >= 0 && idx < views.length) switchPlanView(views[idx]);
+    initViewSwitcher('plan-view-switcher', switchPlanView, {
+        views: ['doc', 'graph', 'board', 'decide', 'matrix'],
+        guard: () => state.view === 'plan'
     });
 }
 
 function switchPlanView(viewName) {
+    if (state.view !== 'plan') return;
     state.planView = viewName;
-    document.querySelectorAll('#plan-view-switcher .view-btn').forEach(b => b.classList.remove('active'));
-    document.querySelector(`#plan-view-switcher [data-plan-view="${viewName}"]`)?.classList.add('active');
+    updateViewButtons('plan-view-switcher', viewName);
     renderCanvas();
 }
 

@@ -14,6 +14,46 @@ function escapeHtml(str) {
 }
 
 /**
+ * Initialize a view-switcher: click delegation + keyboard shortcuts.
+ *
+ * @param {string}   containerId  - ID of the `.view-switcher` container element.
+ * @param {Function} callback     - Called with the view name string when a view is selected.
+ * @param {Object}   [opts]
+ * @param {string[]} [opts.views] - Ordered view names for keyboard shortcuts (keys 1-N).
+ * @param {Function} [opts.guard] - Return true to allow shortcuts (e.g., check active tab).
+ */
+function initViewSwitcher(containerId, callback, opts) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.addEventListener('click', e => {
+        const btn = e.target.closest('[data-view]');
+        if (btn) callback(btn.dataset.view);
+    });
+    const views = opts?.views;
+    const guard = opts?.guard;
+    if (views && views.length) {
+        document.addEventListener('keydown', e => {
+            if (guard && !guard()) return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            const idx = parseInt(e.key) - 1;
+            if (idx >= 0 && idx < views.length) callback(views[idx]);
+        });
+    }
+}
+
+/**
+ * Update view-switcher button active states.
+ * @param {string} containerId - ID of the `.view-switcher` container.
+ * @param {string} activeView  - The data-view value to mark active.
+ */
+function updateViewButtons(containerId, activeView) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+    container.querySelector(`[data-view="${activeView}"]`)?.classList.add('active');
+}
+
+/**
  * Toggle a dropdown element's visibility and register a one-shot
  * outside-click handler to close it.
  *

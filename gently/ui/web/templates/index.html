@@ -15,6 +15,13 @@
 
     <!-- Calibration Tab -->
     <div id="calibration-content" class="tab-content">
+        <div class="calibration-header-bar">
+            <h2 class="calibration-title">Calibration</h2>
+            <div class="view-switcher" id="calibration-view-switcher">
+                <button class="view-btn active" data-view="profile" title="Profile view (1)">Profile</button>
+                <button class="view-btn" data-view="gallery" title="Gallery view (2)">Gallery</button>
+            </div>
+        </div>
         <div class="calibration-container">
             <!-- Left sidebar: Embryo list -->
             <div class="calibration-sidebar" id="calibration-sidebar">
@@ -37,10 +44,10 @@
     <div id="events-content" class="tab-content">
         <div class="events-container">
             <div class="events-toolbar">
-                <div class="system-view-switcher">
-                    <button class="view-btn active" data-system-view="log" title="Event log">Log</button>
-                    <button class="view-btn" data-system-view="timeline" title="Timeline">Timeline</button>
-                    <button class="view-btn" data-system-view="summary" title="Summary">Summary</button>
+                <div class="view-switcher" id="system-view-switcher">
+                    <button class="view-btn active" data-view="log" title="Event log (1)">Log</button>
+                    <button class="view-btn" data-view="timeline" title="Timeline (2)">Timeline</button>
+                    <button class="view-btn" data-view="summary" title="Summary (3)">Summary</button>
                 </div>
                 <div class="events-toolbar-filters" id="events-toolbar-filters">
                     <div class="search-container">

@@ -221,7 +221,9 @@ const EmbryosManager = {
     },
 
     _updateViewButtons() {
-        document.querySelectorAll('.view-btn').forEach(btn => {
+        const switcher = document.getElementById('view-switcher');
+        if (!switcher) return;
+        switcher.querySelectorAll('.view-btn').forEach(btn => {
             btn.classList.toggle('active', btn.dataset.view === this.currentView);
         });
     },
