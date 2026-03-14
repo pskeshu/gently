@@ -242,8 +242,13 @@
 }
 .graph-edge {
     fill: none;
-    stroke: var(--border);
+    stroke: var(--text-muted);
     stroke-width: 1.5;
+    opacity: 0.4;
+}
+.graph-edge.cross-lane {
+    stroke: var(--accent);
+    stroke-dasharray: 6 3;
     opacity: 0.5;
 }
 .graph-node { cursor: pointer; }

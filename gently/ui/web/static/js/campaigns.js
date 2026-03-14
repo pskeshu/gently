@@ -1215,97 +1215,63 @@ function renderGraphView() {
         return;
     }
 
-    // Build adjacency and compute depths via BFS from roots
-    const byId = {};
-    items.forEach(i => byId[i.id] = i);
-    const inDegree = {};
-    const outEdges = {};
+    // Group items by phase (swim lanes)
+    const phases = {};
+    const phaseOrder = [];
     items.forEach(i => {
-        inDegree[i.id] = 0;
-        outEdges[i.id] = [];
-    });
-    items.forEach(i => {
-        (i.dependencies || []).forEach(d => {
-            if (byId[d.id]) {
-                outEdges[d.id].push(i.id);
-                inDegree[i.id] = (inDegree[i.id] || 0) + 1;
-            }
-        });
+        if (!phases[i._phaseNum]) {
+            phases[i._phaseNum] = { name: i._phase, items: [] };
+            phaseOrder.push(i._phaseNum);
+        }
+        phases[i._phaseNum].items.push(i);
     });
 
-    // Topological layering
-    const depth = {};
-    const queue = items.filter(i => inDegree[i.id] === 0).map(i => i.id);
-    queue.forEach(id => depth[id] = 0);
-    let head = 0;
-    while (head < queue.length) {
-        const id = queue[head++];
-        outEdges[id].forEach(next => {
-            depth[next] = Math.max(depth[next] || 0, depth[id] + 1);
-            inDegree[next]--;
-            if (inDegree[next] === 0) queue.push(next);
-        });
-    }
-    const maxDepth = Math.max(0, ...Object.values(depth));
-    items.forEach(i => { if (depth[i.id] === undefined) depth[i.id] = maxDepth + 1; });
+    // Sort items within each phase by phase_order (their natural sequence)
+    Object.values(phases).forEach(p => p.items.sort((a, b) => (a.phase_order || 0) - (b.phase_order || 0)));
 
-    // Group by depth layer
-    const layers = {};
-    items.forEach(i => {
-        const d = depth[i.id];
-        if (!layers[d]) layers[d] = [];
-        layers[d].push(i);
-    });
+    // Layout constants
+    const nodeW = 200, nodeH = 64, gapX = 40, gapY = 16;
+    const laneGap = 20, lanePadX = 16, lanePadY = 28, pad = 20;
 
-    // Collect phase info for background bands
-    const phaseMap = {};
-    items.forEach(i => {
-        if (!phaseMap[i._phaseNum]) phaseMap[i._phaseNum] = { name: i._phase, items: [] };
-        phaseMap[i._phaseNum].items.push(i);
-    });
-
-    // Node sizing — horizontal layout (left-to-right flow)
-    const nodeW = 220, nodeH = 72, pad = 40;
-    const gapX = 100, gapY = 28;
-    const numLayers = Math.max(...Object.keys(layers).map(Number)) + 1;
-    const maxPerLayer = Math.max(...Object.values(layers).map(l => l.length));
-    const svgW = numLayers * nodeW + (numLayers - 1) * gapX + pad * 2;
-    const svgH = maxPerLayer * nodeH + (maxPerLayer - 1) * gapY + pad * 2;
-
-    // Sort items within each layer by phase for cleaner grouping
-    Object.values(layers).forEach(layerItems => {
-        layerItems.sort((a, b) => a._phaseNum - b._phaseNum);
-    });
-
-    // Assign positions — compact, phase-grouped
+    // Compute positions: each phase is a swim lane row
     const pos = {};
-    Object.entries(layers).forEach(([d, layerItems]) => {
-        const di = parseInt(d);
-        layerItems.forEach((item, idx) => {
+    let currentY = pad;
+    const laneYRanges = [];
+
+    phaseOrder.forEach(pNum => {
+        const phase = phases[pNum];
+        const laneTop = currentY;
+        const itemsY = currentY + lanePadY;
+
+        // Lay items left-to-right within the lane
+        phase.items.forEach((item, idx) => {
             pos[item.id] = {
-                x: pad + di * (nodeW + gapX),
-                y: pad + idx * (nodeH + gapY)
+                x: pad + lanePadX + idx * (nodeW + gapX),
+                y: itemsY
             };
         });
+
+        const laneH = lanePadY + nodeH + lanePadY;
+        laneYRanges.push({ pNum, name: phase.name, top: laneTop, height: laneH });
+        currentY += laneH + laneGap;
     });
 
-    // Phase background bands — horizontal stripes based on Y-range per phase
+    const maxItemsPerPhase = Math.max(...Object.values(phases).map(p => p.items.length));
+    const svgW = pad * 2 + lanePadX * 2 + maxItemsPerPhase * (nodeW + gapX) - gapX;
+    const svgH = currentY;
+
+    // Build phase lookup for edge routing
+    const phaseOf = {};
+    items.forEach(i => phaseOf[i.id] = i._phaseNum);
+
+    // Render swim lane backgrounds
+    const phaseColors = ['rgba(96,165,250,0.07)', 'rgba(52,211,153,0.07)', 'rgba(251,191,36,0.07)', 'rgba(167,139,250,0.07)', 'rgba(248,113,113,0.07)', 'rgba(236,72,153,0.07)'];
     let bands = '';
-    const phaseColors = ['rgba(96,165,250,0.06)', 'rgba(52,211,153,0.06)', 'rgba(251,191,36,0.06)', 'rgba(167,139,250,0.06)', 'rgba(248,113,113,0.06)', 'rgba(236,72,153,0.06)'];
-    const phaseYRanges = {};
-    items.forEach(i => {
-        const p = pos[i.id];
-        if (!p) return;
-        const pn = i._phaseNum;
-        if (!phaseYRanges[pn]) phaseYRanges[pn] = { minY: Infinity, maxY: -Infinity, name: i._phase };
-        phaseYRanges[pn].minY = Math.min(phaseYRanges[pn].minY, p.y);
-        phaseYRanges[pn].maxY = Math.max(phaseYRanges[pn].maxY, p.y + nodeH);
-    });
-    Object.entries(phaseYRanges).forEach(([pNum, range], ci) => {
-        const bpad = 12;
+    laneYRanges.forEach((lane, ci) => {
         const color = phaseColors[ci % phaseColors.length];
-        bands += `<rect x="0" y="${range.minY - bpad - 16}" width="${svgW}" height="${range.maxY - range.minY + bpad * 2 + 16}" rx="0" fill="${color}" />`;
-        bands += `<text x="${pad - 4}" y="${range.minY - bpad}" class="graph-phase-label">P${pNum} — ${esc(range.name.split(' — ').pop())}</text>`;
+        const shortName = lane.name.split(' — ').pop();
+        bands += `<rect x="${pad}" y="${lane.top}" width="${svgW - pad * 2}" height="${lane.height}" rx="10" fill="${color}" />`;
+        bands += `<text x="${pad + 10}" y="${lane.top + 16}" class="graph-phase-label">P${lane.pNum} — ${esc(shortName)}</text>`;
     });
 
     // Render edges
@@ -1315,14 +1281,22 @@ function renderGraphView() {
             if (!pos[d.id] || !pos[i.id]) return;
             const from = pos[d.id];
             const to = pos[i.id];
+            const sameLane = i._phaseNum === phaseOf[d.id];
             const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
             const x2 = to.x, y2 = to.y + nodeH / 2;
-            const cx = (x1 + x2) / 2;
-            edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" data-from="${d.id}" data-to="${i.id}" />`;
+            if (sameLane) {
+                // Horizontal within lane
+                const cx = (x1 + x2) / 2;
+                edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" data-from="${d.id}" data-to="${i.id}" />`;
+            } else {
+                // Cross-lane: go right, curve down/up, go right to target
+                const midX = Math.max(x1, x2) + 30;
+                edges += `<path d="M${x1},${y1} L${x1 + 15},${y1} C${midX},${y1} ${midX},${y2} ${x2 - 15},${y2} L${x2},${y2}" class="graph-edge cross-lane" data-from="${d.id}" data-to="${i.id}" />`;
+            }
         });
     });
 
-    // Render nodes — full title with word wrap via foreignObject
+    // Render nodes
     let nodes = '';
     items.forEach(i => {
         const p = pos[i.id];
@@ -1331,9 +1305,9 @@ function renderGraphView() {
         const color = STATUS_COLORS[i.status] || STATUS_COLORS.planned;
         const statusLabel = STATUS_LABELS[i.status] || i.status;
         nodes += `<g class="graph-node" data-action="select-item" data-id="${i.id}" data-item-id="${i.id}" data-item-type="${i.type}">
-            <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="10"
+            <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="8"
                   fill="var(--bg-card)" stroke="${color}" stroke-width="2" />
-            <foreignObject x="${p.x + 10}" y="${p.y + 6}" width="${nodeW - 20}" height="${nodeH - 12}">
+            <foreignObject x="${p.x + 8}" y="${p.y + 4}" width="${nodeW - 16}" height="${nodeH - 8}">
                 <div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-inner">
                     <div class="graph-node-top"><span>${icon}</span><span class="graph-node-phase">P${i._phaseNum}</span></div>
                     <div class="graph-node-title">${esc(i.title)}</div>
@@ -1349,18 +1323,6 @@ function renderGraphView() {
             ${bands}${edges}${nodes}
         </svg>
     </div>`;
-
-    // Convert vertical scroll to horizontal when graph doesn't need vertical scrolling
-    const container = document.getElementById('graph-view-container');
-    if (container) {
-        container.addEventListener('wheel', (e) => {
-            const needsVerticalScroll = container.scrollHeight > container.clientHeight;
-            if (!needsVerticalScroll && Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-                e.preventDefault();
-                container.scrollLeft += e.deltaY;
-            }
-        }, { passive: false });
-    }
 }
 
 // filterGraphByType kept for graph-specific CSS dimming (preserves layout while filtering)
