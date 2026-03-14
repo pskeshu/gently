@@ -54,5 +54,5 @@ def create_client(http_url: str):
     QueueServerClient
         The client instance (call .connect() before use)
     """
-    from gently.app.queue_server_client import QueueServerClient
+    from .client import QueueServerClient
     return QueueServerClient(http_url=http_url)
