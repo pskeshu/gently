@@ -4,64 +4,27 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gently - Session Review</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/review.css">
 </head>
-<body>
+<body data-page="review">
     <script>
         // Load saved theme preference
         const savedTheme = localStorage.getItem('gently-theme') || 'dark';
         document.body.setAttribute('data-theme', savedTheme);
     </script>
-    <div class="header">
-        <div class="header-left">
-            <h1>Session Review</h1>
-        </div>
-        <div class="header-right">
-            <a href="/" class="back-to-live">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M19 12H5M12 19l-7-7 7-7"/>
-                </svg>
-                Back to Live
-            </a>
-        </div>
-    </div>
+    {% include '_header.html' %}
+    {% include '_navbar.html' %}
 
-    <div class="review-container">
-        <!-- Session selector sidebar -->
-        <div class="session-sidebar" id="session-sidebar">
-            <div class="sidebar-header">
-                <h3>Sessions</h3>
-                <button class="refresh-btn" onclick="ReviewApp.loadSessions()" title="Refresh">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                        <path d="M23 4v6h-6M1 20v-6h6"/>
-                        <path d="M3.51 9a9 9 0 0114.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0020.49 15"/>
-                    </svg>
-                </button>
-            </div>
-            <div class="sidebar-filter">
-                <label class="filter-toggle">
-                    <input type="checkbox" id="filter-with-content" checked onchange="ReviewApp.renderSessionList()">
-                    <span>Only with content</span>
-                </label>
-            </div>
-            <div class="session-list" id="session-list">
-                <div class="loading">Loading sessions...</div>
-            </div>
-        </div>
+    {% include '_sessions_panel.html' %}
 
-        <!-- Session content -->
-        <div class="session-content" id="session-content">
-            <div class="no-session-selected">
-                <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                    <path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/>
-                </svg>
-                <p>Select a session to review</p>
-            </div>
-        </div>
-    </div>
+    <footer class="statusbar" id="statusbar">
+        <span id="status-left"></span>
+        <span id="status-right"></span>
+    </footer>
 
+    <script src="/static/js/utils.js"></script>
     <script src="/static/js/review.js"></script>
 </body>
 </html>

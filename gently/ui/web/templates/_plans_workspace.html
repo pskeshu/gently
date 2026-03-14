@@ -1,0 +1,57 @@
+{# Plans workspace — shared between index.html (SPA tab) and campaigns.html (standalone) #}
+<div class="page-toolbar" id="page-toolbar">
+    <div class="page-toolbar-left">
+        <span class="page-toolbar-title" id="header-title">Campaigns</span>
+        <span class="header-breadcrumb" id="header-breadcrumb"></span>
+        <div class="view-switcher hidden" id="plan-view-switcher">
+            <button class="view-btn active" data-plan-view="doc" title="Document (1)">Doc</button>
+            <button class="view-btn" data-plan-view="graph" title="Dependency Graph (2)">Graph</button>
+            <button class="view-btn" data-plan-view="board" title="Status Board (3)">Board</button>
+            <button class="view-btn" data-plan-view="decide" title="Decisions (4)">Decide</button>
+            <button class="view-btn" data-plan-view="matrix" title="Coverage Matrix (5)">Matrix</button>
+        </div>
+    </div>
+    <div class="page-toolbar-right">
+        <div class="version-wrap hidden" id="version-wrap">
+            <button class="hdr-btn" id="version-btn">
+                <span id="version-label">Current</span>
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
+            </button>
+            <div class="version-dropdown hidden" id="version-dropdown"></div>
+        </div>
+        <button class="hdr-btn hidden" id="print-btn" title="Print plan">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>
+            </svg>
+            Print
+        </button>
+    </div>
+</div>
+<div class="snapshot-banner hidden" id="snapshot-banner">
+    <span id="snapshot-banner-text"></span>
+    <button class="snapshot-close" id="snapshot-close">Back to current</button>
+</div>
+<div class="workspace" id="workspace">
+    <nav class="navigator" id="navigator">
+        <div class="nav-content" id="nav-content"></div>
+    </nav>
+    <main class="canvas" id="canvas">
+        <div class="canvas-loading" id="canvas-loading">
+            <div class="loading-spinner"></div>
+            <p>Loading campaigns...</p>
+        </div>
+        <div class="canvas-content" id="canvas-content"></div>
+    </main>
+    <aside class="inspector" id="inspector">
+        <div class="inspector-header">
+            <button class="inspector-close" id="inspector-close" title="Close">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+            <h2 id="inspector-title"></h2>
+            <span class="inspector-status" id="inspector-status"></span>
+        </div>
+        <div class="inspector-body" id="inspector-body"></div>
+    </aside>
+</div>

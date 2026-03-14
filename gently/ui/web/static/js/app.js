@@ -28,6 +28,23 @@ const ANALYSIS_TYPES = ['segmentation', 'detection', 'classification', 'tracking
                         'roi_detection', 'cropped_roi', 'vision_prepared', 'timeline', 'cv_visualization'];
 const VOLUME_TYPES = ['volume', 'volume_projection', 'z_stack', 'timelapse'];
 
+// Statusbar
+function updateStatusbar() {
+    const left = document.getElementById('status-left');
+    const right = document.getElementById('status-right');
+    if (!left) return;
+
+    // Plans and Sessions tabs manage their own statusbar content
+    if (state.tab === 'plans' || state.tab === 'sessions') return;
+
+    const embryoCount = state.embryos?.length || 0;
+    const imageCount = state.snapshots?.length || 0;
+    const eventCount = state.allEvents?.length || 0;
+    left.textContent = `${embryoCount} embryo${embryoCount !== 1 ? 's' : ''} \u00B7 ${imageCount} image${imageCount !== 1 ? 's' : ''} \u00B7 ${eventCount} event${eventCount !== 1 ? 's' : ''}`;
+    const timelapse = document.getElementById('timelapse-status-text');
+    if (right && timelapse) right.textContent = timelapse.textContent;
+}
+
 // UI Update functions
 function updateMainCount() {
     const el = document.getElementById('main-count');
@@ -41,15 +58,18 @@ function updateCalibrationCount() {
 }
 
 function switchTab(tabName) {
+    if (!tabName) return;
     state.tab = tabName;
 
     // Update tab styling
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.tab[data-tab="${tabName}"]`).classList.add('active');
+    const activeTab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+    if (activeTab) activeTab.classList.add('active');
 
     // Show/hide content
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`${tabName}-content`).classList.add('active');
+    const content = document.getElementById(`${tabName}-content`);
+    if (content) content.classList.add('active');
 
     // Render galleries
     if (tabName === 'calibration') renderCalibrationGallery();
@@ -59,6 +79,19 @@ function switchTab(tabName) {
     if (tabName === 'embryos' && typeof EmbryosManager !== 'undefined') {
         EmbryosManager.clearDetectionBadge();
     }
+
+    // Lazy-init Plans tab
+    if (tabName === 'plans' && typeof CampaignsApp !== 'undefined') {
+        CampaignsApp.init();
+    }
+
+    // Lazy-init Sessions tab
+    if (tabName === 'sessions' && typeof ReviewApp !== 'undefined') {
+        ReviewApp.init();
+    }
+
+    // Update statusbar for context
+    updateStatusbar();
 }
 
 /**
@@ -342,15 +375,9 @@ const ThemeManager = {
     storageKey: 'gently-theme',
 
     init() {
-        // Load saved theme or default to light
+        // Load saved theme or default to light (toggle handled by _header.html)
         const savedTheme = localStorage.getItem(this.storageKey) || 'light';
         this.setTheme(savedTheme);
-
-        // Setup toggle button
-        const toggleBtn = document.getElementById('theme-toggle');
-        if (toggleBtn) {
-            toggleBtn.addEventListener('click', () => this.toggle());
-        }
     },
 
     setTheme(theme) {
@@ -484,9 +511,13 @@ const KeyboardShortcuts = {
 // ==========================================
 
 function toggleStatusPopover(event) {
-    event.stopPropagation();
-    const wrapper = document.getElementById('status-button').closest('.status-button-wrapper');
-    wrapper.classList.toggle('open');
+    const popover = document.getElementById('status-popover');
+    const wrapper = document.getElementById('status-button')?.closest('.status-button-wrapper');
+    toggleDropdown(popover, event);
+    // Sync the wrapper's 'open' class for chevron rotation CSS
+    if (wrapper) {
+        wrapper.classList.toggle('open', popover && !popover.classList.contains('hidden'));
+    }
 }
 
 let _microscopeConnected = false;
@@ -555,22 +586,26 @@ document.addEventListener('DOMContentLoaded', () => {
         tab.addEventListener('click', () => switchTab(tab.dataset.tab));
     });
 
-    // Z-slider event listener
-    document.getElementById('z-slider').addEventListener('input', (e) => {
-        if (!state.current3dVolume) return;
-        state.currentZ = parseInt(e.target.value);
-        updateZSliderDisplay();
-        loadZSlice(state.current3dVolume.uid, state.currentZ);
-    });
+    // Z-slider event listener (Live View)
+    const zSlider = document.getElementById('z-slider');
+    if (zSlider) {
+        zSlider.addEventListener('input', (e) => {
+            if (!state.current3dVolume) return;
+            state.currentZ = parseInt(e.target.value);
+            updateZSliderDisplay();
+            loadZSlice(state.current3dVolume.uid, state.currentZ);
+        });
+    }
 
     // Initialize events tab
     initEventsTab();
 
-    // Close status popover on outside click
-    document.addEventListener('click', (e) => {
+    // Sync wrapper 'open' class when toggleDropdown closes the popover via outside click
+    document.addEventListener('click', () => {
+        const popover = document.getElementById('status-popover');
         const wrapper = document.getElementById('status-button')?.closest('.status-button-wrapper');
-        if (wrapper && !wrapper.contains(e.target)) {
-            wrapper.classList.remove('open');
+        if (wrapper && popover) {
+            wrapper.classList.toggle('open', !popover.classList.contains('hidden'));
         }
     });
 
@@ -580,4 +615,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // Fetch device status periodically
     fetchDeviceStatus();
     setInterval(fetchDeviceStatus, 15000);
+
+    // Initial statusbar update (subsequent updates are event-driven from websocket.js)
+    setTimeout(updateStatusbar, 500);
+
+    // Handle hash-based tab routing (e.g., /#plans, /#sessions, /#plans:campaignId)
+    const hash = window.location.hash.slice(1); // remove #
+    if (hash) {
+        const [tab, param] = hash.split(':');
+        if (tab === 'plans' || tab === 'sessions' || tab === 'embryos' || tab === 'calibration' || tab === 'events') {
+            switchTab(tab);
+            if (tab === 'plans' && param && typeof openCampaign === 'function') {
+                setTimeout(() => openCampaign(param), 200);
+            }
+        }
+        // Clean up the hash
+        history.replaceState(null, '', '/');
+    }
 });

@@ -94,15 +94,20 @@ function display3DVolume(data) {
     const viewerInfo = document.getElementById('viewer-info');
     if (viewerInfo) viewerInfo.style.display = 'flex';
 
-    document.getElementById('info-type').textContent = `3D Seg · ${data.num_cells} cells`;
-    document.getElementById('info-uid').textContent = data.uid.slice(0, 12) + '...';
-    document.getElementById('info-embryo').textContent = data.metadata?.embryo_id || '-';
-    document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
+    const infoType = document.getElementById('info-type');
+    if (infoType) infoType.textContent = `3D Seg · ${data.num_cells} cells`;
+    const infoUid = document.getElementById('info-uid');
+    if (infoUid) infoUid.textContent = data.uid.slice(0, 12) + '...';
+    const infoEmbryo = document.getElementById('info-embryo');
+    if (infoEmbryo) infoEmbryo.textContent = data.metadata?.embryo_id || '-';
+    const imageTime = document.getElementById('image-time');
+    if (imageTime) imageTime.textContent = new Date(data.timestamp).toLocaleTimeString();
 }
 
 function loadZSlice(uid, z) {
     const img = document.getElementById('main-image');
     const placeholder = document.getElementById('placeholder');
+    if (!img || !placeholder) return;
 
     // Add cache buster to force reload
     img.src = `/api/volumes3d/${uid}/slice/${z}?t=${Date.now()}`;
@@ -113,13 +118,15 @@ function loadZSlice(uid, z) {
 function updateZSliderDisplay() {
     const data = state.current3dVolume;
     if (!data) return;
-
-    document.getElementById('z-slider-value').textContent = state.currentZ;
-    document.getElementById('z-slider-info').textContent = `${state.currentZ + 1} / ${data.num_slices}`;
+    const val = document.getElementById('z-slider-value');
+    const info = document.getElementById('z-slider-info');
+    if (val) val.textContent = state.currentZ;
+    if (info) info.textContent = `${state.currentZ + 1} / ${data.num_slices}`;
 }
 
 function hideZSlider() {
-    document.getElementById('z-slider-container').classList.remove('active');
+    const container = document.getElementById('z-slider-container');
+    if (container) container.classList.remove('active');
     state.current3dVolume = null;
 }
 
@@ -160,28 +167,38 @@ function handleNewImage(data) {
 function displayImage(data) {
     state.currentImage = data;
 
+    const img = document.getElementById('main-image');
+    if (!img) {
+        // Live View tab removed — just update recent strip
+        renderRecentList();
+        return;
+    }
+
     // Hide Z slider when showing regular 2D images
     hideZSlider();
 
     // Reset zoom when showing new image
     MainViewerZoom.reset();
 
-    const img = document.getElementById('main-image');
     const placeholder = document.getElementById('placeholder');
     const viewerInfo = document.getElementById('viewer-info');
 
     if (data.base64_png) {
         img.src = 'data:image/png;base64,' + data.base64_png;
         img.style.display = 'block';
-        placeholder.style.display = 'none';
+        if (placeholder) placeholder.style.display = 'none';
         if (viewerInfo) viewerInfo.style.display = 'flex';
     }
 
     const embryoId = data.metadata?.embryo_id || '-';
-    document.getElementById('info-embryo').textContent = embryoId;
-    document.getElementById('info-type').textContent = data.data_type;
-    document.getElementById('info-uid').textContent = data.uid.slice(0, 12) + '...';
-    document.getElementById('image-time').textContent = new Date(data.timestamp).toLocaleTimeString();
+    const infoEmbryo = document.getElementById('info-embryo');
+    if (infoEmbryo) infoEmbryo.textContent = embryoId;
+    const infoType = document.getElementById('info-type');
+    if (infoType) infoType.textContent = data.data_type;
+    const infoUid = document.getElementById('info-uid');
+    if (infoUid) infoUid.textContent = data.uid.slice(0, 12) + '...';
+    const imageTime = document.getElementById('image-time');
+    if (imageTime) imageTime.textContent = new Date(data.timestamp).toLocaleTimeString();
 
     // Update recent strip to show active state
     renderRecentList();

@@ -769,11 +769,7 @@ const TimepointPlayer = {
         this.seekTo(Math.max(0, Math.min(this.sequence.length - 1, index)));
     },
 
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    },
+    escapeHtml(text) { return escapeHtml(text); },
 
     showDetectionToast() {
         // Remove any existing toast

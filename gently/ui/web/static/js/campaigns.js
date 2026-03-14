@@ -6,6 +6,10 @@
  *   plan      — single campaign, navigator shows outline, canvas shows plan doc
  */
 
+// Wrapped in IIFE to avoid global state collision with app.js
+(function() {
+'use strict';
+
 // ── Constants ────────────────────────────────────────────
 const TYPE_ICONS = {
     imaging: '\u{1F4F7}', bench: '\u{1F9EA}', genetics: '\u{1F9EC}',
@@ -40,6 +44,8 @@ const SPEC_UNITS = {
 // ── State ────────────────────────────────────────────────
 const state = {
     view: 'dashboard',          // 'dashboard' | 'plan'
+    planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix'
+    graphVertical: false,
     activeCampaignId: null,
     selectedItemId: null,
     allCampaigns: [],           // full tree list from /api/campaigns
@@ -58,7 +64,10 @@ let $printBtn, $snapshotBanner, $snapshotBannerText;
 let $statusLeft, $statusRight;
 
 // ── Init ─────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+let _initialized = false;
+function boot() {
+    if (_initialized) return;
+    _initialized = true;
     // Cache DOM
     $workspace      = document.getElementById('workspace');
     $navContent     = document.getElementById('nav-content');
@@ -79,8 +88,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $statusLeft     = document.getElementById('status-left');
     $statusRight    = document.getElementById('status-right');
 
-    // Event listeners
-    document.getElementById('theme-toggle')?.addEventListener('click', toggleTheme);
+    // Event listeners (theme toggle handled by _header.html)
     document.getElementById('inspector-close')?.addEventListener('click', closeInspector);
     $printBtn?.addEventListener('click', () => window.print());
     $versionBtn?.addEventListener('click', toggleVersionDropdown);
@@ -103,6 +111,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Scroll-spy for plan view
     document.getElementById('canvas')?.addEventListener('scroll', onCanvasScroll, { passive: true });
 
+    // Plan view switcher
+    setupPlanViewSwitcher();
+
     // Route: auto-open campaign if ID is provided
     const initialId = window.INITIAL_CAMPAIGN_ID;
     if (initialId) {
@@ -110,14 +121,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         loadCampaigns();
     }
-});
-
-// ── Theme ────────────────────────────────────────────────
-function toggleTheme() {
-    const next = document.body.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-    document.body.setAttribute('data-theme', next);
-    localStorage.setItem('gently-theme', next);
 }
+
 
 // ══════════════════════════════════════════════════════════
 //  DATA LOADING
@@ -233,6 +238,8 @@ async function openCampaign(campaignId) {
 
 function goToDashboard() {
     state.view = 'dashboard';
+    state.planView = 'doc';
+    state.graphVertical = false;
     state.activeCampaignId = null;
     state.selectedItemId = null;
     state.docData = null;
@@ -281,9 +288,11 @@ function renderAll() {
 function renderNavigator() {
     if (!$navContent) return;
     if (state.view === 'dashboard') {
+        $workspace?.classList.remove('plan-mode');
         renderNavDashboard();
     } else {
-        renderNavOutline();
+        $workspace?.classList.add('plan-mode');
+        $navContent.innerHTML = '';
     }
 }
 
@@ -388,7 +397,13 @@ function renderCanvas() {
     if (state.view === 'dashboard') {
         renderDashboard();
     } else {
-        renderPlanDoc();
+        switch (state.planView) {
+            case 'board': renderBoardView(); break;
+            case 'decide': renderDecideView(); break;
+            case 'graph': renderGraphView(); break;
+            case 'matrix': renderMatrixView(); break;
+            default: renderPlanDoc(); break;
+        }
     }
 }
 
@@ -963,15 +978,34 @@ function backToCurrent() {
 // ══════════════════════════════════════════════════════════
 
 function updateHeader() {
+    const $viewSwitcher = document.getElementById('plan-view-switcher');
     if (state.view === 'dashboard') {
         if ($headerTitle) $headerTitle.textContent = 'Campaigns';
-        if ($headerBreadcrumb) $headerBreadcrumb.textContent = '';
+        if ($headerBreadcrumb) $headerBreadcrumb.innerHTML = '';
         $versionWrap?.classList.add('hidden');
         $printBtn?.classList.add('hidden');
+        $viewSwitcher?.classList.add('hidden');
     } else {
         const campaign = state.docData?.document?.campaign;
-        if ($headerTitle) $headerTitle.textContent = campaign?.shorthand || 'Plan';
-        if ($headerBreadcrumb) $headerBreadcrumb.textContent = '';
+        if ($headerTitle) {
+            $headerTitle.innerHTML = `<a class="toolbar-back-link" onclick="goToDashboard()">Campaigns</a>`;
+        }
+        if ($headerBreadcrumb) {
+            // Build campaign switcher dropdown
+            let switcherHtml = `<div class="campaign-switcher">
+                <button class="campaign-switcher-btn" onclick="toggleCampaignSwitcher(event)">
+                    ${esc(campaign?.shorthand || 'Plan')}
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
+                </button>
+                <div class="campaign-switcher-dropdown hidden" id="campaign-switcher-dropdown">`;
+            (state.allCampaigns || []).forEach(c => {
+                const isActive = c.campaign.id === state.activeCampaignId;
+                const safeId = encodeURIComponent(c.campaign.id);
+                switcherHtml += `<div class="campaign-switcher-item ${isActive ? 'active' : ''}" onclick="openCampaign(decodeURIComponent('${safeId}'))">${esc(c.campaign.shorthand)}</div>`;
+            });
+            switcherHtml += '</div></div>';
+            $headerBreadcrumb.innerHTML = switcherHtml;
+        }
         // Show version dropdown if we have versions
         if (state.versions.length > 0) {
             $versionWrap?.classList.remove('hidden');
@@ -979,6 +1013,7 @@ function updateHeader() {
             $versionWrap?.classList.add('hidden');
         }
         $printBtn?.classList.remove('hidden');
+        $viewSwitcher?.classList.remove('hidden');
     }
 }
 
@@ -1055,7 +1090,7 @@ function toggleNavPhase(headerEl) {
 
 // ── Scroll-spy ───────────────────────────────────────────
 function onCanvasScroll() {
-    if (state.view !== 'plan' || state.selectedItemId) return;
+    if (state.view !== 'plan' || state.planView !== 'doc' || state.selectedItemId) return;
 
     const canvas = document.getElementById('canvas');
     if (!canvas) return;
@@ -1184,12 +1219,7 @@ function renderSpecTable(spec) {
     return rows;
 }
 
-function esc(str) {
-    if (!str) return '';
-    const div = document.createElement('div');
-    div.textContent = String(str);
-    return div.innerHTML;
-}
+function esc(str) { return escapeHtml(str); }
 
 function formatDate(isoStr) {
     try {
@@ -1200,3 +1230,416 @@ function formatDate(isoStr) {
         return isoStr;
     }
 }
+
+function toggleCampaignSwitcher(event) {
+    const dropdown = document.getElementById('campaign-switcher-dropdown');
+    toggleDropdown(dropdown, event);
+}
+
+// ══════════════════════════════════════════════════════════
+//  PLAN VIEW SWITCHING
+// ══════════════════════════════════════════════════════════
+
+const STATUS_COLORS = {
+    planned: 'var(--text-muted)',
+    in_progress: 'var(--accent)',
+    completed: 'var(--accent-green)',
+    skipped: 'var(--text-muted)',
+    blocked: '#f85149',
+};
+
+function setupPlanViewSwitcher() {
+    const switcher = document.getElementById('plan-view-switcher');
+    if (!switcher) return;
+    switcher.addEventListener('click', e => {
+        const btn = e.target.closest('[data-plan-view]');
+        if (!btn || state.view !== 'plan') return;
+        switchPlanView(btn.dataset.planView);
+    });
+    document.addEventListener('keydown', e => {
+        if (state.view !== 'plan') return;
+        if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+        const views = ['doc', 'graph', 'board', 'decide', 'matrix'];
+        const idx = parseInt(e.key) - 1;
+        if (idx >= 0 && idx < views.length) switchPlanView(views[idx]);
+    });
+}
+
+function switchPlanView(viewName) {
+    state.planView = viewName;
+    document.querySelectorAll('#plan-view-switcher .view-btn').forEach(b => b.classList.remove('active'));
+    document.querySelector(`#plan-view-switcher [data-plan-view="${viewName}"]`)?.classList.add('active');
+    renderCanvas();
+}
+
+// Collect all items from the document tree into a flat array
+function collectAllItems(node, phase, phaseNum) {
+    const result = [];
+    function walk(n, ph, pn) {
+        (n.items || []).forEach(item => {
+            result.push({ ...item, _phase: ph || 'Unassigned', _phaseNum: pn || 0 });
+        });
+        (n.children || []).forEach((child, idx) => {
+            const childName = child.campaign?.description || child.title || '';
+            const cph = childName || ph;
+            const cpn = pn || idx + 1;
+            walk(child, cph, cpn);
+        });
+    }
+    walk(node, phase, phaseNum);
+    return result;
+}
+
+// ══════════════════════════════════════════════════════════
+//  BOARD VIEW
+// ══════════════════════════════════════════════════════════
+
+function renderBoardView() {
+    const doc = state.docData?.document;
+    if (!doc) return;
+    const items = collectAllItems(doc);
+    const columns = ['planned', 'in_progress', 'completed', 'skipped', 'blocked'];
+    const labels = { planned: 'Planned', in_progress: 'In Progress', completed: 'Completed', skipped: 'Skipped', blocked: 'Blocked' };
+    const grouped = {};
+    columns.forEach(c => grouped[c] = []);
+    items.forEach(item => {
+        const col = grouped[item.status] || grouped.planned;
+        col.push(item);
+    });
+
+    let html = '<div class="board-view">';
+    columns.forEach(col => {
+        const colItems = grouped[col];
+        html += `<div class="board-column">
+            <div class="board-column-header">
+                <span class="board-column-dot" style="background:${STATUS_COLORS[col]}"></span>
+                ${labels[col]} <span class="board-column-count">${colItems.length}</span>
+            </div>
+            <div class="board-column-body">`;
+        colItems.forEach(item => {
+            const icon = TYPE_ICONS[item.type] || '';
+            const spec = item.imaging_spec || item.bench_spec;
+            const specLine = spec ? (spec.strain || spec.protocol || '') : '';
+            html += `<div class="board-card" onclick="selectItem('${item.id}')">
+                <div class="board-card-top">
+                    <span class="board-card-icon">${icon}</span>
+                    <span class="board-card-phase">P${item._phaseNum}</span>
+                </div>
+                <div class="board-card-title">${esc(item.title)}</div>
+                ${specLine ? `<div class="board-card-spec">${esc(specLine)}</div>` : ''}
+            </div>`;
+        });
+        html += '</div></div>';
+    });
+    html += '</div>';
+    $canvasContent.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
+//  DECIDE VIEW
+// ══════════════════════════════════════════════════════════
+
+function renderDecideView() {
+    const doc = state.docData?.document;
+    if (!doc) return;
+    const items = collectAllItems(doc);
+    const decisions = items.filter(i => i.type === 'decision_point');
+
+    if (decisions.length === 0) {
+        $canvasContent.innerHTML = `<div class="empty-state">
+            <div style="font-size:2rem;margin-bottom:12px">🚦</div>
+            <p>No decision points in this plan</p>
+            <span class="empty-hint">Decision points help track key branching moments in your experiment</span>
+        </div>`;
+        return;
+    }
+
+    let html = '<div class="decide-view">';
+    decisions.forEach(item => {
+        const deps = (item.dependencies || []).map(d =>
+            `<span class="dep-chip" onclick="selectItem('${d.id}')">${STATUS_DOTS[d.status] || '○'} ${esc(d.title)}</span>`
+        ).join('');
+        const dependents = (item.dependents || []).map(d =>
+            `<span class="dep-chip" onclick="selectItem('${d.id}')">${esc(d.title)}</span>`
+        ).join('');
+        const statusClass = item.status === 'completed' ? 'completed' : item.status === 'in_progress' ? 'active' : '';
+
+        html += `<div class="decide-card ${statusClass}" onclick="selectItem('${item.id}')">
+            <div class="decide-phase">Phase ${item._phaseNum}</div>
+            <div class="decide-header">
+                <span class="decide-status">${STATUS_DOTS[item.status] || '○'}</span>
+                <h3>${esc(item.title)}</h3>
+            </div>
+            ${item.description ? `<div class="decide-desc">${esc(item.description)}</div>` : ''}
+            ${deps ? `<div class="decide-section"><div class="decide-section-label">Inputs</div>${deps}</div>` : ''}
+            <div class="decide-section">
+                <div class="decide-section-label">Outcome</div>
+                <div class="decide-outcome ${item.outcome ? '' : 'pending'}">${item.outcome ? esc(item.outcome) : 'Pending — no outcome recorded yet'}</div>
+            </div>
+            ${dependents ? `<div class="decide-section"><div class="decide-section-label">Unblocks</div>${dependents}</div>` : ''}
+        </div>`;
+    });
+    html += '</div>';
+    $canvasContent.innerHTML = html;
+}
+
+// ══════════════════════════════════════════════════════════
+//  GRAPH VIEW
+// ══════════════════════════════════════════════════════════
+
+function renderGraphView() {
+    const doc = state.docData?.document;
+    if (!doc) return;
+    const items = collectAllItems(doc);
+    if (items.length === 0) {
+        $canvasContent.innerHTML = '<div class="empty-state"><p>No items to graph</p></div>';
+        return;
+    }
+
+    // Build adjacency and compute depths via BFS from roots
+    const byId = {};
+    items.forEach(i => byId[i.id] = i);
+    const inDegree = {};
+    const outEdges = {};
+    items.forEach(i => {
+        inDegree[i.id] = 0;
+        outEdges[i.id] = [];
+    });
+    items.forEach(i => {
+        (i.dependencies || []).forEach(d => {
+            if (byId[d.id]) {
+                outEdges[d.id].push(i.id);
+                inDegree[i.id] = (inDegree[i.id] || 0) + 1;
+            }
+        });
+    });
+
+    // Topological layering
+    const depth = {};
+    const queue = items.filter(i => inDegree[i.id] === 0).map(i => i.id);
+    queue.forEach(id => depth[id] = 0);
+    let head = 0;
+    while (head < queue.length) {
+        const id = queue[head++];
+        outEdges[id].forEach(next => {
+            depth[next] = Math.max(depth[next] || 0, depth[id] + 1);
+            inDegree[next]--;
+            if (inDegree[next] === 0) queue.push(next);
+        });
+    }
+    const maxDepth = Math.max(0, ...Object.values(depth));
+    items.forEach(i => { if (depth[i.id] === undefined) depth[i.id] = maxDepth + 1; });
+
+    // Group by depth layer
+    const layers = {};
+    items.forEach(i => {
+        const d = depth[i.id];
+        if (!layers[d]) layers[d] = [];
+        layers[d].push(i);
+    });
+
+    // Collect phase info for background bands
+    const phaseMap = {};
+    items.forEach(i => {
+        if (!phaseMap[i._phaseNum]) phaseMap[i._phaseNum] = { name: i._phase, items: [] };
+        phaseMap[i._phaseNum].items.push(i);
+    });
+
+    // Node sizing — larger nodes to show full text
+    const nodeW = 220, nodeH = 72, pad = 40;
+    const vert = state.graphVertical;
+    const gapMain = 100, gapCross = 28;
+    const numLayers = Math.max(...Object.keys(layers).map(Number)) + 1;
+    const maxPerLayer = Math.max(...Object.values(layers).map(l => l.length));
+
+    const mainSize = numLayers * (vert ? nodeH : nodeW) + (numLayers - 1) * gapMain + pad * 2;
+    const crossSize = maxPerLayer * (vert ? nodeW : nodeH) + (maxPerLayer - 1) * gapCross + pad * 2;
+    const svgW = vert ? crossSize : mainSize;
+    const svgH = vert ? mainSize : crossSize;
+
+    // Assign positions
+    const pos = {};
+    Object.entries(layers).forEach(([d, layerItems]) => {
+        const di = parseInt(d);
+        const crossTotal = layerItems.length * ((vert ? nodeW : nodeH) + gapCross) - gapCross;
+        const crossStart = ((vert ? svgW : svgH) - crossTotal) / 2;
+        layerItems.forEach((item, idx) => {
+            const mainPos = pad + di * ((vert ? nodeH : nodeW) + gapMain);
+            const crossPos = crossStart + idx * ((vert ? nodeW : nodeH) + gapCross);
+            pos[item.id] = vert
+                ? { x: crossPos, y: mainPos }
+                : { x: mainPos, y: crossPos };
+        });
+    });
+
+    // Phase background bands
+    let bands = '';
+    const phaseColors = ['rgba(96,165,250,0.06)', 'rgba(52,211,153,0.06)', 'rgba(251,191,36,0.06)', 'rgba(167,139,250,0.06)', 'rgba(248,113,113,0.06)'];
+    Object.entries(phaseMap).forEach(([pNum, info], ci) => {
+        if (!info.items.length) return;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        info.items.forEach(i => {
+            const p = pos[i.id];
+            if (!p) return;
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x + nodeW);
+            maxY = Math.max(maxY, p.y + nodeH);
+        });
+        const bpad = 16;
+        const color = phaseColors[ci % phaseColors.length];
+        bands += `<rect x="${minX - bpad}" y="${minY - bpad - 18}" width="${maxX - minX + nodeW + bpad * 2 - nodeW}" height="${maxY - minY + nodeH + bpad * 2 + 18}" rx="12" fill="${color}" />`;
+        bands += `<text x="${minX - bpad + 8}" y="${minY - bpad}" class="graph-phase-label">P${pNum} — ${esc(info.name.split(' — ').pop())}</text>`;
+    });
+
+    // Render edges
+    let edges = '';
+    items.forEach(i => {
+        (i.dependencies || []).forEach(d => {
+            if (!pos[d.id] || !pos[i.id]) return;
+            const from = pos[d.id];
+            const to = pos[i.id];
+            if (vert) {
+                const x1 = from.x + nodeW / 2, y1 = from.y + nodeH;
+                const x2 = to.x + nodeW / 2, y2 = to.y;
+                const cy = (y1 + y2) / 2;
+                edges += `<path d="M${x1},${y1} C${x1},${cy} ${x2},${cy} ${x2},${y2}" class="graph-edge" />`;
+            } else {
+                const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
+                const x2 = to.x, y2 = to.y + nodeH / 2;
+                const cx = (x1 + x2) / 2;
+                edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" />`;
+            }
+        });
+    });
+
+    // Render nodes — full title with word wrap via foreignObject
+    let nodes = '';
+    items.forEach(i => {
+        const p = pos[i.id];
+        if (!p) return;
+        const icon = TYPE_ICONS[i.type] || '';
+        const color = STATUS_COLORS[i.status] || STATUS_COLORS.planned;
+        const statusLabel = STATUS_LABELS[i.status] || i.status;
+        nodes += `<g class="graph-node" onclick="selectItem('${i.id}')" data-item-id="${i.id}">
+            <rect x="${p.x}" y="${p.y}" width="${nodeW}" height="${nodeH}" rx="10"
+                  fill="var(--bg-card)" stroke="${color}" stroke-width="2" />
+            <foreignObject x="${p.x + 10}" y="${p.y + 6}" width="${nodeW - 20}" height="${nodeH - 12}">
+                <div xmlns="http://www.w3.org/1999/xhtml" class="graph-node-inner">
+                    <div class="graph-node-top"><span>${icon}</span><span class="graph-node-phase">P${i._phaseNum}</span></div>
+                    <div class="graph-node-title">${esc(i.title)}</div>
+                    <div class="graph-node-status" style="color:${color}">${STATUS_DOTS[i.status]} ${statusLabel}</div>
+                </div>
+            </foreignObject>
+        </g>`;
+    });
+
+    // Layout toggle button
+    const toggleIcon = vert ? '↔' : '↕';
+    const toggleTitle = vert ? 'Switch to horizontal layout' : 'Switch to vertical layout';
+
+    $canvasContent.innerHTML = `<div class="graph-view" id="graph-view-container">
+        <div class="graph-toolbar">
+            <button class="graph-layout-toggle" onclick="toggleGraphLayout()" title="${toggleTitle}">${toggleIcon} ${vert ? 'Horizontal' : 'Vertical'}</button>
+        </div>
+        <svg width="${svgW}" height="${svgH}" viewBox="0 0 ${svgW} ${svgH}">
+            ${bands}${edges}${nodes}
+        </svg>
+    </div>`;
+
+    // Horizontal scroll from mousewheel
+    const container = document.getElementById('graph-view-container');
+    if (container) {
+        container.addEventListener('wheel', (e) => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                e.preventDefault();
+                container.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
+    }
+}
+
+function toggleGraphLayout() {
+    state.graphVertical = !state.graphVertical;
+    renderGraphView();
+}
+
+// ══════════════════════════════════════════════════════════
+//  MATRIX VIEW
+// ══════════════════════════════════════════════════════════
+
+function renderMatrixView() {
+    const doc = state.docData?.document;
+    if (!doc) return;
+    const phases = (doc.children || []).filter(c => c.children);
+    const types = ['imaging', 'bench', 'genetics', 'analysis', 'decision_point'];
+    const typeLabels = { imaging: 'Imaging', bench: 'Bench', genetics: 'Genetics', analysis: 'Analysis', decision_point: 'Decisions' };
+
+    let html = '<div class="matrix-view"><table class="matrix-table"><thead><tr><th>Phase</th>';
+    types.forEach(t => html += `<th>${typeLabels[t]}</th>`);
+    html += '<th>Total</th></tr></thead><tbody>';
+
+    const colTotals = {};
+    types.forEach(t => colTotals[t] = { total: 0, completed: 0, active: 0 });
+    let grandTotal = 0;
+
+    phases.forEach((phase, idx) => {
+        const phaseName = phase.campaign?.description || phase.title || '';
+        const shortName = phaseName.split(' — ').pop() || phaseName;
+        const items = collectAllItems(phase, phaseName, idx + 1);
+        let rowTotal = 0;
+        html += `<tr><td class="matrix-phase">P${idx + 1} — ${esc(shortName)}</td>`;
+        types.forEach(type => {
+            const matching = items.filter(i => i.type === type);
+            const done = matching.filter(i => i.status === 'completed').length;
+            const active = matching.filter(i => i.status === 'in_progress').length;
+            const count = matching.length;
+            colTotals[type].total += count;
+            colTotals[type].completed += done;
+            colTotals[type].active += active;
+            rowTotal += count;
+            grandTotal += count;
+            if (count === 0) {
+                html += '<td class="matrix-cell empty">—</td>';
+            } else {
+                const dots = matching.map(i => `<span class="matrix-dot" style="background:${STATUS_COLORS[i.status]}" title="${esc(i.title)}"></span>`).join('');
+                html += `<td class="matrix-cell">${dots}<span class="matrix-count">${count}</span></td>`;
+            }
+        });
+        html += `<td class="matrix-total">${rowTotal}</td></tr>`;
+    });
+
+    // Totals row
+    html += '<tr class="matrix-totals-row"><td>Total</td>';
+    types.forEach(t => {
+        html += `<td class="matrix-total">${colTotals[t].total}</td>`;
+    });
+    html += `<td class="matrix-total">${grandTotal}</td></tr>`;
+    html += '</tbody></table></div>';
+    $canvasContent.innerHTML = html;
+}
+
+// Expose init and onclick-referenced functions to global scope
+window.CampaignsApp = { init: boot };
+window.openCampaign = openCampaign;
+window.goToDashboard = goToDashboard;
+window.navigateToItem = navigateToItem;
+window.toggleNavPhase = toggleNavPhase;
+window.scrollCanvasTo = scrollCanvasTo;
+window.selectItem = selectItem;
+window.viewVersion = viewVersion;
+window.backToCurrent = backToCurrent;
+window.switchPlanView = switchPlanView;
+window.toggleCampaignSwitcher = toggleCampaignSwitcher;
+window.toggleGraphLayout = toggleGraphLayout;
+
+// Auto-init on standalone campaigns page (detected via data-page attribute)
+if (document.body?.dataset.page === 'campaigns') {
+    boot();
+} else {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (document.body.dataset.page === 'campaigns') boot();
+    });
+}
+
+})(); // end IIFE

@@ -23,6 +23,7 @@ function loadInitialData() {
             state.snapshots = data.snapshots || [];
             updateMainCount();
             renderRecentList();
+            if (typeof updateStatusbar === 'function') updateStatusbar();
         })
         .catch(e => console.warn('Failed to load snapshots:', e));
 
@@ -39,6 +40,7 @@ function loadInitialData() {
         .then(r => r.json())
         .then(data => {
             state.embryos = data.embryos || [];
+            if (typeof updateStatusbar === 'function') updateStatusbar();
         })
         .catch(e => console.warn('Failed to load embryos:', e));
 }
@@ -88,12 +90,14 @@ function handleMessage(msg) {
         state.snapshots = msg.data || [];
         updateMainCount();
         renderRecentList();
+        if (typeof updateStatusbar === 'function') updateStatusbar();
     } else if (msg.type === 'calibration') {
         state.calibration = msg.data || [];
         updateCalibrationCount();
         renderCalibrationGallery();
     } else if (msg.type === 'embryos') {
         state.embryos = msg.data || [];
+        if (typeof updateStatusbar === 'function') updateStatusbar();
     } else if (msg.type === 'event') {
         // Add to events tab (full event data)
         handleFullEvent({

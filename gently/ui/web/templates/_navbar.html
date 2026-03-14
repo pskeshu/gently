@@ -1,0 +1,29 @@
+{# Shared navigation bar #}
+<div class="tabs">
+    {% if is_live %}
+    {# SPA tabs — JS-driven via switchTab() in app.js #}
+    <div class="tab active" data-tab="embryos">
+        Embryos
+        <span class="tab-badge" id="embryos-count">0</span>
+    </div>
+    <div class="tab" data-tab="calibration">
+        Calibration
+        <span class="tab-badge" id="calibration-count">0</span>
+    </div>
+    <div class="tab" data-tab="events">
+        System
+        <span class="tab-badge" id="events-count">0</span>
+    </div>
+    <div class="tab-divider"></div>
+    <div class="tab" data-tab="plans">Plans</div>
+    <div class="tab" data-tab="sessions">Sessions</div>
+    {% else %}
+    {# Standalone pages — all tabs link back to the SPA #}
+    <a href="/" class="tab tab-link">Embryos</a>
+    <a href="/" class="tab tab-link">Calibration</a>
+    <a href="/" class="tab tab-link">System</a>
+    <div class="tab-divider"></div>
+    <a href="/" class="tab tab-link">Plans</a>
+    <a href="/" class="tab tab-link">Sessions</a>
+    {% endif %}
+</div>

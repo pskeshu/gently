@@ -18,7 +18,7 @@ def create_router(server) -> APIRouter:
         if server.sessions_dir.exists():
             for path in server.sessions_dir.glob("*.json"):
                 try:
-                    with open(path) as f:
+                    with open(path, encoding='utf-8') as f:
                         data = json.load(f)
                     sessions.append({
                         'session_id': data.get('session_id', path.stem),
@@ -41,7 +41,7 @@ def create_router(server) -> APIRouter:
         if not path.exists():
             raise HTTPException(status_code=404, detail="Session not found")
         try:
-            with open(path) as f:
+            with open(path, encoding='utf-8') as f:
                 return json.load(f)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to load session: {e}")

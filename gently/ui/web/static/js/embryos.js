@@ -3354,11 +3354,7 @@ const EmbryosManager = {
         }
     },
 
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    },
+    escapeHtml(text) { return escapeHtml(text); },
 
     // Simple markdown renderer for reasoning trace
     renderMarkdown(text) {

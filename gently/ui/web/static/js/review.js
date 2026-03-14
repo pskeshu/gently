@@ -8,9 +8,14 @@ const ReviewApp = {
     currentSession: null,
     currentTab: 'embryos',
 
+    _initialized: false,
+
     async init() {
+        if (this._initialized) return;
+        this._initialized = true;
         await this.loadSessions();
         this.setupTabHandlers();
+        this.updateStatusbar();
 
         // Check for session query parameter to auto-load
         const params = new URLSearchParams(window.location.search);
@@ -46,6 +51,7 @@ const ReviewApp = {
             this.currentTab = 'embryos';
             this.renderSessionContent();
             this.highlightActiveSession(sessionId);
+            this.updateStatusbar();
         } catch (e) {
             content.innerHTML = '<div class="error">Failed to load session</div>';
             console.error('Failed to load session:', e);
@@ -258,13 +264,29 @@ const ReviewApp = {
         }
     },
 
-    escapeHtml(str) {
-        if (!str) return '';
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+    escapeHtml(str) { return escapeHtml(str); },
+
+    updateStatusbar() {
+        const left = document.getElementById('status-left');
+        const right = document.getElementById('status-right');
+        if (!left) return;
+        const total = this.sessions.length;
+        const withContent = this.sessions.filter(s => s.embryo_count > 0).length;
+        left.textContent = `${total} session${total !== 1 ? 's' : ''} \u00B7 ${withContent} with content`;
+        if (right && this.currentSession) {
+            const embryos = Object.keys(this.currentSession.embryo_states || {}).length;
+            right.textContent = `${embryos} embryo${embryos !== 1 ? 's' : ''}`;
+        } else if (right) {
+            right.textContent = '';
+        }
     }
 };
 
-// Initialize on page load
-document.addEventListener('DOMContentLoaded', () => ReviewApp.init());
+// Auto-init on standalone review page (detected via data-page attribute)
+if (document.body?.dataset.page === 'review') {
+    ReviewApp.init();
+} else {
+    document.addEventListener('DOMContentLoaded', () => {
+        if (document.body.dataset.page === 'review') ReviewApp.init();
+    });
+}

@@ -2,7 +2,8 @@
 
 .review-container {
     display: flex;
-    height: calc(100vh - 60px);
+    flex: 1;
+    min-height: 0;
     overflow: hidden;
 }
 
@@ -442,19 +443,3 @@
     color: var(--text-muted);
 }
 
-/* Back to live link */
-.back-to-live {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--accent);
-    text-decoration: none;
-    font-weight: 500;
-    padding: 8px 12px;
-    border-radius: 6px;
-    transition: background 0.15s ease;
-}
-
-.back-to-live:hover {
-    background: var(--bg-hover);
-}

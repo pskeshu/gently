@@ -1,7 +1,7 @@
 """Page routes - HTML template rendering."""
 
 from fastapi import APIRouter, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 
 def create_router(server) -> APIRouter:
@@ -9,35 +9,24 @@ def create_router(server) -> APIRouter:
 
     @router.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        """Serve the main visualization page"""
+        """Serve the main SPA page"""
         return server.templates.TemplateResponse(
             "index.html",
-            {"request": request}
+            {"request": request, "active_section": "embryos", "is_live": True}
         )
 
-    @router.get("/review", response_class=HTMLResponse)
-    async def review_page(request: Request):
-        """Serve the session review page"""
-        return server.templates.TemplateResponse(
-            "review.html",
-            {"request": request}
-        )
+    # Standalone URLs redirect to SPA with hash fragment for tab routing
+    @router.get("/review")
+    async def review_page():
+        return RedirectResponse("/#sessions", status_code=302)
 
-    @router.get("/campaigns", response_class=HTMLResponse)
-    async def campaigns_page(request: Request):
-        """Serve the campaigns/plans overview page"""
-        return server.templates.TemplateResponse(
-            "campaigns.html",
-            {"request": request, "campaign_id": ""}
-        )
+    @router.get("/campaigns")
+    async def campaigns_page():
+        return RedirectResponse("/#plans", status_code=302)
 
-    @router.get("/campaigns/{campaign_id}/review", response_class=HTMLResponse)
-    async def plan_review_page(request: Request, campaign_id: str):
-        """Serve the plan review page (same template, auto-opens campaign)"""
-        return server.templates.TemplateResponse(
-            "campaigns.html",
-            {"request": request, "campaign_id": campaign_id}
-        )
+    @router.get("/campaigns/{campaign_id}/review")
+    async def plan_review_page(campaign_id: str):
+        return RedirectResponse(f"/#plans:{campaign_id}", status_code=302)
 
     @router.get("/settings", response_class=HTMLResponse)
     async def settings_page(request: Request):
