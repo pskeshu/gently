@@ -162,7 +162,8 @@ class MicroscopyAgent:
         # Wire tool execution context
         self.conversation._tool_context = {
             'agent': self,
-            'client': getattr(self, 'client', None),
+            'client': getattr(self, 'microscope', None),
+            'microscope': getattr(self, 'microscope', None),
             'databroker': getattr(self, 'databroker', None),
         }
 

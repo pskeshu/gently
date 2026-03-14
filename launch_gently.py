@@ -209,6 +209,16 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         except Exception:
             pass
 
+    # Register auto-generated microscope tools from device layer plan schemas
+    if client and client.is_connected:
+        try:
+            from gently.harness.microscope import register_microscope_tools
+            n = register_microscope_tools(client)
+            if n:
+                logger.info("Registered %d microscope tools from device layer", n)
+        except Exception as e:
+            logger.debug("Auto-tool registration skipped: %s", e)
+
     # Create agent
     agent = MicroscopyAgent(
         microscope_client=client,

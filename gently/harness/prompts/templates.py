@@ -200,6 +200,7 @@ def build_system_prompt(
     connection_status: dict = None,
     context_summary: str = None,
     memory_awareness: str = None,
+    microscope=None,
 ) -> str:
     """
     Build complete system prompt for Claude
@@ -271,9 +272,10 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     stop_condition_names = list(organism.STOP_CONDITIONS.keys())
     detector_names = list(organism.get_detector_presets().keys())
 
-    # Pull hardware description from the active hardware module
+    # Pull hardware description — prefer microscope (from device layer handshake),
+    # fall back to the static hardware module
     hardware = get_hardware()
-    hardware_description = hardware.HARDWARE_DESCRIPTION
+    hardware_description = getattr(microscope, 'DESCRIPTION', '') or hardware.HARDWARE_DESCRIPTION
     hardware_display = hardware.HARDWARE_DISPLAY_NAME
 
     return f"""You are a Microscopy Agent - an AI scientific collaborator assisting with {hardware_display}

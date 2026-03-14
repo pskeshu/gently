@@ -88,6 +88,7 @@ class PromptManager:
         return build_system_prompt(
             experiment, connection_status, context_summary,
             memory_awareness=memory_awareness,
+            microscope=client,
         )
 
     def get_tools_for_mode(self, mode: str, has_microscope: bool) -> list:
