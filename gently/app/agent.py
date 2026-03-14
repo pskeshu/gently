@@ -344,15 +344,6 @@ class MicroscopyAgent:
             session_id, self.experiment, self.conversation, self._update_system_prompt
         )
 
-    # Static methods preserved for backward compatibility
-    @staticmethod
-    def _sanitize_loaded_messages(messages):
-        return SessionManager.sanitize_loaded_messages(messages)
-
-    @staticmethod
-    def _serialize_messages(messages):
-        return SessionManager.serialize_messages(messages)
-
     # ===== Init Helpers =====
 
     def _init_interaction_logger(self):
