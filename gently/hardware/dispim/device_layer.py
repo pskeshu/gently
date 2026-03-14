@@ -922,6 +922,171 @@ class DeviceLayerServer(Service):
             loop.close()
 
     # =========================================================================
+    # Microscope API — generic plan-based interface
+    # =========================================================================
+
+    # Maps generic plan names → (bluesky_plan_name, result_extractor)
+    # Extractors pull clean results from Bluesky documents.
+    PLAN_REGISTRY = {
+        "move":             ("move_stage_plan",              "_extract_move"),
+        "get_position":     ("read_stage_plan",              "_extract_position"),
+        "acquire":          ("acquire_single_volume_plan",   "_extract_volume"),
+        "snap":             ("capture_lightsheet_image_plan", "_extract_image"),
+        "detect_image":     ("capture_bottom_image_plan",    "_extract_image"),
+        "calibrate":        ("calibrate_piezo_galvo_plan",   "_extract_calibration"),
+        "set_illumination": ("set_led_plan",                 "_extract_success"),
+        "get_illumination": None,  # handled directly (no Bluesky plan)
+        "detect":           None,  # handled directly (SAM endpoint)
+        "status":           None,  # handled directly
+    }
+
+    def _extract_from_events(self, documents: dict, candidate_keys: list) -> Any:
+        """Pull data from Bluesky event documents by candidate key names."""
+        events = documents.get('events', [])
+        for event in events:
+            data = event.get('data', {})
+            for key in candidate_keys:
+                if key in data:
+                    return data[key]
+        return None
+
+    def _extract_move(self, documents: dict, params: dict) -> dict:
+        return {"success": True, "x": params.get("x"), "y": params.get("y")}
+
+    def _extract_position(self, documents: dict, params: dict) -> dict:
+        events = documents.get('events', [])
+        if events:
+            data = events[0].get('data', {})
+            for key in ['XY:31', 'xy_stage', 'stage']:
+                if key in data:
+                    val = data[key]
+                    if isinstance(val, (list, tuple)) and len(val) >= 2:
+                        return {"success": True, "x": float(val[0]), "y": float(val[1])}
+                    if isinstance(val, dict):
+                        return {"success": True, "x": float(val.get('x', 0)), "y": float(val.get('y', 0))}
+        return {"success": False, "error": "Could not read position"}
+
+    def _extract_volume(self, documents: dict, params: dict) -> dict:
+        val = self._extract_from_events(documents, ['volume_scanner', 'camera', 'camera_image'])
+        if val is not None:
+            result = {"success": True}
+            if isinstance(val, dict) and val.get('__file_ref__'):
+                result['volume'] = val  # file ref — client resolves
+                result['shape'] = val.get('shape')
+            else:
+                result['volume'] = val
+                if hasattr(val, 'shape'):
+                    result['shape'] = list(val.shape)
+            return result
+        return {"success": False, "error": "No volume data in result"}
+
+    def _extract_image(self, documents: dict, params: dict) -> dict:
+        val = self._extract_from_events(
+            documents, ['HamCam1', 'lightsheet_snap', 'camera', 'bottom_camera', 'bottom_camera_image', 'Bottom PCO']
+        )
+        if val is not None:
+            result = {"success": True}
+            if isinstance(val, dict) and val.get('__file_ref__'):
+                result['image'] = val
+                result['shape'] = val.get('shape')
+            else:
+                result['image'] = val
+                if hasattr(val, 'shape'):
+                    result['shape'] = list(val.shape)
+            return result
+        return {"success": False, "error": "No image data in result"}
+
+    def _extract_calibration(self, documents: dict, params: dict) -> dict:
+        # Calibration results come back in the plan result
+        return {"success": True, "calibration": {}}
+
+    def _extract_success(self, documents: dict, params: dict) -> dict:
+        return {"success": True}
+
+    async def handle_microscope_info(self, request):
+        """GET /api/microscope — handshake: what plans are available?"""
+        from .description import HARDWARE_DESCRIPTION
+        from . import HARDWARE_NAME, HARDWARE_DISPLAY_NAME
+
+        available_plans = []
+        for plan_name, mapping in self.PLAN_REGISTRY.items():
+            if mapping is None:
+                # Directly handled plans are always available
+                available_plans.append(plan_name)
+            else:
+                bluesky_name, _ = mapping
+                if bluesky_name in self.plans:
+                    available_plans.append(plan_name)
+
+        return web.json_response({
+            "name": HARDWARE_NAME,
+            "display_name": HARDWARE_DISPLAY_NAME,
+            "description": HARDWARE_DESCRIPTION,
+            "plans": sorted(available_plans),
+        })
+
+    async def handle_microscope_execute(self, request):
+        """POST /api/microscope/execute — execute a named plan.
+
+        Request: {"plan": "acquire", "params": {"num_slices": 50}}
+        Response: {"success": true, "volume": <file_ref>, "shape": [50, 512, 1024]}
+        """
+        try:
+            data = await request.json()
+            plan_name = data.get("plan")
+            params = data.get("params", {})
+
+            if not plan_name:
+                return web.json_response(
+                    {"success": False, "error": "No plan name provided"}, status=400
+                )
+
+            if plan_name not in self.PLAN_REGISTRY:
+                return web.json_response(
+                    {"success": False, "error": f"Unknown plan: {plan_name}. Available: {sorted(self.PLAN_REGISTRY.keys())}"},
+                    status=400,
+                )
+
+            mapping = self.PLAN_REGISTRY[plan_name]
+
+            # Directly handled plans (not Bluesky)
+            if mapping is None:
+                if plan_name == "detect":
+                    # Forward to SAM detection handler
+                    return await self.handle_detect_embryos(request)
+                elif plan_name == "get_illumination":
+                    return await self.handle_get_led_status(request)
+                elif plan_name == "status":
+                    return await self.handle_status(request)
+                return web.json_response({"success": False, "error": f"Plan '{plan_name}' not implemented"}, status=500)
+
+            bluesky_name, extractor_name = mapping
+
+            if bluesky_name not in self.plans:
+                return web.json_response(
+                    {"success": False, "error": f"Bluesky plan '{bluesky_name}' not loaded"},
+                    status=500,
+                )
+
+            # Execute the Bluesky plan
+            result = await self.submit_plan(bluesky_name, params)
+
+            if not result.get("success"):
+                return web.json_response(result)
+
+            # Extract clean result from Bluesky documents
+            extractor = getattr(self, extractor_name)
+            clean_result = extractor(result.get("documents", {}), params)
+            return web.json_response(clean_result)
+
+        except Exception as e:
+            import traceback
+            return web.json_response(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()},
+                status=500,
+            )
+
+    # =========================================================================
     # Server Lifecycle
     # =========================================================================
 
@@ -949,6 +1114,10 @@ class DeviceLayerServer(Service):
         # SAM endpoints (new - replaces RPyC sam_server.py)
         self._app.router.add_get('/api/sam/status', self.handle_sam_status)
         self._app.router.add_post('/api/detect_embryos', self.handle_detect_embryos)
+
+        # Microscope API (generic plan-based interface)
+        self._app.router.add_get('/api/microscope', self.handle_microscope_info)
+        self._app.router.add_post('/api/microscope/execute', self.handle_microscope_execute)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())

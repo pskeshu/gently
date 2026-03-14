@@ -11,9 +11,14 @@ tools that need volume acquisition will work. No separate CAPABILITIES set.
 Usage:
     result = await microscope.execute("acquire", num_slices=50, exposure_ms=10)
     result = await microscope.acquire(num_slices=50, exposure_ms=10)  # convenience
+
+HTTPMicroscope is the generic client for device layers that expose the
+/api/microscope protocol. It discovers plans on connect and delegates
+all execution to the device layer — no hardware-specific code needed.
 """
 
 import logging
+from pathlib import Path
 from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
@@ -128,3 +133,123 @@ class Microscope:
     async def get_status(self) -> dict:
         """Get microscope status."""
         return await self.execute("status")
+
+
+class HTTPMicroscope(Microscope):
+    """
+    Generic HTTP client for any device layer that speaks /api/microscope.
+
+    Discovers available plans on connect. Delegates all execution to the
+    device layer — no hardware-specific code in the gently process.
+
+    Usage
+    -----
+    >>> microscope = HTTPMicroscope("http://localhost:60610")
+    >>> await microscope.connect()
+    >>> microscope.plans  # discovered from device layer
+    >>> result = await microscope.execute("acquire", num_slices=50)
+    """
+
+    def __init__(self, http_url: str):
+        self.http_url = http_url
+        self._session = None
+        self._connected = False
+        self._available_plans: Set[str] = set()
+
+    @property
+    def plans(self) -> Set[str]:
+        return self._available_plans
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected
+
+    async def connect(self) -> bool:
+        """Connect and discover available plans from the device layer."""
+        import aiohttp
+
+        self._connected = False
+        self._session = aiohttp.ClientSession()
+
+        try:
+            # Handshake: discover plans and description
+            async with self._session.get(f"{self.http_url}/api/microscope") as resp:
+                if resp.status != 200:
+                    logger.warning("Microscope handshake failed: HTTP %d", resp.status)
+                    return False
+                info = await resp.json()
+
+            self._available_plans = set(info.get("plans", []))
+            self.DESCRIPTION = info.get("description", "")
+            self._connected = True
+
+            logger.info(
+                "Connected to %s (%s) — plans: %s",
+                info.get("display_name", "microscope"),
+                self.http_url,
+                ", ".join(sorted(self._available_plans)),
+            )
+            return True
+
+        except Exception as e:
+            logger.warning("Failed to connect to %s: %s", self.http_url, e)
+            return False
+
+    async def disconnect(self) -> None:
+        if self._session:
+            await self._session.close()
+            self._session = None
+        self._connected = False
+
+    async def execute(self, plan: str, **params) -> dict:
+        """Execute a plan on the remote device layer."""
+        if plan not in self._available_plans:
+            raise ValueError(
+                f"Plan '{plan}' not available. "
+                f"Available: {', '.join(sorted(self._available_plans))}"
+            )
+
+        if not self._connected or not self._session:
+            raise ConnectionError("Not connected. Call connect() first.")
+
+        import aiohttp
+
+        try:
+            async with self._session.post(
+                f"{self.http_url}/api/microscope/execute",
+                json={"plan": plan, "params": params},
+                timeout=aiohttp.ClientTimeout(total=300),
+            ) as resp:
+                result = await resp.json()
+
+            # Resolve file references (large arrays written to disk)
+            if isinstance(result, dict):
+                self._resolve_file_refs(result)
+
+            return result
+
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    @staticmethod
+    def _is_file_ref(obj) -> bool:
+        return isinstance(obj, dict) and obj.get("__file_ref__") is True
+
+    def _resolve_file_refs(self, data: dict) -> None:
+        """Resolve file references in-place (load TIFFs from staging dir)."""
+        for key, val in list(data.items()):
+            if self._is_file_ref(val):
+                import tifffile
+                path = Path(val["path"])
+                data[key] = tifffile.imread(str(path))
+                data[f"{key}_path"] = str(path)
+
+    async def configure_session(self, volume_dir: str) -> dict:
+        """Tell the device layer where to write staging TIFFs."""
+        if not self._session:
+            raise ConnectionError("Not connected.")
+        async with self._session.post(
+            f"{self.http_url}/session/configure",
+            json={"volume_dir": volume_dir},
+        ) as resp:
+            return await resp.json()
