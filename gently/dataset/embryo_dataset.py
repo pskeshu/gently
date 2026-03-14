@@ -984,26 +984,10 @@ class EmbryoDataset:
             if width > height * 1.5:
                 projection = projection[:, :width // 2]
 
-        # Normalize to 8-bit
-        projection = projection.astype(np.float32)
-        p_min, p_max = np.percentile(projection, [1, 99.5])
-        projection = np.clip((projection - p_min) / (p_max - p_min + 1e-6) * 255, 0, 255)
-        projection = projection.astype(np.uint8)
-
-        # Convert to JPEG base64
-        img = Image.fromarray(projection)
-
-        # Resize if too large
-        max_dim = 1024
-        if max(img.size) > max_dim:
-            ratio = max_dim / max(img.size)
-            new_size = (int(img.size[0] * ratio), int(img.size[1] * ratio))
-            img = img.resize(new_size, Image.LANCZOS)
-
-        buffer = io.BytesIO()
-        img.save(buffer, format="JPEG", quality=85)
-
-        return base64.b64encode(buffer.getvalue()).decode()
+        # Normalize and encode
+        from gently.core.imaging import normalize_to_uint8, image_to_base64
+        projection = normalize_to_uint8(projection, method="percentile", p_low=1, p_high=99.5)
+        return image_to_base64(projection, format="JPEG", quality=85, max_dimension=1024)
 
     # =========================================================================
     # Query Methods

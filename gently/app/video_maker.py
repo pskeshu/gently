@@ -84,19 +84,8 @@ def make_max_projection(volume: np.ndarray) -> np.ndarray:
 
 def normalize_for_video(image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99.5) -> np.ndarray:
     """Normalize image to 8-bit for video encoding."""
-    # Clip to percentiles to handle outliers
-    p_low = np.percentile(image, percentile_low)
-    p_high = np.percentile(image, percentile_high)
-
-    image = np.clip(image, p_low, p_high)
-
-    # Normalize to 0-255
-    if p_high > p_low:
-        image = ((image - p_low) / (p_high - p_low) * 255).astype(np.uint8)
-    else:
-        image = np.zeros_like(image, dtype=np.uint8)
-
-    return image
+    from gently.core.imaging import normalize_to_uint8
+    return normalize_to_uint8(image, method="percentile", p_low=percentile_low, p_high=percentile_high)
 
 
 def add_timestamp_overlay(
