@@ -11,6 +11,7 @@ both hardware control and SAM detection in a single HTTP process.
 
 import asyncio
 import logging
+import traceback
 from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import aiohttp
@@ -47,7 +48,7 @@ class QueueServerClient:
     >>> await client.move_to_position(1000.0, 500.0)
     >>>
     >>> # Detect embryos
-    >>> results = await client.capture_and_detect_embryos()
+    >>> results = await client.detect_embryos()
     >>>
     >>> # Acquire volume
     >>> volume_data = await client.acquire_volume(num_slices=50)
@@ -69,9 +70,6 @@ class QueueServerClient:
         self._qs_connected = False  # Track actual queue server connection
         self._sam_available = False  # Track SAM availability via HTTP
 
-        # Store last detection results for visualization
-        self._last_detection = None  # {image, embryos, stage_position}
-
     async def connect(self) -> bool:
         """
         Connect to Device Layer Server.
@@ -81,8 +79,6 @@ class QueueServerClient:
         bool
             True if connection successful
         """
-        import aiohttp
-
         self._qs_connected = False
         self._sam_available = False
 
@@ -216,117 +212,115 @@ class QueueServerClient:
         return result
 
     # =========================================================================
-    # Server Operations
+    # HTTP Helpers
     # =========================================================================
+
+    async def _api_get(self, path: str) -> dict:
+        """GET request using the shared session."""
+        self._ensure_connected()
+        async with self._session.get(f"{self.http_url}{path}") as resp:
+            return await resp.json()
+
+    async def _api_post(self, path: str, json: dict = None) -> dict:
+        """POST request using the shared session."""
+        self._ensure_connected()
+        async with self._session.post(f"{self.http_url}{path}", json=json) as resp:
+            return await resp.json()
 
     async def _submit_plan_and_wait(
         self,
         plan_name: str,
         kwargs: Dict = None,
-        timeout: float = settings.timeouts.plan_execution
+        timeout: float = 120.0,
     ) -> Dict:
-        """
-        Submit a plan and wait for completion.
-
-        The simple_server runs plans synchronously - the POST request blocks
-        until the plan completes and returns the full result directly.
-        No polling needed!
+        """Submit a Bluesky plan to the server and wait for completion.
 
         Parameters
         ----------
         plan_name : str
-            Name of the plan function
-        kwargs : dict
-            Plan keyword arguments
+            Name of the Bluesky plan to execute
+        kwargs : dict, optional
+            Arguments to pass to the plan
         timeout : float
-            Maximum wait time in seconds
+            Maximum time to wait (seconds)
 
         Returns
         -------
         dict
-            Result with 'success', 'run_uid', 'documents', and any error info
+            Plan execution result with 'success', 'documents', etc.
         """
         self._ensure_connected()
-        kwargs = kwargs or {}
+
+        payload = {
+            "item": {
+                "name": plan_name,
+                "kwargs": kwargs or {},
+            }
+        }
 
         try:
-            # Submit plan via HTTP POST - server runs it synchronously and returns result
-            payload = {
-                'item': {
-                    'name': plan_name,
-                    'kwargs': kwargs
-                }
-            }
-
             async with self._session.post(
                 f"{self.http_url}/api/queue/item/add",
                 json=payload,
-                timeout=timeout  # Use full timeout for plan execution
+                timeout=aiohttp.ClientTimeout(total=timeout)
             ) as resp:
-                result = await resp.json()
-
-                if result.get('success', False):
-                    # Extract run UID from response
-                    run_uid = (
-                        result.get('uid') or
-                        result.get('documents', {}).get('start', {}).get('uid')
-                    )
-                    return {
-                        'success': True,
-                        'run_uid': run_uid,
-                        'documents': result.get('documents', {}),
-                    }
-                else:
+                if resp.status != 200:
+                    error_text = await resp.text()
                     return {
                         'success': False,
-                        'error': result.get('error', result.get('msg', 'Plan failed'))
+                        'error': f"HTTP {resp.status}: {error_text}",
                     }
 
+                result = await resp.json()
+
+                # Resolve file references (zero-copy transfer)
+                if isinstance(result, dict):
+                    docs = result.get('documents', {})
+                    events = docs.get('events', [])
+                    for event in events:
+                        data = event.get('data', {})
+                        for key, val in list(data.items()):
+                            if self._is_file_ref(val):
+                                arr, path = self._resolve_file_ref(val)
+                                data[key] = arr
+                                # Store path for downstream use
+                                if 'volume_path' not in result:
+                                    result['volume_path'] = str(path)
+
+                return result
+
         except asyncio.TimeoutError:
-            return {'success': False, 'error': f'Plan timed out after {timeout}s'}
+            return {
+                'success': False,
+                'error': f"Plan '{plan_name}' timed out after {timeout}s",
+            }
         except aiohttp.ClientError as e:
-            import traceback
-            return {
-                'success': False,
-                'error': str(NetworkError(f"Device layer request failed: {e}")),
-                'traceback': traceback.format_exc()
-            }
-        except Exception as e:
-            import traceback
-            return {
-                'success': False,
-                'error': str(e),
-                'traceback': traceback.format_exc()
-            }
+            raise NetworkError(f"Device layer request failed: {e}") from e
 
     # =========================================================================
-    # Stage Operations
+    # Stage Control
     # =========================================================================
 
     async def move_to_position(self, x: float, y: float) -> Dict:
         """
-        Move XY stage to position.
+        Move stage to absolute position.
 
         Parameters
         ----------
-        x : float
-            X position in micrometers
-        y : float
-            Y position in micrometers
-
-        Returns
-        -------
-        dict
-            Result with new position
+        x, y : float
+            Target position in micrometers
         """
+        logger.info("Moving to (%.1f, %.1f) µm", x, y)
+
         result = await self._submit_plan_and_wait(
             'move_stage_plan',
-            kwargs={'xy_stage': 'xy_stage', 'x': x, 'y': y}
+            kwargs={'x': x, 'y': y}
         )
 
         if result.get('success'):
-            return {'x': x, 'y': y, 'success': True}
-        return {'error': result.get('error', 'Move failed'), 'success': False}
+            return {'success': True, 'x': x, 'y': y}
+
+        return result
 
     async def get_stage_position(self) -> Tuple[float, float]:
         """
@@ -334,184 +328,173 @@ class QueueServerClient:
 
         Returns
         -------
-        tuple
-            (x, y) position in micrometers
+        tuple of (float, float)
+            Current (x, y) position in micrometers
         """
-        result = await self._submit_plan_and_wait(
-            'read_stage_plan',
-            kwargs={'xy_stage': 'xy_stage'}
-        )
+        result = await self._submit_plan_and_wait('read_stage_plan')
 
         if result.get('success'):
             docs = result.get('documents', {})
             events = docs.get('events', [])
             if events:
                 data = events[0].get('data', {})
-                # DiSPIMXYStage.read() returns {device_name: [x, y]}
-                for key in ['xy_stage', 'XYStage:XY:31', 'xy_stage_position']:
+                # Look for stage coordinates
+                for key in ['XY:31', 'xy_stage', 'stage']:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (list, tuple)) and len(val) >= 2:
                             return (float(val[0]), float(val[1]))
+                        if isinstance(val, dict):
+                            return (float(val.get('x', 0)), float(val.get('y', 0)))
 
-        return (0.0, 0.0)
+        raise DeviceLayerError("Failed to read stage position")
 
     async def get_piezo_position(self) -> float:
         """
-        Get current piezo position.
+        Get current piezo Z position.
 
         Returns
         -------
         float
-            Piezo position in micrometers
+            Current Z position in micrometers
         """
-        result = await self._submit_plan_and_wait(
-            'read_piezo_plan',
-            kwargs={'piezo': 'piezo'}
-        )
+        result = await self._submit_plan_and_wait('read_piezo_plan')
 
         if result.get('success'):
             docs = result.get('documents', {})
             events = docs.get('events', [])
             if events:
                 data = events[0].get('data', {})
-                # Look for piezo position in various possible keys
-                for key in data.keys():
-                    if 'piezo' in key.lower():
+                for key in ['PiezoStage:P:34', 'piezo', 'z_stage']:
+                    if key in data:
                         val = data[key]
                         if isinstance(val, (int, float)):
                             return float(val)
-                        elif isinstance(val, (list, tuple)) and len(val) > 0:
-                            return float(val[0])
+                        if isinstance(val, dict):
+                            return float(val.get('z', val.get('position', 0)))
 
-        return 0.0
+        raise DeviceLayerError("Failed to read piezo position")
 
     # =========================================================================
-    # Calibration Operations
+    # Calibration
     # =========================================================================
 
     async def calibrate_piezo_galvo(
         self,
-        piezo_positions: List[float] = None
+        piezo_positions: Optional[List[float]] = None,
+        galvo_positions: Optional[List[float]] = None,
+        **kwargs,
     ) -> Dict:
         """
-        Run piezo-galvo calibration.
-
-        Parameters
-        ----------
-        piezo_positions : list of float, optional
-            Piezo positions to use for calibration
+        Run piezo-galvo calibration plan.
 
         Returns
         -------
         dict
-            Calibration results
+            Calibration results with optimal positions
         """
-        if piezo_positions is None:
-            piezo_positions = [40.0, 60.0]
+        plan_kwargs = {}
+        if piezo_positions is not None:
+            plan_kwargs['piezo_positions'] = piezo_positions
+        if galvo_positions is not None:
+            plan_kwargs['galvo_positions'] = galvo_positions
+        plan_kwargs.update(kwargs)
 
         result = await self._submit_plan_and_wait(
             'calibrate_piezo_galvo_plan',
-            kwargs={
-                'lightsheet_snap': 'lightsheet_snap',
-                'piezo_positions': piezo_positions
-            },
-            timeout=settings.timeouts.plan_execution
+            kwargs=plan_kwargs,
+            timeout=300.0
         )
 
         if result.get('success'):
-            docs = result.get('documents', {})
-            start = docs.get('start', {})
             return {
-                'calibration': start.get('calibration', {}),
-                'success': True
+                'success': True,
+                'calibration': result.get('calibration', {}),
             }
 
-        return {'error': result.get('error', 'Calibration failed'), 'success': False}
+        return result
+
+    # =========================================================================
+    # Imaging
+    # =========================================================================
+
+    def _extract_image(self, result: dict, candidate_keys: List[str], multi_event: bool = False) -> Optional[tuple]:
+        """Extract image array from plan result documents.
+
+        Returns (array, path) or None if not found.
+        """
+        if not result.get('success'):
+            return None
+
+        docs = result.get('documents', {})
+        events = docs.get('events', [])
+        if not events:
+            return None
+
+        search_events = events if multi_event else [events[0]]
+        for event in search_events:
+            data = event.get('data', {})
+            for key in candidate_keys:
+                if key in data:
+                    val = data[key]
+                    if self._is_file_ref(val):
+                        arr, fpath = self._resolve_file_ref(val)
+                        return arr, fpath
+                    return np.array(val), None
+
+        return None
 
     async def capture_lightsheet_image(
         self,
-        piezo_position: float = 50.0,
-        galvo_position: float = 0.0
+        piezo_position: Optional[float] = None,
+        galvo_position: Optional[float] = None,
+        exposure_ms: float = 10.0,
+        **kwargs,
     ) -> Dict:
         """
-        Capture a single lightsheet image at specified piezo/galvo positions.
+        Capture a single lightsheet image at specified position.
 
         Parameters
         ----------
-        piezo_position : float
-            Piezo position in micrometers. Default: 50.0
-        galvo_position : float
-            Galvo position in volts. Default: 0.0
+        piezo_position : float, optional
+            Z position in micrometers
+        galvo_position : float, optional
+            Galvo angle in volts
+        exposure_ms : float
+            Camera exposure time
 
         Returns
         -------
         dict
-            Contains 'image' (numpy array) and 'success' status
+            ``{'image': np.ndarray, 'piezo_position': float, 'galvo_position': float, 'success': bool}``
         """
+        plan_kwargs = {'exposure_ms': exposure_ms}
+        if piezo_position is not None:
+            plan_kwargs['piezo_position'] = piezo_position
+        if galvo_position is not None:
+            plan_kwargs['galvo_position'] = galvo_position
+        plan_kwargs.update(kwargs)
+
         result = await self._submit_plan_and_wait(
-            'capture_lightsheet_image_plan',
-            kwargs={
-                'lightsheet_snap': 'lightsheet_snap',
-                'scanner': 'scanner',
-                'piezo': 'piezo',
-                'laser_control': 'laser_control',
-                'piezo_position': piezo_position,
-                'galvo_position': galvo_position
-            },
-            timeout=settings.timeouts.rpc_call
+            'lightsheet_snap_plan',
+            kwargs=plan_kwargs,
+            timeout=30.0
         )
 
-        if result.get('success'):
-            run_uid = result.get('run_uid')
-            docs = result.get('documents', {})
-
-            # Try to get image from the response documents first
-            events = docs.get('events', [])
-            if events:
-                data = events[0].get('data', {})
-                # Look for image data under various possible keys
-                for key in ['HamCam1', 'lightsheet_snap', 'camera']:
-                    if key in data:
-                        image_data = data[key]
-                        # Handle file-ref protocol
-                        volume_path = None
-                        if self._is_file_ref(image_data):
-                            image_data, volume_path = self._resolve_file_ref(image_data)
-                        else:
-                            image_data = np.array(image_data)
-                        # Clean up staging file — lightsheet snaps are
-                        # transient (calibration / focus).  The volume
-                        # acquisition path goes through acquire_volume().
-                        if volume_path is not None:
-                            try:
-                                volume_path.unlink(missing_ok=True)
-                            except OSError:
-                                pass
-                        ret = {
-                            'image': image_data,
-                            'piezo_position': piezo_position,
-                            'galvo_position': galvo_position,
-                            'run_uid': run_uid,
-                            'success': True,
-                        }
-                        return ret
-
-            # Plan succeeded but no image data available
-            return {
-                'image': None,
-                'piezo_position': piezo_position,
-                'galvo_position': galvo_position,
-                'run_uid': run_uid,
+        extracted = self._extract_image(result, ['HamCam1', 'lightsheet_snap', 'camera'])
+        if extracted:
+            arr, fpath = extracted
+            ret = {
+                'image': arr,
+                'piezo_position': piezo_position or 0.0,
+                'galvo_position': galvo_position or 0.0,
                 'success': True,
-                'note': 'Plan completed but image not in response'
             }
+            if fpath:
+                ret['image_path'] = fpath
+            return ret
 
-        return {'error': result.get('error', 'Lightsheet snap failed'), 'success': False}
-
-    # =========================================================================
-    # Acquisition Operations
-    # =========================================================================
+        return {'error': result.get('error', 'No image data'), 'success': False}
 
     async def acquire_volume(
         self,
@@ -521,148 +504,82 @@ class QueueServerClient:
         galvo_center: float = 0.0,
         piezo_amplitude: float = 25.0,
         piezo_center: float = 50.0,
+        **kwargs,
     ) -> Dict:
         """
-        Acquire a single volume.
+        Acquire a 3D volume via synchronized galvo-piezo scan.
 
         Parameters
         ----------
         num_slices : int
             Number of Z slices
         exposure_ms : float
-            Camera exposure time in milliseconds
-        galvo_amplitude : float
-            Galvo sweep amplitude in degrees
-        galvo_center : float
-            Galvo center position in degrees
-        piezo_amplitude : float
-            Piezo sweep amplitude in micrometers
-        piezo_center : float
-            Piezo center position in micrometers
+            Camera exposure per slice
+        galvo_amplitude, galvo_center : float
+            Galvo scan range in volts
+        piezo_amplitude, piezo_center : float
+            Piezo Z range in micrometers
 
         Returns
         -------
         dict
-            Results with 'volume' (numpy array) and metadata
+            ``{'volume': np.ndarray, 'shape': tuple, 'success': bool}``
         """
+        plan_kwargs = {
+            'num_slices': num_slices,
+            'exposure_ms': exposure_ms,
+            'galvo_amplitude': galvo_amplitude,
+            'galvo_center': galvo_center,
+            'piezo_amplitude': piezo_amplitude,
+            'piezo_center': piezo_center,
+        }
+        plan_kwargs.update(kwargs)
+
         result = await self._submit_plan_and_wait(
-            'acquire_single_volume_plan',
-            kwargs={
-                'volume_scanner': 'volume_scanner',
-                'num_slices': num_slices,
-                'exposure_ms': exposure_ms,
-                'galvo_amplitude': galvo_amplitude,
-                'galvo_center': galvo_center,
-                'piezo_amplitude': piezo_amplitude,
-                'piezo_center': piezo_center,
-            },
-            timeout=120
+            'volume_scan_plan',
+            kwargs=plan_kwargs,
+            timeout=120.0
         )
 
-        if result.get('success'):
-            # Extract volume data from documents
-            docs = result.get('documents', {})
-            events = docs.get('events', [])
-            if events:
-                # Try to reconstruct volume from events
-                images = []
-                volume_path = None
-                for event in events:
-                    data = event.get('data', {})
-                    for key in ['volume_scanner', 'camera', 'camera_image']:
-                        if key in data:
-                            val = data[key]
-                            # Handle file-ref protocol
-                            if self._is_file_ref(val):
-                                arr, fpath = self._resolve_file_ref(val)
-                                images.append(arr)
-                                volume_path = fpath
-                            else:
-                                images.append(val)
-                            break
-                if images:
-                    # If a file ref gave us the complete volume, use it directly
-                    if len(images) == 1 and isinstance(images[0], np.ndarray) and images[0].ndim >= 3:
-                        volume = images[0]
-                    else:
-                        volume = np.array(images)
-                    ret = {
-                        'volume': volume,
-                        'shape': volume.shape,
-                        'success': True,
-                    }
-                    if volume_path is not None:
-                        ret['volume_path'] = volume_path
-                    return ret
+        extracted = self._extract_image(result, ['volume_scanner', 'camera', 'camera_image'], multi_event=True)
+        if extracted:
+            arr, fpath = extracted
+            ret = {
+                'volume': arr,
+                'shape': arr.shape,
+                'success': True,
+            }
+            if fpath:
+                ret['volume_path'] = str(fpath)
+            elif result.get('volume_path'):
+                ret['volume_path'] = result['volume_path']
+            return ret
 
         return {'error': result.get('error', 'Acquisition failed'), 'success': False}
 
-    async def set_led(self, state: str = 'Closed') -> Dict:
-        """
-        Set LED state directly (bypasses plan queue for immediate effect).
+    # =========================================================================
+    # LED / Camera Controls
+    # =========================================================================
 
-        Parameters
-        ----------
-        state : str
-            'Open' (on) or 'Closed' (off) - Micro-Manager ConfigGroup presets
-        """
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.http_url}/api/led/set",
-                json={'state': state}
-            ) as response:
-                return await response.json()
+    async def set_led(self, state: str = 'Closed') -> Dict:
+        """Set LED state ('Open' or 'Closed')."""
+        return await self._api_post('/api/led/set', {'state': state})
 
     async def get_led_status(self) -> Dict:
-        """
-        Get current LED status and available configurations.
-
-        Returns
-        -------
-        dict
-            Contains 'current_state', 'available_configs', 'group_name'
-        """
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.http_url}/api/led/status") as response:
-                return await response.json()
+        """Get current LED status."""
+        return await self._api_get('/api/led/status')
 
     async def set_camera_led_mode(self, use_led: bool = False) -> Dict:
-        """
-        Enable/disable automatic LED control for bottom camera captures.
-
-        Parameters
-        ----------
-        use_led : bool
-            True to enable LED during capture, False to disable (ambient light only)
-        """
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.http_url}/api/camera/led_mode",
-                json={'use_led': use_led}
-            ) as response:
-                return await response.json()
+        """Enable/disable automatic LED for bottom camera captures."""
+        return await self._api_post('/api/camera/led_mode', {'use_led': use_led})
 
     async def set_bottom_camera_exposure(self, exposure_ms: float) -> Dict:
-        """
-        Set bottom camera exposure time.
-
-        Parameters
-        ----------
-        exposure_ms : float
-            Exposure time in milliseconds
-        """
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{self.http_url}/api/camera/exposure",
-                json={'exposure_ms': exposure_ms}
-            ) as response:
-                return await response.json()
+        """Set bottom camera exposure time in milliseconds."""
+        return await self._api_post('/api/camera/exposure', {'exposure_ms': exposure_ms})
 
     async def get_bottom_camera_exposure(self) -> Dict:
         """Get current bottom camera exposure time."""
-        async with aiohttp.ClientSession() as session:
-            async with session.get(f"{self.http_url}/api/camera/exposure") as response:
-                return await response.json()
+        return await self._api_get('/api/camera/exposure')
 
     async def capture_bottom_image(self, use_led: bool = False, exposure_ms: float = None) -> dict:
         """
@@ -671,173 +588,31 @@ class QueueServerClient:
         Parameters
         ----------
         use_led : bool
-            Whether to turn on LED during capture. Default: False (ambient light)
+            Whether to turn on LED during capture.
         exposure_ms : float, optional
-            Exposure time in milliseconds. If None, uses current camera setting.
+            Exposure time in milliseconds. If None, uses current setting.
 
         Returns
         -------
         dict
-            ``{'image': np.ndarray, 'image_path': Path | None}``.
-            *image_path* is set when the device wrote a staging TIFF.
+            ``{'image': np.ndarray, 'image_path': Path | None}``
         """
-        # Set exposure if specified
         if exposure_ms is not None:
             await self.set_bottom_camera_exposure(exposure_ms)
 
-        # Set camera LED mode before capture (controls automatic LED in device)
         await self.set_camera_led_mode(use_led)
 
-        # Capture image (LED is controlled by device based on use_led setting)
         result = await self._submit_plan_and_wait(
             'capture_bottom_image_plan',
             kwargs={'bottom_camera': 'bottom_camera'}
         )
 
-        if result.get('success'):
-            docs = result.get('documents', {})
-            events = docs.get('events', [])
-            if events:
-                data = events[0].get('data', {})
-                for key in ['bottom_camera', 'bottom_camera_image', 'Bottom PCO']:
-                    if key in data:
-                        val = data[key]
-                        if self._is_file_ref(val):
-                            arr, fpath = self._resolve_file_ref(val)
-                            return {'image': arr, 'image_path': fpath}
-                        return {'image': np.array(val), 'image_path': None}
+        extracted = self._extract_image(result, ['bottom_camera', 'bottom_camera_image', 'Bottom PCO'])
+        if extracted:
+            arr, fpath = extracted
+            return {'image': arr, 'image_path': fpath}
 
         return {'image': np.zeros((100, 100), dtype=np.uint16), 'image_path': None}
-
-    # =========================================================================
-    # Napari Embryo Editing (client-side)
-    # =========================================================================
-
-    async def _edit_embryos_in_napari(
-        self,
-        image: np.ndarray,
-        embryos: List[Dict],
-        stage_position: Tuple[float, float],
-        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-        objective_mag: float = DEFAULT_OBJECTIVE_MAG
-    ) -> List[Dict]:
-        """
-        Open napari for interactive embryo editing.
-
-        This runs on the client side (main thread) to avoid Qt threading issues.
-        """
-        import napari
-
-        um_per_pixel = pixel_size_um / objective_mag
-        image_center_x = image.shape[1] / 2
-        image_center_y = image.shape[0] / 2
-
-        # Build points array from detected embryos
-        original_points = []
-        for emb in embryos:
-            px = emb.get('center_x', emb.get('pixel_x', 0))
-            py = emb.get('center_y', emb.get('pixel_y', 0))
-            original_points.append([py, px])  # napari [row, col]
-
-        # Create napari viewer
-        viewer = napari.Viewer(title="Edit Detected Embryos - Close when done")
-        viewer.add_image(image, name='Bottom Camera', colormap='gray')
-
-        # Add editable points layer
-        points_layer = viewer.add_points(
-            original_points if original_points else None,
-            name='Embryos (editable)',
-            face_color='lime',
-            border_color='white',
-            size=35,
-            symbol='cross'
-        )
-        points_layer.mode = 'select'
-
-        original_points_set = set(tuple(p) for p in original_points)
-
-        logger.info("[INTERACTIVE] Edit embryos in napari:")
-        logger.info("  - Press '2' or click 'Add points' to add new embryos")
-        logger.info("  - Press '3' or click 'Select points' to select existing")
-        logger.info("  - Press Delete/Backspace to remove selected points")
-        logger.info("  - Drag points to move them")
-        logger.info("  - Close window when done")
-
-        # Run napari (blocking - waits for user to close window)
-        napari.run()
-
-        # Get final points
-        final_points = points_layer.data
-
-        # Rebuild embryo list from edited points
-        final_embryos = []
-        next_id = len(embryos) + 1
-
-        for i, point in enumerate(final_points):
-            py, px = point[0], point[1]
-
-            # Check if this point matches an original
-            point_tuple = tuple(point)
-            original_idx = None
-            for j, orig_point in enumerate(original_points):
-                if tuple(orig_point) == point_tuple:
-                    original_idx = j
-                    break
-
-            if original_idx is not None and original_idx < len(embryos):
-                # Existing embryo, keep original data
-                emb = dict(embryos[original_idx])
-            else:
-                # New embryo - calculate stage coordinates using centralized function
-                stage_x_um, stage_y_um = pixel_to_stage_position(
-                    pixel_x=px,
-                    pixel_y=py,
-                    image_center_x=image_center_x,
-                    image_center_y=image_center_y,
-                    stage_x=stage_position[0],
-                    stage_y=stage_position[1],
-                    um_per_pixel=um_per_pixel
-                )
-
-                emb = {
-                    'embryo_id': f'embryo_{next_id}',
-                    'center_x': float(px),
-                    'center_y': float(py),
-                    'stage_x_um': float(stage_x_um),
-                    'stage_y_um': float(stage_y_um),
-                    'confidence': 1.0,
-                    'source': 'manual_edit'
-                }
-                next_id += 1
-
-            # Always update pixel coordinates from napari
-            emb['center_x'] = float(px)
-            emb['center_y'] = float(py)
-
-            # Recalculate stage coordinates using centralized function
-            stage_x_um, stage_y_um = pixel_to_stage_position(
-                pixel_x=px,
-                pixel_y=py,
-                image_center_x=image_center_x,
-                image_center_y=image_center_y,
-                stage_x=stage_position[0],
-                stage_y=stage_position[1],
-                um_per_pixel=um_per_pixel
-            )
-            emb['stage_x_um'] = float(stage_x_um)
-            emb['stage_y_um'] = float(stage_y_um)
-
-            final_embryos.append(emb)
-
-        # Summary
-        final_points_set = set(tuple(p) for p in final_points)
-        added = len(final_points_set - original_points_set)
-        removed = len(original_points_set - final_points_set)
-
-        logger.info("Edit complete: Original: %d, Final: %d, Added: %d, Removed: %d",
-                     len(embryos), len(final_embryos), added, removed)
-
-        return final_embryos
 
     # =========================================================================
     # SAM Embryo Detection (HTTP API)
@@ -858,12 +633,6 @@ class QueueServerClient:
         """
         Capture image and detect embryos using brightness detection + SAM.
 
-        This method calls the device layer's /api/detect_embryos endpoint which:
-        1. Captures image from bottom camera
-        2. Reads stage position
-        3. Runs brightness + SAM detection in-process
-        4. Returns embryo positions
-
         Parameters
         ----------
         pixel_size_um : float
@@ -875,25 +644,19 @@ class QueueServerClient:
         min_confidence : float
             Minimum confidence threshold
         exposure_ms : float, optional
-            Camera exposure time in milliseconds. Higher values improve contrast.
-            If None, uses current camera setting.
+            Camera exposure time in milliseconds.
         brightness_percentile : float
             Percentile threshold for brightness-based detection.
-            99.0 = fewer, confident detections. 98.0 = more. Default: 99.0
-        min_area : int
-            Minimum embryo area in pixels. Default: 5000
-        max_area : int
-            Maximum embryo area in pixels. Default: 150000
+        min_area, max_area : int
+            Embryo area bounds in pixels.
         open_editor : bool
             If True, opens napari after detection for interactive editing.
-            User can add/delete/move embryos. Default: False
 
         Returns
         -------
         dict
             Detection results with 'embryos' list
         """
-        # Check SAM availability
         if not self.has_sam:
             return {'error': 'SAM detection not available on server'}
 
@@ -901,9 +664,7 @@ class QueueServerClient:
 
         try:
             logger.info("Calling /api/detect_embryos (server-side capture + SAM)...")
-            logger.info("Parameters: brightness_percentile=%s, area=%s-%s", brightness_percentile, min_area, max_area)
 
-            # Build request payload
             payload = {
                 'pixel_size_um': pixel_size_um,
                 'objective_mag': objective_mag,
@@ -916,7 +677,6 @@ class QueueServerClient:
             if exposure_ms is not None:
                 payload['exposure_ms'] = exposure_ms
 
-            # Call HTTP endpoint (timeout 5 min for SAM + Claude)
             async with self._session.post(
                 f"{self.http_url}/api/detect_embryos",
                 json=payload,
@@ -930,68 +690,45 @@ class QueueServerClient:
             embryos = result.get('embryos', [])
             stage_pos = tuple(result.get('stage_position', [0.0, 0.0]))
 
-            # Load image if path provided (for napari editor)
-            image = None
-            image_path = result.get('image_path')
-            if image_path and open_editor:
-                try:
-                    import tifffile
-                    image = tifffile.imread(image_path)
-                except Exception:
-                    pass
-
-            # If no image but editor requested, capture one for display
-            if image is None and open_editor:
-                logger.info("Capturing image for napari editor...")
-                snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
-                image = snap['image']
-                # Transient — clean up staging file
-                if snap.get('image_path'):
-                    try:
-                        snap['image_path'].unlink(missing_ok=True)
-                    except OSError:
-                        pass
-
-            # Open napari editor if requested (runs on client side for main thread)
-            if open_editor and image is not None:
-                logger.info("Opening napari editor for review/editing...")
-                embryos = await self._edit_embryos_in_napari(
-                    image, embryos, stage_pos, pixel_size_um, objective_mag
-                )
-                result['embryos'] = embryos
-
-            # Add image to result if available
-            if image is not None:
-                result['image'] = image
-
-            # Store for later visualization
-            self._last_detection = {
-                'image': image,
-                'embryos': result.get('embryos', []),
-                'stage_position': list(stage_pos)
-            }
+            # Open napari editor if requested
+            if open_editor:
+                image = await self._get_detection_image(result, exposure_ms)
+                if image is not None:
+                    from gently.ui.napari_viewer import edit_embryos_in_napari
+                    embryos = edit_embryos_in_napari(
+                        image, embryos, stage_pos, pixel_size_um, objective_mag
+                    )
+                    result['embryos'] = embryos
+                    result['image'] = image
 
             return result
 
         except asyncio.TimeoutError:
             return {'success': False, 'error': 'Detection timed out (5 min limit)'}
         except aiohttp.ClientError as e:
-            import traceback
-            return {
-                'error': str(NetworkError(f"Device layer request failed: {e}")),
-                'traceback': traceback.format_exc(),
-                'success': False
-            }
+            return {'error': str(NetworkError(f"Device layer request failed: {e}")),
+                    'traceback': traceback.format_exc(), 'success': False}
         except Exception as e:
-            import traceback
-            return {
-                'error': str(e),
-                'traceback': traceback.format_exc(),
-                'success': False
-            }
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
 
-    # Alias for compatibility with existing agent code
-    capture_and_detect_embryos = detect_embryos
+    async def _get_detection_image(self, detection_result: dict, exposure_ms: float = None) -> Optional[np.ndarray]:
+        """Load or capture an image for the detection editor."""
+        image_path = detection_result.get('image_path')
+        if image_path:
+            try:
+                import tifffile
+                return tifffile.imread(image_path)
+            except Exception:
+                pass
+        # Fallback: capture a fresh image
+        snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
+        image = snap['image']
+        if snap.get('image_path'):
+            try:
+                snap['image_path'].unlink(missing_ok=True)
+            except OSError:
+                pass
+        return image
 
     async def manual_mark_embryos(
         self,
@@ -1003,9 +740,6 @@ class QueueServerClient:
         """
         Capture image and manually mark embryos via napari.
 
-        Opens a napari window where user can click on embryo centers.
-        Existing embryos are shown in green for reference.
-
         Parameters
         ----------
         pixel_size_um : float
@@ -1013,173 +747,50 @@ class QueueServerClient:
         objective_mag : float
             Objective magnification
         exposure_ms : float, optional
-            Camera exposure time in milliseconds for better contrast.
-            If None, uses current camera setting.
+            Camera exposure time.
         existing_embryos : list, optional
-            List of existing embryo dicts with stage positions.
-            Will be converted to pixel positions and displayed.
+            Previously detected embryos to show as reference.
 
         Returns
         -------
         dict
-            Detection results with 'embryos' list
+            Marked embryo positions with stage coordinates.
         """
         self._ensure_connected()
 
         try:
-            # Capture image via queue server
-            if exposure_ms:
-                logger.info("Setting exposure to %s ms...", exposure_ms)
-            logger.info("Capturing bottom camera image...")
-            snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
+            # Capture image
+            snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
             image = snap['image']
-            image_path = snap.get('image_path')
-            if image.shape == (100, 100):
-                return {'error': 'Failed to capture image'}
 
-            logger.info("Image shape: %s", image.shape)
+            if image is None or (image.shape == (100, 100) and image.max() == 0):
+                return {'success': False, 'error': 'Failed to capture image'}
+
+            # Clean up staging file
+            if snap.get('image_path'):
+                try:
+                    snap['image_path'].unlink(missing_ok=True)
+                except OSError:
+                    pass
 
             # Get stage position
-            logger.info("Reading stage position...")
             stage_pos = await self.get_stage_position()
-            logger.info("Stage position: %s", stage_pos)
 
-            # Convert existing embryos to pixel positions for display
-            display_embryos = None
-            if existing_embryos:
-                um_per_pixel = get_um_per_pixel(pixel_size_um, objective_mag)
-                image_center_x = image.shape[1] / 2
-                image_center_y = image.shape[0] / 2
-
-                display_embryos = []
-                for emb in existing_embryos:
-                    stage_x = emb.get('stage_x', emb.get('x', 0))
-                    stage_y = emb.get('stage_y', emb.get('y', 0))
-
-                    # Convert stage to pixel using centralized function
-                    pixel_x, pixel_y = stage_to_pixel_position(
-                        stage_x=stage_x,
-                        stage_y=stage_y,
-                        current_stage_x=stage_pos[0],
-                        current_stage_y=stage_pos[1],
-                        image_center_x=image_center_x,
-                        image_center_y=image_center_y,
-                        um_per_pixel=um_per_pixel
-                    )
-
-                    display_embryos.append({
-                        'embryo_id': emb.get('embryo_id', '?'),
-                        'pixel_x': pixel_x,
-                        'pixel_y': pixel_y,
-                    })
-                logger.info("Showing %d existing embryos", len(display_embryos))
-
-            # Run manual marking client-side (napari requires main thread)
-            logger.info("Opening napari window for manual marking...")
-            import napari
-
-            um_per_pixel = get_um_per_pixel(pixel_size_um, objective_mag)
-            image_center_x = image.shape[1] / 2
-            image_center_y = image.shape[0] / 2
-
-            viewer = napari.Viewer(title="Click on embryo centers (close window when done)")
-            viewer.add_image(image, name='Bottom Camera', colormap='gray')
-
-            # Add existing embryos as green points
-            if display_embryos:
-                existing_points = []
-                existing_labels = []
-                for emb in display_embryos:
-                    px = emb.get('pixel_x')
-                    py = emb.get('pixel_y')
-                    eid = emb.get('embryo_id', '?')
-                    if px is not None and py is not None:
-                        existing_points.append([py, px])  # napari uses [row, col] = [y, x]
-                        existing_labels.append(eid)
-
-                if existing_points:
-                    properties = {'label': existing_labels}
-                    viewer.add_points(
-                        existing_points,
-                        name='Existing Embryos',
-                        face_color='green',
-                        border_color='white',
-                        size=30,
-                        symbol='cross',
-                        properties=properties,
-                        text={'string': '{label}', 'size': 12, 'color': 'green'}
-                    )
-
-            # Add points layer for new embryos (user will add points here)
-            new_points_layer = viewer.add_points(
-                name='New Embryos (click to add)',
-                face_color='red',
-                border_color='white',
-                size=30,
-                symbol='disc'
+            # Open napari for marking
+            from gently.ui.napari_viewer import mark_embryos_in_napari
+            embryos = mark_embryos_in_napari(
+                image, stage_pos, pixel_size_um, objective_mag, existing_embryos
             )
-            new_points_layer.mode = 'add'  # Start in add mode
-
-            logger.info("[INTERACTIVE] Click on embryo centers in the napari window.")
-            logger.info("Close the window when done marking.")
-
-            # Run napari (blocking)
-            napari.run()
-
-            # Get the points that were added
-            clicked_points = new_points_layer.data  # Array of [y, x] coordinates
-
-            # Convert clicked points to embryo positions
-            embryos = []
-            for i, point in enumerate(clicked_points):
-                py, px = point[0], point[1]  # napari stores as [y, x]
-
-                # Convert pixel to stage position using centralized function
-                embryo_x, embryo_y = pixel_to_stage_position(
-                    pixel_x=px,
-                    pixel_y=py,
-                    image_center_x=image_center_x,
-                    image_center_y=image_center_y,
-                    stage_x=stage_pos[0],
-                    stage_y=stage_pos[1],
-                    um_per_pixel=um_per_pixel
-                )
-
-                embryos.append({
-                    'embryo_id': f'embryo_{i+1}',
-                    'pixel_x': float(px),
-                    'pixel_y': float(py),
-                    'stage_x_um': float(embryo_x),
-                    'stage_y_um': float(embryo_y),
-                    'confidence': 1.0,
-                    'source': 'manual_marking'
-                })
-
-            logger.info("Marked %d embryos", len(embryos))
 
             return {
                 'success': True,
                 'embryos': embryos,
-                'num_embryos': len(embryos),
-                'image': image,
-                'image_path': image_path,
-                'stage_position': list(stage_pos)
+                'stage_position': list(stage_pos),
+                'image_shape': list(image.shape),
             }
 
         except Exception as e:
-            logger.debug("manual_mark_embryos failed with %s: %s", type(e).__name__, e)
-            import traceback
-            # Clean up staging file on failure
-            if 'image_path' in dir() and image_path:
-                try:
-                    image_path.unlink(missing_ok=True)
-                except OSError:
-                    pass
-            return {
-                'error': str(e),
-                'traceback': traceback.format_exc(),
-                'success': False
-            }
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
 
     async def edit_embryos(
         self,
@@ -1192,217 +803,48 @@ class QueueServerClient:
         """
         Interactive embryo editor via napari.
 
-        Opens a napari viewer where user can add, delete, or move embryo positions.
-        Close the window when done to apply changes.
-
         Parameters
         ----------
         image : np.ndarray
             Image to display
         embryos : list
-            List of existing embryo dicts with pixel_x, pixel_y, embryo_id
+            Existing embryo dicts
         stage_position : tuple
             Current (x, y) stage position in micrometers
-        pixel_size_um : float
-            Camera pixel size in micrometers
-        objective_mag : float
-            Objective magnification
-
-        Returns
-        -------
-        dict
-            Updated embryo list with added/removed counts
         """
         try:
-            logger.info("Opening napari embryo editor...")
-            edited_embryos = await self._edit_embryos_in_napari(
+            from gently.ui.napari_viewer import edit_embryos_in_napari
+            edited = edit_embryos_in_napari(
                 image, embryos, stage_position, pixel_size_um, objective_mag
             )
-
             return {
                 'success': True,
-                'embryos': edited_embryos,
+                'embryos': edited,
                 'original_count': len(embryos),
-                'final_count': len(edited_embryos),
+                'final_count': len(edited),
             }
-
         except Exception as e:
-            logger.debug("edit_embryos failed with %s: %s", type(e).__name__, e)
-            import traceback
-            return {
-                'error': str(e),
-                'traceback': traceback.format_exc(),
-                'success': False
-            }
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
 
     async def view_image(self, image: np.ndarray = None, title: str = "Image View",
                          exposure_ms: float = None, save_path: str = None,
                          show: bool = True, embryo_annotations: list = None) -> Dict:
-        """
-        View an image using napari (client-side).
-
-        Parameters
-        ----------
-        image : np.ndarray, optional
-            Image to view. If None, captures from bottom camera.
-        title : str
-            Window title
-        exposure_ms : float, optional
-            Camera exposure time if capturing new image.
-        save_path : str, optional
-            Path to save the image
-        show : bool
-            Whether to show in napari window (blocking). Default: True
-        embryo_annotations : list, optional
-            List of embryo dicts with 'embryo_id', 'pixel_x', 'pixel_y', 'label'
-            to overlay on the image
-
-        Returns
-        -------
-        dict
-            Success status and save_path if saved
-        """
+        """View an image using napari. Captures from bottom camera if no image provided."""
         try:
             if image is None:
-                if exposure_ms:
-                    logger.info("Setting exposure to %s ms...", exposure_ms)
-                logger.info("Capturing image...")
                 snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
                 image = snap['image']
-                # Transient view — clean up staging file
                 if snap.get('image_path'):
                     try:
                         snap['image_path'].unlink(missing_ok=True)
                     except OSError:
                         pass
 
-            result = {'success': True}
-
-            # Save if path provided
-            if save_path:
-                from pathlib import Path
-                from PIL import Image as PILImage
-
-                # Normalize image to 8-bit for saving
-                if image.dtype != np.uint8:
-                    img_normalized = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
-                else:
-                    img_normalized = image
-
-                pil_img = PILImage.fromarray(img_normalized)
-
-                # Use appropriate format based on extension
-                ext = Path(save_path).suffix.lower()
-                if ext in ['.jpg', '.jpeg']:
-                    pil_img.save(save_path, 'JPEG', quality=70, optimize=True)
-                elif ext == '.png':
-                    pil_img.save(save_path, 'PNG', optimize=True)
-                else:
-                    # Fallback to tifffile for other formats
-                    import tifffile
-                    tifffile.imwrite(save_path, image)
-
-                result['saved_to'] = save_path
-                logger.info("Saved image to: %s", save_path)
-
-            # Show if requested (using napari client-side)
-            if show:
-                import napari
-
-                logger.info("Opening napari viewer (shape: %s)...", image.shape)
-
-                viewer = napari.Viewer(title=title)
-                viewer.add_image(image, name='Image', colormap='gray')
-
-                # Add embryo annotations if provided
-                if embryo_annotations:
-                    in_view_points = []
-                    out_of_view_points = []
-
-                    for emb in embryo_annotations:
-                        px = emb.get('pixel_x')
-                        py = emb.get('pixel_y')
-
-                        if px is not None and py is not None:
-                            in_view = 0 <= px < image.shape[1] and 0 <= py < image.shape[0]
-                            if in_view:
-                                in_view_points.append([py, px])
-                            else:
-                                out_of_view_points.append([py, px])
-
-                    # Add in-view embryos (green)
-                    if in_view_points:
-                        viewer.add_points(
-                            in_view_points,
-                            name='Embryos (in view)',
-                            face_color='lime',
-                            border_color='white',
-                            size=30,
-                            symbol='cross'
-                        )
-
-                    # Add out-of-view embryos (orange)
-                    if out_of_view_points:
-                        viewer.add_points(
-                            out_of_view_points,
-                            name='Embryos (out of view)',
-                            face_color='orange',
-                            border_color='white',
-                            size=30,
-                            symbol='cross'
-                        )
-
-                napari.run()  # Blocking
-
-            return result
-
+            from gently.ui.napari_viewer import view_image as _view
+            return _view(image, title=title, save_path=save_path, show=show,
+                        embryo_annotations=embryo_annotations)
         except Exception as e:
-            logger.debug("view_image failed with %s: %s", type(e).__name__, e)
             return {'error': str(e)}
-
-    async def view_detected_embryos(
-        self,
-        save_path: Optional[str] = None,
-        show: bool = True
-    ) -> Dict:
-        """
-        View the last detected embryos with bounding boxes.
-
-        Parameters
-        ----------
-        save_path : str, optional
-            Path to save the visualization image
-        show : bool
-            Whether to display in matplotlib window
-
-        Returns
-        -------
-        dict
-            Success status
-        """
-        if self._last_detection is None:
-            return {'error': 'No detection results available. Run detect_embryos first.'}
-
-        try:
-            image = self._last_detection['image']
-            embryos = self._last_detection['embryos']
-
-            if not embryos:
-                return {'error': 'No embryos in last detection'}
-
-            # Use client-side view_embryos
-            return await self.view_embryos(
-                image=image,
-                embryos=embryos,
-                title=f"Detected {len(embryos)} Embryos",
-                save_path=save_path,
-                show=show
-            )
-
-        except Exception as e:
-            logger.debug("view_detected_embryos failed with %s: %s", type(e).__name__, e)
-            import traceback
-            return {'error': str(e), 'traceback': traceback.format_exc()}
 
     async def view_embryos(
         self,
@@ -1410,109 +852,13 @@ class QueueServerClient:
         embryos: List[Dict],
         title: str = "Embryos",
         save_path: Optional[str] = None,
-        show: bool = True
+        show: bool = True,
     ) -> Dict:
-        """
-        View specified embryos with markers on an image using napari (client-side).
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Image to display
-        embryos : list of dict
-            Embryo data with pixel_x, pixel_y coordinates
-        title : str
-            Window title
-        save_path : str, optional
-            Path to save the visualization image
-        show : bool
-            Whether to display in napari window
-
-        Returns
-        -------
-        dict
-            Success status
-        """
-        if image is None:
-            return {'error': 'No image provided'}
-
-        if not embryos:
-            return {'error': 'No embryos to display'}
-
+        """View embryos with markers on an image using napari."""
         try:
-            result = {'success': True, 'num_embryos': len(embryos)}
-
-            # Save if path provided
-            if save_path:
-                from pathlib import Path
-                from PIL import Image as PILImage
-
-                # Normalize image to 8-bit for saving
-                if image.dtype != np.uint8:
-                    img_normalized = ((image - image.min()) / (image.max() - image.min()) * 255).astype(np.uint8)
-                else:
-                    img_normalized = image
-
-                pil_img = PILImage.fromarray(img_normalized)
-
-                # Use appropriate format based on extension
-                ext = Path(save_path).suffix.lower()
-                if ext in ['.jpg', '.jpeg']:
-                    pil_img.save(save_path, 'JPEG', quality=70, optimize=True)
-                elif ext == '.png':
-                    pil_img.save(save_path, 'PNG', optimize=True)
-                else:
-                    # Fallback to tifffile for other formats
-                    import tifffile
-                    tifffile.imwrite(save_path, image)
-
-                result['saved_to'] = save_path
-                logger.info("Saved image to: %s", save_path)
-
-            # Show if requested (using napari client-side)
-            if show:
-                import napari
-
-                logger.info("Opening napari viewer with %d embryos...", len(embryos))
-
-                viewer = napari.Viewer(title=title)
-                viewer.add_image(image, name='Image', colormap='gray')
-
-                # Collect embryo points and colors
-                points = []
-                colors = []
-                color_palette = [
-                    'red', 'blue', 'green', 'yellow', 'magenta',
-                    'cyan', 'orange', 'purple', 'pink', 'lime'
-                ]
-
-                for i, embryo in enumerate(embryos):
-                    px = embryo.get('pixel_x', embryo.get('center_x', 0))
-                    py = embryo.get('pixel_y', embryo.get('center_y', 0))
-                    points.append([py, px])  # napari uses [row, col] = [y, x]
-                    colors.append(color_palette[i % len(color_palette)])
-
-                    embryo_id = embryo.get('embryo_id', embryo.get('id', i))
-                    logger.debug("%s at pixel (%.0f, %.0f)", embryo_id, px, py)
-
-                # Add points layer for embryos
-                if points:
-                    viewer.add_points(
-                        points,
-                        name=f'Embryos ({len(embryos)})',
-                        face_color=colors,
-                        border_color='white',
-                        size=40,
-                        symbol='disc'
-                    )
-
-                napari.run()  # Blocking
-
-            return result
-
+            from gently.ui.napari_viewer import view_embryos as _view
+            return _view(image, embryos, title=title, save_path=save_path, show=show)
         except Exception as e:
-            logger.debug("view_embryos failed with %s: %s", type(e).__name__, e)
-            import traceback
             return {'error': str(e), 'traceback': traceback.format_exc()}
 
     # =========================================================================
@@ -1544,9 +890,7 @@ class QueueServerClient:
                         }
                     else:
                         status['queue_server'] = {'error': f'HTTP {resp.status}'}
-            except aiohttp.ClientError as e:
-                status['queue_server'] = {'error': str(e)}
-            except Exception as e:
+            except (aiohttp.ClientError, Exception) as e:
                 status['queue_server'] = {'error': str(e)}
         else:
             status['queue_server'] = {'connected': False}
@@ -1564,9 +908,7 @@ class QueueServerClient:
                         }
                     else:
                         status['sam_server'] = {'error': f'HTTP {resp.status}'}
-            except aiohttp.ClientError as e:
-                status['sam_server'] = {'error': str(e)}
-            except Exception as e:
+            except (aiohttp.ClientError, Exception) as e:
                 status['sam_server'] = {'error': str(e)}
         else:
             status['sam_server'] = {'connected': False}
