@@ -1018,15 +1018,7 @@ function renderSpecTable(spec) {
 
 function esc(str) { return escapeHtml(str); }
 
-function formatDate(isoStr) {
-    try {
-        const d = new Date(isoStr);
-        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
-            ' ' + d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
-    } catch {
-        return isoStr;
-    }
-}
+// formatDate is now in utils.js
 
 
 // ══════════════════════════════════════════════════════════

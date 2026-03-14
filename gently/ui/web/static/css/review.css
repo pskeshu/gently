@@ -290,14 +290,14 @@
     font-size: 16px;
 }
 
-.status-badge {
+.review-container .status-badge {
     font-size: 11px;
     padding: 3px 8px;
     border-radius: 4px;
     font-weight: 500;
 }
 
-.status-badge.complete {
+.review-container .status-badge.complete {
     background: var(--accent-green);
     color: white;
 }

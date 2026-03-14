@@ -246,23 +246,9 @@ const ReviewApp = {
         return JSON.stringify(content);
     },
 
-    formatDate(isoString) {
-        if (!isoString) return '';
-        try {
-            return new Date(isoString).toLocaleDateString();
-        } catch {
-            return isoString;
-        }
-    },
+    formatDate(isoString) { return formatDate(isoString); },
 
-    formatDateTime(isoString) {
-        if (!isoString) return '';
-        try {
-            return new Date(isoString).toLocaleString();
-        } catch {
-            return isoString;
-        }
-    },
+    formatDateTime(isoString) { return formatDate(isoString); },
 
     escapeHtml(str) { return escapeHtml(str); },
 

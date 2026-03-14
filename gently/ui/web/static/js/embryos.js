@@ -16,8 +16,9 @@ const EmbryosManager = {
         baseInterval: 120
     },
 
-    // Detection reasoning cache (per-embryo)
+    // Detection reasoning cache (per-embryo, capped to prevent unbounded growth)
     detectionReasoning: {},  // embryo_id -> list of detection results with reasoning
+    MAX_REASONING_PER_EMBRYO: 200,
 
     // Track if we've reconciled with server (prevents showing stale cached data)
     hasReconciledWithServer: false,
@@ -1121,6 +1122,11 @@ const EmbryosManager = {
                 // Temporal analysis for detecting arrested/stalled embryos
                 temporal_analysis: data.temporal_analysis,
             });
+            // Cap per-embryo reasoning to prevent unbounded memory growth
+            const arr = this.detectionReasoning[embryoId];
+            if (arr.length > this.MAX_REASONING_PER_EMBRYO) {
+                arr.splice(0, arr.length - this.MAX_REASONING_PER_EMBRYO);
+            }
         }
 
         if (this.currentView === 'default') {

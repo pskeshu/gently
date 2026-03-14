@@ -28,11 +28,13 @@ const ANALYSIS_TYPES = ['segmentation', 'detection', 'classification', 'tracking
                         'roi_detection', 'cropped_roi', 'vision_prepared', 'timeline', 'cv_visualization'];
 const VOLUME_TYPES = ['volume', 'volume_projection', 'z_stack', 'timelapse'];
 
-// Statusbar
+// Statusbar (cached DOM refs)
+let _statusLeft, _statusRight, _timelapseText;
 function updateStatusbar() {
-    const left = document.getElementById('status-left');
-    const right = document.getElementById('status-right');
-    if (!left) return;
+    if (!_statusLeft) _statusLeft = document.getElementById('status-left');
+    if (!_statusRight) _statusRight = document.getElementById('status-right');
+    if (!_timelapseText) _timelapseText = document.getElementById('timelapse-status-text');
+    if (!_statusLeft) return;
 
     // Plans and Sessions tabs manage their own statusbar content
     if (state.tab === 'plans' || state.tab === 'sessions') return;
@@ -40,9 +42,8 @@ function updateStatusbar() {
     const embryoCount = state.embryos?.length || 0;
     const imageCount = state.snapshots?.length || 0;
     const eventCount = state.allEvents?.length || 0;
-    left.textContent = `${embryoCount} embryo${embryoCount !== 1 ? 's' : ''} \u00B7 ${imageCount} image${imageCount !== 1 ? 's' : ''} \u00B7 ${eventCount} event${eventCount !== 1 ? 's' : ''}`;
-    const timelapse = document.getElementById('timelapse-status-text');
-    if (right && timelapse) right.textContent = timelapse.textContent;
+    _statusLeft.textContent = `${embryoCount} embryo${embryoCount !== 1 ? 's' : ''} \u00B7 ${imageCount} image${imageCount !== 1 ? 's' : ''} \u00B7 ${eventCount} event${eventCount !== 1 ? 's' : ''}`;
+    if (_statusRight && _timelapseText) _statusRight.textContent = _timelapseText.textContent;
 }
 
 // UI Update functions

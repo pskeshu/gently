@@ -54,6 +54,20 @@ function updateViewButtons(containerId, activeView) {
 }
 
 /**
+ * Format an ISO date string for display.
+ * @param {string} isoStr
+ * @returns {string} e.g. "Mar 14, 2:30 PM"
+ */
+function formatDate(isoStr) {
+    if (!isoStr) return '';
+    try {
+        const d = new Date(isoStr);
+        return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+            ', ' + d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    } catch { return isoStr; }
+}
+
+/**
  * Toggle a dropdown element's visibility and register a one-shot
  * outside-click handler to close it.
  *
