@@ -43,7 +43,6 @@ const SPEC_UNITS = {
 
 // ── State ────────────────────────────────────────────────
 const state = {
-    view: 'dashboard',          // 'dashboard' | 'plan'
     planView: 'doc',            // 'doc' | 'graph' | 'board' | 'decide' | 'matrix'
     graphVertical: false,
     activeCampaignId: null,
@@ -114,13 +113,11 @@ function boot() {
     // Plan view switcher
     setupPlanViewSwitcher();
 
-    // Route: auto-open campaign if ID is provided
+    // Load campaigns (will auto-select first or the specified one)
     const initialId = window.INITIAL_CAMPAIGN_ID;
-    if (initialId) {
-        openCampaign(initialId);
-    } else {
-        loadCampaigns();
-    }
+    loadCampaigns().then(() => {
+        if (initialId) openCampaign(initialId);
+    });
 }
 
 
@@ -148,7 +145,21 @@ async function loadCampaigns() {
         state.allCampaigns.forEach(indexItems);
 
         hideLoading();
-        renderAll();
+        renderNavigator();
+
+        // Auto-select first campaign if none active
+        if (!state.activeCampaignId && state.allCampaigns.length > 0) {
+            openCampaign(state.allCampaigns[0].campaign.id);
+        } else if (state.activeCampaignId) {
+            renderAll();
+        } else {
+            $canvasContent.innerHTML = `<div class="empty-state">
+                <p>No campaigns yet</p>
+                <span class="empty-hint">Create a campaign plan to get started</span>
+            </div>`;
+            updateHeader();
+            updateStatusbar();
+        }
     } catch (err) {
         console.error('Failed to load campaigns:', err);
         hideLoading();
@@ -198,14 +209,18 @@ function buildItemIndex(node) {
 // ══════════════════════════════════════════════════════════
 
 async function openCampaign(campaignId) {
-    state.view = 'plan';
+    if (state.activeCampaignId === campaignId && state.docData) {
+        // Already loaded — just update sidebar highlight
+        renderNavigator();
+        return;
+    }
     state.activeCampaignId = campaignId;
     state.selectedItemId = null;
     state.viewingSnapshotId = null;
+    state.planView = 'doc';
     closeInspector();
     showLoading('Loading plan...');
 
-    // Load data in parallel
     await Promise.all([
         loadDocument(campaignId),
         loadVersions(campaignId),
@@ -228,42 +243,12 @@ async function openCampaign(campaignId) {
     }
 
     renderAll();
-
-    // Update URL without reload
-    const url = `/campaigns/${encodeURIComponent(campaignId)}/review`;
-    if (window.location.pathname !== url) {
-        history.pushState({ view: 'plan', campaignId }, '', url);
-    }
-}
-
-function goToDashboard() {
-    state.view = 'dashboard';
-    state.planView = 'doc';
-    state.graphVertical = false;
-    state.activeCampaignId = null;
-    state.selectedItemId = null;
-    state.docData = null;
-    state.versions = [];
-    state.viewingSnapshotId = null;
-    closeInspector();
-
-    // Re-render with existing campaign data, or reload
-    if (state.allCampaigns.length > 0) {
-        renderAll();
-    } else {
-        loadCampaigns();
-    }
-
-    const url = '/campaigns';
-    if (window.location.pathname !== url) {
-        history.pushState({ view: 'dashboard' }, '', url);
-    }
 }
 
 // Handle browser back/forward
 window.addEventListener('popstate', e => {
     const s = e.state;
-    if (s && s.view === 'plan' && s.campaignId) {
+    if (s && s.campaignId) {
         openCampaign(s.campaignId);
     } else {
         goToDashboard();
@@ -287,13 +272,7 @@ function renderAll() {
 
 function renderNavigator() {
     if (!$navContent) return;
-    if (state.view === 'dashboard') {
-        $workspace?.classList.remove('plan-mode');
-        renderNavDashboard();
-    } else {
-        $workspace?.classList.add('plan-mode');
-        $navContent.innerHTML = '';
-    }
+    renderNavDashboard();
 }
 
 function renderNavDashboard() {
@@ -319,173 +298,27 @@ function renderNavDashboard() {
     $navContent.innerHTML = html;
 }
 
-function renderNavOutline() {
-    if (!state.docData) return;
-    const tree = state.docData.document;
-    const campaign = tree.campaign;
-
-    let html = `<div class="nav-back" onclick="goToDashboard()">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
-        All Campaigns
-    </div>`;
-
-    html += `<div class="nav-campaign-title">${esc(campaign.description)}</div>`;
-
-    // Root-level items (not in any phase)
-    const rootItems = tree.items || [];
-    if (rootItems.length > 0) {
-        rootItems.forEach((item, idx) => {
-            const dot = STATUS_DOTS[item.status] || '\u25CB';
-            const dotClass = item.status || 'planned';
-            html += `<div class="nav-item" data-item-id="${item.id}" onclick="navigateToItem('${item.id}')">
-                <span class="nav-item-dot dot-${dotClass}">${dot}</span>
-                <span class="nav-item-num">${idx + 1}</span>
-                <span class="nav-item-title">${esc(item.title)}</span>
-            </div>`;
-        });
-    }
-
-    // Phase children
-    const children = tree.children || [];
-    children.forEach((child, idx) => {
-        const phaseNum = idx + 1;
-        const phaseName = child.campaign.description || child.campaign.shorthand;
-        const items = child.items || [];
-
-        html += `<div class="nav-outline-phase">
-            <div class="nav-phase-header" onclick="toggleNavPhase(this)">
-                <svg class="nav-phase-chevron open" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <polyline points="9,18 15,12 9,6"></polyline>
-                </svg>
-                <span class="nav-phase-name">${esc(phaseName)}</span>
-            </div>
-            <div class="nav-phase-items">`;
-
-        items.forEach((item, iIdx) => {
-            const taskNum = `${phaseNum}.${iIdx + 1}`;
-            const dot = STATUS_DOTS[item.status] || '\u25CB';
-            const dotClass = item.status || 'planned';
-            html += `<div class="nav-item" data-item-id="${item.id}" onclick="navigateToItem('${item.id}')">
-                <span class="nav-item-dot dot-${dotClass}">${dot}</span>
-                <span class="nav-item-num">${esc(taskNum)}</span>
-                <span class="nav-item-title">${esc(item.title)}</span>
-            </div>`;
-        });
-
-        html += `</div></div>`;
-    });
-
-    // Bottom links
-    const refCount = (state.docData.bibliography || []).length;
-    html += `<div class="nav-divider"></div>`;
-    html += `<div class="nav-link" onclick="scrollCanvasTo('bibliography-section')">
-        Refs <span class="nav-link-count">(${refCount})</span>
-    </div>`;
-    html += `<div class="nav-link" onclick="scrollCanvasTo('versions-section')">
-        History <span class="nav-link-count">(${state.versions.length})</span>
-    </div>`;
-
-    $navContent.innerHTML = html;
-}
-
 // ══════════════════════════════════════════════════════════
 //  CANVAS
 // ══════════════════════════════════════════════════════════
 
 function renderCanvas() {
     if (!$canvasContent) return;
-    if (state.view === 'dashboard') {
-        renderDashboard();
-    } else {
-        switch (state.planView) {
-            case 'board': renderBoardView(); break;
-            case 'decide': renderDecideView(); break;
-            case 'graph': renderGraphView(); break;
-            case 'matrix': renderMatrixView(); break;
-            default: renderPlanDoc(); break;
-        }
-    }
-}
-
-function renderDashboard() {
-    if (state.allCampaigns.length === 0) {
+    if (!state.docData) {
         $canvasContent.innerHTML = `<div class="empty-state">
-            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" opacity="0.3">
-                <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                <polyline points="14,2 14,8 20,8"/>
-            </svg>
-            <p>No campaigns yet</p>
-            <span class="empty-hint">Create a campaign from a chat session to get started</span>
+            <p>Select a campaign</p>
         </div>`;
         return;
     }
-
-    let html = '<div class="overview-grid">';
-    for (const tree of state.allCampaigns) {
-        html += renderCampaignCard(tree);
+    switch (state.planView) {
+        case 'board': renderBoardView(); break;
+        case 'decide': renderDecideView(); break;
+        case 'graph': renderGraphView(); break;
+        case 'matrix': renderMatrixView(); break;
+        default: renderPlanDoc(); break;
     }
-    html += '</div>';
-    $canvasContent.innerHTML = html;
 }
 
-function renderCampaignCard(tree) {
-    const c = tree.campaign;
-    const status = tree.status || {};
-    const total = status.total || 0;
-    const completed = status.completed || 0;
-    const inProgress = status.in_progress || 0;
-    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-    const children = tree.children || [];
-
-    let phasesHtml = '';
-    if (children.length > 0) {
-        phasesHtml = '<div class="campaign-phases-preview">';
-        children.forEach((child, idx) => {
-            const ps = child.status || {};
-            const pt = ps.total || 0;
-            const pc = ps.completed || 0;
-            const ppct = pt > 0 ? Math.round((pc / pt) * 100) : 0;
-            const name = child.campaign.description || child.campaign.shorthand;
-            phasesHtml += `<div class="phase-row">
-                <span class="phase-num">P${idx + 1}</span>
-                <span class="phase-name">${esc(name)}</span>
-                ${pt > 0 ? `<div class="phase-mini-progress"><div class="phase-mini-fill" style="width:${ppct}%"></div></div>` : ''}
-                <span class="phase-count">${pt > 0 ? `${pc}/${pt}` : ''}</span>
-            </div>`;
-        });
-        phasesHtml += '</div>';
-    }
-
-    const descParts = (c.description || '').split(' — ');
-    const cardTitle = descParts[0] || c.shorthand;
-    const cardSub = descParts.length > 1 ? descParts.slice(1).join(' — ') : '';
-
-    return `<div class="campaign-card" data-status="${c.status}">
-        <div class="campaign-card-header">
-            <div class="campaign-title-row">
-                ${c.shorthand ? `<span class="campaign-shorthand">${esc(c.shorthand)}</span>` : ''}
-                <span class="campaign-name">${esc(cardTitle)}</span>
-                <span class="status-badge status-${c.status}">${STATUS_LABELS[c.status] || c.status}</span>
-            </div>
-            ${cardSub ? `<div class="campaign-subtitle">${esc(cardSub)}</div>` : ''}
-        </div>
-        ${c.target ? `<div class="campaign-target">${esc(c.target)}</div>` : ''}
-        ${total > 0 ? `<div class="campaign-progress">
-            <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
-            <span class="progress-text">${completed}/${total} \u00B7 ${pct}%</span>
-        </div>` : ''}
-        ${phasesHtml}
-        <div class="campaign-card-footer">
-            <button class="view-plan-btn" onclick="openCampaign('${esc(c.id)}')">
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
-                    <polyline points="14,2 14,8 20,8"/>
-                </svg>
-                View Plan
-            </button>
-        </div>
-    </div>`;
-}
 
 // ── Plan Document ────────────────────────────────────────
 
@@ -979,34 +812,11 @@ function backToCurrent() {
 
 function updateHeader() {
     const $viewSwitcher = document.getElementById('plan-view-switcher');
-    if (state.view === 'dashboard') {
-        if ($headerTitle) $headerTitle.textContent = 'Campaigns';
-        if ($headerBreadcrumb) $headerBreadcrumb.innerHTML = '';
-        $versionWrap?.classList.add('hidden');
-        $printBtn?.classList.add('hidden');
-        $viewSwitcher?.classList.add('hidden');
-    } else {
-        const campaign = state.docData?.document?.campaign;
-        if ($headerTitle) {
-            $headerTitle.innerHTML = `<a class="toolbar-back-link" onclick="goToDashboard()">Campaigns</a>`;
-        }
-        if ($headerBreadcrumb) {
-            // Build campaign switcher dropdown
-            let switcherHtml = `<div class="campaign-switcher">
-                <button class="campaign-switcher-btn" onclick="toggleCampaignSwitcher(event)">
-                    ${esc(campaign?.shorthand || 'Plan')}
-                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6,9 12,15 18,9"/></svg>
-                </button>
-                <div class="campaign-switcher-dropdown hidden" id="campaign-switcher-dropdown">`;
-            (state.allCampaigns || []).forEach(c => {
-                const isActive = c.campaign.id === state.activeCampaignId;
-                const safeId = encodeURIComponent(c.campaign.id);
-                switcherHtml += `<div class="campaign-switcher-item ${isActive ? 'active' : ''}" onclick="openCampaign(decodeURIComponent('${safeId}'))">${esc(c.campaign.shorthand)}</div>`;
-            });
-            switcherHtml += '</div></div>';
-            $headerBreadcrumb.innerHTML = switcherHtml;
-        }
-        // Show version dropdown if we have versions
+    const campaign = state.docData?.document?.campaign;
+    if ($headerTitle) $headerTitle.textContent = campaign?.shorthand || 'Campaigns';
+    if ($headerBreadcrumb) $headerBreadcrumb.textContent = '';
+    // Show view switcher and controls when a campaign is loaded
+    if (state.docData) {
         if (state.versions.length > 0) {
             $versionWrap?.classList.remove('hidden');
         } else {
@@ -1014,50 +824,34 @@ function updateHeader() {
         }
         $printBtn?.classList.remove('hidden');
         $viewSwitcher?.classList.remove('hidden');
+        updateViewButtons('plan-view-switcher', state.planView);
+    } else {
+        $versionWrap?.classList.add('hidden');
+        $printBtn?.classList.add('hidden');
+        $viewSwitcher?.classList.add('hidden');
     }
 }
 
 function updateStatusbar() {
-    if (state.view === 'dashboard') {
-        // Aggregate stats
-        let totalItems = 0, doneItems = 0, activeItems = 0;
-        function countTree(tree) {
-            const s = tree.status || {};
-            totalItems += s.total || 0;
-            doneItems += s.completed || 0;
-            activeItems += s.in_progress || 0;
-            (tree.children || []).forEach(countTree);
-        }
-        state.allCampaigns.forEach(countTree);
+    const numCampaigns = state.allCampaigns.length;
+    const status = state.docData?.status || {};
+    const total = status.total || 0;
+    const completed = status.completed || 0;
+    const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-        const activeCampaigns = state.allCampaigns.filter(t => t.campaign.status === 'active').length;
-        const pct = totalItems > 0 ? Math.round((doneItems / totalItems) * 100) : 0;
-
-        if ($statusLeft) {
-            $statusLeft.textContent = `${state.allCampaigns.length} campaign${state.allCampaigns.length !== 1 ? 's' : ''} \u00B7 ${totalItems} items \u00B7 ${pct}% complete`;
-        }
-        if ($statusRight) {
-            $statusRight.textContent = `${activeCampaigns} active`;
-        }
-    } else {
-        const status = state.docData?.status || {};
-        const total = status.total || 0;
-        const completed = status.completed || 0;
-        const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
-        const phases = (state.docData?.document?.children || []).length;
-
-        if ($statusLeft) {
-            $statusLeft.textContent = `Plan: ${total} items \u00B7 ${pct}% complete \u00B7 ${phases} phase${phases !== 1 ? 's' : ''}`;
-        }
-        if ($statusRight) {
-            if (state.versions.length > 0) {
-                const latest = state.versions.reduce((a, b) =>
-                    (b.version_number || 0) > (a.version_number || 0) ? b : a, state.versions[0]);
-                const date = latest.created_at ? formatDate(latest.created_at) : '';
-                $statusRight.textContent = `Last snapshot: v${latest.version_number || '?'} ${date}`;
-            } else {
-                $statusRight.textContent = '';
-            }
+    if ($statusLeft) {
+        $statusLeft.textContent = state.docData
+            ? `${numCampaigns} campaign${numCampaigns !== 1 ? 's' : ''} \u00B7 ${total} items \u00B7 ${pct}% complete`
+            : `${numCampaigns} campaign${numCampaigns !== 1 ? 's' : ''}`;
+    }
+    if ($statusRight) {
+        if (state.versions.length > 0) {
+            const latest = state.versions.reduce((a, b) =>
+                (b.version_number || 0) > (a.version_number || 0) ? b : a, state.versions[0]);
+            const date = latest.created_at ? formatDate(latest.created_at) : '';
+            $statusRight.textContent = `v${latest.version_number || '?'} ${date}`;
+        } else {
+            $statusRight.textContent = '';
         }
     }
 }
@@ -1090,7 +884,7 @@ function toggleNavPhase(headerEl) {
 
 // ── Scroll-spy ───────────────────────────────────────────
 function onCanvasScroll() {
-    if (state.view !== 'plan' || state.planView !== 'doc' || state.selectedItemId) return;
+    if (state.planView !== 'doc' || state.selectedItemId) return;
 
     const canvas = document.getElementById('canvas');
     if (!canvas) return;
@@ -1231,10 +1025,6 @@ function formatDate(isoStr) {
     }
 }
 
-function toggleCampaignSwitcher(event) {
-    const dropdown = document.getElementById('campaign-switcher-dropdown');
-    toggleDropdown(dropdown, event);
-}
 
 // ══════════════════════════════════════════════════════════
 //  PLAN VIEW SWITCHING
@@ -1251,12 +1041,12 @@ const STATUS_COLORS = {
 function setupPlanViewSwitcher() {
     initViewSwitcher('plan-view-switcher', switchPlanView, {
         views: ['doc', 'graph', 'board', 'decide', 'matrix'],
-        guard: () => state.view === 'plan'
+        guard: () => !!state.docData
     });
 }
 
 function switchPlanView(viewName) {
-    if (state.view !== 'plan') return;
+    if (!state.docData) return;
     state.planView = viewName;
     updateViewButtons('plan-view-switcher', viewName);
     renderCanvas();
@@ -1612,7 +1402,6 @@ function renderMatrixView() {
 // Expose init and onclick-referenced functions to global scope
 window.CampaignsApp = { init: boot };
 window.openCampaign = openCampaign;
-window.goToDashboard = goToDashboard;
 window.navigateToItem = navigateToItem;
 window.toggleNavPhase = toggleNavPhase;
 window.scrollCanvasTo = scrollCanvasTo;
@@ -1620,7 +1409,6 @@ window.selectItem = selectItem;
 window.viewVersion = viewVersion;
 window.backToCurrent = backToCurrent;
 window.switchPlanView = switchPlanView;
-window.toggleCampaignSwitcher = toggleCampaignSwitcher;
 window.toggleGraphLayout = toggleGraphLayout;
 
 // Auto-init on standalone campaigns page (detected via data-page attribute)
