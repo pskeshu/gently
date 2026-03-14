@@ -15,20 +15,6 @@
 .workspace.inspector-open {
     grid-template-columns: 240px 1fr 380px;
 }
-.workspace.plan-mode {
-    grid-template-columns: 0 1fr 0;
-}
-.workspace.plan-mode.inspector-open {
-    grid-template-columns: 0 1fr 380px;
-}
-.workspace.plan-mode .navigator {
-    overflow: hidden;
-    padding: 0;
-    border: none;
-    width: 0;
-    min-width: 0;
-}
-
 .hidden { display: none !important; }
 
 /* ── Campaign Switcher ────────────────────────────────── */
@@ -261,8 +247,12 @@
 .graph-view {
     overflow: auto;
     padding: 0;
-    height: 100%;
-    position: relative;
+    position: absolute;
+    inset: 0;
+    background: var(--bg-dark);
+}
+.graph-view svg {
+    min-height: 100%;
 }
 .graph-toolbar {
     position: sticky;
