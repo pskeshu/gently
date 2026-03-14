@@ -1272,38 +1272,40 @@ function renderGraphView() {
     const svgW = numLayers * nodeW + (numLayers - 1) * gapX + pad * 2;
     const svgH = maxPerLayer * nodeH + (maxPerLayer - 1) * gapY + pad * 2;
 
-    // Assign positions
+    // Sort items within each layer by phase for cleaner grouping
+    Object.values(layers).forEach(layerItems => {
+        layerItems.sort((a, b) => a._phaseNum - b._phaseNum);
+    });
+
+    // Assign positions — compact, phase-grouped
     const pos = {};
     Object.entries(layers).forEach(([d, layerItems]) => {
         const di = parseInt(d);
-        const totalH = layerItems.length * (nodeH + gapY) - gapY;
-        const startY = (svgH - totalH) / 2;
         layerItems.forEach((item, idx) => {
             pos[item.id] = {
                 x: pad + di * (nodeW + gapX),
-                y: startY + idx * (nodeH + gapY)
+                y: pad + idx * (nodeH + gapY)
             };
         });
     });
 
-    // Phase background bands
+    // Phase background bands — horizontal stripes based on Y-range per phase
     let bands = '';
-    const phaseColors = ['rgba(96,165,250,0.06)', 'rgba(52,211,153,0.06)', 'rgba(251,191,36,0.06)', 'rgba(167,139,250,0.06)', 'rgba(248,113,113,0.06)'];
-    Object.entries(phaseMap).forEach(([pNum, info], ci) => {
-        if (!info.items.length) return;
-        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-        info.items.forEach(i => {
-            const p = pos[i.id];
-            if (!p) return;
-            minX = Math.min(minX, p.x);
-            minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x + nodeW);
-            maxY = Math.max(maxY, p.y + nodeH);
-        });
-        const bpad = 16;
+    const phaseColors = ['rgba(96,165,250,0.06)', 'rgba(52,211,153,0.06)', 'rgba(251,191,36,0.06)', 'rgba(167,139,250,0.06)', 'rgba(248,113,113,0.06)', 'rgba(236,72,153,0.06)'];
+    const phaseYRanges = {};
+    items.forEach(i => {
+        const p = pos[i.id];
+        if (!p) return;
+        const pn = i._phaseNum;
+        if (!phaseYRanges[pn]) phaseYRanges[pn] = { minY: Infinity, maxY: -Infinity, name: i._phase };
+        phaseYRanges[pn].minY = Math.min(phaseYRanges[pn].minY, p.y);
+        phaseYRanges[pn].maxY = Math.max(phaseYRanges[pn].maxY, p.y + nodeH);
+    });
+    Object.entries(phaseYRanges).forEach(([pNum, range], ci) => {
+        const bpad = 12;
         const color = phaseColors[ci % phaseColors.length];
-        bands += `<rect x="${minX - bpad}" y="${minY - bpad - 18}" width="${maxX - minX + nodeW + bpad * 2 - nodeW}" height="${maxY - minY + nodeH + bpad * 2 + 18}" rx="12" fill="${color}" />`;
-        bands += `<text x="${minX - bpad + 8}" y="${minY - bpad}" class="graph-phase-label">P${pNum} — ${esc(info.name.split(' — ').pop())}</text>`;
+        bands += `<rect x="0" y="${range.minY - bpad - 16}" width="${svgW}" height="${range.maxY - range.minY + bpad * 2 + 16}" rx="0" fill="${color}" />`;
+        bands += `<text x="${pad - 4}" y="${range.minY - bpad}" class="graph-phase-label">P${pNum} — ${esc(range.name.split(' — ').pop())}</text>`;
     });
 
     // Render edges
