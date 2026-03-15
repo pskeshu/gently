@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A Population of Scientific Agents</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: #ffffff;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    padding: 48px 32px;
+  }
+
+  .diagram {
+    max-width: 960px;
+    width: 100%;
+  }
+
+  .panels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    margin-bottom: 20px;
+  }
+
+  .panel {
+    position: relative;
+  }
+
+  .panel-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.8px;
+    text-align: center;
+    margin-bottom: 6px;
+    color: #2d3748;
+  }
+
+  .panel-desc {
+    font-size: 11px;
+    color: #2d3748;
+    text-align: center;
+    line-height: 1.5;
+    margin-bottom: 12px;
+    min-height: 32px;
+  }
+
+  .panel svg {
+    width: 100%;
+    height: auto;
+    display: block;
+    border: 1px solid #edf2f7;
+    border-radius: 12px;
+    background: #fcfcfd;
+  }
+
+  .footnote {
+    text-align: center;
+    font-size: 11.5px;
+    color: #2d3748;
+    line-height: 1.6;
+  }
+</style>
+</head>
+<body>
+<div class="diagram">
+  <div class="panels">
+
+    <!-- ===================== LEFT PANEL: LOCAL ORDER ===================== -->
+    <div class="panel">
+      <div class="panel-label">Local Order</div>
+      <div class="panel-desc">
+        Within a domain, agents share data, validate findings,<br>and train models together.
+      </div>
+      <svg viewBox="0 0 440 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <!-- Card shadow filter -->
+          <filter id="cardShadow" x="-4%" y="-4%" width="108%" height="110%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dy="1"/>
+            <feComponentTransfer><feFuncA type="linear" slope="0.06"/></feComponentTransfer>
+            <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+        </defs>
+
+        <!-- ===== DOMAIN CARDS ===== -->
+
+        <!-- Microscopy (top-left) -->
+        <rect x="16" y="16" width="196" height="170" rx="10" fill="#f7faff" stroke="#c3dafe" stroke-width="1.5" filter="url(#cardShadow)"/>
+        <text x="36" y="40" font-family="Inter" font-size="10.5" font-weight="700" fill="#2b6cb0">Microscopy</text>
+        <text x="36" y="53" font-family="Inter" font-size="8.5" fill="#2d3748">Light-sheet, confocal, cryo-EM</text>
+
+        <!-- Astronomy (top-right) -->
+        <rect x="228" y="16" width="196" height="170" rx="10" fill="#faf5ff" stroke="#d6bcfa" stroke-width="1.5" filter="url(#cardShadow)"/>
+        <text x="248" y="40" font-family="Inter" font-size="10.5" font-weight="700" fill="#6b46c1">Astronomy</text>
+        <text x="248" y="53" font-family="Inter" font-size="8.5" fill="#2d3748">Telescopes, sky surveys, transients</text>
+
+        <!-- Environmental Science (bottom-left) -->
+        <rect x="16" y="202" width="196" height="170" rx="10" fill="#f7fdf9" stroke="#9ae6b4" stroke-width="1.5" filter="url(#cardShadow)"/>
+        <text x="36" y="226" font-family="Inter" font-size="10.5" font-weight="700" fill="#276749">Environmental Science</text>
+        <text x="36" y="239" font-family="Inter" font-size="8.5" fill="#2d3748">Ocean buoys, satellites, sensor nets</text>
+
+        <!-- Materials Discovery (bottom-right) -->
+        <rect x="228" y="202" width="196" height="170" rx="10" fill="#fffaf0" stroke="#fbd38d" stroke-width="1.5" filter="url(#cardShadow)"/>
+        <text x="248" y="226" font-family="Inter" font-size="10.5" font-weight="700" fill="#c05621">Materials Discovery</text>
+        <text x="248" y="239" font-family="Inter" font-size="8.5" fill="#2d3748">Characterization, synthesis, screening</text>
+
+        <!-- ===== LOCAL EDGES (prominent) ===== -->
+
+        <!-- Microscopy intra -->
+        <line x1="55" y1="85" x2="105" y2="75" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="55" y1="85" x2="60" y2="130" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="55" y1="85" x2="120" y2="120" stroke="#3182ce" stroke-width="0.8" opacity="0.18"/>
+        <line x1="105" y1="75" x2="155" y2="95" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="105" y1="75" x2="120" y2="120" stroke="#3182ce" stroke-width="1" opacity="0.22"/>
+        <line x1="155" y1="95" x2="170" y2="140" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="155" y1="95" x2="120" y2="120" stroke="#3182ce" stroke-width="0.8" opacity="0.18"/>
+        <line x1="60" y1="130" x2="120" y2="120" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="60" y1="130" x2="100" y2="155" stroke="#3182ce" stroke-width="1" opacity="0.22"/>
+        <line x1="120" y1="120" x2="170" y2="140" stroke="#3182ce" stroke-width="1" opacity="0.25"/>
+        <line x1="120" y1="120" x2="100" y2="155" stroke="#3182ce" stroke-width="0.8" opacity="0.18"/>
+        <line x1="170" y1="140" x2="100" y2="155" stroke="#3182ce" stroke-width="1" opacity="0.22"/>
+
+        <!-- Astronomy intra -->
+        <line x1="268" y1="80" x2="330" y2="72" stroke="#805ad5" stroke-width="1" opacity="0.25"/>
+        <line x1="268" y1="80" x2="275" y2="125" stroke="#805ad5" stroke-width="1" opacity="0.25"/>
+        <line x1="330" y1="72" x2="375" y2="100" stroke="#805ad5" stroke-width="1" opacity="0.25"/>
+        <line x1="330" y1="72" x2="340" y2="125" stroke="#805ad5" stroke-width="0.8" opacity="0.18"/>
+        <line x1="375" y1="100" x2="340" y2="125" stroke="#805ad5" stroke-width="1" opacity="0.25"/>
+        <line x1="375" y1="100" x2="385" y2="150" stroke="#805ad5" stroke-width="1" opacity="0.22"/>
+        <line x1="275" y1="125" x2="340" y2="125" stroke="#805ad5" stroke-width="1" opacity="0.25"/>
+        <line x1="275" y1="125" x2="310" y2="158" stroke="#805ad5" stroke-width="0.8" opacity="0.18"/>
+        <line x1="340" y1="125" x2="310" y2="158" stroke="#805ad5" stroke-width="1" opacity="0.22"/>
+        <line x1="340" y1="125" x2="385" y2="150" stroke="#805ad5" stroke-width="0.8" opacity="0.18"/>
+        <line x1="310" y1="158" x2="385" y2="150" stroke="#805ad5" stroke-width="1" opacity="0.22"/>
+
+        <!-- Environmental intra -->
+        <line x1="55" y1="268" x2="110" y2="260" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="55" y1="268" x2="50" y2="312" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="110" y1="260" x2="155" y2="282" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="110" y1="260" x2="120" y2="310" stroke="#38a169" stroke-width="0.8" opacity="0.18"/>
+        <line x1="155" y1="282" x2="170" y2="330" stroke="#38a169" stroke-width="1" opacity="0.22"/>
+        <line x1="155" y1="282" x2="120" y2="310" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="50" y1="312" x2="120" y2="310" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="50" y1="312" x2="95" y2="345" stroke="#38a169" stroke-width="0.8" opacity="0.18"/>
+        <line x1="120" y1="310" x2="170" y2="330" stroke="#38a169" stroke-width="1" opacity="0.25"/>
+        <line x1="120" y1="310" x2="95" y2="345" stroke="#38a169" stroke-width="1" opacity="0.22"/>
+        <line x1="170" y1="330" x2="95" y2="345" stroke="#38a169" stroke-width="0.8" opacity="0.18"/>
+
+        <!-- Materials intra -->
+        <line x1="268" y1="268" x2="330" y2="258" stroke="#dd6b20" stroke-width="1" opacity="0.25"/>
+        <line x1="268" y1="268" x2="275" y2="315" stroke="#dd6b20" stroke-width="1" opacity="0.25"/>
+        <line x1="330" y1="258" x2="380" y2="282" stroke="#dd6b20" stroke-width="1" opacity="0.25"/>
+        <line x1="330" y1="258" x2="340" y2="310" stroke="#dd6b20" stroke-width="0.8" opacity="0.18"/>
+        <line x1="380" y1="282" x2="340" y2="310" stroke="#dd6b20" stroke-width="1" opacity="0.25"/>
+        <line x1="380" y1="282" x2="390" y2="340" stroke="#dd6b20" stroke-width="1" opacity="0.22"/>
+        <line x1="275" y1="315" x2="340" y2="310" stroke="#dd6b20" stroke-width="1" opacity="0.25"/>
+        <line x1="275" y1="315" x2="310" y2="348" stroke="#dd6b20" stroke-width="0.8" opacity="0.18"/>
+        <line x1="340" y1="310" x2="310" y2="348" stroke="#dd6b20" stroke-width="1" opacity="0.22"/>
+        <line x1="340" y1="310" x2="390" y2="340" stroke="#dd6b20" stroke-width="0.8" opacity="0.18"/>
+        <line x1="310" y1="348" x2="390" y2="340" stroke="#dd6b20" stroke-width="1" opacity="0.22"/>
+
+        <!-- ===== CROSS-DOMAIN EDGES (ghosted) ===== -->
+        <path d="M 155 95 Q 210 65 268 80" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 170 140 Q 215 180 275 125" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 60 130 Q 50 195 55 268" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 170 140 Q 175 210 170 330" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 310 158 Q 305 210 275 315" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 155 282 Q 210 270 268 268" stroke="#a0aec0" stroke-width="0.6" opacity="0.08" stroke-dasharray="3 3"/>
+        <path d="M 120 120 Q 200 210 268 268" stroke="#a0aec0" stroke-width="0.6" opacity="0.06" stroke-dasharray="3 3"/>
+        <path d="M 275 125 Q 210 210 120 310" stroke="#a0aec0" stroke-width="0.6" opacity="0.06" stroke-dasharray="3 3"/>
+
+        <!-- ===== AGENT NODES ===== -->
+
+        <!-- Microscopy agents -->
+        <circle cx="55" cy="85" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="105" cy="75" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="155" cy="95" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="60" cy="130" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="120" cy="120" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="170" cy="140" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="100" cy="155" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+
+        <!-- Astronomy agents -->
+        <circle cx="268" cy="80" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="330" cy="72" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="375" cy="100" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="275" cy="125" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="340" cy="125" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="310" cy="158" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="385" cy="150" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+
+        <!-- Environmental agents -->
+        <circle cx="55" cy="268" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="110" cy="260" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="155" cy="282" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="50" cy="312" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="120" cy="310" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="170" cy="330" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="95" cy="345" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+
+        <!-- Materials agents -->
+        <circle cx="268" cy="268" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="330" cy="258" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="380" cy="282" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="275" cy="315" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="340" cy="310" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="390" cy="340" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="310" cy="348" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+
+      </svg>
+    </div>
+
+    <!-- ===================== RIGHT PANEL: GLOBAL ORDER ===================== -->
+    <div class="panel">
+      <div class="panel-label">Global Order</div>
+      <div class="panel-desc">
+        Across domains, bridges form. A finding in one community<br>reshapes interpretation in another.
+      </div>
+      <svg viewBox="0 0 440 400" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <defs>
+          <filter id="cardShadow2" x="-4%" y="-4%" width="108%" height="110%">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+            <feOffset dy="1"/>
+            <feComponentTransfer><feFuncA type="linear" slope="0.06"/></feComponentTransfer>
+            <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+          </filter>
+          <linearGradient id="b1" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#3182ce"/><stop offset="100%" stop-color="#805ad5"/>
+          </linearGradient>
+          <linearGradient id="b2" x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#3182ce"/><stop offset="100%" stop-color="#38a169"/>
+          </linearGradient>
+          <linearGradient id="b3" x1="0%" y1="100%" x2="100%" y2="0%">
+            <stop offset="0%" stop-color="#38a169"/><stop offset="100%" stop-color="#dd6b20"/>
+          </linearGradient>
+          <linearGradient id="b4" x1="100%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#805ad5"/><stop offset="100%" stop-color="#dd6b20"/>
+          </linearGradient>
+          <linearGradient id="b5" x1="100%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stop-color="#805ad5"/><stop offset="100%" stop-color="#38a169"/>
+          </linearGradient>
+          <linearGradient id="b6" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#3182ce"/><stop offset="100%" stop-color="#dd6b20"/>
+          </linearGradient>
+        </defs>
+
+        <!-- ===== DOMAIN CARDS (slightly faded) ===== -->
+
+        <!-- Microscopy -->
+        <rect x="16" y="16" width="196" height="170" rx="10" fill="#f7faff" stroke="#c3dafe" stroke-width="1" opacity="0.6" filter="url(#cardShadow2)"/>
+        <text x="36" y="40" font-family="Inter" font-size="10.5" font-weight="700" fill="#2b6cb0" opacity="0.5">Microscopy</text>
+        <text x="36" y="53" font-family="Inter" font-size="8.5" fill="#2d3748" opacity="0.4">Light-sheet, confocal, cryo-EM</text>
+
+        <!-- Astronomy -->
+        <rect x="228" y="16" width="196" height="170" rx="10" fill="#faf5ff" stroke="#d6bcfa" stroke-width="1" opacity="0.6" filter="url(#cardShadow2)"/>
+        <text x="248" y="40" font-family="Inter" font-size="10.5" font-weight="700" fill="#6b46c1" opacity="0.5">Astronomy</text>
+        <text x="248" y="53" font-family="Inter" font-size="8.5" fill="#2d3748" opacity="0.4">Telescopes, sky surveys, transients</text>
+
+        <!-- Environmental Science -->
+        <rect x="16" y="202" width="196" height="170" rx="10" fill="#f7fdf9" stroke="#9ae6b4" stroke-width="1" opacity="0.6" filter="url(#cardShadow2)"/>
+        <text x="36" y="226" font-family="Inter" font-size="10.5" font-weight="700" fill="#276749" opacity="0.5">Environmental Science</text>
+        <text x="36" y="239" font-family="Inter" font-size="8.5" fill="#2d3748" opacity="0.4">Ocean buoys, satellites, sensor nets</text>
+
+        <!-- Materials Discovery -->
+        <rect x="228" y="202" width="196" height="170" rx="10" fill="#fffaf0" stroke="#fbd38d" stroke-width="1" opacity="0.6" filter="url(#cardShadow2)"/>
+        <text x="248" y="226" font-family="Inter" font-size="10.5" font-weight="700" fill="#c05621" opacity="0.5">Materials Discovery</text>
+        <text x="248" y="239" font-family="Inter" font-size="8.5" fill="#2d3748" opacity="0.4">Characterization, synthesis, screening</text>
+
+        <!-- ===== LOCAL EDGES (ghosted) ===== -->
+
+        <!-- Microscopy -->
+        <line x1="55" y1="85" x2="105" y2="75" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="55" y1="85" x2="60" y2="130" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="105" y1="75" x2="155" y2="95" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="155" y1="95" x2="170" y2="140" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="60" y1="130" x2="120" y2="120" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="120" y1="120" x2="170" y2="140" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+        <line x1="120" y1="120" x2="100" y2="155" stroke="#3182ce" stroke-width="0.5" opacity="0.07"/>
+
+        <!-- Astronomy -->
+        <line x1="268" y1="80" x2="330" y2="72" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+        <line x1="330" y1="72" x2="375" y2="100" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+        <line x1="375" y1="100" x2="340" y2="125" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+        <line x1="275" y1="125" x2="340" y2="125" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+        <line x1="340" y1="125" x2="310" y2="158" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+        <line x1="310" y1="158" x2="385" y2="150" stroke="#805ad5" stroke-width="0.5" opacity="0.07"/>
+
+        <!-- Environmental -->
+        <line x1="55" y1="268" x2="110" y2="260" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+        <line x1="110" y1="260" x2="155" y2="282" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+        <line x1="50" y1="312" x2="120" y2="310" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+        <line x1="120" y1="310" x2="170" y2="330" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+        <line x1="155" y1="282" x2="120" y2="310" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+        <line x1="170" y1="330" x2="95" y2="345" stroke="#38a169" stroke-width="0.5" opacity="0.07"/>
+
+        <!-- Materials -->
+        <line x1="268" y1="268" x2="330" y2="258" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+        <line x1="330" y1="258" x2="380" y2="282" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+        <line x1="275" y1="315" x2="340" y2="310" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+        <line x1="340" y1="310" x2="390" y2="340" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+        <line x1="380" y1="282" x2="340" y2="310" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+        <line x1="310" y1="348" x2="390" y2="340" stroke="#dd6b20" stroke-width="0.5" opacity="0.07"/>
+
+        <!-- ===== CROSS-DOMAIN BRIDGES (prominent) ===== -->
+
+        <!-- Microscopy <-> Astronomy (adaptive optics, image processing) -->
+        <path d="M 155 95 Q 212 60 268 80" stroke="url(#b1)" stroke-width="2" opacity="0.45" stroke-dasharray="6 3"/>
+        <path d="M 170 140 Q 220 135 275 125" stroke="url(#b1)" stroke-width="1.5" opacity="0.3" stroke-dasharray="5 3"/>
+
+        <!-- Microscopy <-> Environmental (long-duration monitoring, anomaly detection) -->
+        <path d="M 60 130 Q 45 200 55 268" stroke="url(#b2)" stroke-width="2" opacity="0.45" stroke-dasharray="6 3"/>
+        <path d="M 170 140 Q 175 215 170 330" stroke="url(#b2)" stroke-width="1.5" opacity="0.3" stroke-dasharray="5 3"/>
+
+        <!-- Astronomy <-> Materials (spectroscopy, composition analysis) -->
+        <path d="M 310 158 Q 310 210 275 315" stroke="url(#b4)" stroke-width="2" opacity="0.45" stroke-dasharray="6 3"/>
+        <path d="M 385 150 Q 395 260 390 340" stroke="url(#b4)" stroke-width="1.2" opacity="0.2" stroke-dasharray="4 3"/>
+
+        <!-- Environmental <-> Materials (earth materials, mineral surveys) -->
+        <path d="M 155 282 Q 210 270 268 268" stroke="url(#b3)" stroke-width="2" opacity="0.45" stroke-dasharray="6 3"/>
+        <path d="M 170 330 Q 225 340 310 348" stroke="url(#b3)" stroke-width="1.2" opacity="0.2" stroke-dasharray="4 3"/>
+
+        <!-- Astronomy <-> Environmental (remote sensing, satellite data) -->
+        <path d="M 275 125 Q 200 200 120 310" stroke="url(#b5)" stroke-width="1.8" opacity="0.4" stroke-dasharray="6 3"/>
+
+        <!-- Microscopy <-> Materials (electron microscopy, characterization) -->
+        <path d="M 120 120 Q 200 210 268 268" stroke="url(#b6)" stroke-width="1.2" opacity="0.18" stroke-dasharray="4 3"/>
+
+        <!-- ===== AGENT NODES (bridge nodes full opacity, others faded) ===== -->
+
+        <!-- Microscopy agents -->
+        <circle cx="55" cy="85" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="105" cy="75" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="155" cy="95" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="60" cy="130" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="120" cy="120" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="170" cy="140" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3"/>
+        <circle cx="100" cy="155" r="7" fill="#dbeafe" stroke="#3182ce" stroke-width="1.3" opacity="0.5"/>
+
+        <!-- Astronomy agents -->
+        <circle cx="268" cy="80" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="330" cy="72" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="375" cy="100" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="275" cy="125" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="340" cy="125" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="310" cy="158" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+        <circle cx="385" cy="150" r="7" fill="#ede9fe" stroke="#805ad5" stroke-width="1.3"/>
+
+        <!-- Environmental agents -->
+        <circle cx="55" cy="268" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="110" cy="260" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="155" cy="282" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="50" cy="312" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="120" cy="310" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="170" cy="330" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3"/>
+        <circle cx="95" cy="345" r="7" fill="#d1fae5" stroke="#38a169" stroke-width="1.3" opacity="0.5"/>
+
+        <!-- Materials agents -->
+        <circle cx="268" cy="268" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="330" cy="258" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="380" cy="282" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="275" cy="315" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="340" cy="310" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3" opacity="0.5"/>
+        <circle cx="390" cy="340" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+        <circle cx="310" cy="348" r="7" fill="#ffedd5" stroke="#dd6b20" stroke-width="1.3"/>
+
+      </svg>
+    </div>
+
+  </div>
+
+  <div class="footnote">
+    Same population, two scales of structure. Local communities share methods and data.<br>
+    Global bridges produce understanding no single community could reach alone.
+  </div>
+
+</div>
+</body>
+</html>

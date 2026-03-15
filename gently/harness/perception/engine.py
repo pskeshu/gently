@@ -331,6 +331,7 @@ class PerceptionEngine:
         examples_path: Optional[Path] = None,
         volume_accessor: Optional[Callable[[str, int], Optional[np.ndarray]]] = None,
         enable_verification: bool = True,
+        multishot_turns: int = 0,
     ):
         """
         Parameters
@@ -346,10 +347,14 @@ class PerceptionEngine:
             If provided, enables the view_embryo tool.
         enable_verification : bool
             Whether to enable multi-phase verification. Defaults to True.
+        multishot_turns : int
+            Number of follow-up reconsideration turns after the initial
+            prediction. 0 = single-shot (default).
         """
         self.claude = claude_client
         self.volume_accessor = volume_accessor
         self.enable_verification = enable_verification
+        self.multishot_turns = multishot_turns
 
         # Load examples if provided
         if example_store:
@@ -448,11 +453,56 @@ class PerceptionEngine:
             )
 
             # Run interleaved reasoning loop with tool use
-            result, trace = await self._run_reasoning_loop(
+            result, trace, messages = await self._run_reasoning_loop(
                 content=content,
                 session=session,
                 timepoint=timepoint,
             )
+
+            # Multi-shot reconsideration: continue the conversation
+            if self.multishot_turns > 0:
+                initial_stage = result.stage
+                initial_confidence = result.confidence
+                result.initial_stage = initial_stage
+                result.initial_confidence = initial_confidence
+
+                for turn in range(self.multishot_turns):
+                    followup = self._build_reconsider_prompt(result, turn)
+                    messages.append({"role": "user", "content": [{"type": "text", "text": followup}]})
+
+                    trace.add_step(ReasoningStep(
+                        step_type="reconsider_prompt",
+                        content=followup,
+                    ))
+
+                    # Skip tools on reconsideration — just text classification
+                    response = await self._call_claude(messages, include_tools=False)
+
+                    text_response = ""
+                    for block in response.content:
+                        if block.type == "text":
+                            text_response = block.text
+
+                    messages.append({"role": "assistant", "content": [{"type": "text", "text": text_response}]})
+
+                    trace.add_step(ReasoningStep(
+                        step_type="reconsider_response",
+                        content=text_response,
+                    ))
+
+                    prev_stage = result.stage
+                    result = self._parse_response(text_response)
+                    result.initial_stage = initial_stage
+                    result.initial_confidence = initial_confidence
+
+                    logger.info(
+                        f"[{session.embryo_id}] T{timepoint} reconsider turn {turn+1}: "
+                        f"{prev_stage} -> {result.stage} ({result.confidence:.0%})"
+                    )
+
+                    # If the model kept the same answer with high confidence, stop early
+                    if result.stage == prev_stage and result.confidence >= 0.8:
+                        break
 
             # Attach reasoning trace to result
             result.reasoning_trace = trace

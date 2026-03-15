@@ -1,0 +1,138 @@
+% Diagram 1: Scale Progression — "From Instrument to Planetary Science"
+\begin{tikzpicture}[
+    remember picture,
+    panel/.style={
+        draw=slate, thick, rounded corners=6pt,
+        minimum width=4.8cm, minimum height=6.2cm,
+        fill=white, anchor=north
+    },
+    paneltitle/.style={
+        font=\sffamily\bfseries\normalsize, text=darkslate
+    },
+    paneldesc/.style={
+        font=\sffamily\small, text=slate,
+        text width=4cm, align=center
+    },
+    gaplabel/.style={
+        font=\sffamily\small\itshape, text=accentblue,
+        fill=lightblue, rounded corners=3pt,
+        inner xsep=6pt, inner ysep=3pt
+    },
+    iconnode/.style={
+        draw=accentblue, thick, circle,
+        minimum size=8mm, fill=lightblue,
+        font=\sffamily\footnotesize\bfseries, text=darkslate
+    },
+    agentnode/.style={
+        draw=accentgreen, thick, circle,
+        minimum size=6mm, fill=lightgreen,
+        font=\sffamily\tiny\bfseries, text=darkslate
+    },
+    meshline/.style={
+        draw=slate!60, thick
+    },
+    arrowbridge/.style={
+        -{Stealth[length=5pt]}, thick, draw=slate!50
+    },
+]
+
+% === Color definitions (if not already defined) ===
+% Defined in main.tex
+
+% === Panel positions ===
+\coordinate (p1) at (0, 0);
+\coordinate (p2) at (5.8, 0);
+\coordinate (p3) at (11.6, 0);
+
+% === Panel 1: Single Instrument ===
+\node[panel] (panel1) at (p1) {};
+\node[paneltitle, anchor=north] at ([yshift=-6pt]panel1.north) {Single Instrument};
+
+% Microscope icon — stylized
+\node[iconnode] (mic1) at ([yshift=-2.2cm]panel1.north) {\footnotesize\textmu};
+
+% Agent loop arrows
+\draw[arrowbridge, draw=accentblue!70]
+    ([xshift=-12pt, yshift=4pt]mic1.south west)
+    arc[start angle=210, end angle=330, radius=10pt]
+    node[midway, below=3pt, font=\sffamily\tiny, text=slate] {perceive \textrightarrow\ reason \textrightarrow\ act};
+
+% Description
+\node[paneldesc] at ([yshift=-3.6cm]panel1.north) {
+    One agent governs\\one microscope.\\Closes the semantic gap\\from pixels to biology.
+};
+
+% Gap label
+\node[gaplabel] at ([yshift=6pt]panel1.south) {\textbf{Semantic gap}};
+
+% === Panel 2: Multi-Instrument ===
+\node[panel] (panel2) at (p2) {};
+\node[paneltitle, anchor=north] at ([yshift=-6pt]panel2.north) {Multi-Instrument};
+
+% Mesh of 4 nodes
+\foreach \i/\a in {1/135, 2/45, 3/-45, 4/-135} {
+    \node[agentnode] (m\i) at ([shift=(\a:10pt), yshift=-2.2cm]panel2.north) {A\i};
+}
+% Mesh edges
+\foreach \i in {1,2,3,4} {
+    \foreach \j in {1,2,3,4} {
+        \ifnum\i<\j
+            \draw[meshline] (m\i) -- (m\j);
+        \fi
+    }
+}
+
+% Description
+\node[paneldesc] at ([yshift=-3.6cm]panel2.north) {
+    Same-domain mesh.\\Share data, federated ML,\\cross-validate across\\instruments and labs.
+};
+
+% Gap label
+\node[gaplabel] at ([yshift=6pt]panel2.south) {\textbf{Coverage gap}};
+
+% === Panel 3: Planetary Science ===
+\node[panel] (panel3) at (p3) {};
+\node[paneltitle, anchor=north] at ([yshift=-6pt]panel3.north) {Planetary Science};
+
+% Cross-domain agents — colored by domain
+\node[draw=accentblue, thick, circle, minimum size=6mm, fill=lightblue,
+      font=\sffamily\tiny\bfseries, text=darkslate]
+      (d1) at ([shift=(120:14pt), yshift=-2.0cm]panel3.north) {Mi};
+\node[draw=accentgreen, thick, circle, minimum size=6mm, fill=lightgreen,
+      font=\sffamily\tiny\bfseries, text=darkslate]
+      (d2) at ([shift=(60:14pt), yshift=-2.0cm]panel3.north) {Oc};
+\node[draw=accentorange, thick, circle, minimum size=6mm, fill=lightorange,
+      font=\sffamily\tiny\bfseries, text=darkslate]
+      (d3) at ([shift=(-60:14pt), yshift=-2.0cm]panel3.north) {As};
+\node[draw=accentpurple, thick, circle, minimum size=6mm, fill=lightpurple,
+      font=\sffamily\tiny\bfseries, text=darkslate]
+      (d4) at ([shift=(-120:14pt), yshift=-2.0cm]panel3.north) {Ge};
+
+% Cross-domain edges
+\foreach \i in {d1,d2,d3,d4} {
+    \foreach \j in {d1,d2,d3,d4} {
+        \draw[meshline, draw=slate!40] (\i) -- (\j);
+    }
+}
+
+% Description
+\node[paneldesc] at ([yshift=-3.6cm]panel3.north) {
+    Cross-domain agents.\\Microscopy, oceanography,\\astronomy, genomics —\\inter-agent communication.
+};
+
+% Gap label
+\node[gaplabel] at ([yshift=6pt]panel3.south) {\textbf{Knowledge gap}};
+
+% === Bridging arrows between panels ===
+\draw[arrowbridge, shorten >=4pt, shorten <=4pt]
+    ([xshift=2pt]panel1.east) -- ([xshift=-2pt]panel2.west);
+\draw[arrowbridge, shorten >=4pt, shorten <=4pt]
+    ([xshift=2pt]panel2.east) -- ([xshift=-2pt]panel3.west);
+
+% === Tagline ===
+\node[font=\sffamily\small\itshape, text=slate, anchor=north]
+    at ([yshift=-10pt]panel2.south) {
+    Same architectural pattern, dynamically expanded context, empirically grown connections
+};
+
+\end{tikzpicture}

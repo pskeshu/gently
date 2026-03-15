@@ -1,0 +1,39 @@
+\documentclass[border=12pt]{standalone}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, calc, decorations.pathreplacing, positioning, shapes}
+
+% === Muted color palette (shared across both diagrams) ===
+% Base grays
+\definecolor{darkslate}{HTML}{2D3748}
+\definecolor{slate}{HTML}{4A5568}
+\definecolor{lightgray}{HTML}{EDF2F7}
+
+% Accent blues
+\definecolor{accentblue}{HTML}{3182CE}
+\definecolor{lightblue}{HTML}{EBF4FF}
+
+% Accent greens
+\definecolor{accentgreen}{HTML}{38A169}
+\definecolor{lightgreen}{HTML}{F0FFF4}
+
+% Accent orange
+\definecolor{accentorange}{HTML}{DD6B20}
+\definecolor{lightorange}{HTML}{FFFAF0}
+
+% Accent purple
+\definecolor{accentpurple}{HTML}{805AD5}
+\definecolor{lightpurple}{HTML}{FAF5FF}
+
+\begin{document}
+
+% --- Diagram 1: Scale Progression ---
+\input{diagram1_scale_progression.tex}
+
+\newpage
+
+% --- Diagram 2: Domain Map ---
+\input{diagram2_domain_map.tex}
+
+\end{document}

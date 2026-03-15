@@ -1,0 +1,664 @@
+\documentclass[11pt, a4paper]{article}
+\usepackage[margin=1in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+\usepackage{amsmath, amssymb}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\usepackage{fancyvrb}
+\usepackage{float}
+\usepackage{caption}
+
+\definecolor{accentblue}{HTML}{2563EB}
+\definecolor{muted}{HTML}{64748B}
+\definecolor{codebg}{HTML}{F8FAFC}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=accentblue,
+  urlcolor=accentblue,
+  citecolor=accentblue,
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+
+% Section formatting
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries\sffamily}{\thesection.}{0.5em}{}[\vspace{-4pt}\rule{\textwidth}{0.4pt}]
+\titleformat{\subsection}{\normalsize\bfseries\sffamily}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}{\normalsize\itshape}{\thesubsubsection}{0.5em}{}
+
+\title{%
+  \sffamily\bfseries
+  Perception Agent Benchmark:\\[4pt]
+  \Large A Representation Ablation Study for\\
+  Vision-Based Embryo Stage Classification
+}
+\author{%
+  Gently Project, Shroff Lab, Janelia Research Campus
+}
+\date{February 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+The Gently microscopy platform uses Claude's vision capabilities to classify
+\textit{C.\ elegans} embryo developmental stages from light-sheet 3D volumes in real
+time. The fundamental challenge is representational: Claude cannot see in 3D, so
+volumetric data must be projected into 2D images. The current approach (three
+orthogonal max-intensity projections) achieves 33\% exact accuracy and 69\%
+adjacent accuracy. Even the human annotator noted difficulty classifying from
+projections alone. This document defines a systematic benchmark to determine
+whether the representation is the bottleneck, and proposes controlled ablation
+experiments across four representation strategies, reference example counts, and
+tool-use configurations. The dataset (3D volumes, ground truth annotations,
+baseline results) is publicly available at
+\url{https://huggingface.co/datasets/pskeshu/gently-perception-benchmark}.
+\end{abstract}
+
+\tableofcontents
+\vspace{12pt}
+
+% ═══════════════════════════════════════════════════════════════
+\section{The Problem}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Biological context}
+
+\textit{C.\ elegans} embryo development proceeds through a continuous
+morphological transformation: a fertilized egg undergoes gastrulation, elongation,
+folding, and coiling until a fully formed larva hatches from the eggshell. This
+process takes approximately 13--14 hours at 20\textdegree C and is conventionally
+described in discrete stages:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Stage} & \textbf{Key feature} & \textbf{Duration (approx.)} \\
+\midrule
+early    & Symmetric oval, dividing cells         & $\sim$350 min \\
+bean     & End asymmetry, central constriction     & $\sim$20 min \\
+comma    & Ventral indentation, C-shape            & $\sim$30 min \\
+1.5-fold & Body folding back on itself             & $\sim$30 min \\
+2-fold   & Body doubled back completely            & $\sim$45 min \\
+pretzel  & Tight coil, 3+ body segments            & $\sim$300 min \\
+hatching & Active emergence from shell             & minutes \\
+hatched  & Free L1 larva                           & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+These stages are \emph{bins imposed on a continuum}. The transitions are gradual,
+not instantaneous. Any classification system must contend with this inherent
+ambiguity.
+
+\subsection{Imaging modality}
+
+We capture the embryo using a dual-view selective plane illumination microscope
+(diSPIM). The light-sheet creates a 2D illumination plane that is scanned through
+the depth of the specimen, producing a 3D volume (z-stack). The fluorescence
+signal comes from a histone marker labeling all nuclei.
+
+The raw data is inherently \textbf{3D}: a volume of shape $(Z, Y, X)$ where $Z$
+is typically 40--80 slices and $Y, X$ are the lateral dimensions.
+
+\subsection{The fundamental gap}
+
+Claude is a 2D vision model. It cannot consume a 3D volume directly. The entire
+perception system therefore hinges on \emph{how we project the 3D volume into 2D
+images} that the model can see.
+
+This creates a representational bottleneck with several failure modes:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+  \item \textbf{Projections destroy depth structure.} Max-intensity projections
+    collapse an entire axis into a single plane. Folding and coiling, which are
+    3D spatial relationships, merge into ambiguous 2D patterns when overlapping
+    structures are superimposed.
+
+  \item \textbf{The projection choice is arbitrary.} Why XY, YZ, and XZ? Why
+    max-intensity rather than mean, sum, or alpha compositing? Each choice
+    destroys different information. The system prompt compensates by instructing
+    the model to ``ALWAYS ANALYZE XZ VIEW,'' an admission that the
+    representation is fragile.
+
+  \item \textbf{The model is not a microscopist.} Claude was trained on internet
+    images, not fluorescence microscopy. The perception prompt bridges this gap
+    with text descriptions (``peanut shape'', ``horizontal figure-8''), asking
+    the model to map novel visual patterns to verbal descriptions. This mapping
+    is unvalidated.
+
+  \item \textbf{Few-shot examples are thin.} 2 reference images per stage
+    $\times$ 7 stages = 14 total images to represent the full morphological
+    diversity of embryo development. Every embryo looks different; orientation
+    varies; imaging conditions vary.
+
+  \item \textbf{Verification doesn't add information.} When Phase~1 is uncertain,
+    spawning Haiku subagents to examine the \emph{same projections} averages over
+    the same noise rather than resolving the underlying ambiguity.
+\end{enumerate}
+
+The annotator's note is telling:
+\begin{quote}
+\itshape
+``I did find it difficult just using the max projections alone, as sometimes the
+embryo would orient itself in a way that made it hard to determine the location of
+the nose or tail.'' (Ryan, biologist, December 2024)
+\end{quote}
+
+If a domain expert struggles with the representation, a general-purpose vision model will
+struggle more.
+
+% ═══════════════════════════════════════════════════════════════
+\section{Current Perception Architecture}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{System overview}
+
+The perception agent is a two-phase pipeline:
+
+\begin{Verbatim}[fontsize=\small, frame=single, framesep=8pt, baselinestretch=0.95]
+  Caller (Timelapse Orchestrator / Benchmark Runner)
+    |
+    |  embryo_id, timepoint, image_b64, volume?
+    v
+  PerceptionManager            (one session per embryo)
+    |
+    |  engine.perceive(image, session, timepoint, volume?)
+    v
+  PerceptionEngine             MODEL: claude-opus-4-6
+    |
+    |  _build_prompt():
+    |    STATIC (cached 1h):  system prompt + 14 reference images
+    |    DYNAMIC (per-call):  last 3 observations, temporal context,
+    |                         current 3-view image
+    |
+    |  _run_reasoning_loop()   (max 5 tool-use iterations)
+    |    |
+    |    +-- end_turn --> parse JSON --> calibrate confidence
+    |    |                               --> PerceptionResult
+    |    +-- tool_use:
+    |          +-- view_previous_timepoint  (cached image)
+    |          +-- view_embryo              (3D alpha-composite)
+    |          +-- request_verification --> Phase 2
+    |
+    v  (if verification triggered, confidence < 0.7)
+  VerificationEngine           SUBAGENT MODEL: claude-haiku-4-5-20251001
+    |
+    |  asyncio.gather: up to 3 parallel subagents
+    |    Subagent A: "stage_a vs stage_b"  (focused comparison)
+    |    Subagent B: "stage_c vs stage_d"
+    |    Subagent C: "stage_e vs stage_f"
+    |
+    |  _aggregate_results(): confidence-weighted voting
+    v
+  PerceptionResult
+    stage, confidence, is_hatching, is_transitional,
+    observed_features, contrastive_reasoning,
+    reasoning_trace, verification_result
+\end{Verbatim}
+
+\noindent\small\textit{The \texttt{?} on \texttt{volume} indicates
+\texttt{Optional[np.ndarray]} in the API; the raw 3D volume is passed when
+available (live imaging), but the system can also operate from pre-rendered 2D
+images alone (offline/benchmark mode).}
+\normalsize
+
+\subsection{Current performance}
+
+The most recent benchmark run (Sonnet 4.5, December 2024) on session
+\texttt{59799c78} with 4 embryos and 737 total timepoints:
+
+\begin{center}
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{Metric} & \textbf{Value} \\
+\midrule
+Exact accuracy         & 33.2\% \\
+Adjacent accuracy      & 69.5\% \\
+Total predictions      & 737 \\
+Model                  & \texttt{claude-sonnet-4-5-20250929} \\
+Tools                  & all enabled \\
+Verification           & enabled \\
+Reference examples     & 2 per stage \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+33\% exact accuracy means the model gets the correct stage only one-third of the
+time. 69\% adjacent accuracy means it is within one stage about two-thirds of the
+time. This is insufficient for reliable autonomous microscopy.
+
+\subsection{Baseline analysis}
+
+Breaking down the baseline results reveals systematic failure patterns.
+
+\subsubsection{Per-stage accuracy}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+\textbf{Stage} & \textbf{Samples} & \textbf{Accuracy} & \textbf{Most common error} \\
+\midrule
+early    & 157 & 40.8\% & predicted as bean (93/157) \\
+bean     &  24 & 79.2\% & predicted as comma (5/24) \\
+comma    &  27 & 44.4\% & predicted as bean (15/27) \\
+1.5-fold &  49 & 28.6\% & predicted as comma (33/49) \\
+2-fold   &  79 & 67.1\% & predicted as comma (16/79) \\
+pretzel  & 401 & 20.7\% & predicted as 2-fold (110/401) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Two patterns dominate: the model is systematically late on early$\to$bean (calls
+59\% of early timepoints ``bean''), and systematically early on pretzel (calls
+27\% of pretzel timepoints ``2-fold''). The 1.5-fold stage is almost entirely
+missed, with 67\% of predictions falling on comma instead.
+
+\subsubsection{Confusion matrix}
+
+\begin{center}
+\small
+\begin{tabular}{@{}l*{6}{r}@{}}
+\toprule
+& \multicolumn{6}{c}{\textbf{Predicted}} \\
+\cmidrule(l){2-7}
+\textbf{True} & early & bean & comma & 1.5f & 2f & pretzel \\
+\midrule
+early    & \textbf{64} & 93  &  0 &  0 &   0 &  0 \\
+bean     &  0 & \textbf{19} &  5 &  0 &   0 &  0 \\
+comma    &  0 & 15 & \textbf{12} &  0 &   0 &  0 \\
+1.5-fold &  0 &  1 & 33 & \textbf{14} &   1 &  0 \\
+2-fold   &  0 &  0 & 16 & 10 &  \textbf{53} &  0 \\
+pretzel  &  0 &  0 &  0 &  0 & 110 & \textbf{83} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The matrix shows a strong upper-diagonal bias: errors almost always predict an
+\emph{earlier} stage than the true one, suggesting the model is slow to recognize
+transitions.
+
+\subsubsection{Calibration}
+
+The model's confidence is poorly calibrated. Mean confidence when correct (0.867)
+is nearly identical to mean confidence when wrong (0.857), yielding an Expected
+Calibration Error (ECE) of 0.524. The model does not know when it is wrong.
+
+\subsubsection{Tool use}
+
+Tools were invoked on 16.6\% of predictions (122/737 total tool calls).
+Accuracy \emph{with} tool use was 23.0\%, compared to 35.1\% \emph{without}.
+This suggests that tool invocation correlates with difficult cases and does not
+resolve the underlying ambiguity, consistent with the hypothesis that
+verification on the same representation cannot add new information.
+
+\subsection{The representation pipeline (current)}
+
+The volume-to-image conversion is implemented in
+\texttt{projection.py} and \texttt{testset.py}:
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+  \item Load 3D volume from TIFF: shape $(Z, Y, X)$
+  \item Auto-crop using center-of-mass (95th percentile threshold)
+  \item Generate three max-intensity projections:
+    \begin{itemize}[itemsep=0pt]
+      \item XY: \texttt{np.max(volume, axis=0)}, looking down
+      \item YZ: \texttt{np.max(volume, axis=2)}, looking from side
+      \item XZ: \texttt{np.max(volume, axis=1)}, looking from front
+    \end{itemize}
+  \item Composite into a single image: $[\text{XY}|\text{YZ}]$ top row,
+    $[\text{XZ}]$ bottom row
+  \item Normalize (1st--99th percentile), resize to $\leq$1500px, encode as
+    base64 JPEG
+\end{enumerate}
+
+This is the representation we aim to challenge in the benchmark.
+
+% ═══════════════════════════════════════════════════════════════
+\section{Benchmark Design}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Central question}
+
+\textbf{Is the 2D representation the bottleneck, or is the model the bottleneck?}
+
+If different representations of the same 3D data produce significantly different
+accuracy, the representation is the bottleneck. If accuracy is uniformly low
+regardless of representation, the problem is deeper (model capability, few-shot
+inadequacy, or task formulation).
+
+\subsection{Experimental structure}
+
+Three sequential experiments, each informed by the results of the previous:
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}clXl@{}}
+\toprule
+\textbf{Exp} & \textbf{Question} & \textbf{Independent variable}
+  & \textbf{Conditions} \\
+\midrule
+1 & Is representation the bottleneck?
+  & Volume $\to$ image strategy
+  & 4 \\
+2 & Do few-shot examples help?
+  & Number of reference images per stage
+  & 3 \\
+3 & Do tools/verification help?
+  & Tool access configuration
+  & 3 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\textbf{Held constant} across all conditions within an experiment: model
+(configurable, Opus or Sonnet), ground truth, embryo set, timepoint set.
+
+\subsection{Experiment 1: Representation ablation}
+
+Four representation strategies, each taking the same 3D volume as input:
+
+\subsubsection{A. Three-View MIP (baseline)}
+
+The current approach. Three orthogonal max-intensity projections composited into a
+single image. The model sees one image containing XY, YZ, and XZ views.
+
+\textit{Strengths:} Compact (single image), computationally cheap.\\
+\textit{Weaknesses:} Collapses depth, merges overlapping structures.
+
+\subsubsection{B. Z-Slice Montage}
+
+Show the model a grid of individual z-slices (e.g., 16 evenly-spaced slices in a
+$4 \times 4$ grid). Each tile is labeled with its z-index. The model can see
+which structures appear at which depths; stacking vs.\ side-by-side arrangement
+becomes directly visible.
+
+\textit{Strengths:} Preserves depth structure, no information collapse, closest
+to what a microscopist sees when scrolling.\\
+\textit{Weaknesses:} Lower per-tile resolution, may be harder for the model to
+integrate mentally.
+
+\subsubsection{C. Multi-Angle Rendered Views}
+
+Render the volume from 6 canonical viewing angles using alpha compositing
+(reusing the existing \texttt{render\_volume\_view()} function):
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrl@{}}
+\toprule
+\textbf{View} & $r_x$ & $r_y$ & \textbf{Perspective} \\
+\midrule
+Top-down   & 0\textdegree   & 0\textdegree    & Default \\
+Tilted     & 45\textdegree  & 0\textdegree    & Forward tilt \\
+Right side & 0\textdegree   & 90\textdegree   & Side view \\
+Left side  & 0\textdegree   & $-$90\textdegree & Opposite side \\
+Oblique R  & 45\textdegree  & 45\textdegree   & Angled right \\
+Front      & 90\textdegree  & 0\textdegree    & Front-on \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Views composited into a $2 \times 3$ grid.
+
+\textit{Strengths:} Shows 3D shape from multiple perspectives, depth-aware
+rendering.\\
+\textit{Weaknesses:} Each view is still a 2D projection (albeit with depth
+cues), computationally heavier.
+
+\subsubsection{D. Classical Features + Single MIP}
+
+Compute quantitative 3D morphological features from the segmented volume and pass
+them as structured text alongside a single top-down projection:
+
+\begin{itemize}[itemsep=1pt]
+  \item Bounding box aspect ratios ($X/Y$, $X/Z$, $Y/Z$)
+  \item Elongation (PCA major/minor axis ratio)
+  \item Compactness ($\text{volume} / \text{bounding\_box\_volume}$)
+  \item Sphericity ($36\pi V^2 / S^3$)
+  \item Number of connected components per z-level
+  \item Centroid position relative to bounding box
+  \item Moments of inertia ratios
+\end{itemize}
+
+\textit{Strengths:} Offloads 3D understanding to computation; the model reasons over
+pre-computed features rather than extracting them from unfamiliar images.\\
+\textit{Weaknesses:} Depends on segmentation quality; loses visual nuance the model
+might catch.
+
+\subsection{Experiment 2: Reference example count}
+
+Using the best representation from Experiment~1:
+
+\begin{center}
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Condition} & \textbf{Examples/stage} & \textbf{What it tests} \\
+\midrule
+Zero-shot  & 0 & Can the model classify from the prompt alone? \\
+One-shot   & 1 & Minimal visual reference \\
+Two-shot   & 2 & Current default \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+The reference images consume $\sim$21{,}000 tokens (cached). If zero-shot
+performs comparably, these tokens are wasted. If more examples help significantly,
+the example store needs expansion.
+
+\subsection{Experiment 3: Tool and verification ablation}
+
+Using the best representation and example count:
+
+\begin{center}
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Condition} & \textbf{Tools} & \textbf{Verification} & \textbf{What it tests} \\
+\midrule
+Full       & on  & on  & Current system (max capability) \\
+Tools only & on  & off & Does interactive exploration help? \\
+Minimal    & off & off & Raw single-pass classification \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════
+\section{API Cost Estimates}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Token budget per call}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrl@{}}
+\toprule
+\textbf{Component} & \textbf{Tokens} & \textbf{Caching} \\
+\midrule
+System prompt (text)                & $\sim$800     & cached (1h TTL) \\
+Reference images ($14 \times 1500$) & $\sim$21{,}000 & cached (1h TTL) \\
+Previous observations               & $\sim$200     & uncached \\
+Temporal context                     & $\sim$200     & uncached \\
+Current image                        & $\sim$1{,}500 & uncached \\
+\midrule
+\textbf{Total input}                & $\sim$23{,}700 & 22K cached + 1.9K fresh \\
+\textbf{Output} (reasoning + JSON)  & $\sim$1{,}000  & --- \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Representation-specific image token variations: slice montage $\sim$3{,}000;
+multi-angle $\sim$4{,}000; features+MIP $\sim$1{,}300 (smaller image + 300 tokens
+text).
+
+\subsection{Per-call and per-condition costs}
+
+\begin{center}
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Model} & \textbf{Cache read} & \textbf{Fresh input}
+  & \textbf{Output} & \textbf{Per call} \\
+\midrule
+Opus 4.6
+  & 22K $\times$ \$0.50/M & 2K $\times$ \$5/M
+  & 1K $\times$ \$25/M & \textbf{\$0.046} \\
+Sonnet 4.6
+  & 22K $\times$ \$0.30/M & 2K $\times$ \$3/M
+  & 1K $\times$ \$15/M & \textbf{\$0.028} \\
+Haiku 4.5 (verif.)
+  & --- & 5K $\times$ \$1/M
+  & 0.5K $\times$ \$5/M & \textbf{\$0.008} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Total experiment costs}
+
+Test data: 4 embryos, 737 timepoints total.
+
+\begin{center}
+\small
+\begin{tabular}{@{}lcrr@{}}
+\toprule
+\textbf{Experiment} & \textbf{Conditions}
+  & \textbf{Opus 4.6} & \textbf{Sonnet 4.6} \\
+\midrule
+1: Representation    & 4 & \$136 & \$83 \\
+2: Example count     & 3 & \$102 & \$62 \\
+3: Tools/verification & 3 & \$102 & \$62 \\
+\midrule
+\textbf{Total}       & \textbf{10} & \textbf{\$339} & \textbf{\$207} \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\textbf{Quick validation run} (30 timepoints/embryo $\approx$ 120 total):
+Opus \$55, Sonnet \$34.
+
+\textbf{Batch API option:} The Batch API provides a 50\% discount for
+non-real-time workloads, reducing the full experiment to $\sim$\$170 (Opus) /
+$\sim$\$104 (Sonnet).
+
+Verification subagent overhead (Haiku 4.5, $\sim$15\% of calls triggered): adds
+$\sim$5\% to totals.
+
+% ═══════════════════════════════════════════════════════════════
+\section{Metrics and Analysis}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{Primary metrics (per condition)}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+  \item \textbf{Exact accuracy:} fraction of predictions matching ground truth
+  \item \textbf{Adjacent accuracy:} fraction within $\pm 1$ stage
+  \item \textbf{Per-stage accuracy:} accuracy broken down by ground truth stage
+  \item \textbf{Confusion matrix:} predicted vs.\ ground truth counts
+  \item \textbf{Expected Calibration Error (ECE):} do confidence scores reflect
+    true accuracy?
+  \item \textbf{Backward transition rate:} how often does the predicted stage
+    regress (biologically impossible)?
+\end{enumerate}
+
+\subsection{Comparison metrics (across conditions)}
+
+\begin{enumerate}[leftmargin=*, itemsep=2pt]
+  \item \textbf{$\Delta$accuracy by representation:} which representation wins,
+    by how much?
+  \item \textbf{Stage-specific $\Delta$:} which stages benefit most from
+    better representations?
+  \item \textbf{Accuracy vs.\ cost:} is the cheapest representation good enough?
+  \item \textbf{Tool use impact:} accuracy with vs.\ without tools, stratified
+    by stage
+\end{enumerate}
+
+\subsection{Planned figures}
+
+The benchmark report will include the following visualizations:
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{@{}clX@{}}
+\toprule
+\textbf{Fig.} & \textbf{Type} & \textbf{Content} \\
+\midrule
+1 & Grouped bar chart
+  & Exact \& adjacent accuracy by representation (Exp 1) \\
+2 & Heatmaps ($4\times$)
+  & Confusion matrix for each representation \\
+3 & Line plot
+  & Per-stage accuracy across representations (one line per repr) \\
+4 & Grouped bar chart
+  & Accuracy by example count: 0-shot vs 1-shot vs 2-shot (Exp 2) \\
+5 & Stacked bar chart
+  & Accuracy with/without tools and verification (Exp 3) \\
+6 & Scatter plot
+  & Confidence vs.\ actual accuracy (calibration) per representation \\
+7 & Timeline plot
+  & Predicted stage vs.\ ground truth over time for one embryo,
+    per representation (qualitative comparison) \\
+8 & Cost/accuracy Pareto
+  & Each condition plotted as (cost, accuracy) to identify the
+    efficient frontier \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+% ═══════════════════════════════════════════════════════════════
+\section{Validation}
+% ═══════════════════════════════════════════════════════════════
+
+\begin{enumerate}[leftmargin=*, itemsep=4pt]
+  \item \textbf{Unit:} Each representation strategy produces a valid base64 JPEG
+    from a test volume.
+  \item \textbf{Smoke:} Run benchmark with \texttt{-{}-max-timepoints 3
+    -{}-embryo embryo\_1} for each representation; verify completion and valid
+    JSON output.
+  \item \textbf{Quick ablation:} All 4 representations on 30
+    timepoints/embryo with Sonnet ($\sim$\$5 total); verify comparison report
+    generates correctly.
+  \item \textbf{Full Experiment 1:} All 4 representations on all 737 timepoints.
+    Analyze results before proceeding to Experiments 2 and 3.
+\end{enumerate}
+
+% ═══════════════════════════════════════════════════════════════
+\section{Expected Outcomes}
+% ═══════════════════════════════════════════════════════════════
+
+\subsection{If representation is the bottleneck}
+
+We expect the z-slice montage or multi-angle views to outperform the baseline,
+particularly on fold stages (1.5-fold, 2-fold, pretzel) where 3D spatial
+relationships are critical. The early-stage transitions (early/bean/comma) may
+show less improvement since they rely more on 2D shape cues.
+
+\emph{Next step:} Invest in better representations. Explore hybrid approaches
+(e.g., combining montage with rendered views) and optimized prompt strategies
+for the best-performing representation.
+
+\subsection{If representation is not the bottleneck}
+
+If all representations perform similarly poorly, the problem is at the model or
+task level:
+\begin{itemize}[itemsep=2pt]
+  \item The few-shot examples may be inadequate (Experiment~2 will test this)
+  \item The model may lack the visual priors for fluorescence microscopy
+  \item The stage boundaries may be too ambiguous for vision-based classification
+\end{itemize}
+
+\emph{Next step:} Evaluate whether a more capable model (Opus vs.\ Sonnet)
+changes the picture, and whether prompt or example improvements can close the
+gap.
+
+\end{document}

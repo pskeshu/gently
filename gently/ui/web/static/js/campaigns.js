@@ -1260,10 +1260,6 @@ function renderGraphView() {
     const svgW = pad * 2 + lanePadX * 2 + maxItemsPerPhase * (nodeW + gapX) - gapX;
     const svgH = currentY;
 
-    // Build phase lookup for edge routing
-    const phaseOf = {};
-    items.forEach(i => phaseOf[i.id] = i._phaseNum);
-
     // Render swim lane backgrounds
     const phaseColors = ['rgba(96,165,250,0.07)', 'rgba(52,211,153,0.07)', 'rgba(251,191,36,0.07)', 'rgba(167,139,250,0.07)', 'rgba(248,113,113,0.07)', 'rgba(236,72,153,0.07)'];
     let bands = '';

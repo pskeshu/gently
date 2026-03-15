@@ -1,0 +1,131 @@
+% Diagram 2: Gently Domain Map — "Domains of the Agentic Microscope"
+\begin{tikzpicture}[
+    remember picture,
+    % Tier styles
+    foundationbox/.style={
+        draw=accentblue, thick, rounded corners=4pt,
+        fill=lightblue, minimum height=9mm,
+        text width=3.6cm, align=left,
+        inner xsep=6pt, inner ysep=4pt
+    },
+    emergingbox/.style={
+        draw=accentgreen, thick, dotted, rounded corners=4pt,
+        fill=lightgreen, minimum height=9mm,
+        text width=3.6cm, align=left,
+        inner xsep=6pt, inner ysep=4pt
+    },
+    frontierbox/.style={
+        draw=accentorange, thick, dashed, rounded corners=4pt,
+        fill=lightorange, minimum height=9mm,
+        text width=3.6cm, align=left,
+        inner xsep=6pt, inner ysep=4pt
+    },
+    verblabel/.style={
+        font=\sffamily\bfseries\normalsize
+    },
+    desclabel/.style={
+        font=\sffamily\small, text=slate
+    },
+    tierlabel/.style={
+        font=\sffamily\bfseries\large, rotate=90, anchor=south
+    },
+    tierbrace/.style={
+        decorate, decoration={brace, amplitude=6pt, mirror}, thick, draw=slate!60
+    },
+]
+
+% Layout parameters
+\def\colsep{4.6cm}
+\def\rowsep{1.35cm}
+\def\tierpad{0.3cm}
+
+% === FOUNDATION tier ===
+\node[tierlabel, text=accentblue] at (-2.4, -0.5*\rowsep - 0.5*\rowsep) {FOUNDATION};
+
+\node[foundationbox] (see) at (0, 0) {
+    \textcolor{darkslate}{\verblabel SEE}\\[-1pt]
+    {\desclabel VLM perception with reasoning traces}
+};
+\node[foundationbox] (operate) at (\colsep, 0) {
+    \textcolor{darkslate}{\verblabel OPERATE}\\[-1pt]
+    {\desclabel Safe hardware control, safety stack}
+};
+\node[foundationbox] (conduct) at (0, -\rowsep) {
+    \textcolor{darkslate}{\verblabel CONDUCT}\\[-1pt]
+    {\desclabel Adaptive, event-driven acquisition}
+};
+\node[foundationbox] (record) at (\colsep, -\rowsep) {
+    \textcolor{darkslate}{\verblabel RECORD}\\[-1pt]
+    {\desclabel Lineage-tracked provenance}
+};
+
+% Foundation brace
+\draw[tierbrace]
+    ([xshift=-1.6cm, yshift=5pt]see.north west) --
+    ([xshift=-1.6cm, yshift=-5pt]conduct.south west);
+
+% === EMERGING tier ===
+\def\emergingstart{-3.2cm}
+\node[tierlabel, text=accentgreen] at (-2.4, \emergingstart - 0.5*\rowsep) {EMERGING};
+
+\node[emergingbox] (design) at (0, \emergingstart) {
+    \textcolor{darkslate}{\verblabel DESIGN}\\[-1pt]
+    {\desclabel Plan experiments, assess gaps}
+};
+\node[emergingbox] (remember) at (\colsep, \emergingstart) {
+    \textcolor{darkslate}{\verblabel REMEMBER}\\[-1pt]
+    {\desclabel Context across sessions}
+};
+\node[emergingbox] (reason) at (0, \emergingstart - \rowsep) {
+    \textcolor{darkslate}{\verblabel REASON}\\[-1pt]
+    {\desclabel Campaign \textrightarrow\ hypothesis \textrightarrow\ obs.}
+};
+\node[emergingbox] (connect) at (\colsep, \emergingstart - \rowsep) {
+    \textcolor{darkslate}{\verblabel CONNECT}\\[-1pt]
+    {\desclabel Discover peers, federated ML}
+};
+
+% Emerging brace
+\draw[tierbrace]
+    ([xshift=-1.6cm, yshift=5pt]design.north west) --
+    ([xshift=-1.6cm, yshift=-5pt]reason.south west);
+
+% === FRONTIER tier ===
+\def\frontierstart{-6.4cm}
+\node[tierlabel, text=accentorange] at (-2.4, \frontierstart - 0.25*\rowsep) {FRONTIER};
+
+\node[frontierbox] (discover) at (0, \frontierstart) {
+    \textcolor{darkslate}{\verblabel DISCOVER}\\[-1pt]
+    {\desclabel Recognize the surprising}
+};
+\node[frontierbox] (hypothesize) at (\colsep, \frontierstart) {
+    \textcolor{darkslate}{\verblabel HYPOTHESIZE}\\[-1pt]
+    {\desclabel Resolve its own uncertainties}
+};
+\node[frontierbox] (share) at (0.5*\colsep, \frontierstart - \rowsep) {
+    \textcolor{darkslate}{\verblabel SHARE}\\[-1pt]
+    {\desclabel Propagate understanding across agents}
+};
+
+% Frontier brace
+\draw[tierbrace]
+    ([xshift=-1.6cm, yshift=5pt]discover.north west) --
+    ([xshift=-1.6cm, yshift=-5pt]share.south west);
+
+% === Thin connecting lines between tiers ===
+\draw[draw=slate!25, thick]
+    ([yshift=-8pt]conduct.south) -- ([yshift=8pt]design.north);
+\draw[draw=slate!25, thick]
+    ([yshift=-8pt]record.south) -- ([yshift=8pt]remember.north);
+\draw[draw=slate!25, thick]
+    ([yshift=-8pt]reason.south) -- ([yshift=8pt]discover.north);
+\draw[draw=slate!25, thick]
+    ([yshift=-8pt]connect.south) -- ([yshift=8pt]hypothesize.north);
+
+% === Footer ===
+\node[font=\sffamily\small\itshape, text=slate, anchor=north]
+    at (0.5*\colsep, \frontierstart - 2*\rowsep + 0.1cm) {
+    the human:\ \ operator\ \ \textrightarrow\ \ collaborator\ \ \textrightarrow\ \ supervisor
+};
+
+\end{tikzpicture}

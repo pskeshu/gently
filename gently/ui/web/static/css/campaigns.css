@@ -252,8 +252,11 @@
 .graph-edge-active {
     opacity: 0.7;
 }
-/* Dim non-hovered nodes when hovering */
-.graph-hover-active .graph-node:not(.graph-node-hover):not(.graph-node-connected) {
+.graph-edge.dimmed {
+    opacity: 0 !important;
+}
+/* Dim non-hovered nodes when hovering (skip already-dimmed nodes) */
+.graph-hover-active .graph-node:not(.graph-node-hover):not(.graph-node-connected):not(.dimmed) {
     opacity: 0.3;
 }
 .graph-node-connected rect {
