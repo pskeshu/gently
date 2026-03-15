@@ -1274,25 +1274,17 @@ function renderGraphView() {
         bands += `<text x="${pad + 10}" y="${lane.top + 16}" class="graph-phase-label">P${lane.pNum} — ${esc(shortName)}</text>`;
     });
 
-    // Render edges
+    // Render edges (hidden by default, shown on node hover)
     let edges = '';
     items.forEach(i => {
         (i.dependencies || []).forEach(d => {
             if (!pos[d.id] || !pos[i.id]) return;
             const from = pos[d.id];
             const to = pos[i.id];
-            const sameLane = i._phaseNum === phaseOf[d.id];
             const x1 = from.x + nodeW, y1 = from.y + nodeH / 2;
             const x2 = to.x, y2 = to.y + nodeH / 2;
-            if (sameLane) {
-                // Horizontal within lane
-                const cx = (x1 + x2) / 2;
-                edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" data-from="${d.id}" data-to="${i.id}" />`;
-            } else {
-                // Cross-lane: go right, curve down/up, go right to target
-                const midX = Math.max(x1, x2) + 30;
-                edges += `<path d="M${x1},${y1} L${x1 + 15},${y1} C${midX},${y1} ${midX},${y2} ${x2 - 15},${y2} L${x2},${y2}" class="graph-edge cross-lane" data-from="${d.id}" data-to="${i.id}" />`;
-            }
+            const cx = (x1 + x2) / 2;
+            edges += `<path d="M${x1},${y1} C${cx},${y1} ${cx},${y2} ${x2},${y2}" class="graph-edge" data-from="${d.id}" data-to="${i.id}" />`;
         });
     });
 
@@ -1323,6 +1315,35 @@ function renderGraphView() {
             ${bands}${edges}${nodes}
         </svg>
     </div>`;
+
+    // Hover: show edges connected to hovered node
+    const svg = $canvasContent.querySelector('svg');
+    if (svg) {
+        svg.addEventListener('mouseover', e => {
+            const node = e.target.closest('.graph-node');
+            if (!node) return;
+            const id = node.dataset.itemId;
+            svg.classList.add('graph-hover-active');
+            node.classList.add('graph-node-hover');
+            svg.querySelectorAll('.graph-edge').forEach(edge => {
+                if (edge.dataset.from === id || edge.dataset.to === id) {
+                    edge.classList.add('graph-edge-active');
+                    // Highlight connected node
+                    const otherId = edge.dataset.from === id ? edge.dataset.to : edge.dataset.from;
+                    svg.querySelector(`.graph-node[data-item-id="${otherId}"]`)?.classList.add('graph-node-connected');
+                }
+            });
+        });
+        svg.addEventListener('mouseout', e => {
+            const node = e.target.closest('.graph-node');
+            if (!node) return;
+            svg.classList.remove('graph-hover-active');
+            svg.querySelectorAll('.graph-node-hover, .graph-node-connected').forEach(el => {
+                el.classList.remove('graph-node-hover', 'graph-node-connected');
+            });
+            svg.querySelectorAll('.graph-edge-active').forEach(el => el.classList.remove('graph-edge-active'));
+        });
+    }
 }
 
 // filterGraphByType kept for graph-specific CSS dimming (preserves layout while filtering)

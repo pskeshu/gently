@@ -240,16 +240,25 @@
 .graph-edge.dimmed {
     opacity: 0.08;
 }
+/* Edges hidden by default, shown on node hover */
 .graph-edge {
     fill: none;
-    stroke: var(--text-muted);
-    stroke-width: 1.5;
-    opacity: 0.4;
-}
-.graph-edge.cross-lane {
     stroke: var(--accent);
-    stroke-dasharray: 6 3;
-    opacity: 0.5;
+    stroke-width: 2;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+.graph-edge-active {
+    opacity: 0.7;
+}
+/* Dim non-hovered nodes when hovering */
+.graph-hover-active .graph-node:not(.graph-node-hover):not(.graph-node-connected) {
+    opacity: 0.3;
+}
+.graph-node-connected rect {
+    stroke: var(--accent) !important;
+    stroke-width: 2.5;
 }
 .graph-node { cursor: pointer; }
 .graph-node:hover rect {
