@@ -162,6 +162,8 @@
     font-size: 0.82rem;
     margin-bottom: 12px;
     line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 .decide-section {
     margin-top: 12px;
@@ -180,6 +182,8 @@
     padding: 8px 12px;
     background: var(--bg-dark);
     border-radius: 6px;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 .decide-outcome.pending {
     color: var(--text-muted);
@@ -1243,6 +1247,8 @@
     font-size: 0.78rem;
     color: var(--text);
     line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 /* Spec table */
