@@ -634,3 +634,7 @@ class PerceptionResult:
     candidate_stages: Optional[List[CandidateStage]] = None  # Candidates from Phase 1
     multi_phase_trace: Optional[MultiPhaseReasoningTrace] = None  # Full multi-phase trace
     phase_count: int = 1  # Number of phases executed (1, 2, or 3)
+
+    # Multishot reconsideration: the first answer before any reconsider turns
+    initial_stage: Optional[str] = None
+    initial_confidence: Optional[float] = None

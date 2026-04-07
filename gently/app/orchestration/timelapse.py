@@ -1007,7 +1007,6 @@ class TimelapseOrchestrator:
                 embryo_id=embryo_id,
                 detector_name=detector_name,
                 stage=stage,
-                timepoint=estate.timepoints_acquired,
             ):
                 # Round-based: interval rules now modify the global interval
                 old_interval = self._base_interval_seconds
