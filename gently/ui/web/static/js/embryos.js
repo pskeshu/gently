@@ -559,18 +559,25 @@ const EmbryosManager = {
 
             for (const item of filtered) {
                 const imageUid = item.image_uid || item.projection_uid;
-                const stage = item.stage || '—';
-                const stageColor = this.STAGE_COLORS[stage] || '#8b949e';
-                const confNorm = this.normalizeConfidence(item.confidence);
+                const isPending = item._pending === true;
+                const stage = item.stage || (isPending ? 'pending' : '—');
+                const stageColor = isPending
+                    ? 'var(--text-muted)'
+                    : (this.STAGE_COLORS[stage] || '#8b949e');
+                const confNorm = isPending
+                    ? 'analyzing…'
+                    : this.normalizeConfidence(item.confidence);
+                const stageLabel = isPending ? '…' : this.formatStageName(stage);
+                const cellClass = `filmstrip-cell${isPending ? ' pending' : ''}`;
 
-                html += `<div class="filmstrip-cell" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" title="T${item.timepoint} — ${this.formatStageName(stage)} — ${confNorm}">`;
+                html += `<div class="${cellClass}" data-embryo-id="${embryo.embryoId}" data-timepoint="${item.timepoint}" title="T${item.timepoint} — ${stageLabel} — ${confNorm}">`;
                 if (imageUid) {
                     html += `<img class="filmstrip-thumb" src="/api/images/${imageUid}/png?size=${thumbSize * 2}" loading="lazy" width="${thumbSize}" height="${thumbSize}" style="border-color:${stageColor}"/>`;
                 } else {
                     html += `<div class="filmstrip-placeholder" style="width:${thumbSize}px;height:${thumbSize}px;border-color:${stageColor}">T${item.timepoint}</div>`;
                 }
                 if (config.showStageLabels) {
-                    html += `<span class="filmstrip-stage-label" style="color:${stageColor}">${this.formatStageName(stage)}</span>`;
+                    html += `<span class="filmstrip-stage-label" style="color:${stageColor}">${stageLabel}</span>`;
                 }
                 html += `</div>`;
             }
@@ -1051,9 +1058,50 @@ const EmbryosManager = {
         }
         embryo.lastAcquired = now;
 
+        // Seed a pending detection entry with the projection image so every
+        // view in the embryos tab (default, board, filmstrip, vitals) can
+        // render the new frame immediately, without waiting for perception
+        // to finish. handleDetectorEvaluated will upgrade this entry in
+        // place once the perception result arrives (could be 20-40s later).
+        if (data.projection_uid || data.volume_uid) {
+            if (!this.detectionReasoning[embryoId]) {
+                this.detectionReasoning[embryoId] = [];
+            }
+            const existing = this.detectionReasoning[embryoId].find(
+                r => r.timepoint === data.timepoint && r.detector_name === 'perception'
+            );
+            if (!existing) {
+                this.detectionReasoning[embryoId].push({
+                    detector_name: 'perception',
+                    timepoint: data.timepoint,
+                    volume_uid: data.volume_uid,
+                    projection_uid: data.projection_uid,
+                    timestamp: new Date().toISOString(),
+                    // Pending perception result - everything below is null
+                    // until DETECTOR_EVALUATED arrives for this timepoint
+                    _pending: true,
+                    stage: null,
+                    confidence: null,
+                    reasoning: null,
+                    is_hatching: null,
+                    is_transitional: null,
+                    transition_between: null,
+                    observed_features: null,
+                    contrastive_reasoning: null,
+                    reasoning_trace: null,
+                    temporal_analysis: null,
+                });
+            }
+        }
+
         this.updateEmbryosCount();
         this.updateEmbryoCard(embryoId);
         this.updateSummary();
+
+        // Re-render whichever view is active so the new frame shows up now
+        if (this.currentView !== 'default') {
+            this._renderActiveView();
+        }
         this.saveState();
     },
 
@@ -1096,36 +1144,48 @@ const EmbryosManager = {
             embryo.current_stage = stage;
         }
 
-        // Store detection reasoning for the panel (avoid duplicates)
+        // Store detection reasoning for the panel.
+        //
+        // If handleVolumeAcquired already seeded a _pending entry for this
+        // timepoint + detector (the common case now that we render cells
+        // optimistically on VOLUME_ACQUIRED), mutate that entry in place
+        // so views preserve ordering and don't have to reconcile a new
+        // array element against the old one.
         if (!this.detectionReasoning[embryoId]) {
             this.detectionReasoning[embryoId] = [];
         }
-        // Check if we already have this detection (same timepoint + detector)
-        const isDuplicate = this.detectionReasoning[embryoId].some(
+        const perceptionFields = {
+            detected: detected,
+            confidence: data.confidence,
+            reasoning: data.reasoning,
+            volume_uid: data.volume_uid ?? null,
+            projection_uid: data.projection_uid ?? null,
+            timestamp: new Date().toISOString(),
+            stage: stage,
+            is_hatching: data.is_hatching,
+            is_transitional: data.is_transitional,
+            transition_between: data.transition_between,
+            observed_features: data.observed_features,
+            contrastive_reasoning: data.contrastive_reasoning,
+            reasoning_trace: data.reasoning_trace,
+            temporal_analysis: data.temporal_analysis,
+            _pending: false,
+        };
+        const existing = this.detectionReasoning[embryoId].find(
             r => r.timepoint === data.timepoint && r.detector_name === detectorName
         );
-        if (!isDuplicate) {
+        if (existing) {
+            // Only overwrite UIDs if the detector evaluation actually
+            // shipped them - the optimistic seed from VOLUME_ACQUIRED
+            // already knows the right projection_uid otherwise.
+            if (perceptionFields.volume_uid == null) delete perceptionFields.volume_uid;
+            if (perceptionFields.projection_uid == null) delete perceptionFields.projection_uid;
+            Object.assign(existing, perceptionFields);
+        } else {
             this.detectionReasoning[embryoId].push({
                 detector_name: detectorName,
-                detected: detected,
-                confidence: data.confidence,
-                reasoning: data.reasoning,
                 timepoint: data.timepoint,
-                volume_uid: data.volume_uid,
-                projection_uid: data.projection_uid,
-                timestamp: new Date().toISOString(),
-                // Perception-specific fields
-                stage: stage,
-                is_hatching: data.is_hatching,
-                // New structured perception fields
-                is_transitional: data.is_transitional,
-                transition_between: data.transition_between,
-                observed_features: data.observed_features,
-                contrastive_reasoning: data.contrastive_reasoning,
-                // Interleaved reasoning trace (tool calls + reasoning steps)
-                reasoning_trace: data.reasoning_trace,
-                // Temporal analysis for detecting arrested/stalled embryos
-                temporal_analysis: data.temporal_analysis,
+                ...perceptionFields,
             });
             // Cap per-embryo reasoning to prevent unbounded memory growth
             const arr = this.detectionReasoning[embryoId];
