@@ -355,28 +355,55 @@ const ProjectionViewer = {
             contrastDisplay.textContent = this.contrast.toFixed(1);
         });
 
-        // Mouse controls
-        this.renderer3d.domElement.addEventListener('mousedown', (e) => {
+        // Drag-to-rotate with pointer capture. Using pointer events +
+        // setPointerCapture ensures pointermove/pointerup continue to
+        // fire on the canvas even when the cursor leaves the canvas
+        // element during a drag. The previous mouse-event version
+        // attached mousemove to the canvas directly, so drags that
+        // strayed outside caused a rotation jump when the cursor
+        // returned - the delta from the last in-canvas position was
+        // applied all at once.
+        const canvas = this.renderer3d.domElement;
+        canvas.addEventListener('pointerdown', (e) => {
+            // Only react to primary button / primary touch
+            if (e.button !== undefined && e.button !== 0) return;
             this.isDragging = true;
             this.prevMouse = { x: e.clientX, y: e.clientY };
+            try {
+                canvas.setPointerCapture(e.pointerId);
+            } catch (_) {
+                // Older browsers may not support pointer capture;
+                // fall through and rely on window-level listeners.
+            }
+            e.preventDefault();
         });
 
-        this.renderer3d.domElement.addEventListener('mousemove', (e) => {
+        canvas.addEventListener('pointermove', (e) => {
             if (!this.isDragging) return;
+            const dx = e.clientX - this.prevMouse.x;
+            const dy = e.clientY - this.prevMouse.y;
             if (e.shiftKey) {
-                this.sliceGroup.rotation.z += (e.clientX - this.prevMouse.x) * 0.01;
+                this.sliceGroup.rotation.z += dx * 0.01;
             } else {
-                this.sliceGroup.rotation.y += (e.clientX - this.prevMouse.x) * 0.01;
-                this.sliceGroup.rotation.x += (e.clientY - this.prevMouse.y) * 0.01;
+                this.sliceGroup.rotation.y += dx * 0.01;
+                this.sliceGroup.rotation.x += dy * 0.01;
             }
             this.savedRotation.x = this.sliceGroup.rotation.x;
             this.savedRotation.y = this.sliceGroup.rotation.y;
             this.prevMouse = { x: e.clientX, y: e.clientY };
         });
 
-        window.addEventListener('mouseup', () => this.isDragging = false);
+        const endDrag = (e) => {
+            if (!this.isDragging) return;
+            this.isDragging = false;
+            if (e && e.pointerId !== undefined) {
+                try { canvas.releasePointerCapture(e.pointerId); } catch (_) {}
+            }
+        };
+        canvas.addEventListener('pointerup', endDrag);
+        canvas.addEventListener('pointercancel', endDrag);
 
-        this.renderer3d.domElement.addEventListener('wheel', (e) => {
+        canvas.addEventListener('wheel', (e) => {
             e.preventDefault();
             this.camera3d.position.z = Math.max(0.5, Math.min(5, this.camera3d.position.z + e.deltaY * 0.002));
             this.savedZoom = this.camera3d.position.z;
