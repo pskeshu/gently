@@ -3759,6 +3759,14 @@ const EmbryosManager = {
             cache.summaryDuration.textContent = this.formatDuration(Date.now() - this.state.startedAt.getTime());
         }
 
+        // Update the header NEXT countdown. This ticks every second
+        // instead of only on VOLUME_ACQUIRED events, so it no longer
+        // freezes during the long wait between rounds.
+        const nextEl = document.getElementById('summary-next-countdown');
+        if (nextEl) {
+            nextEl.textContent = this.getNextCountdown();
+        }
+
         // Update per-embryo countdowns (compact cards use mini-countdown class)
         Object.values(this.state.embryos).forEach(embryo => {
             if (embryo.isComplete) return;
