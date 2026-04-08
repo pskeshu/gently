@@ -623,7 +623,9 @@ const CalibrationProfileView = {
                 `);
             }
 
-            // Focus position marker
+            // Focus position marker (only when an edge slice happens to
+            // coincide with the calibration position - the reliable focus
+            // lines are drawn independently after this loop).
             if (isFocus) {
                 const label = isFocusTop ? 'TOP FOCUS' : 'BOT FOCUS';
                 svgParts.push(`
@@ -634,6 +636,46 @@ const CalibrationProfileView = {
                 `);
             }
         });
+
+        // Dedicated focus position lines. These always render at the actual
+        // calib_top / calib_bottom galvo positions from the calibration
+        // summary metadata, regardless of whether an edge detection slice
+        // happens to coincide with them. Without this, focus markers only
+        // showed up when the 0.05-deg edge grid lined up with the inset
+        // formula output, which was essentially random.
+        const drawFocusLine = (galvo, label) => {
+            if (galvo == null) return;
+            const y = yScale(galvo);
+            // Chord width: use ellipse intersection if inside, else default
+            let x1, x2;
+            if (ellipseVisible) {
+                const normalizedY = (y - cy) / ry;
+                if (Math.abs(normalizedY) <= 1) {
+                    const xHalf = rx * Math.sqrt(1 - normalizedY * normalizedY);
+                    x1 = cx - xHalf;
+                    x2 = cx + xHalf;
+                } else {
+                    // Calibration position outside the detected embryo - still
+                    // draw it so the user can see something is off
+                    x1 = cx - rx * 0.6;
+                    x2 = cx + rx * 0.6;
+                }
+            } else {
+                x1 = cx - rx * 0.6;
+                x2 = cx + rx * 0.6;
+            }
+            svgParts.push(`
+                <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
+                      stroke="var(--accent-green)" stroke-width="2.8"
+                      opacity="0.95" class="cal-focus-line"/>
+                <polygon points="${x1 - 4},${y} ${x1 - 11},${y - 4.5} ${x1 - 11},${y + 4.5}"
+                         fill="var(--accent-green)"/>
+                <text x="${x1 - 14}" y="${y + 3.5}" text-anchor="end"
+                      fill="var(--accent-green)" font-size="9" font-weight="600">${label}</text>
+            `);
+        };
+        drawFocusLine(info.focusTopGalvo, 'TOP FOCUS');
+        drawFocusLine(info.focusBotGalvo, 'BOT FOCUS');
 
         // Legend
         const legY = H - 10;
