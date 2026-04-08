@@ -916,6 +916,7 @@ async def calibrate_embryo(
     galvo_bottom: float = None,
     edge_step: float = 0.05,
     edge_max_range: float = 0.5,
+    edge_tolerance_deg: float = 0.20,
     inset_fraction: float = 0.4,
     z_buffer_um: float = 25.0,
     use_v04_plan: bool = False,
@@ -923,13 +924,30 @@ async def calibrate_embryo(
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection.
 
-    Calibration path: this function now mirrors the v0.4.0 `calibrate_embryo_piezo_galvo`
-    Bluesky plan (in `gently/hardware/dispim/plans/calibration.py`) by always using
-    the `detected_edge + galvo_range * inset_fraction` formula to place calibration
-    positions and an adaptive wide-window focus sweep. An earlier design that picked
-    calibration positions from Claude Vision "feature richness" scores has been
-    removed - in practice it sometimes selected positions at or beyond the detected
-    edge, causing the focus sweep to fit noise above the embryo.
+    Calibration path: this function mirrors the v0.4.0 `calibrate_embryo_piezo_galvo`
+    Bluesky plan (in `gently/hardware/dispim/plans/calibration.py`). After edge
+    detection, the detected top/bottom edges are extended outward by
+    `edge_tolerance_deg` to define the scan boundaries, and calibration positions
+    are inset inward from those scan boundaries by `scan_range * inset_fraction`:
+
+        scan_top    = detected_top    - edge_tolerance_deg
+        scan_bottom = detected_bottom + edge_tolerance_deg
+        scan_range  = scan_bottom - scan_top
+        calib_top   = scan_top + scan_range * inset_fraction
+        calib_bottom= scan_bottom - scan_range * inset_fraction
+
+    With the defaults (tolerance=0.20, inset_fraction=0.4), the two calibration
+    positions sit 0.2 * scan_range apart - i.e. 40% of the detected galvo range
+    when the embryo is small, 20% of the tolerance-extended range overall. That's
+    wide enough to give the 2-point slope fit real signal-to-noise. An earlier
+    port of this logic used the raw detected range (not tolerance-extended), which
+    squeezed the two calibration points to only 20% of the detected range apart
+    and produced noise-amplified slopes on small embryos - see commit history.
+
+    An even earlier design picked calibration positions from Claude Vision "feature
+    richness" scores; that was removed because Claude sometimes ranked the
+    outermost visible edge frame highest, landing calib_top at or beyond the real
+    embryo signal.
 
     The `use_v04_plan` kwarg is an escape hatch reserved for the case where this
     surgical fix is found to be insufficient on hardware. It's intentionally
@@ -1102,21 +1120,26 @@ async def calibrate_embryo(
                          detected_top, detected_bottom, detected_bottom - detected_top, (detected_bottom - detected_top) * 100)
 
         # === PHASE 2: COMPUTE CALIBRATION POSITIONS (v0.4.0 inset formula) ===
-        # Place calibration positions inside the detected edges by a fixed
-        # fraction of the galvo range. This mirrors the v0.4.0 Bluesky plan
-        # `calibrate_embryo_piezo_galvo`, which uses the same formula.
-        #
-        # An earlier implementation ranked edge-detection frames by Claude
-        # Vision "feature richness" scores and picked the two highest-scoring
-        # visible frames as calibration positions. That selection was removed
-        # because Claude sometimes scored the outermost visible frame (the
-        # very edge of the embryo) as feature-rich, putting calib_top beyond
-        # the real embryo signal and causing the focus sweep to fit noise.
-        galvo_range = detected_bottom - detected_top
-        calib_top = detected_top + galvo_range * inset_fraction
-        calib_bottom = detected_bottom - galvo_range * inset_fraction
-        logger.info("Calibration positions (%.0f%% inset): top=%.3f deg, bottom=%.3f deg",
-                     inset_fraction * 100, calib_top, calib_bottom)
+        # Extend the detected edges outward by `edge_tolerance_deg` to get the
+        # scan boundaries, then inset inward from those boundaries by
+        # `inset_fraction` of the scan range. This matches the v0.4.0 Bluesky
+        # plan `calibrate_embryo_piezo_galvo` (plans/calibration.py:745-782)
+        # exactly. Using the tolerance-extended range (instead of the raw
+        # detected range) gives calibration positions enough separation to
+        # make the 2-point slope fit robust on small embryos.
+        scan_top = detected_top - edge_tolerance_deg
+        scan_bottom = detected_bottom + edge_tolerance_deg
+        scan_range = scan_bottom - scan_top
+        inset_amount = scan_range * inset_fraction
+        calib_top = scan_top + inset_amount
+        calib_bottom = scan_bottom - inset_amount
+        # Store on the embryo so the viz server's "scan top"/"scan bot" dashed
+        # lines match what the calibration actually scanned.
+        detected_range = detected_bottom - detected_top
+        logger.info("Scan boundaries (edges +/- %.3f tolerance): %.3f to %.3f deg (range %.3f)",
+                     edge_tolerance_deg, scan_top, scan_bottom, scan_range)
+        logger.info("Calibration positions (%.0f%% inset from scan boundary): top=%.3f deg, bottom=%.3f deg (%.3f deg apart)",
+                     inset_fraction * 100, calib_top, calib_bottom, calib_bottom - calib_top)
 
         # === PHASE 3: ADAPTIVE FOCUS SWEEPS AT CALIBRATION POSITIONS ===
         logger.info("Phase 3: Adaptive focus sweeps at calibration positions...")
