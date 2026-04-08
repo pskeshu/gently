@@ -119,6 +119,14 @@ class TimelapseOrchestrator:
         self._acquisition_task: Optional[asyncio.Task] = None
         self._stop_requested = False
 
+        # In-flight perception tasks. Acquisition fires perception tasks
+        # as create_task() and moves on to the next embryo immediately, so
+        # round-to-round throughput is bounded by volume acquisition time,
+        # not VLM API latency. Tasks are tracked here so (a) stop() can
+        # await them before returning and (b) we can cap concurrency if
+        # the Claude API rate limit becomes a problem.
+        self._perception_tasks: Set[asyncio.Task] = set()
+
         # Interval adjustment rules
         self._interval_rules: List[IntervalRule] = []
         self._applied_rules: Dict[str, Set[str]] = {}  # embryo_id -> set of applied rule names
@@ -313,6 +321,24 @@ class TimelapseOrchestrator:
                 if not active_embryos:
                     self._status = TimelapseStatus.COMPLETED
 
+                    # Wait for any in-flight perception tasks to land before
+                    # finalizing, otherwise the last few DETECTOR_EVALUATED
+                    # events can land after the completion event and
+                    # confuse listeners.
+                    if self._perception_tasks:
+                        pending = list(self._perception_tasks)
+                        logger.info(
+                            f"Draining {len(pending)} perception task(s) "
+                            f"before completing timelapse..."
+                        )
+                        done, still_pending = await asyncio.wait(pending, timeout=60.0)
+                        if still_pending:
+                            logger.warning(
+                                f"{len(still_pending)} perception task(s) did not "
+                                f"finish in 60s - proceeding to completion anyway"
+                            )
+                        self._perception_tasks.clear()
+
                     # Log trace file count
                     if self._trace_dir:
                         trace_count = len(list(self._trace_dir.glob("*.json")))
@@ -460,17 +486,29 @@ class TimelapseOrchestrator:
                         if isinstance(callback_result, dict):
                             volume_uids = callback_result
 
-                # Run perception on acquired volume
+                # Fire perception as a background task instead of awaiting
+                # it. This unblocks the next embryo's acquisition so the
+                # filmstrip gets fresh volumes every few seconds, not every
+                # 20-40 seconds. Perception still runs to completion and
+                # still emits DETECTOR_EVALUATED events; it just no longer
+                # gates the acquisition loop.
                 if self.perception_manager and volume_data is not None:
-                    await self._run_perception(
-                        embryo_id=embryo_id,
-                        timepoint=embryo_state.timepoints_acquired,
-                        volume=volume_data,
-                        embryo_state=embryo_state,
-                        volume_uids=volume_uids,
+                    perception_task = asyncio.create_task(
+                        self._run_perception(
+                            embryo_id=embryo_id,
+                            timepoint=embryo_state.timepoints_acquired,
+                            volume=volume_data,
+                            embryo_state=embryo_state,
+                            volume_uids=volume_uids,
+                        )
                     )
+                    self._perception_tasks.add(perception_task)
+                    # Remove the task from the set when it finishes so the
+                    # set doesn't grow unbounded over a long timelapse.
+                    perception_task.add_done_callback(self._perception_tasks.discard)
 
-                # Check stop condition
+                # Check stop condition (based on acquisition state, not
+                # perception - we'll re-check inside _run_perception too)
                 await self._check_stop_condition(embryo_state)
 
                 logger.debug(
@@ -861,6 +899,28 @@ class TimelapseOrchestrator:
                 await self._acquisition_task
             except asyncio.CancelledError:
                 pass
+
+        # Drain in-flight perception tasks. Acquisition is now fire-and-
+        # forget, so at stop time there may still be a few VLM calls in
+        # the air. Give them a bounded window to finish gracefully so
+        # DETECTOR_EVALUATED events and trace files don't get dropped.
+        if self._perception_tasks:
+            pending = list(self._perception_tasks)
+            logger.info(f"Waiting for {len(pending)} in-flight perception task(s) to finish...")
+            try:
+                done, still_pending = await asyncio.wait(pending, timeout=60.0)
+                if still_pending:
+                    logger.warning(
+                        f"{len(still_pending)} perception task(s) did not finish "
+                        f"in 60s - cancelling to unblock stop"
+                    )
+                    for t in still_pending:
+                        t.cancel()
+                    # Swallow cancellation errors
+                    await asyncio.gather(*still_pending, return_exceptions=True)
+            except Exception as e:
+                logger.warning(f"Error draining perception tasks: {e}")
+            self._perception_tasks.clear()
 
         self._status = TimelapseStatus.IDLE
 
