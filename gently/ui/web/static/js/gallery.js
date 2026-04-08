@@ -483,16 +483,46 @@ const CalibrationProfileView = {
         // Build SVG parts
         let svgParts = [];
 
-        // Defs
+        // Defs - richer gradients and a glow filter for a more refined look
         svgParts.push(`
             <defs>
-                <radialGradient id="embryo-grd" cx="40%" cy="40%">
-                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.07"/>
-                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.02"/>
+                <!-- Embryo body: layered radial gradient with off-center highlight -->
+                <radialGradient id="embryo-grd" cx="42%" cy="36%" r="80%">
+                    <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.22"/>
+                    <stop offset="40%" stop-color="var(--accent)" stop-opacity="0.11"/>
+                    <stop offset="85%" stop-color="var(--accent)" stop-opacity="0.04"/>
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0.01"/>
                 </radialGradient>
-                <pattern id="pad-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
-                    <line x1="0" y1="0" x2="0" y2="6" stroke="var(--border)" stroke-width="0.5" opacity="0.4"/>
+                <!-- Outer soft halo for the embryo -->
+                <radialGradient id="embryo-halo" cx="50%" cy="50%" r="55%">
+                    <stop offset="65%" stop-color="var(--accent)" stop-opacity="0"/>
+                    <stop offset="88%" stop-color="var(--accent)" stop-opacity="0.07"/>
+                    <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+                </radialGradient>
+                <!-- Softer padding hatch -->
+                <pattern id="pad-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line x1="0" y1="0" x2="0" y2="8" stroke="var(--border)" stroke-width="0.7" opacity="0.28"/>
                 </pattern>
+                <!-- Glow filter for focus lines -->
+                <filter id="focus-glow" x="-50%" y="-50%" width="200%" height="200%">
+                    <feGaussianBlur stdDeviation="2.2" result="blur"/>
+                    <feMerge>
+                        <feMergeNode in="blur"/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
+                <!-- Subtle drop shadow for the embryo ellipse -->
+                <filter id="embryo-shadow" x="-20%" y="-20%" width="140%" height="140%">
+                    <feGaussianBlur in="SourceAlpha" stdDeviation="2"/>
+                    <feOffset dy="1" result="off"/>
+                    <feComponentTransfer>
+                        <feFuncA type="linear" slope="0.35"/>
+                    </feComponentTransfer>
+                    <feMerge>
+                        <feMergeNode/>
+                        <feMergeNode in="SourceGraphic"/>
+                    </feMerge>
+                </filter>
             </defs>
         `);
 
@@ -540,39 +570,56 @@ const CalibrationProfileView = {
             `);
         }
 
-        // Scan boundary lines (dashed)
-        if (info.scanTop != null) {
-            const y = yScale(info.scanTop);
+        // Scan boundary lines (dotted) with floating label chip
+        const drawScanBoundary = (galvo, label) => {
+            if (galvo == null) return;
+            const y = yScale(galvo);
             svgParts.push(`
                 <line x1="${M.left + 4}" y1="${y}" x2="${M.left + plotW}" y2="${y}"
-                      stroke="var(--text-muted)" stroke-width="0.8" stroke-dasharray="4 3" opacity="0.5"/>
-                <text x="${M.left + plotW + 4}" y="${y + 3}"
-                      fill="var(--text-muted)" font-size="9">scan top</text>
+                      stroke="var(--text-muted)" stroke-width="0.7"
+                      stroke-dasharray="2 4" opacity="0.4"/>
+                <rect x="${M.left + plotW + 2}" y="${y - 7}" width="44" height="13" rx="3"
+                      fill="var(--bg-main)" stroke="var(--border)" stroke-width="0.6" opacity="0.9"/>
+                <text x="${M.left + plotW + 24}" y="${y + 3}" text-anchor="middle"
+                      fill="var(--text-muted)" font-size="9" letter-spacing="0.4">${label}</text>
             `);
-        }
-        if (info.scanBottom != null) {
-            const y = yScale(info.scanBottom);
-            svgParts.push(`
-                <line x1="${M.left + 4}" y1="${y}" x2="${M.left + plotW}" y2="${y}"
-                      stroke="var(--text-muted)" stroke-width="0.8" stroke-dasharray="4 3" opacity="0.5"/>
-                <text x="${M.left + plotW + 4}" y="${y + 3}"
-                      fill="var(--text-muted)" font-size="9">scan bot</text>
-            `);
-        }
+        };
+        drawScanBoundary(info.scanTop, 'scan top');
+        drawScanBoundary(info.scanBottom, 'scan bot');
 
-        // Embryo ellipse
+        // Embryo ellipse - layered for depth: halo, body, rim
         if (ellipseVisible) {
+            // Outer soft halo
+            svgParts.push(`
+                <ellipse cx="${cx}" cy="${cy}" rx="${rx * 1.22}" ry="${ry * 1.32}"
+                         fill="url(#embryo-halo)"/>
+            `);
+            // Main body with subtle drop shadow
             svgParts.push(`
                 <ellipse cx="${cx}" cy="${cy}" rx="${rx}" ry="${ry}"
-                         fill="url(#embryo-grd)" stroke="var(--border)"
-                         stroke-width="1.2" stroke-dasharray="6 3" opacity="0.7"/>
+                         fill="url(#embryo-grd)" stroke="var(--accent)"
+                         stroke-width="1.4" stroke-opacity="0.55"
+                         filter="url(#embryo-shadow)"/>
             `);
-            // Edge labels
+            // Inner highlight arc (subtle rim light at the top-left)
             svgParts.push(`
-                <text x="${cx + rx + 16}" y="${eTop + 3}"
-                      fill="var(--accent)" font-size="9" font-weight="500">edge top</text>
-                <text x="${cx + rx + 16}" y="${eBot + 3}"
-                      fill="var(--accent)" font-size="9" font-weight="500">edge bot</text>
+                <path d="M ${cx - rx * 0.75} ${cy - ry * 0.35}
+                         A ${rx * 0.85} ${ry * 0.85} 0 0 1 ${cx - rx * 0.1} ${cy - ry * 0.9}"
+                      fill="none" stroke="var(--accent)" stroke-width="0.9"
+                      stroke-opacity="0.35" stroke-linecap="round"/>
+            `);
+            // Edge labels with connector line
+            svgParts.push(`
+                <line x1="${cx + rx - 2}" y1="${eTop}" x2="${cx + rx + 12}" y2="${eTop}"
+                      stroke="var(--accent)" stroke-width="0.8" opacity="0.55"/>
+                <text x="${cx + rx + 15}" y="${eTop + 3}"
+                      fill="var(--accent)" font-size="9" font-weight="600"
+                      letter-spacing="0.4">edge top</text>
+                <line x1="${cx + rx - 2}" y1="${eBot}" x2="${cx + rx + 12}" y2="${eBot}"
+                      stroke="var(--accent)" stroke-width="0.8" opacity="0.55"/>
+                <text x="${cx + rx + 15}" y="${eBot + 3}"
+                      fill="var(--accent)" font-size="9" font-weight="600"
+                      letter-spacing="0.4">edge bot</text>
             `);
         }
 
@@ -604,22 +651,32 @@ const CalibrationProfileView = {
             svgParts.push(`
                 <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
                       stroke="${isSelected ? 'var(--accent)' : color}"
-                      stroke-width="${sw}" opacity="${isSelected ? 1 : 0.75}"
+                      stroke-width="${sw}" stroke-linecap="round"
+                      opacity="${isSelected ? 1 : 0.6}"
                       class="cal-slice-line ${isFocus ? 'focus-pos' : ''} ${isSelected ? 'selected' : ''}"
                       data-index="${i}" data-type="edge"
                       style="cursor:pointer"/>
             `);
 
-            // Label on right: feature score or visibility
-            if (d.feature_score > 0) {
+            // Label on right: feature score or visibility (only on the outermost
+            // slices + peak so the profile doesn't get cluttered by per-slice noise).
+            // Always show the top-scoring slice and any "no embryo" markers.
+            const showFeatureScore = d.feature_score > 0 && (
+                d.feature_score >= 5 ||
+                i === 0 ||
+                i === edgeData.length - 1
+            );
+            if (showFeatureScore) {
                 svgParts.push(`
-                    <text x="${x2 + 6}" y="${y + 3.5}"
-                          fill="${color}" font-size="9" opacity="0.8">${d.feature_score}/10</text>
+                    <text x="${x2 + 8}" y="${y + 3}"
+                          fill="${color}" font-size="8.5" font-weight="500"
+                          opacity="0.75" letter-spacing="0.2">${d.feature_score}/10</text>
                 `);
             } else if (!d.visible) {
                 svgParts.push(`
-                    <text x="${x2 + 6}" y="${y + 3.5}"
-                          fill="var(--text-muted)" font-size="9" opacity="0.6">no embryo</text>
+                    <text x="${x2 + 8}" y="${y + 3}"
+                          fill="var(--text-muted)" font-size="8.5"
+                          font-style="italic" opacity="0.55">no embryo</text>
                 `);
             }
 
@@ -640,9 +697,7 @@ const CalibrationProfileView = {
         // Dedicated focus position lines. These always render at the actual
         // calib_top / calib_bottom galvo positions from the calibration
         // summary metadata, regardless of whether an edge detection slice
-        // happens to coincide with them. Without this, focus markers only
-        // showed up when the 0.05-deg edge grid lined up with the inset
-        // formula output, which was essentially random.
+        // happens to coincide with them.
         const drawFocusLine = (galvo, label) => {
             if (galvo == null) return;
             const y = yScale(galvo);
@@ -655,8 +710,6 @@ const CalibrationProfileView = {
                     x1 = cx - xHalf;
                     x2 = cx + xHalf;
                 } else {
-                    // Calibration position outside the detected embryo - still
-                    // draw it so the user can see something is off
                     x1 = cx - rx * 0.6;
                     x2 = cx + rx * 0.6;
                 }
@@ -664,26 +717,26 @@ const CalibrationProfileView = {
                 x1 = cx - rx * 0.6;
                 x2 = cx + rx * 0.6;
             }
+            // Label chip (pill shape) on the left side
+            const chipW = 54;
+            const chipH = 14;
+            const chipX = x1 - chipW - 8;
             svgParts.push(`
                 <line x1="${x1}" y1="${y}" x2="${x2}" y2="${y}"
-                      stroke="var(--accent-green)" stroke-width="2.8"
-                      opacity="0.95" class="cal-focus-line"/>
-                <polygon points="${x1 - 4},${y} ${x1 - 11},${y - 4.5} ${x1 - 11},${y + 4.5}"
-                         fill="var(--accent-green)"/>
-                <text x="${x1 - 14}" y="${y + 3.5}" text-anchor="end"
-                      fill="var(--accent-green)" font-size="9" font-weight="600">${label}</text>
+                      stroke="var(--accent-green)" stroke-width="2.4"
+                      stroke-linecap="round" opacity="0.98"
+                      filter="url(#focus-glow)" class="cal-focus-line"/>
+                <circle cx="${x1}" cy="${y}" r="2.5" fill="var(--accent-green)"/>
+                <circle cx="${x2}" cy="${y}" r="2.5" fill="var(--accent-green)"/>
+                <rect x="${chipX}" y="${y - chipH / 2}" width="${chipW}" height="${chipH}" rx="${chipH / 2}"
+                      fill="var(--accent-green)" opacity="0.92"/>
+                <text x="${chipX + chipW / 2}" y="${y + 3.5}" text-anchor="middle"
+                      fill="#0a1419" font-size="9" font-weight="700"
+                      letter-spacing="0.6">${label}</text>
             `);
         };
         drawFocusLine(info.focusTopGalvo, 'TOP FOCUS');
         drawFocusLine(info.focusBotGalvo, 'BOT FOCUS');
-
-        // Legend
-        const legY = H - 10;
-        svgParts.push(`
-            <text x="${M.left}" y="${legY}" fill="var(--text-muted)" font-size="9">
-                Line color = feature score (dim=low, bright=high)
-            </text>
-        `);
 
         return `
             <svg viewBox="0 0 ${W} ${H}" class="cal-profile-svg"
