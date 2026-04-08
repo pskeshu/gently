@@ -109,7 +109,7 @@ class DiSPIMXYStage:
     """
 
     def __init__(self, name: str, core: pymmcore.CMMCore,
-                 x_limits: Tuple[float, float] = (500.0, 2500.0),
+                 x_limits: Tuple[float, float] = (2000.0, 4000.0),
                  y_limits: Tuple[float, float] = (-1000.0, 1000.0)):
         self.name = name
         self.core = core

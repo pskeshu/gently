@@ -196,7 +196,7 @@ class TestBuildSnapshotMetadata:
             image_shape=(100, 100),
         )
         sp = meta["safety_perimeter"]
-        assert sp["x"] == (500.0, 2500.0)
+        assert sp["x"] == (2000.0, 4000.0)
         assert sp["y"] == (-1000.0, 1000.0)
 
     def test_custom_safety_limits(self):

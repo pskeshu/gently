@@ -226,7 +226,7 @@ def make_z_stage(core=None, limits=(50.0, 250.0)):
     return DiSPIMZstage("ZStage", core or make_core(), limits=limits)
 
 
-def make_xy_stage(core=None, x_limits=(500.0, 2500.0), y_limits=(-1000.0, 1000.0)):
+def make_xy_stage(core=None, x_limits=(2000.0, 4000.0), y_limits=(-1000.0, 1000.0)):
     from gently.hardware.dispim.devices.stage import DiSPIMXYStage
     return DiSPIMXYStage("XYStage", core or make_core(), x_limits=x_limits, y_limits=y_limits)
 
@@ -318,38 +318,38 @@ class TestXYStageBounds:
 
     def test_valid_xy_position(self):
         stage = make_xy_stage()
-        status = stage.set([1500.0, 0.0])
+        status = stage.set([3000.0, 0.0])
         status.wait(timeout=2)
-        assert stage.core._xy_position == (1500.0, 0.0)
+        assert stage.core._xy_position == (3000.0, 0.0)
 
     def test_x_below_lower_limit(self):
         stage = make_xy_stage()
-        status = stage.set([499.0, 0.0])
+        status = stage.set([1999.0, 0.0])
         with pytest.raises(ValueError, match="outside limits"):
             status.wait(timeout=2)
 
     def test_x_above_upper_limit(self):
         stage = make_xy_stage()
-        status = stage.set([2501.0, 0.0])
+        status = stage.set([4001.0, 0.0])
         with pytest.raises(ValueError, match="outside limits"):
             status.wait(timeout=2)
 
     def test_y_below_lower_limit(self):
         stage = make_xy_stage()
-        status = stage.set([1500.0, -1001.0])
+        status = stage.set([3000.0, -1001.0])
         with pytest.raises(ValueError, match="outside limits"):
             status.wait(timeout=2)
 
     def test_y_above_upper_limit(self):
         stage = make_xy_stage()
-        status = stage.set([1500.0, 1001.0])
+        status = stage.set([3000.0, 1001.0])
         with pytest.raises(ValueError, match="outside limits"):
             status.wait(timeout=2)
 
     def test_core_not_called_on_invalid_x(self):
         core = make_core()
         stage = make_xy_stage(core=core)
-        stage.set([0.0, 0.0])  # x=0 is below x_limits[0]=500
+        stage.set([0.0, 0.0])  # x=0 is below x_limits[0]=2000
         time.sleep(0.1)
         assert not any(c[0] == 'setXYPosition' for c in core.call_log)
 

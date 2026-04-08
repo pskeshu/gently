@@ -42,8 +42,11 @@ async def _adaptive_focus_sweep(
     Adaptive focus sweep with early stopping.
 
     Uses sparse-then-dense approach:
-    1. Sparse survey (5µm steps) to find approximate peak with early stopping
-    2. Dense refinement (0.5µm steps) around peak with early stopping
+    1. Sparse survey over a wide window (±15µm, 5µm steps) to find approximate
+       peak with early stopping. The window is intentionally wide so a stale
+       heuristic or a previously-unseen sample region still catches the true
+       peak instead of fitting noise on the shoulder.
+    2. Dense refinement (0.5µm steps) around the sparse peak with early stopping
 
     Parameters
     ----------
@@ -80,7 +83,11 @@ async def _adaptive_focus_sweep(
     DENSE_RANGE = 3.0  # µm - narrow window around peak
     MIN_R_SQUARED = 0.75
 
-    sparse_range = 5.0  # µm sweep range
+    # Sparse window is wide (±15 µm) so the sweep still catches the true peak
+    # when the heuristic piezo is off by up to ~10 µm — e.g. after moving to a
+    # new sample region or when the session prior is stale. Prior versions used
+    # ±5 µm, which silently fit noise when the heuristic missed.
+    sparse_range = 15.0  # µm sweep range
 
     logger.info("=== ADAPTIVE %s FOCUS SWEEP at galvo=%.3f deg ===", galvo_name.upper(), galvo_pos)
     logger.info("Using range: +/-%.1f um (prior: %d calibrations)", sparse_range, session_prior.num_calibrations)
@@ -881,11 +888,11 @@ async def fast_calibrate_embryo(
     description="""Run full piezo-galvo calibration for a specific embryo using Claude vision.
 This performs:
 1. Move to embryo XY position
-2. Use Claude vision to detect embryo Z extent (top/bottom edges) AND rate feature richness
-3. Select two feature-rich positions (score \u22656/10) that are \u226530% of embryo range apart
-4. Run focus sweeps at selected positions:
-   - Fine-only (\u00b15\u00b5m) if feature-rich positions found (faster, ~20 exposures per position)
-   - Adaptive coarse+fine if fallback positions used (~30-40 exposures per position)
+2. Use Claude vision to detect embryo Z extent (top/bottom edges) by linear sweep
+3. Place calibration positions inside the detected edges by inset_fraction of
+   the galvo range (default 0.4, matching the v0.4.0 calibration plan)
+4. Run adaptive focus sweeps (\u00b115\u00b5m sparse survey, \u00b13\u00b5m dense refinement)
+   at each calibration position
 5. FFT bandpass scoring with Gaussian fit (R\u00b2 \u2265 0.75 threshold)
 6. 2-point linear fit to establish piezo = slope*galvo + offset
 7. Store calibration including volume acquisition parameters
@@ -893,7 +900,7 @@ This performs:
 Use after detection to prepare an embryo for volume acquisition. Takes ~2-4 minutes per embryo.
 
 The z_buffer_um parameter controls how much empty space is captured above and below the embryo.
-Default is 15\u00b5m. Increase for more context (useful for segmentation), decrease for faster acquisition.""",
+Default is 25\u00b5m. Increase for more context (useful for segmentation), decrease for faster acquisition.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
@@ -911,9 +918,26 @@ async def calibrate_embryo(
     edge_max_range: float = 0.5,
     inset_fraction: float = 0.4,
     z_buffer_um: float = 25.0,
+    use_v04_plan: bool = False,
     context: Dict = None
 ) -> str:
-    """Run piezo-galvo calibration with Claude vision edge detection"""
+    """Run piezo-galvo calibration with Claude vision edge detection.
+
+    Calibration path: this function now mirrors the v0.4.0 `calibrate_embryo_piezo_galvo`
+    Bluesky plan (in `gently/hardware/dispim/plans/calibration.py`) by always using
+    the `detected_edge + galvo_range * inset_fraction` formula to place calibration
+    positions and an adaptive wide-window focus sweep. An earlier design that picked
+    calibration positions from Claude Vision "feature richness" scores has been
+    removed - in practice it sometimes selected positions at or beyond the detected
+    edge, causing the focus sweep to fit noise above the embryo.
+
+    The `use_v04_plan` kwarg is an escape hatch reserved for the case where this
+    surgical fix is found to be insufficient on hardware. It's intentionally
+    unwired (raises NotImplementedError) because delegating to the actual Bluesky
+    plan requires a RunEngine and device objects that live on the device layer,
+    not on the agent side. If you need it, wire it through the queue server
+    plan-submission API. Until then, the surgical path IS the v0.4.0 path.
+    """
     import numpy as np
     import tempfile
     from pathlib import Path
@@ -929,6 +953,22 @@ async def calibrate_embryo(
 
     if not client or not getattr(client, 'is_connected', False):
         return f"Error: Not connected to microscope server. Cannot calibrate {embryo_id}."
+
+    if use_v04_plan:
+        # Escape hatch hook. Not wired yet - delegating to the real Bluesky
+        # plan requires a RunEngine and device objects that live on the device
+        # layer, so the caller would have to submit the plan through the queue
+        # server. Since the surgical path already mirrors v0.4.0's behavior,
+        # this is a placeholder for a future hardware-regression follow-up.
+        raise NotImplementedError(
+            "use_v04_plan=True is not wired yet. The default surgical path "
+            "in calibrate_embryo already replicates the v0.4.0 calibration "
+            "plan's behavior (edge detection + inset + wide adaptive sweep). "
+            "If that path regresses on hardware, wire this branch to submit "
+            "gently.hardware.dispim.plans.calibration.calibrate_embryo_piezo_galvo "
+            "through the queue server's plan-submission API."
+        )
+    logger.info("calibration path: surgical (v0.4.0-equivalent inset + adaptive sweep)")
 
     embryo, err = get_embryo_or_error(agent, embryo_id)
     if err:
@@ -1061,133 +1101,45 @@ async def calibrate_embryo(
             logger.info("Detected embryo extent: top=%.3f deg, bottom=%.3f deg, range=%.3f deg (~%.0f um)",
                          detected_top, detected_bottom, detected_bottom - detected_top, (detected_bottom - detected_top) * 100)
 
-        # === PHASE 2: SELECT OPTIMAL FOCUS POSITIONS ===
-        # Use Claude's feature richness scores to find best positions for calibration
-        # Need two positions that are ≥30% of embryo range apart for good 2-point slope
+        # === PHASE 2: COMPUTE CALIBRATION POSITIONS (v0.4.0 inset formula) ===
+        # Place calibration positions inside the detected edges by a fixed
+        # fraction of the galvo range. This mirrors the v0.4.0 Bluesky plan
+        # `calibrate_embryo_piezo_galvo`, which uses the same formula.
+        #
+        # An earlier implementation ranked edge-detection frames by Claude
+        # Vision "feature richness" scores and picked the two highest-scoring
+        # visible frames as calibration positions. That selection was removed
+        # because Claude sometimes scored the outermost visible frame (the
+        # very edge of the embryo) as feature-rich, putting calib_top beyond
+        # the real embryo signal and causing the focus sweep to fit noise.
         galvo_range = detected_bottom - detected_top
-        min_separation = galvo_range * 0.3  # Minimum 30% separation for good slope
+        calib_top = detected_top + galvo_range * inset_fraction
+        calib_bottom = detected_bottom - galvo_range * inset_fraction
+        logger.info("Calibration positions (%.0f%% inset): top=%.3f deg, bottom=%.3f deg",
+                     inset_fraction * 100, calib_top, calib_bottom)
 
-        use_fine_only = False  # Will be set to True if we found good feature-rich positions
-
-        if edge_detection_data and not skip_edge_detection:
-            # Filter to visible positions with good features (score >= 6)
-            good_positions = [p for p in edge_detection_data if p['visible'] and p['feature_score'] >= 6]
-
-            if len(good_positions) >= 2:
-                # Sort by feature score (best first)
-                good_positions.sort(key=lambda x: x['feature_score'], reverse=True)
-
-                # Best overall position
-                calib_pos_1 = good_positions[0]
-
-                # Find second position that's far enough from first (≥30% apart)
-                calib_pos_2 = None
-                for pos in good_positions[1:]:
-                    if abs(pos['galvo'] - calib_pos_1['galvo']) >= min_separation:
-                        calib_pos_2 = pos
-                        break
-
-                if calib_pos_2 is None and len(good_positions) > 1:
-                    # Fallback: use second best regardless of distance
-                    calib_pos_2 = good_positions[1]
-
-                if calib_pos_2 is not None:
-                    # Assign to top/bottom based on galvo position
-                    if calib_pos_1['galvo'] < calib_pos_2['galvo']:
-                        calib_top, calib_bottom = calib_pos_1['galvo'], calib_pos_2['galvo']
-                        score_top, score_bottom = calib_pos_1['feature_score'], calib_pos_2['feature_score']
-                    else:
-                        calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
-                        score_top, score_bottom = calib_pos_2['feature_score'], calib_pos_1['feature_score']
-
-                    actual_separation = abs(calib_bottom - calib_top) / galvo_range * 100
-                    use_fine_only = True  # Feature-rich positions, use fine-only sweep
-
-                    logger.info("Optimal focus positions (selected by Claude feature richness):")
-                    logger.info("Position 1: galvo=%.3f deg (features=%s/10)", calib_top, score_top)
-                    logger.info("Position 2: galvo=%.3f deg (features=%s/10)", calib_bottom, score_bottom)
-                    logger.info("Separation: %.0f%% of embryo range -> Using FINE-ONLY focus sweeps", actual_separation)
-                else:
-                    # Only one good position found, fall back to inset
-                    calib_top = detected_top + galvo_range * inset_fraction
-                    calib_bottom = detected_bottom - galvo_range * inset_fraction
-                    logger.info("Calibration positions (fallback): top=%.3f deg, bottom=%.3f deg", calib_top, calib_bottom)
-            else:
-                # Not enough good positions (score >= 6), try positions with any visibility
-                visible_positions = [p for p in edge_detection_data if p['visible']]
-                if len(visible_positions) >= 2:
-                    # Sort by feature score and pick best two that are apart
-                    visible_positions.sort(key=lambda x: x['feature_score'], reverse=True)
-                    calib_pos_1 = visible_positions[0]
-                    calib_pos_2 = None
-                    for pos in visible_positions[1:]:
-                        if abs(pos['galvo'] - calib_pos_1['galvo']) >= min_separation:
-                            calib_pos_2 = pos
-                            break
-                    if calib_pos_2 is None and len(visible_positions) > 1:
-                        calib_pos_2 = visible_positions[1]
-
-                    if calib_pos_2 is not None:
-                        if calib_pos_1['galvo'] < calib_pos_2['galvo']:
-                            calib_top, calib_bottom = calib_pos_1['galvo'], calib_pos_2['galvo']
-                        else:
-                            calib_top, calib_bottom = calib_pos_2['galvo'], calib_pos_1['galvo']
-                        logger.info("Calibration positions (moderate features): top=%.3f deg (features=%s/10), bottom=%.3f deg (features=%s/10)",
-                                     calib_top, calib_pos_1['feature_score'], calib_bottom, calib_pos_2['feature_score'])
-                    else:
-                        calib_top = detected_top + galvo_range * inset_fraction
-                        calib_bottom = detected_bottom - galvo_range * inset_fraction
-                else:
-                    calib_top = detected_top + galvo_range * inset_fraction
-                    calib_bottom = detected_bottom - galvo_range * inset_fraction
-                    logger.info("Calibration positions (fallback to %.0f%% inset): top=%.3f deg, bottom=%.3f deg",
-                                 inset_fraction * 100, calib_top, calib_bottom)
-        else:
-            # No edge detection data, use traditional inset method
-            calib_top = detected_top + galvo_range * inset_fraction
-            calib_bottom = detected_bottom - galvo_range * inset_fraction
-            logger.info("Calibration positions (interior, %.0f%% inset): top=%.3f deg, bottom=%.3f deg",
-                         inset_fraction * 100, calib_top, calib_bottom)
-
-        # === PHASE 3: FOCUS SWEEPS AT CALIBRATION POSITIONS ===
-        # Use fine-only if we found feature-rich positions, otherwise adaptive sweep
-
-        if use_fine_only:
-            logger.info("Phase 2: Fine-only focus sweeps at feature-rich positions...")
-        else:
-            logger.info("Phase 2: Adaptive focus sweeps at calibration positions...")
+        # === PHASE 3: ADAPTIVE FOCUS SWEEPS AT CALIBRATION POSITIONS ===
+        logger.info("Phase 3: Adaptive focus sweeps at calibration positions...")
 
         results = {}
 
         for galvo_name, galvo_pos in [("top", calib_top), ("bottom", calib_bottom)]:
-            # Expected piezo from heuristic
+            # Expected piezo from heuristic - used only to center the sparse
+            # survey window. The window is ±15µm (see _adaptive_focus_sweep),
+            # so a stale heuristic off by <10µm still catches the true peak.
             expected_piezo = galvo_pos * HEURISTIC_SLOPE + HEURISTIC_OFFSET
 
-            if use_fine_only:
-                # Fine-only sweep - heuristic is good enough at feature-rich positions
-                result_dict, sweep_exposures = await _fine_focus_sweep(
-                    client=client,
-                    agent=agent,
-                    embryo_id=embryo_id,
-                    galvo_name=galvo_name,
-                    galvo_pos=galvo_pos,
-                    expected_piezo=expected_piezo,
-                    select_best_view=select_view_and_crop_roi,  # Use ROI cropping for focus
-                    calculate_focus_score=calculate_focus_score,
-                )
-            else:
-                # Adaptive sweep with early stopping for lower-confidence positions
-                result_dict, sweep_exposures = await _adaptive_focus_sweep(
-                    client=client,
-                    agent=agent,
-                    embryo_id=embryo_id,
-                    galvo_name=galvo_name,
-                    galvo_pos=galvo_pos,
-                    expected_piezo=expected_piezo,
-                    session_prior=session_prior,
-                    select_best_view=select_view_and_crop_roi,  # Use ROI cropping for focus
-                    calculate_focus_score=calculate_focus_score,
-                )
+            result_dict, sweep_exposures = await _adaptive_focus_sweep(
+                client=client,
+                agent=agent,
+                embryo_id=embryo_id,
+                galvo_name=galvo_name,
+                galvo_pos=galvo_pos,
+                expected_piezo=expected_piezo,
+                session_prior=session_prior,
+                select_best_view=select_view_and_crop_roi,  # Use ROI cropping for focus
+                calculate_focus_score=calculate_focus_score,
+            )
 
             results[galvo_name] = result_dict
             total_exposures += sweep_exposures

@@ -210,7 +210,7 @@ def build_snapshot_metadata(
         Objective magnification on the bottom camera.
     safety_limits : dict, optional
         Stage safety perimeter, e.g.
-        ``{"x": (500, 2500), "y": (-1000, 1000)}``.
+        ``{"x": (2000, 4000), "y": (-1000, 1000)}``.
         If None, uses diSPIM hardware defaults.
 
     Returns
@@ -222,8 +222,9 @@ def build_snapshot_metadata(
     h, w = image_shape[0], image_shape[1]
 
     if safety_limits is None:
-        # Default diSPIM XY stage limits (µm)
-        safety_limits = {"x": (500.0, 2500.0), "y": (-1000.0, 1000.0)}
+        # Default diSPIM XY stage limits (µm). Must match the default in
+        # gently/hardware/dispim/devices/stage.py::DiSPIMXYStage.__init__.
+        safety_limits = {"x": (2000.0, 4000.0), "y": (-1000.0, 1000.0)}
 
     meta: Dict[str, Any] = {
         "stage_x": stage_position[0],
