@@ -139,10 +139,18 @@ def create_router(server) -> APIRouter:
             vol_bytes = vol_uint8.tobytes()
             vol_b64 = base64.b64encode(vol_bytes).decode('utf-8')
 
+            # Physical voxel size for isometric 3D rendering.
+            # Matches the default in gently.core.imaging.projection_three_view:
+            # (dz, dy, dx) in microns. 1.0 um Z step, 0.1625 um XY (6.5 um
+            # camera pixel / 40x SPIM objective). If per-volume metadata
+            # becomes available later, prefer that over this default.
+            voxel_size_um = [1.0, 0.1625, 0.1625]
+
             return {
                 "embryo_id": embryo_id,
                 "timepoint": timepoint,
                 "shape": list(vol_uint8.shape),
+                "voxel_size_um": voxel_size_um,
                 "data": vol_b64,
             }
 

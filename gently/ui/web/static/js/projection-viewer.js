@@ -17,6 +17,9 @@ const ProjectionViewer = {
     sliceGroup: null,
     volumeData: null,
     volumeShape: null,
+    // Physical voxel size (dz, dy, dx) in microns, for isometric rendering.
+    // Default matches gently.core.imaging.projection_three_view.
+    voxelSizeUm: [1.0, 0.1625, 0.1625],
     savedRotation: { x: -0.5, y: 0.5 },
     savedZoom: 0.9,
     isDragging: false,
@@ -159,6 +162,11 @@ const ProjectionViewer = {
             if (volResponse.ok) {
                 const volData = await volResponse.json();
                 this.volumeShape = volData.shape;
+                // Physical voxel size (dz, dy, dx) in microns. Falls back to
+                // the diSPIM default if the backend didn't send one.
+                if (Array.isArray(volData.voxel_size_um) && volData.voxel_size_um.length === 3) {
+                    this.voxelSizeUm = volData.voxel_size_um;
+                }
 
                 // Decode base64 volume data
                 const raw = atob(volData.data);
@@ -425,8 +433,22 @@ const ProjectionViewer = {
             this.sliceGroup.remove(c);
         }
 
-        const aspect = w / h;
-        const zScale = (zd / w) * 3;
+        // Isometric scaling: derive the plane dimensions and Z spread from
+        // the physical voxel size, matching the math in
+        // gently.core.imaging.projection_three_view (z_scale = dz / dx).
+        // With the default diSPIM voxel (1.0, 0.1625, 0.1625) each Z voxel
+        // covers ~6.15x more physical distance than an XY pixel, so without
+        // this correction volumes look squished in Z.
+        const [dz, dy, dx] = this.voxelSizeUm;
+        // Physical extents in microns
+        const xExtentUm = w * dx;
+        const yExtentUm = h * dy;
+        const zExtentUm = zd * dz;
+        // Normalize so the largest extent becomes 1 three.js unit.
+        const maxExtentUm = Math.max(xExtentUm, yExtentUm, zExtentUm);
+        const planeW = xExtentUm / maxExtentUm;
+        const planeH = yExtentUm / maxExtentUm;
+        const zScale = zExtentUm / maxExtentUm;
 
         for (let i = 0; i < numSlices; i++) {
             const zIndex = Math.floor(i * zd / numSlices);
@@ -438,7 +460,7 @@ const ProjectionViewer = {
                 side: THREE.DoubleSide,
                 depthWrite: false
             });
-            const geo = new THREE.PlaneGeometry(1, 1 / aspect);
+            const geo = new THREE.PlaneGeometry(planeW, planeH);
             const mesh = new THREE.Mesh(geo, mat);
             mesh.position.z = zPos;
             this.sliceGroup.add(mesh);
