@@ -3256,22 +3256,52 @@ kbd {
 }
 
 /* Pending cell: image has arrived but perception is still running.
-   Subtle pulse + muted opacity so the eye can tell which frames are
-   still being analyzed vs which have a final stage label. */
+   Visually distinct so the eye catches it at a glance on a 56px cell:
+   amber border, brighter pulse, amber overlay badge, italic label. */
 .filmstrip-cell.pending .filmstrip-thumb {
-    opacity: 0.72;
-    border-style: dashed;
-    animation: filmstripPendingPulse 1.6s ease-in-out infinite;
+    border-color: #f59e0b !important;  /* amber-500, overrides inline stage color */
+    box-shadow: 0 0 0 1px #f59e0b66, 0 0 8px #f59e0b44;
+    animation: filmstripPendingPulse 1.2s ease-in-out infinite;
 }
 
 .filmstrip-cell.pending .filmstrip-stage-label {
+    color: #f59e0b !important;
     font-style: italic;
-    opacity: 0.8;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+/* Small "analyzing" dot badge in the top-right of a pending cell so
+   you can see at a glance which frame is still in flight. */
+.filmstrip-cell.pending {
+    position: relative;
+}
+.filmstrip-cell.pending::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f59e0b;
+    box-shadow: 0 0 6px #f59e0bcc;
+    animation: filmstripPendingBlink 1s ease-in-out infinite;
+    pointer-events: none;
 }
 
 @keyframes filmstripPendingPulse {
-    0%, 100% { opacity: 0.72; }
-    50%      { opacity: 0.92; }
+    0%, 100% {
+        box-shadow: 0 0 0 1px #f59e0b66, 0 0 8px #f59e0b44;
+    }
+    50% {
+        box-shadow: 0 0 0 2px #f59e0bcc, 0 0 14px #f59e0b88;
+    }
+}
+
+@keyframes filmstripPendingBlink {
+    0%, 100% { opacity: 0.55; transform: scale(0.9); }
+    50%      { opacity: 1;    transform: scale(1.1); }
 }
 
 .filmstrip-thumb {
