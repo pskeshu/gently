@@ -114,7 +114,51 @@ class DiSPIMMicroscope(Microscope):
 
     @property
     def is_connected(self) -> bool:
-        """Check if connected to Device Layer Server"""
+        """Check if connected to Device Layer Server.
+
+        This is a cached value set by connect() / health_check() / any
+        call that succeeds or fails against the device layer. Use
+        `health_check()` if you need to actively verify the connection
+        is still alive (e.g. before reporting status to a UI).
+        """
+        return self._qs_connected
+
+    async def health_check(self, timeout: float = 2.0) -> bool:
+        """Actively ping the device layer and refresh _qs_connected.
+
+        The is_connected property is only updated by connect() and by
+        the natural failure of actual RPC calls, so it can go stale and
+        report True long after the device layer process has died. This
+        method sends a lightweight GET to /api/status with a short
+        timeout and updates _qs_connected based on whether it succeeds,
+        so callers that report connection status (e.g. the viz server's
+        /api/device-status endpoint) get an accurate answer within the
+        timeout window.
+
+        Parameters
+        ----------
+        timeout : float
+            Max seconds to wait for the ping response. Kept short so a
+            dead device layer doesn't stall the UI poll.
+
+        Returns
+        -------
+        bool
+            True if the device layer responded with HTTP 200.
+        """
+        if not self._session:
+            self._qs_connected = False
+            return False
+
+        try:
+            async with self._session.get(
+                f"{self.http_url}/api/status",
+                timeout=aiohttp.ClientTimeout(total=timeout),
+            ) as resp:
+                self._qs_connected = resp.status == 200
+        except (aiohttp.ClientError, asyncio.TimeoutError, Exception):
+            self._qs_connected = False
+
         return self._qs_connected
 
     @property

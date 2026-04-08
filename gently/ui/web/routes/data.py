@@ -25,13 +25,33 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/device-status")
     async def get_device_status():
-        """Get device connection status from agent bridge."""
+        """Get device connection status from agent bridge.
+
+        Actively pings the device layer via client.health_check() to
+        avoid reporting a stale "online" state after the device layer
+        process has been killed. client.is_connected is a cached bool
+        that only updates on connect() / explicit RPC failures, so
+        without the active ping the UI would keep showing the microscope
+        as online indefinitely after a hardware-side shutdown.
+        """
         bridge = getattr(server, "agent_bridge", None)
         if bridge is None:
             return {"gently": True, "microscope": False}
-        # Check live connection state via client, not stale launch info
+
         client = getattr(bridge.agent, "client", None) if bridge.agent else None
-        microscope_up = getattr(client, "is_connected", False) if client else False
+        if client is None:
+            return {"gently": True, "microscope": False}
+
+        # Prefer a live health check; fall back to cached state if the
+        # client doesn't implement health_check (older versions).
+        if hasattr(client, "health_check"):
+            try:
+                microscope_up = await client.health_check(timeout=2.0)
+            except Exception:
+                microscope_up = False
+        else:
+            microscope_up = getattr(client, "is_connected", False)
+
         return {
             "gently": True,
             "microscope": microscope_up,
