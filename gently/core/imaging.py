@@ -690,6 +690,7 @@ def render_volume_view(
     rotation_x: float = 0,
     rotation_y: float = 0,
     threshold: float = 0.2,
+    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
 ) -> str:
     """Render a 3D volume from a specific viewing angle using alpha compositing.
 
@@ -703,6 +704,12 @@ def render_volume_view(
         Rotation around Y axis in degrees (-180 to 180).
     threshold : float
         Intensity threshold for transparency (0-1).
+    voxel_size : tuple of (float, float, float)
+        Physical voxel size (dz, dy, dx) in microns. Before rotating, the
+        volume is rescaled along Z so that each voxel represents the same
+        physical distance as XY voxels. Without this, scipy.ndimage.rotate
+        treats voxels as unit cubes and the rotated view comes out with
+        the Z axis compressed by ~6x for typical diSPIM acquisitions.
 
     Returns
     -------
@@ -717,6 +724,13 @@ def render_volume_view(
     vol = volume.astype(np.float32)
     p1, p99 = np.percentile(vol, [1, 99])
     vol = np.clip((vol - p1) / (p99 - p1 + 1e-8), 0, 1)
+
+    # Rescale Z so voxels are isometric with XY before rotating. Only needed
+    # if the input voxels aren't already cubic.
+    dz, dy, dx = voxel_size
+    z_zoom = dz / dx
+    if abs(z_zoom - 1.0) > 1e-3:
+        vol = ndimage.zoom(vol, (z_zoom, 1.0, 1.0), order=1)
 
     if rotation_y != 0:
         vol = ndimage.rotate(vol, rotation_y, axes=(0, 2), reshape=False, order=1)

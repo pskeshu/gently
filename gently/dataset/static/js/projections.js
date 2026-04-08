@@ -102,6 +102,11 @@ function createSliceTex(zIndex, threshold) {
     return tex;
 }
 
+// Physical voxel size (dz, dy, dx) in microns, matching the default in
+// gently.core.imaging.projection_three_view. Used for isometric Z rescaling
+// so volumes aren't squished in Z.
+const DISPIM_VOXEL_SIZE_UM = [1.0, 0.1625, 0.1625];
+
 function buildSlices3d(numSlices, threshold) {
     if (!volumeShape) return;
     const [zd, h, w] = volumeShape;
@@ -114,8 +119,17 @@ function buildSlices3d(numSlices, threshold) {
         sliceGroup.remove(c);
     }
 
-    const aspect = w / h;
-    const zScale = (zd / w) * 3;  // Exaggerate Z for depth
+    // Isometric scaling from physical voxel dimensions (mirrors the fix in
+    // projection-viewer.js). Previously a hardcoded (zd/w)*3 multiplier
+    // under-scaled Z by ~2x for typical diSPIM volumes.
+    const [dz, dy, dx] = DISPIM_VOXEL_SIZE_UM;
+    const xExtentUm = w * dx;
+    const yExtentUm = h * dy;
+    const zExtentUm = zd * dz;
+    const maxExtentUm = Math.max(xExtentUm, yExtentUm, zExtentUm);
+    const planeW = xExtentUm / maxExtentUm;
+    const planeH = yExtentUm / maxExtentUm;
+    const zScale = zExtentUm / maxExtentUm;
 
     for (let i = 0; i < numSlices; i++) {
         const zIndex = Math.floor(i * zd / numSlices);
@@ -127,7 +141,7 @@ function buildSlices3d(numSlices, threshold) {
             side: THREE.DoubleSide,
             depthWrite: false
         });
-        const geo = new THREE.PlaneGeometry(1, 1 / aspect);
+        const geo = new THREE.PlaneGeometry(planeW, planeH);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.z = zPos;
         sliceGroup.add(mesh);

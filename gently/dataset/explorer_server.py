@@ -87,12 +87,21 @@ def overlay_edges(img: np.ndarray, edges: np.ndarray, color: Tuple[int, int, int
     return rgb
 
 
-def projection_dual_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
-    """Dual-view projection: TOP above, SIDE below with boundary overlay."""
+def projection_dual_view(
+    volume: np.ndarray,
+    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> Tuple[np.ndarray, str]:
+    """Dual-view projection: TOP above, SIDE below with boundary overlay.
+
+    voxel_size: (dz, dy, dx) in microns. Used to compute the physically
+    correct height of the side view so the XZ panel is isometric with the
+    XY panel. Default matches projection_three_view.
+    """
     ensure_projection_deps()
     if volume.ndim != 3:
         return normalize_image(volume), "2D input"
     z_depth, height, width = volume.shape
+    dz, dy, dx = voxel_size
     top_proj = np.max(volume, axis=0)
     side_proj = np.max(volume, axis=1)
     top_norm = normalize_image(top_proj)
@@ -102,7 +111,11 @@ def projection_dual_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     top_rgb = overlay_edges(top_norm, top_edges)
     side_rgb = overlay_edges(side_norm, side_edges)
     target_width = top_rgb.shape[1]
-    side_new_h = max(height // 3, int(z_depth * 3))
+    # Isometric: each Z voxel covers dz microns, each X display pixel covers
+    # dx microns, so a side view with 1:1 aspect needs height = z_depth*dz/dx.
+    # Floor at height//3 so very thin embryos still have a visible side view.
+    z_display_h = max(1, int(round(z_depth * dz / dx)))
+    side_new_h = max(height // 3, z_display_h)
     pil_side = PIL_Image.fromarray(side_rgb)
     pil_side = pil_side.resize((target_width, side_new_h), PIL_Image.Resampling.LANCZOS)
     side_scaled = np.array(pil_side)
@@ -111,13 +124,22 @@ def projection_dual_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     return combined, "Dual-view MIP with boundary: TOP (XY) + SIDE (XZ)"
 
 
-def projection_depth_colored(volume: np.ndarray, colormap: str = 'turbo') -> Tuple[np.ndarray, str]:
-    """Depth-colored max intensity projection."""
+def projection_depth_colored(
+    volume: np.ndarray,
+    colormap: str = 'turbo',
+    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> Tuple[np.ndarray, str]:
+    """Depth-colored max intensity projection.
+
+    voxel_size: (dz, dy, dx) in microns. The side view is rescaled so the
+    XZ panel is isometric with the XY panel above it.
+    """
     ensure_projection_deps()
     if volume.ndim != 3:
         gray = normalize_image(volume)
         return np.stack([gray, gray, gray], axis=-1), "2D input"
     z_depth, height, width = volume.shape
+    dz, dy, dx = voxel_size
     try:
         import matplotlib.pyplot as plt
         cmap = plt.get_cmap(colormap)
@@ -136,7 +158,9 @@ def projection_depth_colored(volume: np.ndarray, colormap: str = 'turbo') -> Tup
     top_rgb = (np.max(colored_volume, axis=0) * 255).astype(np.uint8)
     side_rgb = (np.max(colored_volume, axis=1) * 255).astype(np.uint8)
     pil_side = PIL_Image.fromarray(side_rgb)
-    side_new_h = max(height // 3, int(z_depth * 3))
+    # Isometric side height - see projection_dual_view for the same math.
+    z_display_h = max(1, int(round(z_depth * dz / dx)))
+    side_new_h = max(height // 3, z_display_h)
     pil_side = pil_side.resize((width, side_new_h), PIL_Image.Resampling.LANCZOS)
     side_scaled = np.array(pil_side)
     sep = np.ones((3, width, 3), dtype=np.uint8) * 128
@@ -176,7 +200,8 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
 
 def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
                           threshold: float = 0.12, num_slices: int = 48,
-                          perspective: float = 0.4) -> np.ndarray:
+                          perspective: float = 0.4,
+                          voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625)) -> np.ndarray:
     """
     Render volume from a rotated viewpoint with parallax and perspective.
 
@@ -197,6 +222,9 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
         Number of slices to composite
     perspective : float
         Perspective strength (0 = orthographic, higher = more perspective)
+    voxel_size : tuple of (float, float, float)
+        Physical voxel dimensions (dz, dy, dx) in microns. Used to compute
+        the correct physical Z extent so the rotated view is isometric.
 
     Returns
     -------
@@ -214,9 +242,12 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
     vol = ndimage.gaussian_filter1d(vol, sigma=1.0, axis=0)
 
     z_depth, height, width = vol.shape
+    dz, dy, dx = voxel_size
 
-    # Calculate the z-scale factor (exaggerate depth like in 3D viewer)
-    z_scale = (z_depth / width) * 3.0
+    # Physical Z extent normalized to width units. Previously this was a
+    # hardcoded (z_depth / width) * 3.0, which under-scaled Z by a factor
+    # of ~2 for the default diSPIM voxel (1.0 um Z step vs 0.1625 um XY).
+    z_scale = (z_depth * dz) / (width * dx)
 
     # Output canvas size (larger to accommodate shifts and scaling)
     margin = int(max(width, height) * 0.5)
@@ -341,8 +372,15 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
     return result
 
 
-def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
-    """Multiple 3D perspective views from different angles (2x3 grid)."""
+def projection_spin_3d(
+    volume: np.ndarray,
+    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> Tuple[np.ndarray, str]:
+    """Multiple 3D perspective views from different angles (2x3 grid).
+
+    voxel_size: (dz, dy, dx) in microns. Forwarded to render_volume_rotated
+    so the spin views are Z-isometric.
+    """
     ensure_projection_deps()
     if volume.ndim != 3:
         return normalize_image(volume), "2D input"
@@ -355,7 +393,8 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     for angle_y in angles_y:
         view = render_volume_rotated(
             volume, angle_y=angle_y, angle_x=base_tilt,
-            threshold=py_threshold, perspective=0.5
+            threshold=py_threshold, perspective=0.5,
+            voxel_size=voxel_size,
         )
         views.append(view)
 
