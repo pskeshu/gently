@@ -465,6 +465,7 @@ const ProjectionViewer = {
 
             uniform sampler3D uVolume;
             uniform vec3 uBoxSize;
+            uniform vec3 uVolumeRes;  // (w, h, zd) in voxels
             uniform float uThreshold;
             uniform float uContrast;
             uniform vec3 uCameraObjectPos;
@@ -509,26 +510,39 @@ const ProjectionViewer = {
                 }
                 tMin = max(tMin, 0.0);
 
-                // Step size scales with ray traversal length so resolution
-                // is consistent regardless of volume aspect ratio.
                 float totalLen = tMax - tMin;
-                float stepSize = totalLen / float(uMaxSteps);
+
+                // Step size scales with the volume's voxel resolution so
+                // each step covers at most a fraction of a voxel along
+                // the longest dimension. Without this, rays at 45-degree
+                // angles use a fixed fraction of totalLen and step
+                // through 2-3 voxels at a time, causing rotation flutter
+                // as sample positions slide past bright voxels in and
+                // out of the sampling grid. Each step of ~0.5 voxels is
+                // the sweet spot for trilinear-filtered sampling.
+                float maxRes = max(max(uVolumeRes.x, uVolumeRes.y), uVolumeRes.z);
+                float voxelStep = length(uBoxSize) / (maxRes * 2.0);  // ~0.5 voxel/step
+
+                // Total samples needed to cover the ray; cap at uMaxSteps
+                // so a very long ray doesn't explode GPU time.
+                int steps = int(min(totalLen / voxelStep, float(uMaxSteps)));
+                float stepSize = totalLen / float(steps);
 
                 // Per-pixel jitter to break up wood-grain sampling bands.
                 float jitter = hash12(gl_FragCoord.xy) * stepSize;
                 vec3 pos = ro + rd * (tMin + jitter);
                 vec3 step = rd * stepSize;
 
-                // Nominal step count - used to normalize per-step opacity
-                // so the overall look is roughly independent of uMaxSteps.
-                // If we bump step count for quality, we don't also change
-                // how dense the volume looks.
-                const float NOMINAL_STEPS = 192.0;
-                float opacityScale = NOMINAL_STEPS / float(uMaxSteps);
+                // Per-step opacity is normalized by stepSize against a
+                // reference step of 0.004 (matches ~192 samples on a
+                // unit-sized box), so the overall volume density stays
+                // visually constant whether we take 256 or 512 steps.
+                const float REFERENCE_STEP = 0.004;
+                float opacityScale = stepSize / REFERENCE_STEP;
 
                 vec4 accum = vec4(0.0);
-                for (int i = 0; i < 512; i++) {
-                    if (i >= uMaxSteps) break;
+                for (int i = 0; i < 768; i++) {
+                    if (i >= steps) break;
 
                     // Convert object-space position to [0,1] UVW texture coords
                     vec3 uvw = (pos + boxHalf) / uBoxSize;
@@ -584,10 +598,19 @@ const ProjectionViewer = {
             uniforms: {
                 uVolume: { value: tex3d },
                 uBoxSize: { value: boxSize },
+                // Volume resolution (w, h, zd) in voxels. The shader
+                // uses this to set step size so each sample advances
+                // by ~0.5 voxel regardless of volume aspect ratio,
+                // which eliminates rotation-induced flutter from
+                // undersampling along diagonal rays.
+                uVolumeRes: { value: new THREE.Vector3(w, h, zd) },
                 uThreshold: { value: this.threshold / 255.0 },
                 uContrast: { value: this.contrast },
                 uCameraObjectPos: { value: new THREE.Vector3() },
-                uMaxSteps: { value: 256 },
+                // Upper bound on samples per ray. With voxel-scaled step
+                // size, typical rays need ~400-700 samples; the cap is
+                // a safety net against pathologically long rays.
+                uMaxSteps: { value: 768 },
             },
             vertexShader,
             fragmentShader,
