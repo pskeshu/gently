@@ -609,15 +609,18 @@ const EmbryosManager = {
             });
         });
 
-        // Convert vertical scroll to horizontal on filmstrip rows
-        container.querySelectorAll('.filmstrip-thumbs').forEach(thumbs => {
-            thumbs.addEventListener('wheel', (e) => {
+        // Convert vertical scroll to horizontal on the single shared
+        // filmstrip scroll container. All four embryo rows are now
+        // inside .filmstrip-container and scroll in lock-step.
+        const scrollContainer = container.querySelector('.filmstrip-container');
+        if (scrollContainer) {
+            scrollContainer.addEventListener('wheel', (e) => {
                 if (e.deltaY !== 0) {
                     e.preventDefault();
-                    thumbs.scrollLeft += e.deltaY;
+                    scrollContainer.scrollLeft += e.deltaY;
                 }
             }, { passive: false });
-        });
+        }
     },
 
     // ==========================================

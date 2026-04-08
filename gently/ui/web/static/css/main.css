@@ -3183,9 +3183,16 @@ kbd {
    ======================================== */
 
 .filmstrip-container {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    /* Block-level so children (rows) naturally stack vertically, and
+       overflow-x: auto on the container drives a single horizontal
+       scrollbar shared by all rows. Labels pin to the left via
+       position:sticky inside each row. */
+    display: block;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+    scrollbar-gutter: stable;
+    position: relative;
 }
 
 .filmstrip-row {
@@ -3193,6 +3200,10 @@ kbd {
     align-items: flex-start;
     border-bottom: 1px solid var(--border);
     padding: 0.5rem 0;
+    /* Grow to fit the widest row - this is what gives the shared
+       scroll container something longer than the viewport to scroll. */
+    width: min-content;
+    min-width: 100%;
 }
 
 .filmstrip-label {
@@ -3203,6 +3214,11 @@ kbd {
     align-items: center;
     padding: 0.5rem 0.25rem;
     gap: 2px;
+    /* Pin the label column to the left edge while the row scrolls. */
+    position: sticky;
+    left: 0;
+    background: var(--bg-card);
+    z-index: 2;
 }
 
 .filmstrip-name {
@@ -3224,10 +3240,8 @@ kbd {
 .filmstrip-thumbs {
     display: flex;
     gap: 4px;
-    overflow-x: auto;
     padding: 0.25rem 0.5rem;
-    scrollbar-width: thin;
-    flex: 1;
+    flex-shrink: 0;
 }
 
 .filmstrip-cell {
