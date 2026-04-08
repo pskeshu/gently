@@ -319,45 +319,39 @@ const ProjectionViewer = {
         container.innerHTML = '';
         container.appendChild(this.renderer3d.domElement);
 
-        // Root group that holds all three axis-aligned slice stacks. Only
-        // the stack most perpendicular to the current view direction is
-        // rendered each frame (see _updateStackVisibility), which eliminates
-        // the gaps you see with a single-axis stack when viewed edge-on.
+        // Root group is the object the user rotates. Raymarched volume
+        // mesh is added here. The group scale flips Y so the image
+        // orientation matches 2D projections.
         this.sliceGroup = new THREE.Group();
         this.sliceGroup.rotation.x = this.savedRotation.x;
         this.sliceGroup.rotation.y = this.savedRotation.y;
         this.sliceGroup.rotation.z = 0;
-        this.sliceGroup.scale.y = -1;  // Flip Y to match image orientation
+        this.sliceGroup.scale.y = -1;
         this.scene3d.add(this.sliceGroup);
-
-        this.zStack = new THREE.Group();  // XY planes at varying Z
-        this.yStack = new THREE.Group();  // XZ planes at varying Y
-        this.xStack = new THREE.Group();  // YZ planes at varying X
-        this.sliceGroup.add(this.zStack);
-        this.sliceGroup.add(this.yStack);
-        this.sliceGroup.add(this.xStack);
 
         this.threshold = 30;
         this.contrast = 1.0;
-        this.buildAllStacks();
+        this._buildVolumeCube();
 
-        // Threshold control
+        // Threshold / contrast are now shader uniforms - updating them
+        // is instant, no slice-stack rebuild.
         const threshSlider = document.getElementById('pv-threshold');
         const threshDisplay = document.getElementById('pv-threshold-val');
-
         threshSlider.addEventListener('input', (e) => {
             this.threshold = parseInt(e.target.value);
-            this.buildAllStacks();
+            if (this.volumeMaterial) {
+                this.volumeMaterial.uniforms.uThreshold.value = this.threshold / 255.0;
+            }
             threshDisplay.textContent = (this.threshold / 100).toFixed(2);
         });
 
-        // Contrast control
         const contrastSlider = document.getElementById('pv-contrast');
         const contrastDisplay = document.getElementById('pv-contrast-val');
-
         contrastSlider.addEventListener('input', (e) => {
             this.contrast = parseInt(e.target.value) / 100;
-            this.buildAllStacks();
+            if (this.volumeMaterial) {
+                this.volumeMaterial.uniforms.uContrast.value = this.contrast;
+            }
             contrastDisplay.textContent = this.contrast.toFixed(1);
         });
 
@@ -398,209 +392,216 @@ const ProjectionViewer = {
             this.savedZoom = 0.9;
         });
 
-        // Animation loop with view-aligned stack selection.
-        this._viewDir = new THREE.Vector3();
+        // Animation loop. Raymarching fragment shader needs the camera
+        // position in the volume cube's local space each frame.
+        this._cameraObjectPos = new THREE.Vector3();
         const animate = () => {
             this.animationId = requestAnimationFrame(animate);
-            this._updateStackVisibility();
+            if (this.volumeMesh && this.volumeMaterial) {
+                // Camera position in cube-local coordinates (accounts for
+                // sliceGroup's rotation AND the Y scale flip).
+                this._cameraObjectPos.copy(this.camera3d.position);
+                this.volumeMesh.worldToLocal(this._cameraObjectPos);
+                this.volumeMaterial.uniforms.uCameraObjectPos.value.copy(this._cameraObjectPos);
+            }
             this.renderer3d.render(this.scene3d, this.camera3d);
         };
         animate();
     },
 
-    // Pick the slice stack whose slice normals are most aligned with the
-    // camera view direction, and hide the other two. This is the classic
-    // "object-aligned slices" technique for gap-free volume rendering with
-    // plain MeshBasicMaterial and no custom shaders.
-    _updateStackVisibility() {
-        if (!this.sliceGroup || !this.camera3d) return;
-        if (!this.zStack || !this.yStack || !this.xStack) return;
-
-        // Camera forward direction in world space
-        this.camera3d.getWorldDirection(this._viewDir);
-
-        // Transform view direction into sliceGroup's local space by inverting
-        // the group rotation (the sliceGroup is what the user rotates).
-        const inv = new THREE.Matrix4().copy(this.sliceGroup.matrixWorld).invert();
-        const localDir = this._viewDir.clone().transformDirection(inv);
-
-        const ax = Math.abs(localDir.x);
-        const ay = Math.abs(localDir.y);
-        const az = Math.abs(localDir.z);
-
-        // Stack normal that is MOST aligned with view direction = stack we
-        // should show. Z-stack slices are XY planes (normal = z), etc.
-        this.xStack.visible = ax > ay && ax > az;
-        this.yStack.visible = ay > ax && ay > az;
-        this.zStack.visible = az >= ax && az >= ay;
-    },
-
-    // ======== SLICE EXTRACTION HELPERS ========
-    // Each helper returns an RGBA Uint8Array for a 2D slice at the given
-    // index along one axis. Values below threshold are alpha=0, above get
-    // contrast-adjusted intensity + alpha. These are the expensive CPU-side
-    // part of the 3D build.
-
-    _applyContrast(val) {
-        return Math.max(0, Math.min(255, Math.round(((val - 128) * this.contrast) + 128)));
-    },
-
-    createZSliceTexture(zIndex) {
-        // XY plane at constant Z. Texture is (w x h), row = y.
-        const [zd, h, w] = this.volumeShape;
-        const offset = zIndex * w * h;
-        const rgba = new Uint8Array(w * h * 4);
-        const th = this.threshold;
-        for (let i = 0; i < w * h; i++) {
-            const raw = this.volumeData[offset + i];
-            if (raw > th) {
-                const v = this._applyContrast(raw);
-                const di = i * 4;
-                rgba[di] = v; rgba[di + 1] = v; rgba[di + 2] = v;
-                rgba[di + 3] = Math.min(255, (raw - th) * 2);
-            }
-        }
-        const tex = new THREE.DataTexture(rgba, w, h, THREE.RGBAFormat);
-        tex.needsUpdate = true;
-        return tex;
-    },
-
-    createYSliceTexture(yIndex) {
-        // XZ plane at constant Y. Texture is (w x zd), col = x, row = z.
-        const [zd, h, w] = this.volumeShape;
-        const rgba = new Uint8Array(w * zd * 4);
-        const th = this.threshold;
-        for (let z = 0; z < zd; z++) {
-            const srcRow = z * w * h + yIndex * w;
-            const dstRow = z * w;
-            for (let x = 0; x < w; x++) {
-                const raw = this.volumeData[srcRow + x];
-                if (raw > th) {
-                    const v = this._applyContrast(raw);
-                    const di = (dstRow + x) * 4;
-                    rgba[di] = v; rgba[di + 1] = v; rgba[di + 2] = v;
-                    rgba[di + 3] = Math.min(255, (raw - th) * 2);
-                }
-            }
-        }
-        const tex = new THREE.DataTexture(rgba, w, zd, THREE.RGBAFormat);
-        tex.needsUpdate = true;
-        return tex;
-    },
-
-    createXSliceTexture(xIndex) {
-        // YZ plane at constant X. After the X-stack plane is rotated by
-        // PI/2 around Y, its local U points along Z and its local V points
-        // along Y, so the DataTexture layout needs rows=Y (height), cols=Z
-        // (width). Without this the slice appears transposed relative to
-        // the other two stacks and you get a visible pop when view-aligned
-        // stack selection swaps to the X-stack.
-        const [zd, h, w] = this.volumeShape;
-        const rgba = new Uint8Array(h * zd * 4);
-        const th = this.threshold;
-        for (let y = 0; y < h; y++) {
-            const dstRow = y * zd;  // stride = zd (cols per row)
-            for (let z = 0; z < zd; z++) {
-                const raw = this.volumeData[z * w * h + y * w + xIndex];
-                if (raw > th) {
-                    const v = this._applyContrast(raw);
-                    const di = (dstRow + z) * 4;
-                    rgba[di] = v; rgba[di + 1] = v; rgba[di + 2] = v;
-                    rgba[di + 3] = Math.min(255, (raw - th) * 2);
-                }
-            }
-        }
-        // width = zd (U/Z), height = h (V/Y)
-        const tex = new THREE.DataTexture(rgba, zd, h, THREE.RGBAFormat);
-        tex.needsUpdate = true;
-        return tex;
-    },
-
-    _disposeStack(group) {
-        if (!group) return;
-        while (group.children.length > 0) {
-            const c = group.children[0];
-            c.geometry?.dispose();
-            if (c.material?.map) c.material.map.dispose();
-            c.material?.dispose();
-            group.remove(c);
-        }
-    },
-
-    buildAllStacks() {
-        if (!this.volumeShape || !this.zStack || !this.yStack || !this.xStack) return;
+    // Build the raymarched volume mesh: a Data3DTexture holding the full
+    // volume, a BoxGeometry with the physical extents of the volume, and
+    // a ShaderMaterial that marches rays from the camera through the cube
+    // and composites front-to-back. This replaces the triple-axis slice
+    // stacks and eliminates the edge-on line artifacts because it samples
+    // the volume continuously along the view direction at any angle.
+    _buildVolumeCube() {
+        if (!this.volumeShape || !this.volumeData) return;
         const [zd, h, w] = this.volumeShape;
 
-        // Dispose previously-built meshes/textures so threshold/contrast
-        // updates don't leak GPU memory.
-        this._disposeStack(this.zStack);
-        this._disposeStack(this.yStack);
-        this._disposeStack(this.xStack);
+        // Upload the full volume as a 3D texture. RedFormat + UnsignedByte
+        // keeps it to 1 byte per voxel. Data layout is (depth, height,
+        // width) in the order z*h*w + y*w + x, which matches how the
+        // backend packs it. sampler3D uvw coords are (x, y, z).
+        const tex3d = new THREE.DataTexture3D(this.volumeData, w, h, zd);
+        tex3d.format = THREE.RedFormat;
+        tex3d.type = THREE.UnsignedByteType;
+        tex3d.minFilter = THREE.LinearFilter;
+        tex3d.magFilter = THREE.LinearFilter;
+        tex3d.wrapR = THREE.ClampToEdgeWrapping;
+        tex3d.wrapS = THREE.ClampToEdgeWrapping;
+        tex3d.wrapT = THREE.ClampToEdgeWrapping;
+        tex3d.unpackAlignment = 1;
+        tex3d.needsUpdate = true;
+        this.volumeTexture3D = tex3d;
 
-        // Physical extents in microns, normalized so the largest axis
-        // becomes 1 three.js unit. Matches the voxel_size_um math in
-        // gently.core.imaging.projection_three_view.
+        // Physical extents normalized to the largest axis so the cube
+        // fits inside a unit sphere. Matches the earlier slice-stack math.
         const [dz, dy, dx] = this.voxelSizeUm;
         const xExtentUm = w * dx;
         const yExtentUm = h * dy;
         const zExtentUm = zd * dz;
         const maxExtentUm = Math.max(xExtentUm, yExtentUm, zExtentUm);
-        const planeW = xExtentUm / maxExtentUm;  // size of volume along X
-        const planeH = yExtentUm / maxExtentUm;  // size of volume along Y
-        const zScale = zExtentUm / maxExtentUm;  // size of volume along Z
+        const boxW = xExtentUm / maxExtentUm;
+        const boxH = yExtentUm / maxExtentUm;
+        const boxD = zExtentUm / maxExtentUm;
+        const boxSize = new THREE.Vector3(boxW, boxH, boxD);
 
-        // Cap slice count per axis to limit CPU extraction time and VRAM.
-        // At this cap we get gapless rendering from any angle on typical
-        // diSPIM volumes without noticeable lag on threshold changes.
-        const MAX_SLICES_PER_AXIS = 96;
-        const numZ = Math.min(zd, MAX_SLICES_PER_AXIS);
-        const numY = Math.min(h, MAX_SLICES_PER_AXIS);
-        const numX = Math.min(w, MAX_SLICES_PER_AXIS);
+        const vertexShader = `
+            out vec3 vObjectPos;
+            void main() {
+                vObjectPos = position;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+        `;
 
-        const makeMat = (tex) => new THREE.MeshBasicMaterial({
-            map: tex,
+        // Front-to-back raymarching fragment shader. Works at any camera
+        // angle because it samples the 3D texture continuously along the
+        // view ray using hardware trilinear interpolation - no slice
+        // planes to go edge-on, no gaps between samples.
+        const fragmentShader = `
+            precision highp float;
+            precision highp sampler3D;
+
+            uniform sampler3D uVolume;
+            uniform vec3 uBoxSize;
+            uniform float uThreshold;
+            uniform float uContrast;
+            uniform vec3 uCameraObjectPos;
+            uniform int uMaxSteps;
+
+            in vec3 vObjectPos;
+            out vec4 outColor;
+
+            // Returns true and (tMin, tMax) if the ray (ro, rd) intersects
+            // the AABB [boxMin, boxMax]. Slab method.
+            bool rayBoxIntersect(vec3 ro, vec3 rd, vec3 boxMin, vec3 boxMax, out float tMin, out float tMax) {
+                vec3 invD = 1.0 / rd;
+                vec3 t1 = (boxMin - ro) * invD;
+                vec3 t2 = (boxMax - ro) * invD;
+                vec3 tmn = min(t1, t2);
+                vec3 tmx = max(t1, t2);
+                tMin = max(max(tmn.x, tmn.y), tmn.z);
+                tMax = min(min(tmx.x, tmx.y), tmx.z);
+                return tMax > max(tMin, 0.0);
+            }
+
+            // Pseudo-random hash, used to jitter the ray start position.
+            // Without jittering, the fixed step size beats against the
+            // voxel grid and produces visible "wood grain" bands in the
+            // final image. Jittering by up to one step size decorrelates
+            // the sampling pattern across neighboring pixels so the bands
+            // break up into noise the eye reads as smooth.
+            float hash12(vec2 p) {
+                vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+                p3 += dot(p3, p3.yzx + 33.33);
+                return fract((p3.x + p3.y) * p3.z);
+            }
+
+            void main() {
+                vec3 boxHalf = uBoxSize * 0.5;
+                vec3 ro = uCameraObjectPos;
+                vec3 rd = normalize(vObjectPos - uCameraObjectPos);
+
+                float tMin, tMax;
+                if (!rayBoxIntersect(ro, rd, -boxHalf, boxHalf, tMin, tMax)) {
+                    discard;
+                }
+                tMin = max(tMin, 0.0);
+
+                // Step size scales with ray traversal length so resolution
+                // is consistent regardless of volume aspect ratio.
+                float totalLen = tMax - tMin;
+                float stepSize = totalLen / float(uMaxSteps);
+
+                // Per-pixel jitter to break up wood-grain sampling bands.
+                float jitter = hash12(gl_FragCoord.xy) * stepSize;
+                vec3 pos = ro + rd * (tMin + jitter);
+                vec3 step = rd * stepSize;
+
+                // Nominal step count - used to normalize per-step opacity
+                // so the overall look is roughly independent of uMaxSteps.
+                // If we bump step count for quality, we don't also change
+                // how dense the volume looks.
+                const float NOMINAL_STEPS = 192.0;
+                float opacityScale = NOMINAL_STEPS / float(uMaxSteps);
+
+                vec4 accum = vec4(0.0);
+                for (int i = 0; i < 512; i++) {
+                    if (i >= uMaxSteps) break;
+
+                    // Convert object-space position to [0,1] UVW texture coords
+                    vec3 uvw = (pos + boxHalf) / uBoxSize;
+                    if (any(lessThan(uvw, vec3(0.0))) || any(greaterThan(uvw, vec3(1.0)))) {
+                        pos += step;
+                        continue;
+                    }
+
+                    float sampleVal = texture(uVolume, uvw).r;
+
+                    // Smooth transfer function: density ramps continuously
+                    // from 0 at uThreshold to 1 at max intensity. smoothstep
+                    // has no hard cutoff (unlike the old "if > threshold"
+                    // branch), so the volume's surface doesn't show
+                    // quantization rings where the threshold cuts into
+                    // a gradient.
+                    float density = smoothstep(uThreshold, min(uThreshold + 0.45, 1.0), sampleVal);
+
+                    if (density > 0.001) {
+                        // Contrast around midpoint
+                        float v = clamp((sampleVal - 0.5) * uContrast + 0.5, 0.0, 1.0);
+                        vec3 color = vec3(v);
+
+                        // Per-step opacity is intentionally LOW so density
+                        // accumulates smoothly over many samples instead of
+                        // saturating within one or two steps. Without this
+                        // the first dense voxel a ray hits slams alpha to
+                        // ~1.0 and early-terminates, producing black-centered
+                        // concentric rings (contour lines of ray-integral
+                        // density) instead of a smooth volume.
+                        float alpha = density * 0.18 * opacityScale;
+
+                        // Front-to-back over compositing
+                        accum.rgb += (1.0 - accum.a) * color * alpha;
+                        accum.a += (1.0 - accum.a) * alpha;
+                    }
+
+                    pos += step;
+
+                    // Only early-terminate when effectively fully opaque.
+                    // Raising the threshold from 0.995 to 0.999 keeps more
+                    // of the far side of the volume in the final image.
+                    if (accum.a > 0.999) break;
+                }
+
+                if (accum.a < 0.005) discard;
+                outColor = accum;
+            }
+        `;
+
+        const material = new THREE.ShaderMaterial({
+            glslVersion: THREE.GLSL3,
+            uniforms: {
+                uVolume: { value: tex3d },
+                uBoxSize: { value: boxSize },
+                uThreshold: { value: this.threshold / 255.0 },
+                uContrast: { value: this.contrast },
+                uCameraObjectPos: { value: new THREE.Vector3() },
+                uMaxSteps: { value: 256 },
+            },
+            vertexShader,
+            fragmentShader,
             transparent: true,
-            side: THREE.DoubleSide,
+            side: THREE.BackSide,  // Render back faces so rays always start inside the cube
             depthWrite: false,
         });
 
-        // Z-stack: XY planes at varying Z positions.
-        for (let i = 0; i < numZ; i++) {
-            const zIndex = Math.floor(i * zd / numZ);
-            const zPos = (zIndex / (zd - 1) - 0.5) * zScale;
-            const tex = this.createZSliceTexture(zIndex);
-            const geo = new THREE.PlaneGeometry(planeW, planeH);
-            const mesh = new THREE.Mesh(geo, makeMat(tex));
-            mesh.position.z = zPos;
-            this.zStack.add(mesh);
-        }
+        const geo = new THREE.BoxGeometry(boxW, boxH, boxD);
+        const mesh = new THREE.Mesh(geo, material);
+        this.sliceGroup.add(mesh);
 
-        // Y-stack: XZ planes at varying Y positions. A PlaneGeometry lies
-        // in the XY plane by default; rotating PI/2 around X reorients it
-        // to the XZ plane so its normal points along Y.
-        for (let i = 0; i < numY; i++) {
-            const yIndex = Math.floor(i * h / numY);
-            const yPos = (yIndex / (h - 1) - 0.5) * planeH;
-            const tex = this.createYSliceTexture(yIndex);
-            const geo = new THREE.PlaneGeometry(planeW, zScale);
-            const mesh = new THREE.Mesh(geo, makeMat(tex));
-            mesh.rotation.x = Math.PI / 2;
-            mesh.position.y = yPos;
-            this.yStack.add(mesh);
-        }
-
-        // X-stack: YZ planes at varying X positions. Rotate PI/2 around Y
-        // so the plane normal points along X.
-        for (let i = 0; i < numX; i++) {
-            const xIndex = Math.floor(i * w / numX);
-            const xPos = (xIndex / (w - 1) - 0.5) * planeW;
-            const tex = this.createXSliceTexture(xIndex);
-            const geo = new THREE.PlaneGeometry(zScale, planeH);
-            const mesh = new THREE.Mesh(geo, makeMat(tex));
-            mesh.rotation.y = Math.PI / 2;
-            mesh.position.x = xPos;
-            this.xStack.add(mesh);
-        }
+        this.volumeMesh = mesh;
+        this.volumeMaterial = material;
     },
 
     cleanup3DViewer() {
@@ -608,12 +609,20 @@ const ProjectionViewer = {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
         }
-        // Dispose each axis stack's meshes + textures
-        this._disposeStack(this.zStack);
-        this._disposeStack(this.yStack);
-        this._disposeStack(this.xStack);
+        // Dispose the volume cube's geometry, material, and 3D texture.
+        if (this.volumeMesh) {
+            this.volumeMesh.geometry?.dispose();
+            this.volumeMesh = null;
+        }
+        if (this.volumeMaterial) {
+            this.volumeMaterial.dispose();
+            this.volumeMaterial = null;
+        }
+        if (this.volumeTexture3D) {
+            this.volumeTexture3D.dispose();
+            this.volumeTexture3D = null;
+        }
         if (this.sliceGroup) {
-            // sliceGroup itself may still hold the three (now empty) stacks
             while (this.sliceGroup.children.length > 0) {
                 this.sliceGroup.remove(this.sliceGroup.children[0]);
             }
@@ -625,9 +634,6 @@ const ProjectionViewer = {
         this.scene3d = null;
         this.camera3d = null;
         this.sliceGroup = null;
-        this.zStack = null;
-        this.yStack = null;
-        this.xStack = null;
     },
 
     close() {
