@@ -42,6 +42,11 @@ class BenchmarkConfig:
     max_timepoints_per_embryo: Optional[int] = None
     embryo_ids: Optional[List[str]] = None  # None = all
 
+    # Ablation toggles
+    include_temporal_context: bool = True
+    include_previous_observations: bool = True
+    real_timestamps: bool = False
+
     # Custom system prompt override
     system_prompt_override: Optional[str] = None
 
@@ -58,6 +63,9 @@ class BenchmarkConfig:
             "enable_view_reference": self.enable_view_reference,
             "enable_view_previous": self.enable_view_previous,
             "enable_verification": self.enable_verification,
+            "include_temporal_context": self.include_temporal_context,
+            "include_previous_observations": self.include_previous_observations,
+            "real_timestamps": self.real_timestamps,
             "start_timepoint": self.start_timepoint,
             "max_timepoints_per_embryo": self.max_timepoints_per_embryo,
             "embryo_ids": self.embryo_ids,
@@ -256,6 +264,8 @@ class PerceptionBenchmark:
             claude_client=client,
             examples_path=examples_path,
             enable_verification=self.config.enable_verification,
+            include_temporal_context=self.config.include_temporal_context,
+            include_previous_observations=self.config.include_previous_observations,
         )
 
         self._engine = engine
@@ -349,6 +359,7 @@ class PerceptionBenchmark:
                     reasoning=perception_result.reasoning,
                     is_transitional=perception_result.is_transitional,
                     transition_between=perception_result.transition_between,
+                    timestamp=test_case.acquired_at if self.config.real_timestamps else None,
                 )
 
                 logger.info(
@@ -441,6 +452,21 @@ async def main():
         help="End timepoint index (exclusive). With --start-timepoint, processes [start, max).",
     )
     parser.add_argument(
+        "--no-temporal-context",
+        action="store_true",
+        help="Ablation: omit the TEMPORAL CONTEXT block from the prompt",
+    )
+    parser.add_argument(
+        "--no-previous-observations",
+        action="store_true",
+        help="Ablation: omit the PREVIOUS OBSERVATIONS block from the prompt",
+    )
+    parser.add_argument(
+        "--real-timestamps",
+        action="store_true",
+        help="Use TIFF acquisition timestamps for temporal context instead of wallclock",
+    )
+    parser.add_argument(
         "--description",
         default="",
         help="Description for this benchmark run",
@@ -505,6 +531,9 @@ async def main():
         embryo_ids=args.embryo,
         start_timepoint=args.start_timepoint,
         max_timepoints_per_embryo=args.max_timepoints,
+        include_temporal_context=not args.no_temporal_context,
+        include_previous_observations=not args.no_previous_observations,
+        real_timestamps=args.real_timestamps,
         description=args.description,
     )
 

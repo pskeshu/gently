@@ -332,6 +332,8 @@ class PerceptionEngine:
         volume_accessor: Optional[Callable[[str, int], Optional[np.ndarray]]] = None,
         enable_verification: bool = True,
         multishot_turns: int = 0,
+        include_temporal_context: bool = True,
+        include_previous_observations: bool = True,
     ):
         """
         Parameters
@@ -355,6 +357,8 @@ class PerceptionEngine:
         self.volume_accessor = volume_accessor
         self.enable_verification = enable_verification
         self.multishot_turns = multishot_turns
+        self.include_temporal_context = include_temporal_context
+        self.include_previous_observations = include_previous_observations
 
         # Load examples if provided
         if example_store:
@@ -1183,32 +1187,34 @@ class PerceptionEngine:
         })
 
         # 2. Previous observations (last 3)
-        recent = session.get_recent_observations(3)
-        if recent:
-            obs_text = "\nPREVIOUS OBSERVATIONS:\n"
-            for obs in recent:
-                obs_text += f"- T{obs.timepoint}: {obs.stage}"
-                if obs.is_hatching:
-                    obs_text += " (hatching in progress)"
-                obs_text += "\n"
-            content.append({"type": "text", "text": obs_text})
+        if self.include_previous_observations:
+            recent = session.get_recent_observations(3)
+            if recent:
+                obs_text = "\nPREVIOUS OBSERVATIONS:\n"
+                for obs in recent:
+                    obs_text += f"- T{obs.timepoint}: {obs.stage}"
+                    if obs.is_hatching:
+                        obs_text += " (hatching in progress)"
+                    obs_text += "\n"
+                content.append({"type": "text", "text": obs_text})
 
         # 3. Temporal context (for detecting arrested/dead embryos)
-        temporal = session.compute_temporal_analysis()
-        if temporal:
-            temporal_text = f"""
+        if self.include_temporal_context:
+            temporal = session.compute_temporal_analysis()
+            if temporal:
+                temporal_text = f"""
 TEMPORAL CONTEXT:
 - Current stage: {temporal.current_stage}
 - Time at this stage: {temporal.time_in_current_stage_min:.0f} minutes
 - Expected duration: {temporal.expected_duration_min or 'N/A'} minutes
 - Overtime ratio: {temporal.overtime_ratio:.1f}x (>2x is unusual, >3x is concerning)
 """
-            if temporal.is_potentially_arrested:
-                temporal_text += f"""
+                if temporal.is_potentially_arrested:
+                    temporal_text += f"""
 WARNING - POTENTIAL DEVELOPMENTAL ARREST:
 - {temporal.arrest_reason}
 """
-            content.append({"type": "text", "text": temporal_text})
+                content.append({"type": "text", "text": temporal_text})
 
         # 4. Current image to analyze
         use_separate_images = top_image_b64 is not None and side_image_b64 is not None
