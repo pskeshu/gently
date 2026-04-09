@@ -38,6 +38,7 @@ class BenchmarkConfig:
     enable_verification: bool = True  # Multi-phase verification with subagents
 
     # Test settings
+    start_timepoint: int = 0
     max_timepoints_per_embryo: Optional[int] = None
     embryo_ids: Optional[List[str]] = None  # None = all
 
@@ -57,6 +58,7 @@ class BenchmarkConfig:
             "enable_view_reference": self.enable_view_reference,
             "enable_view_previous": self.enable_view_previous,
             "enable_verification": self.enable_verification,
+            "start_timepoint": self.start_timepoint,
             "max_timepoints_per_embryo": self.max_timepoints_per_embryo,
             "embryo_ids": self.embryo_ids,
             "system_prompt_override": self.system_prompt_override,
@@ -287,7 +289,11 @@ class PerceptionBenchmark:
             if self.config.max_timepoints_per_embryo:
                 end_tp = self.config.max_timepoints_per_embryo
 
-            for test_case in self.testset.iter_embryo(embryo_id, end_timepoint=end_tp):
+            for test_case in self.testset.iter_embryo(
+                embryo_id,
+                start_timepoint=self.config.start_timepoint,
+                end_timepoint=end_tp,
+            ):
                 logger.info(
                     f"[{embryo_id}] Processing T{test_case.timepoint} "
                     f"(GT: {test_case.ground_truth_stage})"
@@ -424,9 +430,15 @@ async def main():
         help="Specific embryo(s) to run (can specify multiple)",
     )
     parser.add_argument(
+        "--start-timepoint",
+        type=int,
+        default=0,
+        help="First timepoint index to process (skip earlier frames)",
+    )
+    parser.add_argument(
         "--max-timepoints",
         type=int,
-        help="Maximum timepoints per embryo",
+        help="End timepoint index (exclusive). With --start-timepoint, processes [start, max).",
     )
     parser.add_argument(
         "--description",
@@ -446,6 +458,11 @@ async def main():
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+
+    # The perception engine reads stage definitions etc. from the active
+    # organism module, which is normally loaded by launch_gently.py.
+    from gently.organisms import load_organism
+    load_organism("celegans")
 
     # Find session path
     session_path = Path(args.session)
@@ -486,6 +503,7 @@ async def main():
     # Create config
     config = BenchmarkConfig(
         embryo_ids=args.embryo,
+        start_timepoint=args.start_timepoint,
         max_timepoints_per_embryo=args.max_timepoints,
         description=args.description,
     )
