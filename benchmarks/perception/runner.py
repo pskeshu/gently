@@ -45,7 +45,6 @@ class BenchmarkConfig:
     # Ablation toggles
     include_temporal_context: bool = True
     include_previous_observations: bool = True
-    real_timestamps: bool = False
 
     # Custom system prompt override
     system_prompt_override: Optional[str] = None
@@ -65,7 +64,6 @@ class BenchmarkConfig:
             "enable_verification": self.enable_verification,
             "include_temporal_context": self.include_temporal_context,
             "include_previous_observations": self.include_previous_observations,
-            "real_timestamps": self.real_timestamps,
             "start_timepoint": self.start_timepoint,
             "max_timepoints_per_embryo": self.max_timepoints_per_embryo,
             "embryo_ids": self.embryo_ids,
@@ -359,7 +357,7 @@ class PerceptionBenchmark:
                     reasoning=perception_result.reasoning,
                     is_transitional=perception_result.is_transitional,
                     transition_between=perception_result.transition_between,
-                    timestamp=test_case.acquired_at if self.config.real_timestamps else None,
+                    timestamp=test_case.acquired_at,
                 )
 
                 logger.info(
@@ -462,11 +460,6 @@ async def main():
         help="Ablation: omit the PREVIOUS OBSERVATIONS block from the prompt",
     )
     parser.add_argument(
-        "--real-timestamps",
-        action="store_true",
-        help="Use TIFF acquisition timestamps for temporal context instead of wallclock",
-    )
-    parser.add_argument(
         "--description",
         default="",
         help="Description for this benchmark run",
@@ -533,7 +526,6 @@ async def main():
         max_timepoints_per_embryo=args.max_timepoints,
         include_temporal_context=not args.no_temporal_context,
         include_previous_observations=not args.no_previous_observations,
-        real_timestamps=args.real_timestamps,
         description=args.description,
     )
 
