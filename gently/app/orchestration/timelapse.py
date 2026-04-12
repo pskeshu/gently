@@ -65,7 +65,7 @@ class TimelapseOrchestrator:
         self,
         microscope_client,
         experiment_state,
-        perception_manager=None,
+        perceiver=None,
         on_volume_callback: Optional[Callable] = None,
         session_id: Optional[str] = None,
         store: Optional["GentlyStore"] = None,
@@ -77,7 +77,7 @@ class TimelapseOrchestrator:
             Client for hardware control
         experiment_state : ExperimentState
             Shared experiment state
-        perception_manager : PerceptionManager, optional
+        perceiver : gently_perception.Perceiver, optional
             VLM-based perception system for stage classification
         on_volume_callback : callable, optional
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
@@ -88,7 +88,7 @@ class TimelapseOrchestrator:
         """
         self.client = microscope_client
         self.experiment = experiment_state
-        self.perception_manager = perception_manager
+        self.perceiver = perceiver
         self.on_volume_callback = on_volume_callback
 
         # Trace file storage (writes JSON files to disk)
@@ -199,7 +199,7 @@ class TimelapseOrchestrator:
 
         # Create a perception run in the unified store
         self._perception_run_id = None
-        if self._store and self._session_id and self.perception_manager:
+        if self._store and self._session_id and self.perceiver:
             try:
                 self._perception_run_id = self._store.create_perception_run(
                     session_id=self._session_id,
@@ -492,7 +492,7 @@ class TimelapseOrchestrator:
                 # 20-40 seconds. Perception still runs to completion and
                 # still emits DETECTOR_EVALUATED events; it just no longer
                 # gates the acquisition loop.
-                if self.perception_manager and volume_data is not None:
+                if self.perceiver and volume_data is not None:
                     perception_task = asyncio.create_task(
                         self._run_perception(
                             embryo_id=embryo_id,
@@ -602,10 +602,10 @@ class TimelapseOrchestrator:
             target = cond.target_stages or set()
 
             # Check perception system for current stage
-            if self.perception_manager:
-                session = self.perception_manager.get_session(embryo_state.embryo_id)
+            if self.perceiver:
+                session = self.perceiver.get_session(embryo_state.embryo_id)
                 if session:
-                    current_stage = session.get_current_stage()
+                    current_stage = session.current_stage
                     if current_stage and current_stage in target:
                         # First time detecting target stage — record the timepoint
                         if embryo_state.detection_triggered_at is None:
@@ -1111,7 +1111,7 @@ class TimelapseOrchestrator:
     # How often to recheck embryos marked as no_object (in timepoints)
     NO_OBJECT_RECHECK_INTERVAL = 10
 
-    def _serialize_result(self, embryo_id: str, timepoint: int, result) -> dict:
+    def _serialize_result(self, embryo_id: str, timepoint: int, result, session=None) -> dict:
         """Serialize a perception result to a dict (shared by trace, store, and events)."""
         data = {
             "session_id": self._session_id,
@@ -1119,27 +1119,10 @@ class TimelapseOrchestrator:
             "timepoint": timepoint,
             "timestamp": datetime.now().isoformat(),
             "predicted_stage": result.stage,
-            "confidence": result.confidence,
             "reasoning": result.reasoning,
-            "is_hatching": getattr(result, 'is_hatching', False),
-            "is_transitional": getattr(result, 'is_transitional', False),
-            "transition_between": getattr(result, 'transition_between', None),
         }
-        if result.observed_features:
-            data["observed_features"] = {
-                'shape': result.observed_features.shape,
-                'curvature': result.observed_features.curvature,
-                'shell_status': result.observed_features.shell_status,
-                'body_segments': getattr(result.observed_features, 'body_segments_visible', None),
-                'emergence': result.observed_features.emergence,
-            }
-        if getattr(result, 'contrastive_reasoning', None):
-            data["contrastive_reasoning"] = {
-                'why_not_previous': result.contrastive_reasoning.why_not_previous_stage,
-                'why_not_next': result.contrastive_reasoning.why_not_next_stage,
-            }
-        if getattr(result, 'reasoning_trace', None):
-            data["reasoning_trace"] = result.reasoning_trace.to_dict()
+        if session:
+            data["stability"] = session.stability
         return data
 
     def _volume_to_b64(self, volume) -> tuple:
@@ -1181,9 +1164,8 @@ class TimelapseOrchestrator:
                 self._emit_event(EventType.DETECTOR_EVALUATED, {
                     'embryo_id': embryo_id, 'timepoint': timepoint,
                     'detector_name': 'perception', 'stage': 'no_object',
-                    'is_hatching': False, 'confidence': 1.0,
                     'reasoning': f"Skipped (empty field). Rechecking in {next_recheck - timepoint} timepoints.",
-                    'is_transitional': False, 'transition_between': None, 'skipped': True,
+                    'skipped': True,
                 })
                 return
             else:
@@ -1195,10 +1177,12 @@ class TimelapseOrchestrator:
             if view_a is None:
                 return
 
-            # Run VLM perception
-            result = await self.perception_manager.process_image(
-                embryo_id=embryo_id, timepoint=timepoint,
-                image_b64=image_b64, volume=view_a,
+            # Run perception via gently_perception.Perceiver
+            result = await self.perceiver(
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                image_b64=image_b64,
+                timestamp=datetime.now(),
             )
 
             # Track no_object state
@@ -1210,8 +1194,11 @@ class TimelapseOrchestrator:
                 logger.info(f"Embryo {embryo_id} object found at t={timepoint}, resuming perception")
                 embryo_state.no_object_since_timepoint = None
 
+            # Get session for temporal context
+            session = self.perceiver.get_session(embryo_id)
+
             # Serialize result once, reuse for trace file, store, and events
-            result_data = self._serialize_result(embryo_id, timepoint, result)
+            result_data = self._serialize_result(embryo_id, timepoint, result, session)
 
             # Persist trace to JSON file
             if self._trace_dir:
@@ -1229,11 +1216,8 @@ class TimelapseOrchestrator:
                         embryo_id=embryo_id,
                         timepoint=timepoint,
                         predicted_stage=result.stage,
-                        confidence=result.confidence,
                         reasoning=result.reasoning,
-                        is_transitional=getattr(result, 'is_transitional', False),
                         trace_data=result_data,
-                        observed_features=result_data.get("observed_features"),
                     )
                 except Exception as e:
                     logger.warning(f"Failed to store prediction: {e}")
@@ -1242,32 +1226,25 @@ class TimelapseOrchestrator:
             event_data = {
                 'embryo_id': embryo_id, 'timepoint': timepoint,
                 'detector_name': 'perception',
-                'stage': result.stage, 'is_hatching': result.is_hatching,
-                'confidence': result.confidence, 'reasoning': result.reasoning,
-                'is_transitional': result.is_transitional,
-                'transition_between': result.transition_between,
+                'stage': result.stage,
+                'reasoning': result.reasoning,
             }
             if volume_uids:
                 event_data['volume_uid'] = volume_uids.get('volume_uid')
                 event_data['projection_uid'] = volume_uids.get('projection_uid')
-            # Copy serialized fields that are already computed
-            for key in ('observed_features', 'contrastive_reasoning', 'reasoning_trace'):
-                if key in result_data:
-                    event_data[key] = result_data[key]
-            # Add temporal analysis
-            session = self.perception_manager.sessions.get(embryo_id)
             if session:
-                temporal = session.compute_temporal_analysis()
-                if temporal:
-                    event_data['temporal_analysis'] = temporal.to_dict()
+                event_data['stability'] = session.stability
+                summary = session.summary()
+                if summary.get('temporal'):
+                    from dataclasses import asdict
+                    event_data['temporal_analysis'] = asdict(summary['temporal'])
 
             self._emit_event(EventType.DETECTOR_EVALUATED, event_data)
 
-            if result.is_hatching:
+            if result.stage in ("hatching", "hatched"):
                 self._emit_event(EventType.HATCHING_DETECTED, {
                     'embryo_id': embryo_id, 'timepoint': timepoint,
                     'detector_name': 'hatching', 'stage': result.stage,
-                    'confidence': result.confidence,
                 })
 
             # Check interval rules based on stage
@@ -1275,7 +1252,7 @@ class TimelapseOrchestrator:
 
             logger.info(
                 f"[{embryo_id}] T{timepoint}: stage={result.stage}, "
-                f"hatching={result.is_hatching}, confidence={result.confidence:.0%}"
+                f"stability={session.stability if session else '?'}"
             )
 
         except Exception as e:

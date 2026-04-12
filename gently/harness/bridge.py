@@ -1121,13 +1121,13 @@ class AgentBridge:
 
     def _get_detectors_data(self) -> dict:
         """Build structured detector/perception data."""
-        pm = getattr(self.agent, "perception_manager", None)
-        if not pm or not pm.sessions:
+        perceiver = getattr(self.agent, "perceiver", None)
+        if not perceiver or not perceiver.sessions:
             return {"text": "No active perception sessions."}
 
         lines = ["Perception Sessions"]
-        for embryo_id, session in pm.sessions.items():
-            stage = session.get_current_stage() or "unknown"
+        for embryo_id, session in perceiver.sessions.items():
+            stage = session.current_stage or "unknown"
             obs_count = len(session.observations)
             lines.append(f"  {embryo_id}: stage={stage}, {obs_count} observations")
 

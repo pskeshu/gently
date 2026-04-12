@@ -112,32 +112,27 @@ def _check_dependency_cycles(items) -> List[str]:
 
 def _stage_order(stage_name: str) -> Optional[int]:
     """Get ordinal position of a stage, or None if unrecognised."""
-    from gently.harness.perception.stages import DevelopmentalStage
-    try:
-        return DevelopmentalStage.get_order(stage_name.lower().replace("-", "").replace(" ", ""))
-    except (ValueError, KeyError):
-        # Try common aliases
-        aliases = {
-            "3fold": "pretzel",
-            "threefold": "pretzel",
-            "1.5-fold": "1.5fold",
-            "2-fold": "2fold",
-        }
-        normed = stage_name.lower().replace("-", "").replace(" ", "")
-        mapped = aliases.get(normed)
-        if mapped:
-            try:
-                return DevelopmentalStage.get_order(mapped)
-            except (ValueError, KeyError):
-                return None
-        return None
+    from gently_perception.organism import CELEGANS
+    stages = CELEGANS.stages
+    aliases = {
+        "3fold": "pretzel", "threefold": "pretzel",
+        "1.5-fold": "1.5fold", "2-fold": "2fold",
+    }
+    normed = stage_name.lower().replace("-", "").replace(" ", "")
+    name = aliases.get(normed, normed)
+    # Match against stages list (handle dot removal: "15fold" -> "1.5fold")
+    for i, s in enumerate(stages):
+        if name == s or name == s.replace(".", ""):
+            return i
+    return None
 
 
 def _normalise_stage(name: str) -> Optional[str]:
     """Normalise a stage name to canonical form, or None."""
-    from gently.harness.perception.stages import DevelopmentalStage
+    from gently_perception.organism import CELEGANS
+    stages = CELEGANS.stages
     low = name.lower().strip()
-    for s in DevelopmentalStage.ordered_values():
+    for s in stages:
         if low == s or low.replace("-", "").replace(" ", "") == s.replace(".", ""):
             return s
     aliases = {"3fold": "pretzel", "threefold": "pretzel", "3-fold": "pretzel"}

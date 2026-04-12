@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 from ..harness.state import ExperimentState, EmbryoState, ImageRecord
 from ..harness.orchestration.plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from ..harness.tools.registry import get_tool_registry
-from ..harness.perception import PerceptionManager
+from gently_perception import Perceiver
 
 # Import tools package to trigger @tool decorator registration
 from . import tools as _tools  # noqa: F401
@@ -121,13 +121,8 @@ class MicroscopyAgent:
         # Event bus for async messaging (must be before perception manager)
         self._event_bus = get_event_bus()
 
-        # Perception system (VLM-based stage classification)
-        examples_path = Path(__file__).parent.parent / "examples"
-        self.perception_manager = PerceptionManager(
-            claude_client=self.claude,
-            examples_path=examples_path,
-            event_bus=self._event_bus,
-        )
+        # Perception system (gently-perception harness)
+        self.perceiver = Perceiver()
 
         # Microscope interface (hardware abstraction)
         self.microscope = microscope_client
@@ -371,7 +366,7 @@ class MicroscopyAgent:
             self.timelapse_orchestrator = TimelapseOrchestrator(
                 microscope_client=self.client,
                 experiment_state=self.experiment,
-                perception_manager=self.perception_manager,
+                perceiver=self.perceiver,
                 on_volume_callback=self.on_volume_acquired,
                 session_id=self.session_id,
                 store=self.store,

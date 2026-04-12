@@ -9,7 +9,7 @@ This module re-exports from the new locations for backward compatibility.
 from gently.app.agent import MicroscopyAgent
 from gently.harness.state import EmbryoState, ExperimentState, ImageRecord
 from gently.harness.orchestration.plan_synthesis import PlanSynthesizer, PlanValidator
-from gently.harness.perception import PerceptionManager, PerceptionResult, PerceptionSession
+from gently_perception import Perceiver, PerceptionOutput, Session as PerceptionSession
 try:
     from gently.hardware.dispim.device_factory import create_devices_from_mmcore
 except ImportError:
@@ -29,8 +29,8 @@ __all__ = [
     'ImageRecord',
     'PlanSynthesizer',
     'PlanValidator',
-    'PerceptionManager',
-    'PerceptionResult',
+    'Perceiver',
+    'PerceptionOutput',
     'PerceptionSession',
     'create_devices_from_mmcore',
     'ToolRegistry',
