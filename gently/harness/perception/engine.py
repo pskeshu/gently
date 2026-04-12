@@ -533,7 +533,8 @@ class PerceptionEngine:
         """
         Run the interleaved reasoning loop with tool use.
 
-        Returns (PerceptionResult, ReasoningTrace)
+        Returns (PerceptionResult, ReasoningTrace, messages) where messages is the
+        full conversation history, so callers can continue the conversation.
         """
         trace = ReasoningTrace()
 
@@ -591,8 +592,9 @@ class PerceptionEngine:
                 ))
 
                 # Parse and return
+                messages.append({"role": "assistant", "content": [{"type": "text", "text": text_response}]})
                 result = self._parse_response(text_response)
-                return result, trace
+                return result, trace, messages
 
             # Handle tool use
             if response.stop_reason == "tool_use":
@@ -620,12 +622,33 @@ class PerceptionEngine:
                                 tool_input=block.input,
                             ))
 
+                    assistant_content = []
+                    for block in response.content:
+                        if block.type == "text":
+                            assistant_content.append({"type": "text", "text": block.text})
+                        elif block.type == "tool_use":
+                            assistant_content.append({
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            })
+                    messages.append({"role": "assistant", "content": assistant_content})
+
                     # Run verification and return result
                     result = await self._handle_verification_request(
                         verification_block.input,
                         trace,
                     )
-                    return result, trace
+                    messages.append({
+                        "role": "user",
+                        "content": [{
+                            "type": "tool_result",
+                            "tool_use_id": verification_block.id,
+                            "content": f"Verification complete: stage={result.stage}, confidence={result.confidence:.0%}",
+                        }],
+                    })
+                    return result, trace, messages
 
                 # Build assistant message with the response
                 assistant_content = []
@@ -688,7 +711,7 @@ class PerceptionEngine:
 
         # Max iterations reached - parse last response
         logger.warning(f"Max reasoning iterations ({max_iterations}) reached")
-        return self._parse_response(""), trace
+        return self._parse_response(""), trace, messages
 
     def _handle_tool_call(
         self,
@@ -1059,6 +1082,18 @@ class PerceptionEngine:
             "text": organism.PERCEPTION_SYSTEM_PROMPT,
             "cache_control": {"type": "ephemeral", "ttl": "1h"}
         }]
+
+    def _build_reconsider_prompt(self, result: "PerceptionResult", turn: int) -> str:
+        raise NotImplementedError(
+            "Multishot reconsideration is not yet implemented. "
+            "Set multishot_turns=0 (the default) to disable."
+        )
+
+    async def _call_claude(self, messages: List[Dict], include_tools: bool = True) -> Any:
+        raise NotImplementedError(
+            "Multishot reconsideration is not yet implemented. "
+            "Set multishot_turns=0 (the default) to disable."
+        )
 
     async def _call_claude_with_tools(self, messages: List[Dict]) -> Any:
         """Call Claude API with tools enabled for interleaved reasoning."""
