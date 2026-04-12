@@ -207,7 +207,9 @@ class PerceptionSession:
             return None
 
         current_stage = self.get_current_stage()
-        now = datetime.now()
+        # Reference "now" against the most recent observation's timestamp so
+        # time-in-stage reflects acquisition time, not benchmark wallclock.
+        now = self.observations[-1].timestamp
 
         # Find when current stage started (walk backwards through observations)
         stage_start_time = None

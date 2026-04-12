@@ -7,6 +7,7 @@ Loads session data and pairs with ground truth for sequential testing.
 import base64
 import io
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator, List, Optional, Tuple, Dict
 
@@ -43,12 +44,13 @@ class TestCase:
     side_image_b64: Optional[str]  # SIDE view only
     volume: Optional[np.ndarray]
     ground_truth_stage: Optional[str]
+    acquired_at: Optional[datetime] = None
 
 
-def _discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dict[str, List[Path]]:
-    """Discover volume files in a session directory."""
-    from datetime import datetime
-
+def _discover_volumes(
+    session_dir: Path, embryo_id: Optional[str] = None
+) -> Dict[str, List[Tuple[datetime, Path]]]:
+    """Discover volume files (with parsed acquisition timestamps) in a session directory."""
     if not session_dir.exists():
         return {}
 
@@ -79,7 +81,7 @@ def _discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dic
     result = {}
     for eid, volumes in embryo_volumes.items():
         volumes.sort(key=lambda x: x[0])
-        result[eid] = [v[1] for v in volumes]
+        result[eid] = volumes
 
     return result
 
@@ -286,7 +288,7 @@ class OfflineTestset:
             end_timepoint = len(volumes)
 
         for timepoint in range(start_timepoint, min(end_timepoint, len(volumes))):
-            vol_path = volumes[timepoint]
+            acquired_at, vol_path = volumes[timepoint]
 
             # Load volume
             volume = _load_volume(vol_path) if self.load_volumes else None
@@ -313,6 +315,7 @@ class OfflineTestset:
                 side_image_b64=side_b64,
                 volume=volume,
                 ground_truth_stage=gt_stage,
+                acquired_at=acquired_at,
             )
 
     def iter_all(self) -> Iterator[Tuple[str, Iterator[TestCase]]]:
