@@ -536,6 +536,10 @@ class TimelapseOrchestrator:
         except Exception as e:
             embryo_state.error_count += 1
             embryo_state.last_error = str(e)
+            logger.error(
+                f"Acquisition failed for {embryo_id} t{embryo_state.timepoints_acquired}: "
+                f"{e}\n{traceback.format_exc()}"
+            )
 
             # Log to global error log
             self.global_error_log.log_error(
