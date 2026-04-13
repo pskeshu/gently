@@ -117,7 +117,13 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING"):
-    configure_logging(level=log_level)
+    # Set up log file in storage directory
+    storage_base = Path(os.environ.get("GENTLY_STORAGE", "D:/Gently2"))
+    log_dir = storage_base / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = str(log_dir / f"gently_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    configure_logging(level=log_level, log_file=log_file)
+    logger.info("Logging to %s", log_file)
 
     # Load organism module from config
     config_path = Path(__file__).parent / "config" / "config.yml"
