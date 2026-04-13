@@ -1199,6 +1199,17 @@ const CalibrationManager = {
     _renderGalleryContent(images) {
         const displayList = images.slice(-50).reverse();
 
+        // Extract best_piezo from focus_plot metadata to mark best-focus sweep images
+        const bestPiezoByGalvo = {};
+        images.forEach(img => {
+            if ((img.data_type === 'focus_plot' || img.data_type === 'focus_curve') && img.metadata) {
+                const name = img.metadata.galvo_name;
+                if (name && img.metadata.best_piezo != null) {
+                    bestPiezoByGalvo[name] = img.metadata.best_piezo;
+                }
+            }
+        });
+
         let segments3dHtml = '';
         if (state.volumes3d.length > 0) {
             segments3dHtml = `
@@ -1219,15 +1230,24 @@ const CalibrationManager = {
 
         return `
             <div class="calibration-image-grid">
-                ${displayList.map((img, idx) => `
-                    <div class="gallery-item" onclick="CalibrationManager.openLightbox(${idx})">
+                ${displayList.map((img, idx) => {
+                    // Mark sweep images closest to best_piezo as best-focus
+                    let isBestFocus = false;
+                    const m = img.metadata || {};
+                    if (m.piezo != null && m.galvo_name && bestPiezoByGalvo[m.galvo_name] != null) {
+                        const best = bestPiezoByGalvo[m.galvo_name];
+                        // Match within 0.5 µm (dense sweep step size)
+                        isBestFocus = Math.abs(m.piezo - best) < 0.5;
+                    }
+                    return `
+                    <div class="gallery-item${isBestFocus ? ' best-focus' : ''}" onclick="CalibrationManager.openLightbox(${idx})">
                         <img class="gallery-img" src="data:image/png;base64,${img.base64_png}" alt="${img.data_type}">
                         <div class="gallery-info">
-                            <div class="gallery-type">${img.data_type}</div>
+                            <div class="gallery-type">${img.data_type}${isBestFocus ? ' ★' : ''}</div>
                             <div class="gallery-meta">${formatMeta(img.metadata)}</div>
                         </div>
-                    </div>
-                `).join('')}
+                    </div>`;
+                }).join('')}
             </div>
             ${segments3dHtml}
         `;
