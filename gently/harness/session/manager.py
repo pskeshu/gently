@@ -78,6 +78,7 @@ class SessionManager:
             conversation_history = self.sanitize_loaded_messages(raw_history)
 
             experiment_data = snapshot.get('experiment_data', {})
+            experiment.active_plan_item_id = experiment_data.get('active_plan_item_id')
             embryo_states = experiment_data.get('embryos', {})
 
             for embryo_id, embryo_data in embryo_states.items():

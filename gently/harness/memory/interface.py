@@ -10,7 +10,7 @@ accumulated knowledge across sessions.
 """
 
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,101 @@ class AgentMemory:
     def __init__(self, context_store, session_id: str = None):
         self.store = context_store
         self.session_id = session_id
+        # Set by startup flow after resolve_plan_context()
+        self.active_plan_item_id: Optional[str] = None
+
+    # ------------------------------------------------------------------
+    # Plan context resolution — called at startup
+    # ------------------------------------------------------------------
+
+    def resolve_plan_context(self) -> Tuple[Optional[str], List]:
+        """Determine which plan item to activate for this session.
+
+        Scans all active campaigns for unblocked imaging items.
+
+        Returns
+        -------
+        (active_item_id, candidates)
+            If exactly one unblocked imaging item exists, active_item_id is
+            set and candidates is a single-element list.
+            If multiple exist, active_item_id is None and candidates has them all.
+            If none, both are empty/None.
+        """
+        try:
+            from .model import PlanItemType
+            root_campaigns = self.store.get_root_campaigns(status="active")
+            imaging_candidates = []
+            for campaign in root_campaigns:
+                unblocked = self.store.get_unblocked_plan_items(campaign.id)
+                for item in unblocked:
+                    if item.type == PlanItemType.IMAGING:
+                        spec = self.store.resolve_imaging_spec(item)
+                        imaging_candidates.append((item, spec, campaign))
+
+            if len(imaging_candidates) == 1:
+                item, spec, campaign = imaging_candidates[0]
+                return item.id, imaging_candidates
+            elif len(imaging_candidates) > 1:
+                return None, imaging_candidates
+            else:
+                return None, []
+        except Exception as e:
+            logger.debug(f"Plan context resolution failed: {e}")
+            return None, []
+
+    def format_imaging_spec_summary(self, spec) -> str:
+        """One-line summary of an ImagingSpec for briefings."""
+        parts = []
+        if spec.strain:
+            parts.append(spec.strain)
+        if spec.temperature_c:
+            parts.append(f"{spec.temperature_c}\u00b0C")
+        if spec.num_slices:
+            parts.append(f"{spec.num_slices} slices")
+        if spec.exposure_ms:
+            parts.append(f"{spec.exposure_ms}ms")
+        if spec.stop_condition:
+            parts.append(f"until {spec.stop_condition}")
+        if spec.interval_s:
+            parts.append(f"every {spec.interval_s}s")
+        return ", ".join(parts) if parts else "no spec"
+
+    def format_imaging_spec_block(self, spec) -> str:
+        """Multi-line ImagingSpec for system prompt injection."""
+        lines = []
+        if spec.strain:
+            lines.append(f"  Strain: {spec.strain}")
+        if spec.genotype:
+            lines.append(f"  Genotype: {spec.genotype}")
+        if spec.reporter:
+            lines.append(f"  Reporter: {spec.reporter}")
+        if spec.temperature_c:
+            lines.append(f"  Temperature: {spec.temperature_c}\u00b0C")
+        if spec.num_embryos:
+            lines.append(f"  Target embryos: {spec.num_embryos}")
+        if spec.num_slices:
+            lines.append(f"  Slices: {spec.num_slices}")
+        if spec.exposure_ms:
+            lines.append(f"  Exposure: {spec.exposure_ms}ms")
+        if spec.laser_wavelength_nm:
+            laser = f"{spec.laser_wavelength_nm}nm"
+            if spec.laser_power_pct:
+                laser += f" at {spec.laser_power_pct}%"
+            lines.append(f"  Laser: {laser}")
+        if spec.interval_s:
+            lines.append(f"  Interval: {spec.interval_s}s")
+        if spec.adaptive_intervals:
+            for stage, interval in spec.adaptive_intervals.items():
+                lines.append(f"  Interval ({stage}): {interval}s")
+        if spec.stop_condition:
+            lines.append(f"  Stop condition: {spec.stop_condition}")
+        if spec.estimated_duration_h:
+            lines.append(f"  Estimated duration: {spec.estimated_duration_h}h")
+        if spec.detectors:
+            lines.append(f"  Detectors: {', '.join(spec.detectors)}")
+        if spec.success_criteria:
+            lines.append(f"  Success criteria: {spec.success_criteria}")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Prompt layer — lightweight awareness for system prompt
@@ -113,9 +208,31 @@ class AgentMemory:
             if count_parts:
                 lines.append(f"- {', '.join(count_parts)} available")
 
+            # Active plan item — full spec in prompt so agent knows
+            # what it's executing without needing to call recall tools
+            if self.active_plan_item_id:
+                try:
+                    item = self.store.get_plan_item(self.active_plan_item_id)
+                    if item:
+                        spec = self.store.resolve_imaging_spec(item)
+                        campaign = self.store.get_campaign(item.campaign_id)
+                        campaign_name = _short_name(campaign) if campaign else "?"
+                        lines.append(f"\n## Active Plan Item: {item.title}")
+                        lines.append(f"Campaign: {campaign_name}")
+                        lines.append(f"Status: {item.status.value}")
+                        if spec:
+                            lines.append(self.format_imaging_spec_block(spec))
+                        lines.append(
+                            "\nUse this spec when configuring embryos and "
+                            "starting the timelapse. The user expects these "
+                            "settings from their experimental plan."
+                        )
+                except Exception:
+                    pass
+
             # Available tools
             lines.append(
-                "- Tools: recall_campaigns, recall_learnings, "
+                "\n- Tools: recall_campaigns, recall_learnings, "
                 "recall_observations, recall_context, query_lab_history"
             )
 
@@ -183,6 +300,7 @@ class AgentMemory:
 
         # Plan status (root campaign)
         try:
+            from .model import PlanItemType
             status = self.store.get_plan_status(campaign.id)
             if status["total"] > 0:
                 lines.append(
@@ -192,7 +310,13 @@ class AgentMemory:
                 if status.get("next_actions"):
                     lines.append("**Next actions**:")
                     for item in status["next_actions"][:5]:
-                        lines.append(f"  - {item.title}")
+                        if item.type == PlanItemType.IMAGING:
+                            spec = self.store.resolve_imaging_spec(item)
+                            spec_summary = self.format_imaging_spec_summary(spec) if spec else ""
+                            suffix = f" — {spec_summary}" if spec_summary else ""
+                            lines.append(f"  - [imaging] {item.title}{suffix}")
+                        else:
+                            lines.append(f"  - [{item.type.value}] {item.title}")
                 if status.get("pending_decisions"):
                     lines.append("**Pending decisions**:")
                     for item in status["pending_decisions"][:3]:
@@ -225,20 +349,56 @@ class AgentMemory:
         return "\n".join(lines) if len(lines) > 1 else ""
 
     def _briefing_broad(self) -> str:
-        """Broad briefing when no campaign is linked — kept minimal."""
+        """Broad briefing when no campaign is linked.
+
+        If there are actionable imaging plan items, surfaces them so the
+        agent can set plan context early in the session.
+        """
         root_campaigns = self.store.get_root_campaigns()
         learnings = self.store.get_learnings(limit=100)
 
         if not root_campaigns and not learnings:
             return ""
 
-        parts = []
-        if root_campaigns:
-            parts.append(f"{len(root_campaigns)} campaigns")
-        if learnings:
-            parts.append(f"{len(learnings)} learnings")
+        lines = []
 
-        return f"{', '.join(parts)} loaded. Use recall tools for details."
+        # Surface actionable imaging items from the plan
+        active_id, candidates = self.resolve_plan_context()
+        if candidates:
+            if len(candidates) == 1:
+                item, spec, campaign = candidates[0]
+                spec_summary = self.format_imaging_spec_summary(spec) if spec else "no spec"
+                lines.append(f"## Next up: {item.title}")
+                lines.append(f"Campaign: {_friendly_name(campaign)}")
+                if spec:
+                    lines.append(self.format_imaging_spec_block(spec))
+                lines.append("")
+                lines.append(
+                    "This is the only unblocked imaging task. "
+                    "Plan context has been set automatically."
+                )
+            else:
+                lines.append("## Ready to image")
+                lines.append(
+                    f"{len(candidates)} imaging tasks are unblocked:"
+                )
+                lines.append("")
+                for item, spec, campaign in candidates:
+                    spec_summary = self.format_imaging_spec_summary(spec) if spec else "no spec"
+                    lines.append(f"- **{item.title}** — {spec_summary}")
+                    lines.append(f"  Campaign: {_short_name(campaign)}")
+                lines.append("")
+                lines.append("Which imaging task are you working on today?")
+        else:
+            # No plan items — minimal briefing
+            parts = []
+            if root_campaigns:
+                parts.append(f"{len(root_campaigns)} campaigns")
+            if learnings:
+                parts.append(f"{len(learnings)} learnings")
+            lines.append(f"{', '.join(parts)} loaded. Use recall tools for details.")
+
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------
     # Recall layer — used by tools and briefing

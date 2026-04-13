@@ -761,6 +761,11 @@ class ExperimentState:
         self.plan_history: List[Dict] = []
         self.metadata: Dict = {}
 
+        # Active plan item — set during plan context resolution at startup.
+        # When set, the agent's system prompt includes the full ImagingSpec
+        # so it knows what it's here to do without being told.
+        self.active_plan_item_id: Optional[str] = None
+
         # Session-level calibration prior for cross-embryo learning
         # Updated after each successful calibration, used to initialize subsequent embryos
         self.calibration_prior: CalibrationPrior = CalibrationPrior()
@@ -843,6 +848,9 @@ class ExperimentState:
         if self.current_plan_name:
             lines.append(f"\nCurrent plan: {self.current_plan_name}")
 
+        if self.active_plan_item_id:
+            lines.append(f"Active plan item: {self.active_plan_item_id}")
+
         return "\n".join(lines)
 
     def to_dict(self) -> Dict:
@@ -851,6 +859,7 @@ class ExperimentState:
             'start_time': self.start_time.isoformat() if self.start_time else None,
             'acquisition_status': self.acquisition_status,
             'current_plan_name': self.current_plan_name,
+            'active_plan_item_id': self.active_plan_item_id,
             'embryo_count': len(self.embryos),
             'embryos': {eid: e.to_dict() for eid, e in self.embryos.items()},
             'metadata': self.metadata,

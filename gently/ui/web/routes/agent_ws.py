@@ -31,7 +31,7 @@ def create_router(server) -> APIRouter:
     # Pending choice futures keyed by request_id
     _choice_futures: Dict[str, asyncio.Future] = {}
 
-    async def _run_wizard(wizard, websocket, send_fn, _choice_futures, bridge=None):
+    async def _run_wizard(wizard, websocket, send_fn, _choice_futures, bridge=None, log_transcript=None):
         """Run the wizard's interactive loop.
 
         Returns the wizard task so callers can check for exceptions.
@@ -75,6 +75,9 @@ def create_router(server) -> APIRouter:
                 data = json.loads(raw)
             except json.JSONDecodeError:
                 continue
+
+            if log_transcript:
+                log_transcript("in", data)
 
             msg_type = data.get("type")
 
@@ -135,11 +138,12 @@ def create_router(server) -> APIRouter:
 
         # Send connection metadata (version, tokens, embryo count, commands)
         meta = bridge.get_connect_metadata()
-        await websocket.send_json({
+        _connected_msg = {
             "type": "connected",
             **meta,
             "timestamp": datetime.now().isoformat(),
-        })
+        }
+        await websocket.send_json(_connected_msg)
 
         # Subscribe to mesh peer events so the TUI gets live peer counts
         _mesh_unsubs = []
@@ -149,10 +153,12 @@ def create_router(server) -> APIRouter:
 
             async def _push_peer_count(event):
                 try:
-                    await websocket.send_json({
+                    msg = {
                         "type": "state_update",
                         "state": {"peer_count": mesh_svc.peer_count},
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
@@ -160,20 +166,24 @@ def create_router(server) -> APIRouter:
                 try:
                     is_trusted = event.data.get("is_trusted", True)
                     hostname = event.data.get("hostname", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "state_update",
                         "state": {"peer_count": mesh_svc.peer_count},
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                     if is_trusted:
-                        await websocket.send_json({
+                        msg = {
                             "type": "notification",
                             "level": "info",
                             "title": f"Peer joined: {hostname}",
-                        })
+                        }
+                        _log_transcript("out", msg)
+                        await websocket.send_json(msg)
                     else:
                         # Interactive prompt for unpaired peers
                         request_id = f"mesh_discover:{hostname}"
-                        await websocket.send_json({
+                        msg = {
                             "type": "choice_request",
                             "choice_data": {
                                 "_type": "single",
@@ -187,7 +197,9 @@ def create_router(server) -> APIRouter:
                                 "allow_multiple": False,
                             },
                             "request_id": request_id,
-                        })
+                        }
+                        _log_transcript("out", msg)
+                        await websocket.send_json(msg)
                         loop = asyncio.get_event_loop()
                         future = loop.create_future()
                         _choice_futures[request_id] = future
@@ -202,15 +214,19 @@ def create_router(server) -> APIRouter:
             async def _push_peer_lost(event):
                 try:
                     hostname = event.data.get("hostname", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "state_update",
                         "state": {"peer_count": mesh_svc.peer_count},
-                    })
-                    await websocket.send_json({
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
+                    msg = {
                         "type": "notification",
                         "level": "warning",
                         "title": f"Peer offline: {hostname}",
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
@@ -221,7 +237,7 @@ def create_router(server) -> APIRouter:
                     pairing_id = event.data.get("pairing_id", "")
 
                     request_id = f"mesh_pair:{pairing_id}"
-                    await websocket.send_json({
+                    msg = {
                         "type": "choice_request",
                         "choice_data": {
                             "_type": "single",
@@ -235,7 +251,9 @@ def create_router(server) -> APIRouter:
                             "allow_multiple": False,
                         },
                         "request_id": request_id,
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
 
                     # Register future — REPL loop resolves it on choice_response
                     loop = asyncio.get_event_loop()
@@ -255,35 +273,41 @@ def create_router(server) -> APIRouter:
             async def _push_pairing_completed(event):
                 try:
                     hostname = event.data.get("peer_hostname", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "notification",
                         "level": "success",
                         "title": f"Paired with {hostname}",
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
             async def _push_auth_failure(event):
                 try:
                     ip = event.data.get("ip", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "notification",
                         "level": "warning",
                         "title": "Auth failed",
                         "body": f"from {ip}",
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
             async def _push_cert_pin_failure(event):
                 try:
                     peer_id = event.data.get("peer_id", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "notification",
                         "level": "error",
                         "title": "Certificate mismatch",
                         "body": f"{peer_id} \u2014 possible MITM",
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
@@ -291,12 +315,14 @@ def create_router(server) -> APIRouter:
                 try:
                     peer_id = event.data.get("peer_id", "unknown")
                     scope = event.data.get("scope", "unknown")
-                    await websocket.send_json({
+                    msg = {
                         "type": "notification",
                         "level": "warning",
                         "title": "Access denied",
                         "body": f"{peer_id} missing scope: {scope}",
-                    })
+                    }
+                    _log_transcript("out", msg)
+                    await websocket.send_json(msg)
                 except Exception:
                     pass
 
@@ -326,8 +352,48 @@ def create_router(server) -> APIRouter:
         active_task: Optional[asyncio.Task] = None
         wizard_task = None
 
+        # ── Session transcript ────────────────────────────────
+        # Log every WebSocket message (both directions) to a JSONL
+        # file in the session directory. This captures the full
+        # conversation as it appeared on screen — every text chunk,
+        # tool call, choice picker, and user message.
+        _transcript_file = None
+        try:
+            agent = bridge.agent
+            store = getattr(agent, "store", None)
+            sid = getattr(agent, "session_id", None)
+            if store and sid:
+                sdir = store._session_dir(sid)
+                if sdir and sdir.exists():
+                    _transcript_file = open(
+                        sdir / "transcript.jsonl", "a", encoding="utf-8",
+                    )
+                    logger.info("Transcript logging to %s", sdir / "transcript.jsonl")
+        except Exception as e:
+            logger.debug("Could not open transcript file: %s", e)
+
+        def _log_transcript(direction: str, data: dict):
+            """Append a timestamped message to the transcript."""
+            if _transcript_file is None:
+                return
+            try:
+                entry = {
+                    "ts": datetime.now().isoformat(),
+                    "dir": direction,
+                    **data,
+                }
+                _transcript_file.write(json.dumps(entry, default=str) + "\n")
+                _transcript_file.flush()
+            except Exception:
+                pass
+
+        # Retroactively log the connected message that was sent before
+        # the transcript file was opened.
+        _log_transcript("out", _connected_msg)
+
         async def send_fn(data: dict):
             """Send a JSON message to the TUI client."""
+            _log_transcript("out", data)
             try:
                 await websocket.send_json(data)
             except Exception:
@@ -349,6 +415,7 @@ def create_router(server) -> APIRouter:
             if wizard is not None and wizard.needed:
                 wizard_task = await _run_wizard(
                     wizard, websocket, send_fn, _choice_futures, bridge,
+                    log_transcript=_log_transcript,
                 )
                 exc = _handle_wizard_result(wizard_task)
                 if exc:
@@ -389,6 +456,7 @@ def create_router(server) -> APIRouter:
                     logger.warning(f"Invalid JSON from TUI: {raw[:100]}")
                     continue
 
+                _log_transcript("in", data)
                 msg_type = data.get("type")
 
                 if msg_type == "chat":
@@ -450,6 +518,7 @@ def create_router(server) -> APIRouter:
 
                             wizard_task = await _run_wizard(
                                 w, websocket, send_fn, _choice_futures, bridge,
+                                log_transcript=_log_transcript,
                             )
                             exc = _handle_wizard_result(wizard_task)
                             if exc:
@@ -490,6 +559,12 @@ def create_router(server) -> APIRouter:
         except Exception as e:
             logger.error(f"Agent WS error: {e}", exc_info=True)
         finally:
+            # Close transcript file
+            if _transcript_file is not None:
+                try:
+                    _transcript_file.close()
+                except Exception:
+                    pass
             # Unsubscribe from mesh events
             for unsub in _mesh_unsubs:
                 try:

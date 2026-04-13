@@ -667,7 +667,12 @@ No version history system needed — the current state of PlanItems is the plan.
 
 ## Storage Schema
 
-New table in the context database (`agent_mind.db`):
+> **Note**: Storage has migrated from SQLite to file-based (Gently3).
+> Plan items live in `D:/Gently3/agent/campaigns/{id}_{slug}/plan/current.yaml`.
+> The schema below shows the original SQL design for reference; the
+> `FileContextStore` provides the same API over YAML files.
+
+Original table in the context database (`agent_mind.db`):
 
 ```sql
 CREATE TABLE IF NOT EXISTS plan_items (
@@ -797,3 +802,143 @@ Plan mode adds a **scientific reasoning layer** upstream of microscope control. 
 7. Learns from completed sessions and suggests plan adjustments
 
 The key principle: **the plan is a living document**, not a one-time output. The agent maintains it, tracks it, and uses it to be a better collaborator over the lifetime of a research project.
+
+---
+
+## Plan-Session Integration — How Plan Context Flows
+
+The plan is only useful if the agent knows about it during a session. This section documents how plan context is resolved, set, and used at runtime.
+
+### Startup Flow
+
+```
+launch_gently.py
+|
++-- load config, organism, hardware
++-- FileStore(D:/Gently3)
++-- session picker (Ink TUI or --resume)
++-- connect to device layer
+|
++-- MicroscopyAgent(session_id, store)
+|   +-- ExperimentState()
+|   |     active_plan_item_id: None (or restored from snapshot)
+|   +-- SessionManager.create/resume()
+|   |     restores active_plan_item_id from session snapshot
+|   +-- TimelapseOrchestrator()
+|   +-- _update_system_prompt()
+|
++-- FileContextStore(D:/Gently3/agent)
++-- agent.set_context_store(cs)
+|   +-- AgentMemory(cs, session_id)
+|         active_plan_item_id: None
+|
++-- bridge.init_wizard(cs, claude)
+|
++-- spawn Ink TUI --> connects via WebSocket
+|
++-- /ws/agent handler:
+    |
+    +-- if wizard.needed (first launch only):
+    |   +-- run wizard (asks organism, etc.)
+    |
+    +-- else (returning user):
+    |   +-- bridge.get_session_briefing()
+    |       |
+    |       +-- PLAN CONTEXT RESOLUTION:
+    |       |   |
+    |       |   +-- if session resumed with active_plan_item_id:
+    |       |   |     restore onto AgentMemory (already on ExperimentState)
+    |       |   |
+    |       |   +-- else: memory.resolve_plan_context()
+    |       |       +-- scan active campaigns
+    |       |       +-- find unblocked imaging items via dependency graph
+    |       |       |
+    |       |       +-- 1 item: auto-set active_plan_item_id
+    |       |       |           link session to campaign
+    |       |       |           briefing: "Next up: [title] + full spec"
+    |       |       |
+    |       |       +-- N items: briefing lists all with specs
+    |       |       |            "Which imaging task today?"
+    |       |       |
+    |       |       +-- 0 items: minimal briefing
+    |       |
+    |       +-- invalidate prompt cache
+    |
+    +-- system prompt rebuilt (next message):
+    |   +-- get_awareness_summary() includes:
+    |       |
+    |       |   # Your Memory
+    |       |   - Active campaigns: "Nerve ring study" (3/8)
+    |       |
+    |       |   ## Active Plan Item: WT session 3
+    |       |   Campaign: Nerve ring formation study
+    |       |     Strain: OH904
+    |       |     Slices: 80
+    |       |     Exposure: 10ms
+    |       |     Laser: 488nm at 10%
+    |       |     Interval: 300s
+    |       |     Stop condition: pretzel
+    |       |     Detectors: comma, pretzel
+    |       |
+    |       |   Use this spec when configuring embryos and
+    |       |   starting the timelapse.
+    |
+    +-- REPL loop
+        agent knows what it's here to do
+```
+
+### Plan Mode Exit Flow
+
+When the user creates a new plan in plan mode and exits:
+
+```
+agent.exit_plan_mode()
+|
++-- memory.resolve_plan_context()
+|   +-- scans newly created campaign
+|   +-- finds unblocked imaging items
+|
++-- if 1 item: auto-set active_plan_item_id
+|              link session to campaign
+|              return "Back to run mode. Active plan item: [title]"
+|
++-- if N items: return "N imaging tasks ready: ... Which one?"
+|
++-- if 0 items: return "Back to run mode."
+|
++-- invalidate prompt cache
++-- rebuild system prompt (now includes ImagingSpec)
+```
+
+### Where active_plan_item_id Lives
+
+```
+ExperimentState.active_plan_item_id     in-memory, serialized to session snapshot
+AgentMemory.active_plan_item_id         in-memory, drives system prompt injection
+```
+
+Both are set together. ExperimentState is the persistence layer (survives session
+save/resume). AgentMemory is the prompt layer (drives what the agent sees).
+
+### Data Flow: Plan Item --> Microscope
+
+```
+ImagingSpec (in plan)
+  |
+  +-- [system prompt] agent sees strain, slices, exposure, etc.
+  |
+  +-- [detect_embryos] agent offers to configure with plan settings
+  |
+  +-- [execute_plan_item or start_timelapse]
+  |     +-- resolve ImagingSpec
+  |     +-- configure embryo params (num_slices, exposure_ms)
+  |     +-- enable detectors
+  |     +-- set stop condition and interval
+  |     +-- start timelapse
+  |     +-- mark plan item in_progress
+  |
+  +-- [ACQUISITION_COMPLETED event]
+        +-- (future: auto-complete plan item with outcome)
+        +-- dependency graph advances
+        +-- next startup shows next unblocked item
+```

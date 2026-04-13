@@ -286,14 +286,50 @@ class MicroscopyAgent:
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
     def exit_plan_mode(self) -> str:
-        """Switch back to run mode."""
+        """Switch back to run mode.
+
+        Resolves plan context so that any newly created imaging items
+        are picked up as the active plan item automatically.
+        """
         if self.mode == "run":
             return "Already in run mode."
         self.mode = "run"
+
+        # Resolve plan context from the freshly created/updated plan
+        result = ""
+        if self.memory:
+            active_id, candidates = self.memory.resolve_plan_context()
+            if active_id:
+                self.experiment.active_plan_item_id = active_id
+                self.memory.active_plan_item_id = active_id
+                item = self.context_store.get_plan_item(active_id)
+                title = item.title if item else active_id
+                result = f"Back to run mode. Active plan item: {title}"
+
+                # Link session to campaign
+                if item and self.session_id and self.context_store:
+                    try:
+                        self.context_store.link_session_campaign(
+                            self.session_id, item.campaign_id,
+                        )
+                    except Exception:
+                        pass
+            elif candidates:
+                titles = [c[0].title for c in candidates]
+                listing = ", ".join(titles[:5])
+                result = (
+                    f"Back to run mode. {len(candidates)} imaging tasks "
+                    f"ready: {listing}. Which one are you working on?"
+                )
+            else:
+                result = "Back to run mode."
+
+            self.prompts.invalidate_context_cache()
+
         self._update_system_prompt()
         emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "run"}, source="agent")
         logger.info("Exited plan mode")
-        return "Back to run mode."
+        return result
 
     # ===== Prompt & System Prompt =====
 

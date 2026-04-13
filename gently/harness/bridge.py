@@ -70,10 +70,48 @@ class AgentBridge:
         return self._launch_info.get("mesh_service")
 
     def get_session_briefing(self) -> str:
-        """Generate briefing for new sessions. Returns '' if not applicable."""
+        """Generate briefing for new sessions.
+
+        Resolves plan context first: if there's exactly one unblocked
+        imaging item, auto-sets it as the active plan item on both
+        AgentMemory and ExperimentState before generating the briefing.
+        """
         if not hasattr(self.agent, 'memory') or not self.agent.memory:
             return ""
-        return self.agent.memory.get_session_briefing()
+
+        memory = self.agent.memory
+
+        # Restore active_plan_item_id from experiment state (session resume)
+        experiment = getattr(self.agent, 'experiment', None)
+        if experiment and experiment.active_plan_item_id:
+            memory.active_plan_item_id = experiment.active_plan_item_id
+        elif experiment:
+            # Resolve plan context from the dependency graph
+            active_id, candidates = memory.resolve_plan_context()
+            if active_id:
+                experiment.active_plan_item_id = active_id
+                memory.active_plan_item_id = active_id
+                logger.info(f"Auto-set active plan item: {active_id}")
+
+                # Link session to the campaign
+                cs = getattr(self.agent, 'context_store', None)
+                if cs and self.agent.session_id:
+                    try:
+                        item = cs.get_plan_item(active_id)
+                        if item:
+                            cs.link_session_campaign(
+                                self.agent.session_id, item.campaign_id,
+                            )
+                    except Exception:
+                        pass
+
+        # Invalidate prompt cache so the system prompt picks up the
+        # active plan item on the next message
+        prompts = getattr(self.agent, 'prompts', None)
+        if prompts and memory.active_plan_item_id:
+            prompts.invalidate_context_cache()
+
+        return memory.get_session_briefing()
 
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""
