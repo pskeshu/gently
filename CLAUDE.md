@@ -27,3 +27,11 @@ Perception is handled by `gently-perception` (separate repo: `pskeshu/gently-per
 
 The device layer runs as a separate process (`python start_device_layer.py`). It communicates with the agent via HTTP. Bluesky plans require ophyd device name kwargs (e.g. `xy_stage='xy_stage'`, `volume_scanner='volume_scanner'`) — these must match the device names registered in `device_factory.py`.
 
+## Debugging Data Sources
+
+- **Agent logs**: `D:\Gently2\logs\gently_*.log`
+- **Device layer logs**: `D:\Gently2\logs\device_layer_*.log`
+- **Perception traces**: `D:\Gently2\traces\<session_id>\` — per-embryo per-timepoint JSON
+- **Volume staging**: `D:\Gently2\incoming\`
+- **Database**: `D:\Gently2\gently.db` (SQLite)
+
