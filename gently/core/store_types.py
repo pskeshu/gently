@@ -1,4 +1,4 @@
-"""Typed dictionary shapes for GentlyStore return values.
+"""Typed dictionary shapes used by FileStore and the legacy GentlyStore.
 
 Use these for type annotations on store methods and their callers.
 """

@@ -362,7 +362,7 @@ class Observation:
     embryo_id: Optional[str] = None
     significance: Significance = Significance.MEDIUM
     session_id: Optional[str] = None
-    gently_refs: Optional[Dict[str, Any]] = None  # References to GentlyStore data
+    gently_refs: Optional[Dict[str, Any]] = None  # References to FileStore data
     relates_to: Optional[List[str]] = None  # Related goals/observations
 
 

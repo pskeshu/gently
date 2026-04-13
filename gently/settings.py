@@ -61,7 +61,7 @@ class ModelSettings:
 @dataclass(frozen=True)
 class StorageSettings:
     """File paths for data storage."""
-    base_path: Path = field(default_factory=lambda: _env("STORAGE_PATH", Path("D:/Gently2")))
+    base_path: Path = field(default_factory=lambda: _env("STORAGE_PATH", Path("D:/Gently3")))
 
     @property
     def sessions_dir(self) -> Path:

@@ -4,7 +4,7 @@ End-to-End Volume Acquisition Benchmark
 
 Measures the full pipeline latency:
 1. Acquisition: HTTP -> device layer -> hardware -> file written
-2. Storage: GentlyStore registration (move + projection + DB)
+2. Storage: FileStore registration (move + projection + DB)
 3. Viz push: Push projection to visualization server (if running)
 
 All benchmark data is stored in a temporary directory and cleaned up
@@ -148,7 +148,7 @@ async def run_benchmark(
     All data is stored in a temporary directory and cleaned up after
     the benchmark completes.
     """
-    from ..core.store import GentlyStore
+    from ..core.file_store import FileStore
 
     # Support bridge's keyword names
     if n_volumes is not None:
@@ -179,7 +179,7 @@ async def run_benchmark(
     temp_store = None
 
     try:
-        temp_store = GentlyStore(temp_dir)
+        temp_store = FileStore(temp_dir)
         benchmark_session = "benchmark"
         temp_store.create_session(benchmark_session, name="Benchmark Session")
         for eid in embryo_ids:

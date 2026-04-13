@@ -4,7 +4,7 @@ Gently ML — Structured machine learning training framework.
 Provides:
 - Architecture registry with suitability metadata
 - Local single-GPU trainer (subprocess-based)
-- Dataset loading from GentlyStore
+- Dataset loading from FileStore
 - Evaluation metrics and reporting
 - Federated averaging for distributed training
 """

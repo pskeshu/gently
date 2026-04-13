@@ -48,7 +48,7 @@ from .core import (
 )
 from .log_config import configure_logging
 from .settings import settings
-from .core.store import GentlyStore
+from .core.file_store import FileStore
 from .harness.tools.registry import ToolRegistry, get_tool_registry
 from .analysis import (
     Pipeline,
@@ -95,8 +95,8 @@ class Gently:
         self._services = get_service_registry()
         self._client = ServiceClient(self._services)
 
-        # Initialize GentlyStore (unified storage)
-        self._store = GentlyStore(self.storage_path)
+        # Initialize FileStore (unified storage)
+        self._store = FileStore(self.storage_path)
 
         # Current session ID (set by start_session or resume_session)
         self._current_session_id: Optional[str] = None
@@ -172,7 +172,7 @@ class Gently:
         return self._client
 
     @property
-    def store(self) -> GentlyStore:
+    def store(self) -> FileStore:
         """Access the unified data store"""
         return self._store
 

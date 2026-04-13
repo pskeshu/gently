@@ -174,7 +174,7 @@ class DiSPIMMicroscope(Microscope):
             )
 
     # =========================================================================
-    # Session Configuration (GentlyStore integration)
+    # Session Configuration (FileStore integration)
     # =========================================================================
 
     async def configure_device_session(self, volume_dir: str) -> dict:
@@ -188,7 +188,7 @@ class DiSPIMMicroscope(Microscope):
         ----------
         volume_dir : str
             Absolute path to the staging directory
-            (e.g. ``"D:/Gently2/incoming"``).
+            (e.g. ``"D:/Gently3/incoming"``).
 
         Returns
         -------

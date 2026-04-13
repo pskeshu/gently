@@ -158,11 +158,11 @@ async def view_volume(
         title = f"Volume: {volume_path.name}"
 
     elif embryo_id:
-        # Get volume for embryo from GentlyStore
+        # Get volume for embryo from FileStore
         session_id = agent.session_id
 
         if timepoint is not None:
-            # Try to find specific timepoint via GentlyStore
+            # Try to find specific timepoint via FileStore
             volume_path = agent.store.get_volume_path(session_id, embryo_id, timepoint)
             if volume_path and volume_path.exists():
                 title = f"{embryo_id} - t{timepoint:04d}"
@@ -250,7 +250,7 @@ async def list_volumes(
     session_id = agent.session_id
     lines = []
 
-    # Get volumes from GentlyStore
+    # Get volumes from FileStore
     all_volumes_list = agent.store.list_volumes(session_id, embryo_id)
 
     # Group by embryo_id

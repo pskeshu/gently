@@ -246,21 +246,10 @@ class AgentMemory:
 
     def recall_campaigns(self, status: str = "active") -> str:
         """List campaigns as a hierarchy: root campaigns with phases nested."""
-        if status == "active":
-            root_campaigns = self.store.get_root_campaigns()
-        elif status == "all":
-            rows = self.store._conn.execute(
-                "SELECT * FROM campaigns WHERE parent_id IS NULL "
-                "ORDER BY updated_at DESC LIMIT 50"
-            ).fetchall()
-            root_campaigns = [self.store._row_to_campaign(r) for r in rows]
+        if status == "all":
+            root_campaigns = self.store.get_root_campaigns(status=None)
         else:
-            rows = self.store._conn.execute(
-                "SELECT * FROM campaigns WHERE status = ? AND parent_id IS NULL "
-                "ORDER BY updated_at DESC LIMIT 50",
-                (status,),
-            ).fetchall()
-            root_campaigns = [self.store._row_to_campaign(r) for r in rows]
+            root_campaigns = self.store.get_root_campaigns(status=status)
 
         if not root_campaigns:
             return f"No {status} campaigns found."

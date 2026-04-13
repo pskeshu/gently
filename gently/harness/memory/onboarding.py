@@ -22,7 +22,10 @@ from .model import (
     Confidence,
     Significance,
 )
-from .store import ContextStore
+try:
+    from .file_store import FileContextStore as ContextStore
+except ImportError:
+    from .store import ContextStore
 
 
 @dataclass

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-GentlyStore Volume Storage Benchmark
-=====================================
+FileStore Volume Storage Benchmark
+==================================
 
-Benchmarks volume storage throughput through the GentlyStore system,
+Benchmarks volume storage throughput through the FileStore system,
 measuring the overhead of:
 - TIFF writing (with zlib compression)
 - JPEG projection generation
-- SQLite database inserts
+- File-based storage writes
 
 This isolates the storage layer from hardware acquisition.
 
@@ -37,7 +37,7 @@ GENTLY_ROOT = Path(__file__).resolve().parent.parent
 if str(GENTLY_ROOT) not in sys.path:
     sys.path.insert(0, str(GENTLY_ROOT))
 
-from gently.core.store import GentlyStore
+from gently.core.file_store import FileStore
 
 
 # ---------------------------------------------------------------------------
@@ -181,7 +181,7 @@ def benchmark_raw_tiff_write(
     compression: Optional[str] = "zlib",
 ) -> tuple[float, float]:
     """
-    Benchmark raw tifffile write (no GentlyStore).
+    Benchmark raw tifffile write (no FileStore).
 
     Returns (elapsed_seconds, file_size_mb).
     """
@@ -203,14 +203,14 @@ def benchmark_raw_tiff_write(
 
 
 def benchmark_put_volume(
-    store: GentlyStore,
+    store: FileStore,
     session_id: str,
     embryo_id: str,
     timepoint: int,
     volume: np.ndarray,
 ) -> tuple[float, float]:
     """
-    Benchmark GentlyStore.put_volume() - full pipeline.
+    Benchmark FileStore.put_volume() - full pipeline.
 
     Returns (elapsed_seconds, file_size_mb).
     """
@@ -223,16 +223,16 @@ def benchmark_put_volume(
 
 
 def benchmark_register_volume(
-    store: GentlyStore,
+    store: FileStore,
     session_id: str,
     embryo_id: str,
     timepoint: int,
     volume: np.ndarray,
 ) -> tuple[float, float]:
     """
-    Benchmark GentlyStore.register_volume() - zero-copy path.
+    Benchmark FileStore.register_volume() - zero-copy path.
 
-    This simulates the device layer writing a TIFF, then GentlyStore
+    This simulates the device layer writing a TIFF, then FileStore
     moving it to canonical location.
 
     Returns (elapsed_seconds, file_size_mb).
@@ -274,8 +274,8 @@ def run_benchmark_sweep(
     print(f"Benchmark temp directory: {temp_dir}")
 
     try:
-        # Initialize GentlyStore
-        store = GentlyStore(temp_dir / "store")
+        # Initialize FileStore
+        store = FileStore(temp_dir / "store")
         session_id = "benchmark_session"
         store.create_session(session_id, name="FPS Benchmark")
 
@@ -333,7 +333,7 @@ def run_benchmark_sweep(
             # --- put_volume (full pipeline) ---
             if run_put_volume:
                 res_put = BenchmarkResult("put_volume", num_slices, volume_shape)
-                print(f"\n[GentlyStore.put_volume]")
+                print(f"\n[FileStore.put_volume]")
 
                 # Warmup
                 for w in range(num_warmup):
@@ -363,7 +363,7 @@ def run_benchmark_sweep(
             # --- register_volume (zero-copy path) ---
             if run_register:
                 res_reg = BenchmarkResult("register_volume", num_slices, volume_shape)
-                print(f"\n[GentlyStore.register_volume]")
+                print(f"\n[FileStore.register_volume]")
 
                 # Warmup
                 for w in range(num_warmup):
@@ -391,7 +391,7 @@ def run_benchmark_sweep(
                 _print_single_result(res_reg)
 
         # Print final stats
-        print(f"\nGentlyStore stats: {store.stats()}")
+        print(f"\nFileStore stats: {store.stats()}")
         store.close()
 
     finally:
@@ -447,7 +447,7 @@ def print_results_table(results: List[BenchmarkResult]):
 
 
 def print_overhead_analysis(results: List[BenchmarkResult]):
-    """Print overhead analysis comparing GentlyStore to raw TIFF."""
+    """Print overhead analysis comparing FileStore to raw TIFF."""
     from collections import defaultdict
 
     groups = defaultdict(dict)
@@ -497,7 +497,7 @@ def save_results_csv(results: List[BenchmarkResult], path: Path, run_params: dic
         writer = csv.writer(f)
 
         # Metadata header
-        writer.writerow(["# GentlyStore Volume Storage Benchmark"])
+        writer.writerow(["# FileStore Volume Storage Benchmark"])
         writer.writerow(["# datetime", datetime.now().isoformat()])
         writer.writerow(["# slices_series", json.dumps(run_params["slices"])])
         writer.writerow(["# width", run_params["width"]])
@@ -542,7 +542,7 @@ def save_results_csv(results: List[BenchmarkResult], path: Path, run_params: dic
 # ---------------------------------------------------------------------------
 def main():
     parser = argparse.ArgumentParser(
-        description="Benchmark GentlyStore volume storage throughput"
+        description="Benchmark FileStore volume storage throughput"
     )
     parser.add_argument("--slices", type=int, nargs="+", default=DEFAULT_SLICES,
                         help=f"Slice counts to test (default: {DEFAULT_SLICES})")
@@ -561,7 +561,7 @@ def main():
                         help="Save results to CSV")
     args = parser.parse_args()
 
-    print("GentlyStore Volume Storage Benchmark")
+    print("FileStore Volume Storage Benchmark")
     print(f"  Slices:    {args.slices}")
     print(f"  Dimensions: {args.width} x {args.height}")
     print(f"  Pattern:   {args.pattern}")

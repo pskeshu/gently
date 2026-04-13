@@ -102,7 +102,7 @@ def create_router(server) -> APIRouter:
             except Exception as e:
                 logger.warning(f"Failed to load image {uid} from DataStore: {e}")
 
-        # Fallback to GentlyStore JPEG projections (persistent on-disk)
+        # Fallback to FileStore JPEG projections (persistent on-disk)
         if server.gently_store and parsed:
             embryo_id, timepoint = parsed
             proj_path = server._resolve_projection_path(embryo_id, timepoint)

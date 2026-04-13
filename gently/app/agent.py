@@ -8,7 +8,7 @@ Thin coordinator that delegates to:
 
 Integrated with:
 - Event Bus for async message passing between components
-- GentlyStore for unified data persistence (SQLite + filesystem)
+- FileStore for unified file-based data persistence
 """
 
 import asyncio
@@ -40,7 +40,7 @@ from ..harness.session.interaction_logger import InteractionLogger
 from .orchestration.timelapse import TimelapseOrchestrator
 from ..harness.session.timeline import TimelineManager
 from ..core import EventType, get_event_bus, emit
-from ..core.store import GentlyStore
+from ..core.file_store import FileStore
 
 from ..harness.conversation import ConversationManager
 from ..harness.session.manager import SessionManager
@@ -66,7 +66,7 @@ class MicroscopyAgent:
         model: str = settings.models.main,
         microscope_client=None,
         session_id: Optional[str] = None,
-        store: GentlyStore = None,
+        store: FileStore = None,
     ):
         """
         Parameters
@@ -81,11 +81,11 @@ class MicroscopyAgent:
             RPC client for microscope server. Required for hardware control.
         session_id : str, optional
             Session ID to resume. If None, creates new session.
-        store : GentlyStore
-            Unified data store (SQLite + filesystem). Required.
+        store : FileStore
+            Unified file-based data store. Required.
         """
         if store is None:
-            raise ValueError("GentlyStore is required. Pass store=GentlyStore(path) to agent.")
+            raise ValueError("FileStore is required. Pass store=FileStore(path) to agent.")
 
         # API client with interleaved thinking support
         self.claude = anthropic.Anthropic(
@@ -106,7 +106,7 @@ class MicroscopyAgent:
         # Storage path (for legacy compatibility, use store.root going forward)
         self.storage_path = Path(storage_path)
 
-        # Unified store (GentlyStore) — single source of truth
+        # Unified store (FileStore) — single source of truth
         self.store = store
 
         # System prompt (rebuilt by PromptManager, stored here for save_session)
@@ -804,7 +804,7 @@ class MicroscopyAgent:
             except StorageError:
                 raise
             except Exception as e:
-                logger.error(f"GentlyStore write failed: {e}")
+                logger.error(f"FileStore write failed: {e}")
 
         session_prefix = f"{self.session_id[:8]}_" if self.session_id else ""
         volume_uid = f"volume_{session_prefix}{embryo_id}_t{timepoint:04d}"

@@ -1,6 +1,10 @@
 """
 Dataset management module for embryo imaging data.
 
+.. deprecated::
+    This module is deprecated and will be removed in a future version.
+    Use :class:`~gently.core.file_store.FileStore` for data access instead.
+
 Provides:
 - SQLite database for indexing volumes, images, and perception results
 - Data aggregator for scanning existing data directories
@@ -26,6 +30,15 @@ Example usage:
                 predicted_stage=result.stage,
             )
 """
+
+import warnings
+
+warnings.warn(
+    "gently.dataset is deprecated and will be removed in a future version. "
+    "Use FileStore for data access.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 from .schema import (
     init_database,

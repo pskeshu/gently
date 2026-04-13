@@ -12,7 +12,10 @@ from enum import Enum
 from typing import List, Optional
 
 from .model import Campaign
-from .store import ContextStore
+try:
+    from .file_store import FileContextStore as ContextStore
+except ImportError:
+    from .store import ContextStore
 
 logger = logging.getLogger(__name__)
 
@@ -130,10 +133,7 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
     report.active_campaigns = campaigns
 
     # Count non-active campaigns for context
-    all_campaigns_row = context_store._conn.execute(
-        "SELECT COUNT(*) as cnt FROM campaigns WHERE status != 'active'"
-    ).fetchone()
-    report.past_campaign_count = all_campaigns_row["cnt"] if all_campaigns_row else 0
+    report.past_campaign_count = context_store.count_non_active_campaigns()
 
     if not campaigns:
         report.needs_campaign = True
@@ -163,10 +163,7 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
         report.needs_session_intent = True
 
         # Count past sessions for context
-        session_rows = context_store._conn.execute(
-            "SELECT COUNT(*) as cnt FROM session_intents"
-        ).fetchone()
-        report.session_count = session_rows["cnt"] if session_rows else 0
+        report.session_count = context_store.count_session_intents()
 
         if report.session_count == 0:
             report.gaps.append(Gap(

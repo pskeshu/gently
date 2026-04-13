@@ -33,7 +33,7 @@ from gently.app.agent import MicroscopyAgent
 from gently.organisms import load_organism
 from gently.hardware import load_hardware, get_hardware
 from gently.settings import settings
-from gently.core.store import GentlyStore
+from gently.core.file_store import FileStore
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ def _format_elapsed(last_active: str) -> str:
         return ""
 
 
-def _build_session_items(store: GentlyStore) -> list:
+def _build_session_items(store: FileStore) -> list:
     """Build a list of session dicts for the Ink picker."""
     sessions = store.list_sessions()
     items = []
@@ -73,7 +73,7 @@ def _build_session_items(store: GentlyStore) -> list:
     return items
 
 
-def list_sessions(store: GentlyStore):
+def list_sessions(store: FileStore):
     """List all available sessions (plain text, no Rich)."""
     items = _build_session_items(store)
     if not items:
@@ -118,7 +118,7 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING"):
     # Set up log file in storage directory
-    storage_base = Path(os.environ.get("GENTLY_STORAGE", "D:/Gently2"))
+    storage_base = Path(os.environ.get("GENTLY_STORAGE", "D:/Gently3"))
     log_dir = storage_base / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = str(log_dir / f"gently_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
@@ -136,12 +136,14 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     load_organism(config.get("organism", "celegans"))
     load_hardware(config.get("hardware", "dispim"))
 
-    # Storage directory (unified with GentlyStore)
+    # Storage directory (unified with FileStore)
     storage_dir = settings.storage.base_path
     storage_dir.mkdir(exist_ok=True)
 
-    # Create unified store (GentlyStore) early for session queries
-    store = GentlyStore(storage_dir)
+    # Create unified store (FileStore) early for session queries
+    from gently.core.gently_manifest import write_manifest
+    write_manifest(storage_dir)
+    store = FileStore(storage_dir)
 
     # Handle --sessions (just list and exit)
     if show_sessions:
@@ -379,9 +381,9 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     })
 
     # Initialize startup wizard (gap-driven onboarding)
-    from gently.harness.memory import ContextStore as CtxStore
-    context_db = storage_dir / "context" / "agent_mind.db"
-    context_store = CtxStore(context_db)
+    from gently.harness.memory.file_store import FileContextStore
+    agent_dir = storage_dir / "agent"
+    context_store = FileContextStore(agent_dir)
     agent.set_context_store(context_store)
     bridge.init_wizard(context_store=context_store, claude_client=agent.claude)
 

@@ -1,5 +1,5 @@
 """
-GentlyDataset — PyTorch Dataset loading projections + ground_truth from GentlyStore.
+GentlyDataset — PyTorch Dataset loading projections + ground_truth from FileStore.
 """
 
 import json
@@ -159,7 +159,7 @@ def create_data_splits(
 
 
 def build_labels_from_store(gently_store, session_ids: Optional[List[str]] = None) -> Dict:
-    """Build a labels dict from GentlyStore ground truth.
+    """Build a labels dict from FileStore ground truth.
 
     Returns
     -------

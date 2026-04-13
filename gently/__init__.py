@@ -10,7 +10,11 @@ from .gently import Gently, create_gently
 
 # Harness (framework)
 from .harness.tools.registry import tool, ToolRegistry, ToolCategory, get_tool_registry
-from .harness.memory.store import ContextStore
+from .harness.memory.store import ContextStore  # legacy SQLite store (kept for backward compat)
+try:
+    from .harness.memory.file_store import FileContextStore
+except ImportError:
+    FileContextStore = None
 from .harness.memory.interface import AgentMemory
 
 # Core infrastructure
@@ -21,7 +25,8 @@ from .core import (
 )
 
 # Core utilities
-from .core.store import GentlyStore
+from .core.store import GentlyStore  # legacy SQLite store (kept for backward compat)
+from .core.file_store import FileStore
 from .core.imaging import (
     normalize_to_uint8,
     image_to_base64,
@@ -83,14 +88,16 @@ __all__ = [
     "ToolRegistry",
     "ToolCategory",
     "get_tool_registry",
-    "ContextStore",
+    "ContextStore",  # legacy SQLite store (backward compat)
     "AgentMemory",
 
     # Core infrastructure
     "EventBus",
     "EventType",
     "get_event_bus",
-    "GentlyStore",
+    "GentlyStore",  # legacy SQLite store (backward compat)
+    "FileStore",
+    "FileContextStore",
 
     # Imaging
     "normalize_to_uint8",

@@ -1413,14 +1413,14 @@ async def restore_plan_version(
 
     # Resolve version_number to version_id
     if version_number is not None and not version_id:
-        row = store._conn.execute(
-            "SELECT version_id FROM plan_snapshots "
-            "WHERE campaign_id = ? AND version_number = ?",
-            (campaign_id, version_number),
-        ).fetchone()
-        if not row:
+        snapshots = store.list_plan_snapshots(campaign_id)
+        match = next(
+            (s for s in snapshots if s.get("version_number") == version_number),
+            None,
+        )
+        if not match:
             return f"Version {version_number} not found for campaign {campaign_id}"
-        version_id = row["version_id"]
+        version_id = match["version_id"]
 
     try:
         new_campaign_id = store.restore_plan_snapshot(version_id)

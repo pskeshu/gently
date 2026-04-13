@@ -185,7 +185,7 @@ The device layer exposes status information:
 |----------|---------|---------|
 | `GENTLY_DEVICE_HOST` | `127.0.0.1` | Device layer hostname |
 | `GENTLY_DEVICE_PORT` | `60610` | Device layer port |
-| `GENTLY_STORAGE_PATH` | `D:/Gently2` | Session and data storage directory |
+| `GENTLY_STORAGE_PATH` | `D:/Gently3` | Session and data storage directory |
 | `GENTLY_VIZ_PORT` | `8080` | Web visualization server port |
 | `GENTLY_VIZ_HOST` | `0.0.0.0` | Visualization bind address |
 

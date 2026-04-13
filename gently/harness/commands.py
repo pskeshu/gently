@@ -503,7 +503,7 @@ Options:
 
 Measures the full pipeline latency:
 - Acquisition: HTTP → device layer → hardware → file written
-- Storage: GentlyStore registration (projection + DB)
+- Storage: FileStore registration (projection + file-based storage)
 - Viz push: Push to visualization server (if running)
 
 Requires microscope connection and at least one registered embryo.""",

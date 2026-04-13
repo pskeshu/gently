@@ -2,7 +2,7 @@
 Core infrastructure for Gently microscope control system
 
 Provides:
-- GentlyStore: Unified data persistence (SQLite + filesystem)
+- FileStore: Unified file-based data persistence
 - EventBus: Async message passing between components
 - Service: Base class and registry for services
 """

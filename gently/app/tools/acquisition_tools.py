@@ -99,7 +99,7 @@ async def acquire_volume(
             # Record light exposure (num_slices frames at exposure_ms each)
             embryo.record_exposure(exposure_ms=exposure_ms, num_frames=num_slices)
 
-            # Store in GentlyStore (dual-write during transition)
+            # Store in FileStore
             saved_path = None
             if agent.store and agent.session_id:
                 try:
@@ -136,7 +136,7 @@ async def acquire_volume(
                             metadata=acq_metadata,
                         )
                 except Exception as store_err:
-                    logger.warning("GentlyStore write failed (non-fatal): %s", store_err)
+                    logger.warning("FileStore write failed (non-fatal): %s", store_err)
 
             # Push max projection to viz server
             if agent.viz_server and volume is not None:

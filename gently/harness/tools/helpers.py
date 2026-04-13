@@ -216,7 +216,7 @@ def build_snapshot_metadata(
     Returns
     -------
     dict
-        Metadata suitable for ``GentlyStore.register_snapshot()``.
+        Metadata suitable for ``FileStore.register_snapshot()``.
     """
     um_per_pixel = pixel_size_um / objective_mag
     h, w = image_shape[0], image_shape[1]

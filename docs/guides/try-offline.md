@@ -110,7 +110,7 @@ Demo data for benchmarking is in `benchmarks/data/` if available, or you can use
 | `GENTLY_MODEL_PERCEPTION` | `claude-opus-4-5-20251101` | VLM perception model |
 | `GENTLY_MODEL_FAST` | `claude-haiku-4-5-20251001` | Fast reasoning (subagents) |
 | `GENTLY_MODEL_MEDIUM` | `claude-sonnet-4-5-20250929` | Medium reasoning (verification) |
-| `GENTLY_STORAGE_PATH` | `D:/Gently2` | Session and data storage |
+| `GENTLY_STORAGE_PATH` | `D:/Gently3` | Session and data storage |
 
 ## What's NOT Available Offline
 

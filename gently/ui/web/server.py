@@ -121,8 +121,8 @@ class VisualizationServer(Service):
         self._ssl_certfile = ssl_certfile
         self._ssl_keyfile = ssl_keyfile
         self.sessions_dir = Path(sessions_dir)
-        self.gently_store = gently_store  # GentlyStore for persistent volume/projection access
-        self.context_store = None  # ContextStore — set via set_context_store()
+        self.gently_store = gently_store  # FileStore for persistent volume/projection access
+        self.context_store = None  # FileContextStore — set via set_context_store()
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()
@@ -166,18 +166,18 @@ class VisualizationServer(Service):
         self._server_task = None
 
     def set_context_store(self, context_store) -> None:
-        """Set the ContextStore for campaign/plan data access."""
+        """Set the FileContextStore for campaign/plan data access."""
         self.context_store = context_store
 
     def _resolve_volume_path(self, embryo_id: str, timepoint: int) -> Optional[str]:
-        """Resolve volume file path from timelapse tracker or GentlyStore."""
+        """Resolve volume file path from timelapse tracker or FileStore."""
         # 1. Try timelapse tracker (in-memory, fastest)
         if embryo_id in self.timelapse_tracker.volume_paths:
             path = self.timelapse_tracker.volume_paths[embryo_id].get(timepoint)
             if path:
                 return path
 
-        # 2. Try GentlyStore (SQLite, persistent)
+        # 2. Try FileStore (file-based, persistent)
         if self.gently_store and self.timelapse_tracker.session_id:
             try:
                 vol_path = self.gently_store.get_volume_path(
@@ -186,12 +186,12 @@ class VisualizationServer(Service):
                 if vol_path and vol_path.exists():
                     return str(vol_path)
             except Exception as e:
-                logger.debug(f"GentlyStore volume path lookup failed: {e}")
+                logger.debug(f"FileStore volume path lookup failed: {e}")
 
         return None
 
     def _resolve_projection_path(self, embryo_id: str, timepoint: int) -> Optional[Path]:
-        """Resolve projection file path from GentlyStore."""
+        """Resolve projection file path from FileStore."""
         if self.gently_store and self.timelapse_tracker.session_id:
             try:
                 proj_path = self.gently_store.get_projection_path(
@@ -200,7 +200,7 @@ class VisualizationServer(Service):
                 if proj_path and proj_path.exists():
                     return proj_path
             except Exception as e:
-                logger.debug(f"GentlyStore projection path lookup failed: {e}")
+                logger.debug(f"FileStore projection path lookup failed: {e}")
         return None
 
     def _subscribe_to_events(self):
@@ -679,7 +679,7 @@ def create_visualization_server(
         Data store for image retrieval
     event_bus : EventBus, optional
         Event bus for real-time updates
-    gently_store : GentlyStore, optional
+    gently_store : FileStore, optional
         Unified store for persistent volume/projection access
 
     Returns

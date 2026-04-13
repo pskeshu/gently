@@ -74,6 +74,49 @@ class IntentionsMixin:
         ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
 
+    def count_non_active_campaigns(self) -> int:
+        """Count campaigns whose status is not 'active'."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) as cnt FROM campaigns WHERE status != 'active'"
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+    def count_session_intents(self) -> int:
+        """Count total session intent records."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) as cnt FROM session_intents"
+        ).fetchone()
+        return row["cnt"] if row else 0
+
+    def get_all_campaigns(self, limit: int = 50) -> List[Campaign]:
+        """Get all campaigns regardless of status, ordered by created_at descending."""
+        rows = self._conn.execute(
+            "SELECT * FROM campaigns ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [self._row_to_campaign(row) for row in rows]
+
+    def get_recent_session_intents(self, limit: int = 50) -> List["SessionIntent"]:
+        """Get recent session intents, ordered by created_at descending."""
+        rows = self._conn.execute(
+            "SELECT * FROM session_intents ORDER BY created_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        results = []
+        for row in rows:
+            d = dict(row)
+            sid = d["session_id"]
+            campaign_ids = self.get_campaign_ids_for_session(sid)
+            results.append(SessionIntent(
+                session_id=sid,
+                planned_intent=d.get("planned_intent"),
+                actual_summary=d.get("actual_summary"),
+                campaign_ids=campaign_ids,
+                created_at=datetime.fromisoformat(d["created_at"]),
+                completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
+            ))
+        return results
+
     def get_campaign(self, campaign_id: str) -> Optional[Campaign]:
         """Get a specific campaign by exact ID."""
         row = self._conn.execute(
@@ -198,12 +241,19 @@ class IntentionsMixin:
             "children": [self.get_campaign_tree(c.id) for c in children],
         }
 
-    def get_root_campaigns(self) -> List[Campaign]:
-        """Get top-level campaigns (no parent)."""
-        rows = self._conn.execute(
-            "SELECT * FROM campaigns WHERE parent_id IS NULL AND status = 'active' "
-            "ORDER BY created_at DESC"
-        ).fetchall()
+    def get_root_campaigns(self, status: Optional[str] = "active") -> List[Campaign]:
+        """Get top-level campaigns (no parent). If status is None, returns all."""
+        if status is None:
+            rows = self._conn.execute(
+                "SELECT * FROM campaigns WHERE parent_id IS NULL "
+                "ORDER BY updated_at DESC LIMIT 50"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT * FROM campaigns WHERE parent_id IS NULL AND status = ? "
+                "ORDER BY updated_at DESC LIMIT 50",
+                (status,),
+            ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
 
     def update_campaign(

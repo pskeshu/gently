@@ -38,7 +38,7 @@ def create_router(server) -> APIRouter:
         """
         from gently.core.imaging import projection_three_view
 
-        # Look up volume path (timelapse tracker + GentlyStore fallback)
+        # Look up volume path (timelapse tracker + FileStore fallback)
         volume_path = server._resolve_volume_path(embryo_id, timepoint)
         if not volume_path:
             raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
@@ -117,7 +117,7 @@ def create_router(server) -> APIRouter:
         """
         from scipy import ndimage
 
-        # Look up volume path (timelapse tracker + GentlyStore fallback)
+        # Look up volume path (timelapse tracker + FileStore fallback)
         volume_path = server._resolve_volume_path(embryo_id, timepoint)
         if not volume_path:
             raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")

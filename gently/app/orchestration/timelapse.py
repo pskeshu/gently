@@ -41,7 +41,7 @@ from .timelapse_models import (
 )
 
 if TYPE_CHECKING:
-    from gently.core.store import GentlyStore
+    from gently.core.file_store import FileStore
 
 # Default trace directory
 TRACE_BASE_PATH = settings.storage.traces_dir
@@ -68,7 +68,7 @@ class TimelapseOrchestrator:
         perceiver=None,
         on_volume_callback: Optional[Callable] = None,
         session_id: Optional[str] = None,
-        store: Optional["GentlyStore"] = None,
+        store: Optional["FileStore"] = None,
     ):
         """
         Parameters
@@ -83,7 +83,7 @@ class TimelapseOrchestrator:
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
         session_id : str, optional
             Session identifier for trace file storage
-        store : GentlyStore, optional
+        store : FileStore, optional
             Unified data store for persisting perception predictions
         """
         self.client = microscope_client
@@ -209,7 +209,7 @@ class TimelapseOrchestrator:
                     source="live",
                     config={"stop_condition": stop_condition, "interval": base_interval_seconds},
                 )
-                logger.info(f"Created perception run {self._perception_run_id} in GentlyStore")
+                logger.info(f"Created perception run {self._perception_run_id} in FileStore")
             except Exception as e:
                 logger.warning(f"Failed to create perception run in store: {e}")
 
@@ -1092,7 +1092,7 @@ class TimelapseOrchestrator:
                 })
 
     def _finalize_perception_run(self, status: str = "completed", error_message: str = None):
-        """Mark the perception run as finished in GentlyStore."""
+        """Mark the perception run as finished in FileStore."""
         if self._store and self._perception_run_id is not None:
             try:
                 self._store.complete_perception_run(
@@ -1211,7 +1211,7 @@ class TimelapseOrchestrator:
                 except Exception as e:
                     logger.warning(f"Failed to write trace file: {e}")
 
-            # Persist prediction to GentlyStore
+            # Persist prediction to FileStore
             if self._store and self._perception_run_id and self._session_id:
                 try:
                     self._store.store_prediction(

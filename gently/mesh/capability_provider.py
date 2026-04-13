@@ -1,7 +1,7 @@
 """
 DynamicCapabilityProvider — Replaces the static lambda in MeshService.
 
-Detects GPUs, computes roles dynamically, queries GentlyStore for
+Detects GPUs, computes roles dynamically, queries FileStore for
 dataset advertisements. Refreshed on each heartbeat/status response.
 """
 
@@ -81,7 +81,7 @@ class DynamicCapabilityProvider:
     Parameters
     ----------
     gently_store : optional
-        GentlyStore instance for querying dataset info.
+        FileStore instance for querying dataset info.
     device_layer : optional
         DeviceLayer for checking microscope connection.
     static_caps : dict
@@ -132,7 +132,7 @@ class DynamicCapabilityProvider:
         return roles
 
     def _get_datasets(self) -> List[DatasetAdvertisement]:
-        """Query GentlyStore for dataset advertisements."""
+        """Query FileStore for dataset advertisements."""
         if self._store is None:
             return []
         datasets = []

@@ -40,24 +40,20 @@ async def query_lab_history(
     results = []
 
     # Search campaigns
-    campaigns = store.get_active_campaigns()
-    all_campaigns_rows = store._conn.execute(
-        "SELECT * FROM campaigns ORDER BY created_at DESC LIMIT 50"
-    ).fetchall()
+    all_campaigns = store.get_all_campaigns(limit=50)
     matching_campaigns = []
-    for row in all_campaigns_rows:
-        d = dict(row)
-        text = f"{d.get('description', '')} {d.get('shorthand', '')} {d.get('target', '')}".lower()
+    for c in all_campaigns:
+        text = f"{c.description or ''} {c.shorthand or ''} {c.target or ''}".lower()
         if any(term in text for term in query_lower.split()):
-            matching_campaigns.append(d)
+            matching_campaigns.append(c)
     if matching_campaigns:
         results.append("## Matching Campaigns")
         for c in matching_campaigns[:5]:
-            status = c.get("status", "?")
+            status = c.status.value if c.status else "?"
             results.append(
-                f"- [{status}] {c['description']}"
-                f"{' (' + c['shorthand'] + ')' if c.get('shorthand') else ''}"
-                f" (id: {c['id']})"
+                f"- [{status}] {c.description}"
+                f"{' (' + c.shorthand + ')' if c.shorthand else ''}"
+                f" (id: {c.id})"
             )
 
     # Search learnings
@@ -84,22 +80,19 @@ async def query_lab_history(
             results.append(f"- [{time_str}] {o.content}")
 
     # Search session intents
-    intent_rows = store._conn.execute(
-        "SELECT * FROM session_intents ORDER BY created_at DESC LIMIT 50"
-    ).fetchall()
+    all_intents = store.get_recent_session_intents(limit=50)
     matching_intents = []
-    for row in intent_rows:
-        d = dict(row)
-        text = f"{d.get('planned_intent', '')} {d.get('actual_summary', '')}".lower()
+    for si in all_intents:
+        text = f"{si.planned_intent or ''} {si.actual_summary or ''}".lower()
         if any(term in text for term in query_lower.split()):
-            matching_intents.append(d)
+            matching_intents.append(si)
     if matching_intents:
         results.append("\n## Matching Sessions")
         for s in matching_intents[:5]:
-            intent = s.get("planned_intent", "no intent recorded")
-            results.append(f"- Session {s['session_id']}: {intent}")
-            if s.get("actual_summary"):
-                results.append(f"  Result: {s['actual_summary'][:100]}")
+            intent = s.planned_intent or "no intent recorded"
+            results.append(f"- Session {s.session_id}: {intent}")
+            if s.actual_summary:
+                results.append(f"  Result: {s.actual_summary[:100]}")
 
     if not results:
         return f"No matches found for '{query}' in lab history."

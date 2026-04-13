@@ -17,7 +17,7 @@ class SessionManager:
     """
     Manages session creation, saving, resuming, and listing.
 
-    Works with GentlyStore for persistence. Does not hold references
+    Works with FileStore for persistence. Does not hold references
     back to agent — receives data as parameters instead.
     """
 
@@ -32,14 +32,14 @@ class SessionManager:
         return self._session_id
 
     def create_session(self):
-        """Create a new session in GentlyStore."""
+        """Create a new session in FileStore."""
         self._session_id = str(uuid.uuid4())[:8]
         self.store.create_session(self._session_id)
         logger.info(f"Created new session: {self._session_id}")
 
     def _resume_session(self, session_id: str, experiment):
         """
-        Resume a session from GentlyStore.
+        Resume a session from FileStore.
 
         Restores embryo state onto the given experiment object and
         returns True if resumed successfully.
@@ -117,7 +117,7 @@ class SessionManager:
 
     def save_session(self, experiment, conversation_history, system_prompt) -> bool:
         """
-        Save current session state to GentlyStore.
+        Save current session state to FileStore.
 
         Parameters
         ----------
@@ -149,7 +149,7 @@ class SessionManager:
             return False
 
     def auto_save(self, experiment, conversation_history, system_prompt):
-        """Auto-save session to GentlyStore (non-blocking, silent on error)."""
+        """Auto-save session to FileStore (non-blocking, silent on error)."""
         if not self._session_id:
             return
         try:
@@ -178,7 +178,7 @@ class SessionManager:
 
     def list_sessions(self) -> List[Dict]:
         """
-        List available sessions from GentlyStore.
+        List available sessions from FileStore.
 
         Returns
         -------

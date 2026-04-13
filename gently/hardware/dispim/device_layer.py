@@ -652,7 +652,7 @@ class DeviceLayerServer(Service):
     async def handle_session_configure(self, request):
         """POST /session/configure - set staging directory for file-ref protocol.
 
-        Body: {"volume_dir": "D:/Gently2/incoming"}
+        Body: {"volume_dir": "D:/Gently3/incoming"}
         """
         try:
             data = await request.json()

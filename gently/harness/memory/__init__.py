@@ -1,7 +1,7 @@
 """
 Context Store — The agent's mind.
 
-Separate from GentlyStore (raw data), ContextStore holds understanding:
+Separate from FileStore (raw data), FileContextStore holds understanding:
 - Intentions: campaigns, projects, session focus
 - Understanding: embryo states, learnings
 - Observations: synthesized notes, not raw data
@@ -42,7 +42,11 @@ from .model import (
     WatchpointStatus,
     QuestionStatus,
 )
-from .store import ContextStore
+from .store import ContextStore  # legacy SQLite store (read-only, replaced by FileContextStore)
+try:
+    from .file_store import FileContextStore
+except ImportError:
+    FileContextStore = None
 from .serialization import context_to_dict, context_to_json, context_summary
 from .gap_assessment import assess_gaps, ContextGapReport, Gap, GapLayer, GapSeverity
 from .onboarding import generate_onboarding_messages, process_onboarding_response, OnboardingMessage
@@ -82,6 +86,7 @@ __all__ = [
     "QuestionStatus",
     # Store
     "ContextStore",
+    "FileContextStore",
     # Serialization
     "context_to_dict",
     "context_to_json",
