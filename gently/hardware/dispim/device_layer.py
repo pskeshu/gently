@@ -1297,9 +1297,15 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    configure_logging(level="INFO")
+    from pathlib import Path
+    from datetime import datetime
+    log_dir = Path(settings.storage.base_path) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = str(log_dir / f"device_layer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+    configure_logging(level="INFO", log_file=log_file)
 
     logger.info("Starting Gently Device Layer...")
+    logger.info("Logging to %s", log_file)
     logger.info("This server provides unified hardware control + SAM detection.")
 
     try:
