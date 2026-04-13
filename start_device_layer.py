@@ -64,11 +64,22 @@ The server provides:
 
     args = parser.parse_args()
 
+    from datetime import datetime
+    from gently.settings import settings
+
+    log_dir = Path(settings.storage.base_path) / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"device_layer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        stream=sys.stderr,
+        handlers=[
+            logging.StreamHandler(sys.stderr),
+            logging.FileHandler(str(log_file)),
+        ],
     )
+    logging.getLogger().info("Logging to %s", log_file)
 
     # Load config to determine hardware type
     config_path = Path(args.config)
