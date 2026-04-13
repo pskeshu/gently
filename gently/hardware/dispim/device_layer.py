@@ -331,6 +331,11 @@ class DeviceLayerServer(Service):
 
             logger.info(">>> [%s] Executing: %s", start_time.strftime('%H:%M:%S'), request.plan_name)
 
+            # Reset documents before each plan so stale results from
+            # a previous plan (e.g. volume file refs from acquire) don't
+            # leak into the response of a simple plan (e.g. move).
+            self._last_documents = {}
+
             try:
                 # Get the plan function
                 if request.plan_name not in self.plans:
