@@ -205,9 +205,11 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # Configure device session for zero-copy volume transfer
     if client and client.is_connected:
         try:
-            resp = await client.configure_device_session(str(store.incoming_dir))
-        except Exception:
-            pass
+            incoming = str(store.incoming_dir)
+            resp = await client.configure_device_session(incoming)
+            logger.info("Device session configured: volume_dir=%s", incoming)
+        except Exception as e:
+            logger.error("Failed to configure device session (volumes will be slow): %s", e)
 
     # Register auto-generated microscope tools from device layer plan schemas
     if client and client.is_connected:
