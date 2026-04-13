@@ -43,10 +43,11 @@ def configure_logging(
     console.setFormatter(logging.Formatter(console_fmt, datefmt=datefmt))
     root.addHandler(console)
 
-    # Suppress noisy third-party loggers unless verbose/debug
-    if log_level > logging.INFO:
-        for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
-            logging.getLogger(name).setLevel(logging.ERROR)
+    # Suppress noisy third-party loggers on console
+    for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
+                  "httpx", "httpcore", "anthropic", "aiohttp",
+                  "aiohttp.access", "bluesky", "bluesky.RE.state"):
+        logging.getLogger(name).setLevel(logging.WARNING)
 
     # File handler — always INFO+ regardless of console level
     if log_file:

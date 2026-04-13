@@ -71,14 +71,15 @@ The server provides:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"device_layer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stderr),
-            logging.FileHandler(str(log_file)),
-        ],
-    )
+    console = logging.StreamHandler(sys.stderr)
+    console.setLevel(logging.WARNING)
+    console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
+
+    file_handler = logging.FileHandler(str(log_file))
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno)d %(message)s"))
+
+    logging.basicConfig(level=logging.DEBUG, handlers=[console, file_handler])
     logging.getLogger().info("Logging to %s", log_file)
 
     # Load config to determine hardware type
