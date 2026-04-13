@@ -35,10 +35,11 @@ def configure_logging(
     log_level = getattr(logging, level.upper(), logging.INFO)
 
     root = logging.getLogger("gently")
-    root.setLevel(log_level)
+    root.setLevel(logging.DEBUG)  # Root accepts everything; handlers filter
 
-    # Console handler
+    # Console handler — uses requested level
     console = logging.StreamHandler(sys.stderr)
+    console.setLevel(log_level)
     console.setFormatter(logging.Formatter(console_fmt, datefmt=datefmt))
     root.addHandler(console)
 
@@ -47,9 +48,10 @@ def configure_logging(
         for name in ("uvicorn", "uvicorn.error", "uvicorn.access"):
             logging.getLogger(name).setLevel(logging.ERROR)
 
-    # Optional file handler
+    # File handler — always INFO+ regardless of console level
     if log_file:
         file_fmt = os.environ.get("GENTLY_LOG_FILE_FORMAT", _DEFAULT_FILE_FORMAT)
         fh = logging.FileHandler(log_file)
+        fh.setLevel(logging.INFO)
         fh.setFormatter(logging.Formatter(file_fmt))
         root.addHandler(fh)
