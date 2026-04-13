@@ -34,14 +34,15 @@ def configure_logging(
 
     log_level = getattr(logging, level.upper(), logging.INFO)
 
-    root = logging.getLogger("gently")
-    root.setLevel(logging.DEBUG)  # Root accepts everything; handlers filter
+    # Configure both gently and gently_perception loggers
+    for logger_name in ("gently", "gently_perception"):
+        lgr = logging.getLogger(logger_name)
+        lgr.setLevel(logging.DEBUG)
 
-    # Console handler — uses requested level
-    console = logging.StreamHandler(sys.stderr)
-    console.setLevel(log_level)
-    console.setFormatter(logging.Formatter(console_fmt, datefmt=datefmt))
-    root.addHandler(console)
+        console = logging.StreamHandler(sys.stderr)
+        console.setLevel(log_level)
+        console.setFormatter(logging.Formatter(console_fmt, datefmt=datefmt))
+        lgr.addHandler(console)
 
     # Suppress noisy third-party loggers on console
     for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
@@ -55,4 +56,5 @@ def configure_logging(
         fh = logging.FileHandler(log_file)
         fh.setLevel(logging.INFO)
         fh.setFormatter(logging.Formatter(file_fmt))
-        root.addHandler(fh)
+        for logger_name in ("gently", "gently_perception"):
+            logging.getLogger(logger_name).addHandler(fh)

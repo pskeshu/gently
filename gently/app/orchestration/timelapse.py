@@ -1124,6 +1124,7 @@ class TimelapseOrchestrator:
             "timestamp": datetime.now().isoformat(),
             "predicted_stage": result.stage,
             "reasoning": result.reasoning,
+            "raw_response": result.raw_response,
         }
         if session:
             data["stability"] = session.stability
