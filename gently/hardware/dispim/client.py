@@ -355,7 +355,7 @@ class DiSPIMMicroscope(Microscope):
 
         result = await self._submit_plan_and_wait(
             'move_stage_plan',
-            kwargs={'x': x, 'y': y}
+            kwargs={'xy_stage': 'xy_stage', 'x': x, 'y': y}
         )
 
         if result.get('success'):
@@ -372,7 +372,7 @@ class DiSPIMMicroscope(Microscope):
         tuple of (float, float)
             Current (x, y) position in micrometers
         """
-        result = await self._submit_plan_and_wait('read_stage_plan')
+        result = await self._submit_plan_and_wait('read_stage_plan', kwargs={'xy_stage': 'xy_stage'})
 
         if result.get('success'):
             docs = result.get('documents', {})
@@ -399,7 +399,7 @@ class DiSPIMMicroscope(Microscope):
         float
             Current Z position in micrometers
         """
-        result = await self._submit_plan_and_wait('read_piezo_plan')
+        result = await self._submit_plan_and_wait('read_piezo_plan', kwargs={'piezo': 'piezo'})
 
         if result.get('success'):
             docs = result.get('documents', {})
@@ -434,7 +434,7 @@ class DiSPIMMicroscope(Microscope):
         dict
             Calibration results with optimal positions
         """
-        plan_kwargs = {}
+        plan_kwargs = {'lightsheet_snap': 'lightsheet_snap'}
         if piezo_positions is not None:
             plan_kwargs['piezo_positions'] = piezo_positions
         if galvo_positions is not None:
