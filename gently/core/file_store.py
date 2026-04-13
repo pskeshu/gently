@@ -91,16 +91,34 @@ def _slugify(text: str, max_len: int = 30) -> str:
     return slug[:max_len]
 
 
+def _sanitize_for_yaml(obj):
+    """Recursively convert numpy types to native Python types."""
+    if isinstance(obj, dict):
+        return {k: _sanitize_for_yaml(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_sanitize_for_yaml(v) for v in obj]
+    if isinstance(obj, np.integer):
+        return int(obj)
+    if isinstance(obj, np.floating):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    return obj
+
+
 def _write_yaml(path: Path, data: Any) -> None:
     """Write YAML atomically: write to a temp file, then rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    data = _sanitize_for_yaml(data)
     fd, tmp = tempfile.mkstemp(
         suffix=".tmp", prefix=path.stem, dir=str(path.parent)
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            yaml.dump(data, f, default_flow_style=False, sort_keys=False,
-                      allow_unicode=True)
+            yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False,
+                           allow_unicode=True)
         # On Windows, rename over an existing file requires removing it first.
         if path.exists():
             path.unlink()
