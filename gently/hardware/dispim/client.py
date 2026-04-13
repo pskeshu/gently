@@ -509,16 +509,16 @@ class DiSPIMMicroscope(Microscope):
         dict
             ``{'image': np.ndarray, 'piezo_position': float, 'galvo_position': float, 'success': bool}``
         """
-        plan_kwargs = {'exposure_ms': exposure_ms}
-        if piezo_position is not None:
-            plan_kwargs['piezo_position'] = piezo_position
-        if galvo_position is not None:
-            plan_kwargs['galvo_position'] = galvo_position
-        plan_kwargs.update(kwargs)
-
         result = await self._submit_plan_and_wait(
-            'lightsheet_snap_plan',
-            kwargs=plan_kwargs,
+            'capture_lightsheet_image_plan',
+            kwargs={
+                'lightsheet_snap': 'lightsheet_snap',
+                'scanner': 'scanner',
+                'piezo': 'piezo',
+                'laser_control': 'laser_control',
+                'piezo_position': piezo_position if piezo_position is not None else 50.0,
+                'galvo_position': galvo_position if galvo_position is not None else 0.0,
+            },
             timeout=30.0
         )
 
@@ -566,19 +566,17 @@ class DiSPIMMicroscope(Microscope):
         dict
             ``{'volume': np.ndarray, 'shape': tuple, 'success': bool}``
         """
-        plan_kwargs = {
-            'num_slices': num_slices,
-            'exposure_ms': exposure_ms,
-            'galvo_amplitude': galvo_amplitude,
-            'galvo_center': galvo_center,
-            'piezo_amplitude': piezo_amplitude,
-            'piezo_center': piezo_center,
-        }
-        plan_kwargs.update(kwargs)
-
         result = await self._submit_plan_and_wait(
-            'volume_scan_plan',
-            kwargs=plan_kwargs,
+            'acquire_single_volume_plan',
+            kwargs={
+                'volume_scanner': 'volume_scanner',
+                'num_slices': num_slices,
+                'exposure_ms': exposure_ms,
+                'galvo_amplitude': galvo_amplitude,
+                'galvo_center': galvo_center,
+                'piezo_amplitude': piezo_amplitude,
+                'piezo_center': piezo_center,
+            },
             timeout=120.0
         )
 
