@@ -99,14 +99,18 @@ function handleMessage(msg) {
         state.embryos = msg.data || [];
         if (typeof updateStatusbar === 'function') updateStatusbar();
     } else if (msg.type === 'event') {
-        // Add to events tab (full event data)
-        handleFullEvent({
-            event_type: msg.event_type,
-            data: msg.data,
-            source: msg.source || 'unknown',
-            timestamp: msg.timestamp || new Date().toISOString(),
-            event_id: msg.event_id || ''
-        });
+        // High-volume telemetry: skip the events-tab table (which DOM-creates a row
+        // per event and would lag every other handler), but still emit to the
+        // client event bus so the Devices tab gets the payload.
+        if (msg.event_type !== 'DEVICE_STATE_UPDATE') {
+            handleFullEvent({
+                event_type: msg.event_type,
+                data: msg.data,
+                source: msg.source || 'unknown',
+                timestamp: msg.timestamp || new Date().toISOString(),
+                event_id: msg.event_id || ''
+            });
+        }
 
         // Broadcast via client event bus - managers subscribe at init time
         ClientEventBus.emit(msg.event_type, msg.data);

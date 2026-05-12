@@ -18,12 +18,14 @@ Usage:
 """
 
 import asyncio
+import contextlib
 import logging
 import json
 import os
 import sys
+import time
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 from dataclasses import dataclass, field
@@ -107,6 +109,63 @@ class DeviceLayerServer(Service):
         self._runner = None
         self._executor_task = None
 
+        # ------------------------------------------------------------------
+        # Device-state streaming (ASIdiSPIM StagePositionUpdater pattern)
+        # ------------------------------------------------------------------
+        # Positions polled at 2 Hz, full system state cache every 15 s.
+        # Properties (exposure, gain, laser/shutter state, etc.) almost never
+        # change unless something calls a setter, so a slow refresh is fine.
+        # Positions change continuously during stage moves and must stay live.
+        # Both pollers contend for pymmcore's internal `g_core_lock`, so a
+        # short property interval would starve position reads —
+        # updateSystemStateCache() takes ~1.5 s on this hardware (Tiger
+        # controller over serial).
+        # Plans that own MMCore for performance-critical sections (volume
+        # acquisition, calibration sweeps, focus sweeps) bracket themselves
+        # with `pause_state_updates()` so the poller goes quiet while they
+        # run. Plain stage moves / LED changes / snaps don't pause — the
+        # adapter's per-device mutex handles the contention fine, and we
+        # want the readout to stay live.
+        self._state_pos_interval_sec = 0.2       # 5 Hz target for XY (hard floor ~4 Hz on ASI)
+        self._state_slow_pos_interval_sec = 1.0  # 1 Hz piezo + galvo
+        self._state_prop_interval_sec = 15.0     # ~0.07 Hz full-state cadence
+        self._state_pause_counter = 0
+        self._state_updating_now = False
+        self._state_latest: Dict[str, Any] = {
+            "positions": {},
+            "properties": {},
+            "t": 0.0,
+            "paused": False,
+        }
+        self._state_subscribers: List[asyncio.Queue] = []
+        self._state_pos_task: Optional[asyncio.Task] = None
+        self._state_slow_pos_task: Optional[asyncio.Task] = None
+        self._state_prop_task: Optional[asyncio.Task] = None
+
+        # MMCore push-callback support. Adapters that fire OnPropertyChanged /
+        # OnXYStagePositionChanged etc. let us skip polling for those events.
+        # Whether the ASI Tiger adapter fires on joystick moves is unknown —
+        # the bridge logs every callback and broadcasts to a dedicated SSE
+        # stream so it can be tested empirically.
+        self._mm_callback_bridge = None       # MMEventCallback subclass
+        self._mm_callback_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._callback_subscribers: List[asyncio.Queue] = []
+        # Debounce timer for state-stream broadcasts triggered by callbacks.
+        # A flurry of OnPropertyChanged events (e.g. during config-group load)
+        # gets coalesced into a single broadcast ~50 ms later.
+        self._callback_broadcast_handle: Optional[asyncio.Handle] = None
+        self._callback_broadcast_debounce_sec: float = 0.05
+
+        # Plans that hold MMCore for long performance-critical work.
+        # Anything in this set runs with state polling paused.
+        self._heavy_plans = frozenset({
+            'acquire_single_volume_plan',
+            'timelapse_volume_plan',
+            'focus_sweep_plan',
+            'calibrate_piezo_galvo_plan',
+            'multi_embryo_calibration_workflow',
+        })
+
     async def initialize(self):
         """Initialize hardware and RunEngine"""
         logger.info("=" * 60)
@@ -142,6 +201,12 @@ class DeviceLayerServer(Service):
         self.core.loadSystemConfiguration(mm_config_path)
         logger.info("MMCore initialized (direct, in-process)")
         logger.info("Loaded devices: %s", self.core.getLoadedDevices())
+
+        # Register MMCore event callback so we get push notifications for
+        # property changes, stage moves, exposure changes, etc. — anything the
+        # adapter chooses to emit. Lives alongside the polling loops; we don't
+        # drop polling until we know which events the adapters reliably fire.
+        self._register_mmcore_callbacks()
 
         # [3/5] Create Ophyd devices
         logger.info("[3/5] Creating Ophyd devices...")
@@ -300,6 +365,467 @@ class DeviceLayerServer(Service):
         return self._sam_detector
 
     # =========================================================================
+    # Device State Streaming
+    # =========================================================================
+
+    @contextlib.asynccontextmanager
+    async def pause_state_updates(self):
+        """Bracket performance-critical MMCore work so the state poller backs off.
+
+        Reference-counted: nested callers stack, polling only resumes when the
+        outermost context exits. Matches ASIdiSPIM's StagePositionUpdater pattern.
+        """
+        self._state_pause_counter += 1
+        self._state_latest["paused"] = True
+        try:
+            yield
+        finally:
+            self._state_pause_counter = max(0, self._state_pause_counter - 1)
+            if self._state_pause_counter == 0:
+                self._state_latest["paused"] = False
+
+    def _read_xy_position(self) -> Dict[str, Any]:
+        """Read just the XY stage. Two ASI serial round-trips (~250 ms).
+
+        The ASI XYStage adapter sends `W X` and `W Y` as separate commands —
+        the compound `W X Y` form exists but is commented out in the source
+        (multi-card edge cases). This is the hard floor for XY polling.
+        """
+        out: Dict[str, Any] = {}
+        xy = self.devices.get('xy_stage')
+        if xy is not None:
+            try:
+                pos = self.core.getXYPosition()
+                out[xy.name] = {"X": float(pos[0]), "Y": float(pos[1]), "kind": "xy_stage"}
+            except Exception as exc:
+                logger.debug("XY position read failed: %s", exc)
+        return out
+
+    def _read_slow_positions(self) -> Dict[str, Any]:
+        """Read piezo + galvo. Two serial round-trips (~250 ms).
+
+        These rarely change on their own — piezo by Z-knob or commands, galvo
+        only programmatically — so a 1 Hz cadence is plenty.
+        """
+        out: Dict[str, Any] = {}
+
+        piezo = self.devices.get('piezo')
+        if piezo is not None:
+            try:
+                out[piezo.name] = {
+                    "Position": float(self.core.getPosition(piezo.name)),
+                    "kind": "piezo",
+                }
+            except Exception as exc:
+                logger.debug("Piezo position read failed: %s", exc)
+
+        scanner = self.devices.get('scanner')
+        if scanner is not None:
+            try:
+                a, b = self.core.getGalvoPosition(scanner.name)
+                out[scanner.name] = {"A": float(a), "B": float(b), "kind": "galvo"}
+            except Exception as exc:
+                logger.debug("Galvo position read failed: %s", exc)
+
+        return out
+
+    def _read_full_state(self) -> Dict[str, Dict[str, str]]:
+        """Snapshot every property of every loaded MM device via the system state cache.
+
+        `updateSystemStateCache()` rereads from hardware, then `getSystemStateCache()`
+        returns the Configuration without further hardware traffic. One bulk MMCore
+        call covers every device — no need to enumerate diSPIM devices by hand.
+        """
+        try:
+            self.core.updateSystemStateCache()
+            cfg = self.core.getSystemStateCache()
+        except Exception as exc:
+            logger.debug("System state cache read failed: %s", exc)
+            return {}
+
+        by_device: Dict[str, Dict[str, str]] = {}
+        try:
+            size = cfg.size()
+        except Exception:
+            return {}
+
+        for i in range(size):
+            try:
+                s = cfg.getSetting(i)
+                dev = s.getDeviceLabel()
+                prop = s.getPropertyName()
+                val = s.getPropertyValue()
+            except Exception:
+                continue
+            by_device.setdefault(dev, {})[prop] = val
+
+        # Tag with device type so the UI can group/format sensibly.
+        for dev in list(by_device):
+            try:
+                by_device[dev]["__type__"] = int(self.core.getDeviceType(dev))
+            except Exception:
+                pass
+
+        return by_device
+
+    async def _position_poller(self):
+        """Fast loop: only reads positions and broadcasts.
+
+        Runs at `_state_pos_interval_sec` (default 2 Hz) and stays responsive
+        even when the property poller is busy with a slow MMCore property
+        snapshot.
+
+        Honours `_state_pause_counter`: while > 0 it emits heartbeats every
+        ~2 s so the browser can show a "paused" indicator.
+        """
+        logger.info(
+            "Position poller started (target=%.1f Hz)",
+            1.0 / self._state_pos_interval_sec,
+        )
+        last_heartbeat = 0.0
+
+        while not getattr(self, "_shutdown_event", asyncio.Event()).is_set():
+            tick_start = time.monotonic()
+            try:
+                if self._state_pause_counter > 0:
+                    now = time.time()
+                    if now - last_heartbeat > 2.0:
+                        await self._broadcast_state({
+                            **self._state_latest,
+                            "t": now,
+                            "paused": True,
+                            "heartbeat": True,
+                        })
+                        last_heartbeat = now
+                    await asyncio.sleep(self._state_pos_interval_sec)
+                    continue
+
+                read_start = time.monotonic()
+                xy_positions = await asyncio.to_thread(self._read_xy_position)
+                read_elapsed = time.monotonic() - read_start
+                # XY is two serial round-trips on ASI Tiger (~250 ms). Warn if
+                # we exceed 400 ms — that means something else is holding the
+                # MMCore lock.
+                if read_elapsed > 0.4:
+                    logger.warning(
+                        "XY position read slow: %.2fs (target<%.2fs)",
+                        read_elapsed, self._state_pos_interval_sec,
+                    )
+
+                now = time.time()
+                # Merge XY into existing positions dict — preserves piezo/galvo
+                # entries published by the slow-positions poller.
+                merged_positions = {
+                    **self._state_latest.get("positions", {}),
+                    **xy_positions,
+                }
+                self._state_latest = {
+                    **self._state_latest,
+                    "positions": merged_positions,
+                    "t": now,
+                    "paused": False,
+                }
+                await self._broadcast_state(self._state_latest)
+                last_heartbeat = now
+
+            except asyncio.CancelledError:
+                logger.info("Position poller cancelled")
+                raise
+            except Exception:
+                logger.exception("Position poller iteration failed")
+
+            elapsed = time.monotonic() - tick_start
+            await asyncio.sleep(max(0.0, self._state_pos_interval_sec - elapsed))
+
+    async def _slow_positions_poller(self):
+        """Piezo + galvo polling. Joystick doesn't move these, so 1 Hz is plenty.
+
+        Splitting these off the XY fast path was the key to getting XY up to
+        ~4 Hz: each ASI serial round-trip is ~125 ms, and XY alone takes two.
+        """
+        logger.info(
+            "Slow-positions poller started (target=%.2f Hz)",
+            1.0 / self._state_slow_pos_interval_sec,
+        )
+
+        while not getattr(self, "_shutdown_event", asyncio.Event()).is_set():
+            tick_start = time.monotonic()
+            try:
+                if self._state_pause_counter > 0:
+                    await asyncio.sleep(self._state_slow_pos_interval_sec)
+                    continue
+
+                read_start = time.monotonic()
+                slow_positions = await asyncio.to_thread(self._read_slow_positions)
+                read_elapsed = time.monotonic() - read_start
+                if read_elapsed > 0.6:
+                    logger.warning(
+                        "Slow-positions read slow: %.2fs", read_elapsed,
+                    )
+
+                # Merge — don't clobber XY entries the fast poller maintains.
+                merged_positions = {
+                    **self._state_latest.get("positions", {}),
+                    **slow_positions,
+                }
+                self._state_latest = {
+                    **self._state_latest,
+                    "positions": merged_positions,
+                    "t": time.time(),
+                }
+                await self._broadcast_state(self._state_latest)
+
+            except asyncio.CancelledError:
+                logger.info("Slow-positions poller cancelled")
+                raise
+            except Exception:
+                logger.exception("Slow-positions poller iteration failed")
+
+            elapsed = time.monotonic() - tick_start
+            await asyncio.sleep(max(0.0, self._state_slow_pos_interval_sec - elapsed))
+
+    async def _property_poller(self):
+        """Slow loop: refreshes the full MMCore property cache.
+
+        Runs independently of the position poller so a multi-second
+        `updateSystemStateCache()` call cannot stall position updates. Updates
+        `_state_latest['properties']` in place and broadcasts.
+        """
+        logger.info(
+            "Property poller started (target=%.2f Hz)",
+            1.0 / self._state_prop_interval_sec,
+        )
+
+        while not getattr(self, "_shutdown_event", asyncio.Event()).is_set():
+            tick_start = time.monotonic()
+            try:
+                if self._state_pause_counter > 0:
+                    await asyncio.sleep(self._state_prop_interval_sec)
+                    continue
+
+                read_start = time.monotonic()
+                properties = await asyncio.to_thread(self._read_full_state)
+                read_elapsed = time.monotonic() - read_start
+                if read_elapsed > 1.0:
+                    logger.warning(
+                        "Property read slow: %.2fs", read_elapsed,
+                    )
+
+                self._state_latest = {
+                    **self._state_latest,
+                    "properties": properties,
+                    "t": time.time(),
+                }
+                await self._broadcast_state(self._state_latest)
+
+            except asyncio.CancelledError:
+                logger.info("Property poller cancelled")
+                raise
+            except Exception:
+                logger.exception("Property poller iteration failed")
+
+            elapsed = time.monotonic() - tick_start
+            await asyncio.sleep(max(0.0, self._state_prop_interval_sec - elapsed))
+
+    async def _broadcast_state(self, payload: Dict[str, Any]):
+        """Push a state payload to every SSE subscriber. Drop slow clients."""
+        if not self._state_subscribers:
+            return
+        dead: List[asyncio.Queue] = []
+        for q in self._state_subscribers:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                dead.append(q)
+        for q in dead:
+            try:
+                self._state_subscribers.remove(q)
+            except ValueError:
+                pass
+            logger.warning("Dropped slow device-state subscriber")
+
+    # =========================================================================
+    # MMCore Push Callbacks
+    # =========================================================================
+
+    def _register_mmcore_callbacks(self):
+        """Wire a pymmcore.MMEventCallback to log + broadcast hardware events.
+
+        Some adapters (ASI Tiger included, possibly) emit callbacks for hardware
+        changes — joystick moves, property updates, exposure changes — without
+        anyone calling MMCore. When they do, we can react with zero polling
+        latency. When they don't, the existing pollers cover us.
+
+        Callbacks fire on the MMCore worker thread, so every handler marshals
+        the payload onto the asyncio loop via call_soon_threadsafe before
+        touching shared state.
+        """
+        import pymmcore
+
+        self._mm_callback_loop = asyncio.get_running_loop()
+        outer = self
+
+        class _Bridge(pymmcore.MMEventCallback):
+            def _emit(self, kind: str, **payload):
+                payload = {"t": time.time(), "kind": kind, **payload}
+                logger.info("MMCore callback: %s %s", kind, {k: v for k, v in payload.items() if k != "t"})
+                loop = outer._mm_callback_loop
+                if loop is None or loop.is_closed():
+                    return
+                loop.call_soon_threadsafe(outer._enqueue_callback, payload)
+
+            def onPropertyChanged(self, dev, prop, value):
+                self._emit("property_changed", device=dev, property=prop, value=value)
+
+            def onPropertiesChanged(self):
+                self._emit("properties_changed")
+
+            def onConfigGroupChanged(self, group, new_config):
+                self._emit("config_group_changed", group=group, config=new_config)
+
+            def onChannelGroupChanged(self, new_channel_group):
+                self._emit("channel_group_changed", group=new_channel_group)
+
+            def onExposureChanged(self, camera, exposure):
+                self._emit("exposure_changed", camera=camera, exposure_ms=exposure)
+
+            def onSLMExposureChanged(self, slm, exposure):
+                self._emit("slm_exposure_changed", slm=slm, exposure_ms=exposure)
+
+            def onStagePositionChanged(self, dev, pos):
+                self._emit("stage_position_changed", device=dev, position=pos)
+
+            def onXYStagePositionChanged(self, dev, x, y):
+                self._emit("xy_stage_position_changed", device=dev, x=x, y=y)
+
+            def onPixelSizeChanged(self, new_pixel_size_um):
+                self._emit("pixel_size_changed", um=new_pixel_size_um)
+
+            def onPixelSizeAffineChanged(self, v0, v1, v2, v3, v4, v5):
+                self._emit("pixel_size_affine_changed",
+                           affine=[v0, v1, v2, v3, v4, v5])
+
+            def onSystemConfigurationLoaded(self):
+                self._emit("system_configuration_loaded")
+
+        self._mm_callback_bridge = _Bridge()
+        # MMCore takes ownership; keep a Python ref so it doesn't get GC'd.
+        self.core.registerCallback(self._mm_callback_bridge)
+        logger.info("MMCore callback bridge registered")
+
+    def _enqueue_callback(self, payload: Dict[str, Any]):
+        """Runs on the asyncio loop (via call_soon_threadsafe).
+
+        Two jobs: forward to /api/devices/callbacks/stream subscribers (for
+        diagnostics), and mirror the change into `_state_latest` so the main
+        device-state stream picks it up within ~50 ms — no waiting for the
+        next property poll cycle.
+        """
+        # 1. Forward to the diagnostic callback stream.
+        if self._callback_subscribers:
+            dead: List[asyncio.Queue] = []
+            for q in self._callback_subscribers:
+                try:
+                    q.put_nowait(payload)
+                except asyncio.QueueFull:
+                    dead.append(q)
+            for q in dead:
+                try:
+                    self._callback_subscribers.remove(q)
+                except ValueError:
+                    pass
+                logger.warning("Dropped slow callback subscriber")
+
+        # 2. Mirror into _state_latest where applicable.
+        if self._apply_callback_to_state(payload):
+            self._schedule_callback_broadcast()
+
+    def _apply_callback_to_state(self, payload: Dict[str, Any]) -> bool:
+        """Translate a callback payload into a `_state_latest` mutation.
+
+        Returns True iff something visible changed (the caller will then
+        schedule a debounced broadcast). Property changes overwrite the cached
+        string value; position-changed callbacks (rare on ASI) refresh the
+        positions block.
+        """
+        kind = payload.get("kind")
+
+        if kind == "property_changed":
+            dev = payload.get("device")
+            prop = payload.get("property")
+            value = payload.get("value")
+            if not dev or not prop:
+                return False
+            props = self._state_latest.setdefault("properties", {})
+            bundle = props.setdefault(dev, {})
+            if bundle.get(prop) == value:
+                return False
+            bundle[prop] = value
+            self._state_latest["t"] = payload.get("t", time.time())
+            return True
+
+        if kind == "exposure_changed":
+            dev = payload.get("camera")
+            new_ms = payload.get("exposure_ms")
+            if not dev or new_ms is None:
+                return False
+            props = self._state_latest.setdefault("properties", {})
+            bundle = props.setdefault(dev, {})
+            bundle["Exposure"] = str(new_ms)
+            self._state_latest["t"] = payload.get("t", time.time())
+            return True
+
+        if kind == "xy_stage_position_changed":
+            dev = payload.get("device")
+            x = payload.get("x")
+            y = payload.get("y")
+            if not dev or x is None or y is None:
+                return False
+            positions = self._state_latest.setdefault("positions", {})
+            positions[dev] = {"X": float(x), "Y": float(y), "kind": "xy_stage"}
+            self._state_latest["t"] = payload.get("t", time.time())
+            return True
+
+        if kind == "stage_position_changed":
+            dev = payload.get("device")
+            pos = payload.get("position")
+            if not dev or pos is None:
+                return False
+            positions = self._state_latest.setdefault("positions", {})
+            entry = positions.setdefault(dev, {})
+            entry["Position"] = float(pos)
+            entry.setdefault("kind", "piezo")
+            self._state_latest["t"] = payload.get("t", time.time())
+            return True
+
+        # Other kinds (config_group_changed, pixel_size_changed, etc.) are
+        # informational — they go to the diagnostic stream but don't change
+        # any device-state field we currently expose.
+        return False
+
+    def _schedule_callback_broadcast(self):
+        """Debounce: a burst of callbacks coalesces into one broadcast."""
+        if self._callback_broadcast_handle is not None:
+            return
+        loop = self._mm_callback_loop
+        if loop is None or loop.is_closed():
+            return
+        self._callback_broadcast_handle = loop.call_later(
+            self._callback_broadcast_debounce_sec,
+            self._fire_callback_broadcast,
+        )
+
+    def _fire_callback_broadcast(self):
+        self._callback_broadcast_handle = None
+        # Snapshot so we don't race with poller mutations during the await.
+        snapshot = {
+            **self._state_latest,
+            "positions": dict(self._state_latest.get("positions", {})),
+            "properties": dict(self._state_latest.get("properties", {})),
+        }
+        asyncio.create_task(self._broadcast_state(snapshot))
+
+    # =========================================================================
     # Plan Execution
     # =========================================================================
 
@@ -349,8 +875,16 @@ class DeviceLayerServer(Service):
                 # Create the plan generator
                 plan = plan_func(**resolved_kwargs)
 
-                # Run the plan (this happens in the main thread!)
-                result = self.RE(plan)
+                # For heavy plans (sequence acquisitions, calibration/focus
+                # sweeps) pause the state poller so it doesn't compete with
+                # MMCore for camera streaming bandwidth. Plain moves, snaps,
+                # LED changes don't pause — those run with live polling.
+                if request.plan_name in self._heavy_plans:
+                    async with self.pause_state_updates():
+                        result = self.RE(plan)
+                else:
+                    # Run the plan (this happens in the main thread!)
+                    result = self.RE(plan)
 
                 # Get the run UID
                 uid = result[0] if result else None
@@ -1197,6 +1731,157 @@ class DeviceLayerServer(Service):
             )
 
     # =========================================================================
+    # Device State HTTP Handlers
+    # =========================================================================
+
+    async def handle_devices_state(self, request):
+        """GET /api/devices/state - One-shot snapshot of device positions + properties.
+
+        Cheap: returns the most recent poller snapshot without forcing a fresh
+        MMCore read. If the caller needs guaranteed-fresh data they can pass
+        ?refresh=1 and we'll do an on-demand read on the worker thread.
+        """
+        try:
+            refresh = request.query.get("refresh", "0") in ("1", "true", "yes")
+            if refresh and self._state_pause_counter == 0 and not self._state_updating_now:
+                self._state_updating_now = True
+                try:
+                    xy = await asyncio.to_thread(self._read_xy_position)
+                    slow = await asyncio.to_thread(self._read_slow_positions)
+                    properties = await asyncio.to_thread(self._read_full_state)
+                    self._state_latest = {
+                        "positions": {**xy, **slow},
+                        "properties": properties,
+                        "t": time.time(),
+                        "paused": False,
+                    }
+                finally:
+                    self._state_updating_now = False
+            return web.json_response(self._state_latest)
+        except Exception as exc:
+            import traceback
+            return web.json_response(
+                {"error": str(exc), "traceback": traceback.format_exc()},
+                status=500,
+            )
+
+    async def handle_callbacks_stream(self, request):
+        """GET /api/devices/callbacks/stream - SSE of raw MMCore push events.
+
+        Diagnostic-grade stream. Each event the MMCore adapter emits via
+        OnPropertyChanged/OnXYStagePositionChanged/etc. becomes one SSE frame.
+        Used to discover which events the adapters actually fire (joystick
+        moves, automatic refocus, anything we don't trigger from the host).
+        """
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=256)
+        self._callback_subscribers.append(queue)
+        peer = request.remote
+        logger.info("Callback subscriber connected from %s (total=%d)",
+                    peer, len(self._callback_subscribers))
+
+        try:
+            await response.write(b"event: ready\ndata: {}\n\n")
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                if payload is None:
+                    break  # shutdown sentinel
+                await response.write(
+                    f"data: {json.dumps(payload)}\n\n".encode()
+                )
+        except (asyncio.CancelledError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except Exception:
+            logger.exception("Callback SSE writer failed")
+        finally:
+            try:
+                self._callback_subscribers.remove(queue)
+            except ValueError:
+                pass
+            logger.info("Callback subscriber disconnected from %s (total=%d)",
+                        peer, len(self._callback_subscribers))
+
+        return response
+
+    async def handle_devices_stream(self, request):
+        """GET /api/devices/stream - Server-Sent Events stream of device state.
+
+        On connect, sends the current snapshot as `event: snapshot`. Subsequent
+        ticks come as default `data:` events. Heartbeats arrive every ~2 s even
+        when the poller is paused, so clients can distinguish "no change" from
+        "stream is dead".
+        """
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+
+        # Bounded queue — slow clients get dropped rather than back-pressuring the poller.
+        queue: asyncio.Queue = asyncio.Queue(maxsize=32)
+        self._state_subscribers.append(queue)
+        peer = request.remote
+        logger.info("Device-state subscriber connected from %s (total=%d)",
+                    peer, len(self._state_subscribers))
+
+        try:
+            # Send the most recent snapshot immediately so the UI doesn't
+            # have to wait for the next tick.
+            snapshot = json.dumps(self._state_latest)
+            await response.write(f"event: snapshot\ndata: {snapshot}\n\n".encode())
+
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    # Comment heartbeat — keeps proxies/sockets warm without
+                    # delivering a parseable event to the client.
+                    await response.write(b": keepalive\n\n")
+                    continue
+                # Shutdown sentinel: on_stop() pushes None into every queue so
+                # all SSE handlers exit promptly instead of waiting on aiohttp's
+                # shutdown timeout.
+                if payload is None:
+                    break
+                await response.write(
+                    f"data: {json.dumps(payload)}\n\n".encode()
+                )
+        except (asyncio.CancelledError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except Exception:
+            logger.exception("Device-state SSE writer failed")
+        finally:
+            try:
+                self._state_subscribers.remove(queue)
+            except ValueError:
+                pass
+            logger.info("Device-state subscriber disconnected from %s (total=%d)",
+                        peer, len(self._state_subscribers))
+
+        return response
+
+    # =========================================================================
     # Server Lifecycle
     # =========================================================================
 
@@ -1229,11 +1914,29 @@ class DeviceLayerServer(Service):
         self._app.router.add_get('/api/microscope', self.handle_microscope_info)
         self._app.router.add_post('/api/microscope/execute', self.handle_microscope_execute)
 
+        # Device state streaming (positions + properties)
+        self._app.router.add_get('/api/devices/state', self.handle_devices_state)
+        self._app.router.add_get('/api/devices/stream', self.handle_devices_stream)
+        self._app.router.add_get('/api/devices/callbacks/stream', self.handle_callbacks_stream)
+
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())
 
+        # Start device-state pollers. Three independent loops so slow MMCore
+        # calls (property cache, piezo/galvo serial) can never stall the XY
+        # fast path:
+        #   - XY position (fast)
+        #   - piezo + galvo (slow, 1 Hz)
+        #   - full property cache (slowest, ~0.07 Hz)
+        self._state_pos_task = asyncio.create_task(self._position_poller())
+        self._state_slow_pos_task = asyncio.create_task(self._slow_positions_poller())
+        self._state_prop_task = asyncio.create_task(self._property_poller())
+
         # Start web server
-        self._runner = web.AppRunner(self._app)
+        # shutdown_timeout limits how long cleanup() waits for active responses
+        # to finish. The default is 60s — way too long for an SSE handler that
+        # got the wake-up sentinel and didn't exit promptly.
+        self._runner = web.AppRunner(self._app, shutdown_timeout=2.0)
         await self._runner.setup()
         site = web.TCPSite(self._runner, self.host, self.port)
 
@@ -1248,6 +1951,40 @@ class DeviceLayerServer(Service):
         """Shut down the HTTP server and plan executor."""
         logger.info("Shutting down...")
         self._running = False
+
+        # Cancel any pending coalesced-broadcast timer.
+        if self._callback_broadcast_handle is not None:
+            self._callback_broadcast_handle.cancel()
+            self._callback_broadcast_handle = None
+
+        # 1. Wake up every SSE subscriber so they exit immediately instead of
+        #    sitting in `wait_for(queue.get(), timeout=10)` and forcing aiohttp
+        #    to wait out its shutdown timeout. Done first so handlers drain
+        #    before we cancel pollers (which would block on in-flight to_thread).
+        for queues in (self._state_subscribers, self._callback_subscribers):
+            for q in list(queues):
+                try:
+                    q.put_nowait(None)
+                except asyncio.QueueFull:
+                    # Replace the head with the sentinel so the handler sees it.
+                    try:
+                        q.get_nowait()
+                        q.put_nowait(None)
+                    except Exception:
+                        pass
+
+        # 2. Cancel pollers. The in-flight to_thread call cannot be aborted;
+        #    cancellation takes effect when the thread returns (~position read
+        #    <0.3s, property read <3s).
+        for task_attr in ("_state_pos_task", "_state_slow_pos_task", "_state_prop_task"):
+            task = getattr(self, task_attr, None)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                setattr(self, task_attr, None)
         if self._executor_task:
             self._executor_task.cancel()
             try:

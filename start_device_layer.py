@@ -122,6 +122,9 @@ The server provides:
 
         def request_shutdown():
             print("\n\nReceived interrupt signal...")
+            logging.getLogger("gently.device_layer.signal").warning(
+                "Interrupt signal received — initiating shutdown"
+            )
             if hasattr(server, '_shutdown_event'):
                 server._shutdown_event.set()
 

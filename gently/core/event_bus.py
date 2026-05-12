@@ -80,6 +80,7 @@ class EventType(Enum):
     STAGE_MOVED = auto()
     FOCUS_CHANGED = auto()
     LASER_CHANGED = auto()
+    DEVICE_STATE_UPDATE = auto()   # Periodic device-state snapshot from device layer
 
     # System events
     ERROR_OCCURRED = auto()
@@ -124,6 +125,14 @@ class EventType(Enum):
     TRANSFER_PROGRESS = auto()
     TRANSFER_COMPLETED = auto()
     TRANSFER_FAILED = auto()
+
+
+# High-volume telemetry events that skip the bounded history deque. These
+# fire many times per second and would push out events that humans actually
+# want to inspect later (acquisitions, perceptions, errors).
+_NO_HISTORY_TYPES = frozenset({
+    EventType.DEVICE_STATE_UPDATE,
+})
 
 
 @dataclass
@@ -324,9 +333,11 @@ class EventBus:
             correlation_id=correlation_id,
         )
 
-        # Add to history
-        with self._lock:
-            self._history.append(event)
+        # Add to history. High-volume telemetry skips history so it doesn't
+        # crowd out the bounded deque of more meaningful events.
+        if event_type not in _NO_HISTORY_TYPES:
+            with self._lock:
+                self._history.append(event)
 
         # Call sync handlers
         self._dispatch_sync(event)
@@ -351,8 +362,9 @@ class EventBus:
         Event
             The published event
         """
-        with self._lock:
-            self._history.append(event)
+        if event.event_type not in _NO_HISTORY_TYPES:
+            with self._lock:
+                self._history.append(event)
 
         self._dispatch_sync(event)
         self._dispatch_async(event)

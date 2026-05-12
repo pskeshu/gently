@@ -224,6 +224,78 @@
         {% include '_sessions_panel.html' %}
     </div>
 
+    <!-- Devices Tab -->
+    <div id="devices-content" class="tab-content">
+        <div class="devices-container">
+            <div class="devices-header-bar">
+                <h2 class="devices-title">Device State</h2>
+                <div class="devices-status">
+                    <span class="devices-status-pill" id="devices-stream-pill">disconnected</span>
+                    <span class="devices-status-meta" id="devices-status-meta">no data</span>
+                </div>
+            </div>
+
+            <div class="devices-positions">
+                <div class="devices-card">
+                    <div class="devices-card-title">XY Stage</div>
+                    <div class="devices-position-row">
+                        <span class="devices-axis-label">X</span>
+                        <span class="devices-axis-value" id="dev-pos-x">—</span>
+                        <span class="devices-axis-unit">µm</span>
+                    </div>
+                    <div class="devices-position-row">
+                        <span class="devices-axis-label">Y</span>
+                        <span class="devices-axis-value" id="dev-pos-y">—</span>
+                        <span class="devices-axis-unit">µm</span>
+                    </div>
+                </div>
+                <div class="devices-card">
+                    <div class="devices-card-title">Piezo (Z)</div>
+                    <div class="devices-position-row">
+                        <span class="devices-axis-label">Z</span>
+                        <span class="devices-axis-value" id="dev-pos-piezo">—</span>
+                        <span class="devices-axis-unit">µm</span>
+                    </div>
+                </div>
+                <div class="devices-card">
+                    <div class="devices-card-title">Galvo Scanner</div>
+                    <div class="devices-position-row">
+                        <span class="devices-axis-label">A</span>
+                        <span class="devices-axis-value" id="dev-pos-galvo-a">—</span>
+                        <span class="devices-axis-unit">°</span>
+                    </div>
+                    <div class="devices-position-row">
+                        <span class="devices-axis-label">B</span>
+                        <span class="devices-axis-value" id="dev-pos-galvo-b">—</span>
+                        <span class="devices-axis-unit">°</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="devices-properties">
+                <div class="devices-properties-header">
+                    <h3 class="devices-properties-title">Properties</h3>
+                    <input type="text" class="devices-filter" id="devices-filter" placeholder="Filter devices or properties…">
+                </div>
+                <div class="devices-properties-table-wrap">
+                    <table class="devices-table">
+                        <thead>
+                            <tr>
+                                <th class="dev-col-device">Device</th>
+                                <th class="dev-col-type">Type</th>
+                                <th class="dev-col-prop">Property</th>
+                                <th class="dev-col-value">Value</th>
+                            </tr>
+                        </thead>
+                        <tbody id="devices-tbody">
+                            <tr class="devices-empty-row"><td colspan="4">Waiting for first state update…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <footer class="statusbar" id="statusbar">
         <span id="status-left"></span>
         <span id="status-right"></span>
@@ -288,6 +360,7 @@
     <script src="/static/js/projection-viewer.js"></script>
     <script src="/static/js/experiment-strip.js"></script>
     <script src="/static/js/marking.js"></script>
+    <script src="/static/js/devices.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/app.js"></script>

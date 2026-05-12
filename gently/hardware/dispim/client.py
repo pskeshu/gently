@@ -608,6 +608,77 @@ class DiSPIMMicroscope(Microscope):
         """Get current LED status."""
         return await self._api_get('/api/led/status')
 
+    # ------------------------------------------------------------------
+    # Live device-state readout (streamed from the device layer poller)
+    # ------------------------------------------------------------------
+    async def get_device_state(self, refresh: bool = False) -> Dict:
+        """One-shot snapshot of all device positions + properties.
+
+        Parameters
+        ----------
+        refresh : bool
+            If True, force the device layer to re-read MMCore right now.
+            Otherwise return the most recent poller snapshot (typically <500 ms old).
+        """
+        path = '/api/devices/state'
+        if refresh:
+            path += '?refresh=1'
+        return await self._api_get(path)
+
+    async def stream_device_states(self, timeout: Optional[float] = None):
+        """Async generator yielding parsed device-state events from the SSE stream.
+
+        Yields each event payload as a dict. Comment-style heartbeats (lines
+        starting with `:`) are silently skipped. The generator runs until the
+        connection drops or the caller breaks out — auto-reconnect is the
+        consumer's responsibility (see DeviceStateMonitor).
+
+        Parameters
+        ----------
+        timeout : float, optional
+            Per-event read timeout in seconds. None = wait indefinitely.
+
+        Example
+        -------
+        >>> async for evt in microscope.stream_device_states():
+        ...     positions = evt.get('positions', {})
+        ...     print(positions)
+        """
+        self._ensure_connected()
+        # SSE: no overall timeout, but allow per-read timeout via aiohttp.
+        client_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=timeout,
+            sock_connect=10.0,
+        )
+        url = f"{self.http_url}/api/devices/stream"
+        async with self._session.get(url, timeout=client_timeout) as resp:
+            resp.raise_for_status()
+            buf = b""
+            async for chunk in resp.content.iter_any():
+                if not chunk:
+                    continue
+                buf += chunk
+                # SSE events terminate with a blank line (\n\n or \r\n\r\n).
+                while b"\n\n" in buf:
+                    event_block, buf = buf.split(b"\n\n", 1)
+                    data_lines = []
+                    for line in event_block.splitlines():
+                        if not line or line.startswith(b":"):
+                            continue
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                        # `event:` lines are ignored — we treat all event
+                        # types uniformly on the consumer side.
+                    if not data_lines:
+                        continue
+                    raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
+                    try:
+                        import json as _json
+                        yield _json.loads(raw)
+                    except Exception as exc:
+                        logger.warning("Malformed SSE payload skipped: %s", exc)
+
     async def set_camera_led_mode(self, use_led: bool = False) -> Dict:
         """Enable/disable automatic LED for bottom camera captures."""
         return await self._api_post('/api/camera/led_mode', {'use_led': use_led})

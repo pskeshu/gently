@@ -146,6 +146,9 @@ class MicroscopyAgent:
         # Visualization server for real-time feedback
         self.viz_server: Optional["VisualizationServer"] = None
 
+        # Device-state monitor (bridges device-layer SSE → EventBus)
+        self.device_state_monitor = None
+
         # ===== Create delegate managers =====
 
         # Conversation manager (LLM calls, tool execution, token tracking)
@@ -501,8 +504,28 @@ class MicroscopyAgent:
             logger.warning(f"Failed to start viz server: {e}")
             self.viz_server = None
 
+        # Start device-state monitor: streams device-layer SSE onto the EventBus,
+        # which the viz server already wildcard-subscribes to. Safe to skip
+        # silently if the microscope client isn't ready — the user just won't
+        # see live readouts until next session.
+        if self.microscope is not None and self.device_state_monitor is None:
+            try:
+                from .device_state_monitor import DeviceStateMonitor
+                self.device_state_monitor = DeviceStateMonitor(self.microscope)
+                await self.device_state_monitor.start()
+                logger.info("Device-state monitor started")
+            except Exception as e:
+                logger.warning(f"Failed to start device-state monitor: {e}")
+                self.device_state_monitor = None
+
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
+        if self.device_state_monitor is not None:
+            try:
+                await self.device_state_monitor.stop()
+            except Exception:
+                logger.exception("Failed to stop device-state monitor")
+            self.device_state_monitor = None
         if self.viz_server is not None:
             await self.viz_server.stop()
             self.viz_server = None
