@@ -2182,15 +2182,23 @@ class DeviceLayerServer(Service):
 
         # 2. Cancel pollers. The in-flight to_thread call cannot be aborted;
         #    cancellation takes effect when the thread returns (~position read
-        #    <0.3s, property read <3s).
-        for task_attr in ("_state_pos_task", "_state_slow_pos_task", "_state_prop_task", "_cam_task"):
+        #    <0.3s, property read <3s, bottom-camera snapImage = exposure +
+        #    transfer). If MMCore is hung or a long exposure is set, we'd
+        #    otherwise wait forever — so each task gets a 3 s ceiling. A
+        #    timed-out thread leaks until interpreter shutdown reaps it.
+        for task_attr in ("_state_pos_task", "_state_slow_pos_task",
+                          "_state_prop_task", "_cam_task"):
             task = getattr(self, task_attr, None)
             if task is not None:
                 task.cancel()
                 try:
-                    await task
-                except asyncio.CancelledError:
-                    pass
+                    await asyncio.wait_for(task, timeout=3.0)
+                except (asyncio.CancelledError, asyncio.TimeoutError):
+                    if not task.done():
+                        logger.warning(
+                            "%s did not exit within shutdown timeout; "
+                            "leaking thread, continuing shutdown", task_attr,
+                        )
                 setattr(self, task_attr, None)
         if self._executor_task:
             self._executor_task.cancel()
