@@ -148,6 +148,9 @@ class MicroscopyAgent:
 
         # Device-state monitor (bridges device-layer SSE → EventBus)
         self.device_state_monitor = None
+        # Opt-in bottom-camera stream bridge — created when viz starts, but
+        # left unstarted until the operator clicks "Start camera" in the UI.
+        self.bottom_camera_monitor = None
 
         # ===== Create delegate managers =====
 
@@ -518,8 +521,26 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to start device-state monitor: {e}")
                 self.device_state_monitor = None
 
+        # Construct the bottom-camera monitor — but don't start it. Streaming
+        # is opt-in and waits for an explicit operator action via the
+        # /api/devices/bottom_camera/stream/start route.
+        if self.microscope is not None and self.bottom_camera_monitor is None:
+            try:
+                from .bottom_camera_monitor import BottomCameraStreamMonitor
+                self.bottom_camera_monitor = BottomCameraStreamMonitor(self.microscope)
+                logger.info("Bottom-camera monitor ready (not started)")
+            except Exception as e:
+                logger.warning(f"Failed to construct bottom-camera monitor: {e}")
+                self.bottom_camera_monitor = None
+
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
+        if self.bottom_camera_monitor is not None:
+            try:
+                await self.bottom_camera_monitor.stop()
+            except Exception:
+                logger.exception("Failed to stop bottom-camera monitor")
+            self.bottom_camera_monitor = None
         if self.device_state_monitor is not None:
             try:
                 await self.device_state_monitor.stop()

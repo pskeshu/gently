@@ -156,6 +156,20 @@ class DeviceLayerServer(Service):
         self._callback_broadcast_handle: Optional[asyncio.Handle] = None
         self._callback_broadcast_debounce_sec: float = 0.05
 
+        # Bottom-camera live stream (Phase-1 thumbnail). Off by default; the
+        # streamer task spins up only while ≥1 SSE subscriber is connected,
+        # so the camera is never grabbed when nobody is watching.
+        # Tuned for low latency: small thumbnail + cheap auto-contrast keeps
+        # the encode path under ~5 ms per frame on the encoding thread.
+        self._cam_subscribers: List[asyncio.Queue] = []
+        self._cam_task: Optional[asyncio.Task] = None
+        self._cam_interval_sec: float = 0.25            # 4 Hz
+        self._cam_target_max_dim: int = 360             # ~360px thumbnail
+        self._cam_jpeg_quality: int = 55
+        # Cache the last camera selected via setCameraDevice — avoids calling
+        # it on every grab (each call hits the MMCore lock unnecessarily).
+        self._cam_last_selected: Optional[str] = None
+
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
         self._heavy_plans = frozenset({
@@ -643,6 +657,138 @@ class DeviceLayerServer(Service):
             except ValueError:
                 pass
             logger.warning("Dropped slow device-state subscriber")
+
+    # =========================================================================
+    # Bottom-camera live stream (Phase 1: low-rate thumbnail)
+    # =========================================================================
+
+    def _capture_bottom_frame_sync(self) -> Optional[np.ndarray]:
+        """Grab a single frame from the bottom camera. Blocking — call via to_thread.
+
+        Bypasses Bluesky / ophyd to keep the loop light: a snapshot is a
+        snapImage + getImage round-trip, ~exposure-time ms. setCameraDevice
+        is only called when the active camera actually needs to change, so
+        steady-state grabs skip that lock-grab entirely.
+        """
+        cam = self.devices.get('bottom_camera')
+        if cam is None:
+            return None
+        try:
+            if self._cam_last_selected != cam.name:
+                self.core.setCameraDevice(cam.name)
+                self._cam_last_selected = cam.name
+            self.core.snapImage()
+            return np.asarray(self.core.getImage())
+        except Exception as exc:
+            logger.debug("Bottom-camera grab failed: %s", exc)
+            return None
+
+    def _encode_frame_for_stream(self, img: np.ndarray) -> Optional[Dict[str, Any]]:
+        """Downsample + auto-contrast + JPEG-encode a uint16 frame for SSE.
+
+        Optimised for streaming throughput:
+          * stride-slice downsample to ~360 px max dim (cheap, no interp)
+          * auto-contrast computed on a 4096-pixel random sample, not the
+            full image — np.partition on the subsample is O(n) and avoids
+            sorting ~120K pixels every frame
+          * JPEG quality 55 (visually fine at thumbnail size)
+        """
+        if img is None or img.size == 0:
+            return None
+        try:
+            import cv2  # opencv ships with the agent env (SAM uses it)
+            import base64
+        except ImportError as exc:
+            logger.warning("Cannot encode frame — OpenCV unavailable: %s", exc)
+            return None
+
+        h, w = img.shape[:2]
+        # Stride slicing — no interpolation, just take every Nth pixel.
+        factor = max(1, max(h, w) // self._cam_target_max_dim)
+        small = img[::factor, ::factor]
+
+        # Auto-contrast off a small random sample. Robust to hot pixels
+        # without paying for a full-image percentile.
+        if small.dtype != np.uint8:
+            flat = small.ravel()
+            sample_size = min(4096, flat.size)
+            # Strided sample — deterministic, no PRNG cost.
+            step = max(1, flat.size // sample_size)
+            sample = flat[::step]
+            # np.partition gets the [1%, 99%] order stats in O(n).
+            k_lo = max(0, int(sample.size * 0.01))
+            k_hi = min(sample.size - 1, int(sample.size * 0.99))
+            part = np.partition(sample, [k_lo, k_hi])
+            lo = float(part[k_lo])
+            hi = float(part[k_hi])
+            if hi <= lo:
+                hi = lo + 1.0
+            scale = 255.0 / (hi - lo)
+            small = np.clip((small.astype(np.float32) - lo) * scale, 0, 255).astype(np.uint8)
+
+        ok, jpeg = cv2.imencode('.jpg', small, [cv2.IMWRITE_JPEG_QUALITY, self._cam_jpeg_quality])
+        if not ok:
+            return None
+        b64 = base64.b64encode(jpeg.tobytes()).decode('ascii')
+        return {
+            "t": time.time(),
+            "shape": [int(small.shape[0]), int(small.shape[1])],
+            "downsample": factor,
+            "mime": "image/jpeg",
+            "jpeg_b64": b64,
+        }
+
+    async def _bottom_camera_streamer(self):
+        """Continuous grab/encode/broadcast loop. Runs while a subscriber lives.
+
+        Yields the MMCore lock between grabs and obeys ``pause_state_updates()``,
+        so heavy plans aren't interfered with. When the last subscriber drops,
+        the loop returns and the task is allowed to exit; it gets started up
+        again on the next subscription.
+        """
+        logger.info("Bottom-camera streamer started")
+        try:
+            while self._cam_subscribers:
+                if self._state_pause_counter > 0:
+                    # A heavy plan owns MMCore; back off until it releases.
+                    await asyncio.sleep(self._cam_interval_sec)
+                    continue
+                tick = time.monotonic()
+                img = await asyncio.to_thread(self._capture_bottom_frame_sync)
+                payload = self._encode_frame_for_stream(img) if img is not None else None
+                if payload is not None:
+                    await self._broadcast_camera(payload)
+                # Pace the loop — sleep whatever's left of the interval.
+                elapsed = time.monotonic() - tick
+                await asyncio.sleep(max(0.0, self._cam_interval_sec - elapsed))
+        except asyncio.CancelledError:
+            logger.info("Bottom-camera streamer cancelled")
+            raise
+        except Exception:
+            logger.exception("Bottom-camera streamer crashed")
+        finally:
+            logger.info("Bottom-camera streamer exiting")
+
+    async def _broadcast_camera(self, payload: Dict[str, Any]):
+        if not self._cam_subscribers:
+            return
+        dead: List[asyncio.Queue] = []
+        for q in self._cam_subscribers:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                # Slow client — drop oldest then push, so steady-state clients
+                # see fresh frames instead of getting kicked off.
+                try:
+                    _ = q.get_nowait()
+                    q.put_nowait(payload)
+                except Exception:
+                    dead.append(q)
+        for q in dead:
+            try:
+                self._cam_subscribers.remove(q)
+            except ValueError:
+                pass
 
     # =========================================================================
     # MMCore Push Callbacks
@@ -1881,6 +2027,64 @@ class DeviceLayerServer(Service):
 
         return response
 
+    async def handle_bottom_camera_stream(self, request):
+        """GET /api/bottom_camera/stream — SSE of base64-JPEG frames.
+
+        The streamer task spins up on first connect and exits when the last
+        subscriber leaves, so MMCore is left alone whenever nobody's watching.
+        """
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+        self._cam_subscribers.append(queue)
+        # If we just brought the subscriber count to 1, start the streamer.
+        if len(self._cam_subscribers) == 1 and (self._cam_task is None or self._cam_task.done()):
+            self._cam_task = asyncio.create_task(
+                self._bottom_camera_streamer(), name="bottom-camera-streamer"
+            )
+        peer = request.remote
+        logger.info("Bottom-camera subscriber connected from %s (total=%d)",
+                    peer, len(self._cam_subscribers))
+
+        try:
+            # Initial comment so the client knows the connection is alive
+            # even before the first frame arrives (camera may take ~exposure ms).
+            await response.write(b": connected\n\n")
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                if payload is None:
+                    break  # shutdown sentinel
+                await response.write(
+                    f"data: {json.dumps(payload)}\n\n".encode()
+                )
+        except (asyncio.CancelledError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except Exception:
+            logger.exception("Bottom-camera SSE writer failed")
+        finally:
+            try:
+                self._cam_subscribers.remove(queue)
+            except ValueError:
+                pass
+            logger.info("Bottom-camera subscriber disconnected from %s (total=%d)",
+                        peer, len(self._cam_subscribers))
+
+        return response
+
     # =========================================================================
     # Server Lifecycle
     # =========================================================================
@@ -1918,6 +2122,9 @@ class DeviceLayerServer(Service):
         self._app.router.add_get('/api/devices/state', self.handle_devices_state)
         self._app.router.add_get('/api/devices/stream', self.handle_devices_stream)
         self._app.router.add_get('/api/devices/callbacks/stream', self.handle_callbacks_stream)
+
+        # Bottom-camera live stream (subscriber-gated, off when nobody listens)
+        self._app.router.add_get('/api/bottom_camera/stream', self.handle_bottom_camera_stream)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())
@@ -1961,7 +2168,7 @@ class DeviceLayerServer(Service):
         #    sitting in `wait_for(queue.get(), timeout=10)` and forcing aiohttp
         #    to wait out its shutdown timeout. Done first so handlers drain
         #    before we cancel pollers (which would block on in-flight to_thread).
-        for queues in (self._state_subscribers, self._callback_subscribers):
+        for queues in (self._state_subscribers, self._callback_subscribers, self._cam_subscribers):
             for q in list(queues):
                 try:
                     q.put_nowait(None)
@@ -1976,7 +2183,7 @@ class DeviceLayerServer(Service):
         # 2. Cancel pollers. The in-flight to_thread call cannot be aborted;
         #    cancellation takes effect when the thread returns (~position read
         #    <0.3s, property read <3s).
-        for task_attr in ("_state_pos_task", "_state_slow_pos_task", "_state_prop_task"):
+        for task_attr in ("_state_pos_task", "_state_slow_pos_task", "_state_prop_task", "_cam_task"):
             task = getattr(self, task_attr, None)
             if task is not None:
                 task.cancel()

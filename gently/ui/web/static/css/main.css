@@ -8586,3 +8586,871 @@ body.modal-open {
     padding: 1.25rem;
     font-style: italic;
 }
+
+/* =====================================================================
+   DEVICES > MAP — "Navigator" design system
+   ---------------------------------------------------------------------
+   Cartographic / engineering blueprint aesthetic. Sharp 4px corners,
+   two-tier grid, scale bar, compass rose, in-place zone callouts. Uses
+   Instrument Serif (display), JetBrains Mono (numbers), Inter Tight
+   (UI labels) — all scoped to .devices-container-map and its children.
+   ===================================================================== */
+
+/* Per-page palette layered over the global theme tokens.
+   Defaults match the dark theme; .light-theme overrides below. */
+.devices-container-map {
+    --map-paper:     #0b0e13;
+    --map-paper-2:   #0e1218;
+    --map-paper-3:   #11161e;
+    --map-ink:       #d4dde8;
+    --map-ink-mute:  #6a778a;
+    --map-ink-faint: rgba(212, 221, 232, 0.20);
+    --map-rule:      rgba(212, 221, 232, 0.16);
+    --map-rule-soft: rgba(212, 221, 232, 0.07);
+    --map-axis-0:    rgba(255, 240, 200, 0.30);
+    --map-accent:    #22d3ee;
+    --map-accent-2:  #67e8f9;
+    --map-warm:      #f0c674;
+    --map-zone-green:  90, 168, 122;     /* RGB triples for compositing */
+    --map-zone-orange: 215, 152, 84;
+    --map-zone-red:    220, 96,  88;
+    --map-overlay-bg:    rgba(11, 14, 19, 0.78);
+    --map-overlay-bg-2:  rgba(11, 14, 19, 0.92);
+    --map-overlay-edge:  rgba(212, 221, 232, 0.18);
+}
+[data-theme="light"] .devices-container-map {
+    --map-paper:     #f6f3ec;
+    --map-paper-2:   #efeae0;
+    --map-paper-3:   #e6dfd1;
+    --map-ink:       #1d2b3a;
+    --map-ink-mute:  #6b7280;
+    --map-ink-faint: rgba(29, 43, 58, 0.22);
+    --map-rule:      rgba(29, 43, 58, 0.20);
+    --map-rule-soft: rgba(29, 43, 58, 0.08);
+    --map-axis-0:    rgba(150, 80, 30, 0.45);
+    --map-accent:    #0e7490;
+    --map-accent-2:  #155e75;
+    --map-warm:      #a16207;
+    --map-overlay-bg:    rgba(246, 243, 236, 0.82);
+    --map-overlay-bg-2:  rgba(246, 243, 236, 0.96);
+    --map-overlay-edge:  rgba(29, 43, 58, 0.18);
+}
+
+/* --- Header ----------------------------------------------------------- */
+.devices-header-left {
+    display: flex;
+    align-items: baseline;
+    gap: 1.25rem;
+}
+.devices-container-map .devices-title {
+    font-family: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+    font-weight: 400;
+    font-size: 1.45rem;
+    letter-spacing: 0.005em;
+    color: var(--map-ink);
+    margin: 0;
+    line-height: 1;
+}
+.devices-container-map .devices-title-script { font-style: normal; }
+.devices-container-map .devices-title-em {
+    font-style: italic;
+    color: var(--map-ink-mute);
+    font-weight: 400;
+}
+.devices-container-map .view-switcher {
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    letter-spacing: 0.02em;
+}
+
+/* Status — LED pill instead of a flat chip */
+.devices-status {
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+}
+.devices-status-led {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.18rem 0.55rem 0.18rem 0.45rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink);
+    font-size: 0.65rem;
+}
+.devices-status-led::before {
+    content: '';
+    width: 6px; height: 6px; border-radius: 50%;
+    background: var(--map-ink-mute);
+    box-shadow: 0 0 0 0 currentColor;
+}
+.devices-status-led.live::before  { background: #4ade80; box-shadow: 0 0 8px rgba(74,222,128,0.6); }
+.devices-status-led.paused::before{ background: var(--map-accent); }
+.devices-status-led.stale::before { background: var(--map-warm); }
+.devices-status-led.error::before { background: #f87171; }
+
+/* --- Containers ------------------------------------------------------- */
+.devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.devices-view-details { gap: 1rem; }
+
+.devices-map-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 0;
+    background:
+        radial-gradient(120% 90% at 50% 30%, var(--map-paper-2) 0%, var(--map-paper) 60%, var(--map-paper-3) 100%);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    padding: 0;
+    overflow: hidden;
+    box-shadow:
+        inset 0 0 0 1px rgba(255,255,255,0.02),
+        inset 0 0 120px rgba(0,0,0,0.25);
+}
+/* faint scan-line / paper-grain over the entire canvas */
+.devices-map-wrap::before {
+    content: '';
+    position: absolute; inset: 0;
+    background:
+        repeating-linear-gradient(
+            0deg,
+            transparent 0 2px,
+            rgba(255, 255, 255, 0.012) 2px 3px
+        );
+    pointer-events: none;
+    mix-blend-mode: overlay;
+    z-index: 1;
+}
+
+.devices-map-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    position: relative;
+    z-index: 0;
+    overflow: hidden;
+    cursor: default;
+}
+
+/* --- Background / grain ---------------------------------------------- */
+.devices-grain-dot {
+    fill: var(--map-ink);
+    opacity: 0.018;
+}
+
+/* --- Grid hierarchy --------------------------------------------------- */
+.devices-grid-major {
+    stroke: var(--map-rule);
+    stroke-width: 0.6;
+    vector-effect: non-scaling-stroke;
+    fill: none;
+}
+.devices-grid-minor {
+    stroke: var(--map-rule-soft);
+    stroke-width: 0.4;
+    vector-effect: non-scaling-stroke;
+    fill: none;
+}
+.devices-axis-emphasis {
+    stroke: var(--map-axis-0);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    fill: none;
+}
+
+.devices-origin-mark {
+    stroke: var(--map-axis-0);
+    stroke-width: 1.2;
+    vector-effect: non-scaling-stroke;
+    fill: none;
+}
+.devices-origin-label {
+    fill: var(--map-axis-0);
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+}
+
+/* --- Axis ticks + labels --------------------------------------------- */
+.devices-axis-tick {
+    stroke: var(--map-ink-mute);
+    stroke-width: 0.8;
+    vector-effect: non-scaling-stroke;
+}
+.devices-axis-label-svg {
+    fill: var(--map-ink-mute);
+    font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
+    font-variant-numeric: tabular-nums;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+}
+
+/* --- "Beyond" — implicit hatched danger envelope ---------------------- */
+/* The beyond layer fills the whole viewport with a diagonal hatch in the
+   red zone-color. Optimal and Maximal rects paint above it, leaving the
+   hatch visible only outside the working region. */
+.devices-beyond-fill {
+    fill: url(#devices-map-hatch-red);
+    pointer-events: none;
+}
+.devices-hatch-line { stroke: rgba(var(--map-zone-red), 0.32); stroke-width: 1; }
+
+/* --- Coverslip reference outline ------------------------------------- */
+.devices-coverslip-outline {
+    fill: none;
+    stroke: var(--map-ink-faint);
+    stroke-width: 1;
+    stroke-dasharray: 4 6;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+}
+.devices-coverslip-label {
+    fill: var(--map-ink-mute);
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    letter-spacing: 0.04em;
+    pointer-events: none;
+}
+
+/* --- Zones (cartographic working-region bands) ----------------------- */
+/* Slightly higher opacity than before so the zone rects clearly occlude
+   the red hatch behind them — the working region reads as a "carved out"
+   safe window in the danger envelope. */
+.devices-zone {
+    fill: rgba(var(--zone-rgb, 90, 168, 122), 0.22);
+    stroke: rgba(var(--zone-rgb, 90, 168, 122), 0.70);
+    stroke-width: 1.2;
+    stroke-dasharray: 5 3;
+    vector-effect: non-scaling-stroke;
+}
+.devices-zone-green  { --zone-rgb: var(--map-zone-green); }
+.devices-zone-orange { --zone-rgb: var(--map-zone-orange); }
+
+.devices-zone-label {
+    fill: rgba(var(--zone-rgb, 90, 168, 122), 0.85);
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    font-weight: 700;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+}
+
+/* --- The "you-are-here" marker --------------------------------------- */
+#devices-map-marker.hidden { display: none; }
+.devices-marker-dot {
+    fill: var(--map-accent);
+    stroke: var(--map-paper);
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+    transition: cx 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                cy 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.devices-marker-ring {
+    fill: none;
+    stroke: var(--map-accent);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    transition: cx 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                cy 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.devices-marker-pulse {
+    fill: var(--map-accent);
+    opacity: 0;
+    transition: cx 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+                cy 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    animation: devices-marker-pulse 2.2s ease-out infinite;
+    transform-origin: center;
+}
+@keyframes devices-marker-pulse {
+    0%   { opacity: 0.35; r: 6; }
+    100% { opacity: 0;    r: 28; }
+}
+
+/* --- Overlay panels (compass, readout, scalebar, legend, edit) ------- */
+.devices-compass,
+.devices-map-readout,
+.devices-scalebar,
+.devices-map-legend,
+.devices-edit-strip {
+    position: absolute;
+    z-index: 4;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    color: var(--map-ink);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+}
+
+/* Compass / +X +Y indicator — small, top-left of canvas */
+.devices-compass {
+    top: 0.85rem;
+    left: 0.85rem;
+    width: 56px;
+    height: 56px;
+    padding: 0;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 50%;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+.devices-compass svg { display: block; }
+.devices-compass-ring {
+    fill: none;
+    stroke: var(--map-rule);
+    stroke-width: 1;
+    stroke-dasharray: 1 2;
+}
+.devices-compass-y { stroke: var(--map-warm);   stroke-width: 1.4; stroke-linecap: round; }
+.devices-compass-x { stroke: var(--map-accent); stroke-width: 1.4; stroke-linecap: round; }
+.devices-compass-hub { fill: var(--map-ink-mute); }
+.devices-compass-label {
+    fill: var(--map-ink-mute);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 7.5px;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+/* Station readout — top-right, multi-line */
+.devices-map-readout {
+    top: 0.85rem;
+    right: 0.85rem;
+    min-width: 220px;
+    padding: 0.55rem 0.85rem 0.65rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 3px;
+    pointer-events: none;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+.devices-readout-head {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    padding-bottom: 0.4rem;
+    margin-bottom: 0.4rem;
+    border-bottom: 1px dashed var(--map-rule);
+}
+.devices-readout-led {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--map-accent);
+    box-shadow: 0 0 8px var(--map-accent);
+    animation: devices-led-blink 2.4s ease-in-out infinite;
+}
+@keyframes devices-led-blink {
+    0%, 70%, 100% { opacity: 1; }
+    35% { opacity: 0.45; }
+}
+.devices-readout-title {
+    flex: 1;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: var(--map-ink);
+    font-weight: 600;
+}
+.devices-readout-unit {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 0.78rem;
+    color: var(--map-ink-mute);
+    line-height: 1;
+}
+.devices-readout-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+.devices-readout-row {
+    display: grid;
+    grid-template-columns: 18px 1fr;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.devices-readout-axis {
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    color: var(--map-ink-mute);
+    font-size: 0.95rem;
+    line-height: 1;
+}
+.devices-readout-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.05rem;
+    font-weight: 500;
+    letter-spacing: 0.01em;
+    color: var(--map-ink);
+    text-align: right;
+}
+
+/* Bottom-camera thumbnail panel — sits above the scale bar in the
+   bottom-left column. Hidden until first activation. */
+.devices-camera-panel {
+    position: absolute;
+    bottom: 5.2rem;
+    left: 0.85rem;
+    width: 260px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0.5rem 0.6rem 0.55rem;
+    background: var(--map-overlay-bg-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.32);
+    z-index: 4;
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    font-family: 'Inter Tight', system-ui, sans-serif;
+}
+.devices-camera-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.devices-camera-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--map-ink);
+}
+.devices-camera-led {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--map-ink-mute);
+}
+.devices-camera-led.live {
+    background: var(--map-accent);
+    box-shadow: 0 0 8px var(--map-accent);
+    animation: devices-led-blink 2.4s ease-in-out infinite;
+}
+.devices-camera-led.stale {
+    background: var(--map-warm);
+}
+.devices-camera-toggle {
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.18rem 0.55rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.devices-camera-toggle:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+.devices-camera-toggle.active {
+    background: var(--map-accent);
+    color: var(--map-paper);
+    border-color: var(--map-accent);
+}
+.devices-camera-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: var(--map-paper);
+    border-radius: 3px;
+    overflow: hidden;
+    border: 1px solid var(--map-overlay-edge);
+}
+.devices-camera-img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.devices-camera-img.has-frame { opacity: 1; }
+
+.devices-camera-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    color: var(--map-ink-mute);
+    pointer-events: none;
+}
+.devices-camera-placeholder[hidden] { display: none; }
+.devices-camera-placeholder-icon { color: var(--map-ink-faint); }
+.devices-camera-placeholder-text {
+    font-size: 0.66rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+
+.devices-camera-foot {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem;
+}
+.devices-camera-meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.66rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--map-ink-mute);
+    letter-spacing: 0.02em;
+}
+
+/* Scale bar — bottom-left */
+.devices-scalebar {
+    bottom: 0.85rem;
+    left: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    align-items: flex-start;
+    padding: 0.45rem 0.7rem 0.5rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 3px;
+    pointer-events: none;
+}
+.devices-scalebar-track {
+    width: 120px;
+    height: 14px;
+}
+.devices-scalebar-svg { width: 100%; height: 100%; display: block; }
+.devices-scalebar-line { stroke: var(--map-ink); stroke-width: 1; }
+.devices-scalebar-tick { stroke: var(--map-ink); stroke-width: 1; }
+.devices-scalebar-tick-mid { stroke: var(--map-ink-mute); }
+.devices-scalebar-caption {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+}
+.devices-scalebar-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--map-ink);
+    font-variant-numeric: tabular-nums;
+}
+.devices-scalebar-meta {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+}
+
+/* Legend (zone key) — bottom-right */
+.devices-map-legend {
+    bottom: 0.85rem;
+    right: 0.85rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    padding: 0.55rem 0.75rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 3px;
+    pointer-events: none;
+}
+.devices-legend-title {
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.6rem;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    padding-bottom: 0.25rem;
+    margin-bottom: 0.1rem;
+    border-bottom: 1px dashed var(--map-rule);
+}
+.devices-legend-item {
+    display: grid;
+    grid-template-columns: 14px 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.72rem;
+    color: var(--map-ink);
+    font-family: 'Inter Tight', sans-serif;
+}
+.devices-legend-swatch {
+    display: inline-block;
+    width: 16px;
+    height: 8px;
+    border-radius: 1px;
+    background: currentColor;
+    box-shadow:
+        inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+        0 0 0 0.5px currentColor;
+    position: relative;
+}
+.devices-legend-swatch::after {
+    /* tiny diagonal hatch streak to match the forbidden-band visual */
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: linear-gradient(45deg,
+        transparent 47%, rgba(0, 0, 0, 0.18) 47%, rgba(0, 0, 0, 0.18) 53%, transparent 53%);
+    background-size: 3px 3px;
+    opacity: 0;
+}
+.devices-legend-swatch.legend-red::after { opacity: 0.6; }
+
+.legend-green  { color: rgb(var(--map-zone-green)); }
+.legend-orange { color: rgb(var(--map-zone-orange)); }
+.legend-red    { color: rgb(var(--map-zone-red)); }
+
+/* =====================================================================
+   Edit-zones strip
+   ===================================================================== */
+.devices-edit-strip {
+    top: 0.85rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0;
+    background: transparent;
+    border: 0;
+    z-index: 6;
+}
+.devices-edit-pencil {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.4rem 0.85rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 999px;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--map-ink);
+    cursor: pointer;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+    transition: transform 0.15s, background 0.15s, border-color 0.15s;
+}
+.devices-edit-pencil:hover {
+    background: var(--map-overlay-bg-2);
+    border-color: var(--map-accent);
+}
+.devices-edit-pencil:hover svg { color: var(--map-accent); }
+.devices-edit-pencil.active {
+    background: var(--map-overlay-bg-2);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+    box-shadow: 0 0 0 1px var(--map-accent), 0 8px 24px rgba(0,0,0,0.32);
+}
+
+/* The expanded flow — chart-annotation strip */
+.devices-edit-flow {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.4rem 0.7rem;
+    background: var(--map-overlay-bg-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 999px;
+    box-shadow: 0 12px 32px rgba(0,0,0,0.34);
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.72rem;
+    color: var(--map-ink);
+    animation: devices-strip-in 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes devices-strip-in {
+    from { opacity: 0; transform: translateY(-4px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+.devices-edit-flow[hidden] { display: none; }
+
+.devices-edit-step {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0.35rem;
+    color: var(--map-ink-mute);
+}
+.devices-edit-step-num {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    font-weight: 600;
+    color: var(--map-warm);
+    letter-spacing: 0.08em;
+}
+.devices-edit-step-text {
+    font-size: 0.66rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.devices-edit-divider {
+    width: 1px;
+    height: 16px;
+    background: var(--map-rule);
+}
+
+/* Zone chips */
+.devices-edit-zone-picker {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+.devices-edit-zone-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.22rem 0.55rem 0.22rem 0.55rem;
+    background: transparent;
+    border: 1px solid currentColor;
+    border-radius: 999px;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+.devices-edit-zone-chip::before {
+    content: '';
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+    box-shadow: 0 0 0 2px rgba(0,0,0,0.18);
+}
+.devices-edit-zone-chip.chip-green   { color: rgb(var(--map-zone-green)); }
+.devices-edit-zone-chip.chip-orange  { color: rgb(var(--map-zone-orange)); }
+.devices-edit-zone-chip.chip-red     { color: rgb(var(--map-zone-red)); }
+.devices-edit-zone-chip:hover {
+    background: rgba(255, 255, 255, 0.06);
+    transform: translateY(-1px);
+}
+.devices-edit-zone-chip.active {
+    background: currentColor;
+    color: #fff;
+    box-shadow: 0 0 0 1px var(--map-overlay-bg-2),
+                0 0 0 3px currentColor;
+}
+.devices-edit-zone-chip.active.chip-green   { background: rgb(var(--map-zone-green));   color: #fff; }
+.devices-edit-zone-chip.active.chip-orange  { background: rgb(var(--map-zone-orange));  color: #fff; }
+.devices-edit-zone-chip.active.chip-red     { background: rgb(var(--map-zone-red));     color: #fff; }
+.devices-edit-zone-chip.active::before {
+    background: #fff;
+    box-shadow: 0 0 0 2px rgba(255,255,255,0.45);
+}
+
+/* Capture button — accent action */
+.devices-edit-capture {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.28rem 0.7rem;
+    background: var(--map-accent);
+    color: var(--map-paper);
+    border: 1px solid var(--map-accent);
+    border-radius: 999px;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.66rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: filter 0.15s, transform 0.15s;
+}
+.devices-edit-capture:hover { filter: brightness(1.08); transform: translateY(-1px); }
+.devices-edit-capture[hidden] { display: none; }
+
+/* Save / cancel */
+.devices-edit-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.devices-edit-save,
+.devices-edit-cancel {
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: 'Inter Tight', sans-serif;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.22rem 0.6rem;
+    border-radius: 999px;
+    color: var(--map-ink);
+}
+.devices-edit-save {
+    color: #4ade80;
+    border-color: rgba(74, 222, 128, 0.4);
+}
+.devices-edit-save:hover {
+    background: rgba(74, 222, 128, 0.14);
+    border-color: rgba(74, 222, 128, 0.6);
+}
+.devices-edit-cancel {
+    color: var(--map-ink-mute);
+}
+.devices-edit-cancel:hover { color: var(--map-ink); }
+
+/* Instruction text under the strip — appears as a chart annotation */
+.devices-edit-instruction {
+    margin: 0;
+    padding: 0.25rem 0.7rem;
+    background: var(--map-overlay-bg);
+    border: 1px dashed var(--map-rule);
+    border-radius: 3px;
+    font-family: 'Instrument Serif', Georgia, serif;
+    font-style: italic;
+    font-size: 0.82rem;
+    color: var(--map-ink);
+    letter-spacing: 0.01em;
+    max-width: 540px;
+    text-align: center;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+}
+.devices-edit-instruction[hidden] { display: none; }
+
+/* Edit-mode visual modifiers */
+.devices-map-wrap.edit-mode .devices-map-svg { cursor: crosshair; }
+.devices-map-wrap.edit-mode {
+    box-shadow:
+        inset 0 0 0 1px var(--map-accent),
+        inset 0 0 120px rgba(0,0,0,0.25);
+}
+
+/* Edit overlay (first-corner point + dashed preview rect) */
+.devices-edit-first-point {
+    fill: var(--map-accent);
+    stroke: var(--map-paper);
+    stroke-width: 1.6;
+    vector-effect: non-scaling-stroke;
+}
+.devices-edit-preview-rect {
+    fill: rgba(34, 211, 238, 0.06);
+    stroke: var(--map-accent);
+    stroke-width: 1.2;
+    stroke-dasharray: 6 4;
+    vector-effect: non-scaling-stroke;
+    pointer-events: none;
+    animation: devices-marching-ants 0.6s linear infinite;
+}
+@keyframes devices-marching-ants {
+    to { stroke-dashoffset: -10; }
+}

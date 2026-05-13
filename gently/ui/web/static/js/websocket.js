@@ -102,7 +102,8 @@ function handleMessage(msg) {
         // High-volume telemetry: skip the events-tab table (which DOM-creates a row
         // per event and would lag every other handler), but still emit to the
         // client event bus so the Devices tab gets the payload.
-        if (msg.event_type !== 'DEVICE_STATE_UPDATE') {
+        if (msg.event_type !== 'DEVICE_STATE_UPDATE' &&
+            msg.event_type !== 'BOTTOM_CAMERA_FRAME') {
             handleFullEvent({
                 event_type: msg.event_type,
                 data: msg.data,

@@ -5,6 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Gently - Microscopy Visualization</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <!-- Devices/Map page fonts: Instrument Serif (display), JetBrains Mono
+         (tabular figures), Inter Tight (UI labels). Scoped to .devices-map-* -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
@@ -226,71 +231,246 @@
 
     <!-- Devices Tab -->
     <div id="devices-content" class="tab-content">
-        <div class="devices-container">
+        <div class="devices-container devices-container-map">
             <div class="devices-header-bar">
-                <h2 class="devices-title">Device State</h2>
+                <div class="devices-header-left">
+                    <h2 class="devices-title"><span class="devices-title-script">Device</span> <em class="devices-title-em">state</em></h2>
+                    <div class="view-switcher" id="devices-view-switcher">
+                        <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
+                        <button class="view-btn" data-view="details" title="Details (d)">Details</button>
+                    </div>
+                </div>
                 <div class="devices-status">
-                    <span class="devices-status-pill" id="devices-stream-pill">disconnected</span>
+                    <span class="devices-status-led" id="devices-stream-pill">disconnected</span>
                     <span class="devices-status-meta" id="devices-status-meta">no data</span>
                 </div>
             </div>
 
-            <div class="devices-positions">
-                <div class="devices-card">
-                    <div class="devices-card-title">XY Stage</div>
-                    <div class="devices-position-row">
-                        <span class="devices-axis-label">X</span>
-                        <span class="devices-axis-value" id="dev-pos-x">—</span>
-                        <span class="devices-axis-unit">µm</span>
+            <!-- Map view: graphical XY position over safe/caution/forbidden zones -->
+            <div class="devices-view devices-view-map" id="devices-view-map">
+                <div class="devices-map-wrap" id="devices-map-wrap">
+                    <!-- SVG ground plane -->
+                    <svg id="devices-map-svg" class="devices-map-svg" preserveAspectRatio="xMidYMid meet">
+                        <defs>
+                            <!-- subtle radial vignette to deepen edges -->
+                            <radialGradient id="devices-map-vignette" cx="50%" cy="50%" r="75%">
+                                <stop offset="55%" stop-color="rgba(0,0,0,0)"/>
+                                <stop offset="100%" stop-color="rgba(0,0,0,0.18)"/>
+                            </radialGradient>
+                            <!-- fine paper-grain pattern for the map background -->
+                            <pattern id="devices-map-grain" x="0" y="0" width="3" height="3" patternUnits="userSpaceOnUse">
+                                <rect width="3" height="3" fill="transparent"/>
+                                <circle cx="0.5" cy="0.5" r="0.35" class="devices-grain-dot"/>
+                            </pattern>
+                            <!-- diagonal hatch for the forbidden band -->
+                            <pattern id="devices-map-hatch-red" patternUnits="userSpaceOnUse" width="6" height="6" patternTransform="rotate(45)">
+                                <line x1="0" y1="0" x2="0" y2="6" class="devices-hatch-line hatch-red"/>
+                            </pattern>
+                        </defs>
+                        <g id="devices-map-bg"></g>
+                        <g id="devices-map-beyond"></g>
+                        <g id="devices-map-grid-minor"></g>
+                        <g id="devices-map-grid-major"></g>
+                        <g id="devices-map-axis-emphasis"></g>
+                        <g id="devices-map-coverslip"></g>
+                        <g id="devices-map-zones"></g>
+                        <g id="devices-map-zone-labels"></g>
+                        <g id="devices-map-origin"></g>
+                        <g id="devices-map-axes"></g>
+                        <g id="devices-map-marker" class="hidden">
+                            <circle id="devices-map-marker-pulse" class="devices-marker-pulse"></circle>
+                            <circle id="devices-map-marker-ring" class="devices-marker-ring"></circle>
+                            <circle id="devices-map-marker-dot"  class="devices-marker-dot"></circle>
+                        </g>
+                        <g id="devices-map-edit-overlay"></g>
+                    </svg>
+
+                    <!-- TOP LEFT: compass / axis indicator -->
+                    <div class="devices-compass" aria-hidden="true">
+                        <svg viewBox="0 0 56 56" width="56" height="56">
+                            <circle cx="28" cy="28" r="22" class="devices-compass-ring"/>
+                            <line x1="28" y1="28" x2="28" y2="8" class="devices-compass-y"/>
+                            <line x1="28" y1="28" x2="48" y2="28" class="devices-compass-x"/>
+                            <circle cx="28" cy="28" r="2.2" class="devices-compass-hub"/>
+                            <text x="28" y="6"  class="devices-compass-label">+Y</text>
+                            <text x="54" y="32" class="devices-compass-label" text-anchor="end">+X</text>
+                        </svg>
                     </div>
-                    <div class="devices-position-row">
-                        <span class="devices-axis-label">Y</span>
-                        <span class="devices-axis-value" id="dev-pos-y">—</span>
-                        <span class="devices-axis-unit">µm</span>
+
+                    <!-- TOP RIGHT: station readout -->
+                    <div class="devices-map-readout" id="devices-map-readout">
+                        <div class="devices-readout-head">
+                            <span class="devices-readout-led" id="devices-readout-led"></span>
+                            <span class="devices-readout-title">XY Stage</span>
+                            <span class="devices-readout-unit">micrometres</span>
+                        </div>
+                        <div class="devices-readout-rows">
+                            <div class="devices-readout-row">
+                                <span class="devices-readout-axis">X</span>
+                                <span class="devices-readout-value" id="devices-map-x">—</span>
+                            </div>
+                            <div class="devices-readout-row">
+                                <span class="devices-readout-axis">Y</span>
+                                <span class="devices-readout-value" id="devices-map-y">—</span>
+                            </div>
+                        </div>
                     </div>
-                </div>
-                <div class="devices-card">
-                    <div class="devices-card-title">Piezo (Z)</div>
-                    <div class="devices-position-row">
-                        <span class="devices-axis-label">Z</span>
-                        <span class="devices-axis-value" id="dev-pos-piezo">—</span>
-                        <span class="devices-axis-unit">µm</span>
+
+                    <!-- BOTTOM LEFT: scale bar -->
+                    <div class="devices-scalebar" id="devices-scalebar">
+                        <div class="devices-scalebar-track">
+                            <svg viewBox="0 0 120 14" preserveAspectRatio="none" class="devices-scalebar-svg">
+                                <line x1="2" y1="9" x2="118" y2="9" class="devices-scalebar-line"/>
+                                <line x1="2" y1="3" x2="2" y2="13" class="devices-scalebar-tick"/>
+                                <line x1="60" y1="6" x2="60" y2="12" class="devices-scalebar-tick devices-scalebar-tick-mid"/>
+                                <line x1="118" y1="3" x2="118" y2="13" class="devices-scalebar-tick"/>
+                            </svg>
+                        </div>
+                        <div class="devices-scalebar-caption">
+                            <span class="devices-scalebar-label" id="devices-scalebar-value">— µm</span>
+                            <span class="devices-scalebar-meta">scale</span>
+                        </div>
                     </div>
-                </div>
-                <div class="devices-card">
-                    <div class="devices-card-title">Galvo Scanner</div>
-                    <div class="devices-position-row">
-                        <span class="devices-axis-label">A</span>
-                        <span class="devices-axis-value" id="dev-pos-galvo-a">—</span>
-                        <span class="devices-axis-unit">°</span>
+
+                    <!-- BOTTOM LEFT (above scale bar): bottom-camera live thumbnail -->
+                    <div class="devices-camera-panel" id="devices-camera-panel">
+                        <div class="devices-camera-head">
+                            <span class="devices-camera-title">
+                                <span class="devices-camera-led" id="devices-camera-led"></span>
+                                <span>Bottom camera</span>
+                            </span>
+                            <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
+                        </div>
+                        <div class="devices-camera-stage">
+                            <img class="devices-camera-img" id="devices-camera-img" alt="bottom camera live frame">
+                            <div class="devices-camera-placeholder" id="devices-camera-placeholder">
+                                <div class="devices-camera-placeholder-icon">
+                                    <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                                        <rect x="3" y="6" width="18" height="13" rx="2"/>
+                                        <circle cx="12" cy="12.5" r="3.6"/>
+                                        <path d="M8 6l1.5-2h5L16 6"/>
+                                    </svg>
+                                </div>
+                                <div class="devices-camera-placeholder-text">Stream off</div>
+                            </div>
+                        </div>
+                        <div class="devices-camera-foot">
+                            <span class="devices-camera-meta" id="devices-camera-meta">—</span>
+                        </div>
                     </div>
-                    <div class="devices-position-row">
-                        <span class="devices-axis-label">B</span>
-                        <span class="devices-axis-value" id="dev-pos-galvo-b">—</span>
-                        <span class="devices-axis-unit">°</span>
+
+                    <!-- BOTTOM RIGHT: zone key (kept; restyled) -->
+                    <div class="devices-map-legend">
+                        <span class="devices-legend-title">Working region</span>
+                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-green"></span><span>Optimal</span></span>
+                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-orange"></span><span>Maximal</span></span>
+                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-red"></span><span>Beyond</span></span>
+                    </div>
+
+                    <!-- TOP CENTER: edit-zones strip (collapsed by default) -->
+                    <div class="devices-edit-strip" id="devices-map-edit-toolbar">
+                        <button class="devices-edit-pencil" id="devices-edit-toggle" title="Redefine zones (e)" aria-label="Edit zones">
+                            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3z"/>
+                                <path d="M9.5 4l2.5 2.5"/>
+                            </svg>
+                            <span>Edit zones</span>
+                        </button>
+                        <div class="devices-edit-flow" hidden>
+                            <span class="devices-edit-step">
+                                <span class="devices-edit-step-num">01</span>
+                                <span class="devices-edit-step-text">Pick a zone</span>
+                            </span>
+                            <span class="devices-edit-zone-picker" id="devices-edit-zone-picker">
+                                <button class="devices-edit-zone-chip chip-green"  data-zone="green">Optimal</button>
+                                <button class="devices-edit-zone-chip chip-orange" data-zone="orange">Maximal</button>
+                            </span>
+                            <span class="devices-edit-divider"></span>
+                            <span class="devices-edit-step">
+                                <span class="devices-edit-step-num">02</span>
+                                <span class="devices-edit-step-text">Capture corners</span>
+                            </span>
+                            <button class="devices-edit-capture" id="devices-edit-capture" hidden title="Use the live stage XY as the next corner">
+                                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <circle cx="8" cy="8" r="6.2"/>
+                                    <circle cx="8" cy="8" r="1.6" fill="currentColor"/>
+                                    <line x1="8" y1="1" x2="8" y2="3"/>
+                                    <line x1="8" y1="13" x2="8" y2="15"/>
+                                    <line x1="1" y1="8" x2="3" y2="8"/>
+                                    <line x1="13" y1="8" x2="15" y2="8"/>
+                                </svg>
+                                <span>Capture XY</span>
+                            </button>
+                            <span class="devices-edit-divider"></span>
+                            <span class="devices-edit-actions" id="devices-edit-actions">
+                                <button class="devices-edit-save"   id="devices-edit-save">Save</button>
+                                <button class="devices-edit-cancel" id="devices-edit-cancel">Cancel</button>
+                            </span>
+                        </div>
+                        <p class="devices-edit-instruction" id="devices-edit-instruction" hidden></p>
                     </div>
                 </div>
             </div>
 
-            <div class="devices-properties">
-                <div class="devices-properties-header">
-                    <h3 class="devices-properties-title">Properties</h3>
-                    <input type="text" class="devices-filter" id="devices-filter" placeholder="Filter devices or properties…">
+            <!-- Details view: existing position cards + properties table -->
+            <div class="devices-view devices-view-details" id="devices-view-details" style="display:none">
+                <div class="devices-positions">
+                    <div class="devices-card">
+                        <div class="devices-card-title">XY Stage</div>
+                        <div class="devices-position-row">
+                            <span class="devices-axis-label">X</span>
+                            <span class="devices-axis-value" id="dev-pos-x">—</span>
+                            <span class="devices-axis-unit">µm</span>
+                        </div>
+                        <div class="devices-position-row">
+                            <span class="devices-axis-label">Y</span>
+                            <span class="devices-axis-value" id="dev-pos-y">—</span>
+                            <span class="devices-axis-unit">µm</span>
+                        </div>
+                    </div>
+                    <div class="devices-card">
+                        <div class="devices-card-title">Piezo (Z)</div>
+                        <div class="devices-position-row">
+                            <span class="devices-axis-label">Z</span>
+                            <span class="devices-axis-value" id="dev-pos-piezo">—</span>
+                            <span class="devices-axis-unit">µm</span>
+                        </div>
+                    </div>
+                    <div class="devices-card">
+                        <div class="devices-card-title">Galvo Scanner</div>
+                        <div class="devices-position-row">
+                            <span class="devices-axis-label">A</span>
+                            <span class="devices-axis-value" id="dev-pos-galvo-a">—</span>
+                            <span class="devices-axis-unit">°</span>
+                        </div>
+                        <div class="devices-position-row">
+                            <span class="devices-axis-label">B</span>
+                            <span class="devices-axis-value" id="dev-pos-galvo-b">—</span>
+                            <span class="devices-axis-unit">°</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="devices-properties-table-wrap">
-                    <table class="devices-table">
-                        <thead>
-                            <tr>
-                                <th class="dev-col-device">Device</th>
-                                <th class="dev-col-type">Type</th>
-                                <th class="dev-col-prop">Property</th>
-                                <th class="dev-col-value">Value</th>
-                            </tr>
-                        </thead>
-                        <tbody id="devices-tbody">
-                            <tr class="devices-empty-row"><td colspan="4">Waiting for first state update…</td></tr>
-                        </tbody>
-                    </table>
+
+                <div class="devices-properties">
+                    <div class="devices-properties-header">
+                        <h3 class="devices-properties-title">Properties</h3>
+                        <input type="text" class="devices-filter" id="devices-filter" placeholder="Filter devices or properties…">
+                    </div>
+                    <div class="devices-properties-table-wrap">
+                        <table class="devices-table">
+                            <thead>
+                                <tr>
+                                    <th class="dev-col-device">Device</th>
+                                    <th class="dev-col-type">Type</th>
+                                    <th class="dev-col-prop">Property</th>
+                                    <th class="dev-col-value">Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="devices-tbody">
+                                <tr class="devices-empty-row"><td colspan="4">Waiting for first state update…</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
         </div>

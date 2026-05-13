@@ -1,0 +1,21 @@
+xy_stage:
+  units: um
+  # Two editable zones: the inner green band is the OPTIMAL working region,
+  # the outer orange band is the MAXIMAL acceptable region. Everything beyond
+  # the orange band is implicit "beyond" — painted as a hatched danger area
+  # by the renderer, not user-editable.
+  zones:
+  - color: green
+    x: [2000.0, 4000.0]
+    y: [-1000.0, 1000.0]
+  - color: orange
+    x: [1800.0, 4200.0]
+    y: [-1200.0, 1200.0]
+
+# Optional 50x24 mm coverslip reference outline, centered on the stage point
+# the operator considers the coverslip centre. Drawn as a faint dashed rect
+# so the operator can see the safe zones in context of the physical slide.
+# Remove this block to hide the outline.
+coverslip:
+  center_um: [3000.0, 0.0]
+  size_mm:   [50.0, 24.0]

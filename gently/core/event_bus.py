@@ -81,6 +81,7 @@ class EventType(Enum):
     FOCUS_CHANGED = auto()
     LASER_CHANGED = auto()
     DEVICE_STATE_UPDATE = auto()   # Periodic device-state snapshot from device layer
+    BOTTOM_CAMERA_FRAME = auto()   # Live JPEG frame from the bottom camera stream
 
     # System events
     ERROR_OCCURRED = auto()
@@ -132,6 +133,7 @@ class EventType(Enum):
 # want to inspect later (acquisitions, perceptions, errors).
 _NO_HISTORY_TYPES = frozenset({
     EventType.DEVICE_STATE_UPDATE,
+    EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
 })
 
 

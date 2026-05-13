@@ -679,6 +679,49 @@ class DiSPIMMicroscope(Microscope):
                     except Exception as exc:
                         logger.warning("Malformed SSE payload skipped: %s", exc)
 
+    async def stream_bottom_camera(self, timeout: Optional[float] = None):
+        """Async generator yielding JPEG frames from the bottom-camera SSE stream.
+
+        Mirrors :meth:`stream_device_states`. The device layer's streamer task
+        is subscriber-gated: it starts on first connect and exits when the
+        last subscriber drops, so simply iterating this generator costs the
+        camera nothing until it's actually running.
+
+        Each yielded payload is the dict the device layer publishes:
+        ``{"t": <unix>, "shape": [h, w], "downsample": int,
+           "mime": "image/jpeg", "jpeg_b64": <str>}``.
+        """
+        self._ensure_connected()
+        client_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=timeout,
+            sock_connect=10.0,
+        )
+        url = f"{self.http_url}/api/bottom_camera/stream"
+        async with self._session.get(url, timeout=client_timeout) as resp:
+            resp.raise_for_status()
+            buf = b""
+            async for chunk in resp.content.iter_any():
+                if not chunk:
+                    continue
+                buf += chunk
+                while b"\n\n" in buf:
+                    event_block, buf = buf.split(b"\n\n", 1)
+                    data_lines = []
+                    for line in event_block.splitlines():
+                        if not line or line.startswith(b":"):
+                            continue
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                    if not data_lines:
+                        continue
+                    raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
+                    try:
+                        import json as _json
+                        yield _json.loads(raw)
+                    except Exception as exc:
+                        logger.warning("Malformed bottom-camera SSE payload skipped: %s", exc)
+
     async def set_camera_led_mode(self, use_led: bool = False) -> Dict:
         """Enable/disable automatic LED for bottom camera captures."""
         return await self._api_post('/api/camera/led_mode', {'use_led': use_led})
