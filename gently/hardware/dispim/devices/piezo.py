@@ -175,6 +175,18 @@ class DiSPIMPiezo:
         """Required for Bluesky"""
         return OrderedDict()
 
+    def setPosition(self, value: float) -> None:
+        """Synchronous move: drive to ``value`` and block until the piezo
+        reports settled. For use outside Bluesky plans — equivalent to
+        ``set(value).wait()`` minus the Status/thread plumbing. Safety bounds
+        match the Bluesky ``set()`` path.
+        """
+        value = float(value)
+        if not (self._limits[0] <= value <= self._limits[1]):
+            raise ValueError(f"Position {value} outside limits {self._limits}")
+        self.core.setPosition(self.name, value)
+        self.core.waitForDevice(self.name)
+
     # Hardware configuration methods for SPIM
     def set_as_focus_device(self):
         """Set this piezo as the Micro-Manager focus device."""

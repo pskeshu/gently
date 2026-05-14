@@ -7,6 +7,7 @@ import logging
 from collections import OrderedDict
 from typing import Tuple
 
+import numpy as np
 from ophyd.status import Status
 import pymmcore
 
@@ -86,6 +87,26 @@ class DiSPIMCamera:
     def describe_configuration(self):
         """Required for Bluesky"""
         return OrderedDict()
+
+    def snap(self) -> np.ndarray:
+        """Synchronous single-frame capture.
+
+        Unlike :meth:`trigger`, which spawns a thread and returns an ophyd
+        Status object (right for Bluesky plan integration), this is a
+        straight blocking call. Use it from continuous capture loops where
+        the per-frame Status/thread overhead isn't worth paying — most
+        notably the bottom-camera live-stream task in the device layer.
+
+        Returns the captured frame as a numpy array. Also updates the
+        device's ``_last_image`` / ``_last_image_time`` cache so that
+        subsequent ``read()`` calls see the same value.
+        """
+        self.core.setCameraDevice(self.name)
+        self.core.snapImage()
+        img = _safe_obtain(self.core.getImage())
+        self._last_image = img
+        self._last_image_time = time.time()
+        return np.asarray(img)
 
     # Hardware configuration methods
     def configure_exposure(self, exposure_ms: float):

@@ -468,9 +468,9 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
 
     uid = yield from bps.open_run(md=metadata)
 
-    # Move galvo to position
+    # Move galvo to position. setPosition() is synchronous — it issues the
+    # set + waits for the device to settle, so no explicit wait needed here.
     galvo.setPosition(float(galvo_deg))
-    core.waitForDevice(galvo.device_name)
     time.sleep(0.2)
 
     # Perform focus sweep
@@ -480,18 +480,14 @@ def calibrate_focus_at_position(camera, galvo, piezo, focus_scorer, core,
     embryo_roi = None
 
     for i, pos in enumerate(positions):
-        # Move piezo
+        # Move piezo (synchronous — waits internally for settle).
         piezo.setPosition(float(pos))
-        core.waitForDevice(piezo.device_name)
         time.sleep(0.1)
 
-        # Snap image
-        core.snapImage()
-        img = core.getImage()
-
-        # Transfer RPyC netref to local numpy array using _safe_obtain()
-        # This is the only way to properly transfer numpy arrays across RPyC boundary
-        img = _safe_obtain(img)
+        # Snap image via the ophyd camera's synchronous capture path;
+        # camera.snap() owns the setCameraDevice + snapImage + getImage trio
+        # plus the _safe_obtain RPyC transfer.
+        img = camera.snap()
 
         # DiSPIM captures two views side-by-side (Path A and Path B)
         # Select the brighter view for focus scoring

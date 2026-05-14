@@ -49,6 +49,18 @@ class _ScannerAxisOffset:
         threading.Thread(target=wait).start()
         return status
 
+    def setPosition(self, value: float) -> None:
+        """Synchronous set: writes the offset property and blocks until the
+        device settles. For use outside Bluesky plans (or inside plans that
+        prefer sync semantics) — equivalent to ``set(value).wait()`` minus
+        the Status/thread plumbing. MMCore traffic stays inside this ophyd
+        boundary.
+        """
+        self.scanner.core.setProperty(
+            self.scanner.name, self.property_name, float(value)
+        )
+        self.scanner.core.waitForDevice(self.scanner.name)
+
     def read(self):
         """Read current offset value"""
         try:

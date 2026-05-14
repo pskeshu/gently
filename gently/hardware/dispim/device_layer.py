@@ -76,7 +76,7 @@ class DeviceLayerServer(Service):
         super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
         self.config = None
-        self.core = None
+        self.system = None  # DiSPIMSystem facade — only place this process touches MMCore directly
         self.RE = None
         self.devices = {}
         self.plans = {}
@@ -166,9 +166,6 @@ class DeviceLayerServer(Service):
         self._cam_interval_sec: float = 0.25            # 4 Hz
         self._cam_target_max_dim: int = 360             # ~360px thumbnail
         self._cam_jpeg_quality: int = 55
-        # Cache the last camera selected via setCameraDevice — avoids calling
-        # it on every grab (each call hits the MMCore lock unnecessarily).
-        self._cam_last_selected: Optional[str] = None
 
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
@@ -192,17 +189,19 @@ class DeviceLayerServer(Service):
             self.config = yaml.safe_load(f)
         logger.info("Config loaded from %s", self.config_path)
 
-        # [2/5] Direct MMCore initialization (replaces RPyC hop)
+        # [2/5] MMCore initialization, routed through the DiSPIMSystem facade
+        # so this process never touches `core.*` directly outside the
+        # devices/ package.
         logger.info("[2/5] Initializing Micro-Manager Core (direct)...")
-        import pymmcore
+        from .devices.system import DiSPIMSystem
 
-        self.core = pymmcore.CMMCore()
-        self.core.enableStderrLog(True)
+        self.system = DiSPIMSystem()
+        self.system.enable_stderr_log(True)
 
         # Add MM directory to PATH for device adapters
         mm_directory = self.config.get('mmdirectory', 'C:/Program Files/Micro-Manager-1.4')
         os.environ["PATH"] += os.pathsep + mm_directory
-        self.core.setDeviceAdapterSearchPaths([mm_directory])
+        self.system.set_device_adapter_search_paths([mm_directory])
 
         # Load system configuration
         mm_config = self.config.get('mmconfig', 'MMConfig.cfg')
@@ -212,9 +211,9 @@ class DeviceLayerServer(Service):
             mm_config_path = os.path.join(os.path.dirname(self.config_path), mm_config)
 
         logger.info("Loading: %s", mm_config_path)
-        self.core.loadSystemConfiguration(mm_config_path)
+        self.system.load_system_configuration(mm_config_path)
         logger.info("MMCore initialized (direct, in-process)")
-        logger.info("Loaded devices: %s", self.core.getLoadedDevices())
+        logger.info("Loaded devices: %s", self.system.get_loaded_devices())
 
         # Register MMCore event callback so we get push notifications for
         # property changes, stage moves, exposure changes, etc. — anything the
@@ -230,7 +229,7 @@ class DeviceLayerServer(Service):
         old_stdout = sys.stdout
         sys.stdout = io.StringIO()
         try:
-            self.devices = create_devices_from_mmcore(self.core)
+            self.devices = create_devices_from_mmcore(self.system.core)
         finally:
             sys.stdout = old_stdout
         logger.info("Created %d devices", len(self.devices))
@@ -399,24 +398,30 @@ class DeviceLayerServer(Service):
                 self._state_latest["paused"] = False
 
     def _read_xy_position(self) -> Dict[str, Any]:
-        """Read just the XY stage. Two ASI serial round-trips (~250 ms).
+        """Read just the XY stage via the ophyd device's ``read()``.
 
-        The ASI XYStage adapter sends `W X` and `W Y` as separate commands —
-        the compound `W X Y` form exists but is commented out in the source
-        (multi-card edge cases). This is the hard floor for XY polling.
+        Two ASI serial round-trips (~250 ms) — the cost is in the underlying
+        ASI XYStage adapter (`W X` + `W Y`), not in the ophyd layer. We go
+        through ``xy_stage.read()`` so the only place that touches MMCore is
+        inside the ophyd device class.
         """
         out: Dict[str, Any] = {}
         xy = self.devices.get('xy_stage')
         if xy is not None:
             try:
-                pos = self.core.getXYPosition()
-                out[xy.name] = {"X": float(pos[0]), "Y": float(pos[1]), "kind": "xy_stage"}
+                data = xy.read()
+                value = data[xy.name]['value']
+                out[xy.name] = {
+                    "X": float(value[0]),
+                    "Y": float(value[1]),
+                    "kind": "xy_stage",
+                }
             except Exception as exc:
                 logger.debug("XY position read failed: %s", exc)
         return out
 
     def _read_slow_positions(self) -> Dict[str, Any]:
-        """Read piezo + galvo. Two serial round-trips (~250 ms).
+        """Read piezo + galvo via their ophyd ``read()`` methods.
 
         These rarely change on their own — piezo by Z-knob or commands, galvo
         only programmatically — so a 1 Hz cadence is plenty.
@@ -426,8 +431,9 @@ class DeviceLayerServer(Service):
         piezo = self.devices.get('piezo')
         if piezo is not None:
             try:
+                data = piezo.read()
                 out[piezo.name] = {
-                    "Position": float(self.core.getPosition(piezo.name)),
+                    "Position": float(data[piezo.name]['value']),
                     "kind": "piezo",
                 }
             except Exception as exc:
@@ -436,8 +442,13 @@ class DeviceLayerServer(Service):
         scanner = self.devices.get('scanner')
         if scanner is not None:
             try:
-                a, b = self.core.getGalvoPosition(scanner.name)
-                out[scanner.name] = {"A": float(a), "B": float(b), "kind": "galvo"}
+                data = scanner.read()
+                value = data[scanner.name]['value']
+                out[scanner.name] = {
+                    "A": float(value[0]),
+                    "B": float(value[1]),
+                    "kind": "galvo",
+                }
             except Exception as exc:
                 logger.debug("Galvo position read failed: %s", exc)
 
@@ -446,13 +457,15 @@ class DeviceLayerServer(Service):
     def _read_full_state(self) -> Dict[str, Dict[str, str]]:
         """Snapshot every property of every loaded MM device via the system state cache.
 
-        `updateSystemStateCache()` rereads from hardware, then `getSystemStateCache()`
-        returns the Configuration without further hardware traffic. One bulk MMCore
-        call covers every device — no need to enumerate diSPIM devices by hand.
+        `update_system_state_cache()` rereads from hardware, then
+        `get_system_state_cache()` returns the Configuration without further
+        hardware traffic. One bulk call covers every device — no need to
+        enumerate diSPIM devices by hand. All MMCore traffic routes through
+        the DiSPIMSystem facade.
         """
         try:
-            self.core.updateSystemStateCache()
-            cfg = self.core.getSystemStateCache()
+            self.system.update_system_state_cache()
+            cfg = self.system.get_system_state_cache()
         except Exception as exc:
             logger.debug("System state cache read failed: %s", exc)
             return {}
@@ -476,7 +489,7 @@ class DeviceLayerServer(Service):
         # Tag with device type so the UI can group/format sensibly.
         for dev in list(by_device):
             try:
-                by_device[dev]["__type__"] = int(self.core.getDeviceType(dev))
+                by_device[dev]["__type__"] = self.system.get_device_type(dev)
             except Exception:
                 pass
 
@@ -663,22 +676,17 @@ class DeviceLayerServer(Service):
     # =========================================================================
 
     def _capture_bottom_frame_sync(self) -> Optional[np.ndarray]:
-        """Grab a single frame from the bottom camera. Blocking — call via to_thread.
+        """Grab a single frame via the ophyd device's synchronous ``snap()``.
 
-        Bypasses Bluesky / ophyd to keep the loop light: a snapshot is a
-        snapImage + getImage round-trip, ~exposure-time ms. setCameraDevice
-        is only called when the active camera actually needs to change, so
-        steady-state grabs skip that lock-grab entirely.
+        Blocking — call via ``asyncio.to_thread``. All MMCore traffic happens
+        inside ``DiSPIMCamera.snap()``; the streamer holds no direct core
+        handle.
         """
         cam = self.devices.get('bottom_camera')
         if cam is None:
             return None
         try:
-            if self._cam_last_selected != cam.name:
-                self.core.setCameraDevice(cam.name)
-                self._cam_last_selected = cam.name
-            self.core.snapImage()
-            return np.asarray(self.core.getImage())
+            return cam.snap()
         except Exception as exc:
             logger.debug("Bottom-camera grab failed: %s", exc)
             return None
@@ -856,7 +864,7 @@ class DeviceLayerServer(Service):
 
         self._mm_callback_bridge = _Bridge()
         # MMCore takes ownership; keep a Python ref so it doesn't get GC'd.
-        self.core.registerCallback(self._mm_callback_bridge)
+        self.system.register_callback(self._mm_callback_bridge)
         logger.info("MMCore callback bridge registered")
 
     def _enqueue_callback(self, payload: Dict[str, Any]):
