@@ -1,32 +1,16 @@
-xy_stage:
-  units: um
-  # When the optimal box is auto-detected (pen marks on coverslip), the
-  # maximal box is derived by expanding optimal by this fixed buffer on
-  # each side. Tune per rig as needed.
-  optimal_to_maximal_buffer_um: 200
-  # Two editable zones: the inner green band is the OPTIMAL working region,
-  # the outer orange band is the MAXIMAL acceptable region. Everything beyond
-  # the orange band is implicit "beyond" — painted as a hatched danger area
-  # by the renderer, not user-editable.
-  #
-  # Current values are the operator's manually-measured pen-marked optimal
-  # box corners (also embedded as the XY_STAGE_*_UM hardware-safety constants
-  # in gently/hardware/dispim/devices/stage.py). The hardware refuses to move
-  # past these, so maximal and optimal collapse onto the same rectangle —
-  # there is no operationally-reachable maximal-but-not-optimal ring.
-  zones:
-  - color: green
-    x: [-2252.1, 983.0]
-    y: [-1677.0, 586.6]
-  # No maximal band today — the hardware safety limit coincides with optimal,
-  # so any drawn maximal would either be coincident (visual clutter) or extend
-  # past the hardware envelope (visually misleading). Re-add an orange zone
-  # here when there's a real operationally-meaningful buffer to show.
+# Rig-specific UI configuration.
+#
+# NOTE: XY safety bounds are NOT here. They live as constants in
+#   gently/hardware/dispim/devices/stage.py  (XY_STAGE_*_UM)
+# and are pushed into the ASI Tiger firmware at device-layer boot. The
+# Devices > Map view reads them from the live device-state stream, so
+# editing those constants + restarting the device layer is the only way
+# to change the safety envelope. Single source of truth.
 
-# Optional 50x24 mm coverslip reference outline, centered on the stage point
-# the operator considers the coverslip centre. Drawn as a faint dashed rect
-# so the operator can see the safe zones in context of the physical slide.
-# Remove this block to hide the outline.
+# Optional 50x24 mm coverslip reference outline drawn on the Map. Centre is
+# the stage coordinate the operator considers the coverslip centre. Drawn
+# as a faint dashed rect so the operator can see the safety envelope in
+# context of the physical slide. Remove this block to hide the outline.
 coverslip:
-  center_um: [3000.0, 0.0]
+  center_um: [0.0, 0.0]
   size_mm:   [50.0, 24.0]

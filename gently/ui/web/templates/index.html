@@ -282,7 +282,6 @@
                             <circle id="devices-map-marker-ring" class="devices-marker-ring"></circle>
                             <circle id="devices-map-marker-dot"  class="devices-marker-dot"></circle>
                         </g>
-                        <g id="devices-map-edit-overlay"></g>
                     </svg>
 
                     <!-- TOP LEFT: compass / axis indicator -->
@@ -359,55 +358,11 @@
                         </div>
                     </div>
 
-                    <!-- BOTTOM RIGHT: zone key (kept; restyled) -->
+                    <!-- BOTTOM RIGHT: zone key -->
                     <div class="devices-map-legend">
                         <span class="devices-legend-title">Working region</span>
                         <span class="devices-legend-item"><span class="devices-legend-swatch legend-green"></span><span>Optimal</span></span>
-                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-orange"></span><span>Maximal</span></span>
-                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-red"></span><span>Beyond</span></span>
-                    </div>
-
-                    <!-- TOP CENTER: edit-zones strip (collapsed by default) -->
-                    <div class="devices-edit-strip" id="devices-map-edit-toolbar">
-                        <button class="devices-edit-pencil" id="devices-edit-toggle" title="Redefine zones (e)" aria-label="Edit zones">
-                            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M11 2.5l2.5 2.5L5 13.5l-3 .5.5-3z"/>
-                                <path d="M9.5 4l2.5 2.5"/>
-                            </svg>
-                            <span>Edit zones</span>
-                        </button>
-                        <div class="devices-edit-flow" hidden>
-                            <span class="devices-edit-step">
-                                <span class="devices-edit-step-num">01</span>
-                                <span class="devices-edit-step-text">Pick a zone</span>
-                            </span>
-                            <span class="devices-edit-zone-picker" id="devices-edit-zone-picker">
-                                <button class="devices-edit-zone-chip chip-green"  data-zone="green">Optimal</button>
-                                <button class="devices-edit-zone-chip chip-orange" data-zone="orange">Maximal</button>
-                            </span>
-                            <span class="devices-edit-divider"></span>
-                            <span class="devices-edit-step">
-                                <span class="devices-edit-step-num">02</span>
-                                <span class="devices-edit-step-text">Capture corners</span>
-                            </span>
-                            <button class="devices-edit-capture" id="devices-edit-capture" hidden title="Use the live stage XY as the next corner">
-                                <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                    <circle cx="8" cy="8" r="6.2"/>
-                                    <circle cx="8" cy="8" r="1.6" fill="currentColor"/>
-                                    <line x1="8" y1="1" x2="8" y2="3"/>
-                                    <line x1="8" y1="13" x2="8" y2="15"/>
-                                    <line x1="1" y1="8" x2="3" y2="8"/>
-                                    <line x1="13" y1="8" x2="15" y2="8"/>
-                                </svg>
-                                <span>Capture XY</span>
-                            </button>
-                            <span class="devices-edit-divider"></span>
-                            <span class="devices-edit-actions" id="devices-edit-actions">
-                                <button class="devices-edit-save"   id="devices-edit-save">Save</button>
-                                <button class="devices-edit-cancel" id="devices-edit-cancel">Cancel</button>
-                            </span>
-                        </div>
-                        <p class="devices-edit-instruction" id="devices-edit-instruction" hidden></p>
+                        <span class="devices-legend-item"><span class="devices-legend-swatch legend-red"></span><span>Forbidden</span></span>
                     </div>
                 </div>
             </div>
