@@ -32,10 +32,16 @@ logger = logging.getLogger(__name__)
 #      stream (or the XY Stage readout in the Devices > Map view).
 #   4. Edit the four constants below; restart the device-layer process.
 # =========================================================================
-XY_STAGE_X_MIN_UM: float = -3242.55
-XY_STAGE_X_MAX_UM: float = 1676.06
-XY_STAGE_Y_MIN_UM: float = -2531.39
-XY_STAGE_Y_MAX_UM: float = 1461.16
+#
+# Current envelope is INSET from the operator-measured outer corners by
+# ~840–860 µm. The inset absorbs the joystick's deceleration-overshoot
+# (we measured ~13 µm at slow joystick, up to ~683 µm at fast). With this
+# inset, even a fast-joystick overshoot still lands inside the true safe
+# travel envelope the operator measured by hand.
+XY_STAGE_X_MIN_UM: float = -2252.1
+XY_STAGE_X_MAX_UM: float =   983.0
+XY_STAGE_Y_MIN_UM: float = -1677.0
+XY_STAGE_Y_MAX_UM: float =   586.6
 
 
 class DiSPIMZstage:
@@ -216,6 +222,115 @@ class DiSPIMXYStage:
     def describe_configuration(self):
         """Required for Bluesky"""
         return OrderedDict()
+
+    # ASI Tiger firmware soft-limit names. The controller enforces these for
+    # ALL motion sources — joystick, MMCore, scripting — so writing them is
+    # the right way to plug the joystick-bypass hole. Property values are in
+    # millimetres on the ASI adapter; we feed it from the *_UM constants by
+    # dividing by 1000.
+    _ASI_LIMIT_PROPS = {
+        "x_min": "LowerLimX(mm)",
+        "x_max": "UpperLimX(mm)",
+        "y_min": "LowerLimY(mm)",
+        "y_max": "UpperLimY(mm)",
+    }
+
+    def set_firmware_limits(
+        self,
+        x_min_mm: float, x_max_mm: float,
+        y_min_mm: float, y_max_mm: float,
+        *,
+        readback_tolerance_mm: float = 0.001,
+    ) -> None:
+        """Push XY safety bounds down to the ASI Tiger controller firmware.
+
+        The Tiger firmware enforces these against every motion source —
+        joystick included — so this closes the bypass where the joystick
+        could otherwise drive the stage past Layer-1 software limits.
+
+        Refuses to write if the current position is outside the requested
+        envelope (controller behaviour is undefined when limits exclude the
+        live position). Operator should drive into bounds first.
+
+        Read-back is verified after every write — if the controller silently
+        clamped or rejected a value (e.g. unit mismatch, advanced-properties
+        gate, firmware quirk), this raises HardwareError so the device layer
+        refuses to start in an unsafe state.
+
+        Parameters
+        ----------
+        x_min_mm, x_max_mm, y_min_mm, y_max_mm : float
+            Soft-limit values in millimetres. The XY_STAGE_*_UM constants in
+            this module are the source of truth — pass them divided by 1000.
+        readback_tolerance_mm : float
+            How close the read-back value must be to the written value to
+            count as accepted. Default 1 µm — well below any meaningful
+            envelope precision.
+
+        Raises
+        ------
+        ValueError
+            If current XY is outside the requested envelope.
+        HardwareError
+            If a write didn't take or the read-back differs by more than
+            ``readback_tolerance_mm``.
+        """
+        # 1. Sanity-check the requested values against each other.
+        if x_min_mm >= x_max_mm or y_min_mm >= y_max_mm:
+            raise ValueError(
+                f"Degenerate firmware limit envelope: "
+                f"x=[{x_min_mm}, {x_max_mm}] y=[{y_min_mm}, {y_max_mm}]"
+            )
+
+        # 2. Refuse if the stage is currently outside the new envelope.
+        # Allow a small encoder-noise tolerance — sub-µm differences between
+        # the operator's recorded corner and the live encoder reading
+        # shouldn't block startup. The slop is far below the deceleration
+        # overshoot we're trying to absorb anyway.
+        POS_SLOP_MM = 0.001  # 1 µm
+        try:
+            cur = self.read()[self.name]['value']
+            cur_x_mm = float(cur[0]) / 1000.0
+            cur_y_mm = float(cur[1]) / 1000.0
+        except Exception as exc:
+            raise HardwareError(f"Could not read current XY to validate limits: {exc}")
+        if not (x_min_mm - POS_SLOP_MM <= cur_x_mm <= x_max_mm + POS_SLOP_MM and
+                y_min_mm - POS_SLOP_MM <= cur_y_mm <= y_max_mm + POS_SLOP_MM):
+            raise ValueError(
+                f"Current stage position ({cur_x_mm * 1000:.2f}, {cur_y_mm * 1000:.2f}) µm "
+                f"is outside the requested firmware envelope "
+                f"x=[{x_min_mm * 1000:.2f}, {x_max_mm * 1000:.2f}] µm "
+                f"y=[{y_min_mm * 1000:.2f}, {y_max_mm * 1000:.2f}] µm — "
+                f"drive the stage into bounds before applying firmware limits."
+            )
+
+        # 3. Write each limit, read it back, and verify.
+        targets = [
+            (self._ASI_LIMIT_PROPS["x_min"], x_min_mm),
+            (self._ASI_LIMIT_PROPS["x_max"], x_max_mm),
+            (self._ASI_LIMIT_PROPS["y_min"], y_min_mm),
+            (self._ASI_LIMIT_PROPS["y_max"], y_max_mm),
+        ]
+        for prop, value_mm in targets:
+            try:
+                self.core.setProperty(self.name, prop, float(value_mm))
+            except RuntimeError as exc:
+                raise HardwareError(
+                    f"setProperty {prop}={value_mm} failed: {exc}. The ASI adapter "
+                    f"may require EnableAdvancedProperties=Yes for this write."
+                )
+            try:
+                got = float(self.core.getProperty(self.name, prop))
+            except RuntimeError as exc:
+                raise HardwareError(f"getProperty {prop} read-back failed: {exc}")
+            if abs(got - value_mm) > readback_tolerance_mm:
+                raise HardwareError(
+                    f"Firmware limit read-back mismatch for {prop}: "
+                    f"wrote {value_mm} mm, controller reports {got} mm "
+                    f"(tolerance {readback_tolerance_mm} mm). "
+                    f"The controller may have rejected or rescaled the value."
+                )
+            logger.info("ASI firmware limit %s = %.4f mm (verified)", prop, got)
 
     # Synchronous convenience methods (usable outside RunEngine)
     def get_position(self) -> np.ndarray:
