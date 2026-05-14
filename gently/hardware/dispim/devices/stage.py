@@ -17,6 +17,27 @@ from gently.exceptions import HardwareError, StageMovementError
 logger = logging.getLogger(__name__)
 
 
+# =========================================================================
+# XY-STAGE HARDWARE SAFETY LIMITS — absolute MMCore micrometres.
+#
+# Layer 0 of the motion-safety stack. Every XY move planned by any layer
+# above (Bluesky plans, agent orchestrators, UI tools) is bounded here.
+# No layer above can widen these — they are not constructor kwargs and
+# DiSPIMXYStage exposes no setter for them.
+#
+# Update only after physically verifying the new bounds on the rig:
+#   1. Drive the stage manually to each corner using the joystick.
+#   2. Confirm no collisions with the SPIM head, optics, or sample holder.
+#   3. Read the absolute MMCore X / Y values from the live device-state
+#      stream (or the XY Stage readout in the Devices > Map view).
+#   4. Edit the four constants below; restart the device-layer process.
+# =========================================================================
+XY_STAGE_X_MIN_UM: float = -3242.55
+XY_STAGE_X_MAX_UM: float = 1676.06
+XY_STAGE_Y_MIN_UM: float = -2531.39
+XY_STAGE_Y_MAX_UM: float = 1461.16
+
+
 class DiSPIMZstage:
     """
     DiSPIM Z Stage positioner - works with bps.mv(z_stage, position)
@@ -108,22 +129,20 @@ class DiSPIMXYStage:
     Based on deepthought XYStage implementation
     """
 
-    def __init__(self, name: str, core: pymmcore.CMMCore,
-                 x_limits: Tuple[float, float] = (-500.0, 500.0),
-                 y_limits: Tuple[float, float] = (-500.0, 500.0)):
+    def __init__(self, name: str, core: pymmcore.CMMCore):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
-        self._x_limits = x_limits
-        self._y_limits = y_limits
 
     @property
-    def x_limits(self):
-        return self._x_limits
+    def x_limits(self) -> Tuple[float, float]:
+        """Read-only view of the hardware safety limits (module constants)."""
+        return (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
 
     @property
-    def y_limits(self):
-        return self._y_limits
+    def y_limits(self) -> Tuple[float, float]:
+        """Read-only view of the hardware safety limits (module constants)."""
+        return (XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM)
 
     def set(self, position):
         """Move XY stage to position [x, y] - called by bps.mv(xy_stage, [x, y])"""
@@ -132,11 +151,18 @@ class DiSPIMXYStage:
             x = float(x)
             y = float(y)
 
-            # Safety checks
-            if not (self._x_limits[0] <= x <= self._x_limits[1]):
-                raise ValueError(f"X position {x} outside limits {self._x_limits}")
-            if not (self._y_limits[0] <= y <= self._y_limits[1]):
-                raise ValueError(f"Y position {y} outside limits {self._y_limits}")
+            # Hardware safety check — values pinned to the module-level
+            # XY_STAGE_*_UM constants; nothing above this layer can widen them.
+            if not (XY_STAGE_X_MIN_UM <= x <= XY_STAGE_X_MAX_UM):
+                raise ValueError(
+                    f"X position {x} outside hardware limits "
+                    f"[{XY_STAGE_X_MIN_UM}, {XY_STAGE_X_MAX_UM}]"
+                )
+            if not (XY_STAGE_Y_MIN_UM <= y <= XY_STAGE_Y_MAX_UM):
+                raise ValueError(
+                    f"Y position {y} outside hardware limits "
+                    f"[{XY_STAGE_Y_MIN_UM}, {XY_STAGE_Y_MAX_UM}]"
+                )
 
             status = Status(obj=self, timeout=30)
 
