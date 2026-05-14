@@ -31,13 +31,31 @@ class DiSPIMCamera:
         self._last_image = None
         self._last_image_time = None
 
+    def _ensure_active(self) -> None:
+        """Make this the default MMCore camera if it isn't already.
+
+        Single source of truth for the set-camera step. Calling
+        ``setCameraDevice`` unconditionally fires MMCore's
+        ``onConfigGroupChanged`` callback and logs ``"Default camera set
+        to ..."`` every time — at streaming cadence (≥4 Hz) that's noise.
+        Querying ``getCameraDevice`` first is a cheap getter (no driver
+        round-trip, no callbacks) and lets us skip the set entirely when
+        the camera is already active.
+
+        Applies uniformly to every DiSPIMCamera subclass — the bottom
+        camera, HamCam, anything we add later — so the optimisation is
+        not specific to the live streamer.
+        """
+        if self.core.getCameraDevice() != self.name:
+            self.core.setCameraDevice(self.name)
+
     def trigger(self):
         """Trigger image acquisition - called by bps.trigger()"""
 
         def wait():
             try:
                 # Set camera and snap
-                self.core.setCameraDevice(self.name)
+                self._ensure_active()
                 self.core.snapImage()
 
                 # Use _safe_obtain to transfer numpy array properly
@@ -100,8 +118,13 @@ class DiSPIMCamera:
         Returns the captured frame as a numpy array. Also updates the
         device's ``_last_image`` / ``_last_image_time`` cache so that
         subsequent ``read()`` calls see the same value.
+
+        Skips ``setCameraDevice`` when this camera is already the active
+        one (via :meth:`_ensure_active`) — avoids spurious MMCore
+        ``onConfigGroupChanged`` callbacks and log noise at streaming
+        cadence.
         """
-        self.core.setCameraDevice(self.name)
+        self._ensure_active()
         self.core.snapImage()
         img = _safe_obtain(self.core.getImage())
         self._last_image = img
@@ -127,7 +150,7 @@ class DiSPIMCamera:
         It automatically selects this camera as the active device and allows
         hardware time to settle after configuration.
         """
-        self.core.setCameraDevice(self.name)
+        self._ensure_active()
         self.core.setExposure(self.name, exposure_ms)
         self.core.waitForDevice(self.name)
 
@@ -182,7 +205,7 @@ class DiSPIMCamera:
         roi : Tuple[int, int, int, int], optional
             Region of interest as (x, y, width, height). Default is diSPIM light sheet ROI.
         """
-        self.core.setCameraDevice(self.name)
+        self._ensure_active()
         self.set_roi(*roi)
         self.set_trigger_mode("INTERNAL")
         self.set_sensor_mode("AREA")
@@ -205,7 +228,7 @@ class DiSPIMCamera:
             Region of interest as (x, y, width, height). Default is diSPIM light sheet ROI.
             CRITICAL: ROI must be set before hardware triggering!
         """
-        self.core.setCameraDevice(self.name)
+        self._ensure_active()
         self.set_roi(*roi)  # CRITICAL: ROI must be set for hardware triggering
         self.set_trigger_mode("EXTERNAL")
         self.set_sensor_mode("PROGRESSIVE")  # CRITICAL for SPIM!
@@ -411,7 +434,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
                     time.sleep(0.1)  # Allow LED to stabilize
 
                 # Capture image
-                self.core.setCameraDevice(self.name)
+                self._ensure_active()
                 self.core.snapImage()
                 self._last_image = _safe_obtain(self.core.getImage())
                 self._last_image_time = time.time()
@@ -453,7 +476,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
         Status
             Ophyd status object for the capture
         """
-        self.core.setCameraDevice(self.name)
+        self._ensure_active()
         self.core.setExposure(self.name, exposure_ms)
         self.core.waitForDevice(self.name)
         return self.trigger()  # LED automatically handled
