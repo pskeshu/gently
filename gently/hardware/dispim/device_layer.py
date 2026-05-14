@@ -236,6 +236,43 @@ class DeviceLayerServer(Service):
         for name in self.devices:
             logger.debug("  - %s", name)
 
+        # Push XY safety bounds down to the ASI Tiger firmware so the joystick
+        # can't drive past Layer-1 software limits. The XY_STAGE_*_UM constants
+        # in devices/stage.py are the single source of truth — both the
+        # software set() check and the firmware fence read from them.
+        # Refuses cleanly (no firmware writes) if the stage is currently
+        # outside the requested envelope — operator must drive into bounds
+        # first. We do NOT SaveCardSettings so a code-side limit change always
+        # wins on next device-layer restart (config-as-code).
+        xy_stage = self.devices.get('xy_stage')
+        if xy_stage is not None:
+            from .devices.stage import (
+                XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM,
+                XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM,
+            )
+            try:
+                xy_stage.set_firmware_limits(
+                    x_min_mm=XY_STAGE_X_MIN_UM / 1000.0,
+                    x_max_mm=XY_STAGE_X_MAX_UM / 1000.0,
+                    y_min_mm=XY_STAGE_Y_MIN_UM / 1000.0,
+                    y_max_mm=XY_STAGE_Y_MAX_UM / 1000.0,
+                )
+                logger.info(
+                    "ASI Tiger firmware soft limits applied: "
+                    "X=[%.2f, %.2f] µm, Y=[%.2f, %.2f] µm",
+                    XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM,
+                    XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM,
+                )
+            except ValueError as exc:
+                # Current position is outside the envelope — refuse to start
+                # in an inconsistent state where firmware limits and live
+                # position disagree.
+                logger.error("Firmware limits refused: %s", exc)
+                raise
+            except Exception as exc:
+                logger.error("Could not apply ASI firmware soft limits: %s", exc)
+                raise
+
         # [4/5] Initialize RunEngine
         logger.info("[4/5] Initializing RunEngine...")
         self.RE = RunEngine({})
