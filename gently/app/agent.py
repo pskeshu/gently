@@ -151,6 +151,11 @@ class MicroscopyAgent:
         # candidate orchestrator architectures.
         self.event_capture = None
 
+        # Decision log — what production decided at each turn (tool calls,
+        # response text, prompt hash). Pairs with event capture so a
+        # candidate replay can be diffed against production turn-by-turn.
+        self.decision_log = None
+
         # Timelapse orchestrator (initialized when microscope connected)
         self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
 
@@ -218,6 +223,10 @@ class MicroscopyAgent:
         # high-volume telemetry types (DEVICE_STATE_UPDATE / BOTTOM_CAMERA_FRAME)
         # by default so a long timelapse doesn't bury the meaningful events.
         self._init_event_capture()
+
+        # Open the per-session production decision log and hand it to the
+        # conversation manager so each Claude round-trip is captured.
+        self._init_decision_log()
 
         # Wire interaction logger and choice handler to conversation manager
         self.conversation.interaction_logger = self.interaction_logger
@@ -501,6 +510,43 @@ class MicroscopyAgent:
             except Exception:
                 logging.getLogger(__name__).exception("EventCapture stop failed")
             self.event_capture = None
+
+    def _init_decision_log(self):
+        """Open the per-session decisions.jsonl and wire it into conversation.
+
+        Each call to ConversationManager.call_claude writes one Decision
+        row (success or error) describing what production decided for the
+        user turn. Shadow candidates write their own rows into separate
+        logs and the two are diffed offline.
+        """
+        from gently.eval import DecisionLog
+        try:
+            session_dir = None
+            sid = self.session_id
+            if self.store is not None and sid:
+                session_dir = self.store._session_dir(sid)
+            if session_dir is None:
+                logging.getLogger(__name__).debug(
+                    "DecisionLog: no session dir for %s — skipping", sid)
+                return
+            path = session_dir / "decisions.jsonl"
+            self.decision_log = DecisionLog(path)
+            self.decision_log.open()
+            self.conversation.decision_log = self.decision_log
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to init decision log")
+            self.decision_log = None
+
+    def stop_decision_log(self):
+        """Flush + close the decisions.jsonl. Idempotent; safe at shutdown."""
+        if self.decision_log is not None:
+            try:
+                self.decision_log.close()
+            except Exception:
+                logging.getLogger(__name__).exception("DecisionLog close failed")
+            self.decision_log = None
+            if hasattr(self, "conversation") and self.conversation is not None:
+                self.conversation.decision_log = None
 
     def _init_timelapse_orchestrator(self):
         """Initialize the timelapse orchestrator if microscope is connected."""

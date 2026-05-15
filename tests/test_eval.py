@@ -361,3 +361,201 @@ def test_shadow_runner_watch_filter(tmp_path: Path):
     decs = dlog.read()
     assert len(decs) == 1
     assert decs[0].trigger_detail == "ERROR_OCCURRED"
+
+
+# =============================================================================
+# prompt_hash
+# =============================================================================
+
+def test_prompt_hash_stable_and_distinguishing():
+    """Identical inputs → identical hash; any change → different hash."""
+    from gently.eval import prompt_hash
+    h1 = prompt_hash("sys-A", [{"role": "user", "content": "hi"}])
+    h2 = prompt_hash("sys-A", [{"role": "user", "content": "hi"}])
+    h3 = prompt_hash("sys-A", [{"role": "user", "content": "hello"}])
+    h4 = prompt_hash("sys-B", [{"role": "user", "content": "hi"}])
+    assert h1 == h2
+    assert h1 != h3
+    assert h1 != h4
+    assert len(h1) == 16  # documented short fingerprint length
+
+
+def test_prompt_hash_accepts_list_system_prompt():
+    """Cached system prompts use the list-of-blocks shape; hashing must work."""
+    from gently.eval import prompt_hash
+    list_prompt = [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
+    str_prompt = "sys"
+    # Different shapes, different hashes — that's fine, the point is just
+    # that the list case doesn't raise.
+    h_list = prompt_hash(list_prompt, [])
+    h_str  = prompt_hash(str_prompt,  [])
+    assert isinstance(h_list, str) and isinstance(h_str, str)
+    assert len(h_list) == 16 and len(h_str) == 16
+
+
+# =============================================================================
+# ConversationManager production-decision capture (success + error paths)
+# =============================================================================
+
+def _make_fake_conversation_manager(claude_client):
+    """Build a ConversationManager with a fake Claude client and a no-op
+    tool registry — enough to exercise call_claude's decision-write path."""
+    import asyncio  # noqa: F401  (used by callers)
+    from gently.harness.conversation import ConversationManager
+
+    class _NoopReg:
+        # call_claude doesn't use this directly; tools list is passed in
+        pass
+
+    return ConversationManager(claude_client, "claude-haiku-4-5-20251001", _NoopReg())
+
+
+class _Usage:
+    input_tokens = 10
+    output_tokens = 20
+    cache_creation_input_tokens = 0
+    cache_read_input_tokens = 0
+
+
+class _ToolBlock:
+    type = "tool_use"
+    name = "detect_embryos"
+    input = {"min_confidence": 0.7}
+    id = "t1"
+
+
+class _TextBlock:
+    type = "text"
+    text = "Done."
+
+
+class _R1:
+    stop_reason = "tool_use"
+    content = [_ToolBlock()]
+    usage = _Usage()
+
+
+class _R2:
+    stop_reason = "end_turn"
+    content = [_TextBlock()]
+    usage = _Usage()
+
+
+def test_production_decision_capture_success(tmp_path: Path):
+    """One success turn through call_claude writes one Decision row."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    class _FakeMessages:
+        def create(self, **kw):
+            calls["n"] += 1
+            return _R1() if calls["n"] == 1 else _R2()
+
+    class _FakeClient:
+        messages = _FakeMessages()
+
+    cm = _make_fake_conversation_manager(_FakeClient())
+
+    # Bypass actual tool execution
+    async def fake_exec(content_blocks, interaction):
+        return [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]
+    cm._execute_tools_with_logging = fake_exec
+
+    dlog = DecisionLog(tmp_path / "decisions.jsonl")
+    dlog.open()
+    cm.decision_log = dlog
+
+    async def run():
+        return await cm.call_claude(
+            user_message="find embryos please",
+            system_prompt="system",
+            tools=[],
+            mode="run",
+            auto_save_fn=lambda: None,
+        )
+
+    out = asyncio.run(run())
+    dlog.close()
+
+    assert out == "Done."
+    decs = dlog.read()
+    assert len(decs) == 1
+    d = decs[0]
+    assert d.agent == "production"
+    assert d.trigger is DecisionTrigger.USER_MESSAGE
+    assert d.trigger_detail == "find embryos please"
+    assert d.tool_calls == [{
+        "name": "detect_embryos",
+        "input": {"min_confidence": 0.7},
+        "id": "t1",
+    }]
+    assert d.response_text == "Done."
+    assert d.error is None
+    assert d.prompt_hash is not None and len(d.prompt_hash) == 16
+    assert d.duration_ms is not None and d.duration_ms >= 0
+
+
+def test_production_decision_capture_error(tmp_path: Path):
+    """A failing Claude call writes a Decision with error before re-raising."""
+    import asyncio
+
+    class _BoomMessages:
+        def create(self, **kw):
+            raise RuntimeError("simulated outage")
+
+    class _BoomClient:
+        messages = _BoomMessages()
+
+    cm = _make_fake_conversation_manager(_BoomClient())
+    dlog = DecisionLog(tmp_path / "decisions.jsonl")
+    dlog.open()
+    cm.decision_log = dlog
+
+    async def run():
+        with pytest.raises(RuntimeError, match="simulated outage"):
+            await cm.call_claude(
+                user_message="do something",
+                system_prompt="system",
+                tools=[],
+                mode="run",
+                auto_save_fn=lambda: None,
+            )
+
+    asyncio.run(run())
+    dlog.close()
+    decs = dlog.read()
+    assert len(decs) == 1
+    assert decs[0].error == "simulated outage"
+    assert decs[0].trigger is DecisionTrigger.USER_MESSAGE
+    assert decs[0].response_text and "simulated outage" in decs[0].response_text
+
+
+def test_production_decision_capture_no_log_is_no_op(tmp_path: Path):
+    """No DecisionLog attached → call_claude proceeds normally, no errors."""
+    import asyncio
+
+    calls = {"n": 0}
+
+    class _M:
+        def create(self, **kw):
+            calls["n"] += 1
+            return _R2()  # immediate end_turn, no tool loop
+
+    class _C:
+        messages = _M()
+
+    cm = _make_fake_conversation_manager(_C())
+    assert cm.decision_log is None  # default
+
+    async def run():
+        return await cm.call_claude(
+            user_message="hi",
+            system_prompt="sys",
+            tools=[],
+            mode="run",
+            auto_save_fn=lambda: None,
+        )
+
+    out = asyncio.run(run())
+    assert out == "Done."  # no log to read; we just want no error

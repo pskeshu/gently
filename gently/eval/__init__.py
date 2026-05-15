@@ -17,7 +17,7 @@ See docs/EVAL.md (TODO) for usage.
 
 from .event_capture import EventCapture
 from .event_replay import EventReplay
-from .decision_log import Decision, DecisionLog, DecisionTrigger
+from .decision_log import Decision, DecisionLog, DecisionTrigger, prompt_hash
 from .shadow import OrchestratorCandidate, ShadowRunner, NoOpCandidate
 
 __all__ = [
@@ -26,6 +26,7 @@ __all__ = [
     "Decision",
     "DecisionLog",
     "DecisionTrigger",
+    "prompt_hash",
     "OrchestratorCandidate",
     "ShadowRunner",
     "NoOpCandidate",

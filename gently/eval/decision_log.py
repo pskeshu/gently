@@ -15,6 +15,7 @@ enough to skim across sessions.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
@@ -27,6 +28,28 @@ from typing import Any, Dict, List, Optional
 from .event_capture import _json_default
 
 logger = logging.getLogger(__name__)
+
+
+def prompt_hash(system_prompt: Any, messages: Any) -> str:
+    """Stable short fingerprint of the input the orchestrator saw.
+
+    Two candidates seeing byte-identical (system_prompt, messages) get
+    the same hash; a difference here means they're working from different
+    context, so any decision divergence is expected. Used in shadow A/B
+    to filter out apples-to-oranges comparisons.
+
+    SHA-256 truncated to 16 hex chars — enough to make accidental
+    collisions vanishingly unlikely at the scale of one session's
+    decisions, short enough to skim by eye in a log.
+    """
+    h = hashlib.sha256()
+    if isinstance(system_prompt, str):
+        h.update(system_prompt.encode("utf-8"))
+    else:
+        h.update(json.dumps(system_prompt, sort_keys=True, default=_json_default).encode("utf-8"))
+    h.update(b"\x1f")  # separator so prompt boundary can't be ambiguous
+    h.update(json.dumps(messages, sort_keys=True, default=_json_default).encode("utf-8"))
+    return h.hexdigest()[:16]
 
 
 class DecisionTrigger(str, Enum):
