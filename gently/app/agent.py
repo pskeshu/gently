@@ -146,6 +146,11 @@ class MicroscopyAgent:
         # Interaction logger for structured logging (research data collection)
         self.interaction_logger: Optional[InteractionLogger] = None
 
+        # Event capture — durable log of every EventBus event during this
+        # session. Substrate for offline replay / shadow-mode A/B of
+        # candidate orchestrator architectures.
+        self.event_capture = None
+
         # Timelapse orchestrator (initialized when microscope connected)
         self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
 
@@ -207,6 +212,12 @@ class MicroscopyAgent:
 
         # Initialize interaction logger (for research data collection)
         self._init_interaction_logger()
+
+        # Start event capture into the session folder so offline replay /
+        # shadow-mode testing has a durable input stream. Filters out the
+        # high-volume telemetry types (DEVICE_STATE_UPDATE / BOTTOM_CAMERA_FRAME)
+        # by default so a long timelapse doesn't bury the meaningful events.
+        self._init_event_capture()
 
         # Wire interaction logger and choice handler to conversation manager
         self.conversation.interaction_logger = self.interaction_logger
@@ -456,6 +467,40 @@ class MicroscopyAgent:
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to init interaction logger: {e}")
             self.interaction_logger = None
+
+    def _init_event_capture(self):
+        """Open the per-session events.jsonl capture.
+
+        Resolves the session folder via FileStore._session_dir so the log
+        sits next to session.yaml / interaction_log.jsonl. Silent no-op
+        when the session folder can't be resolved (e.g. test harness with
+        a stripped-down agent) — replay just won't have a log to read.
+        """
+        from gently.eval import EventCapture
+        try:
+            session_dir = None
+            sid = self.session_id
+            if self.store is not None and sid:
+                session_dir = self.store._session_dir(sid)
+            if session_dir is None:
+                logging.getLogger(__name__).debug(
+                    "EventCapture: no session dir for %s — skipping", sid)
+                return
+            path = session_dir / "events.jsonl"
+            self.event_capture = EventCapture(path)
+            self.event_capture.start(self._event_bus)
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to init event capture")
+            self.event_capture = None
+
+    def stop_event_capture(self):
+        """Flush + close the events.jsonl. Idempotent; safe at shutdown."""
+        if self.event_capture is not None:
+            try:
+                self.event_capture.stop()
+            except Exception:
+                logging.getLogger(__name__).exception("EventCapture stop failed")
+            self.event_capture = None
 
     def _init_timelapse_orchestrator(self):
         """Initialize the timelapse orchestrator if microscope is connected."""
