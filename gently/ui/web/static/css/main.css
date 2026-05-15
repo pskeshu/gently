@@ -9436,6 +9436,9 @@ body.modal-open {
    alignment. Coarse reads as an outlined ring (provisional), fine as a
    filled disc (committed). Same hue so the row of embryos still reads as
    one cohort, but visual weight signals calibration state at a glance. */
+.devices-embryo-group {
+    cursor: pointer;
+}
 .devices-embryo-ring {
     fill: rgba(var(--map-embryo), 0.08);
     stroke: rgba(var(--map-embryo), 0.85);
@@ -9459,6 +9462,20 @@ body.modal-open {
     stroke: var(--map-paper);
     stroke-width: 2;
     stroke-linejoin: round;
+}
+
+/* Selected = "picked up" — outlined dashed, hollow fill, brighter label.
+   Click on empty map drops the picked-up embryo at that XY; Delete /
+   Backspace removes it; Escape deselects. */
+.devices-embryo-group.devices-embryo-selected .devices-embryo-ring,
+.devices-embryo-group.devices-embryo-selected .devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.12);
+    stroke: rgba(var(--map-embryo), 1);
+    stroke-width: 2;
+    stroke-dasharray: 4 3;
+}
+.devices-embryo-group.devices-embryo-selected .devices-embryo-label {
+    fill: rgba(var(--map-embryo), 1);
 }
 
 /* --- Overlay panels (compass, readout, scalebar, legend) ------------- */

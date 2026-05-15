@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from gently.ui.web.auth import require_control
 
@@ -64,6 +64,58 @@ def create_router(server) -> APIRouter:
             "gently": True,
             "microscope": microscope_up,
         }
+
+    def _require_agent_with_experiment():
+        """Resolve the live agent from the server bridge, or 503.
+
+        Edit endpoints write through ExperimentState so the notify hook fires
+        EMBRYOS_UPDATE and the Map re-renders without a follow-up fetch.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None or not hasattr(agent, "experiment"):
+            raise HTTPException(status_code=503, detail="Agent not ready")
+        return agent
+
+    @router.put("/api/embryos/{embryo_id}/position",
+                dependencies=[Depends(require_control)])
+    async def update_embryo_position(
+        embryo_id: str,
+        body: dict = Body(...),
+    ):
+        """Update an embryo's coarse XY position.
+
+        Map-side edits write to the coarse stage and CLEAR any prior fine
+        position — the operator is overriding the sighting, so any
+        SPIM-objective fine alignment derived from the old coarse is no
+        longer trustworthy and must be re-run.
+        """
+        agent = _require_agent_with_experiment()
+        emb = agent.experiment.embryos.get(embryo_id)
+        if emb is None:
+            raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+        try:
+            x = float(body.get("x"))
+            y = float(body.get("y"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Body needs numeric x and y")
+        emb.position_coarse = {"x": x, "y": y}
+        emb.position_fine = {}
+        agent.experiment.notify_embryos_changed()
+        return emb.to_dict()
+
+    @router.delete("/api/embryos/{embryo_id}",
+                   dependencies=[Depends(require_control)])
+    async def delete_embryo(embryo_id: str):
+        """Remove an embryo from the experiment.
+
+        Goes through ExperimentState.remove_embryo so the observer hook
+        fires EMBRYOS_UPDATE automatically.
+        """
+        agent = _require_agent_with_experiment()
+        if not agent.experiment.remove_embryo(embryo_id):
+            raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+        return {"ok": True, "embryo_id": embryo_id}
 
     @router.get("/api/embryos/current")
     async def get_current_embryos():

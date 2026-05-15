@@ -47,6 +47,11 @@ const DevicesManager = (function () {
         unassigned: '#888888',
     };
 
+    // Map-side edit state. _selectedEmbryoId means "picked up": the next
+    // click on empty map space drops it there (with a confirm), Delete /
+    // Backspace removes it (with a confirm), Escape clears the selection.
+    let _selectedEmbryoId = null;
+
     // Bottom-camera panel DOM + state
     let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
     let _camStreaming = false;
@@ -811,16 +816,24 @@ const DevicesManager = (function () {
             if (!xy) return;
 
             const isFine = !!emb.has_fine_position;
+            const isSelected = _selectedEmbryoId !== null
+                            && emb.id === _selectedEmbryoId;
+
+            // Wrap circle + label in a group so a single closest() lookup
+            // finds the embryo regardless of which child the click hit.
+            const group = document.createElementNS(SVG_NS, 'g');
+            group.setAttribute('class',
+                'devices-embryo-group' + (isSelected ? ' devices-embryo-selected' : ''));
+            group.setAttribute('data-embryo-id', emb.id || '');
+            group.setAttribute('data-embryo-stage', isFine ? 'fine' : 'coarse');
+
             const circle = document.createElementNS(SVG_NS, 'circle');
             circle.setAttribute('cx', xy.x);
             circle.setAttribute('cy', svgY(xy.y));
             circle.setAttribute('r', radius);
             circle.setAttribute('class',
                 isFine ? 'devices-embryo-disc' : 'devices-embryo-ring');
-            // Identifiers for inspection / future click handlers — not used yet.
-            circle.setAttribute('data-embryo-id', emb.id || '');
-            circle.setAttribute('data-embryo-stage', isFine ? 'fine' : 'coarse');
-            _mapEmbryos.appendChild(circle);
+            group.appendChild(circle);
 
             const label = document.createElementNS(SVG_NS, 'text');
             label.setAttribute('x', xy.x);
@@ -828,8 +841,148 @@ const DevicesManager = (function () {
             label.setAttribute('class', 'devices-embryo-label');
             label.setAttribute('font-size', fontSize);
             label.textContent = embryoLabelText(emb.id, i);
-            _mapEmbryos.appendChild(label);
+            group.appendChild(label);
+
+            _mapEmbryos.appendChild(group);
         });
+    }
+
+    // ---- Map-side edit interactions ------------------------------------
+    // Convert a pointer event's client coords into stage µm. SVG y axis is
+    // positive-down and stage y is positive-up, so the y component is
+    // negated to match the convention used elsewhere in this module.
+    function eventToStageXY(event) {
+        if (!_mapSvg || !_mapSvg.getScreenCTM) return null;
+        const ctm = _mapSvg.getScreenCTM();
+        if (!ctm) return null;
+        const pt = _mapSvg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        const local = pt.matrixTransform(ctm.inverse());
+        return { x: local.x, y: -local.y };
+    }
+
+    function findEmbryoIdAt(target) {
+        if (!target) return null;
+        const node = target.closest && target.closest('[data-embryo-id]');
+        return node ? node.getAttribute('data-embryo-id') : null;
+    }
+
+    function embryoById(id) {
+        return _embryos.find(e => e.id === id) || null;
+    }
+
+    function embryoNumberFor(emb) {
+        return embryoLabelText(emb.id, _embryos.indexOf(emb));
+    }
+
+    function setSelectedEmbryo(id) {
+        if (_selectedEmbryoId === id) return;
+        _selectedEmbryoId = id;
+        renderEmbryos();
+    }
+
+    function clearSelection() {
+        if (_selectedEmbryoId === null) return;
+        _selectedEmbryoId = null;
+        renderEmbryos();
+    }
+
+    async function attemptMoveSelected(targetStage) {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        if (!emb) { clearSelection(); return; }
+        const cur = embryoResolvedXY(emb);
+        const num = embryoNumberFor(emb);
+        const oldStr = cur ? `(${cur.x.toFixed(1)}, ${cur.y.toFixed(1)})` : '(unknown)';
+        const newStr = `(${targetStage.x.toFixed(1)}, ${targetStage.y.toFixed(1)})`;
+        if (!window.confirm(`Move embryo ${num} from ${oldStr} to ${newStr}?`)) {
+            return;  // keep the embryo picked up so they can try again
+        }
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}/position`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x: targetStage.x, y: targetStage.y }),
+            });
+            if (!res.ok) {
+                window.alert(`Move failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // EMBRYOS_UPDATE will arrive over the bus and refresh the layer;
+            // dropping clears the picked-up state regardless.
+            clearSelection();
+        } catch (err) {
+            console.error('move embryo:', err);
+            window.alert(`Move failed: ${err.message}`);
+        }
+    }
+
+    async function attemptDeleteSelected() {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        const num = emb ? embryoNumberFor(emb) : id;
+        if (!window.confirm(`Remove embryo ${num}?`)) return;
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) {
+                window.alert(`Delete failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // The embryo is gone from the server snapshot; EMBRYOS_UPDATE
+            // will arrive and drop it from _embryos. Clear locally too.
+            _selectedEmbryoId = null;
+        } catch (err) {
+            console.error('delete embryo:', err);
+            window.alert(`Delete failed: ${err.message}`);
+        }
+    }
+
+    function onMapPointerDown(event) {
+        // Ignore non-primary buttons so right-clicks etc. don't trigger UI.
+        if (event.button !== undefined && event.button !== 0) return;
+        const id = findEmbryoIdAt(event.target);
+        if (id) {
+            setSelectedEmbryo(id);
+            return;
+        }
+        // Empty-space click: drop the picked-up embryo here.
+        if (_selectedEmbryoId !== null) {
+            const stage = eventToStageXY(event);
+            if (stage) attemptMoveSelected(stage);
+        }
+    }
+
+    function onMapKeyDown(event) {
+        // Only honour keys when the operator is actually looking at the Map:
+        // not on another top-level tab, not on the Details subview, and not
+        // typing into an input / textarea / select / contenteditable.
+        if (typeof state !== 'undefined' && typeof TABS !== 'undefined'
+                && state.tab !== TABS.DEVICES) {
+            return;
+        }
+        if (_currentView !== 'map') return;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' ||
+                  a.tagName === 'SELECT' || a.isContentEditable)) {
+            return;
+        }
+        if (event.key === 'Escape') {
+            if (_selectedEmbryoId !== null) {
+                clearSelection();
+                event.preventDefault();
+            }
+            return;
+        }
+        if (_selectedEmbryoId === null) return;
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();  // Backspace would otherwise navigate back
+            attemptDeleteSelected();
+        }
     }
 
     function updateMapMarker() {
@@ -1048,6 +1201,14 @@ const DevicesManager = (function () {
             ClientEventBus.on('EMBRYO_DETECTED', handleEmbryoDetected);
             ClientEventBus.on('STATUS_CHANGED', handleStatusChanged);
         }
+        // Map-side edit handlers. Pointer events on the SVG cover both
+        // "click an embryo" (selects it) and "click empty map" (drops the
+        // selected embryo). Keyboard listener is document-wide but guards
+        // against firing while an input is focused.
+        if (_mapSvg) {
+            _mapSvg.addEventListener('pointerdown', onMapPointerDown);
+        }
+        document.addEventListener('keydown', onMapKeyDown);
         setStatus('stale', 'waiting', 'no payload yet');
         syncInitialCameraState();
         // Stop the camera stream if the tab is closed while it's running,
