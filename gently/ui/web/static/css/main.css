@@ -9172,6 +9172,7 @@ body.modal-open {
     --map-zone-green:  90, 168, 122;     /* RGB triples for compositing */
     --map-zone-orange: 215, 152, 84;
     --map-zone-red:    220, 96,  88;
+    --map-embryo:      156, 120, 220;    /* lavender — distinct from zones and marker */
     --map-overlay-bg:    rgba(11, 14, 19, 0.78);
     --map-overlay-bg-2:  rgba(11, 14, 19, 0.92);
     --map-overlay-edge:  rgba(212, 221, 232, 0.18);
@@ -9189,6 +9190,7 @@ body.modal-open {
     --map-accent:    #0e7490;
     --map-accent-2:  #155e75;
     --map-warm:      #a16207;
+    --map-embryo:    100, 60, 180;       /* deeper purple for cream paper */
     --map-overlay-bg:    rgba(246, 243, 236, 0.82);
     --map-overlay-bg-2:  rgba(246, 243, 236, 0.96);
     --map-overlay-edge:  rgba(29, 43, 58, 0.18);
@@ -9427,6 +9429,36 @@ body.modal-open {
 @keyframes devices-marker-pulse {
     0%   { opacity: 0.35; r: 6; }
     100% { opacity: 0;    r: 28; }
+}
+
+/* --- Embryo waypoints ------------------------------------------------ */
+/* Coarse = bottom-camera / manual placement; fine = SPIM-objective
+   alignment. Coarse reads as an outlined ring (provisional), fine as a
+   filled disc (committed). Same hue so the row of embryos still reads as
+   one cohort, but visual weight signals calibration state at a glance. */
+.devices-embryo-ring {
+    fill: rgba(var(--map-embryo), 0.08);
+    stroke: rgba(var(--map-embryo), 0.85);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.65);
+    stroke: rgba(var(--map-embryo), 0.95);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-label {
+    fill: var(--map-ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--map-paper);
+    stroke-width: 2;
+    stroke-linejoin: round;
 }
 
 /* --- Overlay panels (compass, readout, scalebar, legend) ------------- */

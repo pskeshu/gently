@@ -63,6 +63,31 @@ def create_router(server) -> APIRouter:
             "microscope": microscope_up,
         }
 
+    @router.get("/api/embryos/current")
+    async def get_current_embryos():
+        """Return the agent's current embryo list as an EMBRYOS_UPDATE payload.
+
+        EMBRYOS_UPDATE is published only on mutation, so a Map page opened
+        mid-session would otherwise see an empty embryo layer until the next
+        add/remove/edit. This endpoint serves the same payload shape as the
+        event so clients can bootstrap and then switch to the live stream.
+        """
+        empty = {"embryos": [], "count": 0, "session_id": None}
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None or not hasattr(agent, "experiment"):
+            return empty
+        try:
+            embryos = [e.to_dict() for e in agent.experiment.embryos.values()]
+        except Exception:
+            logger.exception("Failed to serialise embryos for snapshot")
+            return empty
+        return {
+            "embryos": embryos,
+            "count": len(embryos),
+            "session_id": getattr(agent, "session_id", None),
+        }
+
     @router.get("/api/devices/coverslip")
     async def get_coverslip():
         """Return the coverslip outline metadata for the Map view.
