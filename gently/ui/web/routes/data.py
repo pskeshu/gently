@@ -89,6 +89,10 @@ def create_router(server) -> APIRouter:
         position — the operator is overriding the sighting, so any
         SPIM-objective fine alignment derived from the old coarse is no
         longer trustworthy and must be re-run.
+
+        Publishes OPERATOR_EDITED_EMBRYO with both the old and new
+        positions so candidates can reason about the magnitude of the
+        correction and trigger re-calibration suggestions.
         """
         agent = _require_agent_with_experiment()
         emb = agent.experiment.embryos.get(embryo_id)
@@ -99,9 +103,28 @@ def create_router(server) -> APIRouter:
             y = float(body.get("y"))
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="Body needs numeric x and y")
+        old_coarse = dict(emb.position_coarse) if emb.position_coarse else None
+        had_fine   = bool(emb.position_fine)
         emb.position_coarse = {"x": x, "y": y}
         emb.position_fine = {}
         agent.experiment.notify_embryos_changed()
+
+        bus = getattr(agent, "_event_bus", None)
+        if bus is not None:
+            from gently.core.event_bus import EventType
+            try:
+                bus.publish(
+                    event_type=EventType.OPERATOR_EDITED_EMBRYO,
+                    data={
+                        "embryo_id": embryo_id,
+                        "old_position_coarse": old_coarse,
+                        "new_position_coarse": {"x": x, "y": y},
+                        "fine_position_invalidated": had_fine,
+                    },
+                    source="web:map-edit",
+                )
+            except Exception:
+                logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
 
     @router.delete("/api/embryos/{embryo_id}",
@@ -110,11 +133,36 @@ def create_router(server) -> APIRouter:
         """Remove an embryo from the experiment.
 
         Goes through ExperimentState.remove_embryo so the observer hook
-        fires EMBRYOS_UPDATE automatically.
+        fires EMBRYOS_UPDATE automatically. Also publishes
+        OPERATOR_REMOVED_EMBRYO carrying the embryo's last known position
+        — candidates can use that to e.g. clean up associated cache or
+        log the deletion in their own world model.
         """
         agent = _require_agent_with_experiment()
+        emb = agent.experiment.embryos.get(embryo_id)
+        last_position = None
+        if emb is not None:
+            last_position = {
+                "coarse": dict(emb.position_coarse) if emb.position_coarse else None,
+                "fine":   dict(emb.position_fine) if emb.position_fine else None,
+            }
         if not agent.experiment.remove_embryo(embryo_id):
             raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+
+        bus = getattr(agent, "_event_bus", None)
+        if bus is not None:
+            from gently.core.event_bus import EventType
+            try:
+                bus.publish(
+                    event_type=EventType.OPERATOR_REMOVED_EMBRYO,
+                    data={
+                        "embryo_id": embryo_id,
+                        "last_position": last_position,
+                    },
+                    source="web:map-delete",
+                )
+            except Exception:
+                logger.exception("Failed to publish OPERATOR_REMOVED_EMBRYO")
         return {"ok": True, "embryo_id": embryo_id}
 
     @router.get("/api/embryos/current")

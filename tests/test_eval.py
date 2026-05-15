@@ -19,6 +19,7 @@ from gently.eval import (
     EventCapture,
     EventReplay,
     NoOpCandidate,
+    ReactiveCandidate,
     ShadowRunner,
 )
 
@@ -559,3 +560,210 @@ def test_production_decision_capture_no_log_is_no_op(tmp_path: Path):
 
     out = asyncio.run(run())
     assert out == "Done."  # no log to read; we just want no error
+
+
+# =============================================================================
+# ReactiveCandidate
+# =============================================================================
+
+def _publish(bus, event_type_name: str, data: dict, source: str = "test"):
+    bus.publish(EventType[event_type_name], data, source=source)
+
+
+def _decisions_for(dlog: DecisionLog):
+    return dlog.read()
+
+
+def test_reactive_ingests_embryos_update_silently(tmp_path: Path):
+    """EMBRYOS_UPDATE updates the world model but emits no decision."""
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    cand = ReactiveCandidate("reactive-test", dlog)
+    runner = ShadowRunner(bus)
+    runner.add(cand)
+    runner.start()
+
+    _publish(bus, "EMBRYOS_UPDATE", {"embryos": [
+        {"id": "embryo_1", "position_coarse": {"x": 1.0, "y": 2.0},
+         "position_fine": {}, "has_fine_position": False},
+        {"id": "embryo_2", "position_coarse": {"x": 3.0, "y": 4.0},
+         "position_fine": {"x": 3.1, "y": 4.1}, "has_fine_position": True},
+    ]})
+
+    runner.stop()
+    dlog.close()
+
+    assert _decisions_for(dlog) == []  # silent
+    assert set(cand.world.embryos.keys()) == {"embryo_1", "embryo_2"}
+    assert cand.world.embryos["embryo_2"]["has_fine"]
+
+
+def test_reactive_proposes_recalibrate_when_fine_invalidated(tmp_path: Path):
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    runner = ShadowRunner(bus)
+    runner.add(ReactiveCandidate("reactive", dlog))
+    runner.start()
+
+    _publish(bus, "OPERATOR_EDITED_EMBRYO", {
+        "embryo_id": "embryo_2",
+        "old_position_coarse": {"x": 3, "y": 4},
+        "new_position_coarse": {"x": 30, "y": 40},
+        "fine_position_invalidated": True,
+    })
+    runner.stop()
+    dlog.close()
+    decs = _decisions_for(dlog)
+    assert len(decs) == 1
+    assert decs[0].tool_calls == [{
+        "name": "recalibrate_embryo",
+        "input": {"embryo_id": "embryo_2"},
+        "id": None,
+    }]
+
+
+def test_reactive_skips_recalibrate_when_no_fine_existed(tmp_path: Path):
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    runner = ShadowRunner(bus)
+    runner.add(ReactiveCandidate("reactive", dlog))
+    runner.start()
+
+    _publish(bus, "OPERATOR_EDITED_EMBRYO", {
+        "embryo_id": "embryo_1",
+        "old_position_coarse": {"x": 1, "y": 2},
+        "new_position_coarse": {"x": 10, "y": 20},
+        "fine_position_invalidated": False,
+    })
+    runner.stop()
+    dlog.close()
+    decs = _decisions_for(dlog)
+    assert len(decs) == 1
+    assert decs[0].tool_calls == []  # nothing to refresh
+    assert "no action" in decs[0].response_text.lower()
+
+
+def test_reactive_proposes_calibrate_all_on_marked(tmp_path: Path):
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    runner = ShadowRunner(bus)
+    runner.add(ReactiveCandidate("reactive", dlog))
+    runner.start()
+
+    _publish(bus, "OPERATOR_MARKED_EMBRYOS", {
+        "embryo_ids": ["embryo_001", "embryo_002", "embryo_003"],
+        "count": 3,
+    })
+    runner.stop()
+    dlog.close()
+    decs = _decisions_for(dlog)
+    assert len(decs) == 1
+    assert decs[0].tool_calls == [{
+        "name": "calibrate_all_embryos",
+        "input": {"embryo_ids": ["embryo_001", "embryo_002", "embryo_003"]},
+        "id": None,
+    }]
+
+
+def test_reactive_proposes_forget_on_removal(tmp_path: Path):
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    runner = ShadowRunner(bus)
+    runner.add(ReactiveCandidate("reactive", dlog))
+    runner.start()
+
+    _publish(bus, "OPERATOR_REMOVED_EMBRYO", {
+        "embryo_id": "embryo_5",
+        "last_position": {"coarse": {"x": 1, "y": 2}, "fine": None},
+    })
+    runner.stop()
+    dlog.close()
+    decs = _decisions_for(dlog)
+    assert len(decs) == 1
+    assert decs[0].tool_calls == [{
+        "name": "forget_embryo",
+        "input": {"embryo_id": "embryo_5"},
+        "id": None,
+    }]
+
+
+def test_reactive_escalates_first_error_then_suppresses_repeat(tmp_path: Path):
+    bus = EventBus()
+    dlog = DecisionLog(tmp_path / "d.jsonl")
+    dlog.open()
+    runner = ShadowRunner(bus)
+    runner.add(ReactiveCandidate("reactive", dlog))
+    runner.start()
+
+    _publish(bus, "ERROR_OCCURRED", {"msg": "camera lost lock"})
+    _publish(bus, "ERROR_OCCURRED", {"msg": "camera lost lock"})  # within 30s
+    _publish(bus, "ERROR_OCCURRED", {"msg": "different error"})
+    runner.stop()
+    dlog.close()
+    decs = _decisions_for(dlog)
+    assert len(decs) == 3
+    # 1st: escalate
+    assert decs[0].tool_calls[0]["name"] == "escalate_to_operator"
+    # 2nd: suppressed
+    assert decs[1].tool_calls == []
+    assert "suppressed" in decs[1].response_text.lower()
+    # 3rd: different message -> escalate
+    assert decs[2].tool_calls[0]["name"] == "escalate_to_operator"
+
+
+def test_reactive_full_event_stream_through_replay(tmp_path: Path):
+    """Capture a realistic operator-driven session and replay through the
+    candidate. End-to-end smoke that the recorded jsonl is enough to
+    drive a candidate's decision log without any other inputs."""
+    src = EventBus()
+    cap = EventCapture(tmp_path / "events.jsonl")
+    cap.start(src)
+
+    src.publish(EventType.EMBRYOS_UPDATE, {"embryos": [
+        {"id": "embryo_1", "position_coarse": {"x": 1.0, "y": 2.0},
+         "position_fine": {"x": 1.05, "y": 2.05}, "has_fine_position": True},
+    ]}, source="agent")
+    src.publish(EventType.OPERATOR_EDITED_EMBRYO, {
+        "embryo_id": "embryo_1",
+        "old_position_coarse": {"x": 1.0, "y": 2.0},
+        "new_position_coarse": {"x": 5.0, "y": 6.0},
+        "fine_position_invalidated": True,
+    }, source="web:map-edit")
+    src.publish(EventType.OPERATOR_MARKED_EMBRYOS, {
+        "embryo_ids": ["embryo_2", "embryo_3"], "count": 2,
+    }, source="detect_embryos:web-editor")
+    src.publish(EventType.ERROR_OCCURRED, {"msg": "lost focus"},
+                source="device-layer")
+    cap.stop()
+
+    dst = EventBus()
+    dlog = DecisionLog(tmp_path / "decisions.jsonl")
+    dlog.open()
+    runner = ShadowRunner(dst)
+    runner.add(ReactiveCandidate("replay-cand", dlog))
+    runner.start()
+
+    n = EventReplay(tmp_path / "events.jsonl").replay(dst)
+    runner.stop()
+    dlog.close()
+
+    assert n == 4  # all four events replayed
+    decs = _decisions_for(dlog)
+    # EMBRYOS_UPDATE is silent ingest; the other 3 each produce a decision.
+    triggers = [(d.trigger.value, d.trigger_detail) for d in decs]
+    assert triggers == [
+        ("event", "OPERATOR_EDITED_EMBRYO"),
+        ("event", "OPERATOR_MARKED_EMBRYOS"),
+        ("event", "ERROR_OCCURRED"),
+    ]
+    tool_names = [d.tool_calls[0]["name"] if d.tool_calls else None for d in decs]
+    assert tool_names == [
+        "recalibrate_embryo",
+        "calibrate_all_embryos",
+        "escalate_to_operator",
+    ]

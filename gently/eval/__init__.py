@@ -19,6 +19,7 @@ from .event_capture import EventCapture
 from .event_replay import EventReplay
 from .decision_log import Decision, DecisionLog, DecisionTrigger, prompt_hash
 from .shadow import OrchestratorCandidate, ShadowRunner, NoOpCandidate
+from .candidates import ReactiveCandidate
 
 __all__ = [
     "EventCapture",
@@ -30,4 +31,5 @@ __all__ = [
     "OrchestratorCandidate",
     "ShadowRunner",
     "NoOpCandidate",
+    "ReactiveCandidate",
 ]

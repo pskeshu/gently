@@ -84,6 +84,14 @@ class EventType(Enum):
     BOTTOM_CAMERA_FRAME = auto()   # Live JPEG frame from the bottom camera stream
     EMBRYOS_UPDATE = auto()        # Full embryo list snapshot from agent.experiment
 
+    # Operator-action events. Distinct from EMBRYOS_UPDATE because they
+    # carry intent ("a human did this") rather than just state delta.
+    # Candidate orchestrators can subscribe and reason about what the
+    # operator just did without having to type it in chat.
+    OPERATOR_EDITED_EMBRYO    = auto()   # Map drag/drop -> PUT /api/embryos/{id}/position
+    OPERATOR_REMOVED_EMBRYO   = auto()   # Map delete  -> DELETE /api/embryos/{id}
+    OPERATOR_MARKED_EMBRYOS   = auto()   # Marking canvas "Done" — operator confirmed N positions
+
     # System events
     ERROR_OCCURRED = auto()
     WARNING_ISSUED = auto()
