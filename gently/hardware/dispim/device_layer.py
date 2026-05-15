@@ -274,6 +274,18 @@ class DeviceLayerServer(Service):
                 logger.error("Could not apply ASI firmware soft limits: %s", exc)
                 raise
 
+            # Tiger persists JoystickEnabled in non-volatile card settings —
+            # if a prior session ever called SaveCardSettings with the
+            # joystick off, every subsequent boot inherits that state and the
+            # physical controller is dead. Force it on at boot so the
+            # operator's joystick always works regardless of card history.
+            try:
+                xy_stage.enable_joystick(True)
+            except Exception as exc:
+                # Not fatal — the agent can still drive the stage. Log loudly
+                # so the operator knows the joystick is unavailable.
+                logger.error("Could not enable XY joystick: %s", exc)
+
         # [4/5] Initialize RunEngine
         logger.info("[4/5] Initializing RunEngine...")
         self.RE = RunEngine({})
