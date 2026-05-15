@@ -14,11 +14,19 @@ class SessionInfo(TypedDict):
     metadata: Optional[dict]
 
 
-class EmbryoInfo(TypedDict):
+class EmbryoInfo(TypedDict, total=False):
     embryo_id: str
     session_id: str
     embryo_uid: Optional[str]
     nickname: Optional[str]
+    # Coarse XY (µm) from bottom-camera detection or manual map placement.
+    # Shape: {"x": float, "y": float}. Always present once the embryo exists.
+    position_coarse: Optional[dict]
+    # Fine XY (µm) from SPIM-objective alignment. None until that workflow
+    # refines the coarse position. Shape: {"x": float, "y": float}.
+    position_fine: Optional[dict]
+    # Legacy flat fields. Still accepted on write and surfaced on read for
+    # callers that haven't migrated; new code should use position_coarse.
     position_x: Optional[float]
     position_y: Optional[float]
     calibration: Optional[dict]

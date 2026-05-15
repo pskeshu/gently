@@ -847,11 +847,16 @@ class MicroscopyAgent:
                     eid,
                 )
                 src_role = "unassigned"
+            coarse = row.get("position_coarse") or {}
+            fine = row.get("position_fine") or {}
             embryo_states[eid] = {
-                "stage_position": {
-                    "x": row.get("position_x"),
-                    "y": row.get("position_y"),
-                },
+                # stage_position remains for legacy consumers of this snapshot.
+                # It carries the resolved (fine ?? coarse) view; add_embryo()
+                # downstream treats it as coarse, but the explicit
+                # position_fine field below will override that on restore.
+                "stage_position": dict(fine) if fine else dict(coarse),
+                "position_coarse": dict(coarse),
+                "position_fine": dict(fine),
                 "calibration": row.get("calibration") or {},
                 "uid": row.get("embryo_uid"),
                 "user_label": row.get("nickname"),
@@ -885,13 +890,20 @@ class MicroscopyAgent:
                 continue
 
             try:
-                position = embryo_data.get('stage_position', {})
+                # Prefer explicit coarse/fine when the snapshot has them
+                # (FileStore path); fall back to flat stage_position for the
+                # legacy JSON-snapshot path which only carries the resolved view.
+                position_coarse = embryo_data.get('position_coarse')
+                position_fine = embryo_data.get('position_fine')
+                if position_coarse is None and position_fine is None:
+                    position_coarse = embryo_data.get('stage_position', {})
                 calibration = embryo_data.get('calibration', {})
                 source_uid = embryo_data.get('uid') or f"{session_id}_{embryo_id}"
 
                 self.experiment.add_embryo(
                     embryo_id=embryo_id,
-                    position=position,
+                    position=position_coarse or {},
+                    position_fine=position_fine or {},
                     calibration=calibration,
                     user_label=embryo_data.get('user_label'),
                     uid=source_uid,
@@ -1037,8 +1049,8 @@ class MicroscopyAgent:
             try:
                 self.store.register_embryo(
                     self.session_id, embryo_id,
-                    position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
-                    position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
+                    position_coarse=embryo.position_coarse or None,
+                    position_fine=embryo.position_fine or None,
                     calibration=embryo.calibration,
                     role=embryo.role,
                 )
