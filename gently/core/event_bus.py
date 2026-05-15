@@ -82,6 +82,7 @@ class EventType(Enum):
     LASER_CHANGED = auto()
     DEVICE_STATE_UPDATE = auto()   # Periodic device-state snapshot from device layer
     BOTTOM_CAMERA_FRAME = auto()   # Live JPEG frame from the bottom camera stream
+    EMBRYOS_UPDATE = auto()        # Full embryo list snapshot from agent.experiment
 
     # System events
     ERROR_OCCURRED = auto()

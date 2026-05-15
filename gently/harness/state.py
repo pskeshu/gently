@@ -25,12 +25,15 @@ Historical: ``EmbryoAcquisitionState`` was removed in Phase 1.5 — its
 fields are now on ``EmbryoState`` directly.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Re-export CalibrationPrior from its hardware-specific home for backward compat.
 # CalibrationPrior is diSPIM-specific (piezo-galvo linear fit). Other hardware
@@ -880,6 +883,27 @@ class ExperimentState:
         # Updated after each successful calibration, used to initialize subsequent embryos
         self.calibration_prior: CalibrationPrior = CalibrationPrior()
 
+        # Observer hook — agent wires this at startup to publish EMBRYOS_UPDATE
+        # over the event bus. Kept as a plain callback so this module stays
+        # bus-agnostic.
+        self.on_embryos_changed: Optional[Callable[[], None]] = None
+
+    def notify_embryos_changed(self) -> None:
+        """Fire the on_embryos_changed observer if one is wired.
+
+        Call this after any mutation the agent can't intercept through
+        add_embryo / remove_embryo (e.g. a direct write to
+        embryo.position_coarse). UI hooks must not raise — failures here are
+        swallowed so state mutations stay durable.
+        """
+        cb = self.on_embryos_changed
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception:
+            logger.exception("ExperimentState.on_embryos_changed callback failed")
+
     def add_embryo(self, embryo_id: str, position: Dict = None,
                    calibration: Dict = None, user_label: Optional[str] = None,
                    confidence: float = 0.0, uid: Optional[str] = None,
@@ -917,6 +941,7 @@ class ExperimentState:
             detection_confidence=confidence,
             role=role,
         )
+        self.notify_embryos_changed()
 
         # Fire the registration event. Late-bound import keeps this module
         # decoupled from the event bus until first use.
@@ -943,6 +968,7 @@ class ExperimentState:
         """Remove embryo from experiment (e.g., false detection)"""
         if embryo_id in self.embryos:
             del self.embryos[embryo_id]
+            self.notify_embryos_changed()
             return True
         return False
 
@@ -950,6 +976,7 @@ class ExperimentState:
         """Agent assigns intuitive name"""
         if embryo_id in self.embryos:
             self.embryos[embryo_id].nickname = nickname
+            self.notify_embryos_changed()
 
     def get_embryo_by_any_name(self, name: str) -> Optional[EmbryoState]:
         """Get embryo by ID, nickname, or user label"""

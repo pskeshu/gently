@@ -125,6 +125,11 @@ class MicroscopyAgent:
         # Event bus for async messaging (must be before perception manager)
         self._event_bus = get_event_bus()
 
+        # Broadcast the embryo list whenever it mutates. Hooked through the
+        # state object's observer so add/remove/nickname/restore all publish
+        # without each call site having to remember.
+        self.experiment.on_embryos_changed = self._publish_embryos_update
+
         # Perception system (gently-perception harness)
         self.perceiver = Perceiver()
 
@@ -678,6 +683,36 @@ class MicroscopyAgent:
             source="agent",
         )
 
+    def _publish_embryos_update(self) -> None:
+        """Broadcast the current embryo list as an EMBRYOS_UPDATE event.
+
+        Wired into ExperimentState.on_embryos_changed at agent init so every
+        add / remove / restore / nickname change snaps a fresh full-list
+        snapshot onto the bus. The viz server's wildcard subscription forwards
+        it straight to connected browsers — that's how the Devices > Map page
+        learns about embryos without a poll loop.
+        """
+        if self._event_bus is None:
+            return
+        try:
+            embryos = [e.to_dict() for e in self.experiment.embryos.values()]
+        except Exception:
+            logger.exception("Failed to serialise embryos for EMBRYOS_UPDATE")
+            return
+        payload = {
+            "embryos": embryos,
+            "count": len(embryos),
+            "session_id": getattr(self, "session_id", None),
+        }
+        try:
+            self._event_bus.publish(
+                event_type=EventType.EMBRYOS_UPDATE,
+                data=payload,
+                source="agent.experiment",
+            )
+        except Exception:
+            logger.exception("Failed to publish EMBRYOS_UPDATE")
+
     def _mark_significant_action(self, action_type: str):
         """Mark that a significant action occurred (triggers auto-save)."""
         self._auto_save()
@@ -879,6 +914,7 @@ class MicroscopyAgent:
 
         if clear_existing:
             self.experiment.embryos.clear()
+            self.experiment.notify_embryos_changed()
 
         imported = []
         skipped = []

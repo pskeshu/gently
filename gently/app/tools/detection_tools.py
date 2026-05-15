@@ -373,7 +373,8 @@ async def edit_embryos(
         return "No embryos to edit. Run detect_embryos or manual_mark_embryos first."
 
     # Same flow as manual_mark_embryos: pre-populate with existing markers,
-    # let user edit, reconcile.
+    # let user edit, reconcile. notify_embryos_changed is fired by
+    # manual_mark_embryos / add_embryo internally.
     return await manual_mark_embryos(
         exposure_ms=exposure_ms,
         default_role=default_role,
