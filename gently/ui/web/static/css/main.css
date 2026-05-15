@@ -9684,8 +9684,43 @@ body.modal-open {
     display: block;
     opacity: 0;
     transition: opacity 0.25s;
+    /* Zoom anchored at frame centre; scroll-wheel + cursor adjust translate
+       so the point under the cursor stays under the cursor. */
+    transform-origin: center center;
+    will-change: transform;
 }
 .devices-camera-img.has-frame { opacity: 1; }
+
+/* Cursor hints for zoom/pan mode. Default cursor stays untouched at zoom 1
+   so the operator can still interact with overlays under the camera. */
+.devices-camera-stage.camera-zoomed   { cursor: grab; }
+.devices-camera-stage.camera-panning  { cursor: grabbing; }
+
+/* Centre reticle — full-span horizontal + vertical hairline marking the
+   FOV centre IN the image. SVG is a sibling of <img>; the inner <g>
+   receives the same translate/scale (in viewBox units) so the lines
+   track the camera image through zoom/pan instead of staying pinned to
+   the viewer rect. Transform lives on the <g>, not the SVG element, so
+   the renderer re-rasterises at each zoom step — otherwise the strokes
+   get bitmap-scaled and go blurry. */
+.devices-camera-crosshair {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.devices-camera-stage:has(.devices-camera-img.has-frame) .devices-camera-crosshair {
+    opacity: 1;
+}
+.devices-camera-crosshair line {
+    stroke: var(--map-warm);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    stroke-opacity: 0.85;
+}
 
 .devices-camera-placeholder {
     position: absolute;

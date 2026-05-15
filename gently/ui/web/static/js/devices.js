@@ -54,12 +54,23 @@ const DevicesManager = (function () {
 
     // Bottom-camera panel DOM + state
     let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
+    let _camStage, _camCrosshair, _camCrosshairGroup;
     let _camStreaming = false;
     let _camLastFrameTs = 0;
     let _camHasFrame = false;
     let _camStaleTimer = null;
     const _CAM_FPS_WINDOW = 12;
     let _camFrameTimes = [];
+
+    // Camera zoom / pan. Identity transform = (zoom 1, tx 0, ty 0); pan only
+    // engages once zoom > 1. Reset on double-click and on stream-off.
+    let _camZoom = 1;
+    let _camTx = 0;
+    let _camTy = 0;
+    let _camPanLast = null;  // {x, y} clientX/Y of last pointermove during pan
+    const _CAM_ZOOM_MIN = 1;
+    const _CAM_ZOOM_MAX = 8;
+    const _CAM_ZOOM_STEP = 1.15;  // multiplicative per wheel notch
 
     let _lastTs = 0;
     let _previousTs = 0;
@@ -118,6 +129,9 @@ const DevicesManager = (function () {
         _camToggle       = document.getElementById('devices-camera-toggle');
         _camImg          = document.getElementById('devices-camera-img');
         _camPlaceholder  = document.getElementById('devices-camera-placeholder');
+        _camStage        = _camPanel ? _camPanel.querySelector('.devices-camera-stage') : null;
+        _camCrosshair    = document.getElementById('devices-camera-crosshair');
+        _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
         _camLed          = document.getElementById('devices-camera-led');
         _camMeta         = document.getElementById('devices-camera-meta');
 
@@ -1061,6 +1075,9 @@ const DevicesManager = (function () {
             if (_camPlaceholder) _camPlaceholder.hidden = false;
             if (_camMeta) _camMeta.textContent = 'stream off';
             if (_camStaleTimer) { clearTimeout(_camStaleTimer); _camStaleTimer = null; }
+            // Operator may have zoomed in; reset so the next stream session
+            // starts at 1× rather than inheriting a stale view.
+            resetCameraZoom();
         } else {
             _camFrameTimes = [];
             if (_camMeta) _camMeta.textContent = 'waiting…';
@@ -1122,12 +1139,132 @@ const DevicesManager = (function () {
         }
     }
 
+    // ---- Camera zoom / pan ---------------------------------------------
+    function applyCameraTransform() {
+        if (!_camImg) return;
+        _camImg.style.transform =
+            `translate(${_camTx}px, ${_camTy}px) scale(${_camZoom})`;
+        // Reticle uses an SVG transform attribute on the inner <g> instead
+        // of a CSS transform on the SVG element — same geometric effect,
+        // but the SVG renderer re-rasterises at the new zoom so the 1px
+        // strokes stay crisp instead of getting bitmap-scaled.
+        if (_camCrosshairGroup && _camStage) {
+            const rect = _camStage.getBoundingClientRect();
+            // Convert pixel-space translation to viewBox units (viewBox is
+            // 0..100 in both axes, preserveAspectRatio=none).
+            const txV = rect.width  > 0 ? (_camTx * 100) / rect.width  : 0;
+            const tyV = rect.height > 0 ? (_camTy * 100) / rect.height : 0;
+            // translate(50+tx, 50+ty) scale(zoom) translate(-50, -50) keeps
+            // the viewBox centre (50, 50) as the zoom anchor and offsets by
+            // the converted pixel translation.
+            _camCrosshairGroup.setAttribute(
+                'transform',
+                `translate(${50 + txV} ${50 + tyV}) ` +
+                `scale(${_camZoom}) ` +
+                `translate(-50 -50)`
+            );
+        }
+    }
+
+    function resetCameraZoom() {
+        _camZoom = 1;
+        _camTx = 0;
+        _camTy = 0;
+        applyCameraTransform();
+        if (_camStage) _camStage.classList.remove('camera-zoomed', 'camera-panning');
+    }
+
+    // Keep at least the image centre within the visible window so the
+    // operator can't accidentally pan the entire frame off-screen. At
+    // zoom 1 this collapses to (0, 0).
+    function clampCameraPan() {
+        if (!_camStage) return;
+        const rect = _camStage.getBoundingClientRect();
+        const maxX = (rect.width  * (_camZoom - 1)) / 2;
+        const maxY = (rect.height * (_camZoom - 1)) / 2;
+        _camTx = Math.max(-maxX, Math.min(maxX, _camTx));
+        _camTy = Math.max(-maxY, Math.min(maxY, _camTy));
+    }
+
+    function onCameraWheel(event) {
+        if (!_camStage) return;
+        // Always preventDefault so the page doesn't scroll under the
+        // operator while they're framing a sample.
+        event.preventDefault();
+        const rect = _camStage.getBoundingClientRect();
+        const cx = event.clientX - rect.left - rect.width  / 2;
+        const cy = event.clientY - rect.top  - rect.height / 2;
+        const oldZoom = _camZoom;
+        const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
+        const newZoom = Math.max(_CAM_ZOOM_MIN,
+                                 Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
+        if (newZoom === oldZoom) return;
+
+        // Keep the image point under the cursor anchored under the cursor
+        // across the zoom: cursor_new = cursor_old after the transform
+        // change, which means newT = cursor - (cursor - oldT) * (new/old).
+        const ratio = newZoom / oldZoom;
+        _camTx = cx - (cx - _camTx) * ratio;
+        _camTy = cy - (cy - _camTy) * ratio;
+        _camZoom = newZoom;
+
+        if (Math.abs(_camZoom - 1) < 0.001) {
+            resetCameraZoom();
+            return;
+        }
+        clampCameraPan();
+        applyCameraTransform();
+        _camStage.classList.add('camera-zoomed');
+    }
+
+    function onCameraPointerDown(event) {
+        if (event.button !== 0) return;
+        if (_camZoom <= 1) return;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        try { _camStage.setPointerCapture(event.pointerId); } catch (_) {}
+        _camStage.classList.add('camera-panning');
+        event.preventDefault();
+    }
+
+    function onCameraPointerMove(event) {
+        if (!_camPanLast) return;
+        _camTx += event.clientX - _camPanLast.x;
+        _camTy += event.clientY - _camPanLast.y;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        clampCameraPan();
+        applyCameraTransform();
+    }
+
+    function onCameraPointerEnd(event) {
+        if (!_camPanLast) return;
+        _camPanLast = null;
+        try { _camStage.releasePointerCapture(event.pointerId); } catch (_) {}
+        if (_camStage) _camStage.classList.remove('camera-panning');
+    }
+
+    function onCameraDoubleClick(event) {
+        if (_camZoom !== 1 || _camTx !== 0 || _camTy !== 0) {
+            event.preventDefault();
+            resetCameraZoom();
+        }
+    }
+
     function setupCameraWiring() {
         if (!_camToggle) return;
         _camToggle.addEventListener('click', toggleCameraStream);
         applyCameraState(false);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', handleCameraFrame);
+        }
+        // Camera zoom/pan. wheel needs passive:false so we can preventDefault
+        // and stop the page from scrolling beneath the FOV.
+        if (_camStage) {
+            _camStage.addEventListener('wheel', onCameraWheel, { passive: false });
+            _camStage.addEventListener('pointerdown', onCameraPointerDown);
+            _camStage.addEventListener('pointermove', onCameraPointerMove);
+            _camStage.addEventListener('pointerup', onCameraPointerEnd);
+            _camStage.addEventListener('pointercancel', onCameraPointerEnd);
+            _camStage.addEventListener('dblclick', onCameraDoubleClick);
         }
     }
 
