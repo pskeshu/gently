@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +125,8 @@ def create_router(server) -> APIRouter:
             "last_frame_ts": getattr(monitor, "_last_frame_ts", None) if monitor else None,
         }
 
-    @router.post("/api/devices/bottom_camera/stream/start")
+    @router.post("/api/devices/bottom_camera/stream/start",
+                 dependencies=[Depends(require_control)])
     async def start_bottom_camera_stream():
         """Start the bottom-camera stream bridge.
 
@@ -144,7 +147,8 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"start failed: {exc}")
         return {"streaming": monitor.running}
 
-    @router.post("/api/devices/bottom_camera/stream/stop")
+    @router.post("/api/devices/bottom_camera/stream/stop",
+                 dependencies=[Depends(require_control)])
     async def stop_bottom_camera_stream():
         """Stop the bottom-camera stream bridge. Idempotent."""
         bridge = getattr(server, "agent_bridge", None)
