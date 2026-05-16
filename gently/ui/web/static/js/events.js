@@ -41,6 +41,40 @@ function getEventBadgeClass(eventType) {
     return 'default';
 }
 
+// Log-record helpers --------------------------------------------------
+// LOG_RECORD events come from the Python logging bridge. We collapse the
+// generic "LOG_RECORD" type into the actual level (DEBUG / INFO / WARN /
+// ERROR) so the table is readable -- otherwise every row in a busy
+// session reads the same string in the Type column.
+function isLogEvent(event) {
+    return event && event.event_type === 'LOG_RECORD';
+}
+
+function logLevelLabel(d) {
+    // levelname is fastest path; fall back to numeric mapping if missing.
+    const lvl = (d && (d.level_name || '')).toString().toUpperCase();
+    if (lvl) {
+        if (lvl === 'WARNING') return 'WARN';
+        if (lvl === 'CRITICAL') return 'CRIT';
+        return lvl;
+    }
+    const n = d && Number(d.level);
+    if (!isFinite(n)) return 'LOG';
+    if (n >= 50) return 'CRIT';
+    if (n >= 40) return 'ERROR';
+    if (n >= 30) return 'WARN';
+    if (n >= 20) return 'INFO';
+    return 'DEBUG';
+}
+
+function logBadgeClass(d) {
+    const label = logLevelLabel(d);
+    if (label === 'DEBUG') return 'log-debug';
+    if (label === 'INFO')  return 'log-info';
+    if (label === 'WARN')  return 'log-warn';
+    return 'log-error';  // ERROR / CRIT collapse together
+}
+
 // Search helper functions
 function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -212,45 +246,81 @@ function addEventToTable(event, prepend = true) {
     if (hasImage) tr.classList.add('has-image');
     tr.dataset.eventId = event.event_id || '';
 
-    const badgeClass = getEventBadgeClass(event.event_type);
+    if (isLogEvent(event)) {
+        // Log rows have a compact, distinctive shape: level badge in the
+        // Type column, logger name + message in the Data column. Click to
+        // toggle a pre with the full payload (incl. exception trace).
+        tr.classList.add('log-row');
+        const d = event.data || {};
+        const badgeCls = logBadgeClass(d);
+        const label = logLevelLabel(d);
+        const message = highlightSearchTerms(d.message || '');
+        const loggerName = highlightSearchTerms(d.logger || '-');
+        const excTag = d.exc_text ? '<span class="log-exc">  ⏎ trace…</span>' : '';
+        tr.innerHTML = `
+            <td class="col-time">${formatEventTime(event.timestamp)}</td>
+            <td class="col-type"><span class="event-type-badge ${badgeCls}">${label}</span></td>
+            <td class="col-source"><span class="event-source">${event.source || '-'}</span></td>
+            <td class="col-data"><div class="event-data">
+                <span class="log-logger">${loggerName}</span><span class="log-message">${message}</span>${excTag}
+            </div></td>
+        `;
+        tr.addEventListener('click', () => {
+            const dataDiv = tr.querySelector('.event-data');
+            dataDiv.classList.toggle('expanded');
+            if (dataDiv.classList.contains('expanded')) {
+                const tracePart = d.exc_text
+                    ? `\n\n${d.exc_text}` : '';
+                dataDiv.innerHTML =
+                    `<pre>${d.logger || ''}  ${d.func || ''}:${d.line || ''}\n` +
+                    `${(d.message || '')}${tracePart}</pre>`;
+            } else {
+                dataDiv.innerHTML =
+                    `<span class="log-logger">${loggerName}</span>` +
+                    `<span class="log-message">${message}</span>${excTag}`;
+            }
+        });
+    } else {
+        const badgeClass = getEventBadgeClass(event.event_type);
 
-    // Image indicator icon
-    const imageIndicator = hasImage
-        ? `<span class="event-image-indicator" title="Has linked image">
-             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-               <rect x="3" y="3" width="18" height="18" rx="2"></rect>
-               <circle cx="8.5" cy="8.5" r="1.5"></circle>
-               <polyline points="21,15 16,10 5,21"></polyline>
-             </svg>
-           </span>`
-        : '';
+        // Image indicator icon
+        const imageIndicator = hasImage
+            ? `<span class="event-image-indicator" title="Has linked image">
+                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                   <rect x="3" y="3" width="18" height="18" rx="2"></rect>
+                   <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                   <polyline points="21,15 16,10 5,21"></polyline>
+                 </svg>
+               </span>`
+            : '';
 
-    // Thumbnail preview
-    const thumbnailHtml = hasImage
-        ? `<img class="event-thumbnail"
-               src="data:image/png;base64,${linkedImage.base64_png}"
-               onclick="event.stopPropagation(); showEventImage('${imageUid}')"
-               title="Click to view image"
-               alt="Event image">`
-        : '';
+        // Thumbnail preview
+        const thumbnailHtml = hasImage
+            ? `<img class="event-thumbnail"
+                   src="data:image/png;base64,${linkedImage.base64_png}"
+                   onclick="event.stopPropagation(); showEventImage('${imageUid}')"
+                   title="Click to view image"
+                   alt="Event image">`
+            : '';
 
-    tr.innerHTML = `
-        <td class="col-time">${formatEventTime(event.timestamp)}</td>
-        <td class="col-type">${imageIndicator}<span class="event-type-badge ${badgeClass}">${event.event_type}</span></td>
-        <td class="col-source"><span class="event-source">${event.source || '-'}</span></td>
-        <td class="col-data">${thumbnailHtml}<div class="event-data">${formatEventData(event.data)}</div></td>
-    `;
+        tr.innerHTML = `
+            <td class="col-time">${formatEventTime(event.timestamp)}</td>
+            <td class="col-type">${imageIndicator}<span class="event-type-badge ${badgeClass}">${event.event_type}</span></td>
+            <td class="col-source"><span class="event-source">${event.source || '-'}</span></td>
+            <td class="col-data">${thumbnailHtml}<div class="event-data">${formatEventData(event.data)}</div></td>
+        `;
 
-    // Click to expand data
-    tr.addEventListener('click', () => {
-        const dataDiv = tr.querySelector('.event-data');
-        dataDiv.classList.toggle('expanded');
-        if (dataDiv.classList.contains('expanded')) {
-            dataDiv.innerHTML = `<pre>${JSON.stringify(event.data, null, 2)}</pre>`;
-        } else {
-            dataDiv.innerHTML = formatEventData(event.data);
-        }
-    });
+        // Click to expand data
+        tr.addEventListener('click', () => {
+            const dataDiv = tr.querySelector('.event-data');
+            dataDiv.classList.toggle('expanded');
+            if (dataDiv.classList.contains('expanded')) {
+                dataDiv.innerHTML = `<pre>${JSON.stringify(event.data, null, 2)}</pre>`;
+            } else {
+                dataDiv.innerHTML = formatEventData(event.data);
+            }
+        });
+    }
 
     if (prepend) {
         tbody.insertBefore(tr, tbody.firstChild);

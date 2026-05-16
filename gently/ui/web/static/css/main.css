@@ -2036,6 +2036,20 @@ a.tab-link.active {
 .event-type-badge.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
 .event-type-badge.default { background: var(--bg-hover); color: var(--text-muted); }
 
+/* Log-record badges per level. The level is the badge text (DEBUG / INFO /
+   WARN / ERROR) for log rows; the LOG_RECORD type itself is collapsed into
+   the level so the column doesn't read the same string for every line. */
+.event-type-badge.log-debug { background: rgba(125, 134, 145, 0.18); color: #9ba3b0; }
+.event-type-badge.log-info  { background: rgba(88, 166, 255, 0.16); color: var(--accent); }
+.event-type-badge.log-warn  { background: rgba(210, 153, 34, 0.22); color: var(--accent-orange); }
+.event-type-badge.log-error { background: rgba(248, 81, 73, 0.22); color: #f85149; }
+
+/* Log line message: monospace, faint logger prefix, expandable trace. */
+.log-row .event-data { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.log-logger { color: var(--text-muted); opacity: 0.85; margin-right: 0.5rem; }
+.log-message { color: var(--text); }
+.log-exc { color: #f85149; opacity: 0.85; }
+
 .event-source {
     color: var(--text-muted);
     font-size: 0.75rem;

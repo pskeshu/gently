@@ -29,6 +29,7 @@ from datetime import datetime
 import yaml
 
 from gently.log_config import configure_logging
+from gently.core.log_bridge import configure_log_bridge
 from gently.app.agent import MicroscopyAgent
 from gently.organisms import load_organism
 from gently.hardware import load_hardware, get_hardware
@@ -124,6 +125,10 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     log_file = str(log_dir / f"gently_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
     # File always gets INFO+, console uses the requested level
     configure_logging(level=log_level, log_file=log_file)
+    # Mirror gently / gently_perception log lines onto the EventBus so the
+    # Events page in the viz server shows them too. Env vars control level
+    # and whether to include noisy third-party loggers (off by default).
+    configure_log_bridge()
     logger.info("Logging to %s (console level: %s)", log_file, log_level)
 
     # Load organism module from config
