@@ -11,12 +11,25 @@ This keeps the streaming transport concerns in one place: the device layer
 owns MMCore polling; the viz server owns browser delivery; this bridge is the
 glue. If we ever swap SSE for WebSocket or split into a separate process, only
 this file changes.
+
+Watchdog
+--------
+The SSE iterator can silently stall in the agent process — most reliably
+when a Qt window (napari) freezes the asyncio loop synchronously during a
+tool call, but in principle any half-open TCP path can cause it. aiohttp's
+async iterator won't raise on a stalled socket; the ``async for`` just
+waits forever. To recover, a sibling watchdog task tracks the timestamp of
+the last received event; if no event arrives within ``stale_timeout_sec``
+it cancels the reader, which triggers the normal reconnect path. The
+generous default timeout (60 s) tolerates legitimate quiet windows during
+heavy plan execution; tune via constructor args if needed.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Optional, TYPE_CHECKING
 
 from gently.core.event_bus import EventType, get_event_bus
@@ -31,40 +44,72 @@ logger = logging.getLogger(__name__)
 class DeviceStateMonitor(Service):
     """Consumes the device-layer SSE stream and republishes events.
 
-    Lifecycle: starts a background asyncio Task that opens the SSE connection,
-    iterates events, and publishes ``DEVICE_STATE_UPDATE`` for each. On stream
-    drop the task waits ``reconnect_delay_sec`` and reconnects. ``stop()``
-    cancels the task and closes the stream.
+    Lifecycle: starts two background asyncio tasks — a reader that opens the
+    SSE connection and republishes events, and a watchdog that forces
+    reconnect if the reader goes quiet for ``stale_timeout_sec``. On stream
+    drop or staleness-induced cancel the reader loops back through its
+    reconnect delay.
 
-    The device layer already rate-limits broadcasts (XY at 5 Hz, properties at
-    ~0.07 Hz, callback-driven property changes coalesced over 50 ms), so this
-    bridge is a pure passthrough — no further throttling.
+    The device layer already rate-limits broadcasts (XY at 5 Hz, properties
+    at ~0.07 Hz, callback-driven property changes coalesced over 50 ms), so
+    this bridge is a pure passthrough — no further throttling.
     """
+
+    # Default staleness threshold. Conservative because property polls during
+    # heavy plan execution can run 2-3 s and we don't want to false-trip
+    # on legitimate slowdowns. Position events at 5 Hz dominate the stream
+    # so a real stall is obvious well within 60 s.
+    DEFAULT_STALE_TIMEOUT_SEC = 60.0
+
+    # Watchdog wakes every this often to check. Doesn't have to be precise;
+    # the threshold is what matters for false-trip avoidance.
+    DEFAULT_WATCHDOG_INTERVAL_SEC = 5.0
 
     def __init__(
         self,
         microscope: "DiSPIMMicroscope",
         reconnect_delay_sec: float = 3.0,
+        stale_timeout_sec: float = DEFAULT_STALE_TIMEOUT_SEC,
+        watchdog_interval_sec: float = DEFAULT_WATCHDOG_INTERVAL_SEC,
     ):
         super().__init__(name="device-state-monitor", service_type="bridge")
         self.microscope = microscope
         self.reconnect_delay_sec = reconnect_delay_sec
+        self.stale_timeout_sec = stale_timeout_sec
+        self.watchdog_interval_sec = watchdog_interval_sec
         self._task: Optional[asyncio.Task] = None
+        self._watchdog_task: Optional[asyncio.Task] = None
         self._stop_requested = False
+        # Monotonic timestamp of the last successfully-received event. The
+        # watchdog reads this; the reader writes it under no lock because
+        # asyncio is single-threaded (datetime/float assignment is atomic
+        # at the bytecode level on CPython).
+        self._last_event_at: Optional[float] = None
+        # Counts of staleness-triggered reconnects, useful for diagnostics.
+        self._watchdog_kicks: int = 0
 
     async def on_start(self):
         self._stop_requested = False
+        self._last_event_at = time.monotonic()
         self._task = asyncio.create_task(self._run(), name="device-state-monitor")
+        self._watchdog_task = asyncio.create_task(
+            self._watchdog(), name="device-state-watchdog",
+        )
 
     async def on_stop(self):
         self._stop_requested = True
-        if self._task and not self._task.done():
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
+        # Cancel both tasks. Order doesn't matter — both honour the stop flag.
+        for t in (self._watchdog_task, self._task):
+            if t is not None and not t.done():
+                t.cancel()
+                try:
+                    await t
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.exception("DeviceStateMonitor: task cleanup error")
         self._task = None
+        self._watchdog_task = None
 
     async def _run(self):
         bus = get_event_bus()
@@ -74,6 +119,9 @@ class DeviceStateMonitor(Service):
                 async for payload in self.microscope.stream_device_states():
                     if self._stop_requested:
                         break
+                    # Bump the staleness timer BEFORE publishing so the
+                    # watchdog can't false-trip on a slow publish handler.
+                    self._last_event_at = time.monotonic()
                     try:
                         bus.publish(
                             event_type=EventType.DEVICE_STATE_UPDATE,
@@ -83,7 +131,14 @@ class DeviceStateMonitor(Service):
                     except Exception:
                         logger.exception("DeviceStateMonitor: failed to publish event")
             except asyncio.CancelledError:
-                raise
+                # Distinguish stop-driven cancel from watchdog-driven cancel.
+                # On stop, re-raise so on_stop's await completes. On watchdog
+                # kick, swallow and fall through to the reconnect delay.
+                if self._stop_requested:
+                    raise
+                logger.warning(
+                    "DeviceStateMonitor: reader cancelled by watchdog — reconnecting"
+                )
             except Exception as exc:
                 logger.warning(
                     "DeviceStateMonitor: stream ended (%s) — reconnecting in %.1fs",
@@ -95,3 +150,39 @@ class DeviceStateMonitor(Service):
                 await asyncio.sleep(self.reconnect_delay_sec)
             except asyncio.CancelledError:
                 raise
+            # Give the fresh connection room to deliver its first event
+            # before the watchdog starts counting against it.
+            self._last_event_at = time.monotonic()
+
+    async def _watchdog(self):
+        """Force-reconnect if the reader goes quiet for too long.
+
+        We cancel the reader task rather than the underlying iterator
+        because aiohttp's SSE iterator doesn't expose a clean cancel; the
+        task cancel propagates through the awaiting read() and the reader
+        loop's except-CancelledError block then re-enters the reconnect
+        path.
+        """
+        while not self._stop_requested:
+            try:
+                await asyncio.sleep(self.watchdog_interval_sec)
+            except asyncio.CancelledError:
+                raise
+            if self._stop_requested:
+                break
+            if self._last_event_at is None:
+                continue
+            age = time.monotonic() - self._last_event_at
+            if age <= self.stale_timeout_sec:
+                continue
+            self._watchdog_kicks += 1
+            logger.warning(
+                "DeviceStateMonitor: stale stream (%.1fs since last event > "
+                "%.1fs threshold) — forcing reconnect (kick #%d)",
+                age, self.stale_timeout_sec, self._watchdog_kicks,
+            )
+            # Reset the timer FIRST so we don't trigger again before the
+            # reader has a chance to reconnect and publish.
+            self._last_event_at = time.monotonic()
+            if self._task is not None and not self._task.done():
+                self._task.cancel()
