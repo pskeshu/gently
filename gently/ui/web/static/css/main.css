@@ -910,6 +910,75 @@ a.tab-link.active {
     display: flex;
     height: 100%;
     overflow: hidden;
+    position: relative;   /* anchors .cal-spim-preview */
+}
+
+/* Live SPIM preview — floats in the top-right of the Calibration tab.
+   Hidden by default; appears when a focus_sweep / focus_snap / focus_coarse
+   frame arrives and auto-hides ~5 s after the last frame so it only
+   appears during an actively-running calibration. The Profile view's SVG
+   shows score-vs-piezo dots; this complements that by showing the actual
+   camera frame each dot came from. */
+.cal-spim-preview {
+    position: absolute;
+    top: 0.6rem;
+    right: 0.7rem;
+    width: 220px;
+    z-index: 6;
+    display: none;
+    flex-direction: column;
+    gap: 0.4rem;
+    padding: 0.55rem 0.65rem 0.6rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transition: opacity 0.2s;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+}
+.cal-spim-preview.active { display: flex; opacity: 1; }
+.cal-spim-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+}
+.cal-spim-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--text);
+}
+.cal-spim-led {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: #22d3ee;
+    box-shadow: 0 0 8px rgba(34, 211, 238, 0.85);
+    animation: cal-spim-led-blink 1.6s ease-in-out infinite;
+}
+@keyframes cal-spim-led-blink {
+    0%, 100% { opacity: 1; }
+    50%      { opacity: 0.35; }
+}
+.cal-spim-meta {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 0.6rem;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-muted);
+}
+.cal-spim-img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: contain;
+    display: block;
+    background: #000;
+    border-radius: 3px;
+    border: 1px solid var(--border);
 }
 
 /* Left sidebar */
@@ -9112,6 +9181,7 @@ body.modal-open {
     color: var(--map-ink-mute);
     letter-spacing: 0.02em;
 }
+
 
 /* Scale bar — bottom-left */
 .devices-scalebar {

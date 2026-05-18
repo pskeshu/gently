@@ -1279,6 +1279,66 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
+// ==========================================
+// SPIM live preview (Calibration tab)
+// ==========================================
+// Subscribes to IMAGE_RECEIVED events and shows the latest focus-sweep
+// frame in a floating panel above the SVG profile / detail grid. Mirrors
+// what the operator sees through the SPIM camera during calibration so
+// the abstract dots on the profile have a concrete image counterpart.
+// Auto-hides ~5 s after the last frame so it stays out of the way when
+// no calibration is running.
+const SpimLivePreview = {
+    _STALE_MS: 5000,
+    _staleTimer: null,
+    // Types the calibration loop pushes via agent.push_viz — these are
+    // all SPIM head captures, distinct from bottom-camera frames which
+    // ride a separate stream.
+    _ACCEPTED: new Set(['focus_sweep', 'focus_snap', 'focus_coarse']),
+
+    init() {
+        if (typeof ClientEventBus === 'undefined') return;
+        ClientEventBus.on('IMAGE_RECEIVED', (data) => this.handleImage(data));
+    },
+
+    handleImage(data) {
+        if (!data || !data.base64_png) return;
+        if (!this._ACCEPTED.has(data.data_type)) return;
+
+        const panel = document.getElementById('cal-spim-preview');
+        const img = document.getElementById('cal-spim-img');
+        const metaEl = document.getElementById('cal-spim-meta');
+        if (!panel || !img) return;
+
+        img.src = `data:image/png;base64,${data.base64_png}`;
+        panel.classList.add('active');
+
+        const md = data.metadata || {};
+        const parts = [];
+        if (md.galvo_name) parts.push(String(md.galvo_name));
+        if (md.sweep) parts.push(String(md.sweep));
+        if (md.piezo !== undefined && md.piezo !== null) {
+            const n = Number(md.piezo);
+            if (Number.isFinite(n)) parts.push(`p ${n.toFixed(1)}µm`);
+        }
+        if (md.score !== undefined && md.score !== null) {
+            const s = Number(md.score);
+            if (Number.isFinite(s)) parts.push(`s ${s.toExponential(1)}`);
+        }
+        if (metaEl) metaEl.textContent = parts.join('  ·  ') || '—';
+
+        // Reset stale timer — sliding window means the panel disappears
+        // only when frames truly stop arriving (not on each new frame).
+        if (this._staleTimer) clearTimeout(this._staleTimer);
+        this._staleTimer = setTimeout(() => {
+            const p = document.getElementById('cal-spim-preview');
+            if (p) p.classList.remove('active');
+        }, this._STALE_MS);
+    },
+};
+
+document.addEventListener('DOMContentLoaded', () => SpimLivePreview.init());
+
 // Legacy wrappers kept for backward compatibility
 function renderCalibrationGallery() { CalibrationManager.render(); }
 
