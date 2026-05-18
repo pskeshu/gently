@@ -910,34 +910,65 @@ a.tab-link.active {
     display: flex;
     height: 100%;
     overflow: hidden;
-    position: relative;   /* anchors .cal-spim-preview */
 }
 
-/* Live SPIM preview — floats in the top-right of the Calibration tab.
-   Hidden by default; appears when a focus_sweep / focus_snap / focus_coarse
-   frame arrives and auto-hides ~5 s after the last frame so it only
-   appears during an actively-running calibration. The Profile view's SVG
-   shows score-vs-piezo dots; this complements that by showing the actual
-   camera frame each dot came from. */
+/* Live SPIM preview — rendered inside the Profile view's svg-area (above
+   the SVG dots) so it sits visibly "next to the objects we draw" during
+   a calibration sweep. The Profile view's SVG shows score-vs-piezo dots;
+   this complements that by showing the actual camera frame each dot came
+   from. Always-visible in the Profile view: shows the latest captured
+   frame for the selected embryo, or an "awaiting calibration"
+   placeholder if no frame has arrived for that embryo yet. */
 .cal-spim-preview {
-    position: absolute;
-    top: 0.6rem;
-    right: 0.7rem;
-    width: 220px;
-    z-index: 6;
-    display: none;
-    flex-direction: column;
-    gap: 0.4rem;
-    padding: 0.55rem 0.65rem 0.6rem;
+    display: flex;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.5rem 0.65rem;
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: 4px;
-    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.35);
-    opacity: 0;
-    transition: opacity 0.2s;
     font-family: 'Inter Tight', system-ui, sans-serif;
+    flex: 0 0 auto;          /* don't stretch; keep its natural height */
 }
-.cal-spim-preview.active { display: flex; opacity: 1; }
+.cal-spim-stage {
+    position: relative;
+    flex: 0 0 200px;
+    width: 200px;
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    overflow: hidden;
+}
+.cal-spim-body {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-width: 0;
+    gap: 0.35rem;
+}
+.cal-spim-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    pointer-events: none;
+}
+.cal-spim-placeholder[hidden] { display: none; }
+.cal-spim-placeholder-text {
+    font-size: 0.62rem;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+}
+.cal-spim-led.idle {
+    background: var(--text-muted);
+    box-shadow: none;
+    animation: none;
+}
 .cal-spim-head {
     display: flex;
     align-items: center;
@@ -973,13 +1004,14 @@ a.tab-link.active {
 }
 .cal-spim-img {
     width: 100%;
-    aspect-ratio: 4 / 3;
+    height: 100%;
     object-fit: contain;
     display: block;
     background: #000;
-    border-radius: 3px;
-    border: 1px solid var(--border);
+    opacity: 0;
+    transition: opacity 0.2s;
 }
+.cal-spim-img.has-frame { opacity: 1; }
 
 /* Left sidebar */
 .calibration-sidebar {

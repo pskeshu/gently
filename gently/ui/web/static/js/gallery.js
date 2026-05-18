@@ -376,11 +376,38 @@ const CalibrationProfileView = {
         return `
             <div class="cal-profile-container">
                 <div class="cal-profile-svg-area">
+                    ${this._renderSpimPreview()}
                     ${this._renderSVG(edgeData, sweepData, calibInfo)}
                     ${this._renderResultsCard(calibInfo)}
                 </div>
                 <div class="cal-profile-detail" id="cal-profile-detail">
                     ${this._renderDetailDefault(focusPlots, summaries, calibInfo, sweepData)}
+                </div>
+            </div>
+        `;
+    },
+
+    /** Always-visible live SPIM frame slot. SpimLivePreview maintains a
+     * per-embryo memory of the last frame received; after every profile
+     * render we re-apply the entry for the selected embryo, so the
+     * preview survives unrelated re-renders and sidebar switches. */
+    _renderSpimPreview() {
+        return `
+            <div class="cal-spim-preview" id="cal-spim-preview">
+                <div class="cal-spim-stage">
+                    <img class="cal-spim-img" id="cal-spim-img" alt="latest SPIM frame">
+                    <div class="cal-spim-placeholder" id="cal-spim-placeholder">
+                        <div class="cal-spim-placeholder-text">awaiting calibration</div>
+                    </div>
+                </div>
+                <div class="cal-spim-body">
+                    <div class="cal-spim-head">
+                        <span class="cal-spim-title">
+                            <span class="cal-spim-led idle" id="cal-spim-led"></span>
+                            <span>SPIM live</span>
+                        </span>
+                    </div>
+                    <span class="cal-spim-meta" id="cal-spim-meta">—</span>
                 </div>
             </div>
         `;
@@ -1191,6 +1218,12 @@ const CalibrationManager = {
 
         if (this.currentView === 'profile') {
             panel.innerHTML = headerHtml + CalibrationProfileView.render(this.selectedEmbryoId);
+            // Re-apply the in-memory SPIM frame for this embryo: the
+            // innerHTML reset above replaced the preview's fresh empty
+            // DOM, so the cached frame needs to be painted back.
+            if (typeof SpimLivePreview !== 'undefined') {
+                SpimLivePreview.applyForEmbryo(this.selectedEmbryoId);
+            }
         } else {
             panel.innerHTML = headerHtml + this._renderGalleryContent(images);
         }
@@ -1282,19 +1315,31 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==========================================
 // SPIM live preview (Calibration tab)
 // ==========================================
-// Subscribes to IMAGE_RECEIVED events and shows the latest focus-sweep
-// frame in a floating panel above the SVG profile / detail grid. Mirrors
-// what the operator sees through the SPIM camera during calibration so
-// the abstract dots on the profile have a concrete image counterpart.
-// Auto-hides ~5 s after the last frame so it stays out of the way when
-// no calibration is running.
+// Subscribes to IMAGE_RECEIVED events and surfaces the latest SPIM-camera
+// frame inside the Profile view, complementing the score-vs-piezo dots on
+// the SVG. Keeps last frame per embryo in memory, so:
+//   - sidebar switches show that embryo's last sighting immediately
+//   - unrelated profile re-renders don't blank the preview
+//   - live framing during a sweep + "last seen" framing when idle
+// Always visible while the Profile view is up; shows an "awaiting
+// calibration" placeholder until the first frame for the selected
+// embryo arrives.
 const SpimLivePreview = {
-    _STALE_MS: 5000,
-    _staleTimer: null,
-    // Types the calibration loop pushes via agent.push_viz — these are
-    // all SPIM head captures, distinct from bottom-camera frames which
-    // ride a separate stream.
-    _ACCEPTED: new Set(['focus_sweep', 'focus_snap', 'focus_coarse']),
+    // Frame types the calibration loop pushes via agent.push_viz as raw
+    // camera captures (distinct from derived plots/summaries).
+    //   edge_detection — Phase 1, embryo Z-extent sweep
+    //   focus_sweep    — Phase 3, adaptive focus sweep
+    //   focus_snap     — single focus probe
+    //   focus_coarse   — coarse focus probe
+    _ACCEPTED: new Set([
+        'edge_detection',
+        'focus_sweep',
+        'focus_snap',
+        'focus_coarse',
+    ]),
+
+    // {[embryo_id]: {base64_png, metadata, data_type, ts}}
+    _latestByEmbryo: {},
 
     init() {
         if (typeof ClientEventBus === 'undefined') return;
@@ -1304,19 +1349,59 @@ const SpimLivePreview = {
     handleImage(data) {
         if (!data || !data.base64_png) return;
         if (!this._ACCEPTED.has(data.data_type)) return;
-
-        const panel = document.getElementById('cal-spim-preview');
-        const img = document.getElementById('cal-spim-img');
-        const metaEl = document.getElementById('cal-spim-meta');
-        if (!panel || !img) return;
-
-        img.src = `data:image/png;base64,${data.base64_png}`;
-        panel.classList.add('active');
-
         const md = data.metadata || {};
+        const embId = md.embryo_id;
+        if (!embId) return;
+
+        // Replace any older entry for this embryo — only the most recent
+        // capture is kept (no growth, no list).
+        this._latestByEmbryo[embId] = {
+            base64_png: data.base64_png,
+            metadata: md,
+            data_type: data.data_type,
+            ts: Date.now(),
+        };
+
+        // If this frame is for the currently-selected embryo, paint
+        // immediately. Otherwise it sits in memory and is applied next
+        // time the operator switches to that embryo.
+        const selected = (typeof CalibrationManager !== 'undefined')
+            ? CalibrationManager.selectedEmbryoId : null;
+        if (selected === embId) this.applyForEmbryo(embId);
+    },
+
+    /** Apply the most-recent frame for ``embryoId`` to the DOM. Called
+     * after every CalibrationManager.renderPanel() so the in-memory
+     * state survives the innerHTML reset that re-rendering causes. */
+    applyForEmbryo(embryoId) {
+        const img = document.getElementById('cal-spim-img');
+        const placeholder = document.getElementById('cal-spim-placeholder');
+        const metaEl = document.getElementById('cal-spim-meta');
+        const led = document.getElementById('cal-spim-led');
+        if (!img) return;  // not in profile view
+
+        const latest = embryoId ? this._latestByEmbryo[embryoId] : null;
+        if (latest) {
+            img.src = `data:image/png;base64,${latest.base64_png}`;
+            img.classList.add('has-frame');
+            if (placeholder) placeholder.hidden = true;
+            if (metaEl) metaEl.textContent = this._formatMeta(latest);
+            if (led) led.classList.remove('idle');
+        } else {
+            img.removeAttribute('src');
+            img.classList.remove('has-frame');
+            if (placeholder) placeholder.hidden = false;
+            if (metaEl) metaEl.textContent = '—';
+            if (led) led.classList.add('idle');
+        }
+    },
+
+    _formatMeta(latest) {
+        const md = latest.metadata || {};
         const parts = [];
+        if (latest.data_type === 'edge_detection') parts.push('edge');
+        else if (md.sweep) parts.push(String(md.sweep));
         if (md.galvo_name) parts.push(String(md.galvo_name));
-        if (md.sweep) parts.push(String(md.sweep));
         if (md.piezo !== undefined && md.piezo !== null) {
             const n = Number(md.piezo);
             if (Number.isFinite(n)) parts.push(`p ${n.toFixed(1)}µm`);
@@ -1325,15 +1410,15 @@ const SpimLivePreview = {
             const s = Number(md.score);
             if (Number.isFinite(s)) parts.push(`s ${s.toExponential(1)}`);
         }
-        if (metaEl) metaEl.textContent = parts.join('  ·  ') || '—';
-
-        // Reset stale timer — sliding window means the panel disappears
-        // only when frames truly stop arriving (not on each new frame).
-        if (this._staleTimer) clearTimeout(this._staleTimer);
-        this._staleTimer = setTimeout(() => {
-            const p = document.getElementById('cal-spim-preview');
-            if (p) p.classList.remove('active');
-        }, this._STALE_MS);
+        // Age hint if the last frame is older than 10 s — distinguishes
+        // "live sweep happening now" from "last sweep was a while ago."
+        const age = (Date.now() - latest.ts) / 1000;
+        if (age > 10) {
+            parts.push(age < 60
+                ? `${Math.round(age)}s ago`
+                : `${Math.round(age / 60)}m ago`);
+        }
+        return parts.join('  ·  ') || '—';
     },
 };
 

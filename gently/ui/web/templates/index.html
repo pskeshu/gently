@@ -27,22 +27,6 @@
                 <button class="view-btn" data-view="gallery" title="Gallery view (2)">Gallery</button>
             </div>
         </div>
-        <!-- Live SPIM preview — populated by IMAGE_RECEIVED events whose
-             data_type is focus_sweep / focus_snap / focus_coarse. Floats in
-             the top-right of the container and auto-hides ~5 s after the
-             last frame so it only appears during an actively-running
-             calibration. Sits outside the dynamic .calibration-panel so it
-             survives panel re-renders. -->
-        <div class="cal-spim-preview" id="cal-spim-preview">
-            <div class="cal-spim-head">
-                <span class="cal-spim-title">
-                    <span class="cal-spim-led"></span>
-                    <span>SPIM live</span>
-                </span>
-                <span class="cal-spim-meta" id="cal-spim-meta">—</span>
-            </div>
-            <img class="cal-spim-img" id="cal-spim-img" alt="latest SPIM focus-sweep frame">
-        </div>
         <div class="calibration-container">
             <!-- Left sidebar: Embryo list -->
             <div class="calibration-sidebar" id="calibration-sidebar">
