@@ -227,6 +227,53 @@ def test_watchdog_recovers_after_kick():
     )
 
 
+def test_external_cancel_does_not_resurrect_reader():
+    """A cancel NOT tagged by the watchdog must exit the reader, not loop.
+
+    Regression: during agent shutdown, asyncio cancels every task. The
+    reader's except-CancelledError used to swallow every cancel that
+    arrived while _stop_requested was False — so during a graceful
+    shutdown (where on_stop hadn't yet been called for the monitor) the
+    reader would reconnect indefinitely, blocking process exit.
+    """
+    bus = EventBus()
+    restore = _patch_bus(bus)
+    fake = _FakeMicroscope()
+    # Hang the iterator so the reader is firmly inside the async-for
+    # await when we externally cancel it.
+    fake.first_yield_delay = 60.0
+
+    result = {}
+
+    async def go():
+        mon = DeviceStateMonitor(microscope=fake,
+                                 reconnect_delay_sec=0.05,
+                                 stale_timeout_sec=10.0,
+                                 watchdog_interval_sec=10.0)
+        await mon.on_start()
+        await asyncio.sleep(0.1)
+        # External cancel (mimics event-loop teardown / Ctrl+C path):
+        # neither _stop_requested nor _watchdog_kicked_reader is set.
+        mon._task.cancel()
+        # Give the reader a moment to propagate the cancel. If the bug
+        # is present, the reader swallows the cancel and reconnects;
+        # connect_count would climb past 1.
+        await asyncio.sleep(0.3)
+        result["task_done"] = mon._task.done()
+        result["connects"] = fake.connect_count
+        await mon.on_stop()
+
+    try:
+        _run(go())
+    finally:
+        restore()
+
+    assert result["task_done"], "reader should exit after external cancel"
+    assert result["connects"] == 1, (
+        f"reader must NOT reconnect on external cancel (connects={result['connects']})"
+    )
+
+
 def test_stop_cancels_both_tasks_cleanly():
     """on_stop terminates the reader and watchdog without lingering tasks."""
     bus = EventBus()

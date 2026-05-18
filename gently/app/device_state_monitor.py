@@ -87,6 +87,13 @@ class DeviceStateMonitor(Service):
         self._last_event_at: Optional[float] = None
         # Counts of staleness-triggered reconnects, useful for diagnostics.
         self._watchdog_kicks: int = 0
+        # Set by the watchdog right before it cancels the reader task, so
+        # the reader's except-CancelledError block can tell a deliberate
+        # staleness kick (reconnect) apart from an external cancellation
+        # like Ctrl+C or on_stop (re-raise). Without this discrimination
+        # the reader treats every cancel as a kick and reconnects forever
+        # during shutdown.
+        self._watchdog_kicked_reader = False
 
     async def on_start(self):
         self._stop_requested = False
@@ -131,14 +138,24 @@ class DeviceStateMonitor(Service):
                     except Exception:
                         logger.exception("DeviceStateMonitor: failed to publish event")
             except asyncio.CancelledError:
-                # Distinguish stop-driven cancel from watchdog-driven cancel.
-                # On stop, re-raise so on_stop's await completes. On watchdog
-                # kick, swallow and fall through to the reconnect delay.
+                # Three sources of cancellation must be told apart:
+                #   1. on_stop() set _stop_requested → re-raise so the
+                #      stop's await self._task completes.
+                #   2. Watchdog tagged _watchdog_kicked_reader → swallow,
+                #      consume the flag, fall through to the reconnect
+                #      delay.
+                #   3. External cancel (Ctrl+C, event-loop teardown) →
+                #      re-raise so the task actually exits; otherwise
+                #      the reader would keep looping during shutdown.
                 if self._stop_requested:
                     raise
-                logger.warning(
-                    "DeviceStateMonitor: reader cancelled by watchdog — reconnecting"
-                )
+                if self._watchdog_kicked_reader:
+                    self._watchdog_kicked_reader = False
+                    logger.warning(
+                        "DeviceStateMonitor: reader cancelled by watchdog — reconnecting"
+                    )
+                else:
+                    raise
             except Exception as exc:
                 logger.warning(
                     "DeviceStateMonitor: stream ended (%s) — reconnecting in %.1fs",
@@ -184,5 +201,9 @@ class DeviceStateMonitor(Service):
             # Reset the timer FIRST so we don't trigger again before the
             # reader has a chance to reconnect and publish.
             self._last_event_at = time.monotonic()
+            # Tag the cancel as ours BEFORE issuing it so the reader's
+            # except-CancelledError block knows to swallow rather than
+            # propagate. The reader consumes the flag on the way through.
+            self._watchdog_kicked_reader = True
             if self._task is not None and not self._task.done():
                 self._task.cancel()
