@@ -66,6 +66,23 @@ async def start_adaptive_timelapse(
     if err:
         return err
 
+    # Gate on calibration certificates. The orchestrator may have its own
+    # checks, but refusing here gives the agent a single, structured failure
+    # message naming the offending embryos and the reason for each.
+    focus = getattr(agent, 'focus', None)
+    if focus is not None:
+        ids_to_check = embryo_ids if embryo_ids else list(agent.experiment.embryos.keys())
+        if ids_to_check:
+            all_ready, refusals = focus.gate_many(ids_to_check)
+            if not all_ready:
+                return (
+                    "Refusing start_adaptive_timelapse: "
+                    f"{len(refusals)} embryo(s) are not ready.\n"
+                    + "\n".join(f"  - {r}" for r in refusals)
+                    + "\nResolve each (recalibrate, skip, or await pending "
+                    "verification) and try again."
+                )
+
     try:
         result = await orchestrator.start(
             embryo_ids=embryo_ids,

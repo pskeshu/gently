@@ -557,9 +557,19 @@ class TimelapseOrchestrator:
 
         Supports both single conditions and composite conditions.
         """
-        # Check all conditions (primary + additional) with OR logic
+        # Check all conditions (primary + additional) with OR logic.
+        # A failing condition is logged and skipped so it can't poison the
+        # acquisition path or block other conditions in a composite.
         for cond in embryo_state.stop_condition.all_conditions():
-            reason = self._evaluate_single_condition(cond, embryo_state)
+            try:
+                reason = self._evaluate_single_condition(cond, embryo_state)
+            except Exception as e:
+                logger.warning(
+                    f"Stop-condition evaluation failed for {embryo_state.embryo_id} "
+                    f"(type={cond.condition_type.value}): {e}",
+                    exc_info=True,
+                )
+                continue
             if reason:
                 embryo_state.is_complete = True
                 embryo_state.completion_reason = reason
@@ -632,12 +642,6 @@ class TimelapseOrchestrator:
                                     f"{cond.confirm_timepoints} confirmation timepoints"
                                 )
                             return f"target stage reached (current: {current_stage})"
-
-                    # Also check session.is_complete() for hatching-type conditions
-                    if session.is_complete():
-                        organism = get_organism()
-                        if target & organism.TERMINAL_STAGES:
-                            return "terminal stage complete (perception)"
 
             # Fallback: check legacy hatching_status (for manual marking)
             organism = get_organism()

@@ -4,7 +4,7 @@ Experiment and Embryo Management Tools
 Tools for managing experiments and tracking embryo states.
 """
 
-from typing import Dict
+from typing import Dict, List, Optional
 from datetime import datetime
 import json
 
@@ -47,6 +47,160 @@ def get_experiment_summary(context: Dict) -> str:
     if err:
         return err
     return agent.experiment.get_summary()
+
+
+@tool(
+    name="get_calibration_certificate",
+    description="""Return the structured calibration certificate for one embryo.
+
+The certificate is the orchestrator's coarse, sanctioned view of calibration
+quality. It contains the verified state (True / False / "pending"), the R²
+values at the top and bottom calibration positions, the slope, any concerns
+flagged by the rule engine, and the most recent VLM check result (or None if
+verification has not yet completed).
+
+USE THIS instead of dredging R² values out of query_embryo_status — the
+certificate is the single field that downstream gates (start_timelapse,
+acquire_volume) consult.""",
+    category=ToolCategory.CALIBRATION,
+    examples=[
+        ToolExample("Is the calibration for embryo 1 healthy?", {"embryo_id": "embryo_1"}),
+        ToolExample("Show the certificate for the bad one", {"embryo_id": "embryo_4"}),
+    ],
+)
+def get_calibration_certificate(embryo_id: str, context: Dict) -> str:
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    embryo, err = get_embryo_or_error(agent, embryo_id)
+    if err:
+        return err
+
+    cert = None
+    if isinstance(embryo.calibration, dict):
+        cert = embryo.calibration.get('certificate')
+    if not cert:
+        return (
+            f"{embryo.id} has no calibration certificate. "
+            "Either it has not been calibrated, or its calibration predates "
+            "the certificate scheme. Run calibrate_embryo to refresh."
+        )
+    return json.dumps(cert, indent=2, default=str)
+
+
+@tool(
+    name="is_ready_to_image",
+    description="""Single gate the agent must consult before any acquisition.
+
+Returns READY / NOT READY plus a one-line reason per embryo. Calling this is
+mandatory before start_adaptive_timelapse or acquire_volume — those tools also
+gate on the certificate, but checking here lets you remediate proactively
+(recalibrate, await pending VLM verification) instead of being refused.
+
+If embryo_ids is omitted, checks every embryo in the experiment.""",
+    category=ToolCategory.CALIBRATION,
+    examples=[
+        ToolExample("Are we good to start the timelapse?", {}),
+        ToolExample("Is embryo 1 ready?", {"embryo_ids": ["embryo_1"]}),
+    ],
+)
+def is_ready_to_image(
+    embryo_ids: Optional[List[str]] = None,
+    context: Dict = None,
+) -> str:
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    focus = getattr(agent, 'focus', None)
+    if focus is None:
+        return "Focus controller unavailable — cannot check readiness"
+
+    if not embryo_ids:
+        embryo_ids = list(agent.experiment.embryos.keys())
+    if not embryo_ids:
+        return "No embryos in experiment yet"
+
+    lines: List[str] = []
+    any_blocked = False
+    any_pending = False
+    for eid in embryo_ids:
+        ready, reason = focus.is_ready_to_image(eid)
+        if ready:
+            lines.append(f"READY     {eid}: {reason}")
+        else:
+            any_blocked = True
+            if 'pending' in reason.lower():
+                any_pending = True
+            lines.append(f"NOT READY {eid}: {reason}")
+
+    if not any_blocked:
+        header = "All embryos are ready to image."
+    elif any_pending:
+        header = (
+            "At least one embryo is still being verified. Call "
+            "await_calibration_verification to block until pending VLM "
+            "checks complete, or proceed with the embryos that are READY."
+        )
+    else:
+        header = (
+            "One or more embryos have unresolved calibration concerns. "
+            "Inspect the certificate via get_calibration_certificate and "
+            "either recalibrate or skip the affected embryos before imaging."
+        )
+    return header + "\n" + "\n".join(lines)
+
+
+@tool(
+    name="await_calibration_verification",
+    description="""Block until pending VLM calibration verifications complete.
+
+Use this when is_ready_to_image reports "verification still in progress" and
+you need a definitive answer before proceeding. Returns a per-embryo summary
+of the final certificate state. Times out after the specified number of
+seconds (default 60) — if the timeout expires the certificates remain in
+'pending' and you can call this again.""",
+    category=ToolCategory.CALIBRATION,
+    examples=[
+        ToolExample("Wait until calibration is verified", {}),
+        ToolExample("Wait up to 2 minutes for embryo_1", {"embryo_id": "embryo_1", "timeout_seconds": 120}),
+    ],
+)
+async def await_calibration_verification(
+    embryo_id: Optional[str] = None,
+    timeout_seconds: float = 60.0,
+    context: Dict = None,
+) -> str:
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    focus = getattr(agent, 'focus', None)
+    if focus is None:
+        return "Focus controller unavailable"
+
+    if not focus.has_pending(embryo_id):
+        return "No pending verifications."
+
+    results = await focus.await_pending(embryo_id=embryo_id, timeout=timeout_seconds)
+    if not results:
+        return "Timed out waiting; verifications are still pending."
+
+    lines: List[str] = []
+    for eid, cert in results.items():
+        if cert is None:
+            lines.append(f"{eid}: no certificate (lost?)")
+            continue
+        verified = cert.get('verified')
+        if verified is True:
+            lines.append(f"{eid}: VERIFIED")
+        elif verified == 'pending':
+            lines.append(f"{eid}: still pending (timeout reached)")
+        else:
+            concerns = cert.get('concerns') or []
+            lines.append(f"{eid}: FAILED — " + "; ".join(concerns))
+    return "\n".join(lines)
 
 
 @tool(

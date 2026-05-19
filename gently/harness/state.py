@@ -677,6 +677,25 @@ class EmbryoState:
         else:
             status_parts.append("active")
 
+        # Calibration certificate state — the agent should see this directly
+        # in the per-embryo summary so it never claims an embryo is ready when
+        # its calibration is pending or has unresolved concerns.
+        cert = (self.calibration or {}).get('certificate') if isinstance(self.calibration, dict) else None
+        if cert is None:
+            if self.calibration:
+                status_parts.append("calibration: legacy (no certificate)")
+            else:
+                status_parts.append("calibration: none")
+        else:
+            verified = cert.get('verified')
+            if verified is True:
+                status_parts.append("calibration: verified")
+            elif verified == 'pending':
+                status_parts.append("calibration: VERIFICATION PENDING")
+            else:
+                n_concerns = len(cert.get('concerns') or [])
+                status_parts.append(f"calibration: CONCERNS ({n_concerns})")
+
         # Current params
         status_parts.append(f"interval={self.interval_seconds}s")
         status_parts.append(f"slices={self.num_slices}")

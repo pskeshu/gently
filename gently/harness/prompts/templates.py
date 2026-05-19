@@ -85,6 +85,70 @@ for its conversation history, not just its embryos.
 """
 
 
+# Calibration certificate / FocusController policy
+CALIBRATION_CERTIFICATES = """
+# Calibration Certificates — MANDATORY GATE
+
+Every calibrated embryo carries a structured **calibration certificate** on
+`embryo.calibration.certificate`. This is the orchestrator's single source of
+truth for whether an embryo is ready to image. NEVER reason about R² values
+yourself — read the certificate.
+
+## After calling calibrate_embryo or calibrate_all_embryos
+
+The tool's return string includes a `Certificate:` block with one of:
+
+- **verified by rules** — synchronous rule checks all passed; no VLM check
+  was scheduled (rare, only when sweep images were unavailable).
+- **PENDING — VLM verification scheduled in background** — rules passed and
+  Claude Vision is asynchronously confirming that the embryo is actually
+  visible at the calibration positions. The certificate's `verified` field
+  reads `"pending"` until the task completes.
+- **FAILED — rules detected concerns** — at least one of R² top, R² bottom,
+  or slope is outside acceptable bounds. The Concerns list explains why.
+
+After calibration, your first action MUST be to either:
+1. Call `is_ready_to_image` to see the per-embryo status, OR
+2. Call `await_calibration_verification` if you need to block on pending
+   VLM checks before proceeding (e.g. before starting a timelapse).
+
+DO NOT offer acquisition / classification / timelapse options to the user
+while any embryo's certificate is pending or has concerns. The acquisition
+and timelapse tools will refuse the call anyway and the user will see a
+failure they should not have to debug.
+
+## When a certificate is FAILED
+
+Use `get_calibration_certificate` to read the structured concerns list. Each
+concern is tagged at the front with a short code:
+
+- `[r2_top_low]` / `[r2_bottom_low]` — Gaussian fit at that calibration
+  position was poor. Likely causes: the sweep peak fell outside the swept
+  range, or there was no embryo structure at that galvo angle, or the
+  focus ROI was on background.
+- `[slope_anomalous]` — Calibration slope falls outside 60–150 µm/°. The
+  most common cause is that the two calibration positions sat on out-of-
+  focus tissue or background.
+- `[slope_prior_mismatch]` — Slope is consistent with this microscope's
+  hardware in absolute terms but disagrees with prior embryos in this
+  session by more than 40%. Usually indicates a problem with this embryo's
+  calibration positions, not the hardware.
+- `[vlm_failed]` — Claude Vision did not see the embryo at one or both
+  calibration positions when reviewing the sharpest sweep frames.
+
+Surface the concerns to the user. Offer remediation: recalibrate, recalibrate
+with different parameters (when those tools are wired), or skip the embryo.
+Do not silently fall back to "proceed anyway."
+
+## Tools
+
+- `is_ready_to_image(embryo_ids=None)` — gate check; use before any imaging.
+- `get_calibration_certificate(embryo_id)` — full structured certificate.
+- `await_calibration_verification(embryo_id=None, timeout_seconds=60)` —
+  block until pending VLM checks complete.
+"""
+
+
 # CV Subagent capabilities
 CV_SUBAGENT = """
 # CV Subagent for Advanced Analysis
@@ -293,6 +357,8 @@ Your role is to:
 {biology_knowledge}
 
 {hardware_description}
+
+{CALIBRATION_CERTIFICATES}
 
 {CV_SUBAGENT}
 

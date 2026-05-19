@@ -108,6 +108,63 @@ yes
 Faint embryo structure visible in center, appears to be at edge of sample."""
 
 
+EMBRYO_EDGE_STRUCTURED_PROMPT = """You are an expert microscopist evaluating a diSPIM light sheet image during embryo edge detection.
+
+We are walking the galvo angle outward from the embryo center to find the true Z extent of the embryo. We need to distinguish a REAL, in-focus embryo edge from background scatter, autofluorescent debris, coverslip flare, or out-of-focus shadows that have no usable focus signal.
+
+Be CONSERVATIVE. If you are unsure whether an "edge" is a real embryo boundary or just background variation, answer no. The cost of accepting a fake edge is a bad calibration; the cost of rejecting a real edge is one extra step in the sweep. Reject when in doubt.
+
+Look at this image and answer THREE strict questions:
+
+1. has_boundary — Is there a CLEAR, DISTINCT BOUNDARY between a brighter structure and the dark background? A faint gradient, a smooth blur, or uniform haze DOES NOT count. The boundary must be a contour you can trace.
+
+2. in_focus — Are the visible edges SHARP, not soft or smeared? An out-of-focus embryo edge looks blurred, with a wide gradient instead of a crisp transition. A focused edge has a narrow, clean transition over a few pixels.
+
+3. has_internal_structure — Inside the boundary, can you see distinct internal features (textures, brighter spots, granularity)? At the very edge of the embryo this may legitimately be no — that is informative but not disqualifying on its own.
+
+RESPOND FORMAT (exactly 4 lines, no markdown, no preamble):
+Line 1: has_boundary: yes
+Line 2: in_focus: yes
+Line 3: has_internal_structure: no
+Line 4: One-sentence description of what you see.
+
+Replace the yes/no values with your actual answers. The keys must appear in this exact order and spelling."""
+
+
+CALIB_POSITION_QUALITY_PROMPT = """You are an expert microscopist deciding whether a diSPIM light sheet image is acceptable as a calibration position for a piezo focus sweep.
+
+A focus sweep will scan the piezo through 30-60 positions at this galvo angle and try to lock onto the focus peak. For that to succeed, this image must show a clearly visible embryo with internal structure that a focus algorithm can lock onto. We are choosing whether to accept this position as a sweep target.
+
+Be STRICT. Better to retreat the calibration position toward the embryo center than to attempt a focus sweep on noise. If the image shows only an edge tip, a vague shadow, or severely defocused tissue with no detail, reject it.
+
+A GOOD calibration position:
+- Embryo body is clearly present (not just an edge tip)
+- Boundaries are sharp or only slightly defocused
+- There is visible internal structure (texture, granularity, brighter regions)
+
+A BAD calibration position:
+- Mostly empty background
+- Just a faint shadow with no structure
+- Severely out of focus — embryo is a vague blob without detail
+- Only the very tip of the embryo, no body visible
+
+Look at the image and answer THREE strict questions:
+
+1. has_boundary — Is the embryo boundary clearly visible as a distinct contour against the background?
+
+2. in_focus — Are visible features sharp? Gross defocus (wide soft gradient instead of crisp transition) is a no. Slight defocus is acceptable.
+
+3. has_internal_structure — Inside the boundary, can a focus algorithm find features to lock onto (texture, brighter regions, granularity)? For a calibration position this must be yes — at edges of the embryo this may not be true, and you should reject such positions.
+
+RESPOND FORMAT (exactly 4 lines, no markdown, no preamble):
+Line 1: has_boundary: yes
+Line 2: in_focus: yes
+Line 3: has_internal_structure: yes
+Line 4: One-sentence description of what you see.
+
+Replace the yes/no values with your actual answers. The keys must appear in this exact order and spelling."""
+
+
 # ============================================================================
 # PLAN: VERIFY EMBRYO CENTERED
 # ============================================================================
@@ -951,6 +1008,8 @@ def calibrate_embryo_piezo_galvo(
 __all__ = [
     'EMBRYO_CENTERING_PROMPT',
     'EMBRYO_EDGE_PROMPT',
+    'EMBRYO_EDGE_STRUCTURED_PROMPT',
+    'CALIB_POSITION_QUALITY_PROMPT',
     'verify_embryo_centered',
     'detect_embryo_edge',
     'calibrate_focus_at_position',
