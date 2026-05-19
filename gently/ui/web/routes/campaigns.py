@@ -118,25 +118,42 @@ def create_router(server) -> APIRouter:
         bibliography = []
         ref_index = {}  # dedup by (source, key)
 
+        # Pre-index every item in the tree once. The naive enrichment used to call
+        # cs.get_plan_item(...) per dep + per dependent, each one walking the on-disk
+        # campaign index — O(items × deps × campaigns) YAML reads per request.
+        items_by_id: Dict[str, Dict] = {}
+        dependents_map: Dict[str, List[str]] = {}
+
+        def _index(node):
+            for it in node.get("items", []):
+                items_by_id[it["id"]] = it
+                for dep_id in (it.get("depends_on") or []):
+                    dependents_map.setdefault(dep_id, []).append(it["id"])
+            for child in node.get("children", []):
+                _index(child)
+
+        _index(tree)
+
+        def _resolve_title(target_id: str) -> str:
+            hit = items_by_id.get(target_id)
+            if hit is not None:
+                return hit.get("title") or target_id[:8]
+            # Cross-tree fallback (rare: dependency points outside this campaign tree)
+            external = cs.get_plan_item(target_id)
+            return external.title if external else target_id[:8]
+
         def _enrich_tree(node):
             """Walk tree, enrich each item with dependencies/dependents, collect refs."""
             for item in node.get("items", []):
                 item_id = item["id"]
-                # Resolve dependency titles
-                dep_ids = cs.get_plan_item_dependencies(item_id)
-                dep_items = []
-                for did in dep_ids:
-                    dep = cs.get_plan_item(did)
-                    dep_items.append({"id": did, "title": dep.title if dep else did[:8]})
-                item["dependencies"] = dep_items
-
-                # Resolve dependent titles
-                dnt_ids = cs.get_plan_item_dependents(item_id)
-                dnt_items = []
-                for did in dnt_ids:
-                    dnt = cs.get_plan_item(did)
-                    dnt_items.append({"id": did, "title": dnt.title if dnt else did[:8]})
-                item["dependents"] = dnt_items
+                dep_ids = list(item.get("depends_on") or [])
+                item["dependencies"] = [
+                    {"id": d, "title": _resolve_title(d)} for d in dep_ids
+                ]
+                dnt_ids = dependents_map.get(item_id, [])
+                item["dependents"] = [
+                    {"id": d, "title": _resolve_title(d)} for d in dnt_ids
+                ]
 
                 # Collect references into bibliography
                 for ref in (item.get("references") or []):
