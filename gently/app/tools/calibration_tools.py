@@ -1149,14 +1149,34 @@ async def calibrate_embryo(
                 prompt = prompt_override or EMBRYO_EDGE_STRUCTURED_PROMPT
                 assessment = await claude_vision.assess_focus_image(temp_path, prompt)
 
+                # Accept-rules deliberately do NOT require in_focus. Edge
+                # detection and pre-flight both capture at the heuristic
+                # piezo, which is the position we have BEFORE running a focus
+                # sweep — so the frame is often legitimately defocused even
+                # when the embryo is really there. Gating on in_focus at
+                # this stage rejects real edges (see eb5aa628 session where
+                # this caused edge detection to return 0/0 across all four
+                # embryos and the slope blew up to 2.6e16 um/deg).
+                #
+                # Rules:
+                #   edge       — has_boundary AND has_internal_structure.
+                #                Rejects shadows / faint impressions while
+                #                accepting defocused-but-real embryos.
+                #   calib_pos  — same. The focus sweep that follows will
+                #                find the right piezo; we just need to know
+                #                there's embryo body at this galvo angle.
+                #
+                # We still log in_focus for diagnostics in the trace.
                 if accept_rule == 'calib_pos':
                     accepted = (
                         assessment['has_boundary']
-                        and assessment['in_focus']
                         and assessment['has_internal_structure']
                     )
                 else:  # 'edge'
-                    accepted = assessment['has_boundary'] and assessment['in_focus']
+                    accepted = (
+                        assessment['has_boundary']
+                        and assessment['has_internal_structure']
+                    )
 
                 # Conservative: if parse failed, treat as rejected.
                 if not assessment.get('parse_ok', False):
@@ -1268,6 +1288,27 @@ async def calibrate_embryo(
             logger.info("Detected embryo extent: top=%.3f deg, bottom=%.3f deg, range=%.3f deg (~%.0f um)",
                          detected_top, detected_bottom, detected_bottom - detected_top, (detected_bottom - detected_top) * 100)
 
+            # Refuse to continue when edge detection found nothing. Both
+            # detected_top and detected_bottom would still be at their initial
+            # 0.0 only if the very first step in each direction was rejected
+            # before the loop could walk outward — that means we cannot trust
+            # the inset math to produce sensible calib positions (see eb5aa628
+            # session). Surface a concrete error so the operator sees what
+            # actually went wrong instead of a downstream 2.6e16 um/deg slope.
+            if detected_top == 0.0 and detected_bottom == 0.0:
+                return (
+                    f"Error calibrating {embryo_id}: edge detection found no "
+                    f"galvo position where the embryo is present (both edges "
+                    f"stuck at 0.0). The first step in each direction was "
+                    f"rejected by the VLM gate. Check the calibration trace "
+                    f"in sessions/{getattr(agent, 'session_id', '?')}/embryos/"
+                    f"{embryo.id}/calibration_traces/ to see what the VLM saw "
+                    f"and why each step was rejected. Common causes: stage "
+                    f"is parked far from the embryo, light sheet alignment "
+                    f"is off, or the heuristic piezo at galvo=0 is so far "
+                    f"from focus that no internal structure is visible."
+                )
+
         # === PHASE 2: COMPUTE CALIBRATION POSITIONS (v0.4.0 inset formula) ===
         # Extend the detected edges outward by `edge_tolerance_deg` to get the
         # scan boundaries, then inset inward from those boundaries by
@@ -1320,8 +1361,25 @@ async def calibrate_embryo(
             # Retreat toward the embryo center by half of the inset amount.
             # Top sits at the negative side, so retreating means +delta; bottom
             # is the mirror.
-            retreat_amount = 0.5 * inset_amount
+            #
+            # Clamp the retreat so it can never CROSS the embryo center
+            # (galvo=0 here, since the calibration uses 0 as the working
+            # center). If the calib position is already close to center, an
+            # un-clamped retreat would land on the OPPOSITE side — see the
+            # eb5aa628 session where detected_top=detected_bottom=0 produced
+            # calib positions of ±0.04 and the 0.08 retreat collapsed both
+            # onto +0.04, then phase 4 divided by ~zero and emitted a 2.6e16
+            # um/deg slope. Cap the move at the distance to center.
+            requested_retreat = 0.5 * inset_amount
+            max_retreat = abs(calib_pos)
+            retreat_amount = min(requested_retreat, max_retreat)
             new_pos = calib_pos + (retreat_amount if name == 'top' else -retreat_amount)
+            if retreat_amount < requested_retreat:
+                logger.warning(
+                    "Pre-flight %s retreat clamped: requested %.3f deg would cross "
+                    "center, using %.3f deg instead",
+                    name, requested_retreat, retreat_amount,
+                )
             logger.warning(
                 "Pre-flight %s rejected at galvo=%+.3f deg; retreating to %+.3f deg",
                 name, calib_pos, new_pos,
@@ -1359,6 +1417,22 @@ async def calibrate_embryo(
                     "but the certificate will flag this position.",
                     name,
                 )
+
+        # Sanity check: pre-flight retreats can land top and bottom on the
+        # same galvo (especially when the embryo center is hard to locate).
+        # If we get here with the two calib positions less than one
+        # edge_step apart, the 2-point slope fit downstream will divide by a
+        # near-zero number and produce nonsense (eb5aa628 emitted 2.6e16
+        # um/deg). Refuse to proceed and surface a clear message.
+        if abs(calib_bottom - calib_top) < edge_step:
+            return (
+                f"Error calibrating {embryo_id}: pre-flight collapsed calib "
+                f"positions onto each other "
+                f"(calib_top={calib_top:+.3f}, calib_bottom={calib_bottom:+.3f}, "
+                f"gap={abs(calib_bottom - calib_top):.3f} deg). A 2-point slope "
+                f"fit needs a wider baseline. Check the calibration trace and "
+                f"consider re-centering the embryo or widening edge_max_range."
+            )
 
         # === PHASE 3: ADAPTIVE FOCUS SWEEPS AT CALIBRATION POSITIONS ===
         logger.info("Phase 3: Adaptive focus sweeps at calibration positions...")
