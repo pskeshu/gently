@@ -1053,6 +1053,15 @@ const STATUS_COLORS = {
     blocked: '#f85149',
 };
 
+// Timeline-only: tint bars by task type so the filter highlight has something to pop.
+const TYPE_COLORS = {
+    imaging: '#3b82f6',          // blue
+    bench: '#10b981',            // green
+    genetics: '#a855f7',         // purple
+    analysis: '#06b6d4',         // cyan
+    decision_point: '#f59e0b',   // amber
+};
+
 function setupPlanViewSwitcher() {
     initViewSwitcher('plan-view-switcher', switchPlanView, {
         views: ['doc', 'graph', 'board', 'decide', 'matrix', 'timeline'],
@@ -1487,16 +1496,9 @@ function renderTimelinePlanView() {
     const headerHeight = 40;
     const chartWidth = totalDays * dayWidth;
 
-    // Sort items by start day then phase
-    const displayItems = state.typeFilter ? items.filter(i => i.type === state.typeFilter) : items;
-    const sorted = [...displayItems].sort((a, b) => (startDay[a.id] || 0) - (startDay[b.id] || 0) || a._phaseNum - b._phaseNum);
-
-    if (sorted.length === 0) {
-        $canvasContent.innerHTML = `${buildTypeFilterBar(allItems)}<div class="empty-state">
-            <p>No ${state.typeFilter || ''} items in this plan</p>
-        </div>`;
-        return;
-    }
+    // Sort items by start day then phase. Filter dims non-matching rows rather than hiding them.
+    const sorted = [...items].sort((a, b) => (startDay[a.id] || 0) - (startDay[b.id] || 0) || a._phaseNum - b._phaseNum);
+    const isDim = (item) => state.typeFilter && item.type !== state.typeFilter;
 
     // Day header
     let dayHeaders = '';
@@ -1520,11 +1522,11 @@ function renderTimelinePlanView() {
             <div class="tl-labels" style="height:${chartHeight}px">
                 ${sorted.map((item, idx) => {
                     const icon = TYPE_ICONS[item.type] || '';
-                    const title = item.title.length > 28 ? item.title.slice(0, 26) + '…' : item.title;
-                    return `<div class="tl-label" style="top:${idx * rowHeight}px" data-action="select-item" data-id="${item.id}">
+                    const dim = isDim(item) ? ' dim' : '';
+                    return `<div class="tl-label${dim}" style="top:${idx * rowHeight}px" data-action="select-item" data-id="${item.id}" title="${esc(item.title)}">
                         <span class="tl-label-icon">${icon}</span>
                         <span class="tl-label-phase">P${item._phaseNum}</span>
-                        <span class="tl-label-title">${esc(title)}</span>
+                        <span class="tl-label-title">${esc(item.title)}</span>
                     </div>`;
                 }).join('')}
             </div>
@@ -1533,8 +1535,12 @@ function renderTimelinePlanView() {
                     ${sorted.map((item, idx) => {
                         const start = startDay[item.id] || 0;
                         const dur = item.estimated_days || 1;
-                        const color = STATUS_COLORS[item.status] || STATUS_COLORS.planned;
-                        return `<div class="tl-bar" style="top:${idx * rowHeight + 4}px;left:${start * dayWidth}px;width:${dur * dayWidth - 2}px;background:${color}"
+                        const fill = TYPE_COLORS[item.type] || STATUS_COLORS.planned;
+                        const statusAccent = item.status && item.status !== 'planned' ? (STATUS_COLORS[item.status] || '') : '';
+                        const dim = isDim(item) ? ' dim' : '';
+                        const styles = `top:${idx * rowHeight + 4}px;left:${start * dayWidth}px;width:${dur * dayWidth - 2}px;background:${fill}` +
+                                       (statusAccent ? `;box-shadow:inset 4px 0 0 ${statusAccent}` : '');
+                        return `<div class="tl-bar${dim}" style="${styles}"
                                      data-action="select-item" data-id="${item.id}" title="Day ${start + 1}–${start + dur}: ${esc(item.title)} (${dur}d)">
                             ${dur > 1 ? `<span class="tl-bar-text">${dur}d</span>` : ''}
                         </div>`;
@@ -1550,6 +1556,13 @@ function renderTimelinePlanView() {
     const headerScroll = document.getElementById('tl-header-scroll');
     if (chartScroll && headerScroll) {
         chartScroll.addEventListener('scroll', () => { headerScroll.scrollLeft = chartScroll.scrollLeft; });
+        // Wheel scroll → horizontal pan. Leave native deltaX (trackpad) and shift+wheel alone.
+        chartScroll.addEventListener('wheel', (e) => {
+            if (e.deltaY !== 0 && e.deltaX === 0 && !e.shiftKey) {
+                e.preventDefault();
+                chartScroll.scrollLeft += e.deltaY;
+            }
+        }, { passive: false });
     }
 }
 

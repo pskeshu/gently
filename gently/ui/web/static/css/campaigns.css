@@ -389,8 +389,8 @@
     flex-shrink: 0;
 }
 .tl-corner {
-    width: 220px;
-    min-width: 220px;
+    width: 280px;
+    min-width: 280px;
     padding: 8px 12px;
     font-size: 0.7rem;
     font-weight: 600;
@@ -436,8 +436,8 @@
     overflow: hidden;
 }
 .tl-labels {
-    width: 220px;
-    min-width: 220px;
+    width: 280px;
+    min-width: 280px;
     position: relative;
     overflow-y: auto;
     background: var(--bg-card);
@@ -459,6 +459,12 @@
 }
 .tl-label:hover {
     background: var(--bg-hover);
+}
+.tl-label.dim {
+    opacity: 0.35;
+}
+.tl-label.dim:hover {
+    opacity: 1;
 }
 .tl-label-icon { font-size: 0.8rem; }
 .tl-label-phase {
@@ -496,6 +502,12 @@
 .tl-bar:hover {
     opacity: 1;
     box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.tl-bar.dim {
+    opacity: 0.18;
+}
+.tl-bar.dim:hover {
+    opacity: 1;
 }
 .tl-bar-text {
     font-size: 0.6rem;
