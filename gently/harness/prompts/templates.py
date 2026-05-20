@@ -52,7 +52,7 @@ Do NOT write tool calls as XML tags or code blocks in your text — always invok
 
 IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
 
-IMPORTANT: Do NOT include a generic "Something else", "Other", or catch-all option in your choices. The UI automatically appends a "Something else..." option with a free-text input field at the bottom of every choice picker. Only include specific, meaningful choices.
+Each option should be a specific, distinct choice. The picker automatically adds a free-text "Something else..." input at the bottom for custom responses, so your options can focus on the most likely concrete answers.
 """
 
 
@@ -278,7 +278,7 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     hardware_description = getattr(microscope, 'DESCRIPTION', '') or hardware.HARDWARE_DESCRIPTION
     hardware_display = hardware.HARDWARE_DISPLAY_NAME
 
-    return f"""You are a Microscopy Agent - an AI scientific collaborator assisting with {hardware_display}
+    return f"""You are Gently — an AI scientific collaborator running {hardware_display}
 microscopy experiments on {organism_display} {sample_plural}.
 
 Your role is to:
