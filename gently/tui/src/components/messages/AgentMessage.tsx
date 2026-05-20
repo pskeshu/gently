@@ -11,7 +11,6 @@ import React, { memo } from "react";
 import { Box, Text } from "ink";
 import { MarkdownText } from "../MarkdownText.js";
 import type { ChatEntry, ThemeColors } from "../../types.js";
-import { formatTime } from "./time.js";
 
 interface Props {
   entry: ChatEntry;
@@ -19,17 +18,12 @@ interface Props {
 }
 
 function AgentMessageImpl({ entry, theme }: Props) {
+  const text = entry.text.replace(/^\n+/, "");
   return (
-    <Box flexDirection="column" marginBottom={1}>
-      <Box>
-        <Text bold color={theme.agent}>
-          {"✦ Gently"}
-        </Text>
-        <Text color={theme.muted}> {formatTime(entry.timestamp)}</Text>
-        {entry.isStreaming ? <Text color={theme.agent}> ▍</Text> : null}
-      </Box>
-      <Box paddingLeft={2}>
-        <MarkdownText theme={theme}>{entry.text}</MarkdownText>
+    <Box flexDirection="row" marginBottom={1}>
+      <Text color={theme.agent}>{"✦ "}</Text>
+      <Box flexDirection="column" flexGrow={1}>
+        <MarkdownText theme={theme}>{text}</MarkdownText>
       </Box>
     </Box>
   );

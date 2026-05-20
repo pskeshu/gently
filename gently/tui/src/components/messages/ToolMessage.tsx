@@ -15,12 +15,11 @@ interface Props {
 function ToolMessageImpl({ entry, theme }: Props) {
   const name = entry.toolName ?? entry.text;
   const summary = entry.toolSummary;
-  const dur = entry.toolDuration;
-  const showDuration = dur && dur > 0.1;
+  const answer = entry.toolAnswer;
 
   if (entry.isStreaming) {
     return (
-      <Box marginBottom={0} paddingLeft={2}>
+      <Box flexDirection="column" marginBottom={0} paddingLeft={2}>
         <Text>
           <Text color={theme.tool}>{"⠸ "}</Text>
           <Text color={theme.tool} dimColor>
@@ -30,18 +29,27 @@ function ToolMessageImpl({ entry, theme }: Props) {
             <Text color={theme.muted} dimColor>{" — "}{summary}</Text>
           ) : null}
         </Text>
+        {answer ? (
+          <Box paddingLeft={2}>
+            <Text color={theme.muted} dimColor>{"↳ "}{answer}</Text>
+          </Box>
+        ) : null}
       </Box>
     );
   }
 
   return (
-    <Box marginBottom={0} paddingLeft={2}>
+    <Box flexDirection="column" marginBottom={0} paddingLeft={2}>
       <Text>
         <Text color={theme.success}>{"● "}</Text>
         <Text color={theme.muted}>{name}</Text>
         {summary ? <Text dimColor>{" — "}{summary}</Text> : null}
-        {showDuration ? <Text dimColor>{` (${dur.toFixed(1)}s)`}</Text> : null}
       </Text>
+      {answer ? (
+        <Box paddingLeft={2}>
+          <Text color={theme.muted} dimColor>{"↳ "}{answer}</Text>
+        </Box>
+      ) : null}
     </Box>
   );
 }

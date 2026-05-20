@@ -25,22 +25,12 @@ function formatElapsed(ms: number): string {
   return `${m}m ${rem}s`;
 }
 
-function formatTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return String(n);
-}
-
 export function ActiveMessage() {
   const store = useTuiStoreApi();
   const entry = useTuiSelector((s) => s.activeMessage);
   const theme = useTuiSelector((s) => s.theme);
 
-  // Tokens are only needed for the thinking-state stats line.
-  const apiCalls = useTuiSelector((s) => s.tokens.api_calls);
-  const totalTokens = useTuiSelector((s) => s.tokens.total_tokens);
-
-  // Tick once a second to refresh elapsed/approxTokens from the ref.
+  // Tick once a second to refresh elapsed time from the ref.
   const [tick, setTick] = useState(0);
   const startedAtRef = useRef(0);
   useEffect(() => {
@@ -60,15 +50,8 @@ export function ActiveMessage() {
   const metrics = store.getState().streamMetrics;
   const elapsed = metrics.startedAt ? Date.now() - metrics.startedAt : 0;
 
-  // Thinking state — spinner with elapsed timer and session stats.
+  // Thinking state — spinner with elapsed time only (no token/API counts).
   if (entry.isThinking) {
-    let stats = "";
-    if (apiCalls > 0) {
-      stats = ` · ${formatTokens(totalTokens)} tokens · ${apiCalls} API call${apiCalls !== 1 ? "s" : ""}`;
-    } else if (elapsed >= 2000) {
-      stats = " · calling API...";
-    }
-
     return (
       <Box marginBottom={1}>
         <Text color={theme.agent}>
@@ -76,28 +59,17 @@ export function ActiveMessage() {
         </Text>
         <Text color={theme.muted}>
           {" "}Thinking{elapsed >= 1000 ? ` ${formatElapsed(elapsed)}` : ""}
-          {stats}
         </Text>
       </Box>
     );
   }
 
-  // Streaming text — show message with elapsed time and approx output tokens.
-  const approxTokens = Math.round(metrics.charsReceived / 4);
   // Reference `tick` so React re-runs this branch on the interval.
   void tick;
 
   return (
     <Box flexDirection="column">
       <MessageBubble entry={entry} theme={theme} />
-      {entry.isStreaming && elapsed >= 1000 ? (
-        <Box>
-          <Text color={theme.muted}>
-            {"  "}{formatElapsed(elapsed)}
-            {approxTokens > 0 ? ` · ~${approxTokens} output tokens` : ""}
-          </Text>
-        </Box>
-      ) : null}
     </Box>
   );
 }

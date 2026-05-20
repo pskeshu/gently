@@ -85,22 +85,16 @@ export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
   }
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={theme.info}
-      paddingX={1}
-      marginBottom={1}
-    >
+    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
       <Text bold color={theme.info}>
         {choice.choice_data.question}
       </Text>
-      <Text color={theme.muted}>
+      <Text color={theme.muted} dimColor>
         {isCustom
-          ? "Type your answer · Enter submit · Esc cancel"
+          ? "type · enter · esc"
           : allowMultiple
-            ? "↑/↓ navigate · Space toggle · Enter submit · Esc cancel"
-            : "↑/↓ navigate · Enter select · Esc cancel"}
+            ? "↑↓ · space · enter · esc"
+            : "↑↓ · enter · esc"}
       </Text>
       <Box flexDirection="column" marginTop={1}>
         {options.map((opt, i) => {

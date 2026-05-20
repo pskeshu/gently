@@ -328,14 +328,28 @@ export function createTuiStore() {
       }),
 
     addUserSelection: (text) =>
-      set((s) => ({
-        // Add user selection to completed WITHOUT committing activeMessage.
-        // Used for choice picker selections where a tool is still active.
-        completedMessages: [
-          ...s.completedMessages,
-          { id: nextId(), role: "user" as const, text, timestamp: Date.now() },
-        ],
-      })),
+      set((s) => {
+        // If a choice-tool is currently active, attach the answer to the
+        // tool entry itself so the question and answer commit together
+        // (mirrors src's AskUserQuestionResultMessage pattern). Avoids the
+        // ordering bug where the answer was appended to completedMessages
+        // before the tool entry, putting the answer above the question.
+        if (s.activeMessage?.role === "tool") {
+          return {
+            activeMessage: {
+              ...s.activeMessage,
+              toolAnswer: text,
+            },
+          };
+        }
+        // Fallback: no active tool — append as a standalone selection row.
+        return {
+          completedMessages: [
+            ...s.completedMessages,
+            { id: nextId(), role: "user" as const, text, timestamp: Date.now(), isSelection: true },
+          ],
+        };
+      }),
 
     appendAgentText: (text) =>
       set((s) => {

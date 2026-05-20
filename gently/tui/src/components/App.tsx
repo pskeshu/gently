@@ -22,7 +22,6 @@ import { useChoiceCallbacks } from "../hooks/useChoiceCallbacks.js";
 import { useTuiSelector, useTuiStoreApi } from "../context.js";
 
 import { GlobalKeybindings } from "./keybindings/GlobalKeybindings.js";
-import { Header } from "./Header.js";
 import { Layout } from "./Layout.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ActiveMessage } from "./ChatPane.js";
@@ -76,12 +75,7 @@ export function App({ wsUrl }: AppProps) {
 
   return (
     <Layout
-      header={
-        <>
-          <GlobalKeybindings send={send} isActive={!modal} />
-          <Header />
-        </>
-      }
+      header={<GlobalKeybindings send={send} isActive={!modal} />}
       welcome={showWelcome ? <WelcomeScreen /> : null}
       transcript={
         <>

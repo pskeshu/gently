@@ -15,6 +15,20 @@ interface Props {
 }
 
 function UserMessageImpl({ entry, theme }: Props) {
+  // Choice-picker selection — compact row attached to the preceding tool call,
+  // mirroring src's "· question → answer" pattern but with just the answer
+  // since the question already appeared in the tool call line above.
+  if (entry.isSelection) {
+    return (
+      <Box marginBottom={1} paddingLeft={4}>
+        <Text color={theme.muted} dimColor>
+          {"↳ "}
+          {entry.text}
+        </Text>
+      </Box>
+    );
+  }
+
   const fg = theme.colorMode === "light" ? "#1f2937" : "#f9fafb";
   return (
     <Box flexDirection="column" marginBottom={1}>
