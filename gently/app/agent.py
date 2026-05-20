@@ -38,7 +38,6 @@ from gently_perception import Perceiver
 from . import tools as _tools  # noqa: F401
 from ..harness.session.interaction_logger import InteractionLogger
 from .orchestration.timelapse import TimelapseOrchestrator
-from .orchestration.focus import FocusController
 from ..harness.session.timeline import TimelineManager
 from ..core import EventType, get_event_bus, emit
 from ..core.file_store import FileStore
@@ -140,11 +139,6 @@ class MicroscopyAgent:
 
         # Timelapse orchestrator (initialized when microscope connected)
         self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
-
-        # Focus controller — owns calibration certificates and the async VLM
-        # verification queue. Created eagerly so tools can rely on its
-        # presence regardless of microscope connection state.
-        self.focus = FocusController(self)
 
         # Timeline manager for tracking events
         self.timeline_manager: Optional[TimelineManager] = None

@@ -50,20 +50,6 @@ async def acquire_volume(
     if err:
         return err
 
-    # Refuse to acquire if the FocusController has not certified this
-    # embryo's calibration. Surfaces a precise reason (pending verification
-    # vs. unresolved concerns) so the agent can remediate before retrying.
-    focus = getattr(agent, 'focus', None)
-    if focus is not None:
-        ready, reason = focus.is_ready_to_image(embryo.id)
-        if not ready:
-            return (
-                f"Refusing acquire_volume: {reason}.\n"
-                "Check is_ready_to_image or get_calibration_certificate before "
-                "retrying. If verification is still pending, call "
-                "await_calibration_verification."
-            )
-
     try:
         # Move to embryo position first
         pos = embryo.stage_position

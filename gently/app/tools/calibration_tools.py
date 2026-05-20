@@ -77,12 +77,6 @@ async def _adaptive_focus_sweep(
     """
     total_exposures = 0
 
-    # Track the best in-focus image (highest score) seen during the dense
-    # sweep. Returned to callers so the FocusController can run an async
-    # VLM verification without re-acquiring frames.
-    best_focus_image: Optional[np.ndarray] = None
-    best_focus_score: float = -1.0
-
     # Adaptive parameters based on prior confidence
     SPARSE_STEP = 5.0  # µm - larger steps for survey
     DENSE_STEP = 0.5   # µm - fine steps for refinement
@@ -170,12 +164,6 @@ async def _adaptive_focus_sweep(
             # Add to adaptive state and check for early stopping
             decision = dense_state.add_point(float(piezo), float(score))
 
-            # Remember the sharpest frame so the FocusController can run the
-            # async VLM verification without acquiring fresh exposures.
-            if score > best_focus_score:
-                best_focus_score = float(score)
-                best_focus_image = img
-
             logger.debug("piezo=%.1f: score=%.2e", piezo, score)
 
             # Push to viz server
@@ -235,10 +223,6 @@ async def _adaptive_focus_sweep(
         'max_score': float(max(dense_state.scores)) if dense_state.scores else 0.0,
         'r_squared': r_squared,
         'fit_params': None,  # Will be set by focus curve plot generation
-        # Best in-focus frame from the dense sweep — handed back to the
-        # FocusController for async VLM verification. May be None if no
-        # frames were captured (e.g. all exposures failed).
-        'best_image': best_focus_image,
     }
 
     # Push focus curve plot
@@ -1040,161 +1024,49 @@ async def calibrate_embryo(
         # Initialize Claude client for vision
         claude_vision = AsyncClaudeClient()
 
-        # Per-step evidence accumulated during edge detection. Replaces the
-        # earlier "feature_score 1-10" path; each entry is the structured
-        # boolean perception returned by assess_focus_image plus the
-        # deterministic decision the loop made.
-        edge_detection_data = []  # List of {galvo, piezo, valid, assessment}
+        # Track feature richness during edge detection for optimal focus position selection
+        # Claude rates each slice 1-10 for how good it would be for focus calibration
+        edge_detection_data = []  # List of {galvo, piezo, visible, feature_score}
 
-        # Per-calibration JSONL trace. One line per VLM call so the operator
-        # can see (in real time, via `tail -f`, or post-hoc) what the VLM saw
-        # at each galvo step and what the procedure decided. Path:
-        #   sessions/{sid}/embryos/{eid}/calibration_traces/{ts}.jsonl
-        # Silently no-ops if the store has not yet attached a session — the
-        # in-memory edge_detection_data still keeps the record.
-        trace_path = None
-        try:
-            session_id = getattr(agent, 'session_id', None)
-            store = getattr(agent, 'store', None)
-            if store and session_id:
-                emb_dir = store._embryo_dir(session_id, embryo.id)
-                trace_dir = emb_dir / 'calibration_traces'
-                trace_dir.mkdir(parents=True, exist_ok=True)
-                trace_path = trace_dir / (
-                    datetime.now().strftime('%Y%m%d_%H%M%S') + '.jsonl'
-                )
-                logger.info("Calibration trace: %s", trace_path)
-        except Exception as trace_err:
-            logger.warning("Could not set up calibration trace file: %s", trace_err)
-            trace_path = None
-
-        def _write_trace(record: Dict) -> None:
-            """Append one JSON line to the trace file (no-op if unavailable)."""
-            if trace_path is None:
-                return
-            try:
-                with open(trace_path, 'a', encoding='utf-8') as fh:
-                    fh.write(json.dumps(record, default=str) + '\n')
-            except Exception as write_err:
-                logger.debug("Trace write failed (non-fatal): %s", write_err)
-
-        # Helper to capture, run structured perception, and apply the
-        # deterministic edge-acceptance rule.
-        async def check_embryo_at_position(
-            galvo_pos: float,
-            phase: str = 'edge_detection',
-            prompt_override: Optional[str] = None,
-            accept_rule: str = 'edge',
-        ) -> Dict:
-            """Capture image, run structured perception, return decision dict.
-
-            ``accept_rule``:
-              - 'edge'       — accept if has_boundary AND in_focus (used by the
-                               edge-detection sweep; permissive about internal
-                               structure since the edge of an embryo may
-                               legitimately lack interior features).
-              - 'calib_pos'  — accept only if all three booleans are true (used
-                               by the pre-flight check at calib positions where
-                               the focus algorithm needs structure to lock on).
-
-            Returns a dict with at minimum ``accepted: bool``, ``assessment``
-            (the parsed VLM response), ``galvo``, and ``piezo``.
-            """
-            from gently.hardware.dispim.plans.calibration import (
-                EMBRYO_EDGE_STRUCTURED_PROMPT,
-                CALIB_POSITION_QUALITY_PROMPT,
-            )
-
+        # Helper to save image and check embryo presence
+        async def check_embryo_at_position(galvo_pos: float) -> bool:
+            """Capture image, check embryo presence, and get feature richness score from Claude"""
             nonlocal total_exposures
-            piezo_pos = HEURISTIC_SLOPE * galvo_pos + HEURISTIC_OFFSET
-            cap = await client.capture_lightsheet_image(
+            piezo_pos = HEURISTIC_SLOPE * galvo_pos + HEURISTIC_OFFSET  # Track light sheet
+            result = await client.capture_lightsheet_image(
                 piezo_position=float(piezo_pos),
-                galvo_position=float(galvo_pos),
+                galvo_position=float(galvo_pos)
             )
-            if cap.get('success'):
+            if result.get('success'):
                 total_exposures += 1
-            if not cap.get('success') or cap.get('image') is None:
-                record = {
-                    'ts': datetime.now().isoformat(),
-                    'phase': phase,
-                    'galvo': float(galvo_pos),
-                    'piezo': float(piezo_pos),
-                    'accepted': False,
-                    'reason': 'capture_failed',
-                    'capture_error': cap.get('error') if isinstance(cap, dict) else None,
-                }
-                _write_trace(record)
-                logger.warning(
-                    "%s at galvo=%+.3f: capture failed (%s)",
-                    phase, galvo_pos, record['capture_error'],
-                )
-                return {
-                    'accepted': False,
-                    'galvo': float(galvo_pos),
-                    'piezo': float(piezo_pos),
-                    'assessment': None,
-                    'reason': 'capture_failed',
-                }
+            if not result.get('success') or result.get('image') is None:
+                return False
 
-            img_view = select_best_view(cap['image'])
+            img = result['image']
+            # Select best view from dual-view image
+            img_view = select_best_view(img)
+
+            # Save to temp file for Claude
             with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as f:
                 temp_path = Path(f.name)
-                denom = (img_view.max() - img_view.min()) or 1
-                img_norm = (
-                    (img_view - img_view.min()) / (denom + 1e-10) * 255
-                ).clip(0, 255).astype(np.uint8)
+                # Normalize and save
+                img_norm = ((img_view - img_view.min()) / (img_view.max() - img_view.min() + 1e-10) * 255).astype(np.uint8)
                 Image.fromarray(img_norm).save(temp_path)
 
             try:
-                prompt = prompt_override or EMBRYO_EDGE_STRUCTURED_PROMPT
-                assessment = await claude_vision.assess_focus_image(temp_path, prompt)
+                # Claude now returns (visible, feature_score, description)
+                visible, feature_score, description = await claude_vision.detect_embryo_presence(temp_path)
+                logger.debug("galvo=%+.3f deg: %s (features=%s/10) - %s...", galvo_pos, 'VISIBLE' if visible else 'EMPTY', feature_score, description[:40])
 
-                if accept_rule == 'calib_pos':
-                    accepted = (
-                        assessment['has_boundary']
-                        and assessment['in_focus']
-                        and assessment['has_internal_structure']
-                    )
-                else:  # 'edge'
-                    accepted = assessment['has_boundary'] and assessment['in_focus']
-
-                # Conservative: if parse failed, treat as rejected.
-                if not assessment.get('parse_ok', False):
-                    accepted = False
-
-                logger.info(
-                    "%s galvo=%+.3f: %s (boundary=%s in_focus=%s internal=%s) — %s",
-                    phase, galvo_pos,
-                    'ACCEPT' if accepted else 'REJECT',
-                    assessment.get('has_boundary'),
-                    assessment.get('in_focus'),
-                    assessment.get('has_internal_structure'),
-                    (assessment.get('description') or '')[:120],
-                )
-
+                # Record for optimal focus position selection
                 edge_detection_data.append({
                     'galvo': float(galvo_pos),
                     'piezo': float(piezo_pos),
-                    'phase': phase,
-                    'accepted': accepted,
-                    'assessment': assessment,
+                    'visible': visible,
+                    'feature_score': feature_score,
                 })
 
-                _write_trace({
-                    'ts': datetime.now().isoformat(),
-                    'phase': phase,
-                    'galvo': float(galvo_pos),
-                    'piezo': float(piezo_pos),
-                    'accepted': accepted,
-                    'rule': accept_rule,
-                    'has_boundary': assessment.get('has_boundary'),
-                    'in_focus': assessment.get('in_focus'),
-                    'has_internal_structure': assessment.get('has_internal_structure'),
-                    'parse_ok': assessment.get('parse_ok'),
-                    'description': assessment.get('description'),
-                    'vlm_error': assessment.get('error'),
-                })
-
+                # Push edge detection image to viz server
                 if agent.viz_server:
                     agent.push_viz(
                         array=img_norm,
@@ -1204,24 +1076,12 @@ async def calibrate_embryo(
                             'embryo_id': embryo_id,
                             'galvo': float(galvo_pos),
                             'piezo': float(piezo_pos),
-                            'phase': phase,
-                            'accepted': accepted,
-                            'has_boundary': assessment.get('has_boundary'),
-                            'in_focus': assessment.get('in_focus'),
-                            'has_internal_structure': assessment.get('has_internal_structure'),
-                            'description': (assessment.get('description') or '')[:200],
-                        },
+                            'visible': visible,
+                            'feature_score': feature_score,
+                        }
                     )
 
-                return {
-                    'accepted': accepted,
-                    'galvo': float(galvo_pos),
-                    'piezo': float(piezo_pos),
-                    'assessment': assessment,
-                    'reason': None if accepted else (
-                        'parse_failed' if not assessment.get('parse_ok') else 'rule_rejected'
-                    ),
-                }
+                return visible
             finally:
                 temp_path.unlink(missing_ok=True)
 
@@ -1234,35 +1094,26 @@ async def calibrate_embryo(
         else:
             logger.info("Phase 1: Detecting embryo Z extent with Claude vision...")
 
-            # Detect TOP edge (sweep from center toward negative).
-            # Acceptance rule: has_boundary AND in_focus (deterministic; see
-            # check_embryo_at_position docstring). The first step where the
-            # rule rejects ends the sweep.
+            # Detect TOP edge (sweep from center toward negative)
             logger.info("Detecting TOP edge (sweeping galvo toward negative)...")
             detected_top = 0.0
             for galvo in np.arange(0.0, -edge_max_range - edge_step/2, -edge_step):
-                step = await check_embryo_at_position(galvo, phase='edge_detection_top')
-                if step['accepted']:
+                visible = await check_embryo_at_position(galvo)
+                if visible:
                     detected_top = galvo
                 else:
-                    logger.info(
-                        "Top edge: stopping at galvo=%.3f deg (%s)",
-                        galvo, step.get('reason') or 'rejected',
-                    )
+                    logger.info("Embryo disappeared at galvo=%.3f deg", galvo)
                     break
 
             # Detect BOTTOM edge (sweep from center toward positive)
             logger.info("Detecting BOTTOM edge (sweeping galvo toward positive)...")
             detected_bottom = 0.0
             for galvo in np.arange(0.0, edge_max_range + edge_step/2, edge_step):
-                step = await check_embryo_at_position(galvo, phase='edge_detection_bottom')
-                if step['accepted']:
+                visible = await check_embryo_at_position(galvo)
+                if visible:
                     detected_bottom = galvo
                 else:
-                    logger.info(
-                        "Bottom edge: stopping at galvo=%.3f deg (%s)",
-                        galvo, step.get('reason') or 'rejected',
-                    )
+                    logger.info("Embryo disappeared at galvo=%.3f deg", galvo)
                     break
 
             logger.info("Detected embryo extent: top=%.3f deg, bottom=%.3f deg, range=%.3f deg (~%.0f um)",
@@ -1289,76 +1140,6 @@ async def calibrate_embryo(
                      edge_tolerance_deg, scan_top, scan_bottom, scan_range)
         logger.info("Calibration positions (%.0f%% inset from scan boundary): top=%.3f deg, bottom=%.3f deg (%.3f deg apart)",
                      inset_fraction * 100, calib_top, calib_bottom, calib_bottom - calib_top)
-
-        # === PHASE 2b: PRE-FLIGHT QUALITY CHECK AT CALIB POSITIONS ===
-        # Before committing 30-60 exposures per side to a focus sweep, snap
-        # one frame at each computed calib position and ask Claude (with the
-        # stricter CALIB_POSITION_QUALITY_PROMPT) whether the position
-        # actually has a focused, structured embryo for the algorithm to lock
-        # onto. If the answer is no, retreat by 0.5 * inset_amount toward the
-        # embryo center and re-check once. Any remaining rejection becomes a
-        # certificate concern (preflight_top_failed / preflight_bottom_failed)
-        # so the FocusController gate refuses downstream imaging.
-        from gently.hardware.dispim.plans.calibration import (
-            CALIB_POSITION_QUALITY_PROMPT,
-        )
-
-        logger.info("Phase 2b: Pre-flight check at calibration positions...")
-        preflight_concerns: List[str] = []
-
-        for name in ('top', 'bottom'):
-            calib_pos = calib_top if name == 'top' else calib_bottom
-            initial = await check_embryo_at_position(
-                calib_pos,
-                phase=f'preflight_{name}',
-                prompt_override=CALIB_POSITION_QUALITY_PROMPT,
-                accept_rule='calib_pos',
-            )
-            if initial['accepted']:
-                continue
-
-            # Retreat toward the embryo center by half of the inset amount.
-            # Top sits at the negative side, so retreating means +delta; bottom
-            # is the mirror.
-            retreat_amount = 0.5 * inset_amount
-            new_pos = calib_pos + (retreat_amount if name == 'top' else -retreat_amount)
-            logger.warning(
-                "Pre-flight %s rejected at galvo=%+.3f deg; retreating to %+.3f deg",
-                name, calib_pos, new_pos,
-            )
-            retry = await check_embryo_at_position(
-                new_pos,
-                phase=f'preflight_{name}_retry',
-                prompt_override=CALIB_POSITION_QUALITY_PROMPT,
-                accept_rule='calib_pos',
-            )
-            if retry['accepted']:
-                if name == 'top':
-                    calib_top = new_pos
-                else:
-                    calib_bottom = new_pos
-                logger.info(
-                    "Pre-flight %s accepted after retreat; using galvo=%+.3f deg",
-                    name, new_pos,
-                )
-            else:
-                # Both the original and the retreat failed. We still attempt
-                # the focus sweep so we produce a calibration record (and the
-                # operator can see what the sweep looked like in the trace),
-                # but the certificate will refuse downstream imaging.
-                initial_desc = (
-                    initial.get('assessment') or {}
-                ).get('description', '(no description)')
-                preflight_concerns.append(
-                    f"[preflight_{name}_failed] calib {name} at galvo={calib_pos:+.3f} "
-                    f"and retreat at {new_pos:+.3f} both rejected by pre-flight "
-                    f"(initial: {initial_desc[:80]})"
-                )
-                logger.warning(
-                    "Pre-flight %s retreat also rejected; calibration will proceed "
-                    "but the certificate will flag this position.",
-                    name,
-                )
 
         # === PHASE 3: ADAPTIVE FOCUS SWEEPS AT CALIBRATION POSITIONS ===
         logger.info("Phase 3: Adaptive focus sweeps at calibration positions...")
@@ -1437,23 +1218,6 @@ async def calibrate_embryo(
             'r_squared_bottom': results['bottom']['r_squared'],
         }
 
-        # Hand off to the FocusController. This applies the rule engine
-        # (writes 'certificate' onto embryo.calibration), then schedules an
-        # async VLM verification using the best frame from each sweep. While
-        # the async task is in flight the certificate reads 'pending', which
-        # blocks downstream acquisition gates until verification lands.
-        focus_controller = getattr(agent, 'focus', None)
-        certificate = None
-        if focus_controller is not None:
-            certificate = focus_controller.record_calibration(
-                embryo_id=embryo.id,
-                calibration=embryo.calibration,
-                top_image=results['top'].get('best_image'),
-                bottom_image=results['bottom'].get('best_image'),
-                schedule_vlm=True,
-                extra_concerns=preflight_concerns if preflight_concerns else None,
-            )
-
         # Update session prior for cross-embryo learning
         avg_r_squared = (results['top']['r_squared'] + results['bottom']['r_squared']) / 2
         extent_deg = detected_bottom - detected_top
@@ -1515,36 +1279,6 @@ async def calibrate_embryo(
 
         agent._mark_significant_action("calibration")
 
-        r2_top = results['top']['r_squared']
-        r2_bot = results['bottom']['r_squared']
-
-        # Certificate status \u2014 agent must see this without making a second
-        # tool call. If the FocusController scheduled a VLM check, the
-        # certificate currently reads 'pending'; we surface that explicitly
-        # so the agent does not jump to acquisition.
-        if certificate is None:
-            cert_block = "  Certificate: (focus controller unavailable)"
-        else:
-            verified = certificate.get('verified')
-            concerns = certificate.get('concerns') or []
-            if verified == 'pending':
-                cert_line = "PENDING \u2014 VLM verification scheduled in background"
-            elif verified is True:
-                cert_line = "verified by rules (VLM check disabled \u2014 no images)"
-            else:
-                cert_line = "FAILED \u2014 rules detected concerns"
-            cert_block = (
-                f"  Certificate: {cert_line}\n"
-                f"  R\u00b2 top={r2_top:.2f}  R\u00b2 bottom={r2_bot:.2f}"
-            )
-            if concerns:
-                cert_block += "\n  Concerns:\n    - " + "\n    - ".join(concerns)
-            cert_block += (
-                "\n  Gate: call is_ready_to_image(\"" + embryo.id + "\") before "
-                "acquisition; do not start a timelapse while verification is pending "
-                "or while concerns are unresolved."
-            )
-
         return (
             f"\u2713 Calibrated {embryo_id}\n"
             f"  Embryo extent: galvo {detected_top:.3f}\u00b0 to {detected_bottom:.3f}\u00b0 "
@@ -1555,8 +1289,7 @@ async def calibrate_embryo(
             f"  Bottom: galvo={g_bottom:.3f}\u00b0 \u2192 piezo={p_bottom:.1f}\u00b5m\n"
             f"  Volume params: galvo={galvo_center:.3f}\u00b0\u00b1{galvo_amplitude:.3f}\u00b0, "
             f"piezo={piezo_center:.1f}\u00b5m\u00b1{piezo_amplitude:.1f}\u00b5m\n"
-            f"  Z buffer: \u00b1{z_buffer_um:.0f}\u00b5m above/below embryo\n"
-            f"{cert_block}"
+            f"  Z buffer: \u00b1{z_buffer_um:.0f}\u00b5m above/below embryo"
         )
 
     except Exception as e:

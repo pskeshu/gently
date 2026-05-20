@@ -18,16 +18,11 @@ import asyncio
 import base64
 import os
 from pathlib import Path
-from typing import Any, Optional, Tuple, Dict
+from typing import Optional, Tuple, Dict
 import anthropic
 
 from gently.settings import settings
-from .plans.calibration import (
-    EMBRYO_CENTERING_PROMPT,
-    EMBRYO_EDGE_PROMPT,
-    EMBRYO_EDGE_STRUCTURED_PROMPT,
-    CALIB_POSITION_QUALITY_PROMPT,
-)
+from .plans.calibration import EMBRYO_CENTERING_PROMPT, EMBRYO_EDGE_PROMPT
 
 _MEDIA_TYPE_MAP = {
     '.png': 'image/png',
@@ -344,140 +339,6 @@ class AsyncClaudeClient:
             return False, 0, f"Claude API timeout after {self.timeout}s"
         except Exception as e:
             return False, 0, f"Claude API error: {str(e)}"
-
-    async def assess_focus_image(
-        self,
-        image_path: Path,
-        prompt: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Structured-perception VLM call for calibration decisions.
-
-        Sends one image with a strict-format prompt and parses a 4-line
-        response into three booleans (has_boundary, in_focus,
-        has_internal_structure) plus a one-line description.
-
-        Parsing is conservative: any boolean we cannot parse defaults to
-        False. That biases us toward rejecting marginal inputs, which is the
-        whole point of replacing the lenient 1-10 score.
-
-        Parameters
-        ----------
-        image_path : Path
-            Path to microscopy image (PNG).
-        prompt : str, optional
-            Prompt template. Defaults to EMBRYO_EDGE_STRUCTURED_PROMPT; pass
-            CALIB_POSITION_QUALITY_PROMPT for the stricter pre-flight check.
-
-        Returns
-        -------
-        dict with keys:
-            has_boundary: bool
-            in_focus: bool
-            has_internal_structure: bool
-            description: str
-            raw_response: str
-            parse_ok: bool   — False if the response didn't match the 4-line shape
-            error: str | None — populated on API failure or timeout
-        """
-        image_path = Path(image_path)
-        result: Dict[str, Any] = {
-            'has_boundary': False,
-            'in_focus': False,
-            'has_internal_structure': False,
-            'description': '',
-            'raw_response': '',
-            'parse_ok': False,
-            'error': None,
-        }
-
-        if not image_path.exists():
-            result['error'] = f'Image file not found: {image_path}'
-            result['description'] = result['error']
-            return result
-
-        prompt = prompt or EMBRYO_EDGE_STRUCTURED_PROMPT
-        image_data = self.encode_image(image_path)
-        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), 'image/png')
-
-        try:
-            response = await asyncio.wait_for(
-                self.client.messages.create(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    messages=[{
-                        'role': 'user',
-                        'content': [
-                            {
-                                'type': 'image',
-                                'source': {
-                                    'type': 'base64',
-                                    'media_type': media_type,
-                                    'data': image_data,
-                                },
-                            },
-                            {'type': 'text', 'text': prompt},
-                        ],
-                    }],
-                ),
-                timeout=self.timeout,
-            )
-            raw = response.content[0].text or ''
-        except asyncio.TimeoutError:
-            result['error'] = f'Claude API timeout after {self.timeout}s'
-            result['description'] = result['error']
-            return result
-        except Exception as exc:
-            result['error'] = f'Claude API error: {exc}'
-            result['description'] = result['error']
-            return result
-
-        result['raw_response'] = raw
-
-        def _parse_yes_no(value: str) -> Optional[bool]:
-            v = value.strip().lower()
-            # Strip leading bullets / markdown
-            for prefix in ('-', '*', '`'):
-                if v.startswith(prefix):
-                    v = v[len(prefix):].strip()
-            if v.startswith('yes') or v == 'true' or v.startswith('y '):
-                return True
-            if v.startswith('no') or v == 'false' or v.startswith('n '):
-                return False
-            return None
-
-        keys_in_order = ('has_boundary', 'in_focus', 'has_internal_structure')
-        lines = [ln.strip() for ln in raw.strip().splitlines() if ln.strip()]
-
-        # Match keys regardless of slight wording variations from the model.
-        parsed_keys = 0
-        for key in keys_in_order:
-            matching = next(
-                (ln for ln in lines if ln.lower().startswith(key.lower())),
-                None,
-            )
-            if matching is None:
-                continue
-            _, _, value = matching.partition(':')
-            if not value:
-                # Maybe the line is "has_boundary yes" rather than "has_boundary: yes"
-                _, _, value = matching.partition(' ')
-            parsed = _parse_yes_no(value)
-            if parsed is not None:
-                result[key] = parsed
-                parsed_keys += 1
-
-        # Description: anything that does not look like a key-value line.
-        non_key_lines = [
-            ln for ln in lines
-            if not any(ln.lower().startswith(k.lower()) for k in keys_in_order)
-        ]
-        if non_key_lines:
-            result['description'] = ' '.join(non_key_lines)
-        else:
-            result['description'] = '(no description supplied)'
-
-        result['parse_ok'] = parsed_keys == len(keys_in_order)
-        return result
 
     async def validate_focus_montage(
         self,
