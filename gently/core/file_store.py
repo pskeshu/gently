@@ -133,11 +133,30 @@ def _write_yaml(path: Path, data: Any) -> None:
 
 
 def _read_yaml(path: Path) -> Any:
-    """Read a YAML file.  Returns None if missing or empty."""
+    """Read a YAML file.  Returns None if missing or empty.
+
+    Tolerant of legacy session files written before _sanitize_for_yaml
+    existed — those embed numpy scalars as
+    ``!!python/object/apply:numpy.core.multiarray.scalar`` tags that
+    safe_load refuses to construct. When we hit such a file we fall
+    back to unsafe_load (the only writer of these files is our own
+    code on local disk, same trust boundary as the code itself) and
+    immediately sanitize the result so the caller always receives
+    native Python types. New writes go through _write_yaml + safe_dump
+    so legacy form does not propagate.
+    """
     if not path.exists():
         return None
     with open(path, "r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        text = f.read()
+    try:
+        return yaml.safe_load(text)
+    except yaml.constructor.ConstructorError as err:
+        marker = str(err)
+        if 'python/object' not in marker and 'numpy' not in marker:
+            raise
+        data = yaml.unsafe_load(text)
+        return _sanitize_for_yaml(data)
 
 
 def _append_jsonl(path: Path, record: dict) -> None:
