@@ -116,24 +116,24 @@ class DiSPIMMicroscope(Microscope):
     def is_connected(self) -> bool:
         """Check if connected to Device Layer Server.
 
-        This is a cached value set by connect() / health_check() / any
-        call that succeeds or fails against the device layer. Use
-        `health_check()` if you need to actively verify the connection
-        is still alive (e.g. before reporting status to a UI).
+        This is the cached session-level state, flipped only by
+        connect() / disconnect() and by real RPC failures from actual
+        work. health_check() does NOT mutate this — see its docstring.
         """
         return self._qs_connected
 
     async def health_check(self, timeout: float = 2.0) -> bool:
-        """Actively ping the device layer and refresh _qs_connected.
+        """Actively ping the device layer. READ-ONLY.
 
-        The is_connected property is only updated by connect() and by
-        the natural failure of actual RPC calls, so it can go stale and
-        report True long after the device layer process has died. This
-        method sends a lightweight GET to /api/status with a short
-        timeout and updates _qs_connected based on whether it succeeds,
-        so callers that report connection status (e.g. the viz server's
-        /api/device-status endpoint) get an accurate answer within the
-        timeout window.
+        Returns the live ping result for callers that need a fresh
+        answer (e.g. the UI status badge). Does NOT mutate
+        ``_qs_connected``: that flag is the truth of "is this client's
+        session connected" and must only flip on connect()/disconnect()
+        or on real RPC failures from actual work. Letting a status poll
+        write to it makes the UI's 15-second poll a destructive
+        operation — a transient timeout on the local socket then
+        disconnects any in-flight acquisition. See the 60dbbc62 session
+        for the failure mode this prevents.
 
         Parameters
         ----------
@@ -147,7 +147,6 @@ class DiSPIMMicroscope(Microscope):
             True if the device layer responded with HTTP 200.
         """
         if not self._session:
-            self._qs_connected = False
             return False
 
         try:
@@ -155,11 +154,9 @@ class DiSPIMMicroscope(Microscope):
                 f"{self.http_url}/api/status",
                 timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
-                self._qs_connected = resp.status == 200
+                return resp.status == 200
         except (aiohttp.ClientError, asyncio.TimeoutError, Exception):
-            self._qs_connected = False
-
-        return self._qs_connected
+            return False
 
     @property
     def has_sam(self) -> bool:
