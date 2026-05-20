@@ -61,9 +61,13 @@ export interface TuiState {
   // Queue: messages typed while agent is busy
   messageQueue: string[];
 
-  // Active choice picker (null when none)
-  pendingChoice: ChoiceRequest | null;
-  pendingChoiceRequestId: string;
+  /**
+   * FIFO of choice requests awaiting user response. Head (index 0) is
+   * shown by <ChoicePicker>; responding pops the head and reveals the
+   * next. Storing as a queue prevents loss when two requests land in
+   * quick succession (e.g. agent question while a local picker is open).
+   */
+  choiceQueue: { request: ChoiceRequest; requestId: string }[];
 
   // Commands from server
   commands: CommandDef[];
@@ -76,8 +80,13 @@ export interface TuiState {
 
   // Whether agent is currently streaming a response
   isStreaming: boolean;
-  streamStartedAt: number; // timestamp when current stream began
-  streamCharsReceived: number; // chars received in current stream
+
+  /**
+   * Non-reactive stream metrics. Mutated directly (never via `set`) so
+   * per-chunk updates don't trigger React re-renders — `ActiveMessage`
+   * polls this via its own setInterval. Resets on stream start/finish.
+   */
+  streamMetrics: { startedAt: number; charsReceived: number };
 
   // Agent mode ("run" or "plan")
   agentMode: string;
@@ -137,8 +146,8 @@ export interface TuiActions {
   dequeueMessage: () => string | undefined;
 
   clearMessages: () => void;
-  setChoice: (choice: ChoiceRequest, requestId: string) => void;
-  clearChoice: () => void;
+  enqueueChoice: (request: ChoiceRequest, requestId: string) => void;
+  dismissCurrentChoice: () => void;
 
   setTheme: (theme: ThemeColors) => void;
   setNotification: (n: { level: string; title: string; body?: string } | null) => void;
@@ -245,14 +254,12 @@ export function createTuiStore() {
     completedMessages: [],
     activeMessage: null,
     messageQueue: [],
-    pendingChoice: null,
-    pendingChoiceRequestId: "",
+    choiceQueue: [],
     commands: [],
     theme: getTheme(),
     notification: null,
     isStreaming: false,
-    streamStartedAt: 0,
-    streamCharsReceived: 0,
+    streamMetrics: { startedAt: 0, charsReceived: 0 },
     agentMode: "run",
     wizardActive: false,
     wizardWeight: "none",
@@ -303,6 +310,9 @@ export function createTuiStore() {
           text,
           timestamp: Date.now(),
         });
+        // Reset stream metrics ref in-place (no re-render)
+        s.streamMetrics.startedAt = Date.now();
+        s.streamMetrics.charsReceived = 0;
         return {
           completedMessages,
           // Show a thinking indicator while waiting for first response chunk
@@ -314,8 +324,6 @@ export function createTuiStore() {
             isThinking: true,
           },
           isStreaming: true,
-          streamStartedAt: Date.now(),
-          streamCharsReceived: 0,
         };
       }),
 
@@ -331,6 +339,8 @@ export function createTuiStore() {
 
     appendAgentText: (text) =>
       set((s) => {
+        // Mutate stream metrics ref in-place (no re-render trigger)
+        s.streamMetrics.charsReceived += text.length;
         if (s.activeMessage && s.activeMessage.role === "agent") {
           // Append to current streaming agent message (clears thinking state)
           return {
@@ -340,7 +350,6 @@ export function createTuiStore() {
               isThinking: false,
               isStreaming: true,
             },
-            streamCharsReceived: s.streamCharsReceived + text.length,
           };
         }
         // Commit previous active message, start new agent message
@@ -354,7 +363,6 @@ export function createTuiStore() {
             timestamp: Date.now(),
             isStreaming: true,
           },
-          streamCharsReceived: s.streamCharsReceived + text.length,
         };
       }),
 
@@ -467,12 +475,14 @@ export function createTuiStore() {
       }),
 
     finishStreaming: () =>
-      set((s) => ({
-        ...commitActive(s),
-        isStreaming: false,
-        streamStartedAt: 0,
-        streamCharsReceived: 0,
-      })),
+      set((s) => {
+        s.streamMetrics.startedAt = 0;
+        s.streamMetrics.charsReceived = 0;
+        return {
+          ...commitActive(s),
+          isStreaming: false,
+        };
+      }),
 
     // ------------------------------------------------------------------
     // Message queue
@@ -493,11 +503,11 @@ export function createTuiStore() {
     clearMessages: () =>
       set({ completedMessages: [], activeMessage: null }),
 
-    // Choice picker
-    setChoice: (choice, requestId) =>
-      set({ pendingChoice: choice, pendingChoiceRequestId: requestId }),
-    clearChoice: () =>
-      set({ pendingChoice: null, pendingChoiceRequestId: "" }),
+    // Choice picker (FIFO queue)
+    enqueueChoice: (request, requestId) =>
+      set((s) => ({ choiceQueue: [...s.choiceQueue, { request, requestId }] })),
+    dismissCurrentChoice: () =>
+      set((s) => ({ choiceQueue: s.choiceQueue.slice(1) })),
 
     // Theme / notifications
     setTheme: (theme) => set({ theme }),
@@ -506,6 +516,8 @@ export function createTuiStore() {
 
     cancelStream: () =>
       set((s) => {
+        s.streamMetrics.startedAt = 0;
+        s.streamMetrics.charsReceived = 0;
         // If thinking (no text yet), just clear. If streaming text,
         // commit what we have and mark as cancelled.
         if (s.activeMessage?.isThinking) {

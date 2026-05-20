@@ -11,21 +11,17 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
-import type { ChoiceRequest, ThemeColors } from "../types.js";
+import { useTuiSelector } from "../context.js";
 
 interface ChoicePickerProps {
-  choice: ChoiceRequest;
-  theme: ThemeColors;
   onSelect: (selected: string) => void;
   onCancel: () => void;
 }
 
-export function ChoicePicker({
-  choice,
-  theme,
-  onSelect,
-  onCancel,
-}: ChoicePickerProps) {
+export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
+  const choice = useTuiSelector((s) => s.choiceQueue[0]?.request ?? null);
+  const theme = useTuiSelector((s) => s.theme);
+  if (!choice) return null;
   const allowMultiple = choice.choice_data.allow_multiple;
 
   // Auto-append a "Something else..." option if none exists

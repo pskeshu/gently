@@ -1,27 +1,29 @@
 /**
  * Root application component — Claude Code-style persistent layout.
  *
- * Architecture:
- *   <Static>         Completed messages — rendered once, scroll up naturally
- *   <ActiveMessage>  Currently streaming agent/tool message (re-renders on each chunk)
- *   <ChoicePicker>   Interactive picker when agent asks a question
- *   <CommandInput>   Always-visible input bar at the bottom
- *   <StatusBar>      Notifications
+ * Plugs concrete content into the <Layout> primitive's named slots.
+ * All logic lives in dedicated hooks:
+ *   - useWebSocket: WS lifecycle and server-message dispatch
+ *   - GlobalKeybindings: Esc/Shift+Tab handler (gated by isActive when a modal opens)
+ *   - useSendMessage: routes user input through local commands or to the server
+ *   - useMessageQueueDrain: pops the next queued chat message when streaming finishes
+ *   - useChoiceCallbacks: choice-picker onSelect/onCancel (handles local: pickers)
  *
- * The input bar is ALWAYS active. When the agent is streaming, new
- * messages are queued and auto-sent once the stream finishes.
+ * App itself just subscribes to the few slices that decide which slots
+ * are populated, and otherwise stays declarative.
  */
 
-import React, { useCallback, useEffect, useSyncExternalStore } from "react";
-import { Box, Static, Text } from "ink";
-import type { StoreApi } from "zustand/vanilla";
-import type { TuiStore } from "../store.js";
+import React from "react";
+import { Box, Static } from "ink";
 import { useWebSocket } from "../hooks/useWebSocket.js";
-import { useKeyboard } from "../hooks/useKeyboard.js";
-import { isSlashCommand } from "../commands.js";
-import { setTheme, listThemes } from "../theme.js";
+import { useSendMessage } from "../hooks/useSendMessage.js";
+import { useMessageQueueDrain } from "../hooks/useMessageQueueDrain.js";
+import { useChoiceCallbacks } from "../hooks/useChoiceCallbacks.js";
+import { useTuiSelector, useTuiStoreApi } from "../context.js";
 
+import { GlobalKeybindings } from "./keybindings/GlobalKeybindings.js";
 import { Header } from "./Header.js";
+import { Layout } from "./Layout.js";
 import { MessageBubble } from "./MessageBubble.js";
 import { ActiveMessage } from "./ChatPane.js";
 import { CampaignBrowser } from "./CampaignBrowser.js";
@@ -32,287 +34,70 @@ import { WelcomeScreen } from "./WelcomeScreen.js";
 
 interface AppProps {
   wsUrl: string;
-  store: StoreApi<TuiStore>;
 }
 
-export function App({ wsUrl, store }: AppProps) {
-  const state = useSyncExternalStore(store.subscribe, store.getState);
+export function App({ wsUrl }: AppProps) {
+  const store = useTuiStoreApi();
 
-  const { send } = useWebSocket(wsUrl, store);
-  useKeyboard(store, send);
+  const { send } = useWebSocket(wsUrl);
 
-  // ------------------------------------------------------------------
-  // Send a message (or queue it if agent is busy)
-  // ------------------------------------------------------------------
-  // ------------------------------------------------------------------
-  // Handle /theme locally (no server round-trip needed)
-  // ------------------------------------------------------------------
-  const handleThemeCommand = useCallback(
-    (cmd: string): boolean => {
-      const parts = cmd.trim().split(/\s+/);
-      if (parts[0] !== "/theme") return false;
+  const sendMessage = useSendMessage(send);
+  useMessageQueueDrain(send);
+  const choiceCallbacks = useChoiceCallbacks(send);
 
-      const s = store.getState();
-      if (parts.length > 1) {
-        // /theme <name> — switch theme
-        const name = parts[1]!;
-        try {
-          setTheme(name);
-          const newTheme = listThemes()[name]!;
-          s.setTheme(newTheme);
-          s.addSystemMessage(`Theme changed to ${newTheme.name}`);
-          // Also update Python side
-          send({ type: "command", command: cmd });
-        } catch {
-          const available = Object.keys(listThemes()).join(", ");
-          s.addSystemMessage(`Unknown theme: '${name}'. Available: ${available}`);
-        }
-      } else {
-        // /theme — show interactive picker
-        const themes = listThemes();
-        const current = s.theme.name;
-        const options = Object.entries(themes).map(([key, t]) => ({
-          id: key,
-          label: `${t.name}${t.name === current ? " (current)" : ""}`,
-          description: t.colorMode === "dark" ? "Dark mode" : "Light mode",
-        }));
-        s.setChoice(
-          {
-            type: "choice_request",
-            choice_data: {
-              _type: "single",
-              question: "Choose a theme",
-              options,
-              allow_multiple: false,
-            },
-          },
-          "local:theme",
-        );
-      }
-      return true;
-    },
-    [send, store],
-  );
+  // ── Slice subscriptions: just what App needs for layout routing ──
+  const completedMessages = useTuiSelector((s) => s.completedMessages);
+  const hasActive = useTuiSelector((s) => s.activeMessage !== null);
+  const connectionStatus = useTuiSelector((s) => s.connectionStatus);
+  const wizardActive = useTuiSelector((s) => s.wizardActive);
+  const choicePending = useTuiSelector((s) => s.choiceQueue.length > 0);
+  const campaignBrowserOpen = useTuiSelector((s) => s.campaignBrowserOpen);
+  // Theme is needed for the Static block — pulled here so a theme
+  // change re-runs the Static render for new messages. Ink's Static
+  // caches already-rendered items, matching prior behavior.
+  const theme = useTuiSelector((s) => s.theme);
 
-  const sendMessage = useCallback(
-    (text: string) => {
-      if (isSlashCommand(text)) {
-        // Handle /theme locally
-        if (handleThemeCommand(text)) return;
-        // Bare /campaign opens interactive browser
-        const trimmed = text.trim();
-        if (trimmed === "/campaign" || trimmed === "/campaigns") {
-          store.getState().setCampaignBrowserOpen(true);
-          send({ type: "browse", target: "campaigns" });
-          return;
-        }
-        // Other commands go to server
-        send({ type: "command", command: text });
-        return;
-      }
+  const showWelcome =
+    connectionStatus === "connected" &&
+    completedMessages.length === 0 &&
+    !hasActive &&
+    !wizardActive;
 
-      if (store.getState().isStreaming) {
-        // Agent is busy — queue the message
-        store.getState().enqueueMessage(text);
-      } else {
-        store.getState().addUserMessage(text);
-        send({ type: "chat", text });
-      }
-    },
-    [send, store],
-  );
-
-  // ------------------------------------------------------------------
-  // Auto-drain queue when streaming finishes
-  // ------------------------------------------------------------------
-  useEffect(() => {
-    if (state.isStreaming) return;
-
-    const next = store.getState().dequeueMessage();
-    if (next) {
-      store.getState().addUserMessage(next);
-      send({ type: "chat", text: next });
-    }
-  }, [state.isStreaming, send, store]);
-
-  // ------------------------------------------------------------------
-  // Choice picker callbacks
-  // ------------------------------------------------------------------
-  const handleChoiceSelect = useCallback(
-    (selected: string) => {
-      const s = store.getState();
-      const requestId = s.pendingChoiceRequestId;
-
-      // Local theme picker — handle without server round-trip
-      if (requestId === "local:theme") {
-        s.clearChoice();
-        try {
-          setTheme(selected);
-          const newTheme = listThemes()[selected]!;
-          s.setTheme(newTheme);
-          s.addSystemMessage(`Theme changed to ${newTheme.name}`);
-          // Also update Python side
-          send({ type: "command", command: `/theme ${selected}` });
-        } catch {
-          const available = Object.keys(listThemes()).join(", ");
-          s.addSystemMessage(`Unknown theme: '${selected}'. Available: ${available}`);
-        }
-        return;
-      }
-
-      // Server choice — show selection without committing active tool
-      const choice = s.pendingChoice;
-      if (choice) {
-        const option = choice.choice_data.options.find((o) => o.id === selected);
-        const label = option?.label ?? selected;
-        s.addUserSelection(label);
-      }
-
-      send({
-        type: "choice_response",
-        request_id: requestId,
-        selected,
-      });
-      s.clearChoice();
-    },
-    [send, store],
-  );
-
-  const handleChoiceCancel = useCallback(() => {
-    const s = store.getState();
-    const requestId = s.pendingChoiceRequestId;
-
-    // Local picker — just dismiss
-    if (requestId.startsWith("local:")) {
-      s.clearChoice();
-      return;
-    }
-
-    // Server choice — send empty response
-    send({
-      type: "choice_response",
-      request_id: requestId,
-      selected: "",
-    });
-    s.clearChoice();
-    // Use addSystemMessage instead of addUserMessage so we don't
-    // trigger a new thinking indicator for the cancelled choice.
-    s.addSystemMessage("(cancelled)");
-    s.finishStreaming();
-  }, [send, store]);
-
-  const handleClearNotification = useCallback(() => {
-    store.getState().setNotification(null);
-  }, [store]);
-
-  const handleOpenBrowser = useCallback(() => {
-    store.getState().setBrowserOpen(true);
-  }, [store]);
-
-  const handleCloseBrowser = useCallback(() => {
-    store.getState().setBrowserOpen(false);
-  }, [store]);
+  // Modal slot. Listed in priority order: a server-issued choice
+  // request preempts a campaign browse.
+  const modal = choicePending ? (
+    <ChoicePicker {...choiceCallbacks} />
+  ) : campaignBrowserOpen ? (
+    <CampaignBrowser
+      send={send}
+      onClose={() => store.getState().setCampaignBrowserOpen(false)}
+    />
+  ) : null;
 
   return (
-    <Box flexDirection="column">
-      {/* ── Header ──────────────────────────────────────────── */}
-      <Header theme={state.theme} />
-
-      {/* ── Welcome screen (before any messages, hidden during wizard) */}
-      {state.connectionStatus === "connected" &&
-        state.completedMessages.length === 0 &&
-        !state.activeMessage &&
-        !state.wizardActive ? (
-          <WelcomeScreen
-            theme={state.theme}
-            version={state.version}
-            sessionId={state.sessionId}
-            embryoCount={state.embryoCount}
-            deviceConnected={state.deviceConnected}
-            samAvailable={state.samAvailable}
-            offline={state.offline}
-            storePath={state.storePath}
-            vizUrl={state.vizUrl}
-            logPath={state.logPath}
-            resumed={state.resumed}
-          />
-        ) : null}
-
-      {/* ── Completed messages (rendered once, scroll up) ────── */}
-      <Static items={state.completedMessages}>
-        {(entry) => (
-          <Box key={entry.id} flexDirection="column">
-            <MessageBubble entry={entry} theme={state.theme} />
-          </Box>
-        )}
-      </Static>
-
-      {/* ── Active streaming message (re-renders on each chunk) ─ */}
-      <ActiveMessage
-        entry={state.activeMessage}
-        theme={state.theme}
-        tokens={state.tokens}
-        streamStartedAt={state.streamStartedAt}
-        streamCharsReceived={state.streamCharsReceived}
-      />
-
-      {/* ── Campaign browser (when /campaign is invoked) ──────── */}
-      {state.campaignBrowserOpen ? (
-        <CampaignBrowser
-          campaigns={state.browserCampaigns}
-          theme={state.theme}
-          send={send}
-          onClose={() => store.getState().setCampaignBrowserOpen(false)}
-        />
-      ) : null}
-
-      {/* ── Choice picker (when agent asks a question) ──────── */}
-      {state.pendingChoice ? (
-        <ChoicePicker
-          choice={state.pendingChoice}
-          theme={state.theme}
-          onSelect={handleChoiceSelect}
-          onCancel={handleChoiceCancel}
-        />
-      ) : null}
-
-      {/* ── Persistent input bar (hidden when picker/browser active) ── */}
-      {!state.pendingChoice && !state.campaignBrowserOpen ? (
-        <CommandInput
-          commands={state.commands}
-          theme={state.theme}
-          isStreaming={state.isStreaming}
-          queueLength={state.messageQueue.length}
-          onSubmit={sendMessage}
-          onOpenBrowser={handleOpenBrowser}
-          browserOpen={state.browserOpen}
-        />
-      ) : null}
-
-      {/* ── Persistent status bar (navigable when browser open) ── */}
-      <StatusBar
-        theme={state.theme}
-        version={state.version}
-        sessionId={state.sessionId}
-        deviceConnected={state.deviceConnected}
-        offline={state.offline}
-        embryoCount={state.embryoCount}
-        campaignCount={state.campaignCount}
-        peerCount={state.peerCount}
-        tokens={state.tokens}
-        notification={state.notification}
-        onClearNotification={handleClearNotification}
-        wizardActive={state.wizardActive}
-        agentMode={state.agentMode}
-        browserOpen={state.browserOpen}
-        onCloseBrowser={handleCloseBrowser}
-        send={send}
-        campaigns={state.browserCampaigns}
-        peers={state.browserPeers}
-        peerCampaignItems={state.peerCampaignItems}
-        peerCampaignMeta={state.peerCampaignMeta}
-        onClearPeerCampaignItems={store.getState().clearPeerCampaignItems}
-      />
-    </Box>
+    <Layout
+      header={
+        <>
+          <GlobalKeybindings send={send} isActive={!modal} />
+          <Header />
+        </>
+      }
+      welcome={showWelcome ? <WelcomeScreen /> : null}
+      transcript={
+        <>
+          <Static items={completedMessages}>
+            {(entry) => (
+              <Box key={entry.id} flexDirection="column">
+                <MessageBubble entry={entry} theme={theme} />
+              </Box>
+            )}
+          </Static>
+          <ActiveMessage />
+        </>
+      }
+      modal={modal}
+      bottom={<CommandInput onSubmit={sendMessage} />}
+      statusBar={<StatusBar send={send} />}
+    />
   );
 }

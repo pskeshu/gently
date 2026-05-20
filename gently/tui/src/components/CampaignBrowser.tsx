@@ -12,12 +12,11 @@
 
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { useTuiSelector } from "../context.js";
 import type { BrowserCampaign, ThemeColors } from "../types.js";
 import type { WsClient } from "../ws-client.js";
 
 interface CampaignBrowserProps {
-  campaigns: BrowserCampaign[];
-  theme: ThemeColors;
   send: WsClient["send"];
   onClose: () => void;
 }
@@ -67,7 +66,9 @@ function getActionCommand(c: BrowserCampaign, actionIdx: number): string | null 
 
 // ── Component ────────────────────────────────────────────────
 
-export function CampaignBrowser({ campaigns, theme, send, onClose }: CampaignBrowserProps) {
+export function CampaignBrowser({ send, onClose }: CampaignBrowserProps) {
+  const campaigns = useTuiSelector((s) => s.browserCampaigns);
+  const theme = useTuiSelector((s) => s.theme);
   const [cursor, setCursor] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [subCursor, setSubCursor] = useState(0);

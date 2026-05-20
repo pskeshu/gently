@@ -1,15 +1,19 @@
 /**
- * Single chat message — user, agent, system, or tool.
+ * MessageBubble — thin role dispatcher.
  *
- * User messages get a distinctive left-border highlight and bold
- * treatment so they stand out from agent responses — similar
- * to how Claude Code renders user vs assistant messages.
+ * Each role has its own component in `messages/` so it can own its
+ * rendering and be memoized in isolation. Adding a new role (plan
+ * approval, rate-limit notice, etc.) is now a matter of adding one
+ * file and one switch case.
  */
 
 import React from "react";
-import { Box, Text } from "ink";
+import { Text } from "ink";
+import { AgentMessage } from "./messages/AgentMessage.js";
+import { UserMessage } from "./messages/UserMessage.js";
+import { ToolMessage } from "./messages/ToolMessage.js";
+import { SystemMessage } from "./messages/SystemMessage.js";
 import type { ChatEntry, ThemeColors } from "../types.js";
-import { MarkdownText } from "./MarkdownText.js";
 
 interface MessageBubbleProps {
   entry: ChatEntry;
@@ -17,97 +21,15 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ entry, theme }: MessageBubbleProps) {
-  const time = new Date(entry.timestamp).toLocaleTimeString("en-US", {
-    hour12: false,
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-
   switch (entry.role) {
     case "user":
-      return (
-        <Box flexDirection="column" marginBottom={1}>
-          <Box>
-            <Text bold color={theme.user}>
-              {"❯ You"}
-            </Text>
-            <Text color={theme.muted}> {time}</Text>
-          </Box>
-          <Box
-            borderStyle="single"
-            borderLeft
-            borderRight={false}
-            borderTop={false}
-            borderBottom={false}
-            borderColor={theme.user}
-          >
-            <Text bold color={theme.colorMode === "light" ? "#1f2937" : "#f9fafb"} backgroundColor={theme.userMessageBg}>
-              {" "}{entry.text}{" "}
-            </Text>
-          </Box>
-        </Box>
-      );
-
+      return <UserMessage entry={entry} theme={theme} />;
     case "agent":
-      return (
-        <Box flexDirection="column" marginBottom={1}>
-          <Box>
-            <Text bold color={theme.agent}>
-              {"✦ Gently"}
-            </Text>
-            <Text color={theme.muted}> {time}</Text>
-            {entry.isStreaming ? (
-              <Text color={theme.agent}> ▍</Text>
-            ) : null}
-          </Box>
-          <Box paddingLeft={2}>
-            <MarkdownText theme={theme}>{entry.text}</MarkdownText>
-          </Box>
-        </Box>
-      );
-
-    case "tool": {
-      const name = entry.toolName ?? entry.text;
-      const summary = entry.toolSummary;
-      const dur = entry.toolDuration;
-      const showDuration = dur && dur > 0.1;
-
-      return (
-        <Box marginBottom={0} paddingLeft={2}>
-          {entry.isStreaming ? (
-            <Text>
-              <Text color={theme.tool}>{"⠸ "}</Text>
-              <Text color={theme.tool} dimColor>
-                {name}
-              </Text>
-              {summary ? (
-                <Text color={theme.muted} dimColor>{" — "}{summary}</Text>
-              ) : null}
-            </Text>
-          ) : (
-            <Text>
-              <Text color={theme.success}>{"● "}</Text>
-              <Text color={theme.muted}>{name}</Text>
-              {summary ? (
-                <Text dimColor>{" — "}{summary}</Text>
-              ) : null}
-              {showDuration ? (
-                <Text dimColor>{` (${dur.toFixed(1)}s)`}</Text>
-              ) : null}
-            </Text>
-          )}
-        </Box>
-      );
-    }
-
+      return <AgentMessage entry={entry} theme={theme} />;
+    case "tool":
+      return <ToolMessage entry={entry} theme={theme} />;
     case "system":
-      return (
-        <Box marginBottom={1} paddingLeft={2}>
-          <MarkdownText theme={theme}>{entry.text}</MarkdownText>
-        </Box>
-      );
-
+      return <SystemMessage entry={entry} theme={theme} />;
     default:
       return <Text>{entry.text}</Text>;
   }
