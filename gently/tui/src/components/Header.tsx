@@ -5,16 +5,13 @@
 
 import React from "react";
 import { Box, Text } from "ink";
-import type { ThemeColors } from "../types.js";
+import { useTuiSelector } from "../context.js";
 
-interface HeaderProps {
-  theme: ThemeColors;
-}
-
-export function Header({ theme }: HeaderProps) {
+export function Header() {
+  const primary = useTuiSelector((s) => s.theme.primary);
   return (
     <Box paddingX={1}>
-      <Text bold color={theme.primary}>
+      <Text bold color={primary}>
         ✦ Gently
       </Text>
     </Box>

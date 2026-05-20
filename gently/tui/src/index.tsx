@@ -16,6 +16,7 @@ import { App } from "./components/App.js";
 import { SessionPicker } from "./components/SessionPicker.js";
 import type { SessionItem } from "./components/SessionPicker.js";
 import { createTuiStore } from "./store.js";
+import { StoreContext } from "./context.js";
 
 // ---------------------------------------------------------------------------
 // Parse args
@@ -67,7 +68,11 @@ if (pickSession) {
 } else {
   // Normal mode: full TUI with WebSocket connection.
   const store = createTuiStore();
-  const { waitUntilExit } = render(<App wsUrl={wsUrl} store={store} />);
+  const { waitUntilExit } = render(
+    <StoreContext.Provider value={store}>
+      <App wsUrl={wsUrl} />
+    </StoreContext.Provider>,
+  );
   waitUntilExit().then(() => {
     process.exit(0);
   });

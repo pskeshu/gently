@@ -11,21 +11,17 @@
 import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
-import type { ChoiceRequest, ThemeColors } from "../types.js";
+import { useTuiSelector } from "../context.js";
 
 interface ChoicePickerProps {
-  choice: ChoiceRequest;
-  theme: ThemeColors;
   onSelect: (selected: string) => void;
   onCancel: () => void;
 }
 
-export function ChoicePicker({
-  choice,
-  theme,
-  onSelect,
-  onCancel,
-}: ChoicePickerProps) {
+export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
+  const choice = useTuiSelector((s) => s.choiceQueue[0]?.request ?? null);
+  const theme = useTuiSelector((s) => s.theme);
+  if (!choice) return null;
   const allowMultiple = choice.choice_data.allow_multiple;
 
   // Auto-append a "Something else..." option if none exists
@@ -89,22 +85,16 @@ export function ChoicePicker({
   }
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="round"
-      borderColor={theme.info}
-      paddingX={1}
-      marginBottom={1}
-    >
+    <Box flexDirection="column" paddingLeft={2} marginBottom={1}>
       <Text bold color={theme.info}>
         {choice.choice_data.question}
       </Text>
-      <Text color={theme.muted}>
+      <Text color={theme.muted} dimColor>
         {isCustom
-          ? "Type your answer · Enter submit · Esc cancel"
+          ? "type · enter · esc"
           : allowMultiple
-            ? "↑/↓ navigate · Space toggle · Enter submit · Esc cancel"
-            : "↑/↓ navigate · Enter select · Esc cancel"}
+            ? "↑↓ · space · enter · esc"
+            : "↑↓ · enter · esc"}
       </Text>
       <Box flexDirection="column" marginTop={1}>
         {options.map((opt, i) => {

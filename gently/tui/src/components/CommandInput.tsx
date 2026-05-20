@@ -12,27 +12,21 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { getCompletions } from "../commands.js";
-import type { CommandDef, ThemeColors } from "../types.js";
+import { useTuiSelector, useTuiStoreApi } from "../context.js";
 
 interface CommandInputProps {
-  commands: CommandDef[];
-  theme: ThemeColors;
-  isStreaming: boolean;
-  queueLength: number;
   onSubmit: (text: string) => void;
-  onOpenBrowser?: () => void;
-  browserOpen?: boolean;
 }
 
-export function CommandInput({
-  commands,
-  theme,
-  isStreaming,
-  queueLength,
-  onSubmit,
-  onOpenBrowser,
-  browserOpen,
-}: CommandInputProps) {
+export function CommandInput({ onSubmit }: CommandInputProps) {
+  const store = useTuiStoreApi();
+  const commands = useTuiSelector((s) => s.commands);
+  const theme = useTuiSelector((s) => s.theme);
+  const queueLength = useTuiSelector((s) => s.messageQueue.length);
+  const browserOpen = useTuiSelector((s) => s.browserOpen);
+
+  const onOpenBrowser = () => store.getState().setBrowserOpen(true);
+
   const [value, setValue] = useState("");
   const [completionIdx, setCompletionIdx] = useState(-1);
   // Incrementing key forces TextInput to re-mount, resetting cursor to end
@@ -45,7 +39,7 @@ export function CommandInput({
   const showCompletions = completions.length > 0 && completionIdx < 0;
 
   useInput((input, key) => {
-    if (key.downArrow && value === "" && onOpenBrowser && !browserOpen) {
+    if (key.downArrow && value === "" && !browserOpen) {
       onOpenBrowser();
       return;
     }

@@ -8,21 +8,8 @@
 
 import React from "react";
 import { Box, Text } from "ink";
+import { useTuiSelector } from "../context.js";
 import type { ThemeColors } from "../types.js";
-
-interface WelcomeScreenProps {
-  theme: ThemeColors;
-  version: string;
-  sessionId: string;
-  embryoCount: number;
-  deviceConnected: boolean;
-  samAvailable: boolean;
-  offline: boolean;
-  storePath: string;
-  vizUrl: string | null;
-  logPath: string;
-  resumed: boolean;
-}
 
 /** Colored status icon: + green, x red, ! yellow */
 function StatusIcon({
@@ -39,19 +26,19 @@ function StatusIcon({
   return <Text color={theme.error}>{"x"}</Text>;
 }
 
-export function WelcomeScreen({
-  theme,
-  version,
-  sessionId,
-  embryoCount,
-  deviceConnected,
-  samAvailable,
-  offline,
-  storePath,
-  vizUrl,
-  logPath,
-  resumed,
-}: WelcomeScreenProps) {
+export function WelcomeScreen() {
+  const theme = useTuiSelector((s) => s.theme);
+  const version = useTuiSelector((s) => s.version);
+  const sessionId = useTuiSelector((s) => s.sessionId);
+  const embryoCount = useTuiSelector((s) => s.embryoCount);
+  const deviceConnected = useTuiSelector((s) => s.deviceConnected);
+  const samAvailable = useTuiSelector((s) => s.samAvailable);
+  const offline = useTuiSelector((s) => s.offline);
+  const storePath = useTuiSelector((s) => s.storePath);
+  const vizUrl = useTuiSelector((s) => s.vizUrl);
+  const logPath = useTuiSelector((s) => s.logPath);
+  const resumed = useTuiSelector((s) => s.resumed);
+
   const shortSession = sessionId.slice(0, 8);
 
   // Truncate long paths to keep the layout compact (must fit within

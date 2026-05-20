@@ -202,8 +202,10 @@ export interface ChatEntry {
   toolName?: string;
   toolDuration?: number;
   toolSummary?: string;
+  toolAnswer?: string;
   isStreaming?: boolean;
   isThinking?: boolean;
+  isSelection?: boolean;
 }
 
 export interface CommandDef {

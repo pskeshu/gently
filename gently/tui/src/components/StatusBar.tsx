@@ -12,38 +12,17 @@
 
 import React, { useEffect, useState } from "react";
 import { Box, Text, useInput } from "ink";
+import { useTuiSelector, useTuiStoreApi } from "../context.js";
 import type {
   BrowserCampaign,
   BrowserPeer,
   BrowserPlanItem,
   ThemeColors,
-  TokenSnapshot,
 } from "../types.js";
 import type { WsClient } from "../ws-client.js";
 
 interface StatusBarProps {
-  theme: ThemeColors;
-  version: string;
-  sessionId: string;
-  deviceConnected: boolean;
-  offline: boolean;
-  embryoCount: number;
-  campaignCount: number;
-  peerCount: number;
-  tokens: TokenSnapshot;
-  notification: { level: string; title: string; body?: string } | null;
-  onClearNotification: () => void;
-  wizardActive?: boolean;
-  agentMode?: string;
-  // Browser mode
-  browserOpen: boolean;
-  onCloseBrowser: () => void;
   send: WsClient["send"];
-  campaigns: BrowserCampaign[];
-  peers: BrowserPeer[];
-  peerCampaignItems: BrowserPlanItem[];
-  peerCampaignMeta: { hostname: string; campaign_id: string } | null;
-  onClearPeerCampaignItems: () => void;
 }
 
 function formatTokens(n: number): string {
@@ -61,29 +40,31 @@ function ModeBadge({ mode, theme }: { mode: string; theme: ThemeColors }) {
 
 type BrowserView = "campaigns" | "peers";
 
-export function StatusBar({
-  theme,
-  version,
-  sessionId,
-  deviceConnected,
-  offline,
-  embryoCount,
-  campaignCount,
-  peerCount,
-  tokens,
-  notification,
-  onClearNotification,
-  wizardActive,
-  agentMode = "run",
-  browserOpen,
-  onCloseBrowser,
-  send,
-  campaigns,
-  peers,
-  peerCampaignItems,
-  peerCampaignMeta,
-  onClearPeerCampaignItems,
-}: StatusBarProps) {
+export function StatusBar({ send }: StatusBarProps) {
+  const store = useTuiStoreApi();
+  const theme = useTuiSelector((s) => s.theme);
+  const version = useTuiSelector((s) => s.version);
+  // sessionId is unused inside the bar but kept for future detail views
+  const sessionId = useTuiSelector((s) => s.sessionId);
+  void sessionId;
+  const deviceConnected = useTuiSelector((s) => s.deviceConnected);
+  const offline = useTuiSelector((s) => s.offline);
+  const embryoCount = useTuiSelector((s) => s.embryoCount);
+  const campaignCount = useTuiSelector((s) => s.campaignCount);
+  const peerCount = useTuiSelector((s) => s.peerCount);
+  const tokens = useTuiSelector((s) => s.tokens);
+  const notification = useTuiSelector((s) => s.notification);
+  const wizardActive = useTuiSelector((s) => s.wizardActive);
+  const agentMode = useTuiSelector((s) => s.agentMode);
+  const browserOpen = useTuiSelector((s) => s.browserOpen);
+  const campaigns = useTuiSelector((s) => s.browserCampaigns);
+  const peers = useTuiSelector((s) => s.browserPeers);
+  const peerCampaignItems = useTuiSelector((s) => s.peerCampaignItems);
+  const peerCampaignMeta = useTuiSelector((s) => s.peerCampaignMeta);
+
+  const onClearNotification = () => store.getState().setNotification(null);
+  const onCloseBrowser = () => store.getState().setBrowserOpen(false);
+  const onClearPeerCampaignItems = () => store.getState().clearPeerCampaignItems();
   // Auto-dismiss notifications after 5 seconds
   const [showNotification, setShowNotification] = useState(false);
 

@@ -5,19 +5,14 @@
 
 import { useEffect, useRef } from "react";
 import { WsClient } from "../ws-client.js";
-import type { TuiStore } from "../store.js";
+import { useTuiStoreApi } from "../context.js";
 import type { ServerMessage } from "../types.js";
-import type { StoreApi } from "zustand/vanilla";
 
-export function useWebSocket(
-  url: string,
-  store: StoreApi<TuiStore>,
-): { send: WsClient["send"] } {
+export function useWebSocket(url: string): { send: WsClient["send"] } {
+  const store = useTuiStoreApi();
   const clientRef = useRef<WsClient | null>(null);
 
   useEffect(() => {
-    const actions = store.getState();
-
     const client = new WsClient({
       url,
       onConnect: () => {
@@ -81,7 +76,7 @@ export function useWebSocket(
           case "choice_request": {
             const requestId =
               msg.request_id ?? `req_${Date.now()}`;
-            s.setChoice(msg, requestId);
+            s.enqueueChoice(msg, requestId);
             break;
           }
 

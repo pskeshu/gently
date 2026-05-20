@@ -208,7 +208,7 @@ class HTTPMicroscope(Microscope):
             return True
 
         except Exception as e:
-            logger.warning("Failed to connect to %s: %s", self.http_url, e)
+            logger.debug("Failed to connect to %s: %s", self.http_url, e)
             return False
 
     async def disconnect(self) -> None:
