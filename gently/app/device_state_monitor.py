@@ -140,7 +140,7 @@ class DeviceStateMonitor(Service):
                     "DeviceStateMonitor: reader cancelled by watchdog — reconnecting"
                 )
             except Exception as exc:
-                logger.warning(
+                logger.debug(
                     "DeviceStateMonitor: stream ended (%s) — reconnecting in %.1fs",
                     exc, self.reconnect_delay_sec,
                 )

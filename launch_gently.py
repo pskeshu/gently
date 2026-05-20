@@ -123,7 +123,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = str(log_dir / f"gently_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
     # File always gets INFO+, console uses the requested level
-    configure_logging(level="INFO", log_file=log_file)
+    configure_logging(level=log_level, log_file=log_file)
     logger.info("Logging to %s (console level: %s)", log_file, log_level)
 
     # Load organism module from config
@@ -206,7 +206,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             # return clear error messages. Setting client = None causes all
             # requires_microscope tools to vanish from the schema, which
             # makes Claude hallucinate XML tool calls as plain text.
-            logger.warning(
+            logger.debug(
                 "Device layer not reachable at %s — microscope tools "
                 "available but will return errors until connected", http_url,
             )
