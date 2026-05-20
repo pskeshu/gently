@@ -427,18 +427,43 @@ def create_router(server) -> APIRouter:
                         "wizard_complete": True,
                     })
 
-            # ── Auto-briefing for new sessions with existing context ──
+            # ── Auto-briefing or resolution bootstrap ─────────────
+            # New sessions with multiple unblocked imaging candidates
+            # open into resolution mode (agent's first turn becomes
+            # the opener). All other cases fall back to the deterministic
+            # briefing text from get_session_briefing().
             wizard_ran = wizard is not None and wizard.needed
             if not wizard_ran:
-                briefing = bridge.get_session_briefing()
-                if briefing:
-                    await send_fn({"type": "stream_start"})
-                    await send_fn({"type": "text", "text": briefing})
-                    await send_fn({
-                        "type": "stream_end",
-                        "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                   "total_tokens": 0, "api_calls": 0},
-                    })
+                if bridge.should_enter_resolution():
+                    try:
+                        await bridge.bootstrap_resolution(
+                            send_fn, choice_future_factory,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            f"Resolution bootstrap failed; "
+                            f"falling back to static briefing: {exc}",
+                            exc_info=exc,
+                        )
+                        briefing = bridge.get_session_briefing()
+                        if briefing:
+                            await send_fn({"type": "stream_start"})
+                            await send_fn({"type": "text", "text": briefing})
+                            await send_fn({
+                                "type": "stream_end",
+                                "tokens": {"input_tokens": 0, "output_tokens": 0,
+                                           "total_tokens": 0, "api_calls": 0},
+                            })
+                else:
+                    briefing = bridge.get_session_briefing()
+                    if briefing:
+                        await send_fn({"type": "stream_start"})
+                        await send_fn({"type": "text", "text": briefing})
+                        await send_fn({
+                            "type": "stream_end",
+                            "tokens": {"input_tokens": 0, "output_tokens": 0,
+                                       "total_tokens": 0, "api_calls": 0},
+                        })
 
             # ── Main REPL loop ────────────────────────────────────
             while True:

@@ -14,6 +14,7 @@ from typing import Dict, List, Optional
 from gently.settings import settings
 from .templates import build_system_prompt, build_context_message
 from ..plan_mode.prompt import build_plan_prompt
+from ..resolution_mode.prompt import build_resolution_prompt
 from ..tools.registry import get_tool_registry
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,12 @@ class PromptManager:
         """
         memory_awareness = self.get_cached_memory_awareness()
 
+        if mode == "resolution":
+            return build_resolution_prompt(
+                context_summary=context_summary,
+                memory_awareness=memory_awareness,
+            )
+
         if mode == "plan":
             active_plan = self.get_active_plan_summary()
             return build_plan_prompt(
@@ -108,6 +115,31 @@ class PromptManager:
             Tool schemas for Claude API
         """
         registry = get_tool_registry()
+        if mode == "resolution":
+            # Resolution mode is paperwork — no microscope, no acquisition,
+            # no plan editing. Just memory recall, lifecycle decisions,
+            # spec application, and the escape-hatch listing.
+            resolution_tool_names = {
+                # Lifecycle (transitions out of resolution mode)
+                "attach_session_to_plan",
+                "mark_session_standalone",
+                "detach_session_from_plan",
+                "mark_plan_item_status",
+                # Plan application
+                "apply_plan_acquisition_spec",
+                # Context recall
+                "recall_campaigns",
+                "recall_learnings",
+                "recall_observations",
+                "recall_context",
+                "recall_sibling_sessions",
+                "summarize_campaign_history",
+                # Escape hatches
+                "list_imaging_candidates",
+                "ask_user_choice",
+            }
+            all_tools = registry.get_claude_schemas(has_microscope=False)
+            return [t for t in all_tools if t["name"] in resolution_tool_names]
         if mode == "plan":
             plan_tool_names = {
                 "create_campaign", "create_plan_item", "update_plan_item",

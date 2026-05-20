@@ -75,6 +75,10 @@ class AgentBridge:
         Resolves plan context first: if there's exactly one unblocked
         imaging item, auto-sets it as the active plan item on both
         AgentMemory and ExperimentState before generating the briefing.
+
+        When resolution mode will fire (see should_enter_resolution),
+        returns an empty string — the agent's first turn becomes the
+        opener instead of static text.
         """
         if not hasattr(self.agent, 'memory') or not self.agent.memory:
             return ""
@@ -104,6 +108,9 @@ class AgentBridge:
                             )
                     except Exception:
                         pass
+            elif self.should_enter_resolution():
+                # Resolution mode will take over the opener.
+                return ""
 
         # Invalidate prompt cache so the system prompt picks up the
         # active plan item on the next message
@@ -112,6 +119,55 @@ class AgentBridge:
             prompts.invalidate_context_cache()
 
         return memory.get_session_briefing()
+
+    def should_enter_resolution(self) -> bool:
+        """True when the agent should open the session in resolution mode.
+
+        Conditions: new session (no active plan item already), agent
+        memory available, and more than one unblocked imaging candidate.
+        Single-candidate and zero-candidate launches fall back to the
+        existing briefing / run-mode behavior — no resolution needed.
+        """
+        if not hasattr(self.agent, 'memory') or not self.agent.memory:
+            return False
+        experiment = getattr(self.agent, 'experiment', None)
+        if experiment is None:
+            return False
+        if experiment.active_plan_item_id:
+            return False  # already resolved (resume or earlier auto-attach)
+        try:
+            active_id, candidates = self.agent.memory.resolve_plan_context()
+        except Exception:
+            return False
+        if active_id:
+            return False  # single candidate — silent auto-attach is fine
+        return bool(candidates) and len(candidates) > 1
+
+    async def bootstrap_resolution(
+        self,
+        send_fn: Callable[[Dict], Coroutine],
+        choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
+    ) -> None:
+        """Open the session in resolution mode and stream the agent's
+        first turn through ``send_fn``.
+
+        This synthesizes a brief bootstrap message into conversation
+        history so the agent's resolution-mode system prompt is given
+        a turn to act on. The user does not see this message — only
+        the agent's reply (which is the actual opener).
+        """
+        try:
+            self.agent.enter_resolution_mode()
+        except Exception as e:
+            logger.warning(f"enter_resolution_mode failed: {e}")
+            return
+
+        bootstrap = (
+            "[Session start — read your memory, identify the most likely "
+            "purpose for this session, and propose it. Don't dump the "
+            "full list; pick the top candidate or two.]"
+        )
+        await self.stream_response(bootstrap, send_fn, choice_future_factory)
 
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""

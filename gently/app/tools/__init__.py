@@ -21,6 +21,7 @@ from . import interaction_tools
 from . import detection_tools
 from . import plan_execution_tools
 from . import memory_tools
+from . import resolution_tools
 from gently.harness.plan_mode.tools import lab_context as _lab_context  # query_lab_history in run mode
 
 # Import tool registry utilities

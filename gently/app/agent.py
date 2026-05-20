@@ -94,7 +94,11 @@ class MicroscopyAgent:
         )
         self.model = model
 
-        # Mode: "run" (default) or "plan" (experimental design)
+        # Mode: "run" (default), "plan" (experimental design), or
+        # "resolution" (figuring out what this session is for at startup).
+        # Resolution mode is entered explicitly by the startup wiring when
+        # there are unblocked plan items that need a decision; it is not
+        # the default for resumed sessions.
         self.mode: str = "run"
 
         # Context store (agent's mind — set via set_context_store)
@@ -290,6 +294,55 @@ class MicroscopyAgent:
         emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "plan"}, source="agent")
         logger.info("Entered plan mode")
         return "Switched to plan mode. I'm now your experimental design collaborator."
+
+    def enter_resolution_mode(self) -> str:
+        """Switch into resolution mode at session start.
+
+        The agent's job in this mode is to figure out what this session
+        is for — continuing an existing plan item, resuming an interrupted
+        session, starting standalone, or designing a new plan — and to
+        call one of the resolution lifecycle tools to record that choice
+        and transition into the right next mode.
+        """
+        if self.mode == "resolution":
+            return "Already in resolution mode."
+        self.mode = "resolution"
+        if self.prompts:
+            self.prompts.invalidate_context_cache()
+        self._update_system_prompt()
+        emit(
+            EventType.STATUS_CHANGED,
+            {"field": "agent_mode", "value": "resolution"},
+            source="agent",
+        )
+        logger.info("Entered resolution mode")
+        return "Resolution mode active. Determining what this session is for."
+
+    def exit_resolution_mode(self, outcome: str = None) -> str:
+        """Leave resolution mode for run mode.
+
+        Called by resolution tools (attach_session_to_plan,
+        mark_session_standalone, etc.) once the user has confirmed
+        what this session is. ``outcome`` is a one-line summary the
+        caller wants surfaced (the tool already returned its own
+        description; this is just for logging).
+        """
+        if self.mode != "resolution":
+            return ""
+        self.mode = "run"
+        if self.prompts:
+            self.prompts.invalidate_context_cache()
+        self._update_system_prompt()
+        emit(
+            EventType.STATUS_CHANGED,
+            {"field": "agent_mode", "value": "run"},
+            source="agent",
+        )
+        if outcome:
+            logger.info(f"Exited resolution mode: {outcome}")
+        else:
+            logger.info("Exited resolution mode")
+        return ""
 
     def exit_plan_mode(self) -> str:
         """Switch back to run mode.
