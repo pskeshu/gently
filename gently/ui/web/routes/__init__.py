@@ -14,6 +14,7 @@ from .data import create_router as create_data_router
 from .websocket import create_router as create_websocket_router
 from .agent_ws import create_router as create_agent_ws_router
 from .campaigns import create_router as create_campaigns_router
+from .chat import create_router as create_chat_router
 
 
 def register_all_routes(server):
@@ -27,6 +28,7 @@ def register_all_routes(server):
         create_data_router,
         create_websocket_router,
         create_agent_ws_router,
+        create_chat_router,
     ):
         router = factory(server)
         server.app.include_router(router)

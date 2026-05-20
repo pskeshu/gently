@@ -604,6 +604,7 @@ const EmbryosManager = {
                     const detail = document.getElementById('filmstrip-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
+                        this.initChatPanel(eid, tp);
                     }
                 }
             });
@@ -620,6 +621,22 @@ const EmbryosManager = {
                     scrollContainer.scrollLeft += e.deltaY;
                 }
             }, { passive: false });
+        }
+
+        // Restore any open detail panel — re-render strips wipe the
+        // filmstrip-detail container, so paint the previously-selected
+        // item back in.
+        if (this.currentDetailItem && this.selectedEmbryoId) {
+            const tp = this.currentDetailItem.timepoint;
+            const cell = container.querySelector(
+                `.filmstrip-cell[data-embryo-id="${this.selectedEmbryoId}"][data-timepoint="${tp}"]`
+            );
+            if (cell) cell.classList.add('active');
+            const detail = document.getElementById('filmstrip-detail');
+            if (detail) {
+                detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
+                this.initChatPanel(this.selectedEmbryoId, tp);
+            }
         }
     },
 
@@ -663,10 +680,26 @@ const EmbryosManager = {
                     const detail = document.getElementById('vitals-detail');
                     if (detail) {
                         detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
+                        this.initChatPanel(eid, tp);
                     }
                 }
             });
         });
+
+        // Restore any open detail panel after a strip rebuild (e.g. when
+        // a new timepoint arrives mid-conversation).
+        if (this.currentDetailItem && this.selectedEmbryoId) {
+            const tp = this.currentDetailItem.timepoint;
+            const pt = container.querySelector(
+                `.vitals-point[data-embryo-id="${this.selectedEmbryoId}"][data-timepoint="${tp}"]`
+            );
+            if (pt) pt.classList.add('active');
+            const detail = document.getElementById('vitals-detail');
+            if (detail) {
+                detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
+                this.initChatPanel(this.selectedEmbryoId, tp);
+            }
+        }
     },
 
     _renderVitalsStrip(embryo) {
@@ -2356,6 +2389,8 @@ const EmbryosManager = {
         if (activeDot) {
             activeDot.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
         }
+
+        this.initChatPanel(this.selectedEmbryoId, item.timepoint);
     },
 
     // Render the detail panel content
@@ -2577,6 +2612,19 @@ const EmbryosManager = {
                         <div class="reasoning-label">VLM Summary</div>
                         <div class="reasoning-text">${linkedReasoning}</div>
                     </div>
+                    <div class="chat-panel"
+                         data-embryo-id="${this.selectedEmbryoId}"
+                         data-timepoint="${item.timepoint}">
+                        <div class="chat-panel-label">Follow-up</div>
+                        <div class="chat-thread" id="chat-thread"></div>
+                        <form class="chat-input-row" onsubmit="return EmbryosManager.sendChat(event)">
+                            <textarea class="chat-input" id="chat-input"
+                                      placeholder="Ask a follow-up about this timepoint…"
+                                      rows="2"
+                                      onkeydown="EmbryosManager.handleChatKeydown(event)"></textarea>
+                            <button type="submit" class="chat-send">Send</button>
+                        </form>
+                    </div>
                 </div>
             </div>
             <div class="detail-actions">
@@ -2584,6 +2632,161 @@ const EmbryosManager = {
                 <button class="detail-nav" onclick="EmbryosManager.navigateDetail(1)">Next &#x2192;</button>
             </div>
         `;
+    },
+
+    // ==========================================
+    // Chat — per-timepoint VLM follow-up
+    // ==========================================
+
+    async initChatPanel(embryoId, timepoint) {
+        const sessionId = this.currentSessionId;
+        if (!sessionId) return;
+
+        const thread = document.getElementById('chat-thread');
+        if (!thread) return;
+        thread.innerHTML = '';
+
+        try {
+            const resp = await fetch(
+                `/api/perception/chat/${sessionId}/${embryoId}/${timepoint}`
+            );
+            if (!resp.ok) return;
+            const data = await resp.json();
+            for (const turn of (data.turns || [])) {
+                this.appendChatMessage(turn.role, turn.content);
+            }
+        } catch (err) {
+            console.warn('Failed to load chat history', err);
+        }
+    },
+
+    appendChatMessage(role, content) {
+        const thread = document.getElementById('chat-thread');
+        if (!thread) return null;
+
+        const el = document.createElement('div');
+        el.className = `chat-message chat-message-${role}`;
+
+        const label = document.createElement('div');
+        label.className = 'chat-message-label';
+        label.textContent = role === 'user' ? 'You' : 'Gently';
+        el.appendChild(label);
+
+        const contentEl = document.createElement('div');
+        contentEl.className = 'chat-message-content';
+        contentEl.textContent = content;
+        el.appendChild(contentEl);
+
+        thread.appendChild(el);
+        thread.scrollTop = thread.scrollHeight;
+        return el;
+    },
+
+    handleChatKeydown(event) {
+        // Enter submits; Shift+Enter inserts a newline.
+        if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            event.target.form.requestSubmit();
+        }
+    },
+
+    async sendChat(event) {
+        event.preventDefault();
+        const panel = document.querySelector('.chat-panel');
+        const input = document.getElementById('chat-input');
+        if (!panel || !input) return false;
+
+        const text = input.value.trim();
+        if (!text) return false;
+
+        const sessionId = this.currentSessionId;
+        const embryoId = panel.dataset.embryoId;
+        const timepoint = parseInt(panel.dataset.timepoint, 10);
+        if (!sessionId || !embryoId || isNaN(timepoint)) {
+            console.error('Chat: missing session/embryo/timepoint');
+            return false;
+        }
+
+        this.appendChatMessage('user', text);
+        input.value = '';
+        input.disabled = true;
+        const sendBtn = panel.querySelector('.chat-send');
+        if (sendBtn) sendBtn.disabled = true;
+
+        const assistantEl = this.appendChatMessage('assistant', '');
+        const contentEl = assistantEl
+            ? assistantEl.querySelector('.chat-message-content')
+            : null;
+        if (contentEl) contentEl.classList.add('streaming');
+
+        try {
+            const resp = await fetch(
+                `/api/perception/chat/${sessionId}/${embryoId}/${timepoint}`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: text }),
+                }
+            );
+
+            if (!resp.ok) {
+                const errTxt = await resp.text();
+                if (contentEl) {
+                    contentEl.textContent = `Error: ${errTxt}`;
+                    contentEl.classList.add('error');
+                }
+                return false;
+            }
+
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let accumulated = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+
+                const events = buffer.split('\n\n');
+                buffer = events.pop();
+
+                for (const ev of events) {
+                    const line = ev.trim();
+                    if (!line.startsWith('data:')) continue;
+                    const payloadStr = line.slice(5).trim();
+                    try {
+                        const payload = JSON.parse(payloadStr);
+                        if (payload.type === 'delta') {
+                            accumulated += payload.text;
+                            if (contentEl) contentEl.textContent = accumulated;
+                            const thread = document.getElementById('chat-thread');
+                            if (thread) thread.scrollTop = thread.scrollHeight;
+                        } else if (payload.type === 'error') {
+                            if (contentEl) {
+                                contentEl.textContent = `Error: ${payload.message}`;
+                                contentEl.classList.add('error');
+                            }
+                        }
+                    } catch (e) {
+                        console.warn('Bad SSE payload', payloadStr);
+                    }
+                }
+            }
+        } catch (err) {
+            console.error('Chat request failed', err);
+            if (contentEl) {
+                contentEl.textContent = `Error: ${err.message}`;
+                contentEl.classList.add('error');
+            }
+        } finally {
+            if (contentEl) contentEl.classList.remove('streaming');
+            input.disabled = false;
+            if (sendBtn) sendBtn.disabled = false;
+            input.focus();
+        }
+
+        return false;
     },
 
     // Fetch image for detail panel using sequence API
