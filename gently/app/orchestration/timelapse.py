@@ -633,11 +633,15 @@ class TimelapseOrchestrator:
                                 )
                             return f"target stage reached (current: {current_stage})"
 
-                    # Also check session.is_complete() for hatching-type conditions
-                    if session.is_complete():
-                        organism = get_organism()
-                        if target & organism.TERMINAL_STAGES:
-                            return "terminal stage complete (perception)"
+                    # Also catch terminal-stage completion the upper block
+                    # might miss: e.g. target={hatching} but perception now
+                    # reports 'hatched'. Session has no is_complete() — we
+                    # check terminal-stage membership directly.
+                    organism = get_organism()
+                    if (current_stage
+                            and current_stage in organism.TERMINAL_STAGES
+                            and target & organism.TERMINAL_STAGES):
+                        return f"terminal stage '{current_stage}' reached (perception)"
 
             # Fallback: check legacy hatching_status (for manual marking)
             organism = get_organism()

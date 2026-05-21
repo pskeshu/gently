@@ -45,6 +45,30 @@ except ImportError:
     FASTAPI_AVAILABLE = False
     logger.warning("FastAPI not available. Install with: pip install fastapi uvicorn")
 
+
+class _InvalidHttpFilter(logging.Filter):
+    """Suppress uvicorn's "Invalid HTTP request received." warning.
+
+    Fires when something speaks non-HTTP at the viz port — typically a
+    mesh peer with a TLS/plain mismatch (one side advertised
+    tls_enabled=True while the other is plain http), or an opportunistic
+    network scanner. uvicorn rejects the connection cleanly; the warning
+    is cosmetic. We downgrade it to a single DEBUG line so the log stays
+    readable but the diagnostic info is still reachable with -v.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "Invalid HTTP request received" in msg:
+            logger.debug("uvicorn dropped non-HTTP bytes on viz port "
+                         "(probable TLS/peer mismatch)")
+            return False
+        return True
+
+
+if FASTAPI_AVAILABLE:
+    logging.getLogger("uvicorn.error").addFilter(_InvalidHttpFilter())
+
 # Web asset paths (templates and static files live alongside this module)
 _WEB_DIR = Path(__file__).parent
 TEMPLATES_DIR = _WEB_DIR / "templates"

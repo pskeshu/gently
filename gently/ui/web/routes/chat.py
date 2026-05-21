@@ -196,7 +196,6 @@ def create_router(server) -> APIRouter:
                 async with client.messages.stream(
                     model=CHAT_MODEL,
                     max_tokens=2048,
-                    temperature=0.0,
                     system=[
                         {
                             "type": "text",
