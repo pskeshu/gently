@@ -628,10 +628,13 @@ class DiSPIMMicroscope(Microscope):
         return await self._api_post('/api/led/set', {'state': state})
 
     async def set_laser_power(self, wavelength: int, pct: float) -> Dict:
-        """Set per-line laser power % via the Bluesky queue.
+        """Set per-line laser power %.
 
-        Hard-limited at the device layer (DiSPIMLightSource.POWER_LIMITS_PCT).
-        Out-of-range values cause the plan to fail with ValueError.
+        Hits the device layer's ``POST /api/light_source/power`` directly
+        — bypasses the Bluesky queue so this is a fast, no-experiment-trace
+        operation suitable for setup pokes. Hard-limited at the device
+        layer (``DiSPIMLightSource.POWER_LIMITS_PCT``); out-of-range
+        values return a structured error.
 
         Parameters
         ----------
@@ -640,26 +643,26 @@ class DiSPIMMicroscope(Microscope):
         pct : float
             Setpoint percent (must be within hard limit for ``wavelength``).
         """
-        return await self._submit_plan_and_wait(
-            'set_light_source_power_plan',
-            kwargs={
-                'light_source': 'light_source',
-                'wavelength': wavelength,
-                'pct': pct,
-            },
-            timeout=10.0,
-        )
+        return await self._api_post('/api/light_source/power', {
+            'wavelength': int(wavelength),
+            'pct': float(pct),
+        })
 
     async def get_laser_power(self, wavelength: int) -> Dict:
-        """Read the current per-line laser power %."""
-        return await self._submit_plan_and_wait(
-            'get_light_source_power_plan',
-            kwargs={
-                'light_source': 'light_source',
-                'wavelength': wavelength,
-            },
-            timeout=5.0,
-        )
+        """Read the current per-line laser power %.
+
+        Hits ``GET /api/light_source/power?wavelength={wavelength}`` —
+        direct, no queue.
+        """
+        try:
+            async with self._session.get(
+                f"{self.http_url}/api/light_source/power",
+                params={"wavelength": int(wavelength)},
+                timeout=5,
+            ) as resp:
+                return await resp.json()
+        except Exception as e:
+            return {'success': False, 'error': str(e)}
 
     async def get_led_status(self) -> Dict:
         """Get current LED status."""

@@ -1337,6 +1337,74 @@ class DeviceLayerServer(Service):
                 'traceback': traceback.format_exc()
             }, status=500)
 
+    async def handle_set_light_source_power(self, request):
+        """POST /api/light_source/power — set per-line laser power %.
+
+        Direct (non-queue) path mirroring the existing camera-exposure
+        endpoint. Hard-limited by ``DiSPIMLightSource.POWER_LIMITS_PCT``
+        — out-of-range values come back as a 400 with the error message
+        from the device-layer setter.
+        """
+        try:
+            data = await request.json()
+            wavelength = int(data.get('wavelength', 488))
+            pct = float(data.get('pct'))
+            light_source = self.devices.get('light_source') or self.devices.get('laser_control')
+            if light_source is None:
+                return web.json_response({
+                    'success': False,
+                    'error': 'Light source device not found',
+                }, status=503)
+            try:
+                light_source.set_power_pct(wavelength, pct)
+            except (ValueError, KeyError) as e:
+                return web.json_response({
+                    'success': False, 'error': str(e),
+                }, status=400)
+            readback = light_source.get_power_pct(wavelength)
+            return web.json_response({
+                'success': True,
+                'wavelength': wavelength,
+                'pct': pct,
+                'readback_pct': readback,
+            })
+        except Exception as e:
+            import traceback
+            return web.json_response({
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc(),
+            }, status=500)
+
+    async def handle_get_light_source_power(self, request):
+        """GET /api/light_source/power?wavelength=488 — read laser power %."""
+        try:
+            wavelength = int(request.query.get('wavelength', 488))
+            light_source = self.devices.get('light_source') or self.devices.get('laser_control')
+            if light_source is None:
+                return web.json_response({
+                    'success': False,
+                    'error': 'Light source device not found',
+                }, status=503)
+            try:
+                pct = light_source.get_power_pct(wavelength)
+            except KeyError as e:
+                return web.json_response({
+                    'success': False, 'error': str(e),
+                }, status=400)
+            return web.json_response({
+                'success': True,
+                'wavelength': wavelength,
+                'pct': float(pct),
+            })
+        except Exception as e:
+            import traceback
+            return web.json_response({
+                'success': False,
+                'error': str(e),
+                'traceback': traceback.format_exc(),
+            }, status=500)
+
     async def handle_get_camera_exposure(self, request):
         """GET /api/camera/exposure - Get bottom camera exposure time"""
         try:
@@ -2156,6 +2224,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
         self._app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
         self._app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
+        self._app.router.add_post('/api/light_source/power', self.handle_set_light_source_power)
+        self._app.router.add_get('/api/light_source/power', self.handle_get_light_source_power)
         self._app.router.add_get('/api/plan_log', self.handle_get_plan_log)
         self._app.router.add_post('/session/configure', self.handle_session_configure)
 

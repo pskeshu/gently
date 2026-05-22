@@ -230,7 +230,6 @@ class TimelapseOrchestrator:
         # Initialize timelapse runtime state on EmbryoState references.
         # No separate state object — orchestrator and agent share the same
         # EmbryoState instances.
-        from gently.harness.roles import REGISTRY as ROLE_REGISTRY
         now = datetime.now()
         self._embryo_states = {}
         for eid in embryo_ids:
@@ -244,17 +243,18 @@ class TimelapseOrchestrator:
             embryo.detection_type = None
             embryo.no_object_since_timepoint = None
 
-            # Async cadence init: per-embryo interval defaults to the role's
-            # default_cadence_seconds (e.g. 300s for test/calibration), falling
-            # back to base_interval_seconds, then to 300s. An explicit
-            # interval_seconds already on the embryo (e.g. from a prior
-            # modify_parameters call) is preserved.
-            if embryo.interval_seconds is None:
-                role_def = ROLE_REGISTRY.get(embryo.role)
-                if role_def is not None:
-                    embryo.interval_seconds = role_def.default_cadence_seconds
-                else:
-                    embryo.interval_seconds = base_interval_seconds
+            # Async cadence init: the caller-supplied base_interval_seconds
+            # is the intent for *this* timelapse run and always wins. We
+            # broadcast it to every embryo so per-embryo state matches what
+            # the agent told the user ("starting at 120s interval").
+            #
+            # NOTE: this DOES overwrite any pre-existing per-embryo
+            # interval (e.g. from a prior modify_parameters call). That's
+            # deliberate — the agent's explicit start() call is the most
+            # recent intent. Phase 5 rules (test_onset_speedup etc.)
+            # mutate per-embryo intervals AFTER start, and those changes
+            # stick because rules go through transition_cadence.
+            embryo.interval_seconds = base_interval_seconds
             embryo.cadence_phase = "normal"
             embryo.next_due_at = now  # image immediately on first tick
             self._embryo_states[eid] = embryo
@@ -1082,12 +1082,17 @@ class TimelapseOrchestrator:
         embryo.detection_type = None
         embryo.no_object_since_timepoint = None
 
-        # Async cadence init for the newcomer.
-        if embryo.interval_seconds is None:
+        # Async cadence init for the newcomer. The newcomer inherits the
+        # timelapse's current base_interval (the user-specified cadence
+        # at start time); falls back to the role's default if base is
+        # somehow unset.
+        if self._base_interval_seconds:
+            embryo.interval_seconds = self._base_interval_seconds
+        elif embryo.interval_seconds is None:
             role_def = ROLE_REGISTRY.get(embryo.role)
             embryo.interval_seconds = (
                 role_def.default_cadence_seconds if role_def is not None
-                else self._base_interval_seconds
+                else 300.0
             )
         embryo.cadence_phase = "normal"
         embryo.next_due_at = datetime.now()  # picked up on next loop tick
