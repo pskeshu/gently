@@ -20,6 +20,9 @@ class StopConditionType(Enum):
     FIXED_TIMEPOINTS = "fixed_timepoints"  # Stop after N timepoints
     DURATION = "duration"                # Stop after X hours
     ALL_TERMINAL = "all_terminal"        # Stop when all embryos reach terminal stage
+    # Phase 8: stop when every role='test' embryo has hatched
+    # (via the dopaminergic detector setting hatching_status.hatched=True).
+    ALL_TEST_HATCHED = "all_test_hatched"
     # Legacy aliases (kept for backward compatibility with serialized data)
     HATCHING = "hatching"
     COMMA_STAGE = "comma_stage"
@@ -196,6 +199,15 @@ class StopCondition:
         return cls(StopConditionType.MANUAL)
 
     @classmethod
+    def all_test_hatched(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+        """Stop when EVERY role='test' embryo's ``hatching_status.hatched``
+        flag is True (set by the dopaminergic detector / Phase 2 path)."""
+        return cls(
+            StopConditionType.ALL_TEST_HATCHED,
+            confirm_timepoints=confirm_timepoints,
+        )
+
+    @classmethod
     def composite(cls, *conditions: 'StopCondition') -> 'StopCondition':
         """Create a composite stop condition from multiple conditions (OR logic)."""
         if not conditions:
@@ -234,6 +246,8 @@ class StopCondition:
 
             if s == 'manual':
                 return cls.manual()
+            elif s in ('all_test_hatched', 'test_hatched'):
+                return cls.all_test_hatched(confirm_timepoints=confirm_timepoints)
             elif s.startswith('timepoints:'):
                 n = int(s.split(':')[1])
                 return cls.fixed_timepoints(n)

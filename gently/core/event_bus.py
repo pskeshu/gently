@@ -91,6 +91,18 @@ class EventType(Enum):
     # Async timelapse — per-embryo cadence transitions (Phase 4)
     EMBRYO_CADENCE_CHANGED = auto()  # {embryo_id, old_phase, new_phase, old_interval_s, new_interval_s, next_due_at}
 
+    # Burst lifecycle (Phase 7 / 10)
+    BURST_QUEUED = auto()    # {embryo_id, request_id, position_in_queue}
+    BURST_START = auto()     # {embryo_id, request_id, frames, mode}
+    BURST_FRAME = auto()     # {embryo_id, request_id, frame_idx, total_frames}
+    BURST_COMPLETE = auto()  # {embryo_id, request_id, mp4_path, sustained_hz, frames_captured}
+
+    # Reactive control telemetry (Phase 5 / 10)
+    POWER_RAMP_STEP = auto()  # {embryo_id, rule, wavelength, old_pct, new_pct, direction}
+
+    # Per-detector findings stream (Phase 2 / 10)
+    CLAUDE_DETECTOR_RESULT = auto()  # {embryo_id, timepoint, detector_name, findings}
+
     # Data events
     DATA_STORED = auto()
     DATA_RETRIEVED = auto()

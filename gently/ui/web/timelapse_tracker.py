@@ -232,6 +232,103 @@ class TimelapseStateTracker:
                 eid = data["embryo_id"]
                 if eid in self.embryos:
                     self.embryos[eid]["interval_seconds"] = data["new_interval_seconds"]
+            # Photodose-budget exceedance — surface as a pause reason.
+            if data.get("change") == "photodose_budget_exceeded":
+                eid = data.get("embryo_id")
+                if eid and eid in self.embryos:
+                    self.embryos[eid]["cadence_phase"] = "paused"
+                    self.embryos[eid]["photodose_paused"] = True
+                    self.embryos[eid]["dose_budget_ms"] = data.get("budget_ms")
+                    self.embryos[eid]["total_exposure_ms"] = data.get("total_exposure_ms")
+
+        # -- Phase 10: async timelapse events --------------------------
+
+        elif event_type == "EMBRYO_CADENCE_CHANGED":
+            eid = data.get("embryo_id")
+            if eid:
+                emb = self.embryos.setdefault(eid, {
+                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                    "detections": {}, "current_stage": None,
+                })
+                if data.get("new_phase") is not None:
+                    emb["cadence_phase"] = data["new_phase"]
+                if data.get("new_interval_s") is not None:
+                    emb["interval_seconds"] = data["new_interval_s"]
+                if data.get("next_due_at"):
+                    emb["next_due_at"] = data["next_due_at"]
+                emb["last_cadence_change_reason"] = data.get("reason")
+
+        elif event_type == "POWER_RAMP_STEP":
+            eid = data.get("embryo_id")
+            if eid:
+                emb = self.embryos.setdefault(eid, {
+                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                    "detections": {}, "current_stage": None,
+                })
+                wavelength = data.get("wavelength", 488)
+                if wavelength == 488:
+                    emb["laser_power_488_pct"] = data.get("new_pct")
+                emb.setdefault("power_history", []).append({
+                    "wavelength": wavelength,
+                    "old_pct": data.get("old_pct"),
+                    "new_pct": data.get("new_pct"),
+                    "direction": data.get("direction"),
+                    "rule": data.get("rule"),
+                    "intensity_level": data.get("intensity_level"),
+                    "timestamp": datetime.now().isoformat(),
+                })
+                # cap history per embryo
+                if len(emb["power_history"]) > 200:
+                    emb["power_history"] = emb["power_history"][-200:]
+
+        elif event_type == "CLAUDE_DETECTOR_RESULT":
+            eid = data.get("embryo_id")
+            if eid:
+                emb = self.embryos.setdefault(eid, {
+                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                    "detections": {}, "current_stage": None,
+                })
+                findings = data.get("findings") or {}
+                emb["last_intensity_level"] = findings.get("intensity_level")
+                emb["last_structure_quality"] = findings.get("structure_quality")
+                emb["last_detector_name"] = data.get("detector_name")
+                if findings.get("has_hatched"):
+                    emb["hatched"] = True
+
+        elif event_type in ("BURST_QUEUED", "BURST_START", "BURST_FRAME", "BURST_COMPLETE"):
+            eid = data.get("embryo_id")
+            if eid:
+                emb = self.embryos.setdefault(eid, {
+                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                    "detections": {}, "current_stage": None,
+                })
+                emb.setdefault("burst", {})
+                burst_state = emb["burst"]
+                if event_type == "BURST_QUEUED":
+                    burst_state["status"] = "queued"
+                    burst_state["request_id"] = data.get("request_id")
+                    burst_state["queue_position"] = data.get("position_in_queue")
+                    burst_state["frames"] = data.get("frames")
+                    burst_state["mode"] = data.get("mode")
+                elif event_type == "BURST_START":
+                    burst_state["status"] = "running"
+                    burst_state["request_id"] = data.get("request_id")
+                    burst_state["frames"] = data.get("frames")
+                    burst_state["mode"] = data.get("mode")
+                    burst_state["current_frame"] = 0
+                    burst_state["started_at"] = datetime.now().isoformat()
+                    emb["cadence_phase"] = "burst"
+                elif event_type == "BURST_FRAME":
+                    burst_state["current_frame"] = data.get("frame_idx", 0)
+                    burst_state["total_frames"] = data.get("total_frames")
+                elif event_type == "BURST_COMPLETE":
+                    burst_state["status"] = "complete"
+                    burst_state["frames_captured"] = data.get("frames_captured")
+                    burst_state["duration_s"] = data.get("duration_s")
+                    burst_state["sustained_hz"] = data.get("sustained_hz")
+                    burst_state["mp4_path"] = data.get("mp4_path")
+                    if emb.get("cadence_phase") == "burst":
+                        emb["cadence_phase"] = "normal"
 
     def to_dict(self) -> dict:
         """Serialize for WebSocket transmission"""

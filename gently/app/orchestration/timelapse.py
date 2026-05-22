@@ -11,6 +11,7 @@ Manages background timelapse acquisition with:
 import asyncio
 import json
 import logging
+from collections import deque
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
@@ -151,10 +152,30 @@ class TimelapseOrchestrator:
         # Active monitoring modes (declarative anticipation bundles).
         self._active_monitoring_modes: List[Any] = []
 
+        # Phase 6: calibration data from CalibrationEmbryos. Populated by
+        # ``run_calibration_pipelines()``; consumed by _run_detector as
+        # detector context["calibration"].
+        self._calibration_data: Optional[Dict[str, Any]] = None
+
+        # Phase 8: per-role photodose budgets. ``base_dose_budget_ms`` is the
+        # ceiling for a 1× role (e.g. test). Other roles get this scaled by
+        # their EmbryoRole.photodose_budget_multiplier (e.g. calibration
+        # gets 10×). None = no enforcement. See ``set_photodose_budget``.
+        self._dose_budget_base_ms: Optional[float] = None
+        # Embryos that have hit the budget — set to paused once, emit a
+        # STATUS_CHANGED, then leave alone (don't spam).
+        self._dose_budget_exceeded: Set[str] = set()
+
         # Async cadence state (Phase 4). Single-burst exclusion handled by
         # _burst_in_progress: while set to an embryo_id, _run_loop skips
         # all other embryos and runs only the burst executor (Phase 7).
         self._burst_in_progress: Optional[str] = None
+
+        # Phase 7: exclusive acquisitions (bursts, etc) — FIFO queue.
+        self._exclusive_queue: deque = deque()
+        # Track which embryos have already had a burst applied
+        # (one-time per embryo by default).
+        self._burst_applied: Set[str] = set()
 
         # Global error log for cross-embryo hardware error correlation
         self.global_error_log = GlobalErrorLog()
@@ -353,6 +374,12 @@ class TimelapseOrchestrator:
         ``paused`` phase skips it (over-budget, manual pause, or another
         embryo's burst is in flight). ``burst`` phase means an exclusive
         burst-executor handles it — the normal due-loop should skip too.
+
+        Phase 8: enforces per-role photodose budgets. If
+        ``_dose_budget_base_ms`` is set, any embryo whose
+        ``total_exposure_ms`` exceeds ``base * role.photodose_budget_multiplier``
+        gets paused, a STATUS_CHANGED is emitted once, and the embryo
+        falls out of the eligible set.
         """
         if embryo.is_complete:
             return False
@@ -361,7 +388,50 @@ class TimelapseOrchestrator:
         phase = getattr(embryo, "cadence_phase", "normal")
         if phase in ("paused", "burst"):
             return False
+
+        if self._dose_budget_base_ms is not None and embryo.id not in self._dose_budget_exceeded:
+            from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
+            role_def = _ROLE_REGISTRY.get(getattr(embryo, "role", "test"))
+            mult = role_def.photodose_budget_multiplier if role_def else 1.0
+            budget = self._dose_budget_base_ms * mult
+            if embryo.total_exposure_ms > budget:
+                embryo.cadence_phase = "paused"
+                self._dose_budget_exceeded.add(embryo.id)
+                self._emit_event(EventType.STATUS_CHANGED, {
+                    "embryo_id": embryo.id,
+                    "change": "photodose_budget_exceeded",
+                    "role": embryo.role,
+                    "total_exposure_ms": embryo.total_exposure_ms,
+                    "budget_ms": budget,
+                    "multiplier": mult,
+                })
+                logger.warning(
+                    "[%s] photodose budget exceeded: %.0f ms > %.0f ms "
+                    "(role=%s, mult=%.1fx). Pausing.",
+                    embryo.id, embryo.total_exposure_ms, budget,
+                    embryo.role, mult,
+                )
+                return False
+
         return True
+
+    def set_photodose_budget(self, base_dose_budget_ms: Optional[float]) -> str:
+        """Set the per-role photodose ceiling.
+
+        Each embryo's ``total_exposure_ms`` is checked against
+        ``base_dose_budget_ms * role.photodose_budget_multiplier``. Test
+        embryos use 1× (tight); calibration embryos default to 10× (decoy).
+
+        Pass ``None`` to disable enforcement.
+        """
+        self._dose_budget_base_ms = base_dose_budget_ms
+        self._dose_budget_exceeded.clear()
+        if base_dose_budget_ms is None:
+            return "Photodose budget enforcement disabled."
+        return (
+            f"Photodose budget set: {base_dose_budget_ms:.0f} ms base "
+            f"(scaled per role)."
+        )
 
     def _pick_next_due(self) -> tuple:
         """Pick the most-overdue eligible embryo.
@@ -498,10 +568,57 @@ class TimelapseOrchestrator:
                     await asyncio.sleep(1)
                     continue
 
-                # Exclusive burst (Phase 7 wires the executor). For now,
-                # if the flag is set, just yield and check back.
+                # Exclusive burst (Phase 7). If something's already in
+                # flight, yield and check back. Otherwise, see if the
+                # queue has a pending burst to dispatch.
                 if self._burst_in_progress is not None:
                     await asyncio.sleep(0.2)
+                    continue
+                if self._exclusive_queue:
+                    next_op = self._exclusive_queue.popleft()
+                    self._burst_in_progress = next_op.target_embryo_id
+                    # Pause every other embryo so the due-loop skips them
+                    # for the duration of the exclusive op.
+                    paused_ids = []
+                    for eid, e in self._embryo_states.items():
+                        if eid == next_op.target_embryo_id:
+                            continue
+                        if getattr(e, "cadence_phase", "normal") not in ("burst", "paused"):
+                            e.cadence_phase = "paused"
+                            paused_ids.append(eid)
+                    # Bursting embryo's phase reflects what it's doing.
+                    target_emb = self._embryo_states.get(next_op.target_embryo_id)
+                    if target_emb is not None:
+                        target_emb.cadence_phase = "burst"
+
+                    try:
+                        await next_op.run(self)
+                        self._burst_applied.add(next_op.target_embryo_id)
+                    except Exception as e:
+                        logger.error(
+                            "Exclusive op %s failed: %s",
+                            next_op.request_id, e, exc_info=True,
+                        )
+                    finally:
+                        self._burst_in_progress = None
+                        # Restore paused embryos to normal phase. They will
+                        # be picked up by the priority queue ASAP (their
+                        # next_due_at has been advancing the whole time).
+                        for eid in paused_ids:
+                            e = self._embryo_states.get(eid)
+                            if e and e.cadence_phase == "paused":
+                                e.cadence_phase = "normal"
+                        # Bursting embryo returns to normal cadence per the
+                        # experiment's state machine (Phase 5 sets fast→normal).
+                        if target_emb is not None and target_emb.cadence_phase == "burst":
+                            target_emb.cadence_phase = "normal"
+                            # Reset its interval to the role default if it
+                            # was running on the fast cadence.
+                            from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
+                            role_def = _ROLE_REGISTRY.get(target_emb.role)
+                            if role_def is not None:
+                                target_emb.interval_seconds = role_def.default_cadence_seconds
+                            self._reschedule(target_emb)
                     continue
 
                 # All embryos complete?
@@ -537,6 +654,13 @@ class TimelapseOrchestrator:
                 # Reschedule (anchor at "now" so a slow acquisition doesn't
                 # cause immediate retrigger).
                 self._reschedule(embryo, from_now=True)
+
+                # Persist runtime state so we can resume across an agent
+                # restart. Cheap YAML write; OK to do every acquisition.
+                try:
+                    self.save_state()
+                except Exception:
+                    logger.debug("save_state failed", exc_info=True)
 
                 # Small yield between back-to-back picks so other tasks
                 # (perception, event handlers) get cycles.
@@ -766,6 +890,32 @@ class TimelapseOrchestrator:
         """
         if cond.condition_type == StopConditionType.MANUAL:
             # Never auto-stop
+            return None
+
+        elif cond.condition_type == StopConditionType.ALL_TEST_HATCHED:
+            # Stop when every role='test' embryo in the active timelapse
+            # has hatched (via Claude detector setting hatching_status).
+            test_states = [
+                e for e in self._embryo_states.values()
+                if getattr(e, "role", "test") == "test" and not e.should_skip
+            ]
+            if not test_states:
+                return None  # no test embryos → not applicable
+            if all(e.hatching_status.get("hatched") for e in test_states):
+                # Optional confirmation timepoints — fold into the
+                # per-embryo machinery the existing stage-based code uses.
+                if embryo_state.detection_triggered_at is None:
+                    embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
+                    embryo_state.detection_type = "all_test_hatched"
+                tps_since = (
+                    embryo_state.timepoints_acquired
+                    - embryo_state.detection_triggered_at
+                )
+                if tps_since >= cond.confirm_timepoints:
+                    return (
+                        f"all test embryos hatched"
+                        + (f" (+{cond.confirm_timepoints} confirm)" if cond.confirm_timepoints > 0 else "")
+                    )
             return None
 
         elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
@@ -1345,6 +1495,393 @@ class TimelapseOrchestrator:
             wavelength, step_pct, floor_pct, embryo_ids or "all test embryos",
         )
 
+    # ------------------------------------------------------------------
+    # Phase 9: overnight persistence (timelapse.yaml)
+    # ------------------------------------------------------------------
+
+    def save_state(self) -> Optional[Path]:
+        """Write orchestrator runtime state to ``timelapse.yaml``.
+
+        Captures per-embryo cadence state, installed rules, burst state,
+        photodose budget — enough to rebuild the running orchestrator's
+        state on a session resume. Best-effort: failures log a warning
+        but don't raise.
+
+        Returns the path written, or None if no session is active.
+        """
+        if not (self._store and self._session_id):
+            return None
+        try:
+            import yaml
+            path = self._store.root / "sessions" / self._session_id / "timelapse.yaml"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            doc = self._serialize_runtime_state()
+            with open(path, "w", encoding="utf-8") as f:
+                yaml.safe_dump(doc, f, sort_keys=False, default_flow_style=False)
+            logger.debug("Saved timelapse.yaml (%d embryos)", len(self._embryo_states))
+            return path
+        except Exception as e:
+            logger.warning("save_state failed: %s", e)
+            return None
+
+    def load_state(self) -> str:
+        """Read ``timelapse.yaml`` and restore orchestrator runtime state.
+
+        Call from session-resume code AFTER ``self.experiment.embryos`` has
+        been populated (their on-disk embryo.yaml carries the durable
+        identity / role / position fields; this restores the transient
+        cadence + rule state on top).
+        """
+        if not (self._store and self._session_id):
+            return "No session — cannot load state."
+        try:
+            import yaml
+            path = self._store.root / "sessions" / self._session_id / "timelapse.yaml"
+            if not path.exists():
+                return f"No timelapse.yaml at {path}"
+            with open(path, "r", encoding="utf-8") as f:
+                doc = yaml.safe_load(f) or {}
+        except Exception as e:
+            return f"Failed to read timelapse.yaml: {e}"
+
+        try:
+            self._apply_runtime_state(doc)
+        except Exception as e:
+            return f"Failed to apply state: {e}"
+
+        return (
+            f"Restored timelapse state: {len(self._embryo_states)} embryos, "
+            f"{len(self._interval_rules)} interval rules, "
+            f"{len(self._power_rules)} power rules, "
+            f"{len(self._exclusive_queue)} queued bursts"
+        )
+
+    def _serialize_runtime_state(self) -> Dict[str, Any]:
+        """Build the timelapse.yaml document."""
+        def _iso(dt):
+            return dt.isoformat() if dt is not None else None
+
+        embryos = {}
+        for eid, e in self._embryo_states.items():
+            embryos[eid] = {
+                "role": getattr(e, "role", "test"),
+                "cadence_phase": getattr(e, "cadence_phase", "normal"),
+                "interval_seconds": e.interval_seconds,
+                "next_due_at": _iso(getattr(e, "next_due_at", None)),
+                "laser_power_488_pct": e.laser_power_488_pct,
+                "total_exposure_ms": e.total_exposure_ms,
+                "timepoints_acquired": e.timepoints_acquired,
+                "is_complete": e.is_complete,
+                "completion_reason": e.completion_reason,
+                "should_skip": e.should_skip,
+                "skip_reason": e.skip_reason,
+                "detection_triggered_at": e.detection_triggered_at,
+                "detection_type": e.detection_type,
+                "no_object_since_timepoint": e.no_object_since_timepoint,
+                "hatching_status": dict(e.hatching_status) if e.hatching_status else {},
+            }
+
+        def _ser_interval_rule(r):
+            return {
+                "name": r.name, "trigger_detector": r.trigger_detector,
+                "trigger_stage": r.trigger_stage,
+                "new_interval_seconds": r.new_interval_seconds,
+                "applies_to": list(r.applies_to) if r.applies_to else None,
+                "one_time": r.one_time,
+            }
+
+        def _ser_power_rule(r):
+            return {
+                "name": r.name, "wavelength": r.wavelength,
+                "trigger_detector": r.trigger_detector,
+                "trigger_intensity_levels": list(r.trigger_intensity_levels or []),
+                "trigger_stage": r.trigger_stage,
+                "step_pct": r.step_pct,
+                "floor_pct": r.floor_pct, "ceiling_pct": r.ceiling_pct,
+                "direction": r.direction,
+                "applies_to": list(r.applies_to) if r.applies_to else None,
+                "confirm_timepoints": r.confirm_timepoints,
+                "one_time": r.one_time,
+            }
+
+        return {
+            "saved_at": datetime.now().isoformat(),
+            "schema_version": 1,
+            "status": self._status.value if hasattr(self._status, "value") else str(self._status),
+            "started_at": _iso(self._started_at),
+            "base_interval_seconds": self._base_interval_seconds,
+            "current_round": self._current_round,
+            "total_timepoints": self._total_timepoints,
+            "dose_budget_base_ms": self._dose_budget_base_ms,
+            "dose_budget_exceeded": sorted(self._dose_budget_exceeded),
+            "burst_applied": sorted(self._burst_applied),
+            "burst_in_progress": self._burst_in_progress,
+            "exclusive_queue": [
+                {
+                    "kind": op.kind,
+                    "request_id": op.request_id,
+                    "target_embryo_id": op.target_embryo_id,
+                    "frames": getattr(op, "frames", None),
+                    "mode": getattr(op, "mode", None),
+                    "num_slices": getattr(op, "num_slices", None),
+                }
+                for op in self._exclusive_queue
+            ],
+            "interval_rules": [_ser_interval_rule(r) for r in self._interval_rules],
+            "power_rules": [_ser_power_rule(r) for r in self._power_rules],
+            "applied_rules": {eid: sorted(s) for eid, s in self._applied_rules.items()},
+            "active_monitoring_modes": [m.name for m in self._active_monitoring_modes],
+            "embryos": embryos,
+        }
+
+    def _apply_runtime_state(self, doc: Dict[str, Any]) -> None:
+        """Restore orchestrator state from a parsed timelapse.yaml dict."""
+        from .timelapse_models import IntervalRule, PowerRule, StopCondition
+        from .exclusive import BurstAcquisition
+
+        def _parse_dt(s):
+            if not s:
+                return None
+            try:
+                return datetime.fromisoformat(s)
+            except (TypeError, ValueError):
+                return None
+
+        self._base_interval_seconds = float(doc.get("base_interval_seconds", self._base_interval_seconds))
+        self._current_round = int(doc.get("current_round", self._current_round))
+        self._total_timepoints = int(doc.get("total_timepoints", self._total_timepoints))
+        self._dose_budget_base_ms = doc.get("dose_budget_base_ms")
+        self._dose_budget_exceeded = set(doc.get("dose_budget_exceeded") or [])
+        self._burst_applied = set(doc.get("burst_applied") or [])
+        self._burst_in_progress = doc.get("burst_in_progress")
+        if started := _parse_dt(doc.get("started_at")):
+            self._started_at = started
+
+        self._interval_rules = []
+        for r in (doc.get("interval_rules") or []):
+            self._interval_rules.append(IntervalRule(
+                name=r["name"],
+                trigger_detector=r.get("trigger_detector"),
+                trigger_stage=r.get("trigger_stage"),
+                new_interval_seconds=float(r.get("new_interval_seconds", 30.0)),
+                applies_to=r.get("applies_to"),
+                one_time=bool(r.get("one_time", True)),
+            ))
+
+        self._power_rules = []
+        for r in (doc.get("power_rules") or []):
+            self._power_rules.append(PowerRule(
+                name=r["name"],
+                wavelength=int(r.get("wavelength", 488)),
+                trigger_detector=r.get("trigger_detector"),
+                trigger_intensity_levels=r.get("trigger_intensity_levels") or None,
+                trigger_stage=r.get("trigger_stage"),
+                step_pct=float(r.get("step_pct", 1.0)),
+                floor_pct=float(r.get("floor_pct", 2.0)),
+                ceiling_pct=float(r.get("ceiling_pct", 6.0)),
+                direction=r.get("direction", "down"),
+                applies_to=r.get("applies_to"),
+                confirm_timepoints=int(r.get("confirm_timepoints", 0)),
+                one_time=bool(r.get("one_time", False)),
+            ))
+
+        self._applied_rules = {
+            eid: set(names) for eid, names in (doc.get("applied_rules") or {}).items()
+        }
+
+        self._exclusive_queue.clear()
+        for op_doc in (doc.get("exclusive_queue") or []):
+            if op_doc.get("kind") == "burst":
+                self._exclusive_queue.append(BurstAcquisition(
+                    target_embryo_id=op_doc["target_embryo_id"],
+                    frames=int(op_doc.get("frames", 60)),
+                    mode=op_doc.get("mode", "1hz"),
+                    num_slices=int(op_doc.get("num_slices", 1)),
+                    request_id=op_doc.get("request_id"),
+                ))
+
+        # Per-embryo state: only restore fields for embryos that already
+        # exist in the experiment (embryo.yaml is the durable identity).
+        for eid, ed in (doc.get("embryos") or {}).items():
+            embryo = self.experiment.embryos.get(eid)
+            if embryo is None:
+                continue
+            for attr in (
+                "cadence_phase", "interval_seconds", "laser_power_488_pct",
+                "total_exposure_ms", "timepoints_acquired", "is_complete",
+                "completion_reason", "should_skip", "skip_reason",
+                "detection_triggered_at", "detection_type",
+                "no_object_since_timepoint",
+            ):
+                if attr in ed:
+                    setattr(embryo, attr, ed[attr])
+            if "next_due_at" in ed:
+                embryo.next_due_at = _parse_dt(ed.get("next_due_at"))
+            if "hatching_status" in ed:
+                embryo.hatching_status = dict(ed.get("hatching_status") or {})
+            # Re-register into the orchestrator's active set if not skipped.
+            if not embryo.should_skip and not embryo.is_complete:
+                self._embryo_states[eid] = embryo
+
+    # ------------------------------------------------------------------
+    # Phase 7: exclusive acquisitions (burst, ...)
+    # ------------------------------------------------------------------
+
+    def queue_burst(
+        self,
+        embryo_id: str,
+        *,
+        frames: int = 60,
+        mode: str = "1hz",
+        num_slices: int = 1,
+        force: bool = False,
+    ) -> str:
+        """Queue a burst acquisition for ``embryo_id``.
+
+        Bursts are FIFO; only one runs at a time. ``one_time``-per-embryo
+        semantics by default (``force=True`` overrides). The orchestrator
+        pauses all other embryos while the burst is running, then
+        restores them to ``normal`` cadence afterwards.
+
+        Parameters
+        ----------
+        embryo_id : str
+            Target embryo. Must be in the active timelapse.
+        frames : int
+            Number of frames (default 60 — one 1 Hz movie at 60s).
+        mode : "1hz" | "asap"
+            Cadence policy.
+        num_slices : int
+            Z-slices per frame. Default 1 (snap mode — best chance of
+            sustaining 1 Hz on this hardware).
+        force : bool
+            If True, queue even if this embryo has already had a burst.
+        """
+        from .exclusive import BurstAcquisition
+        if embryo_id not in self._embryo_states:
+            return f"Embryo '{embryo_id}' not in active timelapse."
+        if not force and embryo_id in self._burst_applied:
+            return (
+                f"Embryo '{embryo_id}' already had a burst this session. "
+                f"Pass force=True to queue another."
+            )
+        if any(op.target_embryo_id == embryo_id for op in self._exclusive_queue):
+            return f"Embryo '{embryo_id}' already has a queued burst."
+        op = BurstAcquisition(
+            target_embryo_id=embryo_id,
+            frames=frames,
+            mode=mode,
+            num_slices=num_slices,
+        )
+        self._exclusive_queue.append(op)
+        logger.info(
+            "Queued burst for %s: frames=%d mode=%s num_slices=%d request_id=%s "
+            "(queue depth=%d)",
+            embryo_id, frames, mode, num_slices, op.request_id,
+            len(self._exclusive_queue),
+        )
+        self._emit_event(EventType.BURST_QUEUED, {
+            "embryo_id": embryo_id,
+            "request_id": op.request_id,
+            "position_in_queue": len(self._exclusive_queue),
+            "frames": frames,
+            "mode": mode,
+        })
+        return (
+            f"Burst queued for {embryo_id} (request_id={op.request_id}, "
+            f"frames={frames}, mode={mode}, queue_depth={len(self._exclusive_queue)})"
+        )
+
+    # ------------------------------------------------------------------
+    # Phase 6: calibration pipelines (capture on Calibration, apply on Test)
+    # ------------------------------------------------------------------
+
+    def run_calibration_pipelines(
+        self,
+        *,
+        pipelines: Optional[List[str]] = None,
+        source_volumes: Optional[Dict[str, Any]] = None,
+        embryo_bboxes: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Run the named calibration pipelines on CalibrationEmbryo volumes
+        and merge the result into ``self._calibration_data``.
+
+        ``source_volumes`` shape depends on the pipeline:
+        - TwoPointCalibration: ``{"dark": {eid: vol}, "flat": {eid: vol}}``
+        - EdgeRoiCalibration: ``{eid: vol}`` (or rely on ``embryo_bboxes``)
+
+        Detectors read the merged calibration dict from their context;
+        the dopaminergic detector specifically picks ``dark``, ``flat``,
+        ``edge_bbox`` out and applies them as preprocessing.
+        """
+        from gently.app.calibration import (
+            get_calibration_pipeline, aggregate_calibrations,
+        )
+
+        if pipelines is None:
+            pipelines = ["two_point", "edge_roi"]
+
+        captured = []
+        for pname in pipelines:
+            pipeline = get_calibration_pipeline(pname)
+            if pipeline is None:
+                logger.warning("Unknown calibration pipeline: %s", pname)
+                continue
+
+            # Each pipeline gets the source_volumes shape it expects.
+            ctx = {"embryo_bboxes": embryo_bboxes} if embryo_bboxes else {}
+            try:
+                data = pipeline.capture(source_volumes or {}, ctx)
+                captured.append(data)
+                logger.info(
+                    "Calibration pipeline '%s' captured: keys=%s notes=%s",
+                    pname, sorted(data.payload.keys()), data.notes,
+                )
+            except Exception as e:
+                logger.warning("Calibration pipeline '%s' failed: %s", pname, e)
+
+        if not captured:
+            return "No calibration pipelines produced data."
+
+        merged = aggregate_calibrations(captured)
+        self._calibration_data = merged
+
+        # Persist a tiny manifest. The actual numpy arrays could be saved
+        # as .npy alongside if needed; for now just log what we captured.
+        if self._store and self._session_id:
+            try:
+                import yaml
+                from pathlib import Path
+                cal_dir = self._store.root / "sessions" / self._session_id / "calibration"
+                cal_dir.mkdir(parents=True, exist_ok=True)
+                manifest = {
+                    "pipelines": [
+                        {
+                            "name": c.pipeline_name,
+                            "captured_at": c.captured_at.isoformat(),
+                            "source_embryo_ids": c.source_embryo_ids,
+                            "payload_keys": sorted(c.payload.keys()),
+                            "notes": c.notes,
+                        }
+                        for c in captured
+                    ],
+                }
+                with open(cal_dir / "aggregate.yaml", "w", encoding="utf-8") as f:
+                    yaml.safe_dump(manifest, f, sort_keys=False)
+                # Save heavy arrays as .npy
+                import numpy as _np
+                for c in captured:
+                    for key, value in c.payload.items():
+                        if isinstance(value, _np.ndarray):
+                            _np.save(cal_dir / f"{c.pipeline_name}_{key}.npy", value)
+            except Exception as e:
+                logger.warning("Failed to persist calibration manifest: %s", e)
+
+        return (
+            f"Calibration complete: {len(captured)} pipeline(s); "
+            f"merged keys: {sorted(merged.keys())}"
+        )
+
     def enable_expression_monitoring(
         self,
         *,
@@ -1473,9 +2010,8 @@ class TimelapseOrchestrator:
             if prule.wavelength == 488:
                 estate.laser_power_488_pct = new_pct
             # (Future wavelengths: extend EmbryoState similarly.)
-            self._emit_event(EventType.STATUS_CHANGED, {
+            self._emit_event(EventType.POWER_RAMP_STEP, {
                 "embryo_id": embryo_id,
-                "change": "laser_power_stepped",
                 "rule": prule.name,
                 "wavelength": prule.wavelength,
                 "old_pct": current,
@@ -1728,6 +2264,14 @@ class TimelapseOrchestrator:
             event_data["volume_uid"] = volume_uids.get("volume_uid")
             event_data["projection_uid"] = volume_uids.get("projection_uid")
         self._emit_event(EventType.DETECTOR_EVALUATED, event_data)
+        # Dedicated Phase 10 event for the per-detector findings stream.
+        self._emit_event(EventType.CLAUDE_DETECTOR_RESULT, {
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "detector_name": detector_name,
+            "findings": findings,
+            "reasoning": result.reasoning,
+        })
 
         if has_hatched:
             self._emit_event(EventType.HATCHING_DETECTED, {
