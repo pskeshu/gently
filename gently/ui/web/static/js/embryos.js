@@ -611,15 +611,26 @@ const EmbryosManager = {
         });
 
         // Convert vertical scroll to horizontal on the single shared
-        // filmstrip scroll container. All four embryo rows are now
-        // inside .filmstrip-container and scroll in lock-step.
+        // filmstrip scroll container, BUT only while there's still
+        // horizontal room to scroll in the wheel's direction. When the
+        // container is at the left/right edge for the requested direction,
+        // let the wheel event bubble so the page (and the detail panel
+        // below the rows) can scroll vertically. Shift+wheel always
+        // bubbles for vertical (standard convention).
         const scrollContainer = container.querySelector('.filmstrip-container');
         if (scrollContainer) {
             scrollContainer.addEventListener('wheel', (e) => {
-                if (e.deltaY !== 0) {
-                    e.preventDefault();
-                    scrollContainer.scrollLeft += e.deltaY;
+                if (e.shiftKey || e.deltaY === 0) return;
+                const maxScroll = scrollContainer.scrollWidth - scrollContainer.clientWidth;
+                const atLeftEdge = scrollContainer.scrollLeft <= 0 && e.deltaY < 0;
+                const atRightEdge = scrollContainer.scrollLeft >= maxScroll && e.deltaY > 0;
+                if (atLeftEdge || atRightEdge || maxScroll <= 0) {
+                    // Nothing left to scroll horizontally — let the wheel
+                    // bubble so vertical page/detail scroll takes over.
+                    return;
                 }
+                e.preventDefault();
+                scrollContainer.scrollLeft += e.deltaY;
             }, { passive: false });
         }
 

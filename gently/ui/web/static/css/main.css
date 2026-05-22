@@ -3658,6 +3658,15 @@ kbd {
 
 .filmstrip-detail {
     background: var(--bg-card);
+    /* Cap the detail panel so it always leaves the rows visible AND
+       has a scrollable body of its own. Without this, when an item is
+       expanded the detail panel can grow past the viewport bottom and
+       the parent's scroll is unintuitive (mouse wheel over the rows
+       converts to horizontal). max-height keeps it bounded; overflow-y
+       lets long VLM summaries scroll on their own. */
+    max-height: 60vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 /* ========================================
