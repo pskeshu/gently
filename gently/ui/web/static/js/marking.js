@@ -84,6 +84,10 @@ const MarkingManager = {
         this.stageYUm = data.stage_y_um != null ? data.stage_y_um : 0;
         this.umPerPixel = data.pixel_size_um || 0.65;
 
+        // Auto-switch to the marking subtab so the user doesn't have to
+        // hunt for it when a session starts.
+        try { this.switchSubtab('marking'); } catch (_) { /* tabs not ready */ }
+
         // Hydrate any initial markers (e.g. SAM detections) — already
         // normalized server-side to {number, pixelX, pixelY, role, source, ...}.
         this.markers = (data.initial_markers || []).map(m => ({
@@ -361,19 +365,37 @@ const MarkingManager = {
         this._send('marking_done', { markers: this.markers });
 
         this.active = false;
+        const counts = this.markers.reduce((acc, m) => {
+            acc[m.role] = (acc[m.role] || 0) + 1;
+            return acc;
+        }, {});
+        const summary = Object.entries(counts)
+            .map(([r, n]) => `${n} ${r}`)
+            .join(', ');
         const instructions = document.getElementById('marking-instructions');
         if (instructions) {
-            const counts = this.markers.reduce((acc, m) => {
-                acc[m.role] = (acc[m.role] || 0) + 1;
-                return acc;
-            }, {});
-            const summary = Object.entries(counts)
-                .map(([r, n]) => `${n} ${r}`)
-                .join(', ');
             instructions.textContent = `Marking complete — ${this.markers.length} embryo(s)${summary ? ': ' + summary : ''}.`;
         }
 
         document.querySelectorAll('.marking-action-btn').forEach(btn => btn.disabled = true);
+
+        // Auto-switch back to monitoring after the user sees the
+        // "marking complete" confirmation. Without this the marker
+        // window stays put even after the agent has started a
+        // timelapse, and the user has to manually switch tabs.
+        setTimeout(() => {
+            try { this.switchSubtab('monitoring'); } catch (_) { /* tabs may be gone */ }
+            // Reset placeholder/active visibility so the next session
+            // starts fresh on this tab.
+            const placeholder = document.getElementById('marking-placeholder');
+            const activeEl = document.getElementById('marking-active');
+            if (placeholder) placeholder.style.display = '';
+            if (activeEl) activeEl.style.display = 'none';
+            this.markers = [];
+            this._updateCount(0);
+            this._redraw();
+            this._renderList();
+        }, 1500);
     },
 
     _send(type, payload) {

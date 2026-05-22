@@ -1260,6 +1260,26 @@ a.tab-link.active {
     overflow: hidden;
 }
 
+/* Side-by-side container for the paired TOP/BOTTOM focus curves so the
+   right detail pane stays compact and the Calibration Summary card
+   below them stays above the fold on a typical 900px viewport. */
+.cal-focus-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+}
+
+.cal-focus-grid > .cal-detail-card {
+    margin-top: 0;
+}
+
+/* Collapse to a single column if the pane is narrow. */
+@media (max-width: 1100px) {
+    .cal-focus-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
 .cal-detail-card-title {
     padding: 8px 12px;
     font-size: 11px;
@@ -1368,6 +1388,192 @@ a.tab-link.active {
     font-weight: 600;
     color: var(--text);
     font-family: monospace;
+}
+
+/* ===================================================================
+ * Calibration → Profile v2 — metrics-first 2x2 layout
+ * =================================================================== */
+
+.cal-profile-v2 {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    height: calc(100vh - 175px);
+    min-height: 480px;
+}
+
+/* Top metrics strip — flat row of label/value pairs separated by 1px
+   borders, plus the SPIM live indicator as the last cell. */
+.cal-metrics-strip {
+    display: flex;
+    align-items: stretch;
+    background: var(--border);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    gap: 1px;
+    flex: 0 0 auto;
+}
+
+.cal-metric {
+    flex: 1;
+    background: var(--bg-card);
+    padding: 8px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.cal-metric-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.cal-metric-value {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.2;
+}
+
+.cal-metric-unit {
+    font-size: 10px;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 3px;
+}
+
+/* SPIM live indicator riding inside the metrics strip — compact pill
+   with the same IDs the old preview used so SpimLivePreview just works. */
+.cal-spim-indicator {
+    flex: 0 0 auto;
+    background: var(--bg-card);
+    padding: 8px 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.cal-spim-label {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.cal-spim-thumb {
+    width: 96px;
+    height: 72px;
+    object-fit: contain;
+    background: #000;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    display: none;  /* shown when frame arrives via .has-frame */
+    opacity: 1;
+}
+
+.cal-spim-thumb.has-frame {
+    display: inline-block;
+}
+
+/* When a live frame is active, let the SPIM cell breathe a bit so the
+   thumb and meta have room. */
+.cal-spim-indicator:has(.cal-spim-thumb.has-frame) {
+    padding: 8px 12px;
+    gap: 10px;
+    min-width: 250px;
+}
+
+.cal-spim-indicator .cal-spim-meta {
+    max-width: 130px;
+    white-space: normal;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+/* Asymmetric grid: Galvo Profile gets a full-height left column (it's
+   the spatial overview and benefits most from the extra vertical
+   space). The other three stack vertically on the right. */
+.cal-grid {
+    flex: 1;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr 1fr;
+    grid-template-areas:
+        "galvo summary"
+        "galvo focus-top"
+        "galvo focus-bot";
+    gap: 12px;
+}
+
+.cal-quad-galvo .cal-quad-body { padding: 4px; }
+
+.cal-quad {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    min-width: 0;
+}
+
+.cal-quad-title {
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.cal-quad-body {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    overflow: hidden;
+}
+
+.cal-quad-body > svg,
+.cal-quad-body .cal-chart-svg,
+.cal-quad-body .cal-profile-svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.cal-quad-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+.cal-quad-empty {
+    color: var(--text-muted);
+    font-size: 12px;
+    font-style: italic;
 }
 
 /* Sidebar type badges */
@@ -3678,7 +3884,7 @@ kbd {
 }
 
 .marking-image-container {
-    flex: 1;
+    flex: 1 1 auto;
     position: relative;
     background: #111;
     border-radius: 8px;
@@ -3686,7 +3892,11 @@ kbd {
     display: flex;
     align-items: center;
     justify-content: center;
-    min-height: 300px;
+    /* min-height was 300px which prevented flex-shrink when the parent
+       (#embryos-marking → .marking-container → .marking-active →
+       .marking-viewer) lacked a bounded height. Use 0 + a reasonable
+       basis so the container shrinks correctly inside its flex chain. */
+    min-height: 0;
 }
 
 .marking-image-container img {
@@ -3791,9 +4001,52 @@ kbd {
     color: #ff6b6b;
 }
 
+/* Role chip on each marker — click cycles test ↔ calibration ↔ unassigned.
+   Inline styles set the role-specific colors (magenta/cyan/grey); this
+   gives the chip its shape, cursor, and hover affordance. */
+.marking-role-chip {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    user-select: none;
+    transition: filter 0.15s, transform 0.1s;
+    flex-shrink: 0;
+}
+.marking-role-chip:hover {
+    filter: brightness(1.2) saturate(1.1);
+}
+.marking-role-chip:active {
+    transform: scale(0.96);
+}
+
+/* Source tag (sam / manual / existing) — quieter than the role chip. */
+.marking-source {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0.75;
+    flex-shrink: 0;
+}
+
 /* ========================================
    EMBRYOS TAB - Timelapse Tracking
    ======================================== */
+
+/* Marking subtab needs the same flex sizing as monitoring so the image
+   container can compute its bounded height. Without this rule,
+   #embryos-marking falls back to display:block when switchSubtab
+   clears its inline display, and the image-container's flex:1 has no
+   height context → image expands to full natural size and overflows. */
+#embryos-marking {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
 
 #embryos-monitoring {
     flex: 1;
