@@ -848,8 +848,12 @@ class ExperimentState:
         ``role`` must be a key in :data:`gently.harness.roles.REGISTRY`
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Unknown roles
         raise KeyError.
+
+        Emits an ``EMBRYO_DETECTED`` event so listeners (e.g. the viz
+        server's TimelapseStateTracker, which feeds the device map)
+        learn about marked embryos immediately — not just after the
+        first acquisition.
         """
-        # Validate role against the registry (lazy import to avoid circular).
         from gently.harness.roles import get_role
         get_role(role)  # raises KeyError if unknown
 
@@ -857,15 +861,37 @@ class ExperimentState:
         if self.start_time is None:
             self.start_time = datetime.now()
 
+        pos = position or {}
         self.embryos[embryo_id] = EmbryoState(
             id=embryo_id,
             uid=uid,
-            stage_position=position or {},
+            stage_position=pos,
             calibration=calibration or {},
             user_label=user_label,
             detection_confidence=confidence,
             role=role,
         )
+
+        # Fire the registration event. Late-bound import keeps this module
+        # decoupled from the event bus until first use.
+        try:
+            from gently.core import EventType, get_event_bus
+            get_event_bus().publish(
+                event_type=EventType.EMBRYO_DETECTED,
+                data={
+                    "embryo_id": embryo_id,
+                    "uid": uid,
+                    "x": pos.get("x"),
+                    "y": pos.get("y"),
+                    "role": role,
+                    "user_label": user_label,
+                    "confidence": confidence,
+                },
+                source="experiment.add_embryo",
+            )
+        except Exception:
+            # Don't let event-bus issues block embryo registration.
+            pass
 
     def remove_embryo(self, embryo_id: str) -> bool:
         """Remove embryo from experiment (e.g., false detection)"""

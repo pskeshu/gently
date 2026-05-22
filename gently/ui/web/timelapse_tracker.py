@@ -163,6 +163,35 @@ class TimelapseStateTracker:
                 if data.get("stage") and eid in self.embryos:
                     self.embryos[eid]["current_stage"] = data.get("stage")
 
+        elif event_type == "EMBRYO_DETECTED":
+            # An embryo was marked / registered (typically from the map
+            # view's marking flow). Plant it in our state with its
+            # position + role so the device-map renderer can show it
+            # before any acquisition has happened.
+            eid = data.get("embryo_id")
+            if eid:
+                emb = self.embryos.setdefault(eid, {
+                    "embryo_id": eid,
+                    "timepoints": 0,
+                    "is_complete": False,
+                    "first_acquired": None,
+                    "last_acquired": None,
+                    "detections": {},
+                    "current_stage": None,
+                })
+                if data.get("x") is not None:
+                    emb["stage_x_um"] = data["x"]
+                if data.get("y") is not None:
+                    emb["stage_y_um"] = data["y"]
+                if data.get("role"):
+                    emb["role"] = data["role"]
+                if data.get("uid"):
+                    emb["uid"] = data["uid"]
+                if data.get("user_label"):
+                    emb["user_label"] = data["user_label"]
+                if data.get("confidence") is not None:
+                    emb["confidence"] = data["confidence"]
+
         elif event_type in ("DETECTION_TRIGGERED", "HATCHING_DETECTED"):
             # Positive detection events - update embryo status
             eid = data.get("embryo_id")
@@ -240,6 +269,16 @@ class TimelapseStateTracker:
                     self.embryos[eid]["photodose_paused"] = True
                     self.embryos[eid]["dose_budget_ms"] = data.get("budget_ms")
                     self.embryos[eid]["total_exposure_ms"] = data.get("total_exposure_ms")
+            # Role re-assignment via assign_embryo_roles agent tool.
+            if data.get("change") == "role_assigned":
+                eid = data.get("embryo_id")
+                if eid:
+                    emb = self.embryos.setdefault(eid, {
+                        "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                        "detections": {}, "current_stage": None,
+                    })
+                    if data.get("new_role"):
+                        emb["role"] = data["new_role"]
 
         # -- Phase 10: async timelapse events --------------------------
 

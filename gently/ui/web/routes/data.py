@@ -168,6 +168,41 @@ def create_router(server) -> APIRouter:
             "embryos": server.store.get_embryo_ids()
         }
 
+    @router.get("/api/embryos/positions")
+    async def embryo_positions():
+        """Get per-embryo stage positions + role for the device map.
+
+        Sources:
+        - ``TimelapseStateTracker.embryos`` — fed by ``EMBRYO_DETECTED``
+          (every ``ExperimentState.add_embryo`` call publishes one) plus
+          ``STATUS_CHANGED { change: 'role_assigned' }``.
+        - Per-embryo state from any active timelapse.
+
+        Returns a flat list so the renderer can map directly to SVG circles.
+        """
+        tracker = getattr(server, "timelapse_tracker", None)
+        points = []
+        if tracker is not None:
+            for eid, emb in (tracker.embryos or {}).items():
+                x = emb.get("stage_x_um")
+                y = emb.get("stage_y_um")
+                if x is None or y is None:
+                    # Embryo registered but no position yet (e.g. only the
+                    # ID arrived from another path). Skip — nothing to render.
+                    continue
+                points.append({
+                    "embryo_id": eid,
+                    "uid": emb.get("uid"),
+                    "x": float(x),
+                    "y": float(y),
+                    "role": emb.get("role", "test"),
+                    "user_label": emb.get("user_label"),
+                    "confidence": emb.get("confidence"),
+                    "cadence_phase": emb.get("cadence_phase"),
+                    "is_complete": bool(emb.get("is_complete")),
+                })
+        return {"embryos": points}
+
     @router.get("/api/sequence/{embryo_id}")
     async def get_image_sequence(
         embryo_id: str,

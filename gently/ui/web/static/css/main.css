@@ -4036,6 +4036,26 @@ kbd {
    EMBRYOS TAB - Timelapse Tracking
    ======================================== */
 
+/* Embryo dots on the device map (XY stage). Roles drive the fill via
+   inline ``fill`` attribute (set in devices.js); these rules carry the
+   shared label styling + tooltip behaviour. */
+.devices-embryo {
+    pointer-events: auto;
+    cursor: help;
+}
+.devices-embryo:hover .devices-embryo-label {
+    font-weight: 700;
+}
+.devices-embryo-label {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-weight: 600;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: rgba(0, 0, 0, 0.6);
+    stroke-width: 0.4px;
+    stroke-linejoin: round;
+}
+
 /* Marking subtab needs the same flex sizing as monitoring so the image
    container can compute its bounded height. Without this rule,
    #embryos-marking falls back to display:block when switchSubtab

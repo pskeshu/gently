@@ -26,10 +26,23 @@ const DevicesManager = (function () {
     let _mapSvg, _mapBg, _mapGridMinor, _mapGridMajor, _mapAxisEmphasis;
     let _mapBeyond, _mapCoverslip;
     let _mapZones, _mapZoneLabels, _mapOrigin, _mapAxes;
+    let _mapEmbryos;
     let _mapMarker, _mapMarkerPulse, _mapMarkerRing, _mapMarkerDot;
     let _mapReadoutX, _mapReadoutY;
     let _mapWrap;
     let _scalebarLabel;
+
+    // Embryos overlay state: list of {embryo_id, x, y, role, ...}.
+    // Populated by /api/embryos/positions on init + EMBRYO_DETECTED /
+    // STATUS_CHANGED WS pushes thereafter. Roles drive the marker color
+    // (mirrors the marking-window legend: magenta=test, cyan=calibration,
+    // grey=unassigned).
+    let _embryos = [];
+    const _ROLE_COLOR = {
+        test: '#ff66cc',
+        calibration: '#00cccc',
+        unassigned: '#888888',
+    };
 
     // Bottom-camera panel DOM + state
     let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
@@ -83,6 +96,7 @@ const DevicesManager = (function () {
         _mapZoneLabels    = document.getElementById('devices-map-zone-labels');
         _mapOrigin        = document.getElementById('devices-map-origin');
         _mapAxes          = document.getElementById('devices-map-axes');
+        _mapEmbryos       = document.getElementById('devices-map-embryos');
         _mapMarker        = document.getElementById('devices-map-marker');
         _mapMarkerPulse   = document.getElementById('devices-map-marker-pulse');
         _mapMarkerRing    = document.getElementById('devices-map-marker-ring');
@@ -364,8 +378,130 @@ const DevicesManager = (function () {
         renderZoneLabels();
         renderOrigin();
         renderAxes();
+        renderEmbryos();
         updateMapMarker();
         updateScalebar();
+    }
+
+    function renderEmbryos() {
+        if (!_mapEmbryos || !_viewBox) return;
+        _mapEmbryos.innerHTML = '';
+        if (!_embryos || _embryos.length === 0) return;
+
+        const { xMin, xMax, yMin, yMax } = _viewBox;
+        const span = Math.max(xMax - xMin, yMax - yMin);
+        const r = span * 0.006;              // embryo dot radius (stage µm)
+        const ringR = r * 1.9;               // accent ring
+        const labelFontSize = span * 0.012;
+
+        for (const emb of _embryos) {
+            if (emb.x == null || emb.y == null) continue;
+            const color = _ROLE_COLOR[emb.role] || _ROLE_COLOR.test;
+            // Group so we can attach the title (tooltip).
+            const g = document.createElementNS(SVG_NS, 'g');
+            g.setAttribute('class', `devices-embryo devices-embryo-${emb.role || 'test'}`);
+
+            // Soft outer ring — makes the marker visible even on dense
+            // background grids without overpowering the position marker.
+            const ring = document.createElementNS(SVG_NS, 'circle');
+            ring.setAttribute('cx', emb.x);
+            ring.setAttribute('cy', svgY(emb.y));
+            ring.setAttribute('r', ringR);
+            ring.setAttribute('fill', 'none');
+            ring.setAttribute('stroke', color);
+            ring.setAttribute('stroke-opacity', '0.45');
+            ring.setAttribute('stroke-width', r * 0.35);
+            g.appendChild(ring);
+
+            const dot = document.createElementNS(SVG_NS, 'circle');
+            dot.setAttribute('cx', emb.x);
+            dot.setAttribute('cy', svgY(emb.y));
+            dot.setAttribute('r', r);
+            dot.setAttribute('fill', color);
+            dot.setAttribute('fill-opacity', '0.9');
+            dot.setAttribute('stroke', '#000');
+            dot.setAttribute('stroke-opacity', '0.5');
+            dot.setAttribute('stroke-width', r * 0.18);
+            g.appendChild(dot);
+
+            // Label — embryo id, small, just above the dot.
+            const label = document.createElementNS(SVG_NS, 'text');
+            label.setAttribute('x', emb.x);
+            label.setAttribute('y', svgY(emb.y + r * 2.2));
+            label.setAttribute('font-size', labelFontSize);
+            label.setAttribute('text-anchor', 'middle');
+            label.setAttribute('class', 'devices-embryo-label');
+            label.setAttribute('fill', color);
+            label.textContent = emb.user_label || emb.embryo_id || '';
+            g.appendChild(label);
+
+            const title = document.createElementNS(SVG_NS, 'title');
+            const role = emb.role || 'test';
+            const parts = [
+                `${emb.user_label || emb.embryo_id}`,
+                `role: ${role}`,
+                `(${emb.x.toFixed(1)}, ${emb.y.toFixed(1)}) µm`,
+            ];
+            if (emb.cadence_phase) parts.push(`phase: ${emb.cadence_phase}`);
+            title.textContent = parts.join('\n');
+            g.appendChild(title);
+
+            _mapEmbryos.appendChild(g);
+        }
+    }
+
+    async function loadEmbryos() {
+        try {
+            const res = await fetch('/api/embryos/positions');
+            if (!res.ok) return;
+            const data = await res.json();
+            _embryos = Array.isArray(data.embryos) ? data.embryos : [];
+            renderEmbryos();
+        } catch (err) {
+            console.debug('embryo positions fetch failed:', err);
+        }
+    }
+
+    function _upsertEmbryo(payload) {
+        const eid = payload && payload.embryo_id;
+        if (!eid) return false;
+        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        const existing = idx >= 0 ? _embryos[idx] : null;
+        const merged = Object.assign({}, existing || {}, {
+            embryo_id: eid,
+            role: payload.role || (existing && existing.role) || 'test',
+        });
+        if (payload.x != null) merged.x = payload.x;
+        if (payload.y != null) merged.y = payload.y;
+        if (payload.user_label !== undefined) merged.user_label = payload.user_label;
+        if (payload.confidence !== undefined) merged.confidence = payload.confidence;
+        if (payload.cadence_phase !== undefined) merged.cadence_phase = payload.cadence_phase;
+        if (idx >= 0) {
+            _embryos[idx] = merged;
+        } else {
+            _embryos.push(merged);
+        }
+        return true;
+    }
+
+    function handleEmbryoDetected(payload) {
+        if (_upsertEmbryo(payload)) renderEmbryos();
+    }
+
+    function handleStatusChanged(payload) {
+        // Only the role-assignment variant is relevant to the map.
+        if (!payload || payload.change !== 'role_assigned') return;
+        const eid = payload.embryo_id;
+        const newRole = payload.new_role;
+        if (!eid || !newRole) return;
+        const idx = _embryos.findIndex(e => e.embryo_id === eid);
+        if (idx >= 0) {
+            _embryos[idx] = Object.assign({}, _embryos[idx], { role: newRole });
+            renderEmbryos();
+        } else {
+            // Embryo we haven't seen yet — refetch to be safe.
+            loadEmbryos();
+        }
     }
 
     function renderBackground() {
@@ -814,9 +950,16 @@ const DevicesManager = (function () {
         setupViewSwitcher();
         setupCameraWiring();
         loadCoverslip();
+        loadEmbryos();
         switchView(_currentView);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
+            // Embryo events: a fresh marking session emits one
+            // EMBRYO_DETECTED per registered embryo (via
+            // ExperimentState.add_embryo). assign_embryo_roles emits
+            // STATUS_CHANGED with change=role_assigned per change.
+            ClientEventBus.on('EMBRYO_DETECTED', handleEmbryoDetected);
+            ClientEventBus.on('STATUS_CHANGED', handleStatusChanged);
         }
         setStatus('stale', 'waiting', 'no payload yet');
         syncInitialCameraState();
