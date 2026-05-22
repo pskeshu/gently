@@ -194,10 +194,12 @@ const EmbryosManager = {
     },
 
     _setupViewKeyboard() {
+        // Note: arrow-key timepoint navigation lives in
+        // ``setupKeyboardNavigation()`` further down (it gates on
+        // ``currentDetailItem``, which all views set on detail open).
+        // Here we only handle view-switch hotkeys (1..4).
         document.addEventListener('keydown', (e) => {
-            // Only fire when embryos tab is active
             if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
-            // Don't trigger in text inputs
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
             const viewMap = { '1': 'default', '2': 'board', '3': 'filmstrip', '4': 'vitals' };
             if (viewMap[e.key]) {
@@ -2926,16 +2928,21 @@ const EmbryosManager = {
         if (!this.currentDetailItem) return;
 
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
-        const currentIdx = reasoning.findIndex(r =>
-            r.detector_name === this.currentDetailItem.detector_name &&
-            r.timepoint === this.currentDetailItem.timepoint
+        // Scope to the same detector and sort by timepoint so navigation
+        // is monotonic — independent of insertion order in the array.
+        // If multiple detectors fired per timepoint, we stay within the
+        // currently-viewed detector instead of skipping over its siblings.
+        const detectorName = this.currentDetailItem.detector_name;
+        const sameDetector = reasoning
+            .filter(r => r.detector_name === detectorName)
+            .sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
+        const currentIdx = sameDetector.findIndex(
+            r => r.timepoint === this.currentDetailItem.timepoint
         );
-
         if (currentIdx === -1) return;
-
         const newIdx = currentIdx + direction;
-        if (newIdx >= 0 && newIdx < reasoning.length) {
-            const newItem = reasoning[newIdx];
+        if (newIdx >= 0 && newIdx < sameDetector.length) {
+            const newItem = sameDetector[newIdx];
             this.openDetailPanel(newItem.detector_name, newItem.timepoint);
         }
     },
@@ -4238,6 +4245,44 @@ const EmbryosManager = {
         }
     },
 
+    // Pick the right detail-renderer for the current view. The default
+    // view uses openDetailPanel (full panel). Filmstrip and vitals
+    // re-render their inline ``#filmstrip-detail`` / ``#vitals-detail``
+    // containers. Used by arrow-key navigation so prev/next works
+    // regardless of which view is active.
+    _renderDetailForCurrentView(item) {
+        if (!item) return;
+        if (this.currentView === 'filmstrip') {
+            const detail = document.getElementById('filmstrip-detail');
+            if (detail) {
+                // Update the highlighted cell
+                document.querySelectorAll('.filmstrip-cell.active').forEach(c => c.classList.remove('active'));
+                const cell = document.querySelector(
+                    `.filmstrip-cell[data-embryo-id="${this.selectedEmbryoId}"][data-timepoint="${item.timepoint}"]`
+                );
+                if (cell) {
+                    cell.classList.add('active');
+                    cell.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                }
+                this.currentDetailItem = item;
+                detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(item)}</div>`;
+                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+            }
+            return;
+        }
+        if (this.currentView === 'vitals') {
+            const detail = document.getElementById('vitals-detail');
+            if (detail) {
+                this.currentDetailItem = item;
+                detail.innerHTML = `<div class="vitals-detail-content">${this.renderDetailPanel(item)}</div>`;
+                this.initChatPanel(this.selectedEmbryoId, item.timepoint);
+            }
+            return;
+        }
+        // Default view (and board): open the full detail panel.
+        this.openDetailPanel(item.detector_name, item.timepoint, true);
+    },
+
     // Navigate to previous timepoint in detail panel
     navigateToPrevTimepoint() {
         if (!this.currentDetailItem || !this.selectedEmbryoId) return;
@@ -4245,18 +4290,14 @@ const EmbryosManager = {
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
         if (reasoning.length === 0) return;
 
-        // Sort by timepoint ascending
         const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
-
-        // Find current index
         const currentIdx = sorted.findIndex(r =>
             r.timepoint === this.currentDetailItem.timepoint &&
             r.detector_name === this.currentDetailItem.detector_name
         );
 
         if (currentIdx > 0) {
-            const prevItem = sorted[currentIdx - 1];
-            this.openDetailPanel(prevItem.detector_name, prevItem.timepoint, true);
+            this._renderDetailForCurrentView(sorted[currentIdx - 1]);
         }
     },
 
@@ -4267,29 +4308,28 @@ const EmbryosManager = {
         const reasoning = this.detectionReasoning[this.selectedEmbryoId] || [];
         if (reasoning.length === 0) return;
 
-        // Sort by timepoint ascending
         const sorted = [...reasoning].sort((a, b) => (a.timepoint ?? 0) - (b.timepoint ?? 0));
-
-        // Find current index
         const currentIdx = sorted.findIndex(r =>
             r.timepoint === this.currentDetailItem.timepoint &&
             r.detector_name === this.currentDetailItem.detector_name
         );
 
         if (currentIdx >= 0 && currentIdx < sorted.length - 1) {
-            const nextItem = sorted[currentIdx + 1];
-            this.openDetailPanel(nextItem.detector_name, nextItem.timepoint, true);
+            this._renderDetailForCurrentView(sorted[currentIdx + 1]);
         }
     },
 
     // Setup keyboard navigation
     setupKeyboardNavigation() {
         document.addEventListener('keydown', (e) => {
-            // Only handle if detail panel is visible and we're on the embryos tab
-            if (!this.detailPanelVisible || !this.currentDetailItem) return;
-
-            // Don't handle if user is typing in an input
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            // Arrow keys navigate timepoints whenever a detail item is
+            // active in ANY view — default / board / filmstrip / vitals.
+            // (Previously gated on detailPanelVisible which is only set
+            // by openDetailPanel — so filmstrip arrow nav silently
+            // didn't fire.)
+            if (!this.currentDetailItem || !this.selectedEmbryoId) return;
+            if (typeof state !== 'undefined' && state.tab !== TABS.EMBRYOS) return;
+            if (e.target.matches('input, textarea, select, [contenteditable]')) return;
 
             if (e.key === 'ArrowLeft') {
                 e.preventDefault();
