@@ -123,10 +123,12 @@ class AgentBridge:
     def should_enter_resolution(self) -> bool:
         """True when the agent should open the session in resolution mode.
 
-        Conditions: new session (no active plan item already), agent
-        memory available, and more than one unblocked imaging candidate.
-        Single-candidate and zero-candidate launches fall back to the
-        existing briefing / run-mode behavior — no resolution needed.
+        Cheap O(1) check: new session (no ``active_plan_item_id`` yet) and
+        agent memory is available. The picker itself decides what to do
+        based on the user's top-level pick — candidate enumeration is
+        lazy-loaded only if they pick "Continue a planned task". This
+        replaces the older O(memory-scan) ``resolve_plan_context()`` gate
+        that was making the picker take seconds to appear at startup.
         """
         if not hasattr(self.agent, 'memory') or not self.agent.memory:
             return False
@@ -135,39 +137,420 @@ class AgentBridge:
             return False
         if experiment.active_plan_item_id:
             return False  # already resolved (resume or earlier auto-attach)
-        try:
-            active_id, candidates = self.agent.memory.resolve_plan_context()
-        except Exception:
-            return False
-        if active_id:
-            return False  # single candidate — silent auto-attach is fine
-        return bool(candidates) and len(candidates) > 1
+        return True
 
-    async def bootstrap_resolution(
+    # ------------------------------------------------------------------
+    # Session-resolution picker (replaces LLM-driven bootstrap proposal)
+    # ------------------------------------------------------------------
+
+    def _build_resolution_candidates(self) -> list:
+        """Pull and rank imaging candidates for the resolution picker.
+
+        Returns the same list ``memory.resolve_plan_context`` returns —
+        a list of ``(item, spec, campaign)`` tuples — sorted in_progress
+        first, then by ``phase_order``.
+        """
+        if not hasattr(self.agent, "memory") or not self.agent.memory:
+            return []
+        try:
+            _, candidates = self.agent.memory.resolve_plan_context()
+        except Exception:
+            return []
+
+        def _sort_key(t):
+            item, _spec, _campaign = t
+            status_val = getattr(item.status, "value", str(item.status))
+            in_progress = status_val == "in_progress"
+            order = getattr(item, "phase_order", 0) or 0
+            return (0 if in_progress else 1, order)
+
+        candidates.sort(key=_sort_key)
+        return candidates
+
+    def _candidate_to_option(self, item, spec, campaign) -> Dict:
+        """Turn a ``(item, spec, campaign)`` tuple into a picker option."""
+        memory = getattr(self.agent, "memory", None)
+        spec_summary = ""
+        if memory is not None and spec is not None:
+            try:
+                spec_summary = memory.format_imaging_spec_summary(spec) or ""
+            except Exception:
+                spec_summary = ""
+
+        meta: Dict[str, Any] = {}
+        if campaign is not None:
+            c_name = getattr(campaign, "shorthand", None) or (
+                (getattr(campaign, "description", "") or "")[:60]
+            )
+            if c_name:
+                meta["campaign"] = c_name
+
+        cs = getattr(self.agent, "context_store", None)
+        if cs is not None and campaign is not None:
+            try:
+                ps = cs.get_plan_status(campaign.id)
+                total = ps.get("total", 0) or 0
+                done = ps.get("completed", 0) or 0
+                order = getattr(item, "phase_order", 0) or 0
+                if total > 0:
+                    meta["sequence"] = (
+                        f"{order} of {total} · {done} done"
+                        if order else f"{done}/{total} done"
+                    )
+            except Exception:
+                pass
+
+        status_val = getattr(item.status, "value", str(item.status))
+        if status_val and status_val != "planned":
+            meta["status"] = status_val
+
+        if spec is not None:
+            spec_dict: Dict[str, Any] = {}
+            for field in (
+                "strain", "temperature_c", "num_slices", "exposure_ms",
+                "interval_s", "stop_condition", "success_criteria",
+            ):
+                val = getattr(spec, field, None)
+                if val is not None:
+                    spec_dict[field] = val
+            if spec_dict:
+                meta["spec"] = spec_dict
+
+        return {
+            "id": f"plan:{item.id}",
+            "label": f"Continue · {item.title}",
+            "description": spec_summary or "(no spec recorded)",
+            "meta": meta,
+        }
+
+    def _build_resolution_choice_payload(
+        self, candidates: list, full_list: bool = False,
+    ) -> Dict:
+        """Build the ``choice_data`` payload for the resolution picker.
+
+        Top 3 candidates by default; ``full_list=True`` shows up to 20
+        with the standalone/plan_new escape hatches still appended.
+        """
+        show_n = 20 if full_list else 3
+        options = []
+        for item, spec, campaign in candidates[:show_n]:
+            options.append(self._candidate_to_option(item, spec, campaign))
+
+        if not full_list and len(candidates) > show_n:
+            remaining = len(candidates) - show_n
+            options.append({
+                "id": "show_all",
+                "label": f"See all imaging tasks ({remaining} more)…",
+                "description": "Browse the full unblocked list",
+            })
+
+        options.append({
+            "id": "standalone",
+            "label": "Standalone — just exploring",
+            "description": "No plan attached, default settings",
+        })
+        options.append({
+            "id": "plan_new",
+            "label": "Design a new plan",
+            "description": "Enter plan mode first",
+        })
+
+        question = (
+            f"All {len(candidates)} unblocked imaging tasks — pick one:"
+            if full_list else "What is this session for?"
+        )
+
+        return {
+            "_type": "single",
+            "_kind": "session_resolution",
+            "question": question,
+            "options": options,
+            "allow_multiple": False,
+        }
+
+    async def bootstrap_resolution_picker(
         self,
         send_fn: Callable[[Dict], Coroutine],
         choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
     ) -> None:
-        """Open the session in resolution mode and stream the agent's
-        first turn through ``send_fn``.
+        """Open the session with a deterministic resolution picker.
 
-        This synthesizes a brief bootstrap message into conversation
-        history so the agent's resolution-mode system prompt is given
-        a turn to act on. The user does not see this message — only
-        the agent's reply (which is the actual opener).
+        Two-phase to minimize perceived startup latency:
+
+        **Phase 1 — fast top-level picker** (no slow queries before this
+        renders): the user sees a 3-option question
+        (Standalone / Continue a planned task / Design a new plan)
+        immediately on session start. In parallel, plan-candidate
+        enumeration (``_build_resolution_candidates``, which scans the
+        memory store) runs as a background ``to_thread`` task so it's
+        usually done by the time the user picks anything.
+
+        **Phase 2 — candidate picker** (only if they pick "Continue"):
+        await the background enumeration and show the existing
+        candidate-list picker with the standalone/plan_new escape hatches.
+
+        Dispatch dictionary unchanged from before:
+
+        - ``plan:<item_id>`` → ``attach_session_to_plan`` +
+          ``apply_plan_acquisition_spec`` + ``applied_spec`` panel
+        - ``standalone`` → ``mark_session_standalone``
+        - ``plan_new`` → ``enter_plan_mode`` on the agent
+        - ``show_all`` → re-emit the candidate picker with the full list
+        - ``__custom__`` / free text → hand off to LLM-driven resolution
+          mode with the typed text as the bootstrap turn
         """
+        import uuid as _uuid
+
+        # Kick off the slow candidate scan in the background. By the time
+        # the user picks "Continue", this is almost always already done.
+        candidates_task = asyncio.create_task(
+            asyncio.to_thread(self._build_resolution_candidates)
+        )
+
+        # --- Phase 1: fast top-level question -------------------------
+        top_payload = {
+            "question": "What is this session for?",
+            "options": [
+                {
+                    "id": "standalone",
+                    "label": "Standalone — just exploring",
+                    "description": "No plan attached, default settings",
+                },
+                {
+                    "id": "resume_plan",
+                    "label": "Continue a planned task",
+                    "description": "Pick from active plan items",
+                },
+                {
+                    "id": "plan_new",
+                    "label": "Design a new plan",
+                    "description": "Enter plan mode first",
+                },
+            ],
+            "allow_multiple": False,
+        }
+        top_request_id = f"resolve_top_{_uuid.uuid4().hex[:8]}"
+        top_payload["request_id"] = top_request_id
+        top_future = choice_future_factory(top_payload)
+        await send_fn({
+            "type": "choice_request",
+            "choice_data": top_payload,
+            "request_id": top_request_id,
+        })
+
+        try:
+            top_choice = await top_future
+        except asyncio.CancelledError:
+            candidates_task.cancel()
+            return
+
+        # Anything except "resume_plan" — standalone, plan_new, free-text,
+        # ESC cancel — dispatches directly without enumerating candidates.
+        if top_choice != "resume_plan":
+            candidates_task.cancel()
+            await self._dispatch_resolution_pick(
+                top_choice or "standalone", send_fn, choice_future_factory,
+            )
+            return
+
+        # --- Phase 2: candidate picker (only if "resume_plan") --------
+        try:
+            candidates = await candidates_task
+        except Exception:
+            candidates = []
+
+        if not candidates:
+            # Plan-resume path with no candidates — show the briefing and
+            # let the user start chatting; nothing to attach.
+            briefing = self.get_session_briefing()
+            if briefing:
+                await send_fn({"type": "stream_start"})
+                await send_fn({"type": "text", "text": briefing})
+                await send_fn({
+                    "type": "stream_end",
+                    "tokens": self._get_token_snapshot(),
+                    "mode": self.agent.mode,
+                })
+            else:
+                await self._emit_resolution_result(
+                    send_fn,
+                    "No plan items available to continue. "
+                    "You can design a new plan from the Plans tab.",
+                )
+            return
+
+        full_list = False
+        while True:
+            payload = self._build_resolution_choice_payload(
+                candidates, full_list=full_list,
+            )
+            # Re-label the question for the secondary picker so the user
+            # knows they're now picking the specific plan item.
+            payload["question"] = "Which plan item?"
+            request_id = f"resolve_pick_{_uuid.uuid4().hex[:8]}"
+            payload["request_id"] = request_id
+            future = choice_future_factory(payload)
+            await send_fn({
+                "type": "choice_request",
+                "choice_data": payload,
+                "request_id": request_id,
+            })
+            try:
+                selected = await future
+            except asyncio.CancelledError:
+                return
+
+            if selected == "show_all":
+                full_list = True
+                continue
+
+            await self._dispatch_resolution_pick(
+                selected, send_fn, choice_future_factory,
+            )
+            return
+
+    async def _dispatch_resolution_pick(
+        self,
+        selected: str,
+        send_fn: Callable[[Dict], Coroutine],
+        choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
+    ) -> None:
+        """Apply the user's resolution pick.
+
+        ``selected`` is the option id from the picker, or — for the
+        auto-injected ``__custom__`` option — the user's free-text
+        response. Anything that isn't one of our known ids is treated
+        as custom text and handed off to the LLM-driven resolution
+        flow.
+        """
+        from gently.harness.tools.registry import get_tool_registry
+
+        if not selected:
+            # User cancelled the picker (ESC). Leave the session in
+            # default state — no plan attached. The user can ask for
+            # the picker again or just start chatting.
+            await self._emit_resolution_result(
+                send_fn,
+                "No plan attached yet. Let me know what you'd like to do.",
+            )
+            return
+
+        registry = get_tool_registry()
+        context = {
+            "agent": self.agent,
+            "client": getattr(self.agent, "client", None),
+        }
+
+        if selected.startswith("plan:"):
+            plan_item_id = selected.split(":", 1)[1]
+            try:
+                await registry.execute(
+                    "attach_session_to_plan",
+                    {
+                        "plan_item_id": plan_item_id,
+                        "rationale": "User picked from resolution card.",
+                    },
+                    context=context,
+                )
+            except Exception as e:
+                logger.error(f"attach_session_to_plan failed: {e}", exc_info=True)
+                await self._emit_resolution_result(
+                    send_fn,
+                    "Couldn't attach the session to that plan item. You can try again or pick standalone.",
+                )
+                return
+
+            try:
+                await registry.execute(
+                    "apply_plan_acquisition_spec",
+                    {"plan_item_id": plan_item_id},
+                    context=context,
+                )
+            except Exception as e:
+                logger.error(f"apply_plan_acquisition_spec failed: {e}", exc_info=True)
+
+            spec_dict = self._get_active_plan_spec()
+            closer = self._compose_attach_closer(spec_dict)
+            await self._emit_resolution_result(
+                send_fn, closer, applied_spec=spec_dict,
+            )
+            return
+
+        if selected == "standalone":
+            try:
+                await registry.execute(
+                    "mark_session_standalone",
+                    {"description": "Standalone exploration"},
+                    context=context,
+                )
+            except Exception as e:
+                logger.error(f"mark_session_standalone failed: {e}", exc_info=True)
+            await self._emit_resolution_result(
+                send_fn,
+                "Standalone session — no plan attached. Ready when you are.",
+            )
+            return
+
+        if selected == "plan_new":
+            try:
+                msg = self.agent.enter_plan_mode()
+            except Exception as e:
+                logger.error(f"enter_plan_mode failed: {e}", exc_info=True)
+                msg = "Plan mode active."
+            await self._emit_resolution_result(
+                send_fn, msg or "Plan mode — what are we designing?",
+            )
+            return
+
+        # Anything else: treat as custom text. Hand off to the
+        # LLM-driven resolution flow with the user's input as the
+        # opening turn so the agent can disambiguate.
         try:
             self.agent.enter_resolution_mode()
         except Exception as e:
             logger.warning(f"enter_resolution_mode failed: {e}")
+            await self._emit_resolution_result(
+                send_fn, "Couldn't enter resolution mode.",
+            )
             return
-
-        bootstrap = (
-            "[Session start — read your memory, identify the most likely "
-            "purpose for this session, and propose it. Don't dump the "
-            "full list; pick the top candidate or two.]"
+        await self.stream_response(
+            selected or "(no input)", send_fn, choice_future_factory,
         )
-        await self.stream_response(bootstrap, send_fn, choice_future_factory)
+
+    def _get_active_plan_spec(self) -> Optional[Dict]:
+        """Return the ``active_plan_spec`` dict stashed on
+        ``experiment.metadata`` by ``apply_plan_acquisition_spec``."""
+        try:
+            spec = self.agent.experiment.metadata.get("active_plan_spec")
+            return dict(spec) if spec else None
+        except Exception:
+            return None
+
+    def _compose_attach_closer(self, spec_dict: Optional[Dict]) -> str:
+        """One-line conversational closer to follow attach + apply."""
+        title = (spec_dict or {}).get("plan_item_title") or "this plan item"
+        return f"Attached to **{title}**. Mark embryo positions when you're ready."
+
+    async def _emit_resolution_result(
+        self,
+        send_fn: Callable[[Dict], Coroutine],
+        closer_text: str,
+        applied_spec: Optional[Dict] = None,
+    ) -> None:
+        """Emit a deterministic stream_start → text → stream_end pair,
+        followed by an optional ``applied_spec`` panel message."""
+        await send_fn({"type": "stream_start"})
+        await send_fn({"type": "text", "text": closer_text})
+        await send_fn({
+            "type": "stream_end",
+            "tokens": self._get_token_snapshot(),
+            "mode": self.agent.mode,
+        })
+        if applied_spec:
+            await send_fn({
+                "type": "applied_spec",
+                "spec": applied_spec,
+            })
 
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""
