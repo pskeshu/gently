@@ -4036,6 +4036,29 @@ kbd {
    EMBRYOS TAB - Timelapse Tracking
    ======================================== */
 
+/* Claude-detector findings block shown in the per-timepoint detail
+   panel — surfaces intensity_level / structure_quality / has_hatched
+   for role=test embryos so the user can see what the Claude vision
+   call returned each round. */
+.detail-claude-findings {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+.detail-claude-findings .findings-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-top: 0.3rem;
+}
+.detail-claude-findings .finding-chip {
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: lowercase;
+}
+
 /* Embryo dots on the device map (XY stage). Roles drive the fill via
    inline ``fill`` attribute (set in devices.js); these rules carry the
    shared label styling + tooltip behaviour. */

@@ -200,6 +200,13 @@ behavior is needed.
   all. Stage timing comes from CalibrationEmbryos.
 - Applying global rate/power changes without considering that Test and
   Calibration have different intended cadences and budgets.
+- **Picking a "best" calibration by extent or galvo range.** The
+  quality metric is ``min(r_squared_top, r_squared_bottom)`` — both
+  ends of the galvo sweep need a clean Gaussian fit. Wider galvo
+  amplitude just means a larger embryo; it does NOT imply better
+  calibration. Use ``apply_calibration_to_embryos(source_embryo_id="auto",
+  ...)`` to let the tool pick by R² objectively, or read the R² values
+  from ``query_embryo_status`` before choosing manually.
 """
 
 

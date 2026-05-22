@@ -1098,23 +1098,29 @@ const EmbryosManager = {
         // view in the embryos tab (default, board, filmstrip, vitals) can
         // render the new frame immediately, without waiting for perception
         // to finish. handleDetectorEvaluated will upgrade this entry in
-        // place once the perception result arrives (could be 20-40s later).
+        // place once the detector result arrives (could be 20-40s later).
+        //
+        // detector_name is a sentinel '_pending' rather than 'perception'
+        // because role-routed detection (Phase 2) means test embryos run
+        // 'dopaminergic_signal' rather than 'perception'. The matcher in
+        // handleDetectorEvaluated upgrades the sentinel to whatever
+        // detector_name the result actually carries.
         if (data.projection_uid || data.volume_uid) {
             if (!this.detectionReasoning[embryoId]) {
                 this.detectionReasoning[embryoId] = [];
             }
             const existing = this.detectionReasoning[embryoId].find(
-                r => r.timepoint === data.timepoint && r.detector_name === 'perception'
+                r => r.timepoint === data.timepoint
+                  && (r.detector_name === '_pending' || r._pending === true)
             );
             if (!existing) {
                 this.detectionReasoning[embryoId].push({
-                    detector_name: 'perception',
+                    detector_name: '_pending',
                     timepoint: data.timepoint,
                     volume_uid: data.volume_uid,
                     projection_uid: data.projection_uid,
                     timestamp: new Date().toISOString(),
-                    // Pending perception result - everything below is null
-                    // until DETECTOR_EVALUATED arrives for this timepoint
+                    // Pending result — fields filled in by DETECTOR_EVALUATED
                     _pending: true,
                     stage: null,
                     confidence: null,
@@ -1175,8 +1181,11 @@ const EmbryosManager = {
             stage: stage,
         };
 
-        // Update current_stage if this is a perception result
-        if (detectorName === 'perception' && stage) {
+        // Update current_stage. For role-routed Claude detectors (test
+        // embryos) the orchestrator synthesizes a pseudo-stage like
+        // "lit_up" / "lit_up_saturating" / "hatched" so the existing
+        // stage-driven UI works without changes.
+        if (stage && (detectorName === 'perception' || detectorName === 'dopaminergic_signal')) {
             embryo.current_stage = stage;
         }
 
@@ -1205,11 +1214,37 @@ const EmbryosManager = {
             contrastive_reasoning: data.contrastive_reasoning,
             reasoning_trace: data.reasoning_trace,
             temporal_analysis: data.temporal_analysis,
+            // Phase 2 Claude-detector findings: the test-embryo path
+            // doesn't produce stage classifications; it produces
+            // intensity_level / structure_quality / has_hatched. Keep
+            // these alongside the perception fields so the reasoning
+            // panel can render whichever ones are present.
+            intensity_level: data.intensity_level,
+            structure_quality: data.structure_quality,
+            has_hatched: data.has_hatched,
+            findings: data.findings,
             _pending: false,
         };
-        const existing = this.detectionReasoning[embryoId].find(
+        // Match priority:
+        //   1. Existing non-pending entry at (timepoint, detectorName)
+        //      → upgrade in place (the detector fired again, e.g. burst).
+        //   2. Pending placeholder at the same timepoint (any detector
+        //      name) → claim it, overwriting detector_name. Handles the
+        //      Phase 2 role-routed case where the seed says '_pending'
+        //      but the result arrives as 'dopaminergic_signal'.
+        //   3. Otherwise push a new entry.
+        let existing = this.detectionReasoning[embryoId].find(
             r => r.timepoint === data.timepoint && r.detector_name === detectorName
         );
+        if (!existing) {
+            existing = this.detectionReasoning[embryoId].find(
+                r => r.timepoint === data.timepoint
+                  && (r._pending === true || r.detector_name === '_pending')
+            );
+            if (existing) {
+                existing.detector_name = detectorName;
+            }
+        }
         if (existing) {
             // Only overwrite UIDs if the detector evaluation actually
             // shipped them - the optimistic seed from VOLUME_ACQUIRED
@@ -2429,6 +2464,43 @@ const EmbryosManager = {
             this.fetchDetailImage(this.selectedEmbryoId, item.timepoint);
         }
 
+        // Build Claude-detector findings block (test embryos / Phase 2).
+        // Surfaces intensity_level + structure_quality + has_hatched so
+        // the user can see what the per-volume Claude vision call
+        // returned, separate from the perception-style "stage" semantics.
+        let detectorFindingsHtml = '';
+        const claudeIntensity = item.intensity_level || (item.findings && item.findings.intensity_level);
+        const claudeStructure = item.structure_quality || (item.findings && item.findings.structure_quality);
+        const claudeHatched = (item.has_hatched != null)
+            ? item.has_hatched
+            : (item.findings && item.findings.has_hatched);
+        if (claudeIntensity || claudeStructure || claudeHatched !== undefined) {
+            const intensityColors = {
+                NONE: '#888', WEAK: '#7bb3d4', MEDIUM: '#ffba6b',
+                STRONG: '#ff8c42', SATURATING: '#ff5252',
+            };
+            const structureColors = {
+                NONE: '#888', PARTIAL: '#ffba6b', GOOD: '#4caf50',
+            };
+            const iColor = intensityColors[claudeIntensity] || '#aaa';
+            const sColor = structureColors[claudeStructure] || '#aaa';
+            const intensityChip = claudeIntensity
+                ? `<span class="finding-chip" style="background:${iColor}26;color:${iColor};border:1px solid ${iColor}">intensity: ${claudeIntensity}</span>`
+                : '';
+            const structureChip = claudeStructure
+                ? `<span class="finding-chip" style="background:${sColor}26;color:${sColor};border:1px solid ${sColor}">structure: ${claudeStructure}</span>`
+                : '';
+            const hatchedChip = claudeHatched
+                ? `<span class="finding-chip" style="background:#ff525226;color:#ff5252;border:1px solid #ff5252">hatched</span>`
+                : '';
+            detectorFindingsHtml = `
+                <div class="detail-claude-findings">
+                    <div class="reasoning-label">Claude detector — ${this.escapeHtml(item.detector_name || 'unknown')}</div>
+                    <div class="findings-row">${intensityChip}${structureChip}${hatchedChip}</div>
+                </div>
+            `;
+        }
+
         // Build observed features section if available
         let observedFeaturesHtml = '';
         if (item.observed_features) {
@@ -2603,6 +2675,7 @@ const EmbryosManager = {
                         <span class="verdict-confidence">${confDisplay} confidence</span>
                         ${transitionalHtml}
                     </div>
+                    ${detectorFindingsHtml}
                     ${observedFeaturesHtml}
                 </div>
                 <div class="detail-split-right">

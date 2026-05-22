@@ -1354,19 +1354,60 @@ async def calibrate_all_embryos(
     return f"Calibration complete for {len(ids_to_calibrate)} embryo(s):\n" + "\n".join(results)
 
 
+def _calibration_quality_score(cal: dict) -> float:
+    """Composite fit-quality score for a calibration dict.
+
+    Uses ``min(r_squared_top, r_squared_bottom)`` — the WORSE of the two
+    fits matters more than the average, because acquisitions span both
+    galvo extremes and the weaker end dominates focus quality. Falls
+    back to 0 when R² fields are missing.
+    """
+    if not cal:
+        return 0.0
+    top = cal.get("r_squared_top")
+    bot = cal.get("r_squared_bottom")
+    if top is None and bot is None:
+        # Last-resort: average R² field if present (older formats).
+        return float(cal.get("r_squared", 0.0) or 0.0)
+    vals = [v for v in (top, bot) if v is not None]
+    return float(min(vals)) if vals else 0.0
+
+
+def _format_quality(cal: dict) -> str:
+    """Human-readable summary of a calibration's fit quality."""
+    if not cal:
+        return "no fit"
+    top = cal.get("r_squared_top")
+    bot = cal.get("r_squared_bottom")
+    if top is not None and bot is not None:
+        return f"R²={top:.2f}/{bot:.2f} (min={min(top, bot):.2f})"
+    if top is not None:
+        return f"R²(top)={top:.2f}"
+    if bot is not None:
+        return f"R²(bot)={bot:.2f}"
+    avg = cal.get("r_squared")
+    if avg is not None:
+        return f"R²={avg:.2f}"
+    return "no R² recorded"
+
+
 @tool(
     name="apply_calibration_to_embryos",
-    description="""Copy one embryo's calibration (piezo / galvo amplitude + center, slope, R²) onto one or more target embryos. Useful when one embryo has a strong calibration fit and others can borrow it as-is.
+    description="""Copy one embryo's calibration onto one or more target embryos. Useful when one embryo has a strong piezo-galvo fit and others can borrow it as-is.
 
-Caveats — calibration is position-dependent: piezo-galvo slope can drift across the XY field, and embryos may sit at slightly different Z depths. The agent should warn the user about this when applying a single calibration broadly. Best practice is still to calibrate each embryo individually; this tool is for "good enough" propagation or when individual calibration would burn too much light dose.
+**Quality metric is R²**, NOT galvo extent. The right "source" is the embryo with the highest ``min(r_squared_top, r_squared_bottom)`` — both ends of the galvo sweep need a clean Gaussian fit for the calibration to hold up at the volume edges. Wider extent just means a bigger embryo; it does not imply better calibration.
 
-Pass ``target_embryo_ids=None`` (or omit it) to apply to ALL other embryos in the experiment that are not skipped.""",
+**Auto-pick by quality**: pass ``source_embryo_id="auto"`` to let the tool pick the calibration with the highest min-R² across all currently-calibrated embryos. The response includes the per-embryo R² ranking so the agent can narrate the choice.
+
+Pass ``target_embryo_ids=None`` (or omit it) to apply to ALL other embryos in the experiment that are not skipped.
+
+Caveats — calibration is position-dependent: piezo-galvo slope drifts across the XY field, and embryos may sit at slightly different Z depths. The agent should warn the user about this when applying broadly. Best practice is still to calibrate each embryo individually; this tool is for "good enough" propagation or when individual calibration would burn too much light dose.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=False,
     examples=[
         ToolExample(
-            "Set embryo 6's calibration as the global one",
-            {"source_embryo_id": "embryo_6"},
+            "Auto-pick the best calibration and apply it",
+            {"source_embryo_id": "auto"},
         ),
         ToolExample(
             "Apply embryo_3's calibration to embryos 1 and 2",
@@ -1380,11 +1421,37 @@ def apply_calibration_to_embryos(
     overwrite_existing: bool = True,
     context: Dict = None,
 ) -> str:
-    """Broadcast one embryo's calibration to others (with caveats logged)."""
+    """Broadcast one embryo's calibration to others.
+
+    ``source_embryo_id="auto"`` picks the embryo with the highest
+    ``min(r_squared_top, r_squared_bottom)`` calibration. The response
+    includes the full per-embryo R² ranking so the agent has the data
+    to narrate the choice (and the user can audit).
+    """
     from gently.harness.tools.helpers import require_agent
     agent, err = require_agent(context)
     if err:
         return err
+
+    # Auto-pick by quality.
+    ranking_lines = []
+    if source_embryo_id == "auto" or source_embryo_id == "best":
+        ranked = []
+        for eid, emb in agent.experiment.embryos.items():
+            if emb.should_skip or not emb.calibration:
+                continue
+            ranked.append((eid, _calibration_quality_score(emb.calibration), emb.calibration))
+        if not ranked:
+            return (
+                "No calibrated embryos available for auto-pick. "
+                "Run calibrate_embryo / calibrate_all_embryos first."
+            )
+        ranked.sort(key=lambda t: t[1], reverse=True)
+        source_embryo_id = ranked[0][0]
+        ranking_lines.append("Ranking by min(R²_top, R²_bot):")
+        for eid, score, cal in ranked:
+            mark = " ← chosen" if eid == source_embryo_id else ""
+            ranking_lines.append(f"  {eid}: {_format_quality(cal)}{mark}")
 
     if source_embryo_id not in agent.experiment.embryos:
         return f"Source embryo '{source_embryo_id}' not found."
@@ -1418,10 +1485,15 @@ def apply_calibration_to_embryos(
         tgt.calibration = copy.deepcopy(source.calibration)
         applied.append(tid)
 
-    lines = [
-        f"Applied {source_embryo_id}'s calibration to {len(applied)} embryo(s):",
-        "  " + (", ".join(applied) if applied else "(none)"),
-    ]
+    lines = []
+    if ranking_lines:
+        lines.extend(ranking_lines)
+        lines.append("")
+    lines.append(
+        f"Applied {source_embryo_id}'s calibration "
+        f"({_format_quality(source.calibration)}) to {len(applied)} embryo(s):"
+    )
+    lines.append("  " + (", ".join(applied) if applied else "(none)"))
     if skipped:
         lines.append(f"Skipped: {', '.join(f'{tid} ({reason})' for tid, reason in skipped)}")
     lines.append(
