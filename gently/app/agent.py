@@ -914,12 +914,15 @@ class MicroscopyAgent:
                     position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
                     position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
                     calibration=embryo.calibration,
+                    role=embryo.role,
                 )
                 acq_metadata = {
                     "num_slices": embryo.num_slices,
                     "exposure_ms": embryo.exposure_ms,
                     "interval_seconds": embryo.interval_seconds,
                     "acquisition_mode": embryo.acquisition_mode,
+                    "laser_power_488_pct": embryo.laser_power_488_pct,
+                    "role": embryo.role,
                     "calibration": embryo.calibration,
                 }
                 if volume_path is not None:

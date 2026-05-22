@@ -95,6 +95,10 @@ class DiSPIMVolumeScanner:
                   piezo_amplitude: float,
                   piezo_center: float,
                   laser_config: str = "488 and 561",
+                  laser_power_488_pct: float = None,
+                  laser_power_561_pct: float = None,
+                  laser_power_405_pct: float = None,
+                  laser_power_637_pct: float = None,
                   timing_params: Dict = None):
         """
         Configure all devices for hardware-triggered volume acquisition.
@@ -114,8 +118,12 @@ class DiSPIMVolumeScanner:
         piezo_center : float
             Piezo center offset in micrometers
         laser_config : str
-            Laser configuration name (default: "488 and 561").
+            Laser channel selection preset (default: "488 and 561").
             Common options: "488 and 561", "488 only", "561 only"
+        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct, laser_power_637_pct : float, optional
+            Per-line laser power %. ``None`` leaves the current setpoint
+            unchanged. Out-of-range values are rejected at the device-layer
+            setter (see DiSPIMLightSource.POWER_LIMITS_PCT).
         timing_params : Dict, optional
             Custom SPIM timing parameters (uses defaults if None)
         """
@@ -137,9 +145,25 @@ class DiSPIMVolumeScanner:
             num_slices=num_slices
         )
 
+        # Apply per-line laser power if specified. Each setter raises if the
+        # value violates the hard safety bound — fail loudly, don't acquire
+        # at a wrong power.
+        power_settings = {
+            488: laser_power_488_pct,
+            561: laser_power_561_pct,
+            405: laser_power_405_pct,
+            637: laser_power_637_pct,
+        }
+        applied_powers = {}
+        for wavelength, pct in power_settings.items():
+            if pct is not None:
+                self.laser_control.set_power_pct(wavelength, pct)
+                applied_powers[wavelength] = pct
+
         self._num_slices = num_slices
         self._exposure_ms = exposure_ms
         self._laser_config = laser_config
+        self._laser_powers_pct = applied_powers  # for metadata downstream
         self._configured = True
 
     def trigger(self):

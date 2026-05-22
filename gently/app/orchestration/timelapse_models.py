@@ -209,25 +209,12 @@ class StopCondition:
         return cls.composite(*conditions)
 
 
-@dataclass
-class EmbryoAcquisitionState:
-    """
-    State for a single embryo in the timelapse.
-
-    Note: Timing is now handled globally by the orchestrator's round-based
-    scheduling. Per-embryo timing fields are kept for backward compatibility
-    but the orchestrator uses global round timing for synchronization.
-    """
-    embryo_id: str
-    timepoints_acquired: int = 0
-    stop_condition: StopCondition = field(default_factory=StopCondition.manual)
-    is_complete: bool = False
-    completion_reason: Optional[str] = None
-    error_count: int = 0
-    last_error: Optional[str] = None
-    detection_triggered_at: Optional[int] = None
-    detection_type: Optional[str] = None
-    no_object_since_timepoint: Optional[int] = None
+# EmbryoAcquisitionState was removed in Phase 1.5 of the consolidation.
+# Per-embryo runtime fields (stop_condition, is_complete, completion_reason,
+# error_count, last_error, detection_triggered_at, detection_type,
+# no_object_since_timepoint, timepoints_acquired) now live on EmbryoState
+# (gently/harness/state.py). The orchestrator's `_embryo_states` dict holds
+# direct references to the agent's EmbryoState instances — one source of truth.
 
 
 class TimelapseStatus(Enum):
@@ -244,7 +231,9 @@ class TimelapseState:
     """Current state of the timelapse"""
     status: TimelapseStatus
     started_at: Optional[datetime]
-    embryos: Dict[str, EmbryoAcquisitionState]
+    # Dict of embryo_id -> EmbryoState reference (from agent.experiment.embryos).
+    # Typed Any to avoid importing harness/ from models/ (dependency direction).
+    embryos: Dict[str, Any]
     total_timepoints: int = 0
     current_round: int = 0
     interval_seconds: float = 120.0

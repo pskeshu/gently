@@ -27,7 +27,6 @@ from bluesky.preprocessors import finalize_wrapper, run_wrapper
 
 # Import existing calibration infrastructure
 from .calibration import calibrate_embryo_piezo_galvo
-from gently.ui.web import mark_embryos_napari
 from gently.ui.web.embryo_marker import mark_embryos_web
 from gently.core.database import (
     export_multi_embryo_database,
@@ -418,19 +417,17 @@ def multi_embryo_calibration_session_plan(
                     )
                 )
             else:
-                # Fallback to napari (may fail with Qt threading error)
-                logger.warning("No viz_server available, falling back to napari")
-                try:
-                    marked_embryos = mark_embryos_napari(
-                        image=overview_image,
-                        initial_stage_position=tuple(initial_stage_pos),
-                        pixel_size_um=bottom_camera.effective_pixel_size,
-                        save_image_path=image_dir / f"all_embryos_marked_{timestamp}.png"
-                    )
-                except Exception as e:
-                    logger.error("Interactive marking failed: %s", e)
-                    logger.error("Solution: Capture overview and mark embryos BEFORE calling this plan")
-                    raise
+                # napari has been retired; the web map view is the only
+                # interactive marking surface. Start the viz server before
+                # invoking this plan.
+                logger.error(
+                    "No viz_server available. The web map view is the only "
+                    "interactive marking surface (napari has been retired). "
+                    "Start the visualization server before calling this plan."
+                )
+                raise RuntimeError(
+                    "Interactive marking requires the web visualization server."
+                )
 
         if len(marked_embryos) == 0:
             logger.error("No embryos marked! Aborting session.")

@@ -63,11 +63,10 @@ except ImportError:
 # Use: from gently.hardware.dispim import ...
 # Or: load_hardware("dispim"); hw = get_hardware()
 
-# Visualization
+# Visualization (web map view replaces the retired napari marker)
 try:
     from .ui.web import (
-        EmbryoMarker,
-        mark_embryos_napari,
+        mark_embryos_web,
         get_visualization_server,
         generate_focus_curve_plot,
         generate_calibration_summary_plot,

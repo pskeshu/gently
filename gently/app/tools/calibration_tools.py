@@ -1352,3 +1352,81 @@ async def calibrate_all_embryos(
         results.append(f"{eid}: {summary}")
 
     return f"Calibration complete for {len(ids_to_calibrate)} embryo(s):\n" + "\n".join(results)
+
+
+@tool(
+    name="apply_calibration_to_embryos",
+    description="""Copy one embryo's calibration (piezo / galvo amplitude + center, slope, R²) onto one or more target embryos. Useful when one embryo has a strong calibration fit and others can borrow it as-is.
+
+Caveats — calibration is position-dependent: piezo-galvo slope can drift across the XY field, and embryos may sit at slightly different Z depths. The agent should warn the user about this when applying a single calibration broadly. Best practice is still to calibrate each embryo individually; this tool is for "good enough" propagation or when individual calibration would burn too much light dose.
+
+Pass ``target_embryo_ids=None`` (or omit it) to apply to ALL other embryos in the experiment that are not skipped.""",
+    category=ToolCategory.HARDWARE,
+    requires_microscope=False,
+    examples=[
+        ToolExample(
+            "Set embryo 6's calibration as the global one",
+            {"source_embryo_id": "embryo_6"},
+        ),
+        ToolExample(
+            "Apply embryo_3's calibration to embryos 1 and 2",
+            {"source_embryo_id": "embryo_3", "target_embryo_ids": ["embryo_1", "embryo_2"]},
+        ),
+    ],
+)
+def apply_calibration_to_embryos(
+    source_embryo_id: str,
+    target_embryo_ids: Optional[List[str]] = None,
+    overwrite_existing: bool = True,
+    context: Dict = None,
+) -> str:
+    """Broadcast one embryo's calibration to others (with caveats logged)."""
+    from gently.harness.tools.helpers import require_agent
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    if source_embryo_id not in agent.experiment.embryos:
+        return f"Source embryo '{source_embryo_id}' not found."
+    source = agent.experiment.embryos[source_embryo_id]
+    if not source.calibration:
+        return (
+            f"{source_embryo_id} has no calibration data to copy. "
+            f"Run calibrate_embryo first."
+        )
+
+    if target_embryo_ids is None:
+        target_embryo_ids = [
+            eid for eid, e in agent.experiment.embryos.items()
+            if eid != source_embryo_id and not e.should_skip
+        ]
+
+    if not target_embryo_ids:
+        return "No target embryos. Nothing to do."
+
+    applied, skipped = [], []
+    for tid in target_embryo_ids:
+        if tid not in agent.experiment.embryos:
+            skipped.append((tid, "not found"))
+            continue
+        tgt = agent.experiment.embryos[tid]
+        if tgt.calibration and not overwrite_existing:
+            skipped.append((tid, "already calibrated (overwrite_existing=False)"))
+            continue
+        # Deep-ish copy so subsequent mutations don't alias the source.
+        import copy
+        tgt.calibration = copy.deepcopy(source.calibration)
+        applied.append(tid)
+
+    lines = [
+        f"Applied {source_embryo_id}'s calibration to {len(applied)} embryo(s):",
+        "  " + (", ".join(applied) if applied else "(none)"),
+    ]
+    if skipped:
+        lines.append(f"Skipped: {', '.join(f'{tid} ({reason})' for tid, reason in skipped)}")
+    lines.append(
+        "Note: calibration is position-dependent — piezo-galvo slope can drift "
+        "across the XY field. Verify with a quick acquisition on each target "
+        "before committing to a full timelapse."
+    )
+    return "\n".join(lines)

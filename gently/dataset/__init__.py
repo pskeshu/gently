@@ -48,7 +48,7 @@ from .schema import (
     DATABASE_VERSION,
 )
 from .aggregator import DatasetAggregator
-from .embryo_dataset import EmbryoDataset, EmbryoInfo, ImageData
+from .embryo_dataset import EmbryoDataset, DatasetEmbryoEntry, ImageData
 
 __all__ = [
     "init_database",
@@ -57,7 +57,7 @@ __all__ = [
     "migrate_to_v3",
     "DatasetAggregator",
     "EmbryoDataset",
-    "EmbryoInfo",
+    "DatasetEmbryoEntry",
     "ImageData",
     "DATABASE_VERSION",
 ]

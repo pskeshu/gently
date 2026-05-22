@@ -356,6 +356,8 @@ class DeviceLayerServer(Service):
                 move_scanner_plan,
                 set_led_plan,
                 set_laser_plan,
+                set_light_source_power_plan,
+                get_light_source_power_plan,
             )
             self.plans['move_stage_plan'] = move_stage_plan
             self.plans['read_stage_plan'] = read_stage_plan
@@ -365,6 +367,8 @@ class DeviceLayerServer(Service):
             self.plans['move_scanner_plan'] = move_scanner_plan
             self.plans['set_led_plan'] = set_led_plan
             self.plans['set_laser_plan'] = set_laser_plan
+            self.plans['set_light_source_power_plan'] = set_light_source_power_plan
+            self.plans['get_light_source_power_plan'] = get_light_source_power_plan
             logger.info("Loaded %d plans", len(self.plans))
         except ImportError as e:
             logger.warning("Could not load some plans: %s", e)

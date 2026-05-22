@@ -433,8 +433,14 @@ class FileStore:
         position_x: float = None,
         position_y: float = None,
         calibration: dict = None,
+        role: str = None,
     ) -> None:
-        """Register or update an embryo in a session."""
+        """Register or update an embryo in a session.
+
+        ``role`` is the experimental role key from gently.harness.roles.REGISTRY
+        (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Persisted in
+        embryo.yaml. None preserves the existing value on update.
+        """
         ed = self._embryo_dir(session_id, embryo_id)
         ed.mkdir(parents=True, exist_ok=True)
 
@@ -452,6 +458,7 @@ class FileStore:
                 "position_x": position_x if position_x is not None else existing.get("position_x"),
                 "position_y": position_y if position_y is not None else existing.get("position_y"),
                 "calibration": calibration if calibration is not None else existing.get("calibration"),
+                "role": role if role is not None else existing.get("role", "test"),
                 "created_at": existing.get("created_at", _now()),
             }
         else:
@@ -463,6 +470,7 @@ class FileStore:
                 "position_x": position_x,
                 "position_y": position_y,
                 "calibration": calibration,
+                "role": role if role is not None else "test",
                 "created_at": _now(),
             }
 

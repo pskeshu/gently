@@ -2,16 +2,23 @@
 Embryo Detection Tools
 
 Tools for detecting and marking embryos in microscope images.
+
+All marking / editing UI flows now go through the web map view
+(``gently.ui.web.embryo_marker.mark_embryos_web``). napari has been
+retired; the map view is the single spatial GUI.
 """
 
 import uuid
-from typing import Dict
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
+
+import numpy as np
 
 from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import require_agent
 from gently.core.coordinates import (
+    pixel_to_stage_position,
     stage_to_pixel_position,
     get_um_per_pixel,
     DEFAULT_PIXEL_SIZE_UM,
@@ -19,13 +26,75 @@ from gently.core.coordinates import (
 )
 
 
+async def _route_to_map_view(
+    agent,
+    image: np.ndarray,
+    initial_markers: List[Dict],
+    stage_position: Tuple[float, float],
+    default_role: str = "test",
+    pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+    timeout: Optional[float] = None,
+) -> Tuple[Optional[List[Dict]], Optional[str]]:
+    """Hand off image + markers to the web map view; await user-edited result.
+
+    Returns ``(marked, None)`` on success or ``(None, error_message)`` if the
+    map view isn't available.
+    """
+    if getattr(agent, "viz_server", None) is None:
+        return None, (
+            "Map view requires the web visualization server. "
+            "Start it with start_viz_server first."
+        )
+
+    from gently.ui.web.embryo_marker import mark_embryos_web
+
+    marked = await mark_embryos_web(
+        viz_server=agent.viz_server,
+        image=image,
+        initial_stage_position=tuple(stage_position),
+        pixel_size_um=pixel_size_um,
+        initial_markers=initial_markers,
+        default_role=default_role,
+        timeout=timeout,
+    )
+    return marked, None
+
+
+def _next_embryo_number(experiment) -> int:
+    """Next available embryo number not currently in use."""
+    max_num = 0
+    for eid in experiment.embryos.keys():
+        if eid.startswith("embryo_"):
+            try:
+                max_num = max(max_num, int(eid.replace("embryo_", "")))
+            except ValueError:
+                pass
+    return max_num + 1
+
+
+def _stage_from_pixel(
+    pixel_x: float, pixel_y: float,
+    image_shape: Tuple[int, int],
+    current_stage: Tuple[float, float],
+    pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+    objective_mag: float = DEFAULT_OBJECTIVE_MAG,
+) -> Tuple[float, float]:
+    """Convert a pixel position in the bottom-cam image to a stage XY."""
+    h, w = image_shape[:2]
+    um_per_px = get_um_per_pixel(pixel_size_um, objective_mag)
+    return pixel_to_stage_position(
+        pixel_x, pixel_y,
+        w / 2, h / 2,
+        current_stage[0], current_stage[1],
+        um_per_px,
+    )
+
+
 @tool(
     name="detect_embryos",
-    description="""Automatically detect embryos in the current field of view using brightness detection and SAM segmentation.
-Use when user says "find embryos", "detect embryos", or at the start of an experiment to locate samples.
-Captures a bottom camera image and identifies bright spots as potential embryos.
-Opens napari after detection for immediate editing - add, delete, or move embryos as needed.
-Close napari when done to confirm the embryo list. Detected embryos are added to the experiment.""",
+    description="""Automatically detect embryos in the current field of view using brightness detection + SAM segmentation, then hand off to the web map view for editing and role assignment.
+
+Use when user says "find embryos", "detect embryos", or at the start of an experiment to locate samples. Captures a bottom camera image, runs SAM detection, and opens the web map view with SAM markers pre-placed. User adds/removes markers, cycles each marker's role (Test / Calibration / unassigned), and presses Done. The confirmed embryos are registered with their roles in the experiment.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -41,19 +110,17 @@ async def detect_embryos(
     brightness_percentile: float = 99.0,
     min_area: int = 5000,
     max_area: int = 150000,
-    open_editor: bool = True,
-    context: Dict = None
+    default_role: str = "test",
+    context: Dict = None,
 ) -> str:
-    """Detect embryos automatically"""
+    """Detect embryos via SAM + edit/assign roles in the web map view."""
     agent = context.get('agent')
     client = context.get('client')
 
     if not agent:
         return "Error: No agent context"
-
     if not client:
         return "Error: Microscope not connected. Cannot detect embryos in offline mode."
-
     if not client.has_sam:
         return "Error: SAM server not connected. Embryo detection requires the SAM segmentation server."
 
@@ -65,44 +132,98 @@ async def detect_embryos(
             brightness_percentile=brightness_percentile,
             min_area=min_area,
             max_area=max_area,
-            open_editor=open_editor
         )
 
-        if result.get('success'):
-            embryos = result.get('embryos', [])
-
-            # Add to experiment
-            for emb in embryos:
-                position = {
-                    'x': emb.get('stage_x_um', emb.get('stage_x', 0)),
-                    'y': emb.get('stage_y_um', emb.get('stage_y', 0))
-                }
-                agent.experiment.add_embryo(
-                    embryo_id=emb['embryo_id'],
-                    position=position,
-                    confidence=emb.get('confidence', 0.0),
-                    uid=emb.get('uid'),  # Preserve UID from detection
-                )
-
-            if auto_calibrate and embryos:
-                return f"Detected {len(embryos)} embryos. Starting calibration..."
-            else:
-                if open_editor:
-                    return f"Detection complete: {len(embryos)} embryos confirmed after editing."
-                else:
-                    return f"Detected {len(embryos)} embryos. Use show_detected_embryos to visualize or edit_embryos to modify."
-        else:
+        if not result.get('success'):
             return f"Detection failed: {result.get('error', 'Unknown error')}"
 
+        sam_embryos = result.get('embryos', [])
+        image = result.get('image')
+        stage_pos = tuple(result.get('stage_position', [0.0, 0.0]))
+
+        if image is None:
+            return f"Detection ran but no image was returned for the map view (got {len(sam_embryos)} SAM detections)."
+
+        # Hand off SAM detections as editable initial markers in the map view.
+        initial_markers = [
+            {
+                "pixel_x": emb.get("pixel_x"),
+                "pixel_y": emb.get("pixel_y"),
+                "role": default_role,
+                "source": "sam",
+                "confidence": emb.get("confidence", 0.0),
+                "embryo_id": emb.get("embryo_id"),
+            }
+            for emb in sam_embryos
+            if emb.get("pixel_x") is not None and emb.get("pixel_y") is not None
+        ]
+
+        marked, err = await _route_to_map_view(
+            agent=agent,
+            image=image,
+            initial_markers=initial_markers,
+            stage_position=stage_pos,
+            default_role=default_role,
+        )
+        if err:
+            return err
+        marked = marked or []
+
+        # Register confirmed embryos. Use existing IDs from SAM where possible;
+        # assign fresh ones for manual additions.
+        next_num = _next_embryo_number(agent.experiment)
+        added = []
+        for m in marked:
+            existing_id = m.get("embryo_id")
+            if existing_id and existing_id not in agent.experiment.embryos:
+                emb_id = existing_id
+            elif existing_id and existing_id in agent.experiment.embryos:
+                emb_id = existing_id  # update path
+            else:
+                emb_id = f"embryo_{next_num}"
+                next_num += 1
+
+            stage_x, stage_y = _stage_from_pixel(
+                m["pixel_x"], m["pixel_y"],
+                image.shape, stage_pos,
+            )
+            position = {"x": stage_x, "y": stage_y}
+
+            if emb_id in agent.experiment.embryos:
+                # Update existing in-place (preserve other fields)
+                emb = agent.experiment.embryos[emb_id]
+                emb.stage_position = position
+                emb.role = m.get("role", default_role)
+            else:
+                agent.experiment.add_embryo(
+                    embryo_id=emb_id,
+                    position=position,
+                    confidence=m.get("confidence") or 0.0,
+                    uid=str(uuid.uuid4()),
+                    role=m.get("role", default_role),
+                )
+            added.append((emb_id, m.get("role", default_role)))
+
+        role_counts = {}
+        for _, r in added:
+            role_counts[r] = role_counts.get(r, 0) + 1
+        role_summary = ", ".join(f"{n} {r}" for r, n in sorted(role_counts.items()))
+
+        if auto_calibrate and added:
+            return f"Detected & registered {len(added)} embryos ({role_summary}). Starting calibration..."
+        return f"Detection complete: {len(added)} embryo(s) ({role_summary})."
+
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return f"Error detecting embryos: {str(e)}"
 
 
 @tool(
     name="manual_mark_embryos",
-    description="""Open an interactive window to manually mark embryos by clicking on them. Existing embryos are shown in green for reference.
-Use when automatic detection missed embryos, or user wants to add embryos manually (e.g., "let me mark embryos", "I'll click on them").
-Opens a matplotlib window - user clicks to mark positions, then closes the window. New embryos get unique IDs automatically.""",
+    description="""Capture a bottom-camera image and open the web map view for manual embryo marking. User clicks to add markers and cycles each marker's role (Test / Calibration / unassigned).
+
+Use when automatic detection missed embryos, or when the user wants to add embryos manually (e.g., "let me mark embryos", "I'll click on them"). Newly marked embryos are registered with the role assigned in the map view; existing embryos remain untouched.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -112,102 +233,125 @@ Opens a matplotlib window - user clicks to mark positions, then closes the windo
 )
 async def manual_mark_embryos(
     exposure_ms: float = None,
-    context: Dict = None
+    default_role: str = "test",
+    context: Dict = None,
 ) -> str:
-    """Manual embryo marking - shows existing embryos, adds new ones with unique IDs"""
+    """Manual marking via the web map view."""
     agent = context.get('agent')
     client = context.get('client')
 
     if not agent:
         return "Error: No agent context"
-
     if not client:
         return "Error: Microscope not connected. Cannot mark embryos in offline mode."
 
     try:
-        # Build list of existing embryos with their stage positions
-        existing_embryos = []
-        for embryo_id, embryo_state in agent.experiment.embryos.items():
-            pos = embryo_state.stage_position or {}
-            existing_embryos.append({
-                'embryo_id': embryo_id,
-                'stage_x': pos.get('x', 0),
-                'stage_y': pos.get('y', 0),
+        snap = await client.capture_for_marking(exposure_ms=exposure_ms)
+        if not snap.get("success"):
+            return f"Failed to capture image for marking: {snap.get('error', 'unknown')}"
+
+        image = snap["image"]
+        stage_pos = tuple(snap["stage_position"])
+
+        # Pre-place existing (non-skipped) embryos as reference markers so
+        # the user knows what's already detected — they can leave them
+        # alone, or remove/relabel as needed.
+        initial_markers = []
+        um_per_px = get_um_per_pixel()
+        h, w = image.shape[:2]
+        for embryo_id, emb in agent.experiment.embryos.items():
+            if emb.should_skip:
+                continue
+            pos = emb.stage_position or {}
+            sx, sy = pos.get("x", 0), pos.get("y", 0)
+            px, py = stage_to_pixel_position(
+                stage_x=sx, stage_y=sy,
+                current_stage_x=stage_pos[0], current_stage_y=stage_pos[1],
+                image_center_x=w / 2, image_center_y=h / 2,
+                um_per_pixel=um_per_px,
+            )
+            initial_markers.append({
+                "pixel_x": px,
+                "pixel_y": py,
+                "role": emb.role,
+                "source": "existing",
+                "embryo_id": embryo_id,
+                "confidence": emb.detection_confidence,
             })
 
-        result = await client.manual_mark_embryos(
-            exposure_ms=exposure_ms,
-            existing_embryos=existing_embryos if existing_embryos else None
+        marked, err = await _route_to_map_view(
+            agent=agent,
+            image=image,
+            initial_markers=initial_markers,
+            stage_position=stage_pos,
+            default_role=default_role,
         )
+        if err:
+            return err
+        marked = marked or []
 
-        # Archive bottom camera image from marking with metadata
-        if result.get('image_path') and agent.store and agent.session_id:
-            try:
-                from gently.harness.tools.helpers import build_snapshot_metadata
-                stage_pos = result.get('stage_position', (0, 0))
-                img = result.get('image')
-                meta = build_snapshot_metadata(
-                    stage_pos, img.shape, agent.experiment,
-                ) if img is not None else None
-                agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", result['image_path'],
-                    metadata=meta)
-            except Exception:
-                pass
+        if not marked:
+            return "No markers placed."
 
-        if result.get('success'):
-            embryos = result.get('embryos', [])
+        # Reconcile: any marker whose embryo_id matches an existing one
+        # updates that embryo (position + role); markers without a matching
+        # embryo_id are NEW embryos that get fresh IDs.
+        existing_ids = set(agent.experiment.embryos.keys())
+        next_num = _next_embryo_number(agent.experiment)
+        added_ids, updated_ids = [], []
+        for m in marked:
+            stage_x, stage_y = _stage_from_pixel(
+                m["pixel_x"], m["pixel_y"], image.shape, stage_pos,
+            )
+            pos = {"x": stage_x, "y": stage_y}
+            existing_id = m.get("embryo_id")
 
-            if not embryos:
-                return "No embryos marked. Close the window after clicking on embryo centers."
-
-            # Find next available embryo ID
-            existing_ids = set(agent.experiment.embryos.keys())
-            max_num = 0
-            for eid in existing_ids:
-                if eid.startswith('embryo_'):
-                    try:
-                        num = int(eid.replace('embryo_', ''))
-                        max_num = max(max_num, num)
-                    except ValueError:
-                        pass
-            next_num = max_num + 1
-
-            # Assign new unique IDs and add to experiment
-            added_ids = []
-            for emb in embryos:
-                new_id = f'embryo_{next_num}'
+            if existing_id and existing_id in agent.experiment.embryos:
+                emb = agent.experiment.embryos[existing_id]
+                emb.stage_position = pos
+                emb.role = m.get("role", default_role)
+                updated_ids.append(existing_id)
+            else:
+                new_id = f"embryo_{next_num}"
                 next_num += 1
-
-                position = {
-                    'x': emb.get('stage_x_um', emb.get('stage_x', 0)),
-                    'y': emb.get('stage_y_um', emb.get('stage_y', 0))
-                }
-
-                emb['embryo_id'] = new_id
-
                 agent.experiment.add_embryo(
                     embryo_id=new_id,
-                    position=position,
-                    confidence=emb.get('confidence', 1.0),
-                    uid=str(uuid.uuid4()),  # Generate new UID for manually marked embryo
+                    position=pos,
+                    confidence=m.get("confidence") or 1.0,
+                    uid=str(uuid.uuid4()),
+                    role=m.get("role", default_role),
                 )
                 added_ids.append(new_id)
 
-            return f"Added {len(added_ids)} embryo(s): {', '.join(added_ids)}"
-        else:
-            return f"Marking failed: {result.get('error', 'Unknown error')}"
+        # Removals: any existing embryo NOT mentioned in marked is dropped.
+        seen_ids = {m.get("embryo_id") for m in marked if m.get("embryo_id")}
+        removed_ids = [
+            eid for eid in existing_ids
+            if eid not in seen_ids and eid not in added_ids
+        ]
+        for rid in removed_ids:
+            agent.experiment.embryos.pop(rid, None)
+
+        parts = []
+        if added_ids:
+            parts.append(f"+{len(added_ids)} added: {', '.join(added_ids)}")
+        if updated_ids:
+            parts.append(f"{len(updated_ids)} updated")
+        if removed_ids:
+            parts.append(f"-{len(removed_ids)} removed: {', '.join(removed_ids)}")
+        return "Marking complete. " + ("; ".join(parts) if parts else "no changes.")
 
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return f"Error: {str(e)}"
 
 
 @tool(
     name="edit_embryos",
-    description="""Open an interactive napari editor to modify embryo positions.
-Allows adding new embryos, removing existing ones, and moving embryos to correct positions.
-Use when user wants to adjust detection results (e.g., "edit embryos", "remove embryo_3", "adjust embryo positions", "fix detection").
-Opens napari with current embryos displayed - user can add/delete/move points, then close window to apply changes.""",
+    description="""Capture a fresh bottom-camera image and open the web map view to edit current embryos — add, remove, move, or re-label Test/Calibration. Same surface as manual_mark_embryos; this tool exists to match user intent when they say "edit" rather than "mark".
+
+Use when user wants to adjust existing detection results (e.g., "edit embryos", "remove embryo_3", "swap roles", "fix detection").""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -218,154 +362,23 @@ Opens napari with current embryos displayed - user can add/delete/move points, t
 )
 async def edit_embryos(
     exposure_ms: float = None,
-    context: Dict = None
+    default_role: str = "test",
+    context: Dict = None,
 ) -> str:
-    """Interactive embryo editor - add, remove, or move embryo positions in napari"""
+    """Edit existing embryos via the web map view."""
     agent = context.get('agent')
-    client = context.get('client')
-
     if not agent:
         return "Error: No agent context"
-
-    if not client:
-        return "Error: Microscope not connected. Cannot edit embryos in offline mode."
-
     if not agent.experiment.embryos:
         return "No embryos to edit. Run detect_embryos or manual_mark_embryos first."
 
-    try:
-        # Capture fresh image
-        snap = await client.capture_bottom_image(exposure_ms=exposure_ms)
-        image = snap['image']
-        if image is None:
-            return "Failed to capture image for editing."
-
-        # Get current stage position
-        stage_pos = await client.get_stage_position()
-
-        # Archive the bottom camera image with metadata
-        if snap.get('image_path') and agent.store and agent.session_id:
-            try:
-                from gently.harness.tools.helpers import build_snapshot_metadata
-                meta = build_snapshot_metadata(
-                    stage_pos, image.shape, agent.experiment)
-                agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'],
-                    metadata=meta)
-            except Exception:
-                pass
-
-        # Get current image dimensions for pixel coordinate calculation
-        image_center_x = image.shape[1] / 2
-        image_center_y = image.shape[0] / 2
-
-        # Build list of existing embryos with pixel positions
-        existing_embryos = []
-        um_per_pixel = get_um_per_pixel()  # Uses centralized defaults from coordinates.py
-
-        for embryo_id, embryo_state in agent.experiment.embryos.items():
-            if embryo_state.should_skip:
-                continue  # Don't show skipped embryos
-
-            pos = embryo_state.stage_position or {}
-            stage_x = pos.get('x', 0)
-            stage_y = pos.get('y', 0)
-
-            # Convert stage position to pixel position relative to current view
-            dx_um = stage_x - stage_pos[0]
-            dy_um = stage_y - stage_pos[1]
-            pixel_x = image_center_x + dx_um / um_per_pixel
-            pixel_y = image_center_y + dy_um / um_per_pixel
-
-            existing_embryos.append({
-                'embryo_id': embryo_id,
-                'pixel_x': pixel_x,
-                'pixel_y': pixel_y,
-                'stage_x_um': stage_x,
-                'stage_y_um': stage_y,
-            })
-
-        # Call the edit function on SAM server
-        result = await client.edit_embryos(
-            image=image,
-            embryos=existing_embryos,
-            stage_position=stage_pos,
-            pixel_size_um=DEFAULT_PIXEL_SIZE_UM,
-            objective_mag=DEFAULT_OBJECTIVE_MAG
-        )
-
-        if result.get('success'):
-            edited_embryos = result.get('embryos', [])
-            original_count = result.get('original_count', 0)
-            added = result.get('added', 0)
-            removed = result.get('removed', 0)
-
-            # Clear existing embryos and rebuild from edit result
-            # Keep track of which were removed
-            old_ids = set(agent.experiment.embryos.keys())
-
-            # Find next available embryo ID for new ones
-            max_num = 0
-            for eid in old_ids:
-                if eid.startswith('embryo_'):
-                    try:
-                        num = int(eid.replace('embryo_', ''))
-                        max_num = max(max_num, num)
-                    except ValueError:
-                        pass
-            next_num = max_num + 1
-
-            # Process edited embryos
-            new_ids = set()
-            for emb in edited_embryos:
-                emb_id = emb.get('embryo_id', f'embryo_{next_num}')
-
-                # If it's a new embryo (source=manual_edit), assign new ID
-                if emb.get('source') == 'manual_edit' or emb_id not in old_ids:
-                    emb_id = f'embryo_{next_num}'
-                    next_num += 1
-
-                position = {
-                    'x': emb.get('stage_x_um', 0),
-                    'y': emb.get('stage_y_um', 0)
-                }
-
-                # Update or add embryo
-                if emb_id in agent.experiment.embryos:
-                    # Update existing
-                    agent.experiment.embryos[emb_id].stage_position = position
-                else:
-                    # Add new
-                    agent.experiment.add_embryo(
-                        embryo_id=emb_id,
-                        position=position,
-                        confidence=emb.get('confidence', 1.0),
-                        uid=str(uuid.uuid4()),  # Generate new UID for embryo added via editor
-                    )
-
-                new_ids.add(emb_id)
-
-            # Remove embryos that were deleted in editor
-            removed_ids = old_ids - new_ids
-            for rid in removed_ids:
-                if rid in agent.experiment.embryos:
-                    del agent.experiment.embryos[rid]
-
-            # Build summary
-            summary = f"Edit complete: {len(new_ids)} embryos"
-            if added > 0:
-                summary += f", +{added} added"
-            if len(removed_ids) > 0:
-                summary += f", -{len(removed_ids)} removed ({', '.join(removed_ids)})"
-
-            return summary
-        else:
-            return f"Edit failed: {result.get('error', 'Unknown error')}"
-
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        return f"Error: {str(e)}"
+    # Same flow as manual_mark_embryos: pre-populate with existing markers,
+    # let user edit, reconcile.
+    return await manual_mark_embryos(
+        exposure_ms=exposure_ms,
+        default_role=default_role,
+        context=context,
+    )
 
 
 @tool(

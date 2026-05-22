@@ -376,12 +376,15 @@ class VisualizationServer(Service):
         image: np.ndarray,
         initial_stage_position: tuple = (0.0, 0.0),
         pixel_size_um: float = 0.65,
+        initial_markers: Optional[list] = None,
+        default_role: str = "test",
     ) -> str:
         """
-        Start an embryo marking session in the web UI.
+        Start an embryo marking session in the web UI (map view).
 
         Broadcasts the bottom camera image to all clients and waits
-        for the user to mark embryo positions via clicks.
+        for the user to mark/edit embryo positions via clicks. Each
+        marker carries a role (test / calibration / unassigned).
 
         Parameters
         ----------
@@ -391,6 +394,16 @@ class VisualizationServer(Service):
             Initial XY stage position in micrometers
         pixel_size_um : float
             Pixel size in micrometers/pixel
+        initial_markers : list of dict, optional
+            Pre-populate the map view with editable markers (e.g. from
+            SAM auto-detection). Each entry should have ``pixel_x``,
+            ``pixel_y``; may also include ``role``, ``source``,
+            ``embryo_id``, ``confidence``.
+        default_role : str
+            Role assigned to markers that don't specify one
+            (e.g. user-clicked new markers). Default ``"test"`` matches
+            the EmbryoState default — accidentally treating Calibration
+            as Test only over-protects.
 
         Returns
         -------
@@ -403,12 +416,31 @@ class VisualizationServer(Service):
             self._marking_sessions = {}
 
         session_id = str(uuid.uuid4())[:8]
+
+        # Normalize initial markers to the same shape the frontend uses.
+        normalized = []
+        for i, m in enumerate(initial_markers or []):
+            px = m.get("pixel_x", m.get("pixelX"))
+            py = m.get("pixel_y", m.get("pixelY"))
+            if px is None or py is None:
+                continue
+            normalized.append({
+                "number": i + 1,
+                "pixelX": round(float(px), 1),
+                "pixelY": round(float(py), 1),
+                "role": m.get("role", default_role),
+                "source": m.get("source", "sam"),
+                "embryo_id": m.get("embryo_id"),
+                "confidence": m.get("confidence"),
+            })
+
         self._marking_sessions[session_id] = {
-            "markers": [],
+            "markers": list(normalized),
             "complete": asyncio.Event(),
             "initial_stage_position": initial_stage_position,
             "pixel_size_um": pixel_size_um,
             "image_shape": image.shape,
+            "default_role": default_role,
         }
 
         # Encode image as base64 PNG
@@ -431,10 +463,19 @@ class VisualizationServer(Service):
                 "image_b64": b64,
                 "width": w,
                 "height": h,
+                "initial_markers": normalized,
+                "default_role": default_role,
+                "stage_x_um": float(initial_stage_position[0]),
+                "stage_y_um": float(initial_stage_position[1]),
+                "pixel_size_um": pixel_size_um,
             }
         })
 
-        logger.info(f"Marking session {session_id} started, image {w}x{h} sent to {len(self.manager.active_connections)} clients")
+        logger.info(
+            f"Marking session {session_id} started, image {w}x{h}, "
+            f"{len(normalized)} initial markers, "
+            f"{len(self.manager.active_connections)} clients"
+        )
         return session_id
 
     async def wait_for_marking(self, session_id: str, timeout: float = None) -> list:
@@ -468,15 +509,22 @@ class VisualizationServer(Service):
         h, w = session["image_shape"][:2]
         center_x, center_y = w / 2, h / 2
 
-        # Convert to embryo entries compatible with EmbryoMarker format
+        # Convert to embryo entries. Carries role + source so callers can
+        # register each embryo with the right experimental classification.
+        default_role = session.get("default_role", "test")
         embryos = []
         for m in markers:
             px, py = m["pixelX"], m["pixelY"]
             embryos.append({
                 "embryo_number": m["number"],
-                "embryo_id": f"embryo_{m['number']:03d}",
+                "embryo_id": m.get("embryo_id") or f"embryo_{m['number']:03d}",
                 "pixel_position": (px, py),
+                "pixel_x": px,
+                "pixel_y": py,
                 "initial_stage_position": initial_pos,
+                "role": m.get("role", default_role),
+                "source": m.get("source", "manual"),
+                "confidence": m.get("confidence"),
                 "marking_timestamp": m.get("timestamp", datetime.now().isoformat()),
             })
 

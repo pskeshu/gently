@@ -22,6 +22,7 @@ class EmbryoInfo(TypedDict):
     position_x: Optional[float]
     position_y: Optional[float]
     calibration: Optional[dict]
+    role: Optional[str]  # key into gently.harness.roles.REGISTRY
     created_at: str
 
 

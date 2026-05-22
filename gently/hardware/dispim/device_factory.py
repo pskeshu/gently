@@ -108,12 +108,18 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
         logger.warning("Could not create camera: %s", e)
 
     try:
-        from .devices import DiSPIMLaserControl
-        laser_control = DiSPIMLaserControl(core=core, name='laser_control', group_name="Laser")
+        from .devices import DiSPIMLightSource
+        # Single instance, registered under both names: the ophyd name and
+        # devices-dict key keep the historical "laser_control" identifier
+        # so existing Bluesky plans (which take a `laser_control=...` kwarg)
+        # continue to work; "light_source" is the new canonical alias for
+        # callers that want the broader concept (power + channel).
+        laser_control = DiSPIMLightSource(core=core, name='laser_control', group_name="Laser")
         devices['laser_control'] = laser_control
-        logger.info("Created laser control")
+        devices['light_source'] = laser_control
+        logger.info("Created light source (laser_control)")
     except Exception as e:
-        logger.warning("Could not create laser control: %s", e)
+        logger.warning("Could not create light source: %s", e)
 
     try:
         devices['xy_stage'] = DiSPIMXYStage(name=cfg['xy_stage_name'], core=core)

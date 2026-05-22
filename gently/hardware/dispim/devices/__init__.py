@@ -9,7 +9,7 @@ from .stage import DiSPIMZstage, DiSPIMXYStage
 from .camera import DiSPIMCamera, DiSPIMDualCamera, DiSPIMBottomCamera
 from .piezo import DiSPIMFDrive, DiSPIMPiezo
 from .scanner import DiSPIMScanner
-from .optical import DiSPIMLED, DiSPIMLaserControl
+from .optical import DiSPIMLED, DiSPIMLightSource, DiSPIMLaserControl
 from .acquisition import DiSPIMVolumeScanner, DiSPIMLightSheetSnap
 
 __all__ = [
@@ -17,6 +17,8 @@ __all__ = [
     "DiSPIMCamera", "DiSPIMDualCamera", "DiSPIMBottomCamera",
     "DiSPIMFDrive", "DiSPIMPiezo",
     "DiSPIMScanner",
-    "DiSPIMLED", "DiSPIMLaserControl",
+    "DiSPIMLED", "DiSPIMLightSource",
+    # Backwards-compatible alias for DiSPIMLightSource:
+    "DiSPIMLaserControl",
     "DiSPIMVolumeScanner", "DiSPIMLightSheetSnap",
 ]

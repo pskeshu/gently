@@ -183,14 +183,16 @@ def assign_nickname(embryo_id: str, nickname: str, context: Dict) -> str:
 
 @tool(
     name="modify_parameters",
-    description="""Modify acquisition parameters for a specific embryo. Can change interval_seconds, num_slices, exposure_ms, priority, or acquisition_mode.
-Use when user wants to adjust imaging for one embryo (e.g., "image embryo 2 faster", "use snap mode for embryo_1").
+    description="""Modify acquisition parameters for a specific embryo. Supported keys: interval_seconds, num_slices, exposure_ms, priority, acquisition_mode, laser_power_488_pct.
+Use when user wants to adjust imaging for one embryo (e.g., "image embryo 2 faster", "use snap mode for embryo_1", "drop 488 to 3% for embryo_3").
 acquisition_mode can be "volume" (full 3D stack, default) or "snap" (single 2D lightsheet image - faster, less light exposure).
+laser_power_488_pct is hard-limited at the device layer (currently 2-6% — see DiSPIMLightSource.POWER_LIMITS_PCT). Out-of-range values are rejected at the tool boundary AND at the device.
 Requires a reason to document why parameters are being changed. Changes take effect at the next acquisition.""",
     category=ToolCategory.EMBRYO,
     examples=[
         ToolExample("Image embryo 2 every 30 seconds", {"embryo_id": "embryo_2", "changes": {"interval_seconds": 30}, "reason": "pre-hatching monitoring"}),
         ToolExample("Use snap mode for embryo 1", {"embryo_id": "embryo_1", "changes": {"acquisition_mode": "snap"}, "reason": "reduce light exposure"}),
+        ToolExample("Drop 488 power on embryo 3 to 3%", {"embryo_id": "embryo_3", "changes": {"laser_power_488_pct": 3.0}, "reason": "signal saturating"}),
     ],
 )
 def modify_parameters(
@@ -214,6 +216,7 @@ def modify_parameters(
         'exposure_ms': embryo.exposure_ms,
         'priority': embryo.priority,
         'acquisition_mode': embryo.acquisition_mode,
+        'laser_power_488_pct': embryo.laser_power_488_pct,
     }
 
     if 'interval_seconds' in changes:
@@ -230,8 +233,105 @@ def modify_parameters(
             embryo.acquisition_mode = mode
         else:
             return f"Invalid acquisition_mode '{mode}'. Use 'volume' or 'snap'."
+    if 'laser_power_488_pct' in changes:
+        # Soft-validate at the tool layer so the agent gets a clean error
+        # without round-tripping to the device. Hard limit is enforced
+        # at DiSPIMLightSource.set_power_pct regardless.
+        from gently.hardware.dispim.devices.optical import DiSPIMLightSource
+        pct = changes['laser_power_488_pct']
+        lo, hi = DiSPIMLightSource.POWER_LIMITS_PCT.get(488, (0.0, 100.0))
+        if pct is not None and not (lo <= pct <= hi):
+            return (
+                f"laser_power_488_pct={pct} outside hard safety limit "
+                f"[{lo}, {hi}]%. (Limit is baked into the device layer; "
+                f"change DiSPIMLightSource.POWER_LIMITS_PCT to retune.)"
+            )
+        embryo.laser_power_488_pct = pct
 
     return (f"Modified {embryo_id} parameters:\n"
             f"Reason: {reason}\n\n"
             f"Changes:\n{json.dumps(changes, indent=2)}\n\n"
             f"Previous: {json.dumps(old_params, indent=2)}")
+
+
+@tool(
+    name="assign_embryo_roles",
+    description="""Assign experimental roles (test / calibration / unassigned) to one or more embryos.
+Use when the user has marked embryos in the map view and is classifying which are biological subjects (test) vs reference/calibration samples (calibration).
+Roles drive cadence policy, detector selection, photodose budget, and UI color. Pass a dict mapping embryo_id -> role name.
+Available roles come from gently.harness.roles.REGISTRY: 'test', 'calibration', 'unassigned'.""",
+    category=ToolCategory.EMBRYO,
+    examples=[
+        ToolExample("Mark embryo 1 as calibration", {"roles": {"embryo_1": "calibration"}}),
+        ToolExample(
+            "Embryos 1-2 are calibration, 3-5 are test",
+            {"roles": {"embryo_1": "calibration", "embryo_2": "calibration",
+                       "embryo_3": "test", "embryo_4": "test", "embryo_5": "test"}},
+        ),
+    ],
+)
+def assign_embryo_roles(roles: Dict[str, str], context: Dict) -> str:
+    """Assign roles to embryos. Validates against gently.harness.roles.REGISTRY."""
+    from gently.harness.roles import get_role, list_roles
+    from gently.core import EventType, get_event_bus
+
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    # Validate all roles before mutating anything (atomic semantics)
+    unknown_embryos = [eid for eid in roles if eid not in agent.experiment.embryos]
+    if unknown_embryos:
+        return (
+            f"Unknown embryo(s): {unknown_embryos}. "
+            f"Available: {list(agent.experiment.embryos.keys())}"
+        )
+
+    invalid_roles = []
+    for eid, role_name in roles.items():
+        try:
+            get_role(role_name)
+        except KeyError:
+            invalid_roles.append((eid, role_name))
+    if invalid_roles:
+        return (
+            f"Invalid role(s): {invalid_roles}. "
+            f"Available roles: {list_roles()}"
+        )
+
+    # Apply
+    event_bus = get_event_bus()
+    changes = []
+    for eid, role_name in roles.items():
+        embryo = agent.experiment.embryos[eid]
+        old_role = embryo.role
+        if old_role == role_name:
+            continue
+        embryo.role = role_name
+        changes.append(f"{eid}: {old_role} -> {role_name}")
+
+        # Persist to embryo.yaml if FileStore is wired up.
+        if getattr(agent, "store", None) and getattr(agent, "session_id", None):
+            pos = embryo.stage_position or {}
+            agent.store.register_embryo(
+                agent.session_id, eid,
+                position_x=pos.get("x"),
+                position_y=pos.get("y"),
+                calibration=embryo.calibration,
+                role=role_name,
+            )
+
+        event_bus.publish(
+            event_type=EventType.STATUS_CHANGED,
+            data={
+                "embryo_id": eid,
+                "change": "role_assigned",
+                "old_role": old_role,
+                "new_role": role_name,
+            },
+            source="assign_embryo_roles",
+        )
+
+    if not changes:
+        return "No role changes — all embryos already at the requested roles."
+    return "Assigned roles:\n" + "\n".join(f"  • {c}" for c in changes)

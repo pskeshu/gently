@@ -91,12 +91,49 @@ class DiSPIMLED:
         return OrderedDict()
 
 
-class DiSPIMLaserControl:
+class DiSPIMLightSource:
     """
-    DiSPIM laser control - works with bps.mv(laser, 'config_name')
+    DiSPIM light source — laser ConfigGroup selector + per-line power %.
 
-    Device-agnostic: any plan that sets configurations will work with this device
+    Two control surfaces:
+
+    1. **Preset / channel selection** via ``set(config_name)`` (Bluesky-compatible
+       ``bps.mv(light_source, 'config_name')`` — e.g. ``"488 and 561"``,
+       ``"488 only"``, ``"ALL OFF"``). The PLogic gates which laser lines
+       are routed to the SPIM trigger.
+
+    2. **Per-line power %** via ``set_power_pct(wavelength, pct)``. Writes
+       the analog setpoint directly on the Coherent Scientific Remote
+       device. Hard-limited per wavelength via :attr:`POWER_LIMITS_PCT` —
+       attempts outside the limit raise ``ValueError`` from inside the
+       device-layer setter. This is the bottom line of safety; any
+       orchestrator-level rule must stay within these bounds.
+
+    Adjust ``POWER_LIMITS_PCT`` here (single source of truth) if a future
+    experiment requires a different range. Bounds cannot be bypassed at
+    runtime.
     """
+
+    # Per-wavelength MM property labels on the Coherent Scientific Remote
+    # device. Wavelengths not listed are not addressable via set_power_pct.
+    POWER_DEVICE_LABEL = "Coherent-Scientific Remote"
+    POWER_PROPERTY = {
+        405: "Laser 405-100C - PowerSetpoint (%)",
+        488: "Laser 488-100C - PowerSetpoint (%)",
+        561: "Laser OBIS LS 561-100 - PowerSetpoint (%)",
+        637: "Laser 637-140C - PowerSetpoint (%)",
+    }
+
+    # Hard safety limits (percent). Out-of-range writes raise ValueError.
+    # Tighter than the laser's electrical limits — protects samples from
+    # accidental overexposure regardless of caller. Tune here, not at
+    # the call site.
+    POWER_LIMITS_PCT = {
+        405: (0.0, 100.0),
+        488: (2.0, 6.0),
+        561: (0.0, 100.0),
+        637: (0.0, 100.0),
+    }
 
     def __init__(self, core: pymmcore.CMMCore, name: str = "Laser", group_name: str = None):
         self.core = core
@@ -136,6 +173,61 @@ class DiSPIMLaserControl:
 
         return status
 
+    def set_power_pct(self, wavelength: int, pct: float) -> None:
+        """
+        Set per-line laser power in percent. Hard-limited by ``POWER_LIMITS_PCT``.
+
+        Synchronous: writes the MM property directly. Safe to call from inside
+        Bluesky plan ``configure()`` steps (no Bluesky messages required).
+
+        Parameters
+        ----------
+        wavelength : int
+            Laser wavelength (nm). Must be a key in :attr:`POWER_PROPERTY`.
+        pct : float
+            Setpoint in percent. Must be within :attr:`POWER_LIMITS_PCT`
+            for this wavelength.
+
+        Raises
+        ------
+        KeyError
+            If ``wavelength`` is unknown.
+        ValueError
+            If ``pct`` is outside the hard safety range for the wavelength.
+        """
+        if wavelength not in self.POWER_PROPERTY:
+            raise KeyError(
+                f"Unknown laser wavelength {wavelength}nm. "
+                f"Available: {sorted(self.POWER_PROPERTY.keys())}"
+            )
+
+        lo, hi = self.POWER_LIMITS_PCT.get(wavelength, (0.0, 100.0))
+        if not (lo <= pct <= hi):
+            raise ValueError(
+                f"{wavelength}nm power {pct}% outside hard safety limit "
+                f"[{lo}, {hi}]%. Adjust DiSPIMLightSource.POWER_LIMITS_PCT "
+                f"to change this bound (in source — not at runtime)."
+            )
+
+        prop = self.POWER_PROPERTY[wavelength]
+        self.core.setProperty(self.POWER_DEVICE_LABEL, prop, float(pct))
+        # No waitForDevice — analog setpoint applies on the next exposure.
+        logger.debug(
+            "Set %dnm power to %.4f%% (%s / %s)",
+            wavelength, pct, self.POWER_DEVICE_LABEL, prop,
+        )
+
+    def get_power_pct(self, wavelength: int) -> float:
+        """Read the current laser power % for ``wavelength``."""
+        if wavelength not in self.POWER_PROPERTY:
+            raise KeyError(
+                f"Unknown laser wavelength {wavelength}nm. "
+                f"Available: {sorted(self.POWER_PROPERTY.keys())}"
+            )
+        return float(self.core.getProperty(
+            self.POWER_DEVICE_LABEL, self.POWER_PROPERTY[wavelength]
+        ))
+
     def read(self):
         """Read current laser configuration - required for Bluesky"""
         try:
@@ -167,3 +259,8 @@ class DiSPIMLaserControl:
     def describe_configuration(self):
         """Required for Bluesky"""
         return OrderedDict()
+
+
+# Backwards-compatible alias — existing imports keep working while the
+# codebase migrates to the new name.
+DiSPIMLaserControl = DiSPIMLightSource

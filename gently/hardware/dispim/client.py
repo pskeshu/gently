@@ -542,6 +542,11 @@ class DiSPIMMicroscope(Microscope):
         galvo_center: float = 0.0,
         piezo_amplitude: float = 25.0,
         piezo_center: float = 50.0,
+        laser_config: str = None,
+        laser_power_488_pct: float = None,
+        laser_power_561_pct: float = None,
+        laser_power_405_pct: float = None,
+        laser_power_637_pct: float = None,
         **kwargs,
     ) -> Dict:
         """
@@ -557,23 +562,44 @@ class DiSPIMMicroscope(Microscope):
             Galvo scan range in volts
         piezo_amplitude, piezo_center : float
             Piezo Z range in micrometers
+        laser_config : str, optional
+            Laser channel preset ("488 and 561", "488 only", etc.). None
+            uses the device-layer default.
+        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct, laser_power_637_pct : float, optional
+            Per-line laser power %. Hard-limited at the device layer
+            (DiSPIMLightSource.POWER_LIMITS_PCT). None leaves current
+            setpoint untouched.
 
         Returns
         -------
         dict
             ``{'volume': np.ndarray, 'shape': tuple, 'success': bool}``
         """
+        plan_kwargs = {
+            'volume_scanner': 'volume_scanner',
+            'num_slices': num_slices,
+            'exposure_ms': exposure_ms,
+            'galvo_amplitude': galvo_amplitude,
+            'galvo_center': galvo_center,
+            'piezo_amplitude': piezo_amplitude,
+            'piezo_center': piezo_center,
+        }
+        # Only forward kwargs the user explicitly set — leaves the
+        # acquire_single_volume_plan defaults in place otherwise.
+        if laser_config is not None:
+            plan_kwargs['laser_config'] = laser_config
+        if laser_power_488_pct is not None:
+            plan_kwargs['laser_power_488_pct'] = laser_power_488_pct
+        if laser_power_561_pct is not None:
+            plan_kwargs['laser_power_561_pct'] = laser_power_561_pct
+        if laser_power_405_pct is not None:
+            plan_kwargs['laser_power_405_pct'] = laser_power_405_pct
+        if laser_power_637_pct is not None:
+            plan_kwargs['laser_power_637_pct'] = laser_power_637_pct
+
         result = await self._submit_plan_and_wait(
             'acquire_single_volume_plan',
-            kwargs={
-                'volume_scanner': 'volume_scanner',
-                'num_slices': num_slices,
-                'exposure_ms': exposure_ms,
-                'galvo_amplitude': galvo_amplitude,
-                'galvo_center': galvo_center,
-                'piezo_amplitude': piezo_amplitude,
-                'piezo_center': piezo_center,
-            },
+            kwargs=plan_kwargs,
             timeout=120.0
         )
 
@@ -600,6 +626,40 @@ class DiSPIMMicroscope(Microscope):
     async def set_led(self, state: str = 'Closed') -> Dict:
         """Set LED state ('Open' or 'Closed')."""
         return await self._api_post('/api/led/set', {'state': state})
+
+    async def set_laser_power(self, wavelength: int, pct: float) -> Dict:
+        """Set per-line laser power % via the Bluesky queue.
+
+        Hard-limited at the device layer (DiSPIMLightSource.POWER_LIMITS_PCT).
+        Out-of-range values cause the plan to fail with ValueError.
+
+        Parameters
+        ----------
+        wavelength : int
+            Laser line (488, 561, 405, 637).
+        pct : float
+            Setpoint percent (must be within hard limit for ``wavelength``).
+        """
+        return await self._submit_plan_and_wait(
+            'set_light_source_power_plan',
+            kwargs={
+                'light_source': 'light_source',
+                'wavelength': wavelength,
+                'pct': pct,
+            },
+            timeout=10.0,
+        )
+
+    async def get_laser_power(self, wavelength: int) -> Dict:
+        """Read the current per-line laser power %."""
+        return await self._submit_plan_and_wait(
+            'get_light_source_power_plan',
+            kwargs={
+                'light_source': 'light_source',
+                'wavelength': wavelength,
+            },
+            timeout=5.0,
+        )
 
     async def get_led_status(self) -> Dict:
         """Get current LED status."""
@@ -778,10 +838,14 @@ class DiSPIMMicroscope(Microscope):
         brightness_percentile: float = 99.0,
         min_area: int = 5000,
         max_area: int = 150000,
-        open_editor: bool = False,
     ) -> Dict:
         """
         Capture image and detect embryos using brightness detection + SAM.
+
+        Returns raw SAM detections plus the bottom-camera image and stage
+        position. Interactive editing is the caller's responsibility — the
+        web map view (mark_embryos_web) is the standard editor; napari has
+        been retired.
 
         Parameters
         ----------
@@ -799,13 +863,12 @@ class DiSPIMMicroscope(Microscope):
             Percentile threshold for brightness-based detection.
         min_area, max_area : int
             Embryo area bounds in pixels.
-        open_editor : bool
-            If True, opens napari after detection for interactive editing.
 
         Returns
         -------
         dict
-            Detection results with 'embryos' list
+            ``{'success': bool, 'embryos': [...], 'stage_position': (x, y),
+            'image': np.ndarray, ...}``
         """
         if not self.has_sam:
             return {'error': 'SAM detection not available on server'}
@@ -837,18 +900,10 @@ class DiSPIMMicroscope(Microscope):
             if not result.get('success'):
                 return result
 
-            embryos = result.get('embryos', [])
-            stage_pos = tuple(result.get('stage_position', [0.0, 0.0]))
-
-            # Open napari editor if requested
-            if open_editor:
+            # Ensure the caller has the image to feed into the map view.
+            if result.get('image') is None:
                 image = await self._get_detection_image(result, exposure_ms)
                 if image is not None:
-                    from gently.ui.napari_viewer import edit_embryos_in_napari
-                    embryos = edit_embryos_in_napari(
-                        image, embryos, stage_pos, pixel_size_um, objective_mag
-                    )
-                    result['embryos'] = embryos
                     result['image'] = image
 
             return result
@@ -880,106 +935,15 @@ class DiSPIMMicroscope(Microscope):
                 pass
         return image
 
-    async def manual_mark_embryos(
-        self,
-        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
-        exposure_ms: float = None,
-        existing_embryos: list = None,
-    ) -> Dict:
-        """
-        Capture image and manually mark embryos via napari.
-
-        Parameters
-        ----------
-        pixel_size_um : float
-            Camera pixel size in micrometers
-        objective_mag : float
-            Objective magnification
-        exposure_ms : float, optional
-            Camera exposure time.
-        existing_embryos : list, optional
-            Previously detected embryos to show as reference.
-
-        Returns
-        -------
-        dict
-            Marked embryo positions with stage coordinates.
-        """
-        self._ensure_connected()
-
-        try:
-            # Capture image
-            snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
-            image = snap['image']
-
-            if image is None or (image.shape == (100, 100) and image.max() == 0):
-                return {'success': False, 'error': 'Failed to capture image'}
-
-            # Clean up staging file
-            if snap.get('image_path'):
-                try:
-                    snap['image_path'].unlink(missing_ok=True)
-                except OSError:
-                    pass
-
-            # Get stage position
-            stage_pos = await self.get_stage_position()
-
-            # Open napari for marking
-            from gently.ui.napari_viewer import mark_embryos_in_napari
-            embryos = mark_embryos_in_napari(
-                image, stage_pos, pixel_size_um, objective_mag, existing_embryos
-            )
-
-            return {
-                'success': True,
-                'embryos': embryos,
-                'stage_position': list(stage_pos),
-                'image_shape': list(image.shape),
-            }
-
-        except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
-
-    async def edit_embryos(
-        self,
-        image: np.ndarray,
-        embryos: list,
-        stage_position: tuple,
-        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
-    ) -> Dict:
-        """
-        Interactive embryo editor via napari.
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Image to display
-        embryos : list
-            Existing embryo dicts
-        stage_position : tuple
-            Current (x, y) stage position in micrometers
-        """
-        try:
-            from gently.ui.napari_viewer import edit_embryos_in_napari
-            edited = edit_embryos_in_napari(
-                image, embryos, stage_position, pixel_size_um, objective_mag
-            )
-            return {
-                'success': True,
-                'embryos': edited,
-                'original_count': len(embryos),
-                'final_count': len(edited),
-            }
-        except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
-
     async def view_image(self, image: np.ndarray = None, title: str = "Image View",
                          exposure_ms: float = None, save_path: str = None,
                          show: bool = True, embryo_annotations: list = None) -> Dict:
-        """View an image using napari. Captures from bottom camera if no image provided."""
+        """Save a bottom-camera image to disk (replaces the napari display).
+
+        ``show`` and ``title`` are kept for backwards compatibility with
+        existing tool call sites but only the disk save still happens.
+        Embryo annotations are drawn into the saved PNG if provided.
+        """
         try:
             if image is None:
                 snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
@@ -990,11 +954,38 @@ class DiSPIMMicroscope(Microscope):
                     except OSError:
                         pass
 
-            from gently.ui.napari_viewer import view_image as _view
-            return _view(image, title=title, save_path=save_path, show=show,
-                        embryo_annotations=embryo_annotations)
+            if image is None:
+                return {'success': False, 'error': 'No image to save'}
+
+            result = {'success': True, 'shape': list(image.shape)}
+            if save_path:
+                # Reuse the existing PNG writer; draws annotations if any.
+                from pathlib import Path as _Path
+                _Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+                annots = []
+                for a in (embryo_annotations or []):
+                    px = a.get('pixel_x')
+                    py = a.get('pixel_y')
+                    if px is None or py is None:
+                        continue
+                    annots.append({
+                        'embryo_number': a.get('label') or a.get('embryo_id') or '?',
+                        'pixel_position': (px, py),
+                    })
+                if annots:
+                    from gently.ui.web.embryo_marker import _save_marked_image
+                    _save_marked_image(image, annots, _Path(save_path))
+                else:
+                    from PIL import Image as _PILImage
+                    arr = image
+                    if arr.dtype != np.uint8:
+                        lo, hi = arr.min(), arr.max()
+                        arr = ((arr - lo) / max(hi - lo, 1) * 255).astype(np.uint8)
+                    _PILImage.fromarray(arr).save(save_path)
+                result['saved_to'] = save_path
+            return result
         except Exception as e:
-            return {'error': str(e)}
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
 
     async def view_embryos(
         self,
@@ -1004,12 +995,79 @@ class DiSPIMMicroscope(Microscope):
         save_path: Optional[str] = None,
         show: bool = True,
     ) -> Dict:
-        """View embryos with markers on an image using napari."""
+        """Save an annotated PNG of embryos on an image (replaces napari).
+
+        Markers in ``embryos`` may use ``center_x``/``center_y`` or
+        ``pixel_x``/``pixel_y``. ``show`` is ignored — display is now
+        the map view's job.
+        """
         try:
-            from gently.ui.napari_viewer import view_embryos as _view
-            return _view(image, embryos, title=title, save_path=save_path, show=show)
+            if image is None or not embryos:
+                return {'success': False, 'error': 'No image or embryos to display'}
+
+            annots = []
+            for emb in embryos:
+                px = emb.get('center_x', emb.get('pixel_x', 0))
+                py = emb.get('center_y', emb.get('pixel_y', 0))
+                annots.append({
+                    'embryo_number': emb.get('embryo_id', '?'),
+                    'pixel_position': (px, py),
+                })
+
+            result = {'success': True, 'num_embryos': len(embryos)}
+            if save_path:
+                from pathlib import Path as _Path
+                _Path(save_path).parent.mkdir(parents=True, exist_ok=True)
+                from gently.ui.web.embryo_marker import _save_marked_image
+                _save_marked_image(image, annots, _Path(save_path))
+                result['saved_to'] = save_path
+            return result
         except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc()}
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
+
+    async def capture_for_marking(
+        self,
+        exposure_ms: float = None,
+    ) -> Dict:
+        """
+        Capture a bottom-camera image for manual marking in the map view.
+
+        Replaces the deprecated ``manual_mark_embryos`` (napari) — this just
+        returns the image + stage position; the caller (an agent tool) is
+        expected to feed it into ``mark_embryos_web``.
+
+        Returns
+        -------
+        dict
+            ``{'success': bool, 'image': np.ndarray, 'stage_position': (x, y),
+            'image_shape': [h, w]}``
+        """
+        self._ensure_connected()
+
+        try:
+            snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
+            image = snap['image']
+
+            if image is None or (image.shape == (100, 100) and image.max() == 0):
+                return {'success': False, 'error': 'Failed to capture image'}
+
+            if snap.get('image_path'):
+                try:
+                    snap['image_path'].unlink(missing_ok=True)
+                except OSError:
+                    pass
+
+            stage_pos = await self.get_stage_position()
+
+            return {
+                'success': True,
+                'image': image,
+                'stage_position': list(stage_pos),
+                'image_shape': list(image.shape),
+            }
+
+        except Exception as e:
+            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
 
     # =========================================================================
     # Status

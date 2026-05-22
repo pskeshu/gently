@@ -1,18 +1,45 @@
 /**
- * Embryo Marking - Web-based interactive embryo position marking
+ * Map view — embryo detection, marking, role assignment.
  *
- * Replaces napari-based marking with browser-based click-to-mark workflow.
- * User clicks on bottom camera overview image to place numbered markers,
- * positions are sent back to server via WebSocket.
+ * Single spatial GUI: SAM-detected markers arrive pre-placed and editable;
+ * user can add/remove markers, toggle each between Test (magenta) and
+ * Calibration (cyan), and click "Re-detect" to recapture + re-run SAM.
+ * Replaces the deprecated napari-based marker.
+ *
+ * WS message types:
+ *   incoming  marking_image       — image + initial markers + default role
+ *   outgoing  embryo_marked       — single new marker added (clicked)
+ *   outgoing  marking_update      — full marker list (after edit/role-cycle)
+ *   outgoing  marking_done        — finalize + commit roles
+ *   outgoing  marking_redetect    — recapture + re-run SAM, replace markers
  */
+
+const ROLE_CYCLE = ['test', 'calibration', 'unassigned'];
+const ROLE_COLORS = {
+    test: '#ff66cc',           // magenta — biological subject (precious)
+    calibration: '#00cccc',    // cyan    — reference / staging anchor
+    unassigned: '#888888',     // grey    — not yet classified
+};
+const ROLE_LABEL = {
+    test: 'Test',
+    calibration: 'Cal',
+    unassigned: '—',
+};
 
 const MarkingManager = {
     // State
-    active: false,           // Marking session in progress
-    markers: [],             // Array of { number, pixelX, pixelY, timestamp }
+    active: false,
+    markers: [],             // [{ number, pixelX, pixelY, role, source, embryo_id?, confidence?, timestamp }]
     imageWidth: 0,
     imageHeight: 0,
-    sessionId: null,         // Server-assigned marking session ID
+    sessionId: null,
+    defaultRole: 'test',
+
+    // Coordinate / overlay state
+    stageXUm: 0,             // current stage position (um)
+    stageYUm: 0,
+    umPerPixel: 0.65,        // effective um per pixel on sample
+    coverslip: null,         // {center_um: [x,y], size_mm: [w,h]} from /api/devices/coverslip
 
     // DOM refs (set in init)
     canvas: null,
@@ -28,28 +55,23 @@ const MarkingManager = {
 
         if (!this.canvas || !this.img) return;
 
-        // Click to place marker
         this.canvas.addEventListener('click', (e) => this._onCanvasClick(e));
 
-        // Redraw overlay when image loads
         this.img.addEventListener('load', () => {
             this._syncCanvasSize();
             this._redraw();
         });
 
-        // Handle resize
         new ResizeObserver(() => {
             this._syncCanvasSize();
             this._redraw();
         }).observe(this.container);
 
-        // Listen for marking image from server
-        this._subscribeToEvents();
-    },
-
-    _subscribeToEvents() {
-        // Server pushes marking image via WebSocket
-        // Handled in websocket.js handleMessage
+        // Load coverslip outline once (small static metadata)
+        fetch('/api/devices/coverslip')
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d && d.coverslip) this.coverslip = d.coverslip; })
+            .catch(() => { /* coverslip overlay is optional */ });
     },
 
     // Called when server sends a marking_image message
@@ -57,20 +79,43 @@ const MarkingManager = {
         this.sessionId = data.session_id;
         this.imageWidth = data.width;
         this.imageHeight = data.height;
-        this.markers = [];
+        this.defaultRole = data.default_role || 'test';
+        this.stageXUm = data.stage_x_um != null ? data.stage_x_um : 0;
+        this.stageYUm = data.stage_y_um != null ? data.stage_y_um : 0;
+        this.umPerPixel = data.pixel_size_um || 0.65;
+
+        // Hydrate any initial markers (e.g. SAM detections) — already
+        // normalized server-side to {number, pixelX, pixelY, role, source, ...}.
+        this.markers = (data.initial_markers || []).map(m => ({
+            number: m.number,
+            pixelX: m.pixelX,
+            pixelY: m.pixelY,
+            role: m.role || this.defaultRole,
+            source: m.source || 'sam',
+            embryo_id: m.embryo_id || null,
+            confidence: m.confidence != null ? m.confidence : null,
+            timestamp: m.timestamp || new Date().toISOString(),
+        }));
         this.active = true;
 
-        // Display the image
         this.img.src = 'data:image/png;base64,' + data.image_b64;
         this.img.style.display = 'block';
 
-        // Show the marking UI
-        document.getElementById('marking-placeholder').style.display = 'none';
-        document.getElementById('marking-active').style.display = 'flex';
+        const placeholder = document.getElementById('marking-placeholder');
+        const activeEl = document.getElementById('marking-active');
+        if (placeholder) placeholder.style.display = 'none';
+        if (activeEl) activeEl.style.display = 'flex';
 
-        // Update instructions
-        document.getElementById('marking-instructions').textContent =
-            'Click on each embryo center. Press Done when finished.';
+        const instructions = document.getElementById('marking-instructions');
+        if (instructions) {
+            const n = this.markers.length;
+            instructions.textContent = n > 0
+                ? `${n} marker(s) loaded. Click to add, click a role chip to cycle Test/Calibration, press Done when finished.`
+                : 'Click on each embryo center. Click a role chip to switch Test/Calibration. Press Done when finished.';
+        }
+
+        // Re-enable action buttons in case a previous session disabled them.
+        document.querySelectorAll('.marking-action-btn').forEach(btn => btn.disabled = false);
 
         this._renderList();
     },
@@ -78,18 +123,15 @@ const MarkingManager = {
     _syncCanvasSize() {
         if (!this.img || !this.canvas || !this.imageWidth || !this.imageHeight) return;
 
-        // The img uses object-fit:contain, so compute the actual rendered area
         const containerRect = this.container.getBoundingClientRect();
         const imgAspect = this.imageWidth / this.imageHeight;
         const containerAspect = containerRect.width / containerRect.height;
 
         let renderW, renderH;
         if (imgAspect > containerAspect) {
-            // Image wider than container — limited by width
             renderW = containerRect.width;
             renderH = containerRect.width / imgAspect;
         } else {
-            // Image taller — limited by height
             renderH = containerRect.height;
             renderW = containerRect.height * imgAspect;
         }
@@ -107,7 +149,6 @@ const MarkingManager = {
         const canvasX = e.clientX - rect.left;
         const canvasY = e.clientY - rect.top;
 
-        // Convert to image pixel coordinates
         const scaleX = this.imageWidth / this.canvas.width;
         const scaleY = this.imageHeight / this.canvas.height;
         const pixelX = canvasX * scaleX;
@@ -117,18 +158,15 @@ const MarkingManager = {
             number: this.markers.length + 1,
             pixelX: Math.round(pixelX * 10) / 10,
             pixelY: Math.round(pixelY * 10) / 10,
-            timestamp: new Date().toISOString()
+            role: this.defaultRole,
+            source: 'manual',
+            embryo_id: null,
+            confidence: null,
+            timestamp: new Date().toISOString(),
         };
         this.markers.push(marker);
 
-        // Send to server
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({
-                type: 'embryo_marked',
-                session_id: this.sessionId,
-                marker: marker
-            }));
-        }
+        this._send('embryo_marked', { marker });
 
         this._redraw();
         this._renderList();
@@ -141,34 +179,91 @@ const MarkingManager = {
         const h = this.canvas.height;
         ctx.clearRect(0, 0, w, h);
 
-        if (!this.active || this.markers.length === 0) return;
+        if (!this.active) return;
 
         const scaleX = w / this.imageWidth;
         const scaleY = h / this.imageHeight;
+
+        // Coverslip outline (drawn first so markers sit on top).
+        // The coverslip is much larger than the FOV; we draw it relative to
+        // the current stage position so the user sees where in the slide
+        // they're looking.
+        if (this.coverslip && this.umPerPixel > 0) {
+            const csCx = (this.coverslip.center_um && this.coverslip.center_um[0]) || 0;
+            const csCy = (this.coverslip.center_um && this.coverslip.center_um[1]) || 0;
+            const csW = ((this.coverslip.size_mm && this.coverslip.size_mm[0]) || 0) * 1000;
+            const csH = ((this.coverslip.size_mm && this.coverslip.size_mm[1]) || 0) * 1000;
+            if (csW > 0 && csH > 0) {
+                // Coverslip extents in stage µm
+                const x0um = csCx - csW / 2;
+                const y0um = csCy - csH / 2;
+                const x1um = csCx + csW / 2;
+                const y1um = csCy + csH / 2;
+                // Map each corner to pixel coords (image center IS stage_*Um)
+                const imgCx = this.imageWidth / 2;
+                const imgCy = this.imageHeight / 2;
+                const toPxX = (xum) => (imgCx + (xum - this.stageXUm) / this.umPerPixel) * scaleX;
+                const toPxY = (yum) => (imgCy + (yum - this.stageYUm) / this.umPerPixel) * scaleY;
+                const left = toPxX(x0um);
+                const top = toPxY(y0um);
+                const right = toPxX(x1um);
+                const bottom = toPxY(y1um);
+                ctx.save();
+                ctx.strokeStyle = 'rgba(255, 220, 0, 0.55)';
+                ctx.setLineDash([6, 6]);
+                ctx.lineWidth = 1.5;
+                ctx.strokeRect(left, top, right - left, bottom - top);
+                ctx.setLineDash([]);
+                ctx.restore();
+            }
+        }
+
+        // Stage-center crosshair (current XY) — image center IS the current
+        // stage position by construction. Subtle so it doesn't fight markers.
+        {
+            const cx = (this.imageWidth / 2) * scaleX;
+            const cy = (this.imageHeight / 2) * scaleY;
+            const r = Math.max(6, Math.min(w, h) * 0.008);
+            ctx.save();
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy);
+            ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        if (this.markers.length === 0) return;
 
         for (const m of this.markers) {
             const x = m.pixelX * scaleX;
             const y = m.pixelY * scaleY;
             const size = Math.max(10, Math.min(w, h) * 0.015);
+            const color = ROLE_COLORS[m.role] || ROLE_COLORS.test;
 
-            // Crosshair
-            ctx.strokeStyle = '#00e5ff';
+            // Crosshair (role-colored)
+            ctx.strokeStyle = color;
             ctx.lineWidth = 2;
             ctx.beginPath();
             ctx.moveTo(x - size, y); ctx.lineTo(x + size, y);
             ctx.moveTo(x, y - size); ctx.lineTo(x, y + size);
             ctx.stroke();
 
-            // Circle
+            // Circle (role-colored)
             ctx.beginPath();
             ctx.arc(x, y, size * 2, 0, Math.PI * 2);
             ctx.stroke();
 
-            // Number label
+            // Number label above
             ctx.font = `bold ${Math.max(12, size)}px sans-serif`;
-            ctx.fillStyle = '#00e5ff';
+            ctx.fillStyle = color;
             ctx.textAlign = 'center';
             ctx.fillText(m.number, x, y - size * 2.5);
+
+            // Role short label below
+            ctx.font = `${Math.max(10, size * 0.85)}px sans-serif`;
+            ctx.fillText(ROLE_LABEL[m.role] || m.role, x, y + size * 3);
         }
     },
 
@@ -177,38 +272,57 @@ const MarkingManager = {
 
         if (this.markers.length === 0) {
             this.listEl.innerHTML = '<div class="marking-list-empty">No embryos marked yet</div>';
+            this._updateCount(0);
             return;
         }
 
-        this.listEl.innerHTML = this.markers.map(m =>
-            `<div class="marking-list-item">
-                <span class="marking-number">${m.number}</span>
+        this.listEl.innerHTML = this.markers.map(m => {
+            const color = ROLE_COLORS[m.role] || ROLE_COLORS.test;
+            const label = ROLE_LABEL[m.role] || m.role;
+            const src = m.source ? `<span class="marking-source" title="${m.source}">${m.source}</span>` : '';
+            return `<div class="marking-list-item">
+                <span class="marking-number" style="color:${color}">${m.number}</span>
+                <button class="marking-role-chip"
+                        style="background:${color}26;color:${color};border:1px solid ${color}"
+                        title="Click to cycle role"
+                        onclick="MarkingManager.cycleRole(${m.number})">${label}</button>
+                ${src}
                 <span class="marking-coords">(${m.pixelX}, ${m.pixelY})</span>
                 <button class="marking-remove-btn" onclick="MarkingManager.removeMarker(${m.number})" title="Remove">&times;</button>
-            </div>`
-        ).join('');
+            </div>`;
+        }).join('');
 
-        // Update badge count
+        this._updateCount(this.markers.length);
+    },
+
+    _updateCount(n) {
         const countEl = document.getElementById('marking-count');
         if (countEl) {
-            countEl.textContent = this.markers.length;
-            countEl.style.display = this.markers.length > 0 ? '' : 'none';
+            countEl.textContent = n;
+            countEl.style.display = n > 0 ? '' : 'none';
         }
+    },
+
+    cycleRole(number) {
+        if (!this.active) return;
+        const m = this.markers.find(x => x.number === number);
+        if (!m) return;
+
+        const idx = ROLE_CYCLE.indexOf(m.role);
+        const next = ROLE_CYCLE[(idx + 1) % ROLE_CYCLE.length];
+        m.role = next;
+
+        this._send('marking_update', { markers: this.markers });
+        this._redraw();
+        this._renderList();
     },
 
     removeMarker(number) {
         this.markers = this.markers.filter(m => m.number !== number);
-        // Renumber
+        // Renumber so labels stay 1..N
         this.markers.forEach((m, i) => m.number = i + 1);
 
-        // Notify server
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({
-                type: 'marking_update',
-                session_id: this.sessionId,
-                markers: this.markers
-            }));
-        }
+        this._send('marking_update', { markers: this.markers });
 
         this._redraw();
         this._renderList();
@@ -219,17 +333,22 @@ const MarkingManager = {
         if (this.markers.length > 0 && !confirm('Clear all marked embryos?')) return;
 
         this.markers = [];
-
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({
-                type: 'marking_update',
-                session_id: this.sessionId,
-                markers: []
-            }));
-        }
+        this._send('marking_update', { markers: [] });
 
         this._redraw();
         this._renderList();
+    },
+
+    redetect() {
+        if (!this.active) return;
+        if (this.markers.length > 0 && !confirm('Recapture image and re-run SAM detection? Current markers will be replaced.')) return;
+
+        this._send('marking_redetect', {});
+
+        const instructions = document.getElementById('marking-instructions');
+        if (instructions) {
+            instructions.textContent = 'Recapturing and re-running detection…';
+        }
     },
 
     done() {
@@ -239,34 +358,46 @@ const MarkingManager = {
             if (!confirm('No embryos marked. Finish anyway?')) return;
         }
 
-        // Send completion to server
-        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({
-                type: 'marking_done',
-                session_id: this.sessionId,
-                markers: this.markers
-            }));
-        }
+        this._send('marking_done', { markers: this.markers });
 
         this.active = false;
-        document.getElementById('marking-instructions').textContent =
-            `Marking complete - ${this.markers.length} embryo(s) marked.`;
+        const instructions = document.getElementById('marking-instructions');
+        if (instructions) {
+            const counts = this.markers.reduce((acc, m) => {
+                acc[m.role] = (acc[m.role] || 0) + 1;
+                return acc;
+            }, {});
+            const summary = Object.entries(counts)
+                .map(([r, n]) => `${n} ${r}`)
+                .join(', ');
+            instructions.textContent = `Marking complete — ${this.markers.length} embryo(s)${summary ? ': ' + summary : ''}.`;
+        }
 
-        // Disable buttons
         document.querySelectorAll('.marking-action-btn').forEach(btn => btn.disabled = true);
+    },
+
+    _send(type, payload) {
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) return;
+        state.ws.send(JSON.stringify({
+            type,
+            session_id: this.sessionId,
+            ...payload,
+        }));
     },
 
     // Switch between monitoring and marking subtabs
     switchSubtab(subtab) {
         document.querySelectorAll('.embryos-subtab').forEach(t => t.classList.remove('active'));
-        document.querySelector(`.embryos-subtab[data-subtab="${subtab}"]`).classList.add('active');
+        const tab = document.querySelector(`.embryos-subtab[data-subtab="${subtab}"]`);
+        if (tab) tab.classList.add('active');
 
-        document.getElementById('embryos-monitoring').style.display = subtab === 'monitoring' ? '' : 'none';
-        document.getElementById('embryos-marking').style.display = subtab === 'marking' ? '' : 'none';
+        const monitoring = document.getElementById('embryos-monitoring');
+        const marking = document.getElementById('embryos-marking');
+        if (monitoring) monitoring.style.display = subtab === 'monitoring' ? '' : 'none';
+        if (marking) marking.style.display = subtab === 'marking' ? '' : 'none';
     }
 };
 
-// Initialize on DOM ready
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', () => MarkingManager.init());
 } else {

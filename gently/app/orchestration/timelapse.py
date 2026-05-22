@@ -35,10 +35,10 @@ from .timelapse_models import (
     StopConditionType,
     IntervalRule,
     StopCondition,
-    EmbryoAcquisitionState,
     TimelapseStatus,
     TimelapseState,
 )
+from gently.harness.state import EmbryoState
 
 if TYPE_CHECKING:
     from gently.core.file_store import FileStore
@@ -103,7 +103,10 @@ class TimelapseOrchestrator:
         self._event_bus = get_event_bus()
 
         # Timelapse state
-        self._embryo_states: Dict[str, EmbryoAcquisitionState] = {}
+        # Holds references to EmbryoState objects from self.experiment.embryos
+        # for embryos currently active in this timelapse. Same objects, no
+        # duplication of state.
+        self._embryo_states: Dict[str, EmbryoState] = {}
         self._status = TimelapseStatus.IDLE
         self._started_at: Optional[datetime] = None
         self._total_timepoints = 0
@@ -130,6 +133,11 @@ class TimelapseOrchestrator:
         # Interval adjustment rules
         self._interval_rules: List[IntervalRule] = []
         self._applied_rules: Dict[str, Set[str]] = {}  # embryo_id -> set of applied rule names
+
+        # Async cadence state (Phase 4). Single-burst exclusion handled by
+        # _burst_in_progress: while set to an embryo_id, _run_loop skips
+        # all other embryos and runs only the burst executor (Phase 7).
+        self._burst_in_progress: Optional[str] = None
 
         # Global error log for cross-embryo hardware error correlation
         self.global_error_log = GlobalErrorLog()
@@ -181,15 +189,40 @@ class TimelapseOrchestrator:
         if missing:
             return f"Embryos not found: {missing}"
 
-        # Initialize embryo states (preserve existing timepoint counts)
+        # Initialize timelapse runtime state on EmbryoState references.
+        # No separate state object — orchestrator and agent share the same
+        # EmbryoState instances.
+        from gently.harness.roles import REGISTRY as ROLE_REGISTRY
+        now = datetime.now()
         self._embryo_states = {}
         for eid in embryo_ids:
             embryo = self.experiment.embryos[eid]
-            self._embryo_states[eid] = EmbryoAcquisitionState(
-                embryo_id=eid,
-                stop_condition=stop_cond,
-                timepoints_acquired=embryo.timepoints_acquired,  # Preserve count!
-            )
+            embryo.stop_condition = stop_cond
+            embryo.is_complete = False
+            embryo.completion_reason = None
+            embryo.error_count = 0
+            embryo.last_error = None
+            embryo.detection_triggered_at = None
+            embryo.detection_type = None
+            embryo.no_object_since_timepoint = None
+
+            # Async cadence init: per-embryo interval defaults to the role's
+            # default_cadence_seconds (e.g. 300s for test/calibration), falling
+            # back to base_interval_seconds, then to 300s. An explicit
+            # interval_seconds already on the embryo (e.g. from a prior
+            # modify_parameters call) is preserved.
+            if embryo.interval_seconds is None:
+                role_def = ROLE_REGISTRY.get(embryo.role)
+                if role_def is not None:
+                    embryo.interval_seconds = role_def.default_cadence_seconds
+                else:
+                    embryo.interval_seconds = base_interval_seconds
+            embryo.cadence_phase = "normal"
+            embryo.next_due_at = now  # image immediately on first tick
+            self._embryo_states[eid] = embryo
+
+        # Burst state is per-session; clear at start.
+        self._burst_in_progress = None
 
         # Initialize trace directory for file-based persistence
         if self._session_id:
@@ -293,80 +326,207 @@ class TimelapseOrchestrator:
         pause_seconds = self._total_pause_duration.total_seconds()
         return elapsed - pause_seconds
 
+    # ------------------------------------------------------------------
+    # Async cadence helpers
+    # ------------------------------------------------------------------
+
+    def _is_eligible(self, embryo) -> bool:
+        """An embryo is eligible for the due-loop pick if it's active.
+
+        ``paused`` phase skips it (over-budget, manual pause, or another
+        embryo's burst is in flight). ``burst`` phase means an exclusive
+        burst-executor handles it — the normal due-loop should skip too.
+        """
+        if embryo.is_complete:
+            return False
+        if embryo.should_skip:
+            return False
+        phase = getattr(embryo, "cadence_phase", "normal")
+        if phase in ("paused", "burst"):
+            return False
+        return True
+
+    def _pick_next_due(self) -> tuple:
+        """Pick the most-overdue eligible embryo.
+
+        Returns
+        -------
+        (embryo, wait_seconds) : tuple
+            ``embryo`` is the EmbryoState ready to acquire now (next_due_at
+            <= now), or None if no embryo is due. When None, ``wait_seconds``
+            is how long until the soonest-due embryo (capped at 5s for
+            responsiveness). When (embryo, 0.0), acquire immediately.
+        """
+        now = datetime.now()
+        eligible = [e for e in self._embryo_states.values() if self._is_eligible(e)]
+        if not eligible:
+            return None, 5.0  # nothing to do; check back later
+
+        # Embryos with no next_due_at yet: schedule them immediately.
+        for e in eligible:
+            if e.next_due_at is None:
+                e.next_due_at = now
+
+        # Find the smallest next_due_at
+        soonest = min(eligible, key=lambda e: e.next_due_at)
+        if soonest.next_due_at <= now:
+            return soonest, 0.0
+
+        wait_s = (soonest.next_due_at - now).total_seconds()
+        return None, min(wait_s, 5.0)
+
+    def _reschedule(self, embryo, *, from_now: bool = True) -> None:
+        """Set ``embryo.next_due_at`` to now + interval_seconds.
+
+        ``from_now=True`` (default) anchors at the actual current time —
+        the right choice when acquisitions can take noticeable time. If
+        you'd rather anchor at the previous due-time (catch up on missed
+        rounds after a burst), pass False.
+        """
+        interval_s = embryo.interval_seconds or self._base_interval_seconds or 300.0
+        anchor = datetime.now() if from_now else (embryo.next_due_at or datetime.now())
+        embryo.next_due_at = anchor + timedelta(seconds=interval_s)
+
+    def transition_cadence(
+        self,
+        embryo,
+        *,
+        new_phase: Optional[str] = None,
+        new_interval_seconds: Optional[float] = None,
+        reschedule: bool = True,
+        reason: Optional[str] = None,
+    ) -> None:
+        """Public API for cadence transitions (Phase 5 / agent tools use this).
+
+        Mutates the embryo, schedules its next acquisition, and emits an
+        ``EMBRYO_CADENCE_CHANGED`` event so downstream UI / persistence
+        stays consistent.
+        """
+        old_phase = getattr(embryo, "cadence_phase", "normal")
+        old_interval = embryo.interval_seconds
+
+        changed = False
+        if new_phase is not None and new_phase != old_phase:
+            embryo.cadence_phase = new_phase
+            changed = True
+        if new_interval_seconds is not None and new_interval_seconds != old_interval:
+            embryo.interval_seconds = new_interval_seconds
+            changed = True
+
+        if not changed:
+            return
+
+        if reschedule:
+            self._reschedule(embryo)
+
+        self._emit_event(EventType.EMBRYO_CADENCE_CHANGED, {
+            "embryo_id": embryo.id,
+            "old_phase": old_phase,
+            "new_phase": embryo.cadence_phase,
+            "old_interval_s": old_interval,
+            "new_interval_s": embryo.interval_seconds,
+            "next_due_at": embryo.next_due_at.isoformat() if embryo.next_due_at else None,
+            "reason": reason,
+        })
+
+    async def _finalize_timelapse(self):
+        """Drain perception tasks, log trace count, emit completion event."""
+        if self._perception_tasks:
+            pending = list(self._perception_tasks)
+            logger.info(
+                f"Draining {len(pending)} perception task(s) before "
+                f"completing timelapse..."
+            )
+            _done, still_pending = await asyncio.wait(pending, timeout=60.0)
+            if still_pending:
+                logger.warning(
+                    f"{len(still_pending)} perception task(s) did not finish "
+                    f"in 60s - proceeding to completion anyway"
+                )
+            self._perception_tasks.clear()
+
+        if self._trace_dir:
+            try:
+                trace_count = len(list(self._trace_dir.glob("*.json")))
+                logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
+            except Exception:
+                pass
+
+        self._finalize_perception_run("completed")
+
+        self._emit_event(EventType.ACQUISITION_COMPLETED, {
+            "total_timepoints": self._total_timepoints,
+            "duration_minutes": (
+                (datetime.now() - self._started_at).total_seconds() / 60
+                if self._started_at else 0
+            ),
+        })
+
     async def _run_loop(self):
-        """Main acquisition loop - runs in background with round-based scheduling"""
+        """Async per-embryo acquisition loop (Phase 4).
+
+        Priority-queue model: each tick, pick the most-overdue eligible
+        embryo and acquire it. Each embryo carries its own
+        ``next_due_at`` / ``interval_seconds`` / ``cadence_phase`` —
+        independent cadences interleave naturally.
+
+        Exclusive burst (Phase 7): while ``_burst_in_progress`` is set,
+        the loop yields the wheel to the burst executor and skips normal
+        acquisitions until burst completes.
+        """
         try:
             while not self._stop_requested:
-                # Handle pause
+                # Handle pause (whole-session)
                 if self._status == TimelapseStatus.PAUSED:
                     await asyncio.sleep(1)
                     continue
 
-                # Calculate which round we should be on based on elapsed active time
-                elapsed_active = self._get_elapsed_active_time()
-                target_round = int(elapsed_active // self._base_interval_seconds)
-
-                # If we haven't reached next round yet, wait
-                if target_round <= self._current_round:
-                    next_round_time = self._get_round_scheduled_time(self._current_round + 1)
-                    wait_seconds = (next_round_time - datetime.now()).total_seconds()
-                    if wait_seconds > 0:
-                        await asyncio.sleep(min(wait_seconds, 5))  # Check every 5s max
-                    else:
-                        await asyncio.sleep(0.5)
+                # Exclusive burst (Phase 7 wires the executor). For now,
+                # if the flag is set, just yield and check back.
+                if self._burst_in_progress is not None:
+                    await asyncio.sleep(0.2)
                     continue
 
-                # Check if all embryos are complete
-                active_embryos = [e for e in self._embryo_states.values() if not e.is_complete]
-                if not active_embryos:
+                # All embryos complete?
+                active_count = sum(
+                    1 for e in self._embryo_states.values()
+                    if not e.is_complete and not e.should_skip
+                )
+                if active_count == 0:
                     self._status = TimelapseStatus.COMPLETED
-
-                    # Wait for any in-flight perception tasks to land before
-                    # finalizing, otherwise the last few DETECTOR_EVALUATED
-                    # events can land after the completion event and
-                    # confuse listeners.
-                    if self._perception_tasks:
-                        pending = list(self._perception_tasks)
-                        logger.info(
-                            f"Draining {len(pending)} perception task(s) "
-                            f"before completing timelapse..."
-                        )
-                        done, still_pending = await asyncio.wait(pending, timeout=60.0)
-                        if still_pending:
-                            logger.warning(
-                                f"{len(still_pending)} perception task(s) did not "
-                                f"finish in 60s - proceeding to completion anyway"
-                            )
-                        self._perception_tasks.clear()
-
-                    # Log trace file count
-                    if self._trace_dir:
-                        trace_count = len(list(self._trace_dir.glob("*.json")))
-                        logger.info(f"Trace files saved: {trace_count} files in {self._trace_dir}")
-
-                    self._finalize_perception_run("completed")
-
-                    self._emit_event(EventType.ACQUISITION_COMPLETED, {
-                        'total_timepoints': self._total_timepoints,
-                        'duration_minutes': (datetime.now() - self._started_at).total_seconds() / 60,
-                    })
+                    await self._finalize_timelapse()
                     logger.info("Timelapse completed - all embryos finished")
                     break
 
-                # Execute round - ALL active embryos together
-                self._current_round = target_round
-                round_time = self._get_round_scheduled_time(target_round)
+                # Pick the next due embryo (or wait if none ready)
+                embryo, wait_s = self._pick_next_due()
+                if embryo is None:
+                    await asyncio.sleep(max(0.1, wait_s))
+                    continue
 
-                logger.info(f"Starting round {target_round} (scheduled: {round_time.strftime('%H:%M:%S')})")
+                # Acquire this embryo. Each acquisition is awaited here —
+                # the embryo's next_due_at is advanced AFTER acquisition
+                # lands, so we don't pile up overdue items if a single
+                # acquisition takes longer than the interval.
+                if self._stop_requested:
+                    break
+                acquire_start = datetime.now()
+                await self._acquire_embryo(embryo, round_time=acquire_start)
 
-                for embryo_state in active_embryos:
-                    if self._stop_requested:
-                        break
-                    await self._acquire_embryo(embryo_state, round_time=round_time)
-                    await asyncio.sleep(0.5)
+                # Logical acquisition counter (replaces _current_round for
+                # backward-compat with UI consumers that read it).
+                self._current_round += 1
 
-                # Periodically purge orphaned staging files (every 10 rounds)
-                if self._store and target_round % 10 == 0:
+                # Reschedule (anchor at "now" so a slow acquisition doesn't
+                # cause immediate retrigger).
+                self._reschedule(embryo, from_now=True)
+
+                # Small yield between back-to-back picks so other tasks
+                # (perception, event handlers) get cycles.
+                await asyncio.sleep(0.05)
+
+                # Periodic cleanup every ~10 acquisitions.
+                if self._store and self._current_round > 0 and self._current_round % 10 == 0:
                     try:
                         self._store.cleanup_incoming()
                     except Exception:
@@ -384,17 +544,17 @@ class TimelapseOrchestrator:
                 'error': str(e),
             })
 
-    async def _acquire_embryo(self, embryo_state: EmbryoAcquisitionState, round_time: datetime = None):
+    async def _acquire_embryo(self, embryo_state: EmbryoState, round_time: datetime = None):
         """Acquire a single volume for one embryo
 
         Parameters
         ----------
-        embryo_state : EmbryoAcquisitionState
+        embryo_state : EmbryoState
             Embryo state to acquire
         round_time : datetime, optional
             Shared timestamp for all embryos in this round (keeps them in sync)
         """
-        embryo_id = embryo_state.embryo_id
+        embryo_id = embryo_state.id
         embryo = self.experiment.embryos.get(embryo_id)
 
         if not embryo:
@@ -435,6 +595,7 @@ class TimelapseOrchestrator:
                     galvo_center=galvo_center,
                     piezo_amplitude=piezo_amplitude,
                     piezo_center=piezo_center,
+                    laser_power_488_pct=getattr(embryo, 'laser_power_488_pct', None),
                 )
                 num_frames = embryo.num_slices
                 exposure_ms = embryo.exposure_ms
@@ -551,7 +712,7 @@ class TimelapseOrchestrator:
                 exception=e
             )
 
-    async def _check_stop_condition(self, embryo_state: EmbryoAcquisitionState):
+    async def _check_stop_condition(self, embryo_state: EmbryoState):
         """
         Check if ANY stop condition is met (OR logic for composite conditions).
 
@@ -563,13 +724,13 @@ class TimelapseOrchestrator:
             if reason:
                 embryo_state.is_complete = True
                 embryo_state.completion_reason = reason
-                logger.info(f"Embryo {embryo_state.embryo_id} stopped: {reason}")
+                logger.info(f"Embryo {embryo_state.id} stopped: {reason}")
                 return  # Stop on first matching condition
 
     def _evaluate_single_condition(
         self,
         cond: StopCondition,
-        embryo_state: EmbryoAcquisitionState
+        embryo_state: EmbryoState
     ) -> Optional[str]:
         """
         Evaluate a single stop condition.
@@ -578,7 +739,7 @@ class TimelapseOrchestrator:
         ----------
         cond : StopCondition
             Condition to evaluate
-        embryo_state : EmbryoAcquisitionState
+        embryo_state : EmbryoState
             Current embryo state
 
         Returns
@@ -607,7 +768,7 @@ class TimelapseOrchestrator:
 
             # Check perception system for current stage
             if self.perceiver:
-                session = self.perceiver.get_session(embryo_state.embryo_id)
+                session = self.perceiver.get_session(embryo_state.id)
                 if session:
                     current_stage = session.current_stage
                     if current_stage and current_stage in target:
@@ -616,7 +777,7 @@ class TimelapseOrchestrator:
                             embryo_state.detection_triggered_at = embryo_state.timepoints_acquired
                             embryo_state.detection_type = f"stage:{current_stage}"
                             logger.info(
-                                f"Target stage '{current_stage}' detected for {embryo_state.embryo_id} "
+                                f"Target stage '{current_stage}' detected for {embryo_state.id} "
                                 f"at t{embryo_state.timepoints_acquired}, "
                                 f"will acquire {cond.confirm_timepoints} more confirmation timepoints"
                             )
@@ -646,7 +807,7 @@ class TimelapseOrchestrator:
             # Fallback: check legacy hatching_status (for manual marking)
             organism = get_organism()
             if target & organism.TERMINAL_STAGES:
-                embryo = self.experiment.embryos.get(embryo_state.embryo_id)
+                embryo = self.experiment.embryos.get(embryo_state.id)
                 if embryo:
                     hatched_via_status = embryo.hatching_status.get('hatched', False)
                     if hatched_via_status:
@@ -665,13 +826,25 @@ class TimelapseOrchestrator:
         TimelapseState
             Current state with all embryo details
         """
-        # Calculate next round timing
+        # Async cadence: "next round" is meaningless; report the soonest
+        # next_due_at across active embryos so UI consumers still get a
+        # useful "next acquisition" estimate.
         next_round_time = None
         seconds_until_next = None
 
-        if self._status == TimelapseStatus.RUNNING and self._started_at:
-            next_round_time = self._get_round_scheduled_time(self._current_round + 1)
-            seconds_until_next = max(0, (next_round_time - datetime.now()).total_seconds())
+        if self._status == TimelapseStatus.RUNNING and self._embryo_states:
+            due_times = [
+                e.next_due_at for e in self._embryo_states.values()
+                if not e.is_complete
+                and not e.should_skip
+                and getattr(e, "cadence_phase", "normal") != "paused"
+                and e.next_due_at is not None
+            ]
+            if due_times:
+                next_round_time = min(due_times)
+                seconds_until_next = max(
+                    0, (next_round_time - datetime.now()).total_seconds()
+                )
 
         return TimelapseState(
             status=self._status,
@@ -729,19 +902,41 @@ class TimelapseOrchestrator:
             else:
                 stop_cond = StopCondition.manual()
 
-        # Add new embryo state (round-based: no per-embryo interval)
-        self._embryo_states[embryo_id] = EmbryoAcquisitionState(
-            embryo_id=embryo_id,
-            stop_condition=stop_cond,
-        )
+        # Add embryo to the timelapse: set runtime fields on its EmbryoState
+        # and register the reference in _embryo_states.
+        from gently.harness.roles import REGISTRY as ROLE_REGISTRY
+        embryo = self.experiment.embryos[embryo_id]
+        embryo.stop_condition = stop_cond
+        embryo.is_complete = False
+        embryo.completion_reason = None
+        embryo.error_count = 0
+        embryo.last_error = None
+        embryo.detection_triggered_at = None
+        embryo.detection_type = None
+        embryo.no_object_since_timepoint = None
 
-        logger.info(f"Added {embryo_id} to timelapse (will join round {self._current_round + 1})")
+        # Async cadence init for the newcomer.
+        if embryo.interval_seconds is None:
+            role_def = ROLE_REGISTRY.get(embryo.role)
+            embryo.interval_seconds = (
+                role_def.default_cadence_seconds if role_def is not None
+                else self._base_interval_seconds
+            )
+        embryo.cadence_phase = "normal"
+        embryo.next_due_at = datetime.now()  # picked up on next loop tick
+
+        self._embryo_states[embryo_id] = embryo
+
+        logger.info(
+            f"Added {embryo_id} to timelapse "
+            f"(interval={embryo.interval_seconds}s, role={embryo.role})"
+        )
 
         return (
             f"Added {embryo_id} to timelapse\n"
             f"  Stop condition: {stop_cond.condition_type.value}\n"
-            f"  Global interval: {self._base_interval_seconds}s\n"
-            f"  Will start imaging on round {self._current_round + 1}"
+            f"  Interval: {embryo.interval_seconds}s (role: {embryo.role})\n"
+            f"  Will be picked up on next due-loop tick."
         )
 
     async def remove_embryo(self, embryo_id: str, mark_complete: bool = True) -> str:
@@ -791,28 +986,43 @@ class TimelapseOrchestrator:
 
     def modify_interval(self, new_interval_seconds: float) -> str:
         """
-        Change the global acquisition interval (affects all embryos).
+        Broadcast a new acquisition interval to every embryo in this timelapse.
 
-        The change takes effect on the next round.
+        Async cadence: each embryo carries its own ``interval_seconds`` and
+        ``next_due_at``. This convenience method updates every embryo at once
+        (including paused / fast / burst phases — they all get the new
+        interval, though paused embryos stay paused until separately resumed).
+        For per-embryo changes, use ``transition_cadence(embryo, ...)`` or
+        the agent tool ``modify_parameters``.
 
         Parameters
         ----------
         new_interval_seconds : float
-            New interval in seconds (must be >= 10)
-
-        Returns
-        -------
-        str
-            Confirmation message
+            New interval in seconds (must be >= 1)
         """
-        if new_interval_seconds < 10:
-            return "Error: Interval must be at least 10 seconds"
+        if new_interval_seconds < 1:
+            return "Error: Interval must be at least 1 second"
 
-        old_interval = self._base_interval_seconds
+        old_base = self._base_interval_seconds
         self._base_interval_seconds = new_interval_seconds
-        logger.info(f"Interval changed from {old_interval}s to {new_interval_seconds}s")
+        changed = []
+        for eid, embryo in self._embryo_states.items():
+            old_per = embryo.interval_seconds
+            self.transition_cadence(
+                embryo,
+                new_interval_seconds=new_interval_seconds,
+                reason="modify_interval (broadcast)",
+            )
+            changed.append((eid, old_per, new_interval_seconds))
 
-        return f"Interval changed from {old_interval}s to {new_interval_seconds}s (takes effect next round)"
+        logger.info(
+            "Broadcast interval: base %ss -> %ss; %d embryos rescheduled",
+            old_base, new_interval_seconds, len(changed),
+        )
+        return (
+            f"Interval changed to {new_interval_seconds}s across "
+            f"{len(changed)} embryo(s); each rescheduled on next loop tick."
+        )
 
     async def modify_embryo(
         self,
@@ -1076,24 +1286,27 @@ class TimelapseOrchestrator:
                 detector_name=detector_name,
                 stage=stage,
             ):
-                # Round-based: interval rules now modify the global interval
-                old_interval = self._base_interval_seconds
-                self._base_interval_seconds = rule.new_interval_seconds
+                # Async cadence: mutate ONLY the embryos targeted by the rule.
+                # rule.applies_to=None means "all embryos in this timelapse";
+                # otherwise scope to the listed ids.
+                target_ids = rule.applies_to or list(self._embryo_states.keys())
                 applied.add(rule.name)
 
-                logger.info(
-                    f"Applied interval rule '{rule.name}' (triggered by {embryo_id}): "
-                    f"global interval {old_interval}s -> {rule.new_interval_seconds}s"
-                )
-
-                # Emit event
-                self._emit_event(EventType.STATUS_CHANGED, {
-                    'embryo_id': embryo_id,
-                    'change': 'global_interval_adjusted',
-                    'rule': rule.name,
-                    'old_interval': old_interval,
-                    'new_interval': rule.new_interval_seconds,
-                })
+                for tid in target_ids:
+                    target = self._embryo_states.get(tid)
+                    if target is None or target.is_complete:
+                        continue
+                    old_interval = target.interval_seconds
+                    self.transition_cadence(
+                        target,
+                        new_interval_seconds=rule.new_interval_seconds,
+                        reason=f"rule:{rule.name}",
+                    )
+                    logger.info(
+                        "Applied interval rule '%s' (triggered by %s) to %s: "
+                        "%ss -> %ss",
+                        rule.name, embryo_id, tid, old_interval, rule.new_interval_seconds,
+                    )
 
     def _finalize_perception_run(self, status: str = "completed", error_message: str = None):
         """Mark the perception run as finished in FileStore."""
@@ -1158,7 +1371,7 @@ class TimelapseOrchestrator:
         embryo_id: str,
         timepoint: int,
         volume,
-        embryo_state: EmbryoAcquisitionState,
+        embryo_state: EmbryoState,
         volume_uids: dict = None,
     ):
         """Run perception on acquired volume and emit results."""

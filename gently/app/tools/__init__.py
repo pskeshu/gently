@@ -9,6 +9,7 @@ All tools are automatically registered via the @tool decorator when imported.
 from . import experiment_tools
 from . import stage_tools
 from . import led_tools
+from . import light_source_tools
 from . import calibration_tools
 from . import acquisition_tools
 from . import volume_tools

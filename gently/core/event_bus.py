@@ -88,6 +88,9 @@ class EventType(Enum):
     WARNING_ISSUED = auto()
     STATUS_CHANGED = auto()
 
+    # Async timelapse — per-embryo cadence transitions (Phase 4)
+    EMBRYO_CADENCE_CHANGED = auto()  # {embryo_id, old_phase, new_phase, old_interval_s, new_interval_s, next_due_at}
+
     # Data events
     DATA_STORED = auto()
     DATA_RETRIEVED = auto()

@@ -142,13 +142,20 @@ async def execute_plan_item(
             if spec.adaptive_intervals:
                 for stage_key, new_interval in spec.adaptive_intervals.items():
                     try:
-                        orchestrator.add_interval_speedup_rule(
-                            stage=stage_key,
+                        orchestrator.add_speedup_on_stage(
+                            stage_name=stage_key,
                             new_interval_seconds=new_interval,
                         )
                         actions.append(f"interval rule: {stage_key} → {new_interval}s")
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.error(
+                            "Failed to install adaptive interval rule "
+                            "(stage=%s, new_interval=%s): %s",
+                            stage_key, new_interval, e,
+                        )
+                        actions.append(
+                            f"interval rule FAILED: {stage_key} → {new_interval}s ({e})"
+                        )
         except Exception as e:
             actions.append(f"timelapse start error: {e}")
 

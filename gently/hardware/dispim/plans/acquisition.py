@@ -774,6 +774,10 @@ def acquire_single_volume_plan(volume_scanner,
                                  piezo_amplitude: float = 25.0,
                                  piezo_center: float = 50.0,
                                  laser_config: str = "488 and 561",
+                                 laser_power_488_pct: float = None,
+                                 laser_power_561_pct: float = None,
+                                 laser_power_405_pct: float = None,
+                                 laser_power_637_pct: float = None,
                                  timing_params: Optional[Dict] = None,
                                  metadata: Optional[Dict] = None):
     """
@@ -824,7 +828,11 @@ def acquire_single_volume_plan(volume_scanner,
         'galvo_center': galvo_center,
         'piezo_amplitude': piezo_amplitude,
         'piezo_center': piezo_center,
-        'laser_config': laser_config
+        'laser_config': laser_config,
+        'laser_power_488_pct': laser_power_488_pct,
+        'laser_power_561_pct': laser_power_561_pct,
+        'laser_power_405_pct': laser_power_405_pct,
+        'laser_power_637_pct': laser_power_637_pct,
     }
     if metadata:
         _md.update(metadata)
@@ -839,6 +847,13 @@ def acquire_single_volume_plan(volume_scanner,
         logger.info("Galvo: %.3f deg amplitude, %.4f deg center", galvo_amplitude, galvo_center)
         logger.info("Piezo: %.2f um amplitude, %.2f um center", piezo_amplitude, piezo_center)
         logger.info("Lasers: %s", laser_config)
+        power_log = []
+        if laser_power_488_pct is not None: power_log.append(f"488@{laser_power_488_pct}%")
+        if laser_power_561_pct is not None: power_log.append(f"561@{laser_power_561_pct}%")
+        if laser_power_405_pct is not None: power_log.append(f"405@{laser_power_405_pct}%")
+        if laser_power_637_pct is not None: power_log.append(f"637@{laser_power_637_pct}%")
+        if power_log:
+            logger.info("Laser power: %s", ", ".join(power_log))
         logger.info("=" * 70)
 
         # Configure volume scanner
@@ -851,7 +866,11 @@ def acquire_single_volume_plan(volume_scanner,
             piezo_amplitude=piezo_amplitude,
             piezo_center=piezo_center,
             timing_params=timing_params,
-            laser_config=laser_config
+            laser_config=laser_config,
+            laser_power_488_pct=laser_power_488_pct,
+            laser_power_561_pct=laser_power_561_pct,
+            laser_power_405_pct=laser_power_405_pct,
+            laser_power_637_pct=laser_power_637_pct,
         )
 
         # Acquire volume
@@ -1133,3 +1152,37 @@ def set_led_plan(led, state: str = 'Open') -> Generator[Any, Any, dict]:
     """Set LED state."""
     yield from bps.mv(led, state)
     return {'state': state, 'success': True}
+
+
+def set_light_source_power_plan(
+    light_source,
+    wavelength: int,
+    pct: float,
+) -> Generator[Any, Any, dict]:
+    """Set per-line laser power %.
+
+    Hard-limited at the device layer by ``light_source.POWER_LIMITS_PCT``.
+    Out-of-range values raise ``ValueError`` from inside the device setter
+    — the plan will then fail loudly through the queue server.
+    """
+    light_source.set_power_pct(wavelength, pct)
+    yield from bps.null()  # plan must be a generator
+    return {
+        'wavelength': wavelength,
+        'pct': pct,
+        'success': True,
+    }
+
+
+def get_light_source_power_plan(
+    light_source,
+    wavelength: int,
+) -> Generator[Any, Any, dict]:
+    """Read the current per-line laser power %."""
+    value = light_source.get_power_pct(wavelength)
+    yield from bps.null()
+    return {
+        'wavelength': wavelength,
+        'pct': value,
+        'success': True,
+    }

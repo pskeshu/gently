@@ -86,7 +86,8 @@ async def acquire_volume(
             galvo_amplitude=galvo_amplitude,
             galvo_center=galvo_center,
             piezo_amplitude=piezo_amplitude,
-            piezo_center=piezo_center
+            piezo_center=piezo_center,
+            laser_power_488_pct=embryo.laser_power_488_pct,
         )
 
         if result.get('success'):
@@ -109,12 +110,15 @@ async def acquire_volume(
                         agent.session_id, embryo_id,
                         position_x=pos.get('x'), position_y=pos.get('y'),
                         calibration=embryo.calibration,
+                        role=embryo.role,
                     )
                     acq_metadata = {
                         "num_slices": num_slices,
                         "exposure_ms": exposure_ms,
                         "interval_seconds": embryo.interval_seconds,
                         "acquisition_mode": embryo.acquisition_mode,
+                        "laser_power_488_pct": embryo.laser_power_488_pct,
+                        "role": embryo.role,
                         "calibration": {
                             "galvo_amplitude": galvo_amplitude,
                             "galvo_center": galvo_center,

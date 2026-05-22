@@ -93,7 +93,7 @@ class ImageData:
 
 
 @dataclass
-class EmbryoInfo:
+class DatasetEmbryoEntry:
     """Information about an embryo in the dataset."""
     embryo_id: str
     session_id: Optional[str]
@@ -218,7 +218,7 @@ class EmbryoDataset:
         session_id: Optional[str] = None,
         has_ground_truth: Optional[bool] = None,
         min_images: int = 1,
-    ) -> Iterator[EmbryoInfo]:
+    ) -> Iterator[DatasetEmbryoEntry]:
         """
         Iterate through embryos in the dataset.
 
@@ -234,7 +234,7 @@ class EmbryoDataset:
 
         Yields
         ------
-        EmbryoInfo
+        DatasetEmbryoEntry
             Information about each embryo
         """
         # Build query — schema-dependent
@@ -296,7 +296,7 @@ class EmbryoDataset:
                 if not has_ground_truth and has_gt:
                     continue
 
-            yield EmbryoInfo(
+            yield DatasetEmbryoEntry(
                 embryo_id=embryo_id,
                 session_id=sess_id,
                 num_volumes=row[2],

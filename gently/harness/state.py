@@ -1,11 +1,34 @@
 """
-State management for embryos and experiments
+State management for embryos and experiments.
+
+Embryo-related classes across the codebase — single source of truth:
+
+- ``EmbryoState`` (this file): in-memory canonical state during one session.
+  Includes identity, position, calibration, acquisition params, status,
+  exposure tracking, history, and timelapse runtime fields (stop_condition,
+  is_complete, etc.). The agent's ``experiment.embryos`` dict and the
+  orchestrator's ``_embryo_states`` dict both hold references to the SAME
+  ``EmbryoState`` instances — no duplication.
+
+- ``gently.core.store_types.EmbryoInfo`` (TypedDict): on-disk YAML schema
+  for ``embryo.yaml``. Derived from ``EmbryoState`` (subset of fields).
+
+- ``gently.harness.memory.model.EmbryoUnderstanding``: the agent's
+  synthesized belief about an embryo, persisted across sessions. Distinct
+  from state — this is memory/learning, not raw status.
+
+- ``gently.dataset.embryo_dataset.DatasetEmbryoEntry`` (dataclass):
+  catalog entry for an embryo in a benchmark dataset (offline). Distinct
+  domain from ``EmbryoState``.
+
+Historical: ``EmbryoAcquisitionState`` was removed in Phase 1.5 — its
+fields are now on ``EmbryoState`` directly.
 """
 
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
 
@@ -102,6 +125,11 @@ class EmbryoState:
     uid: Optional[str] = None  # Global unique identifier for cross-session tracking
     nickname: Optional[str] = None  # Agent-assigned: "the fast one"
     user_label: Optional[str] = None  # User-provided: "control_1"
+    # Role key into gently.harness.roles.REGISTRY. Drives cadence policy,
+    # detector selection, photodose budget, UI presentation. Default "test"
+    # is the safe choice — accidental Calibration→Test only over-protects;
+    # accidental Test→Calibration would burn extra dose on the precious sample.
+    role: str = "test"
 
     # Position
     stage_position: Dict[str, float] = field(default_factory=dict)  # {'x': 1234.5, 'y': 5678.9}
@@ -114,12 +142,43 @@ class EmbryoState:
     exposure_ms: float = 10.0
     priority: str = "normal"  # high/normal/low
     acquisition_mode: str = "volume"  # "volume" or "snap"
+    # Per-embryo 488 laser power %. None = use device-layer default (no
+    # change at acquire time). Float values are hard-limited at the device
+    # layer by DiSPIMLightSource.POWER_LIMITS_PCT[488] (default 2-6%).
+    laser_power_488_pct: Optional[float] = None
 
     # Status
     last_imaged: Optional[datetime] = None
     timepoints_acquired: int = 0
     should_skip: bool = False
     skip_reason: Optional[str] = None
+
+    # Timelapse runtime state (consolidated from former EmbryoAcquisitionState).
+    # Populated/used by TimelapseOrchestrator while this embryo is part of an
+    # active timelapse. stop_condition is typed Any to avoid inverting the
+    # harness→app dependency direction; the orchestrator stores its
+    # StopCondition object here directly. YAML persistence for these fields
+    # is a Phase 9 concern.
+    stop_condition: Any = None
+    is_complete: bool = False
+    completion_reason: Optional[str] = None
+    error_count: int = 0
+    last_error: Optional[str] = None
+    detection_triggered_at: Optional[int] = None
+    detection_type: Optional[str] = None
+    no_object_since_timepoint: Optional[int] = None
+
+    # Async cadence (Phase 4). Each embryo has its own next_due_at;
+    # _run_loop is a priority queue keyed on next_due_at, not a synchronized
+    # round timer.
+    #   cadence_phase: "normal" | "fast" | "burst" | "paused"
+    #     - normal: image at the role's default interval (e.g. 5 min)
+    #     - fast:   accelerated cadence (e.g. 1 min) after signal onset
+    #     - burst:  this embryo is currently in a burst sequence (Phase 7)
+    #     - paused: skip in the due loop (over-budget, manually paused, or
+    #               idle during another embryo's burst)
+    cadence_phase: str = "normal"
+    next_due_at: Optional[datetime] = None
 
     # Light exposure tracking (for phototoxicity monitoring)
     exposure_count: int = 0  # Number of imaging events (snaps + volumes)
@@ -658,9 +717,15 @@ class EmbryoState:
         """Format for Claude system prompt"""
         status_parts = []
 
-        # Identity
+        # Identity (with role — the agent must see this to behave correctly)
         name = self.nickname or self.user_label or self.id
-        status_parts.append(f"{name} ({self.id})")
+        role_tag = (self.role or "unassigned").upper()
+        status_parts.append(f"{name} ({self.id}) [role={role_tag}]")
+
+        # Cadence phase (async timelapse)
+        phase = getattr(self, "cadence_phase", "normal")
+        if phase and phase != "normal":
+            status_parts.append(f"phase={phase}")
 
         # Timing
         if self.last_imaged:
@@ -680,6 +745,8 @@ class EmbryoState:
         # Current params
         status_parts.append(f"interval={self.interval_seconds}s")
         status_parts.append(f"slices={self.num_slices}")
+        if self.laser_power_488_pct is not None:
+            status_parts.append(f"488={self.laser_power_488_pct}%")
         status_parts.append(f"priority={self.priority}")
 
         return " | ".join(status_parts)
@@ -723,6 +790,7 @@ class EmbryoState:
             'uid': self.uid,
             'nickname': self.nickname,
             'user_label': self.user_label,
+            'role': self.role,
             'stage_position': self.stage_position,
             'calibration': self.calibration,
             'detection_confidence': self.detection_confidence,
@@ -731,6 +799,7 @@ class EmbryoState:
             'exposure_ms': self.exposure_ms,
             'priority': self.priority,
             'acquisition_mode': self.acquisition_mode,
+            'laser_power_488_pct': self.laser_power_488_pct,
             'last_imaged': self.last_imaged.isoformat() if self.last_imaged else None,
             'timepoints_acquired': self.timepoints_acquired,
             'should_skip': self.should_skip,
@@ -772,8 +841,18 @@ class ExperimentState:
 
     def add_embryo(self, embryo_id: str, position: Dict = None,
                    calibration: Dict = None, user_label: Optional[str] = None,
-                   confidence: float = 0.0, uid: Optional[str] = None):
-        """Register new embryo"""
+                   confidence: float = 0.0, uid: Optional[str] = None,
+                   role: str = "test"):
+        """Register new embryo.
+
+        ``role`` must be a key in :data:`gently.harness.roles.REGISTRY`
+        (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Unknown roles
+        raise KeyError.
+        """
+        # Validate role against the registry (lazy import to avoid circular).
+        from gently.harness.roles import get_role
+        get_role(role)  # raises KeyError if unknown
+
         # Auto-start experiment when first embryo is added
         if self.start_time is None:
             self.start_time = datetime.now()
@@ -784,7 +863,8 @@ class ExperimentState:
             stage_position=position or {},
             calibration=calibration or {},
             user_label=user_label,
-            detection_confidence=confidence
+            detection_confidence=confidence,
+            role=role,
         )
 
     def remove_embryo(self, embryo_id: str) -> bool:

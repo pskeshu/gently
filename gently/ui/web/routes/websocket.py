@@ -178,7 +178,39 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                 if session:
                     session["markers"] = markers
                     session["complete"].set()
-                    logger.info(f"Marking complete: {len(markers)} embryo(s)")
+                    role_summary = {}
+                    for m in markers:
+                        r = m.get("role", "test")
+                        role_summary[r] = role_summary.get(r, 0) + 1
+                    logger.info(
+                        f"Marking complete: {len(markers)} embryo(s) "
+                        f"(roles: {role_summary})"
+                    )
+
+        elif msg_type == "marking_redetect":
+            # Client requested recapture + re-run SAM. The agent that started
+            # the marking session is responsible for handling this; we mark
+            # the request on the session and emit an event the agent can
+            # listen for. Once recapture lands, the agent calls
+            # start_marking_session again with the new image + markers.
+            session_id = data.get("session_id")
+            if session_id and hasattr(server, '_marking_sessions'):
+                session = server._marking_sessions.get(session_id)
+                if session is not None:
+                    session["redetect_requested"] = True
+                    logger.info(f"Marking redetect requested for session {session_id}")
+                    try:
+                        from gently.core import EventType, get_event_bus
+                        get_event_bus().publish(
+                            event_type=EventType.STATUS_CHANGED,
+                            data={
+                                "change": "marking_redetect_requested",
+                                "session_id": session_id,
+                            },
+                            source="marking_ws",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to publish redetect event: {e}")
 
     except json.JSONDecodeError:
         logger.warning(f"Invalid JSON received: {message[:100]}")

@@ -971,56 +971,15 @@ Respond in JSON:
         return embryo_positions
 
     def show_in_napari(self, image: np.ndarray, embryos: List[Dict], block: bool = False):
+        """Deprecated: napari display was retired in Phase 1.
+
+        SAM detection results are now reviewed via the web map view —
+        :func:`gently.ui.web.embryo_marker.mark_embryos_web` accepts the
+        detections as ``initial_markers``. This stub is kept so older
+        callers don't import-error; it logs a warning and returns None.
         """
-        Display detection results in napari viewer
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Original image
-        embryos : list
-            Detected embryos (from detect_embryos)
-        block : bool
-            Whether to block until viewer closed (default: False for non-blocking)
-        """
-        try:
-            import napari
-        except ImportError:
-            logger.debug("napari not installed (optional - web visualization available)")
-            return None
-
-        viewer = napari.Viewer(title="Embryo Detection - Review Required")
-        viewer.add_image(image, name='Bottom Camera', colormap='gray')
-
-        # Add bounding boxes
-        shapes = []
-        properties = {'detection_id': [], 'confidence': []}
-
-        for embryo in embryos:
-            bbox = embryo.get('bbox', embryo.get('bbox_pixel'))
-            x, y, w, h = bbox
-            rect = np.array([[y, x], [y, x+w], [y+h, x+w], [y+h, x]])
-            shapes.append(rect)
-            properties['detection_id'].append(embryo['embryo_id'])
-            properties['confidence'].append(embryo['confidence'])
-
-        viewer.add_shapes(
-            shapes,
-            shape_type='rectangle',
-            edge_color='lime',
-            edge_width=2,
-            face_color='transparent',
-            name='Detections',
-            properties=properties,
-            text='detection_id'
+        logger.warning(
+            "show_in_napari is deprecated; use the web map view "
+            "(mark_embryos_web) to review SAM detections."
         )
-
-        logger.info("Napari viewer opened - review green boxes")
-        logger.info("Close viewer or return to CLI to continue")
-
-        if block:
-            napari.run()
-        else:
-            viewer.show(block=False)
-
-        return viewer
+        return None
