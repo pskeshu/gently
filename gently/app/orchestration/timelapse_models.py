@@ -58,6 +58,60 @@ class IntervalRule:
 
 
 @dataclass
+class PowerRule:
+    """
+    Rule for automatically adjusting per-line laser power.
+
+    Phase 5 reactive control. Sticky-monotonic with floor/ceiling, designed
+    for the dopaminergic-reporter experiment's "ramp down on saturation"
+    pattern: trigger on intensity_level == SATURATING, step ``laser_power_488_pct``
+    DOWN by ``step_pct`` until ``floor_pct``, never going up.
+
+    The hard safety limit at DiSPIMLightSource.POWER_LIMITS_PCT is the
+    bottom-line bound; this is the soft control on top.
+    """
+    name: str
+    wavelength: int = 488
+    trigger_detector: Optional[str] = None
+    trigger_intensity_levels: Optional[List[str]] = None  # e.g. ["SATURATING"]
+    trigger_stage: Optional[str] = None
+    step_pct: float = 1.0           # how much to change per firing
+    floor_pct: float = 2.0          # never go below
+    ceiling_pct: float = 6.0        # never go above
+    direction: str = "down"         # "down" (sticky-downward) or "up"
+    applies_to: Optional[List[str]] = None
+    confirm_timepoints: int = 0     # require N consecutive firings before applying
+    one_time: bool = False          # default: fire repeatedly for ramps
+
+    def matches(
+        self,
+        embryo_id: str,
+        detector_name: Optional[str] = None,
+        stage: Optional[str] = None,
+        intensity_level: Optional[str] = None,
+    ) -> bool:
+        if self.applies_to and embryo_id not in self.applies_to:
+            return False
+        if self.trigger_detector and detector_name != self.trigger_detector:
+            return False
+        # Predicates are OR-combined when multiple are set, AND-combined
+        # with the detector filter above (already applied).
+        if self.trigger_intensity_levels and intensity_level in self.trigger_intensity_levels:
+            return True
+        if self.trigger_stage and stage == self.trigger_stage:
+            return True
+        # If only trigger_detector was set (no further filter), require an
+        # explicit predicate match to avoid firing on every detection.
+        return False
+
+    def next_power(self, current_pct: float) -> float:
+        """Return the post-step power %, clipped to [floor, ceiling]."""
+        if self.direction == "down":
+            return max(self.floor_pct, current_pct - self.step_pct)
+        return min(self.ceiling_pct, current_pct + self.step_pct)
+
+
+@dataclass
 class StopCondition:
     """
     Configuration for when to stop imaging an embryo.

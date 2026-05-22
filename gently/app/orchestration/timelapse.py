@@ -34,6 +34,7 @@ from gently.organisms import get_organism
 from .timelapse_models import (
     StopConditionType,
     IntervalRule,
+    PowerRule,
     StopCondition,
     TimelapseStatus,
     TimelapseState,
@@ -69,6 +70,7 @@ class TimelapseOrchestrator:
         on_volume_callback: Optional[Callable] = None,
         session_id: Optional[str] = None,
         store: Optional["FileStore"] = None,
+        claude_client=None,
     ):
         """
         Parameters
@@ -78,18 +80,24 @@ class TimelapseOrchestrator:
         experiment_state : ExperimentState
             Shared experiment state
         perceiver : gently_perception.Perceiver, optional
-            VLM-based perception system for stage classification
+            VLM-based perception system for stage classification (used for
+            ``role=calibration`` embryos via the PerceptionProxy detector).
         on_volume_callback : callable, optional
             Called after each volume: on_volume_callback(embryo_id, timepoint, volume)
         session_id : str, optional
             Session identifier for trace file storage
         store : FileStore, optional
             Unified data store for persisting perception predictions
+        claude_client : anthropic.Anthropic, optional
+            Anthropic SDK client for the ad-hoc Claude detectors
+            (DopaminergicSignalDetector, HatchingDetector, BlankImageDetector).
+            Required for ``role=test`` detection.
         """
         self.client = microscope_client
         self.experiment = experiment_state
         self.perceiver = perceiver
         self.on_volume_callback = on_volume_callback
+        self.claude_client = claude_client
 
         # Trace file storage (writes JSON files to disk)
         self._session_id = session_id
@@ -133,6 +141,15 @@ class TimelapseOrchestrator:
         # Interval adjustment rules
         self._interval_rules: List[IntervalRule] = []
         self._applied_rules: Dict[str, Set[str]] = {}  # embryo_id -> set of applied rule names
+
+        # Phase 5 reactive control: per-line power rules (sticky-downward
+        # ramp on saturation, etc). Evaluated alongside _interval_rules in
+        # _check_adaptive_rules / _check_interval_rules.
+        self._power_rules: List[PowerRule] = []
+        self._power_rule_consecutive: Dict[str, Dict[str, int]] = {}  # embryo_id -> {rule_name: count}
+
+        # Active monitoring modes (declarative anticipation bundles).
+        self._active_monitoring_modes: List[Any] = []
 
         # Async cadence state (Phase 4). Single-burst exclusion handled by
         # _burst_in_progress: while set to an embryo_id, _run_loop skips
@@ -1247,23 +1264,163 @@ class TimelapseOrchestrator:
         """Alias for add_pre_terminal_speedup (backward compatibility)."""
         self.add_pre_terminal_speedup(fast_interval)
 
+    # ------------------------------------------------------------------
+    # Phase 5 convenience helpers — install canonical reactive rules
+    # ------------------------------------------------------------------
+
+    def add_power_rule(self, rule: PowerRule):
+        """Register a PowerRule for adaptive laser-power control."""
+        self._power_rules.append(rule)
+        logger.info("Added power rule: %s", rule.name)
+
+    def add_test_onset_speedup(
+        self,
+        *,
+        fast_interval: float = 60.0,
+        embryo_ids: Optional[List[str]] = None,
+    ):
+        """Install the canonical 'TestEmbryo signal-onset → fast cadence' rule.
+
+        Fires on the ``lit_up`` pseudo-stage emitted by the dopaminergic
+        detector once intensity_level ≥ WEAK. One-time per embryo;
+        applies_to filters to TestEmbryos by default (or specified list).
+        """
+        if embryo_ids is None:
+            embryo_ids = [
+                eid for eid, e in self._embryo_states.items()
+                if getattr(e, "role", "test") == "test"
+            ]
+        rule = IntervalRule(
+            name="test_onset_speedup",
+            trigger_stage="lit_up",
+            new_interval_seconds=fast_interval,
+            applies_to=embryo_ids or None,
+            one_time=True,
+        )
+        self.add_interval_rule(rule)
+        logger.info(
+            "Test-onset speedup installed: %ss on signal onset for %s",
+            fast_interval, embryo_ids or "all test embryos",
+        )
+
+    def add_test_saturation_rampdown(
+        self,
+        *,
+        wavelength: int = 488,
+        step_pct: float = 1.0,
+        floor_pct: float = 2.0,
+        ceiling_pct: float = 6.0,
+        confirm_timepoints: int = 0,
+        embryo_ids: Optional[List[str]] = None,
+    ):
+        """Install the canonical 'TestEmbryo saturation → step laser down' rule.
+
+        Sticky-monotonic downward ramp: fires on intensity_level == SATURATING
+        from the dopaminergic detector, drops ``wavelength`` power by
+        ``step_pct`` (default 1%) until ``floor_pct``. Never increases.
+        Re-fires each round signal saturates (one_time=False) so the ramp
+        can chase the growing signal.
+        """
+        if embryo_ids is None:
+            embryo_ids = [
+                eid for eid, e in self._embryo_states.items()
+                if getattr(e, "role", "test") == "test"
+            ]
+        rule = PowerRule(
+            name=f"test_saturation_rampdown_{wavelength}",
+            wavelength=wavelength,
+            trigger_detector="dopaminergic_signal",
+            trigger_intensity_levels=["SATURATING"],
+            step_pct=step_pct,
+            floor_pct=floor_pct,
+            ceiling_pct=ceiling_pct,
+            direction="down",
+            applies_to=embryo_ids or None,
+            confirm_timepoints=confirm_timepoints,
+            one_time=False,
+        )
+        self.add_power_rule(rule)
+        logger.info(
+            "Test-saturation rampdown installed: %dnm step=%.2f%% floor=%.2f%% for %s",
+            wavelength, step_pct, floor_pct, embryo_ids or "all test embryos",
+        )
+
+    def enable_expression_monitoring(
+        self,
+        *,
+        fast_interval: float = 60.0,
+        rampdown_step_pct: float = 1.0,
+        rampdown_floor_pct: float = 2.0,
+        rampdown_ceiling_pct: float = 6.0,
+    ):
+        """One-call activation of the dopaminergic-onset experiment's
+        reactive package: onset speedup + sticky-downward power ramp.
+
+        Equivalent to::
+
+            orchestrator.enable_monitoring_mode("expression_monitoring")
+
+        See ``gently.app.orchestration.monitoring_modes.ExpressionMonitoringMode``
+        for the declarative form.
+        """
+        from .monitoring_modes import ExpressionMonitoringMode
+        mode = ExpressionMonitoringMode(
+            name="expression_monitoring",
+            description="",
+            fast_interval=fast_interval,
+            rampdown_step_pct=rampdown_step_pct,
+            rampdown_floor_pct=rampdown_floor_pct,
+            rampdown_ceiling_pct=rampdown_ceiling_pct,
+        )
+        mode.activate(self)
+        self._active_monitoring_modes.append(mode)
+        return f"Activated monitoring mode '{mode.name}': {mode.description}"
+
+    def enable_monitoring_mode(
+        self,
+        name: str,
+        *,
+        embryo_ids: Optional[List[str]] = None,
+        **mode_kwargs,
+    ) -> str:
+        """Activate a named MonitoringMode from the registry.
+
+        ``name`` is a key in
+        ``gently.app.orchestration.monitoring_modes.MONITORING_MODES``
+        (e.g. ``"expression_monitoring"``, ``"pre_terminal_monitoring"``,
+        ``"idle"``). Extra kwargs are forwarded to the mode's
+        constructor (e.g. ``fast_interval=30.0``).
+        """
+        from .monitoring_modes import MONITORING_MODES
+        factory = MONITORING_MODES.get(name)
+        if factory is None:
+            return (
+                f"Unknown monitoring mode: {name!r}. "
+                f"Available: {sorted(MONITORING_MODES.keys())}"
+            )
+        mode = factory(**mode_kwargs) if mode_kwargs else factory()
+        mode.activate(self, embryo_ids=embryo_ids)
+        self._active_monitoring_modes.append(mode)
+        return f"Activated monitoring mode '{mode.name}': {mode.description}"
+
     def _check_interval_rules(
         self,
         embryo_id: str,
         detector_name: Optional[str] = None,
         stage: Optional[str] = None,
+        intensity_level: Optional[str] = None,
+        structure_quality: Optional[str] = None,
     ):
         """
-        Check if any interval rules should apply
+        Evaluate all adaptive rules (interval + power) against a fresh
+        detection event and apply matching ones.
 
-        Parameters
-        ----------
-        embryo_id : str
-            Embryo to check
-        detector_name : str, optional
-            Detector that just fired
-        stage : str, optional
-            Stage that was detected
+        Despite the legacy name, this method now drives **both**
+        ``IntervalRule`` and ``PowerRule`` evaluation — Phase 5 reactive
+        control. ``intensity_level`` and ``structure_quality`` are passed
+        from ``_run_detector`` (Phase 2) so power rules can fire on
+        ``SATURATING`` etc.; ``stage`` keeps the existing perception-driven
+        cadence triggers working.
         """
         if embryo_id not in self._embryo_states:
             return
@@ -1274,6 +1431,67 @@ class TimelapseOrchestrator:
         if embryo_id not in self._applied_rules:
             self._applied_rules[embryo_id] = set()
         applied = self._applied_rules[embryo_id]
+
+        # ---- Power rules (Phase 5 sticky-downward ramp etc.) ----
+        if embryo_id not in self._power_rule_consecutive:
+            self._power_rule_consecutive[embryo_id] = {}
+        consec = self._power_rule_consecutive[embryo_id]
+
+        for prule in self._power_rules:
+            matches = prule.matches(
+                embryo_id=embryo_id,
+                detector_name=detector_name,
+                stage=stage,
+                intensity_level=intensity_level,
+            )
+
+            # Track consecutive matches for confirm_timepoints.
+            if matches:
+                consec[prule.name] = consec.get(prule.name, 0) + 1
+            else:
+                consec[prule.name] = 0
+                continue
+
+            if consec[prule.name] < max(1, prule.confirm_timepoints + 1):
+                continue  # need more consecutive matches before applying
+
+            if prule.one_time and prule.name in applied:
+                continue
+
+            current = estate.laser_power_488_pct if prule.wavelength == 488 else None
+            if current is None:
+                # Embryo doesn't have a per-embryo override yet — fall back
+                # to the experiment-wide default (or 4.0 if nothing set).
+                current = 4.0
+            new_pct = prule.next_power(current)
+            if abs(new_pct - current) < 1e-6:
+                # At floor/ceiling — nothing to do.
+                if prule.one_time:
+                    applied.add(prule.name)
+                continue
+
+            if prule.wavelength == 488:
+                estate.laser_power_488_pct = new_pct
+            # (Future wavelengths: extend EmbryoState similarly.)
+            self._emit_event(EventType.STATUS_CHANGED, {
+                "embryo_id": embryo_id,
+                "change": "laser_power_stepped",
+                "rule": prule.name,
+                "wavelength": prule.wavelength,
+                "old_pct": current,
+                "new_pct": new_pct,
+                "direction": prule.direction,
+                "intensity_level": intensity_level,
+            })
+            logger.info(
+                "Applied PowerRule '%s' on %s: %dnm %.2f%% -> %.2f%% "
+                "(direction=%s, intensity=%s)",
+                prule.name, embryo_id, prule.wavelength,
+                current, new_pct, prule.direction, intensity_level,
+            )
+
+            if prule.one_time:
+                applied.add(prule.name)
 
         for rule in self._interval_rules:
             # Skip if already applied (for one-time rules)
@@ -1366,6 +1584,175 @@ class TimelapseOrchestrator:
             logger.warning(f"Unexpected volume dimensions: {volume.ndim}")
             return None, None
 
+    async def _run_detector(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        volume,
+        embryo_state: EmbryoState,
+        detector_name: str,
+        volume_uids: dict = None,
+    ):
+        """Run a role-declared Detector (Phase 2) and persist + emit results.
+
+        This is the path for ``role=test`` (DopaminergicSignalDetector) and
+        any other role that declares a non-"perception" detector. The
+        existing PerceptionProxy could route through here too, but for
+        backward compatibility we keep the original Perceiver code path
+        live for ``role=calibration``.
+        """
+        from gently.app.detectors import get_detector
+
+        detector = get_detector(
+            detector_name,
+            claude_client=self.claude_client,
+            perceiver=self.perceiver,
+        )
+        if detector is None:
+            logger.warning(
+                "Unknown detector '%s' for embryo %s — skipping detection",
+                detector_name, embryo_id,
+            )
+            return
+
+        # Build context. Calibration params (Phase 6) get plumbed here once
+        # captured at session start — for now pass None.
+        context = {
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "claude": self.claude_client,
+            "perceiver": self.perceiver,
+            "calibration": getattr(self, "_calibration_data", None),
+        }
+
+        try:
+            result = await detector.run(volume, context)
+        except Exception as e:
+            logger.error("Detector %s failed for %s: %s", detector_name, embryo_id, e)
+            return
+
+        # Capture commonly-needed findings up top so we don't repeat lookups.
+        findings = result.findings or {}
+        intensity_level = findings.get("intensity_level")
+        structure_quality = findings.get("structure_quality")
+        has_hatched = bool(findings.get("has_hatched"))
+
+        # Mirror onto EmbryoState for the agent's prompt + rule machinery.
+        try:
+            embryo_state.cv_analyses.setdefault(detector_name, []).append({
+                "timepoint": timepoint,
+                "intensity_level": intensity_level,
+                "structure_quality": structure_quality,
+                "has_hatched": has_hatched,
+                "reasoning": result.reasoning,
+            })
+            # Keep a rolling cap so cv_analyses doesn't grow unbounded.
+            if len(embryo_state.cv_analyses[detector_name]) > 200:
+                embryo_state.cv_analyses[detector_name] = (
+                    embryo_state.cv_analyses[detector_name][-200:]
+                )
+            # If detector flagged hatched, update legacy field too.
+            if has_hatched:
+                embryo_state.hatching_status = {
+                    "hatched": True,
+                    "confidence": "claude",
+                    "timepoint": timepoint,
+                    "source": detector_name,
+                }
+        except Exception:
+            pass
+
+        # Persist trace JSON
+        trace_data = {
+            "session_id": self._session_id,
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "timestamp": result.timestamp.isoformat(),
+            "detector": detector_name,
+            "findings": findings,
+            "reasoning": result.reasoning,
+            "raw_response": result.raw_response,
+            "elapsed_ms": result.elapsed_ms,
+            "error": result.error,
+        }
+        if self._trace_dir:
+            try:
+                self._write_trace_file(embryo_id, timepoint, trace_data)
+            except Exception as e:
+                logger.warning(f"Failed to write trace file: {e}")
+
+        # Persist into predictions.jsonl. predicted_stage is required by
+        # the FileStore schema; for the dopaminergic detector we synthesize
+        # a pseudo-stage so downstream consumers see something meaningful
+        # ("lit_up" once intensity is non-NONE, "hatched", "blank" otherwise).
+        if intensity_level == "SATURATING":
+            pseudo_stage = "lit_up_saturating"
+        elif intensity_level in ("STRONG", "MEDIUM", "WEAK"):
+            pseudo_stage = "lit_up"
+        elif has_hatched:
+            pseudo_stage = "hatched"
+        else:
+            pseudo_stage = "no_object" if intensity_level == "NONE" else (intensity_level or "unknown")
+
+        if self._store and self._perception_run_id and self._session_id:
+            try:
+                self._store.store_prediction(
+                    run_id=self._perception_run_id,
+                    session_id=self._session_id,
+                    embryo_id=embryo_id,
+                    timepoint=timepoint,
+                    predicted_stage=pseudo_stage,
+                    reasoning=result.reasoning,
+                    trace_data=trace_data,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to store prediction: {e}")
+
+        # Emit the detector-evaluated event so UI / rule machinery can
+        # react. We surface findings alongside a "stage" so existing
+        # listeners (e.g. _check_interval_rules using trigger_stage) keep
+        # working without modification.
+        event_data = {
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "detector_name": detector_name,
+            "stage": pseudo_stage,
+            "findings": findings,
+            "reasoning": result.reasoning,
+            "intensity_level": intensity_level,
+            "structure_quality": structure_quality,
+            "has_hatched": has_hatched,
+            "error": result.error,
+        }
+        if volume_uids:
+            event_data["volume_uid"] = volume_uids.get("volume_uid")
+            event_data["projection_uid"] = volume_uids.get("projection_uid")
+        self._emit_event(EventType.DETECTOR_EVALUATED, event_data)
+
+        if has_hatched:
+            self._emit_event(EventType.HATCHING_DETECTED, {
+                "embryo_id": embryo_id,
+                "timepoint": timepoint,
+                "detector_name": detector_name,
+                "stage": "hatched",
+            })
+
+        # Drive Phase 5 reactive rules — pass both the pseudo-stage and
+        # the detailed findings so rules can match either.
+        self._check_interval_rules(
+            embryo_id=embryo_id,
+            detector_name=detector_name,
+            stage=pseudo_stage,
+            intensity_level=intensity_level,
+            structure_quality=structure_quality,
+        )
+
+        logger.info(
+            "[%s] T%d: detector=%s intensity=%s structure=%s hatched=%s",
+            embryo_id, timepoint, detector_name,
+            intensity_level, structure_quality, has_hatched,
+        )
+
     async def _run_perception(
         self,
         embryo_id: str,
@@ -1374,7 +1761,36 @@ class TimelapseOrchestrator:
         embryo_state: EmbryoState,
         volume_uids: dict = None,
     ):
-        """Run perception on acquired volume and emit results."""
+        """Run the per-role detector on the acquired volume and emit results.
+
+        Routes by ``embryo.role`` via the detector registry:
+        - calibration → PerceptionProxy (existing nuclear-marker classifier)
+        - test       → DopaminergicSignalDetector (Claude vision)
+        - unassigned → treated like test (safer default)
+
+        Roles can declare ``detector_name=None`` to opt out of any detector.
+        """
+        # Role-routed detection — Phase 2 wiring. If the role declares a
+        # detector other than the standard "perception", branch into the
+        # ad-hoc detector path; otherwise fall through to the original
+        # Perceiver-based flow below.
+        from gently.harness.roles import REGISTRY as ROLE_REGISTRY
+        from gently.app.detectors import get_detector
+
+        role_def = ROLE_REGISTRY.get(getattr(embryo_state, "role", "test"))
+        detector_name = role_def.detector_name if role_def else None
+
+        if detector_name and detector_name != "perception":
+            await self._run_detector(
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                volume=volume,
+                embryo_state=embryo_state,
+                detector_name=detector_name,
+                volume_uids=volume_uids,
+            )
+            return
+
         # Skip perception for no_object embryos (except periodic rechecks)
         if embryo_state.no_object_since_timepoint is not None:
             timepoints_since = timepoint - embryo_state.no_object_since_timepoint

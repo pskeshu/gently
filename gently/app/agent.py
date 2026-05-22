@@ -465,6 +465,7 @@ class MicroscopyAgent:
                 on_volume_callback=self.on_volume_acquired,
                 session_id=self.session_id,
                 store=self.store,
+                claude_client=self.claude,
             )
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
