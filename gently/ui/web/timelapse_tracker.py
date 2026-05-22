@@ -384,3 +384,35 @@ class TimelapseStateTracker:
     def reset(self):
         """Clear state for new timelapse"""
         self.__init__()
+
+    def seed_from_experiment(self, experiment) -> int:
+        """Seed embryo positions / roles directly from an
+        ``ExperimentState``. Belt-and-suspenders for the event-bus
+        replay path: if the tracker started AFTER ``add_embryo`` calls
+        fired (e.g. session resume happens in agent ``__init__`` but
+        ``start_viz_server`` runs later), the in-memory event history
+        may have rolled past those events. This pulls the current
+        truth from the agent's experiment directly.
+
+        Returns the number of embryos seeded.
+        """
+        if experiment is None:
+            return 0
+        seeded = 0
+        for eid, emb in (getattr(experiment, "embryos", {}) or {}).items():
+            pos = getattr(emb, "stage_position", None) or {}
+            x = pos.get("x") if isinstance(pos, dict) else None
+            y = pos.get("y") if isinstance(pos, dict) else None
+            if x is None or y is None:
+                continue
+            self.handle_event("EMBRYO_DETECTED", {
+                "embryo_id": eid,
+                "uid": getattr(emb, "uid", None),
+                "x": x,
+                "y": y,
+                "role": getattr(emb, "role", "test"),
+                "user_label": getattr(emb, "user_label", None),
+                "confidence": getattr(emb, "detection_confidence", None),
+            })
+            seeded += 1
+        return seeded

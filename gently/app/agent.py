@@ -554,6 +554,23 @@ class MicroscopyAgent:
             await self.viz_server.start()
             scheme = "https" if ssl_certfile else "http"
             logger.info(f"Visualization server started at {scheme}://localhost:{port}")
+            # Seed the viz tracker with current experiment state. The
+            # event-bus replay path covers most cases, but in-memory event
+            # history can roll past EMBRYO_DETECTED emissions from session
+            # resume that happened in __init__ before this viz_server was
+            # ever instantiated. Direct seeding makes the device-map
+            # embryo overlay reliable across all startup orderings.
+            try:
+                tracker = getattr(self.viz_server, "timelapse_tracker", None)
+                if tracker is not None and hasattr(tracker, "seed_from_experiment"):
+                    n = tracker.seed_from_experiment(self.experiment)
+                    if n:
+                        logger.info(
+                            "Seeded viz tracker with %d embryo(s) from experiment.",
+                            n,
+                        )
+            except Exception as e:
+                logger.debug("seed_from_experiment failed (non-fatal): %s", e)
         except ImportError as e:
             logger.warning(f"FastAPI not available for viz server: {e}")
             self.viz_server = None
