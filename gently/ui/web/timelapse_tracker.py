@@ -141,6 +141,9 @@ class TimelapseStateTracker:
                     "detected": data.get("detected", data.get("is_hatching", False)),
                     "confidence": data.get("confidence"),
                     "reasoning": data.get("reasoning"),
+                    # Perceiver prose from the two-stage dopaminergic detector
+                    # (None for legacy single-call detectors / perception).
+                    "description": data.get("description"),
                     "timepoint": timepoint,
                     "volume_uid": data.get("volume_uid"),
                     "projection_uid": data.get("projection_uid") or projection_uid,  # Use stored UID as fallback

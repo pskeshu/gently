@@ -6463,6 +6463,110 @@ kbd {
 }
 
 /* ========================================
+   TWO-STAGE DETECTOR: Perceiver / Classifier blocks
+   ======================================== */
+
+.vlm-analysis.two-stage {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+.vlm-perceiver-text {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+    background: linear-gradient(90deg, rgba(34, 211, 238, 0.08) 0%, var(--bg-card) 100%);
+    padding: 1rem 1.25rem;
+    border-left: 3px solid var(--accent-cyan);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    position: relative;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.vlm-stage-label {
+    display: inline-block;
+    background: var(--accent-cyan);
+    color: white;
+    font-size: 0.65rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    font-style: normal;
+    margin-bottom: 0.5rem;
+}
+
+.vlm-stage-label.classifier {
+    background: var(--accent-purple);
+}
+
+.detection-card.detected .vlm-stage-label.classifier {
+    background: var(--accent-green);
+}
+
+/* When a classifier block sits next to a perceiver block, suppress the
+   pseudo-element "VLM Analysis" badge — the inline label is the source
+   of truth and the duplicate looks noisy. */
+.detection-reasoning-text.two-stage {
+    margin-top: 0;
+}
+.detection-reasoning-text.two-stage::before {
+    display: none;
+}
+
+.vlm-stage-body {
+    margin-top: 0;
+}
+
+/* Detail panel (right side of reasoning view) — perceiver block. The
+   list-view uses .vlm-perceiver-text; the detail panel needs its own
+   variant that matches the surrounding .detail-reasoning styling. */
+.detail-perceiver {
+    margin-bottom: 0.75rem;
+}
+
+.vlm-perceiver-text-detail {
+    font-size: 0.9rem;
+    line-height: 1.6;
+    color: var(--text);
+    background: linear-gradient(90deg, rgba(34, 211, 238, 0.08) 0%, var(--bg-card) 100%);
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--accent-cyan);
+    border-radius: 0 8px 8px 0;
+    font-style: italic;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+/* Pretty-printed classifier JSON — shown below the prose reasoning so
+   the structured output the classifier emits to the orchestrator is
+   visible alongside the natural-language reasoning. */
+.classifier-json {
+    margin-top: 0.6rem;
+    padding: 0.75rem 1rem;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(192, 132, 252, 0.25);
+    border-radius: 6px;
+    font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem;
+    line-height: 1.45;
+    color: var(--text);
+    overflow-x: auto;
+    white-space: pre;
+}
+.classifier-json code {
+    background: transparent;
+    padding: 0;
+    color: inherit;
+    font-family: inherit;
+}
+
+/* ========================================
    SEMANTIC COLOR TOKENS
    ======================================== */
 

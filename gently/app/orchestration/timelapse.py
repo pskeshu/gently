@@ -2553,6 +2553,16 @@ class TimelapseOrchestrator:
         # react. We surface findings alongside a "stage" so existing
         # listeners (e.g. _check_interval_rules using trigger_stage) keep
         # working without modification.
+        #
+        # For the two-stage dopaminergic detector, ``result.raw_response``
+        # is a dict containing the perceiver's prose. Surface that prose
+        # as ``description`` on the event so the reasoning panel can show
+        # it alongside the classifier's one-line reasoning. Older
+        # single-call detectors emit ``raw_response`` as a string —
+        # ignore it then.
+        description = None
+        if isinstance(result.raw_response, dict):
+            description = result.raw_response.get("description")
         event_data = {
             "embryo_id": embryo_id,
             "timepoint": timepoint,
@@ -2560,6 +2570,7 @@ class TimelapseOrchestrator:
             "stage": pseudo_stage,
             "findings": findings,
             "reasoning": result.reasoning,
+            "description": description,
             "intensity_level": intensity_level,
             "structure_quality": structure_quality,
             "has_hatched": has_hatched,
@@ -2576,6 +2587,7 @@ class TimelapseOrchestrator:
             "detector_name": detector_name,
             "findings": findings,
             "reasoning": result.reasoning,
+            "description": description,
         })
 
         if has_hatched:

@@ -1242,6 +1242,9 @@ const EmbryosManager = {
             detected: detected,
             confidence: data.confidence,
             reasoning: data.reasoning,
+            // Perceiver prose from the two-stage dopaminergic detector.
+            // Null for legacy single-call detectors / perception.
+            description: data.description,
             volume_uid: data.volume_uid ?? null,
             projection_uid: data.projection_uid ?? null,
             timestamp: new Date().toISOString(),
@@ -2479,6 +2482,31 @@ const EmbryosManager = {
             reasoningText: reasoning
         });
 
+        // Two-stage detectors (dopaminergic_signal) ship a perceiver
+        // description alongside the classifier reasoning. Render it as a
+        // separate block above the classifier; relabel the classifier
+        // block from "VLM Summary" to "Classifier" so the two-stage
+        // architecture is visually explicit.
+        const hasDescription = !!item.description;
+        const perceiverDetailHtml = hasDescription
+            ? `<div class="detail-perceiver">
+                   <div class="reasoning-label">&#x1F441; Perceiver</div>
+                   <div class="vlm-perceiver-text-detail">${this.escapeHtml(item.description)}</div>
+               </div>`
+            : '';
+        const classifierLabel = hasDescription ? '&#x2699; Classifier' : 'VLM Summary';
+        // Pretty-printed JSON of the classifier output (only for the
+        // two-stage path — single-call detectors don't carry these
+        // structured fields).
+        const classifierJsonDetailHtml = hasDescription
+            ? `<pre class="classifier-json"><code>${this.escapeHtml(JSON.stringify({
+                   intensity_level: item.intensity_level,
+                   structure_quality: item.structure_quality,
+                   has_hatched: item.has_hatched,
+                   reasoning: item.reasoning,
+               }, null, 2))}</code></pre>`
+            : '';
+
         // Build metadata for lightbox
         const lightboxMeta = {
             embryo_id: this.selectedEmbryoId,
@@ -2720,9 +2748,11 @@ const EmbryosManager = {
                 <div class="detail-split-right">
                     ${contrastiveHtml}
                     ${reasoningTraceHtml}
+                    ${perceiverDetailHtml}
                     <div class="detail-reasoning">
-                        <div class="reasoning-label">VLM Summary</div>
+                        <div class="reasoning-label">${classifierLabel}</div>
                         <div class="reasoning-text">${linkedReasoning}</div>
+                        ${classifierJsonDetailHtml}
                     </div>
                     <div class="chat-panel"
                          data-embryo-id="${this.selectedEmbryoId}"
@@ -3010,37 +3040,62 @@ const EmbryosManager = {
             ? (isPositiveHighlight ? 'detection-card positive-highlight' : 'detection-card detected')
             : 'detection-card';
 
-        // Reasoning section - collapsible for non-detected, always visible for detected
-        // Use linkifyTimepoints to make timepoint references clickable for video playback
+        // VLM analysis section. Two-stage detectors (dopaminergic_signal)
+        // emit both a perceiver description (free prose, what the model
+        // saw) and a classifier reasoning (one-line rubric pick). Show
+        // them as two labelled blocks so the audience can see observation
+        // vs classification separately. Single-call detectors just emit
+        // reasoning and get the classifier block alone.
         let reasoningHtml = '';
-        if (detection.reasoning) {
-            // Build context for the linkifier
+        if (detection.description || detection.reasoning) {
+            const embryoId = this.selectedEmbryoId || '';
             const linkContext = {
                 detectionPoint: detection.detected ? detection.timepoint : null,
-                reasoningText: detection.reasoning
+                reasoningText: detection.reasoning || ''
             };
-            const embryoId = this.selectedEmbryoId || '';
-            const linkedReasoning = this.linkifyTimepoints(detection.reasoning, embryoId, linkContext);
+            const linkedReasoning = detection.reasoning
+                ? this.linkifyTimepoints(detection.reasoning, embryoId, linkContext)
+                : '';
+
+            const isTwoStage = !!detection.description;
+            const perceiverBlock = detection.description
+                ? `<div class="vlm-perceiver-text">
+                       <span class="vlm-stage-label perceiver">&#x1F441; Perceiver</span>
+                       <div class="vlm-stage-body">${this.escapeHtml(detection.description)}</div>
+                   </div>`
+                : '';
+            // Pretty-printed JSON of the classifier's structured output —
+            // shown alongside the prose so the audience can see the
+            // exact decision the classifier emitted to the orchestrator.
+            const classifierJsonBlock = isTwoStage
+                ? `<pre class="classifier-json"><code>${this.escapeHtml(JSON.stringify({
+                       intensity_level: detection.intensity_level,
+                       structure_quality: detection.structure_quality,
+                       has_hatched: detection.has_hatched,
+                       reasoning: detection.reasoning,
+                   }, null, 2))}</code></pre>`
+                : '';
+            const classifierBlock = detection.reasoning
+                ? `<div class="detection-reasoning-text ${isTwoStage ? 'two-stage' : ''}">
+                       ${isTwoStage ? '<span class="vlm-stage-label classifier">&#x2699; Classifier</span>' : ''}
+                       <div class="vlm-stage-body">${linkedReasoning}</div>
+                       ${classifierJsonBlock}
+                   </div>`
+                : '';
+            const inner = perceiverBlock + classifierBlock;
 
             if (detection.detected) {
-                // For positive detections, always show reasoning with clickable timepoints
-                reasoningHtml = `
-                    <div class="detection-reasoning-text">
-                        ${linkedReasoning}
-                    </div>
-                `;
+                reasoningHtml = `<div class="vlm-analysis ${isTwoStage ? 'two-stage' : ''}">${inner}</div>`;
             } else {
-                // For negative detections, make reasoning collapsible
+                const label = isTwoStage ? 'analysis' : 'VLM reasoning';
                 reasoningHtml = `
                     <button class="reasoning-toggle ${reasoningExpanded ? 'expanded' : ''}"
                             onclick="event.stopPropagation(); EmbryosManager.toggleReasoning('${index}')">
                         <span class="chevron">&#x25B6;</span>
-                        ${reasoningExpanded ? 'Hide' : 'Show'} VLM reasoning
+                        ${reasoningExpanded ? 'Hide' : 'Show'} ${label}
                     </button>
                     <div class="reasoning-content ${reasoningExpanded ? 'expanded' : ''}" id="reasoning-${index}">
-                        <div class="detection-reasoning-text">
-                            ${linkedReasoning}
-                        </div>
+                        <div class="vlm-analysis ${isTwoStage ? 'two-stage' : ''}">${inner}</div>
                     </div>
                 `;
             }
