@@ -100,6 +100,14 @@ class EventType(Enum):
     # Reactive control telemetry (Phase 5 / 10)
     POWER_RAMP_STEP = auto()  # {embryo_id, rule, wavelength, old_pct, new_pct, direction}
 
+    # Adaptive rule fired (Phase 5 / 10) — discrete trigger event separate
+    # from the EMBRYO_CADENCE_CHANGED / POWER_RAMP_STEP it caused, so the
+    # strategy / experiment view can replay rule firings independently of
+    # whatever side-effect they had on cadence or laser power.
+    # {embryo_id, rule_name, rule_kind ("interval"|"power"), trigger_detector,
+    #  trigger_stage, trigger_intensity_level, applied: {...}}
+    TRIGGER_FIRED = auto()
+
     # Per-detector findings stream (Phase 2 / 10)
     CLAUDE_DETECTOR_RESULT = auto()  # {embryo_id, timepoint, detector_name, findings}
 

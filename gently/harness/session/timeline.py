@@ -158,6 +158,12 @@ EVENT_MAPPING = {
         'icon': '+',
         'severity': 'success',
     },
+    EventType.ACQUISITION_STOPPED: {
+        'event_type': 'timelapse',
+        'event_subtype': 'stopped',
+        'icon': '-',
+        'severity': 'info',
+    },
     EventType.ACQUISITION_FAILED: {
         'event_type': 'timelapse',
         'event_subtype': 'failed',
@@ -180,6 +186,45 @@ EVENT_MAPPING = {
         'event_type': 'detection',
         'event_subtype': 'hatching',
         'icon': '+',
+        'severity': 'success',
+    },
+    # Strategy / experiment view persistence — these were already emitted on
+    # the EventBus but weren't being captured to timeline.jsonl, so the
+    # swimlane view had no event history to replay.
+    EventType.EMBRYO_CADENCE_CHANGED: {
+        'event_type': 'timelapse',
+        'event_subtype': 'cadence_changed',
+        'icon': '~',
+        'severity': 'info',
+    },
+    EventType.POWER_RAMP_STEP: {
+        'event_type': 'timelapse',
+        'event_subtype': 'power_changed',
+        'icon': '*',
+        'severity': 'info',
+    },
+    EventType.TRIGGER_FIRED: {
+        'event_type': 'timelapse',
+        'event_subtype': 'trigger_fired',
+        'icon': '<>',
+        'severity': 'info',
+    },
+    EventType.BURST_QUEUED: {
+        'event_type': 'timelapse',
+        'event_subtype': 'burst_queued',
+        'icon': 'q',
+        'severity': 'info',
+    },
+    EventType.BURST_START: {
+        'event_type': 'timelapse',
+        'event_subtype': 'burst_started',
+        'icon': '^',
+        'severity': 'info',
+    },
+    EventType.BURST_COMPLETE: {
+        'event_type': 'timelapse',
+        'event_subtype': 'burst_completed',
+        'icon': 'v',
         'severity': 'success',
     },
 }

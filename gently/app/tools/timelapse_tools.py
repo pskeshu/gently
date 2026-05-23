@@ -4,7 +4,7 @@ Timelapse Orchestration Tools
 Tools for managing adaptive timelapse acquisitions.
 """
 
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from gently.harness.tools.registry import tool, ToolCategory
 from gently.harness.tools.helpers import (
@@ -46,7 +46,11 @@ async def generate_bluesky_plan(
 
 @tool(
     name="start_adaptive_timelapse",
-    description="Start an adaptive timelapse that runs in the background. Agent remains responsive while acquisition continues.",
+    description=(
+        "Start an adaptive timelapse that runs in the background. Agent remains responsive while acquisition continues. "
+        "Pass `monitoring_mode='expression_monitoring'` for fluorescent-reporter experiments to install reactive cadence + power rules at startup. "
+        "Other monitoring_mode values: 'pre_terminal_monitoring' (hatching-timing experiments), 'idle' (plain imaging, no reactive rules)."
+    ),
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
@@ -55,6 +59,7 @@ async def start_adaptive_timelapse(
     stop_condition: str = "manual",
     interval_seconds: float = 120.0,
     condition_value: int = None,
+    monitoring_mode: Optional[str] = None,
     context: Dict = None
 ) -> str:
     """Start adaptive timelapse in background"""
@@ -88,6 +93,16 @@ async def start_adaptive_timelapse(
                         result += f"\n(Auto-linked to plan item: '{linked}')"
         except Exception:
             pass  # Never block timelapse
+
+        # Optionally install a monitoring mode at startup. The mode IS the
+        # reactive control — without one, embryos stay at base interval
+        # regardless of what detectors observe.
+        if monitoring_mode and monitoring_mode != "idle":
+            try:
+                mode_result = orchestrator.enable_monitoring_mode(monitoring_mode)
+                result += f"\n{mode_result}"
+            except Exception as e:
+                result += f"\n(Failed to enable monitoring mode '{monitoring_mode}': {e})"
 
         return result
     except Exception as e:
@@ -613,3 +628,188 @@ def predict_hatching(
             lines.append(f"  Development rate: {abs(rate_pct):.1f}% {speed} than standard")
 
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Reactive monitoring modes (Phase 5) — high-level "install canonical
+# detector → cadence + power reactive rules" entry points. Without one of
+# these installed, embryos stay at base interval regardless of what
+# detectors see.
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    name="enable_monitoring_mode",
+    description=(
+        "Install a named reactive monitoring mode on the running timelapse. "
+        "The mode IS the reactive control — without one, embryos stay at base "
+        "interval no matter what detectors see. WHEN TO USE: call once, "
+        "immediately after start_adaptive_timelapse + assign_embryo_roles. "
+        "Safe to re-call (modes are additive). "
+        "Modes: "
+        "'expression_monitoring' — for fluorescent-reporter onset experiments "
+        "(GFP, mCherry, dat-1::GFP, dopaminergic, anything where signal turns on); "
+        "installs WEAK+ -> 60s speedup + SATURATING -> 488 rampdown on test-role "
+        "embryos. "
+        "'pre_terminal_monitoring' — for hatching-timing / pre-hatch dynamics "
+        "experiments; speeds up cadence on the organism's pre-terminal stage. "
+        "'idle' — plain exploratory imaging with no reactive rules."
+    ),
+    category=ToolCategory.EXPERIMENT,
+)
+def enable_monitoring_mode(
+    mode_name: str,
+    context: Dict = None,
+) -> str:
+    """Install a named reactive monitoring mode on the orchestrator."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+
+    try:
+        return orchestrator.enable_monitoring_mode(mode_name)
+    except Exception as e:
+        return f"Error enabling monitoring mode '{mode_name}': {str(e)}"
+
+
+@tool(
+    name="add_test_onset_speedup",
+    description=(
+        "Manual / fine-grained version of the onset-speedup rule installed by "
+        "enable_monitoring_mode('expression_monitoring'). Fires on the dopaminergic "
+        "detector's 'lit_up' pseudo-stage (intensity_level >= WEAK) and switches "
+        "matching embryos to `fast_interval` seconds. One-time per embryo. "
+        "WHEN TO USE: only if you need a different fast_interval than the mode's "
+        "default (60s), or you want to apply it to a specific embryo subset rather "
+        "than all test-role embryos. Otherwise prefer enable_monitoring_mode."
+    ),
+    category=ToolCategory.EXPERIMENT,
+)
+def add_test_onset_speedup(
+    fast_interval: float = 60.0,
+    embryo_ids: Optional[List[str]] = None,
+    context: Dict = None,
+) -> str:
+    """Install the canonical signal-onset cadence speedup rule."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+
+    try:
+        orchestrator.add_test_onset_speedup(
+            fast_interval=fast_interval,
+            embryo_ids=embryo_ids,
+        )
+        target = (
+            ", ".join(embryo_ids) if embryo_ids else "all test-role embryos"
+        )
+        return (
+            f"Installed test-onset speedup: switch to {fast_interval}s interval "
+            f"on signal onset for {target}."
+        )
+    except Exception as e:
+        return f"Error installing test-onset speedup: {str(e)}"
+
+
+@tool(
+    name="add_test_saturation_rampdown",
+    description=(
+        "Manual / fine-grained version of the 488 rampdown rule installed by "
+        "enable_monitoring_mode('expression_monitoring'). Sticky-monotonic downward "
+        "ramp: when the dopaminergic detector reports SATURATING, drops 488 laser "
+        "power by `step_pct` (never increases) until `floor_pct`. Re-fires each "
+        "round signal saturates so the ramp can chase growing signal. "
+        "WHEN TO USE: only if the mode's defaults (step 1.0%, floor 2.0%, "
+        "ceiling 6.0%) don't fit. Otherwise prefer enable_monitoring_mode."
+    ),
+    category=ToolCategory.EXPERIMENT,
+)
+def add_test_saturation_rampdown(
+    step_pct: float = 1.0,
+    floor_pct: float = 2.0,
+    ceiling_pct: float = 6.0,
+    confirm_timepoints: int = 0,
+    embryo_ids: Optional[List[str]] = None,
+    context: Dict = None,
+) -> str:
+    """Install the canonical 488 saturation rampdown power rule."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+
+    try:
+        orchestrator.add_test_saturation_rampdown(
+            step_pct=step_pct,
+            floor_pct=floor_pct,
+            ceiling_pct=ceiling_pct,
+            confirm_timepoints=confirm_timepoints,
+            embryo_ids=embryo_ids,
+        )
+        target = (
+            ", ".join(embryo_ids) if embryo_ids else "all test-role embryos"
+        )
+        return (
+            f"Installed 488 saturation rampdown: step={step_pct}%, "
+            f"floor={floor_pct}%, ceiling={ceiling_pct}%, "
+            f"confirm_timepoints={confirm_timepoints} for {target}."
+        )
+    except Exception as e:
+        return f"Error installing test-saturation rampdown: {str(e)}"
+
+
+@tool(
+    name="queue_burst",
+    description=(
+        "Queue a burst acquisition for one embryo. Captures `frames` rapid "
+        "acquisitions at '1hz' (one frame per second, fits into multi-embryo "
+        "cadence) or 'asap' (back-to-back, faster but fully exclusive). Produces "
+        "a max-projection MP4. Other embryos pause while burst runs (their "
+        "next_due_at keeps advancing so they catch up). "
+        "WHEN TO USE: when something interesting just happened on one embryo and "
+        "you want a high-frame-rate video — neuron firing, division, structural "
+        "transition. Or for ground-truthing detector findings (force a burst to "
+        "capture the moment the detector flagged GOOD structure). "
+        "One-time per embryo by default; pass force=True to queue another."
+    ),
+    category=ToolCategory.EXPERIMENT,
+    requires_microscope=True,
+)
+def queue_burst(
+    embryo_id: str,
+    frames: int = 60,
+    mode: str = "1hz",
+    num_slices: int = 1,
+    force: bool = False,
+    context: Dict = None,
+) -> str:
+    """Queue an exclusive burst acquisition for one embryo."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+
+    try:
+        return orchestrator.queue_burst(
+            embryo_id=embryo_id,
+            frames=frames,
+            mode=mode,
+            num_slices=num_slices,
+            force=force,
+        )
+    except Exception as e:
+        return f"Error queueing burst for {embryo_id}: {str(e)}"

@@ -210,6 +210,38 @@ behavior is needed.
 """
 
 
+REACTIVE_MONITORING_MODES = """
+## Reactive monitoring modes
+
+After `start_adaptive_timelapse` + `assign_embryo_roles`, decide whether
+to install a monitoring mode. The mode IS the reactive control —
+without one, embryos stay at base interval regardless of what detectors
+see.
+
+Pattern recognition:
+
+| User describes... | Mode to install |
+|---|---|
+| reporter expression, GFP/mCherry onset, "neurons lighting up", dopaminergic signal, anything where fluorescence turns on | `expression_monitoring` |
+| hatching timing, pre-hatch dynamics, "track until they hatch" | `pre_terminal_monitoring` |
+| plain imaging, exploratory, no specific signal target | none (idle) |
+
+Default to **ASK** if not obvious. One question is fine: "Are you
+watching for signal onset, hatching, or just observing?"
+
+Pass `monitoring_mode='<name>'` to `start_adaptive_timelapse` to install
+on startup, OR call `enable_monitoring_mode` later. Both work.
+
+The mode only affects embryos with matching roles (expression_monitoring
+→ role=test). If no role assignments exist yet, install the mode anyway
+— it applies retroactively as roles are assigned.
+
+Manual overrides exist (`add_test_onset_speedup`,
+`add_test_saturation_rampdown`, `queue_burst`) for when the mode's
+defaults don't fit, but prefer the mode for the common case.
+"""
+
+
 ADAPTIVE_TIMELAPSE = """
 # Adaptive Timelapse System
 
@@ -362,6 +394,8 @@ Your role is to:
 {EMBRYO_ROLES}
 
 {ADAPTIVE_TIMELAPSE}
+
+{REACTIVE_MONITORING_MODES}
 
 {USER_INTERACTION_GUIDELINES}
 
