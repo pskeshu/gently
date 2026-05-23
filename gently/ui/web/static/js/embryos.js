@@ -529,6 +529,21 @@ const EmbryosManager = {
         const container = document.getElementById('view-filmstrip');
         if (!container) return;
 
+        // Capture scroll state before we blow away the DOM. If the user was
+        // at (or near) the right edge — the "leading edge" showing the newest
+        // frames — auto-follow to keep them pinned to newest. Otherwise
+        // preserve their exact scroll position so the strip doesn't jump.
+        const prevScroll = (() => {
+            const sc = container.querySelector('.filmstrip-container');
+            if (!sc) return null;
+            const max = sc.scrollWidth - sc.clientWidth;
+            const FOLLOW_THRESHOLD_PX = 24;  // within 24px of the right edge
+            return {
+                left: sc.scrollLeft,
+                wasAtRightEdge: max <= 0 || sc.scrollLeft >= max - FOLLOW_THRESHOLD_PX,
+            };
+        })();
+
         const embryos = Object.values(this.state.embryos);
         if (embryos.length === 0) {
             container.innerHTML = `<div class="board-empty"><div class="reasoning-empty-icon">&#x1F3AC;</div><div class="reasoning-empty-text">No embryos to display</div></div>`;
@@ -649,6 +664,17 @@ const EmbryosManager = {
             if (detail) {
                 detail.innerHTML = `<div class="filmstrip-detail-content">${this.renderDetailPanel(this.currentDetailItem)}</div>`;
                 this.initChatPanel(this.selectedEmbryoId, tp);
+            }
+        }
+
+        // Restore horizontal scroll position. Done after innerHTML is set so
+        // scrollWidth reflects the (possibly grown) new content.
+        if (prevScroll && scrollContainer) {
+            if (prevScroll.wasAtRightEdge) {
+                scrollContainer.scrollLeft =
+                    scrollContainer.scrollWidth - scrollContainer.clientWidth;
+            } else {
+                scrollContainer.scrollLeft = prevScroll.left;
             }
         }
     },
