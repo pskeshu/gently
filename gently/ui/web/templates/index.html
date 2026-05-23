@@ -13,6 +13,7 @@
     <link rel="stylesheet" href="/static/css/main.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
+    <link rel="stylesheet" href="/static/css/experiment.css">
 </head>
 <body>
     {% include '_header.html' %}
@@ -217,6 +218,20 @@
                     </div>
                 </div>
             </div>
+        </div>
+    </div>
+
+    <!-- Experiment Tab -->
+    <div id="experiment-content" class="tab-content">
+        <div class="experiment-header-bar">
+            <h2 class="experiment-title">Experiment</h2>
+            <div class="view-switcher" id="experiment-view-switcher">
+                <button class="view-btn active" data-experiment-view="overview" title="Overview (1)">Overview</button>
+                <button class="view-btn" data-experiment-view="rules" title="Rules (2)">Rules</button>
+            </div>
+        </div>
+        <div class="experiment-body">
+            <div id="experiment-overview-root"></div>
         </div>
     </div>
 
@@ -498,6 +513,7 @@
     <script src="/static/js/experiment-strip.js"></script>
     <script src="/static/js/marking.js"></script>
     <script src="/static/js/devices.js"></script>
+    <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/app.js"></script>

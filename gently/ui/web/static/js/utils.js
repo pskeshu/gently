@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════════════════
 
 // Tab and view name constants
-const TABS = { EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions', DEVICES: 'devices' };
+const TABS = { EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions', DEVICES: 'devices', EXPERIMENT: 'experiment' };
 
 /**
  * HTML-escape a string (safe for insertion into innerHTML).

@@ -90,6 +90,11 @@ function switchTab(tabName) {
         ReviewApp.init();
     }
 
+    // Lazy-init Experiment tab (mockup with stubbed data)
+    if (tabName === TABS.EXPERIMENT && typeof ExperimentOverview !== 'undefined') {
+        ExperimentOverview.init();
+    }
+
     // Update statusbar for context
     updateStatusbar();
 }
@@ -408,6 +413,7 @@ const KeyboardShortcuts = {
         '3': () => switchTab('main'),            // Live View
         '4': () => switchTab(TABS.CALIBRATION),  // Calibration
         '5': () => switchTab(TABS.DEVICES),      // Devices
+        '6': () => switchTab(TABS.EXPERIMENT),   // Experiment
         'ArrowUp': () => KeyboardShortcuts.adjustZSlider(1),
         'ArrowDown': () => KeyboardShortcuts.adjustZSlider(-1),
         '?': () => KeyboardShortcuts.showHelp(),
@@ -625,7 +631,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS) {
+        if (tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT) {
             switchTab(tab);
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);

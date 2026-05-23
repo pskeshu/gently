@@ -1,0 +1,532 @@
+/* ============================================================
+   Experiment Overview Tab
+   Vector-graphics view of the planned timelapse strategy.
+   ============================================================ */
+
+/* Header bar — matches .calibration-header-bar / .devices-header-bar pattern */
+.experiment-header-bar {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.35rem 1rem;
+    background: var(--bg-card);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.experiment-title {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin: 0;
+}
+
+.experiment-body {
+    padding: 24px 32px 40px;
+    overflow-y: auto;
+    height: calc(100% - 38px);
+}
+
+/* ---- Header band ----------------------------------------- */
+.expov-header {
+    margin-bottom: 18px;
+}
+.expov-header-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+}
+.expov-header-row-meta  { margin-bottom: 12px; }
+.expov-header-row-metrics {
+    gap: 24px;
+    padding: 12px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.expov-mockup-badge {
+    padding: 2px 8px;
+    background: var(--gradient-warm);
+    color: #1a0a0a;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-left: auto;  /* push to right */
+}
+.expov-session-name {
+    font-family: 'Instrument Serif', serif;
+    font-style: italic;
+    font-size: 24px;
+    color: var(--text);
+    font-weight: 400;
+    letter-spacing: -0.005em;
+}
+.expov-session-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11.5px;
+    color: var(--text-muted);
+    opacity: 0.65;
+}
+.expov-metric {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.expov-metric-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1;
+}
+.expov-metric-lbl {
+    font-size: 10.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+
+/* ---- Mode chips ------------------------------------------ */
+.expov-modes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+.expov-mode-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 12px 8px 14px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-purple);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+.expov-mode-chip:hover {
+    background: var(--bg-hover);
+}
+.expov-mode-chip.idle { border-left-color: var(--text-muted); }
+.expov-mode-name {
+    font-size: 13.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+.expov-mode-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-mode-scope {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9px;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: lowercase;
+}
+.expov-mode-expanded {
+    padding: 12px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent-purple);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.55;
+    display: none;
+}
+.expov-mode-expanded.show { display: block; }
+.expov-mode-expanded strong { color: var(--text); }
+.expov-mode-expanded code {
+    font-family: 'JetBrains Mono', monospace;
+    background: var(--bg-hover);
+    padding: 1px 5px;
+    border-radius: 3px;
+    color: var(--accent-cyan);
+}
+
+/* ---- Swimlane SVG --------------------------------------- */
+.expov-swimlanes-wrap {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 14px 14px;
+    margin-bottom: 18px;
+    overflow-x: auto;
+}
+.expov-mini-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 14px;
+    padding-bottom: 10px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10.5px;
+    color: var(--text-muted);
+}
+.expov-mini-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.expov-mini-legend-swatch {
+    display: inline-block;
+    width: 14px;
+    height: 8px;
+    border-radius: 2px;
+}
+.expov-mini-legend-swatch.base     { background: #4b5563; opacity: 0.7; }
+.expov-mini-legend-swatch.fast     { background: var(--accent-orange); opacity: 0.7; }
+.expov-mini-legend-swatch.burst    { background: #ef4444; }
+.expov-mini-legend-swatch.cooldown { background: #a78bfa; opacity: 0.7; }
+.expov-mini-legend-swatch.projected {
+    background: repeating-linear-gradient(
+        90deg,
+        var(--text-muted) 0 4px,
+        transparent 4px 8px
+    );
+    height: 2px;
+    margin-top: 3px;
+    border-radius: 0;
+}
+.expov-swimlanes-svg {
+    display: block;
+    width: 100%;
+    min-width: 900px;
+    height: auto;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+}
+
+/* SVG element styles */
+.expov-svg-row-divider {
+    stroke: var(--border);
+    stroke-width: 1;
+    opacity: 0.5;
+}
+.expov-svg-axis { stroke: var(--border); stroke-width: 1; }
+.expov-svg-axis-label {
+    fill: var(--text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 0.85;
+}
+.expov-svg-axis-wallclock {
+    fill: var(--text-muted);
+    font-size: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 0.55;
+}
+.expov-svg-now-line {
+    stroke: var(--accent);
+    stroke-width: 1;
+    stroke-dasharray: 3 3;
+    opacity: 0.75;
+}
+.expov-svg-now-label {
+    fill: var(--accent);
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-svg-label {
+    fill: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+}
+.expov-svg-role-tag {
+    fill: var(--text-muted);
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: lowercase;
+}
+.expov-svg-sublabel {
+    fill: var(--text-muted);
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-svg-role-icon { font-size: 14px; }
+.expov-svg-stop-chip {
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    cursor: help;
+}
+
+/* Phase fills — saturation differentiates cadence intensity */
+.expov-svg-phase-base       { fill: #6b7280; opacity: 0.32; }
+.expov-svg-phase-fast       { fill: var(--accent-orange); opacity: 0.55; }
+.expov-svg-phase-burst      { fill: #ef4444; opacity: 0.85; }
+.expov-svg-phase-cooldown   { fill: #a78bfa; opacity: 0.50; }
+.expov-svg-phase-paused     { fill: #3b82f6; opacity: 0.28; }
+
+/* Inline cadence label rendered inside the phase rect */
+.expov-svg-phase-label {
+    fill: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 0.55;
+    pointer-events: none;
+}
+
+.expov-svg-projected-bar {
+    fill: none;
+    stroke: var(--text-muted);
+    stroke-width: 4;
+    stroke-dasharray: 10 8;
+    stroke-linecap: round;
+    opacity: 0.35;
+}
+.expov-svg-projected-bar.warn {
+    stroke: var(--accent-orange);
+    opacity: 0.6;
+}
+
+.expov-svg-trigger-diamond {
+    fill: var(--accent-cyan);
+    stroke: var(--bg-card);
+    stroke-width: 1;
+    cursor: pointer;
+}
+.expov-svg-trigger-diamond:hover { fill: var(--accent-pink); }
+.expov-svg-trigger-label {
+    fill: var(--text-muted);
+    font-size: 9.5px;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Power chart — STEADY: dim, calm. RAMPING: bright, urgent. */
+.expov-svg-power-steady {
+    stroke: var(--accent-cyan);
+    stroke-width: 1;
+    fill: none;
+    opacity: 0.45;
+}
+.expov-svg-power-step {
+    stroke: var(--accent-orange);
+    stroke-width: 2.4;
+    stroke-linecap: round;
+    fill: none;
+    opacity: 1;
+}
+.expov-svg-power-stepdot {
+    fill: var(--accent-orange);
+    stroke: var(--bg-card);
+    stroke-width: 1;
+}
+.expov-svg-power-stepmark {
+    fill: var(--accent-orange);
+    font-size: 9px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    opacity: 1;
+}
+.expov-svg-power-ramp-bracket {
+    fill: none;
+    stroke: var(--accent-orange);
+    stroke-width: 1;
+    opacity: 0.6;
+}
+.expov-svg-power-ramp-label {
+    fill: var(--accent-orange);
+    font-size: 9.5px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-svg-power-baseline {
+    stroke: var(--border);
+    stroke-width: 1;
+    stroke-dasharray: 2 4;
+    opacity: 0.45;
+}
+.expov-svg-power-area { fill: var(--accent-cyan); opacity: 0.07; }
+
+.expov-svg-dose-track { fill: var(--bg-hover); }
+.expov-svg-dose-fill-ok    { fill: var(--accent-green); opacity: 0.7; }
+.expov-svg-dose-fill-warn  { fill: var(--accent-orange); opacity: 0.85; }
+.expov-svg-dose-fill-crit  { fill: #ef4444; opacity: 0.85; }
+.expov-svg-dose-text {
+    fill: var(--text);
+    font-size: 9.5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 500;
+}
+
+.expov-svg-stop-icon {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-svg-stop-hatch { fill: var(--accent-green); }
+
+.expov-svg-burst-balloon-bg {
+    fill: #ef4444;
+    opacity: 0.9;
+}
+.expov-svg-burst-label {
+    fill: #fff;
+    font-size: 9.5px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.expov-svg-infinity {
+    fill: var(--text-muted);
+    font-size: 18px;
+    font-weight: 400;
+}
+
+.expov-svg-tooltip-target { cursor: help; }
+
+/* ---- Rules subtab ---------------------------------------- */
+.expov-rules-table {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+}
+.expov-rules-title-row {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    padding-bottom: 12px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border);
+}
+.expov-rules-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
+    margin: 0;
+    letter-spacing: 0.01em;
+}
+.expov-rules-count {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.expov-rules-section { margin-bottom: 18px; }
+.expov-rules-section:last-child { margin-bottom: 0; }
+
+.expov-rules-section-head {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 6px;
+    background: var(--bg-hover);
+}
+.expov-rules-section-icon {
+    font-size: 13px;
+    color: var(--accent-cyan);
+}
+.expov-rules-section-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+.expov-rules-section-count {
+    margin-left: auto;
+    font-size: 10.5px;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.expov-rule-row {
+    display: grid;
+    grid-template-columns: minmax(180px, 1.2fr) minmax(280px, 1.5fr) minmax(260px, 2fr) auto;
+    gap: 24px;
+    padding: 12px 10px;
+    border-bottom: 1px solid var(--border);
+    align-items: start;
+}
+.expov-rule-row:last-child { border-bottom: none; }
+.expov-rule-row:hover { background: var(--bg-hover); }
+
+.expov-rule-col {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+.expov-rule-col-lbl {
+    font-size: 9.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+}
+.expov-rule-col-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    color: var(--text);
+    word-break: break-word;
+}
+.expov-rule-label {
+    flex-direction: row;
+    align-items: center;
+    gap: 9px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+}
+.expov-rule-when .expov-rule-col-val,
+.expov-rule-then .expov-rule-col-val {
+    line-height: 1.45;
+}
+.expov-rule-when .expov-rule-col-val { color: var(--text-muted); }
+
+.expov-rule-scope {
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+}
+.expov-rule-scope-chip {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9px;
+    background: var(--bg-hover);
+    color: var(--text-muted);
+    font-size: 10px;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-rule-lifecycle {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 9px;
+    font-size: 9.5px;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+.expov-rule-lifecycle.one-time {
+    background: rgba(192, 132, 252, 0.15);
+    color: var(--accent-purple);
+}
+.expov-rule-lifecycle.persistent {
+    background: rgba(34, 211, 238, 0.15);
+    color: var(--accent-cyan);
+}
+
+.expov-trigger-diamond-inline {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--accent-cyan);
+    transform: rotate(45deg);
+    flex-shrink: 0;
+}
