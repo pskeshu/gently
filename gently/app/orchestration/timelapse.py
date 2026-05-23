@@ -36,6 +36,7 @@ from .timelapse_models import (
     StopConditionType,
     IntervalRule,
     PowerRule,
+    BurstRule,
     StopCondition,
     TimelapseStatus,
     TimelapseState,
@@ -142,12 +143,19 @@ class TimelapseOrchestrator:
         # Interval adjustment rules
         self._interval_rules: List[IntervalRule] = []
         self._applied_rules: Dict[str, Set[str]] = {}  # embryo_id -> set of applied rule names
+        self._interval_rule_consecutive: Dict[str, Dict[str, int]] = {}  # embryo_id -> {rule_name: consecutive matches}
 
         # Phase 5 reactive control: per-line power rules (sticky-downward
         # ramp on saturation, etc). Evaluated alongside _interval_rules in
         # _check_adaptive_rules / _check_interval_rules.
         self._power_rules: List[PowerRule] = []
         self._power_rule_consecutive: Dict[str, Dict[str, int]] = {}  # embryo_id -> {rule_name: count}
+
+        # Auto-burst rules: fire queue_burst() once per embryo on a
+        # structure/intensity predicate match. One-time semantics are
+        # enforced by queue_burst via _burst_applied.
+        self._burst_rules: List[Any] = []  # List[BurstRule] without forward import
+        self._burst_rule_consecutive: Dict[str, Dict[str, int]] = {}
 
         # Active monitoring modes (declarative anticipation bundles).
         self._active_monitoring_modes: List[Any] = []
@@ -604,21 +612,37 @@ class TimelapseOrchestrator:
                         # Restore paused embryos to normal phase. They will
                         # be picked up by the priority queue ASAP (their
                         # next_due_at has been advancing the whole time).
+                        # Route through transition_cadence so a CADENCE_CHANGED
+                        # event fires for each — the experiment swimlane view
+                        # uses these to draw phase boundaries.
                         for eid in paused_ids:
                             e = self._embryo_states.get(eid)
                             if e and e.cadence_phase == "paused":
-                                e.cadence_phase = "normal"
+                                self.transition_cadence(
+                                    e,
+                                    new_phase="normal",
+                                    reschedule=False,
+                                    reason="burst_end:resume_paused",
+                                )
                         # Bursting embryo returns to normal cadence per the
                         # experiment's state machine (Phase 5 sets fast→normal).
+                        # Use transition_cadence so the burst→normal change
+                        # emits an EMBRYO_CADENCE_CHANGED event with the new
+                        # interval; rely on it to reschedule the embryo.
                         if target_emb is not None and target_emb.cadence_phase == "burst":
-                            target_emb.cadence_phase = "normal"
-                            # Reset its interval to the role default if it
-                            # was running on the fast cadence.
                             from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
                             role_def = _ROLE_REGISTRY.get(target_emb.role)
-                            if role_def is not None:
-                                target_emb.interval_seconds = role_def.default_cadence_seconds
-                            self._reschedule(target_emb)
+                            new_interval = (
+                                role_def.default_cadence_seconds
+                                if role_def is not None
+                                else target_emb.interval_seconds
+                            )
+                            self.transition_cadence(
+                                target_emb,
+                                new_phase="normal",
+                                new_interval_seconds=new_interval,
+                                reason="burst_end",
+                            )
                     continue
 
                 # All embryos complete?
@@ -1432,13 +1456,17 @@ class TimelapseOrchestrator:
         self,
         *,
         fast_interval: float = 60.0,
+        confirm_timepoints: int = 2,
         embryo_ids: Optional[List[str]] = None,
     ):
         """Install the canonical 'TestEmbryo signal-onset → fast cadence' rule.
 
         Fires on the ``lit_up`` pseudo-stage emitted by the dopaminergic
-        detector once intensity_level ≥ WEAK. One-time per embryo;
-        applies_to filters to TestEmbryos by default (or specified list).
+        detector (intensity_level ≥ MEDIUM). Per-source-embryo: the cadence
+        change applies only to the embryo whose detection triggered the
+        match. ``applies_to`` filters which embryos the rule listens to.
+        ``confirm_timepoints`` requires that many additional consecutive
+        matches before firing, suppressing single-frame false positives.
         """
         if embryo_ids is None:
             embryo_ids = [
@@ -1450,12 +1478,60 @@ class TimelapseOrchestrator:
             trigger_stage="lit_up",
             new_interval_seconds=fast_interval,
             applies_to=embryo_ids or None,
+            confirm_timepoints=confirm_timepoints,
             one_time=True,
         )
         self.add_interval_rule(rule)
         logger.info(
-            "Test-onset speedup installed: %ss on signal onset for %s",
-            fast_interval, embryo_ids or "all test embryos",
+            "Test-onset speedup installed: %ss on signal onset for %s "
+            "(confirm_timepoints=%d)",
+            fast_interval, embryo_ids or "all test embryos", confirm_timepoints,
+        )
+
+    def add_burst_rule(self, rule):
+        """Register a BurstRule for auto-queued burst acquisitions."""
+        self._burst_rules.append(rule)
+        logger.info("Added burst rule: %s", rule.name)
+
+    def add_test_burst_on_good_structure(
+        self,
+        *,
+        frames: int = 60,
+        mode: str = "1hz",
+        num_slices: int = 1,
+        confirm_timepoints: int = 2,
+        embryo_ids: Optional[List[str]] = None,
+    ):
+        """Install the canonical 'TestEmbryo stably-bright structure → burst' rule.
+
+        Fires when the dopaminergic detector reports structure_quality
+        == GOOD (well-resolved neurite pattern) AND intensity_level in
+        {MEDIUM, STRONG} (signal stably above background). One-time per
+        embryo — enforced downstream by ``queue_burst`` via
+        ``_burst_applied``. ``confirm_timepoints`` requires that many
+        additional consecutive matches before firing.
+        """
+        if embryo_ids is None:
+            embryo_ids = [
+                eid for eid, e in self._embryo_states.items()
+                if getattr(e, "role", "test") == "test"
+            ]
+        rule = BurstRule(
+            name="test_burst_on_good_structure",
+            trigger_detector="dopaminergic_signal",
+            trigger_intensity_levels=["MEDIUM", "STRONG"],
+            trigger_structure_qualities=["GOOD"],
+            frames=frames,
+            mode=mode,
+            num_slices=num_slices,
+            applies_to=embryo_ids or None,
+            confirm_timepoints=confirm_timepoints,
+        )
+        self.add_burst_rule(rule)
+        logger.info(
+            "Test-burst rule installed: %d frames @ %s on stable structure for %s "
+            "(confirm_timepoints=%d)",
+            frames, mode, embryo_ids or "all test embryos", confirm_timepoints,
         )
 
     def add_test_saturation_rampdown(
@@ -1504,6 +1580,21 @@ class TimelapseOrchestrator:
     # Phase 9: overnight persistence (timelapse.yaml)
     # ------------------------------------------------------------------
 
+    def _session_storage_dir(self) -> Optional[Path]:
+        """Resolve the FileStore-indexed folder for this session.
+
+        Falls back to ``<root>/sessions/<session_id>`` (the legacy bare-id
+        layout used before this routing was fixed) so a running session
+        whose timelapse.yaml predates the fix can still load. Returns
+        None if no session is active.
+        """
+        if not (self._store and self._session_id):
+            return None
+        sd = self._store._session_dir(self._session_id)
+        if sd is None:
+            sd = self._store.root / "sessions" / self._session_id
+        return sd
+
     def save_state(self) -> Optional[Path]:
         """Write orchestrator runtime state to ``timelapse.yaml``.
 
@@ -1514,11 +1605,12 @@ class TimelapseOrchestrator:
 
         Returns the path written, or None if no session is active.
         """
-        if not (self._store and self._session_id):
+        sd = self._session_storage_dir()
+        if sd is None:
             return None
         try:
             import yaml
-            path = self._store.root / "sessions" / self._session_id / "timelapse.yaml"
+            path = sd / "timelapse.yaml"
             path.parent.mkdir(parents=True, exist_ok=True)
             doc = self._serialize_runtime_state()
             with open(path, "w", encoding="utf-8") as f:
@@ -1536,14 +1628,24 @@ class TimelapseOrchestrator:
         been populated (their on-disk embryo.yaml carries the durable
         identity / role / position fields; this restores the transient
         cadence + rule state on top).
+
+        Looks first at the FileStore-indexed folder, then at the legacy
+        bare-session-id folder used by older saves.
         """
         if not (self._store and self._session_id):
             return "No session — cannot load state."
         try:
             import yaml
-            path = self._store.root / "sessions" / self._session_id / "timelapse.yaml"
-            if not path.exists():
-                return f"No timelapse.yaml at {path}"
+            candidates = []
+            sd = self._store._session_dir(self._session_id)
+            if sd is not None:
+                candidates.append(sd / "timelapse.yaml")
+            legacy = self._store.root / "sessions" / self._session_id / "timelapse.yaml"
+            if legacy not in candidates:
+                candidates.append(legacy)
+            path = next((p for p in candidates if p.exists()), None)
+            if path is None:
+                return f"No timelapse.yaml at {candidates[0]}"
             with open(path, "r", encoding="utf-8") as f:
                 doc = yaml.safe_load(f) or {}
         except Exception as e:
@@ -1566,6 +1668,30 @@ class TimelapseOrchestrator:
         def _iso(dt):
             return dt.isoformat() if dt is not None else None
 
+        def _ser_stop_condition(sc):
+            """Serialize a StopCondition (including composite OR-chains)."""
+            if sc is None:
+                return None
+            try:
+                return {
+                    "spec": sc.describe(),
+                    "condition_type": sc.condition_type.value,
+                    "value": sc.value,
+                    "target_stages": sorted(sc.target_stages) if sc.target_stages else None,
+                    "confirm_timepoints": sc.confirm_timepoints,
+                    "additional": [
+                        {
+                            "condition_type": c.condition_type.value,
+                            "value": c.value,
+                            "target_stages": sorted(c.target_stages) if c.target_stages else None,
+                            "confirm_timepoints": c.confirm_timepoints,
+                        }
+                        for c in sc.additional_conditions
+                    ],
+                }
+            except Exception:
+                return None
+
         embryos = {}
         for eid, e in self._embryo_states.items():
             embryos[eid] = {
@@ -1584,6 +1710,10 @@ class TimelapseOrchestrator:
                 "detection_type": e.detection_type,
                 "no_object_since_timepoint": e.no_object_since_timepoint,
                 "hatching_status": dict(e.hatching_status) if e.hatching_status else {},
+                # Stop condition is per-embryo (StopCondition with optional
+                # composite OR-chain). Persisted so the strategy view can
+                # show bounded vs open-ended and so resumes restore correctly.
+                "stop_condition": _ser_stop_condition(getattr(e, "stop_condition", None)),
             }
 
         def _ser_interval_rule(r):
@@ -1592,6 +1722,7 @@ class TimelapseOrchestrator:
                 "trigger_stage": r.trigger_stage,
                 "new_interval_seconds": r.new_interval_seconds,
                 "applies_to": list(r.applies_to) if r.applies_to else None,
+                "confirm_timepoints": r.confirm_timepoints,
                 "one_time": r.one_time,
             }
 
@@ -1607,6 +1738,19 @@ class TimelapseOrchestrator:
                 "applies_to": list(r.applies_to) if r.applies_to else None,
                 "confirm_timepoints": r.confirm_timepoints,
                 "one_time": r.one_time,
+            }
+
+        def _ser_burst_rule(r):
+            return {
+                "name": r.name,
+                "trigger_detector": r.trigger_detector,
+                "trigger_intensity_levels": list(r.trigger_intensity_levels or []) or None,
+                "trigger_structure_qualities": list(r.trigger_structure_qualities or []) or None,
+                "frames": r.frames,
+                "mode": r.mode,
+                "num_slices": r.num_slices,
+                "applies_to": list(r.applies_to) if r.applies_to else None,
+                "confirm_timepoints": r.confirm_timepoints,
             }
 
         return {
@@ -1634,6 +1778,7 @@ class TimelapseOrchestrator:
             ],
             "interval_rules": [_ser_interval_rule(r) for r in self._interval_rules],
             "power_rules": [_ser_power_rule(r) for r in self._power_rules],
+            "burst_rules": [_ser_burst_rule(r) for r in self._burst_rules],
             "applied_rules": {eid: sorted(s) for eid, s in self._applied_rules.items()},
             "active_monitoring_modes": [m.name for m in self._active_monitoring_modes],
             "embryos": embryos,
@@ -1641,7 +1786,7 @@ class TimelapseOrchestrator:
 
     def _apply_runtime_state(self, doc: Dict[str, Any]) -> None:
         """Restore orchestrator state from a parsed timelapse.yaml dict."""
-        from .timelapse_models import IntervalRule, PowerRule, StopCondition
+        from .timelapse_models import IntervalRule, PowerRule, BurstRule, StopCondition
         from .exclusive import BurstAcquisition
 
         def _parse_dt(s):
@@ -1670,6 +1815,7 @@ class TimelapseOrchestrator:
                 trigger_stage=r.get("trigger_stage"),
                 new_interval_seconds=float(r.get("new_interval_seconds", 30.0)),
                 applies_to=r.get("applies_to"),
+                confirm_timepoints=int(r.get("confirm_timepoints", 0)),
                 one_time=bool(r.get("one_time", True)),
             ))
 
@@ -1690,6 +1836,20 @@ class TimelapseOrchestrator:
                 one_time=bool(r.get("one_time", False)),
             ))
 
+        self._burst_rules = []
+        for r in (doc.get("burst_rules") or []):
+            self._burst_rules.append(BurstRule(
+                name=r["name"],
+                trigger_detector=r.get("trigger_detector"),
+                trigger_intensity_levels=r.get("trigger_intensity_levels") or None,
+                trigger_structure_qualities=r.get("trigger_structure_qualities") or None,
+                frames=int(r.get("frames", 60)),
+                mode=r.get("mode", "1hz"),
+                num_slices=int(r.get("num_slices", 1)),
+                applies_to=r.get("applies_to"),
+                confirm_timepoints=int(r.get("confirm_timepoints", 0)),
+            ))
+
         self._applied_rules = {
             eid: set(names) for eid, names in (doc.get("applied_rules") or {}).items()
         }
@@ -1704,6 +1864,35 @@ class TimelapseOrchestrator:
                     num_slices=int(op_doc.get("num_slices", 1)),
                     request_id=op_doc.get("request_id"),
                 ))
+
+        def _deser_stop_condition(d):
+            """Rebuild a StopCondition from the dict written by _ser_stop_condition."""
+            if not d:
+                return None
+            try:
+                primary = StopCondition(
+                    condition_type=StopConditionType(d["condition_type"]),
+                    value=d.get("value"),
+                    target_stages=set(d.get("target_stages") or []) or None,
+                    confirm_timepoints=int(d.get("confirm_timepoints") or 0),
+                )
+                for ad in (d.get("additional") or []):
+                    primary.add_condition(StopCondition(
+                        condition_type=StopConditionType(ad["condition_type"]),
+                        value=ad.get("value"),
+                        target_stages=set(ad.get("target_stages") or []) or None,
+                        confirm_timepoints=int(ad.get("confirm_timepoints") or 0),
+                    ))
+                return primary
+            except Exception:
+                # Fall back to spec-string parse if shape changed across versions.
+                spec = (d.get("spec") if isinstance(d, dict) else None)
+                if isinstance(spec, str) and spec:
+                    try:
+                        return StopCondition.parse(spec)
+                    except Exception:
+                        return None
+                return None
 
         # Per-embryo state: only restore fields for embryos that already
         # exist in the experiment (embryo.yaml is the durable identity).
@@ -1724,6 +1913,10 @@ class TimelapseOrchestrator:
                 embryo.next_due_at = _parse_dt(ed.get("next_due_at"))
             if "hatching_status" in ed:
                 embryo.hatching_status = dict(ed.get("hatching_status") or {})
+            if "stop_condition" in ed:
+                sc = _deser_stop_condition(ed.get("stop_condition"))
+                if sc is not None:
+                    embryo.stop_condition = sc
             # Re-register into the orchestrator's active set if not skipped.
             if not embryo.should_skip and not embryo.is_complete:
                 self._embryo_states[eid] = embryo
@@ -1853,11 +2046,12 @@ class TimelapseOrchestrator:
 
         # Persist a tiny manifest. The actual numpy arrays could be saved
         # as .npy alongside if needed; for now just log what we captured.
-        if self._store and self._session_id:
+        sd = self._session_storage_dir()
+        if sd is not None:
             try:
                 import yaml
                 from pathlib import Path
-                cal_dir = self._store.root / "sessions" / self._session_id / "calibration"
+                cal_dir = sd / "calibration"
                 cal_dir.mkdir(parents=True, exist_ok=True)
                 manifest = {
                     "pipelines": [
@@ -2024,6 +2218,22 @@ class TimelapseOrchestrator:
                 "direction": prule.direction,
                 "intensity_level": intensity_level,
             })
+            # Discrete trigger-fired event so the strategy view can show
+            # rule firings without inferring them from the power-step event.
+            self._emit_event(EventType.TRIGGER_FIRED, {
+                "embryo_id": embryo_id,
+                "rule_name": prule.name,
+                "rule_kind": "power",
+                "trigger_detector": prule.trigger_detector,
+                "trigger_stage": prule.trigger_stage,
+                "trigger_intensity_level": intensity_level,
+                "applied": {
+                    "wavelength": prule.wavelength,
+                    "old_pct": current,
+                    "new_pct": new_pct,
+                    "direction": prule.direction,
+                },
+            })
             logger.info(
                 "Applied PowerRule '%s' on %s: %dnm %.2f%% -> %.2f%% "
                 "(direction=%s, intensity=%s)",
@@ -2034,38 +2244,122 @@ class TimelapseOrchestrator:
             if prule.one_time:
                 applied.add(prule.name)
 
+        # ---- Interval rules: per-source-embryo scope ----
+        # A match for embryo X applies the cadence change to embryo X only.
+        # ``applies_to`` is the listen-filter (which embryos the rule watches);
+        # it is NOT a fan-out target list.
+        if embryo_id not in self._interval_rule_consecutive:
+            self._interval_rule_consecutive[embryo_id] = {}
+        iconsec = self._interval_rule_consecutive[embryo_id]
+
         for rule in self._interval_rules:
-            # Skip if already applied (for one-time rules)
+            # Skip if already applied for this embryo (one-time rules)
             if rule.one_time and rule.name in applied:
+                iconsec[rule.name] = 0
                 continue
 
-            # Check if rule matches
-            if rule.matches(
+            matches = rule.matches(
                 embryo_id=embryo_id,
                 detector_name=detector_name,
                 stage=stage,
-            ):
-                # Async cadence: mutate ONLY the embryos targeted by the rule.
-                # rule.applies_to=None means "all embryos in this timelapse";
-                # otherwise scope to the listed ids.
-                target_ids = rule.applies_to or list(self._embryo_states.keys())
+            )
+
+            if matches:
+                iconsec[rule.name] = iconsec.get(rule.name, 0) + 1
+            else:
+                iconsec[rule.name] = 0
+                continue
+
+            # Require N+1 consecutive matches before firing (N = confirm_timepoints).
+            if iconsec[rule.name] < max(1, rule.confirm_timepoints + 1):
+                continue
+
+            target = self._embryo_states.get(embryo_id)
+            if target is None or target.is_complete:
+                continue
+
+            old_interval = target.interval_seconds
+            self.transition_cadence(
+                target,
+                new_interval_seconds=rule.new_interval_seconds,
+                reason=f"rule:{rule.name}",
+            )
+            self._emit_event(EventType.TRIGGER_FIRED, {
+                "embryo_id": embryo_id,
+                "rule_name": rule.name,
+                "rule_kind": "interval",
+                "trigger_detector": rule.trigger_detector,
+                "trigger_stage": rule.trigger_stage,
+                "trigger_intensity_level": None,
+                "applied": {
+                    "old_interval_s": old_interval,
+                    "new_interval_s": rule.new_interval_seconds,
+                    "one_time": rule.one_time,
+                    "confirm_timepoints": rule.confirm_timepoints,
+                },
+            })
+            logger.info(
+                "Applied interval rule '%s' on %s: %ss -> %ss (confirm=%d)",
+                rule.name, embryo_id, old_interval,
+                rule.new_interval_seconds, rule.confirm_timepoints,
+            )
+
+            if rule.one_time:
                 applied.add(rule.name)
 
-                for tid in target_ids:
-                    target = self._embryo_states.get(tid)
-                    if target is None or target.is_complete:
-                        continue
-                    old_interval = target.interval_seconds
-                    self.transition_cadence(
-                        target,
-                        new_interval_seconds=rule.new_interval_seconds,
-                        reason=f"rule:{rule.name}",
-                    )
-                    logger.info(
-                        "Applied interval rule '%s' (triggered by %s) to %s: "
-                        "%ss -> %ss",
-                        rule.name, embryo_id, tid, old_interval, rule.new_interval_seconds,
-                    )
+        # ---- Burst rules: queue a one-shot burst on stable structure ----
+        # queue_burst enforces one-time-per-embryo via _burst_applied, so
+        # we don't need our own one_time flag.
+        if embryo_id not in self._burst_rule_consecutive:
+            self._burst_rule_consecutive[embryo_id] = {}
+        bconsec = self._burst_rule_consecutive[embryo_id]
+
+        for brule in self._burst_rules:
+            if embryo_id in self._burst_applied:
+                bconsec[brule.name] = 0
+                continue
+
+            matches = brule.matches(
+                embryo_id=embryo_id,
+                detector_name=detector_name,
+                intensity_level=intensity_level,
+                structure_quality=structure_quality,
+            )
+
+            if matches:
+                bconsec[brule.name] = bconsec.get(brule.name, 0) + 1
+            else:
+                bconsec[brule.name] = 0
+                continue
+
+            if bconsec[brule.name] < max(1, brule.confirm_timepoints + 1):
+                continue
+
+            result = self.queue_burst(
+                embryo_id,
+                frames=brule.frames,
+                mode=brule.mode,
+                num_slices=brule.num_slices,
+            )
+            self._emit_event(EventType.TRIGGER_FIRED, {
+                "embryo_id": embryo_id,
+                "rule_name": brule.name,
+                "rule_kind": "burst",
+                "trigger_detector": brule.trigger_detector,
+                "trigger_intensity_level": intensity_level,
+                "trigger_structure_quality": structure_quality,
+                "applied": {
+                    "frames": brule.frames,
+                    "mode": brule.mode,
+                    "num_slices": brule.num_slices,
+                    "confirm_timepoints": brule.confirm_timepoints,
+                    "queue_result": result,
+                },
+            })
+            logger.info(
+                "Applied burst rule '%s' on %s (intensity=%s structure=%s): %s",
+                brule.name, embryo_id, intensity_level, structure_quality, result,
+            )
 
     def _finalize_perception_run(self, status: str = "completed", error_message: str = None):
         """Mark the perception run as finished in FileStore."""
@@ -2224,12 +2518,18 @@ class TimelapseOrchestrator:
 
         # Persist into predictions.jsonl. predicted_stage is required by
         # the FileStore schema; for the dopaminergic detector we synthesize
-        # a pseudo-stage so downstream consumers see something meaningful
-        # ("lit_up" once intensity is non-NONE, "hatched", "blank" otherwise).
+        # a pseudo-stage so downstream consumers see something meaningful.
+        # Only MEDIUM/STRONG → "lit_up" (the speedup trigger). WEAK is
+        # informational only ("weak_signal"). UNCERTAIN means the
+        # classifier refused to commit — emit "uncertain" so no rule fires.
         if intensity_level == "SATURATING":
             pseudo_stage = "lit_up_saturating"
-        elif intensity_level in ("STRONG", "MEDIUM", "WEAK"):
+        elif intensity_level in ("STRONG", "MEDIUM"):
             pseudo_stage = "lit_up"
+        elif intensity_level == "WEAK":
+            pseudo_stage = "weak_signal"
+        elif intensity_level == "UNCERTAIN":
+            pseudo_stage = "uncertain"
         elif has_hatched:
             pseudo_stage = "hatched"
         else:

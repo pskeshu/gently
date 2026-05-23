@@ -34,12 +34,16 @@ class IntervalRule:
     Rule for automatically adjusting acquisition interval.
 
     Triggers when a condition is met (detector fires, stage reached, etc.)
+    Scope: a match for embryo X applies the cadence change to embryo X only.
+    ``applies_to`` filters which embryos this rule listens to — it is not a
+    fan-out target list.
     """
     name: str
     trigger_detector: Optional[str] = None  # Detector name that triggers this rule
     trigger_stage: Optional[str] = None     # Stage name that triggers (comma, pretzel, etc.)
     new_interval_seconds: float = 30.0      # New interval when triggered
-    applies_to: Optional[List[str]] = None  # Embryo IDs (None = all)
+    applies_to: Optional[List[str]] = None  # Embryo IDs this rule listens to (None = all)
+    confirm_timepoints: int = 0             # require N consecutive trigger matches before firing
     one_time: bool = True                   # Only apply once per embryo
 
     def matches(
@@ -112,6 +116,49 @@ class PowerRule:
         if self.direction == "down":
             return max(self.floor_pct, current_pct - self.step_pct)
         return min(self.ceiling_pct, current_pct + self.step_pct)
+
+
+@dataclass
+class BurstRule:
+    """Rule for auto-queuing a one-shot burst acquisition.
+
+    Fires when an embryo's detection matches all specified predicates
+    (intensity + structure). One-time-per-embryo semantics are enforced
+    downstream by ``queue_burst`` (which gates on ``_burst_applied``),
+    so this rule doesn't need its own ``one_time`` flag.
+    """
+    name: str
+    trigger_detector: Optional[str] = None
+    trigger_intensity_levels: Optional[List[str]] = None  # AND-combined predicate
+    trigger_structure_qualities: Optional[List[str]] = None  # AND-combined predicate
+    frames: int = 60
+    mode: str = "1hz"        # "1hz" | "asap"
+    num_slices: int = 1
+    applies_to: Optional[List[str]] = None  # listen-filter
+    confirm_timepoints: int = 0  # require N consecutive matches before firing
+
+    def matches(
+        self,
+        embryo_id: str,
+        detector_name: Optional[str] = None,
+        intensity_level: Optional[str] = None,
+        structure_quality: Optional[str] = None,
+    ) -> bool:
+        if self.applies_to and embryo_id not in self.applies_to:
+            return False
+        if self.trigger_detector and detector_name != self.trigger_detector:
+            return False
+        # AND-combine all specified predicates. At least one must be set
+        # to avoid firing on every detection.
+        if self.trigger_intensity_levels:
+            if intensity_level not in self.trigger_intensity_levels:
+                return False
+        if self.trigger_structure_qualities:
+            if structure_quality not in self.trigger_structure_qualities:
+                return False
+        if not self.trigger_intensity_levels and not self.trigger_structure_qualities:
+            return False
+        return True
 
 
 @dataclass

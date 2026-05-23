@@ -44,18 +44,26 @@ class MonitoringMode:
 class ExpressionMonitoringMode(MonitoringMode):
     """Anticipating fluorescent-reporter onset on TestEmbryos.
 
-    On signal onset (intensity_level >= WEAK reported by the dopaminergic
+    On signal onset (intensity_level >= MEDIUM reported by the dopaminergic
     detector → ``lit_up`` pseudo-stage), the embryo's cadence accelerates
-    to ``fast_interval`` seconds. On sustained saturation
+    to ``fast_interval`` seconds. Onset firing is per-embryo and requires
+    ``onset_confirm_timepoints`` extra consecutive detections to suppress
+    single-frame false positives. On sustained saturation
     (intensity_level == SATURATING), the 488 laser power steps down by
     ``rampdown_step_pct`` until ``rampdown_floor_pct``.
 
     Burst on good structure is handled by Phase 7's BurstAcquisition.
     """
     fast_interval: float = 60.0
+    onset_confirm_timepoints: int = 2
     rampdown_step_pct: float = 1.0
     rampdown_floor_pct: float = 2.0
     rampdown_ceiling_pct: float = 6.0
+    # Auto-burst on stable structure (one-time per embryo)
+    burst_frames: int = 60
+    burst_mode: str = "1hz"
+    burst_num_slices: int = 1
+    burst_confirm_timepoints: int = 2
 
     def __post_init__(self):
         if not self.name:
@@ -63,8 +71,11 @@ class ExpressionMonitoringMode(MonitoringMode):
         if not self.description:
             self.description = (
                 "Anticipating fluorescent-reporter onset on Test embryos: "
-                f"accelerate to {self.fast_interval}s on signal, ramp 488 "
-                f"down to {self.rampdown_floor_pct}% on saturation."
+                f"accelerate to {self.fast_interval}s on signal "
+                f"(confirm={self.onset_confirm_timepoints}), ramp 488 "
+                f"down to {self.rampdown_floor_pct}% on saturation, "
+                f"auto-burst ({self.burst_frames}f @ {self.burst_mode}) "
+                f"on stable structure."
             )
         if not self.applies_to_roles:
             self.applies_to_roles = ["test"]
@@ -72,12 +83,20 @@ class ExpressionMonitoringMode(MonitoringMode):
     def activate(self, orchestrator, embryo_ids: Optional[List[str]] = None):
         orchestrator.add_test_onset_speedup(
             fast_interval=self.fast_interval,
+            confirm_timepoints=self.onset_confirm_timepoints,
             embryo_ids=embryo_ids,
         )
         orchestrator.add_test_saturation_rampdown(
             step_pct=self.rampdown_step_pct,
             floor_pct=self.rampdown_floor_pct,
             ceiling_pct=self.rampdown_ceiling_pct,
+            embryo_ids=embryo_ids,
+        )
+        orchestrator.add_test_burst_on_good_structure(
+            frames=self.burst_frames,
+            mode=self.burst_mode,
+            num_slices=self.burst_num_slices,
+            confirm_timepoints=self.burst_confirm_timepoints,
             embryo_ids=embryo_ids,
         )
 
