@@ -13,6 +13,7 @@ import { AgentMessage } from "./messages/AgentMessage.js";
 import { UserMessage } from "./messages/UserMessage.js";
 import { ToolMessage } from "./messages/ToolMessage.js";
 import { SystemMessage } from "./messages/SystemMessage.js";
+import { SpecPanel } from "./messages/SpecPanel.js";
 import type { ChatEntry, ThemeColors } from "../types.js";
 
 interface MessageBubbleProps {
@@ -21,6 +22,9 @@ interface MessageBubbleProps {
 }
 
 export function MessageBubble({ entry, theme }: MessageBubbleProps) {
+  if (entry.isSpecCard) {
+    return <SpecPanel entry={entry} theme={theme} />;
+  }
   switch (entry.role) {
     case "user":
       return <UserMessage entry={entry} theme={theme} />;

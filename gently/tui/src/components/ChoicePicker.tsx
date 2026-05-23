@@ -12,10 +12,56 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import { useTuiSelector } from "../context.js";
+import type { ChoiceOptionMeta, ThemeColors } from "../types.js";
 
 interface ChoicePickerProps {
   onSelect: (selected: string) => void;
   onCancel: () => void;
+}
+
+/** Render the rich meta panel under the highlighted option for the
+ * session-resolution picker. Keeps the standard picker untouched. */
+function ResolutionMeta({
+  meta,
+  theme,
+}: {
+  meta: ChoiceOptionMeta;
+  theme: ThemeColors;
+}) {
+  const spec = meta.spec;
+  const acquisition: string[] = [];
+  if (spec) {
+    if (spec.num_slices !== undefined) acquisition.push(`${spec.num_slices} slices`);
+    if (spec.exposure_ms !== undefined) acquisition.push(`${spec.exposure_ms}ms`);
+    if (spec.interval_s !== undefined) acquisition.push(`every ${spec.interval_s}s`);
+  }
+  const strainLine: string[] = [];
+  if (spec?.strain) strainLine.push(spec.strain);
+  if (spec?.temperature_c !== undefined) strainLine.push(`${spec.temperature_c}°C`);
+
+  return (
+    <Box flexDirection="column" marginLeft={4} marginBottom={0}>
+      {meta.campaign && (
+        <Text color={theme.muted}>
+          Campaign · {meta.campaign}
+          {meta.sequence ? `  ·  ${meta.sequence}` : ""}
+          {meta.status ? `  ·  ${meta.status}` : ""}
+        </Text>
+      )}
+      {strainLine.length > 0 && (
+        <Text color={theme.muted}>{strainLine.join(" · ")}</Text>
+      )}
+      {acquisition.length > 0 && (
+        <Text color={theme.muted}>{acquisition.join(" · ")}</Text>
+      )}
+      {spec?.stop_condition && (
+        <Text color={theme.muted}>Stop · {spec.stop_condition}</Text>
+      )}
+      {spec?.success_criteria && (
+        <Text color={theme.muted}>Success · {spec.success_criteria}</Text>
+      )}
+    </Box>
+  );
 }
 
 export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
@@ -23,6 +69,8 @@ export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
   const theme = useTuiSelector((s) => s.theme);
   if (!choice) return null;
   const allowMultiple = choice.choice_data.allow_multiple;
+  const kind = choice.choice_data._kind;
+  const isResolution = kind === "session_resolution";
 
   // Auto-append a "Something else..." option if none exists
   const rawOptions = choice.choice_data.options;
@@ -128,6 +176,9 @@ export function ChoicePicker({ onSelect, onCancel }: ChoicePickerProps) {
               </Text>
               {opt.description && isCursor && !isThisCustom ? (
                 <Text color={theme.muted}>    {opt.description}</Text>
+              ) : null}
+              {isResolution && isCursor && opt.meta && !isThisCustom ? (
+                <ResolutionMeta meta={opt.meta} theme={theme} />
               ) : null}
               {isThisCustom && isCursor ? (
                 <Box marginLeft={2} marginTop={0}>

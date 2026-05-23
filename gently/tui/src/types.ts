@@ -79,23 +79,69 @@ export interface ToolCallChunk {
   result_summary?: string;
 }
 
+export interface ChoiceOptionMeta {
+  /** Campaign label (shorthand or short description). */
+  campaign?: string;
+  /** Position in sequence, e.g. "1 of 21 · 0 done". */
+  sequence?: string;
+  /** Plan-item status when non-default (e.g. "in_progress"). */
+  status?: string;
+  /** Acquisition spec for session-resolution candidates. */
+  spec?: {
+    strain?: string;
+    temperature_c?: number;
+    num_slices?: number;
+    exposure_ms?: number;
+    interval_s?: number;
+    stop_condition?: string;
+    success_criteria?: string;
+  };
+}
+
 export interface ChoiceOption {
   id: string;
   label: string;
   description?: string;
   disabled?: boolean;
+  /** Extra metadata for richer rendering (used by session_resolution). */
+  meta?: ChoiceOptionMeta;
 }
 
 export interface ChoiceRequest {
   type: "choice_request";
   choice_data: {
     _type: string;
+    /** Optional sub-kind hint for richer rendering (e.g. "session_resolution"). */
+    _kind?: string;
     question: string;
     options: ChoiceOption[];
     allow_multiple: boolean;
     default_id?: string;
   };
   request_id?: string;
+}
+
+export interface AppliedSpec {
+  plan_item_id?: string;
+  plan_item_title?: string;
+  strain?: string;
+  temperature_c?: number;
+  num_slices?: number;
+  exposure_ms?: number;
+  interval_s?: number;
+  stop_condition?: string;
+  detectors?: string[] | null;
+  success_criteria?: string;
+  adaptive_intervals?: Record<string, unknown> | null;
+}
+
+export interface AppliedSpecMessage {
+  type: "applied_spec";
+  spec: AppliedSpec;
+}
+
+export interface StreamStartMessage {
+  type: "stream_start";
 }
 
 export interface CommandResult {
@@ -133,12 +179,14 @@ export interface PongMessage {
 
 export type ServerMessage =
   | ConnectedMessage
+  | StreamStartMessage
   | StreamEndMessage
   | TextChunk
   | ThinkingChunk
   | ToolStartChunk
   | ToolCallChunk
   | ChoiceRequest
+  | AppliedSpecMessage
   | CommandResult
   | StateUpdate
   | NotificationMessage
@@ -206,6 +254,9 @@ export interface ChatEntry {
   isStreaming?: boolean;
   isThinking?: boolean;
   isSelection?: boolean;
+  /** Renders as a structured applied-spec panel instead of text. */
+  isSpecCard?: boolean;
+  specData?: AppliedSpec;
 }
 
 export interface CommandDef {

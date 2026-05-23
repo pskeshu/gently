@@ -80,6 +80,15 @@ export function useWebSocket(url: string): { send: WsClient["send"] } {
             break;
           }
 
+          case "applied_spec":
+            s.addSpecCard(msg.spec);
+            break;
+
+          case "stream_start":
+            // No-op; activeMessage state is managed by appendAgentText
+            // and finishStreaming. The chunk exists to mark intent.
+            break;
+
           case "command_result": {
             if (msg.action === "quit") {
               process.exit(0);

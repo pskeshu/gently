@@ -14,6 +14,7 @@
 
 import { createStore } from "zustand/vanilla";
 import type {
+  AppliedSpec,
   BrowserCampaign,
   BrowserPeer,
   BrowserPlanItem,
@@ -139,6 +140,7 @@ export interface TuiActions {
   addToolCall: (toolName: string, duration?: number) => void;
   addSystemMessage: (text: string) => void;
   addCommandResult: (command: string, content: string) => void;
+  addSpecCard: (spec: AppliedSpec) => void;
   finishStreaming: () => void;
 
   // Queue
@@ -484,6 +486,20 @@ export function createTuiStore() {
           role: "system",
           text: content,
           timestamp: Date.now(),
+        });
+        return { completedMessages, activeMessage: null };
+      }),
+
+    addSpecCard: (spec) =>
+      set((s) => {
+        const { completedMessages } = commitActive(s);
+        completedMessages.push({
+          id: nextId(),
+          role: "system",
+          text: "",
+          timestamp: Date.now(),
+          isSpecCard: true,
+          specData: spec,
         });
         return { completedMessages, activeMessage: null };
       }),

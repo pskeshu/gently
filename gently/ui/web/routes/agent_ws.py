@@ -351,6 +351,7 @@ def create_router(server) -> APIRouter:
         # Active streaming task (so we can cancel on disconnect)
         active_task: Optional[asyncio.Task] = None
         wizard_task = None
+        bootstrap_task: Optional[asyncio.Task] = None
 
         # ── Session transcript ────────────────────────────────
         # Log every WebSocket message (both directions) to a JSONL
@@ -427,24 +428,30 @@ def create_router(server) -> APIRouter:
                         "wizard_complete": True,
                     })
 
-            # ── Auto-briefing or resolution bootstrap ─────────────
+            # ── Auto-briefing or resolution picker ────────────────
             # New sessions with multiple unblocked imaging candidates
-            # open into resolution mode (agent's first turn becomes
-            # the opener). All other cases fall back to the deterministic
-            # briefing text from get_session_briefing().
+            # open into a structured resolution picker. The picker is
+            # deterministic (no LLM call) and dispatches the user's
+            # pick server-side. It runs concurrently with the REPL so
+            # its awaited choice future can be resolved by incoming
+            # ``choice_response`` messages. All other launches fall
+            # back to the deterministic briefing text.
             wizard_ran = wizard is not None and wizard.needed
-            if not wizard_ran:
-                if bridge.should_enter_resolution():
+
+            async def _run_resolution_bootstrap():
+                try:
+                    await bridge.bootstrap_resolution_picker(
+                        send_fn, choice_future_factory,
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    logger.error(
+                        "Resolution picker failed; falling back to "
+                        "static briefing: %s",
+                        exc, exc_info=exc,
+                    )
                     try:
-                        await bridge.bootstrap_resolution(
-                            send_fn, choice_future_factory,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            f"Resolution bootstrap failed; "
-                            f"falling back to static briefing: {exc}",
-                            exc_info=exc,
-                        )
                         briefing = bridge.get_session_briefing()
                         if briefing:
                             await send_fn({"type": "stream_start"})
@@ -454,6 +461,12 @@ def create_router(server) -> APIRouter:
                                 "tokens": {"input_tokens": 0, "output_tokens": 0,
                                            "total_tokens": 0, "api_calls": 0},
                             })
+                    except Exception:
+                        pass
+
+            if not wizard_ran:
+                if bridge.should_enter_resolution():
+                    bootstrap_task = asyncio.create_task(_run_resolution_bootstrap())
                 else:
                     briefing = bridge.get_session_briefing()
                     if briefing:
@@ -600,6 +613,8 @@ def create_router(server) -> APIRouter:
                 wizard_task.cancel()
             if active_task and not active_task.done():
                 active_task.cancel()
+            if bootstrap_task is not None and not bootstrap_task.done():
+                bootstrap_task.cancel()
             # Clean up pending futures
             for future in _choice_futures.values():
                 if not future.done():
