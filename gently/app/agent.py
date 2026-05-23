@@ -474,11 +474,25 @@ class MicroscopyAgent:
     def _init_timeline_manager(self):
         """Initialize the timeline manager for event tracking."""
         try:
-            timeline_path = self.store.root / "sessions"
+            # Per-session timeline.jsonl — points the TimelineManager at the
+            # FileStore-indexed session folder so each session gets its own
+            # event log. Falls back to ``<root>/sessions/<id>`` for the
+            # legacy bare-id layout when the session isn't indexed yet.
+            sid = self.sessions._session_id
+            session_path = None
+            if sid:
+                session_path = self.store._session_dir(sid)
+                if session_path is None:
+                    session_path = self.store.root / "sessions" / sid
+            if session_path is None:
+                # No session yet — keep events in memory only by passing None.
+                logging.getLogger(__name__).debug(
+                    "TimelineManager started without persistence (no session_id yet)"
+                )
             self.timeline_manager = TimelineManager(
-                storage_path=timeline_path,
+                storage_path=session_path,
                 max_events=1000,
-                session_id=self.sessions._session_id,
+                session_id=sid,
             )
             self.timeline_manager.start()
         except Exception as e:
@@ -825,6 +839,14 @@ class MicroscopyAgent:
             eid = row.get("embryo_id", "")
             if not eid:
                 continue
+            src_role = row.get("role")
+            if not src_role:
+                logger.warning(
+                    "Embryo %s in source session has no role; defaulting to "
+                    "'unassigned'. Re-mark before starting acquisition.",
+                    eid,
+                )
+                src_role = "unassigned"
             embryo_states[eid] = {
                 "stage_position": {
                     "x": row.get("position_x"),
@@ -833,6 +855,7 @@ class MicroscopyAgent:
                 "calibration": row.get("calibration") or {},
                 "uid": row.get("embryo_uid"),
                 "user_label": row.get("nickname"),
+                "role": src_role,
             }
 
         # Fallback: JSON snapshot (legacy path)
@@ -872,6 +895,7 @@ class MicroscopyAgent:
                     calibration=calibration,
                     user_label=embryo_data.get('user_label'),
                     uid=source_uid,
+                    role=embryo_data.get('role') or 'unassigned',
                 )
 
                 embryo = self.experiment.embryos[embryo_id]
@@ -881,20 +905,37 @@ class MicroscopyAgent:
                 embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
                 embryo.priority = embryo_data.get('priority', 'normal')
                 embryo.acquisition_mode = embryo_data.get('acquisition_mode', 'volume')
-                embryo.exposure_count = embryo_data.get('exposure_count', 0)
-                embryo.total_exposure_ms = embryo_data.get('total_exposure_ms', 0.0)
-                embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
+
+                # Light budget import. Prefer fields already on embryo_data
+                # (future schema may persist these directly on embryo.yaml);
+                # otherwise reconstruct by walking volumes/*.meta.yaml in
+                # the source session. TODO: when dose-tracking lands as a
+                # first-class persisted field (per-embryo dose_log.jsonl +
+                # `dose:` summary on embryo.yaml), this fallback should be
+                # removed and the import should fail loudly if dose is
+                # missing.
+                dose = self._compute_imported_dose(session_id, embryo_id)
+                embryo.exposure_count = (
+                    embryo_data.get('exposure_count')
+                    or dose['exposure_count']
+                )
+                embryo.total_exposure_ms = (
+                    embryo_data.get('total_exposure_ms')
+                    or dose['total_exposure_ms']
+                )
+                embryo.timepoints_acquired = (
+                    embryo_data.get('timepoints_acquired')
+                    or dose['exposure_count']
+                )
 
                 last_imaged_str = embryo_data.get('last_imaged')
                 if last_imaged_str:
                     try:
                         embryo.last_imaged = datetime.fromisoformat(last_imaged_str)
                     except (ValueError, TypeError):
-                        embryo.last_imaged = None
+                        embryo.last_imaged = dose['last_imaged']
                 else:
-                    if embryo.exposure_count > 0:
-                        embryo.exposure_count = 0
-                        embryo.total_exposure_ms = 0.0
+                    embryo.last_imaged = dose['last_imaged']
 
                 imported.append(embryo_id)
 
@@ -911,6 +952,73 @@ class MicroscopyAgent:
             'errors': errors,
             'source_session': session_id,
         }
+
+    def _compute_imported_dose(self, source_session_id: str, embryo_id: str) -> Dict:
+        """Reconstruct an embryo's realized 488 nm photodose from the source
+        session's per-volume meta files.
+
+        Hack used by import_embryos_from_session — exposure history is not
+        currently persisted on the FileStore embryo record, so we walk
+        ``embryos/{id}/volumes/*.meta.yaml`` and sum
+        ``num_slices * exposure_ms`` per acquisition. This captures normal
+        acquisitions, calibration sub-acquisitions, and burst frames so
+        long as each writes a meta file (which the existing acquisition
+        path does).
+
+        TODO: replace with reading a persisted ``dose:`` block from
+        embryo.yaml once dose-tracking is first-class.
+        """
+        import yaml
+        from datetime import datetime
+        from pathlib import Path
+
+        result = {
+            'exposure_count': 0,
+            'total_exposure_ms': 0.0,
+            'last_imaged': None,
+        }
+
+        if not self.store:
+            return result
+
+        # FileStore exposes _session_dir(session_id) → resolved Path.
+        session_dir_fn = getattr(self.store, '_session_dir', None)
+        sd = session_dir_fn(source_session_id) if callable(session_dir_fn) else None
+        if sd is None:
+            return result
+
+        vols_dir = Path(sd) / 'embryos' / embryo_id / 'volumes'
+        if not vols_dir.is_dir():
+            return result
+
+        latest = None
+        for meta_path in sorted(vols_dir.glob('*.meta.yaml')):
+            try:
+                doc = yaml.safe_load(meta_path.read_text()) or {}
+            except Exception:
+                continue
+            md = doc.get('metadata') or {}
+            num_slices = md.get('num_slices')
+            if num_slices is None:
+                shape = doc.get('shape') or []
+                num_slices = shape[0] if shape else 0
+            exposure_ms = md.get('exposure_ms') or 0.0
+            try:
+                result['total_exposure_ms'] += float(num_slices) * float(exposure_ms)
+            except (TypeError, ValueError):
+                pass
+            result['exposure_count'] += 1
+            acq = doc.get('acquired_at')
+            if acq and (latest is None or acq > latest):
+                latest = acq
+
+        if latest:
+            try:
+                result['last_imaged'] = datetime.fromisoformat(latest)
+            except (ValueError, TypeError):
+                pass
+
+        return result
 
     async def on_volume_acquired(self, embryo_id: str, timepoint: int,
                                 volume_data, volume_path=None):
