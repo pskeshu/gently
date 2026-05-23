@@ -373,44 +373,90 @@ const CalibrationProfileView = {
             return this._renderFallback(images, focusPlots, summaries);
         }
 
+        // Metrics-first 2x2 layout: numbers on top, four chart quadrants
+        // below (Focus TOP / Focus BOTTOM / Calibration Summary / Galvo
+        // Profile sphere). SPIM live is a compact LED+thumb in the strip
+        // — it only earns chart real estate when actively sweeping, and
+        // even then we keep it tiny so the metrics dominate.
+        const byGalvo = {};
+        sweepData.forEach(s => {
+            const name = s.galvo_name || 'unknown';
+            if (!byGalvo[name]) byGalvo[name] = [];
+            byGalvo[name].push({ piezo: s.piezo, score: s.score });
+        });
+
+        const focusMeta = {};
+        focusPlots.forEach(fp => {
+            const m = fp.metadata || {};
+            if (m.galvo_name) {
+                focusMeta[m.galvo_name] = {
+                    bestPiezo: m.best_piezo ?? null,
+                    rSquared: m.r_squared ?? null,
+                };
+            }
+        });
+
+        const focusTop = this._buildFocusCurveSvg(byGalvo['top'], 'top', focusMeta['top']);
+        const focusBot = this._buildFocusCurveSvg(byGalvo['bottom'], 'bottom', focusMeta['bottom']);
+
+        let summarySvg = '';
+        if (calibInfo.slope != null && calibInfo.focusTopGalvo != null) {
+            summarySvg = CalibrationCharts.renderCalibrationSummary(calibInfo);
+        } else if (summaries.length > 0) {
+            const latest = summaries[summaries.length - 1];
+            summarySvg = `<img class="cal-quad-img" src="data:image/png;base64,${latest.base64_png}" alt="calibration summary"/>`;
+        }
+
         return `
-            <div class="cal-profile-container">
-                <div class="cal-profile-svg-area">
-                    ${this._renderSpimPreview()}
-                    ${this._renderSVG(edgeData, sweepData, calibInfo)}
-                    ${this._renderResultsCard(calibInfo)}
-                </div>
-                <div class="cal-profile-detail" id="cal-profile-detail">
-                    ${this._renderDetailDefault(focusPlots, summaries, calibInfo, sweepData)}
+            <div class="cal-profile-v2">
+                ${this._renderMetricsStrip(calibInfo)}
+                <div class="cal-grid">
+                    ${this._renderQuad('Galvo Profile', this._renderSVG(edgeData, sweepData, calibInfo), 'galvo')}
+                    ${this._renderQuad('Calibration Summary', summarySvg || this._emptyQuadBody('Awaiting calibration results'), 'summary')}
+                    ${this._renderQuad('Focus Curve — TOP', focusTop, 'focus-top')}
+                    ${this._renderQuad('Focus Curve — BOTTOM', focusBot, 'focus-bot')}
                 </div>
             </div>
         `;
     },
 
-    /** Always-visible live SPIM frame slot. SpimLivePreview maintains a
-     * per-embryo memory of the last frame received; after every profile
-     * render we re-apply the entry for the selected embryo, so the
-     * preview survives unrelated re-renders and sidebar switches. */
-    _renderSpimPreview() {
+    /** Compact SPIM live indicator used inside the metrics strip.
+     * Carries the same IDs as the old big preview so SpimLivePreview's
+     * apply-on-render logic continues to work unchanged. */
+    _renderSpimIndicator() {
         return `
-            <div class="cal-spim-preview" id="cal-spim-preview">
-                <div class="cal-spim-stage">
-                    <img class="cal-spim-img" id="cal-spim-img" alt="latest SPIM frame">
-                    <div class="cal-spim-placeholder" id="cal-spim-placeholder">
-                        <div class="cal-spim-placeholder-text">awaiting calibration</div>
-                    </div>
-                </div>
-                <div class="cal-spim-body">
-                    <div class="cal-spim-head">
-                        <span class="cal-spim-title">
-                            <span class="cal-spim-led idle" id="cal-spim-led"></span>
-                            <span>SPIM live</span>
-                        </span>
-                    </div>
-                    <span class="cal-spim-meta" id="cal-spim-meta">—</span>
-                </div>
+            <div class="cal-spim-indicator" id="cal-spim-preview">
+                <span class="cal-spim-led idle" id="cal-spim-led"></span>
+                <span class="cal-spim-label">SPIM</span>
+                <img class="cal-spim-img cal-spim-thumb" id="cal-spim-img" alt="">
+                <span class="cal-spim-placeholder" id="cal-spim-placeholder" hidden></span>
+                <span class="cal-spim-meta" id="cal-spim-meta">—</span>
             </div>
         `;
+    },
+
+    _renderQuad(title, bodyHtml, area) {
+        const areaStyle = area ? ` style="grid-area: ${area};"` : '';
+        return `
+            <div class="cal-quad cal-quad-${area || 'default'}"${areaStyle}>
+                <div class="cal-quad-title">${title}</div>
+                <div class="cal-quad-body">${bodyHtml}</div>
+            </div>
+        `;
+    },
+
+    _emptyQuadBody(msg) {
+        return `<div class="cal-quad-empty">${msg}</div>`;
+    },
+
+    _buildFocusCurveSvg(points, name, meta) {
+        if (!points || points.length < 2) {
+            return this._emptyQuadBody('No sweep data');
+        }
+        const sorted = points.sort((a, b) => a.piezo - b.piezo);
+        return CalibrationCharts.renderFocusCurve(
+            sorted, name, meta?.bestPiezo, meta?.rSquared
+        );
     },
 
     _extractCalibInfo(edgeData, sweepData, allImages) {
@@ -774,137 +820,42 @@ const CalibrationProfileView = {
         `;
     },
 
-    _renderResultsCard(info) {
-        const slope = info.slope != null ? `${info.slope.toFixed(1)} um/deg` : '—';
-        const offset = info.offset != null ? `${info.offset.toFixed(1)} um` : '—';
+    _renderMetricsStrip(info) {
+        const slope = info.slope != null ? `${info.slope.toFixed(1)}` : '—';
+        const slopeUnit = info.slope != null ? 'µm/deg' : '';
+        const offset = info.offset != null ? `${info.offset.toFixed(1)}` : '—';
+        const offsetUnit = info.offset != null ? 'µm' : '';
         const r2Top = info.rSquaredTop != null ? info.rSquaredTop.toFixed(3) : '—';
         const r2Bot = info.rSquaredBot != null ? info.rSquaredBot.toFixed(3) : '—';
-        const coverage = info.coverage != null ? `${info.coverage.toFixed(2)} deg` : '—';
-        const coverageUm = (info.coverage != null && info.slope != null)
-            ? ` (~${(info.coverage * info.slope).toFixed(0)}um)` : '';
+        const coverage = (info.coverage != null && info.slope != null)
+            ? `${(info.coverage * info.slope).toFixed(0)}` : (info.coverage != null ? info.coverage.toFixed(2) : '—');
+        const coverageUnit = (info.coverage != null && info.slope != null) ? 'µm' : (info.coverage != null ? 'deg' : '');
         const scanRange = (info.scanTop != null && info.scanBottom != null)
-            ? `${info.scanTop.toFixed(2)} to ${info.scanBottom.toFixed(2)} deg` : '—';
-        const padding = info.bufferDeg != null ? `${info.bufferDeg.toFixed(2)} deg` : '—';
-        const paddingUm = (info.bufferDeg != null && info.slope != null)
-            ? ` (~${(info.bufferDeg * info.slope).toFixed(0)}um)` : '';
+            ? `${info.scanTop.toFixed(2)}…${info.scanBottom.toFixed(2)}` : '—';
+        const scanRangeUnit = (info.scanTop != null && info.scanBottom != null) ? 'deg' : '';
+        const padding = (info.bufferDeg != null && info.slope != null)
+            ? `${(info.bufferDeg * info.slope).toFixed(0)}` : (info.bufferDeg != null ? info.bufferDeg.toFixed(2) : '—');
+        const paddingUnit = (info.bufferDeg != null && info.slope != null) ? 'µm' : (info.bufferDeg != null ? 'deg' : '');
 
-        return `
-            <div class="cal-results-card">
-                <div class="cal-result">
-                    <span class="cal-result-label">Slope</span>
-                    <span class="cal-result-value">${slope}</span>
-                </div>
-                <div class="cal-result">
-                    <span class="cal-result-label">Offset</span>
-                    <span class="cal-result-value">${offset}</span>
-                </div>
-                <div class="cal-result">
-                    <span class="cal-result-label">R² (top/bot)</span>
-                    <span class="cal-result-value">${r2Top} / ${r2Bot}</span>
-                </div>
-                <div class="cal-result">
-                    <span class="cal-result-label">Coverage</span>
-                    <span class="cal-result-value">${coverage}${coverageUm}</span>
-                </div>
-                <div class="cal-result">
-                    <span class="cal-result-label">Scan Range</span>
-                    <span class="cal-result-value">${scanRange}</span>
-                </div>
-                <div class="cal-result">
-                    <span class="cal-result-label">Padding</span>
-                    <span class="cal-result-value">${padding}${paddingUm}</span>
-                </div>
+        const metric = (label, value, unit) => `
+            <div class="cal-metric">
+                <span class="cal-metric-label">${label}</span>
+                <span class="cal-metric-value">${value}${unit ? `<span class="cal-metric-unit">${unit}</span>` : ''}</span>
             </div>
         `;
-    },
 
-    _renderDetailDefault(focusPlots, summaries, info, sweepData) {
-        let html = '';
-
-        // Build focus curves from sweep data (grouped by galvo_name)
-        if (sweepData && sweepData.length > 0) {
-            const byGalvo = {};
-            sweepData.forEach(s => {
-                const name = s.galvo_name || 'unknown';
-                if (!byGalvo[name]) byGalvo[name] = [];
-                byGalvo[name].push({ piezo: s.piezo, score: s.score });
-            });
-
-            // Get best_piezo and r_squared from focus_plot metadata
-            const focusMeta = {};
-            focusPlots.forEach(fp => {
-                const m = fp.metadata || {};
-                if (m.galvo_name) {
-                    focusMeta[m.galvo_name] = {
-                        bestPiezo: m.best_piezo ?? null,
-                        rSquared: m.r_squared ?? null
-                    };
-                }
-            });
-
-            // Render chart for each galvo position (top, bottom)
-            for (const [name, points] of Object.entries(byGalvo)) {
-                const sorted = points.sort((a, b) => a.piezo - b.piezo);
-                const meta = focusMeta[name] || {};
-                const chartSvg = CalibrationCharts.renderFocusCurve(
-                    sorted, name, meta.bestPiezo, meta.rSquared
-                );
-                if (chartSvg) {
-                    html += `
-                        <div class="cal-detail-card">
-                            <div class="cal-detail-card-title">Focus Curve — ${name.toUpperCase()}</div>
-                            <div class="cal-chart-container">${chartSvg}</div>
-                        </div>
-                    `;
-                }
-            }
-        } else if (focusPlots.length > 0) {
-            // Fallback: show matplotlib PNGs if no sweep data available
-            const latest = focusPlots.slice(-2).reverse();
-            latest.forEach((img, i) => {
-                const label = i === 0 ? 'Focus Curve (latest)' : 'Focus Curve';
-                html += `
-                    <div class="cal-detail-card">
-                        <div class="cal-detail-card-title">${label}</div>
-                        <img class="cal-detail-img" src="data:image/png;base64,${img.base64_png}"
-                             alt="focus curve"/>
-                    </div>
-                `;
-            });
-        }
-
-        // Render calibration summary chart from metadata
-        if (info.slope != null && info.focusTopGalvo != null) {
-            const chartSvg = CalibrationCharts.renderCalibrationSummary(info);
-            if (chartSvg) {
-                html += `
-                    <div class="cal-detail-card">
-                        <div class="cal-detail-card-title">Calibration Summary</div>
-                        <div class="cal-chart-container">${chartSvg}</div>
-                    </div>
-                `;
-            }
-        } else if (summaries.length > 0) {
-            // Fallback: show matplotlib PNG
-            const latest = summaries[summaries.length - 1];
-            html += `
-                <div class="cal-detail-card">
-                    <div class="cal-detail-card-title">Calibration Summary</div>
-                    <img class="cal-detail-img" src="data:image/png;base64,${latest.base64_png}"
-                         alt="calibration summary"/>
-                </div>
-            `;
-        }
-
-        if (!html) {
-            html = `
-                <div class="cal-detail-empty">
-                    <div class="cal-detail-empty-text">Click a slice line to view its image</div>
-                </div>
-            `;
-        }
-
-        return html;
+        return `
+            <div class="cal-metrics-strip">
+                ${metric('Slope', slope, slopeUnit)}
+                ${metric('Offset', offset, offsetUnit)}
+                ${metric('R² top', r2Top, '')}
+                ${metric('R² bot', r2Bot, '')}
+                ${metric('Coverage', coverage, coverageUnit)}
+                ${metric('Scan range', scanRange, scanRangeUnit)}
+                ${metric('Padding', padding, paddingUnit)}
+                ${this._renderSpimIndicator()}
+            </div>
+        `;
     },
 
     _renderSliceDetail(sliceItem) {
