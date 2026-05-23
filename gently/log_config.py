@@ -27,6 +27,15 @@ def configure_logging(
     Call once at startup (launch_gently.py or gently.py).
     Explicit arguments take priority over env vars.
     """
+    # Windows consoles default to cp1252, which crashes when log messages
+    # contain Unicode (e.g. the arrow '→' used in plan-item titles). Force
+    # the standard streams to UTF-8 with replacement so logging never raises.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     level = level or os.environ.get("GENTLY_LOG_LEVEL", "INFO")
     log_file = log_file or os.environ.get("GENTLY_LOG_FILE") or None
     console_fmt = os.environ.get("GENTLY_LOG_FORMAT", _DEFAULT_FORMAT)
@@ -53,7 +62,7 @@ def configure_logging(
     # File handler — always INFO+ regardless of console level
     if log_file:
         file_fmt = os.environ.get("GENTLY_LOG_FILE_FORMAT", _DEFAULT_FILE_FORMAT)
-        fh = logging.FileHandler(log_file)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
         fh.setLevel(logging.INFO)
         fh.setFormatter(logging.Formatter(file_fmt))
         for logger_name in ("gently", "gently_perception"):

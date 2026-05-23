@@ -71,11 +71,19 @@ The server provides:
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = log_dir / f"device_layer_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
+    # Windows consoles default to cp1252; force UTF-8 so Unicode in log
+    # messages (e.g. '→') doesn't crash the StreamHandler.
+    for _stream in (sys.stdout, sys.stderr):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, OSError):
+            pass
+
     console = logging.StreamHandler(sys.stderr)
     console.setLevel(logging.WARNING)
     console.setFormatter(logging.Formatter("%(asctime)s %(levelname)s [%(name)s] %(message)s"))
 
-    file_handler = logging.FileHandler(str(log_file))
+    file_handler = logging.FileHandler(str(log_file), encoding="utf-8")
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno)d %(message)s"))
 
