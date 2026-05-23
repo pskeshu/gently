@@ -202,12 +202,15 @@ const ExperimentOverview = {
             console.error('[ExperimentOverview] #experiment-overview-root NOT FOUND in DOM');
             return;
         }
+        // Tear down any prior ticker before we blow away the SVG it pointed at.
+        this._stopNowTicker();
         try {
             root.innerHTML = '';
             if (this.activeView === 'rules') {
                 this._renderRulesView(root, s);
             } else {
                 this._renderOverviewView(root, s);
+                this._startNowTicker();
             }
             console.log('[ExperimentOverview] rendered OK, view=', this.activeView);
         } catch (err) {
@@ -216,6 +219,72 @@ const ExperimentOverview = {
                 Render error: ${err.message}<br>
                 <pre style="margin-top:8px;font-size:11px;color:#888;white-space:pre-wrap;">${err.stack || ''}</pre>
             </div>`;
+        }
+    },
+
+    // The "now" marker advances with wall-clock time and shows a countdown to
+    // the next base-interval acquisition. We update only the marker group's
+    // transform + the chip text, never re-rendering the whole SVG. Tick rate
+    // is ~4 Hz which keeps the line motion visibly smooth without burning
+    // cycles. Skipped while the tab is hidden.
+    _startNowTicker() {
+        this._stopNowTicker();
+        const tick = () => {
+            if (!this._nowTickerCtx) return;
+            if (!document.hidden) this._updateNowMarker();
+            this._nowTickerHandle = setTimeout(tick, 250);
+        };
+        this._nowTickerHandle = setTimeout(tick, 250);
+    },
+
+    _stopNowTicker() {
+        if (this._nowTickerHandle) {
+            clearTimeout(this._nowTickerHandle);
+            this._nowTickerHandle = null;
+        }
+    },
+
+    _updateNowMarker() {
+        const ctx = this._nowTickerCtx;
+        if (!ctx || !ctx.marker.isConnected) return;
+        const elapsedRealS = (Date.now() - ctx.renderedAtMs) / 1000;
+        const effOffsetS = Math.min(
+            ctx.renderedOffsetS + elapsedRealS,
+            ctx.horizonS
+        );
+        const x = ctx.xForT(effOffsetS);
+        ctx.marker.setAttribute('transform', `translate(${x},0)`);
+
+        // Wall-clock from session-anchored time so the line and the clock
+        // can't drift apart even if the client clock is wrong.
+        const wallMs = ctx.startedAtMs + effOffsetS * 1000;
+        const d = new Date(wallMs);
+        const hh = String(d.getHours()).padStart(2, '0');
+        const mm = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+
+        let label = `${hh}:${mm}:${ss}`;
+        if (ctx.baseIntervalS > 0) {
+            const nextTickS = Math.ceil(effOffsetS / ctx.baseIntervalS) * ctx.baseIntervalS;
+            const remainS = Math.max(0, Math.round(nextTickS - effOffsetS));
+            const rm = Math.floor(remainS / 60);
+            const rs = String(remainS % 60).padStart(2, '0');
+            label += ` · next ${rm}:${rs}`;
+        }
+        ctx.chipText.textContent = label;
+
+        // Size the chip to fit; flip to the left of the line if we're near
+        // the right edge so it stays on-screen.
+        const textLen = label.length * 6.2 + 12;
+        const nearEnd = x + textLen + 8 > ctx.laneRight;
+        if (nearEnd) {
+            ctx.chipBg.setAttribute('x', -textLen - 4);
+            ctx.chipBg.setAttribute('width', textLen);
+            ctx.chipText.setAttribute('x', -textLen + 2);
+        } else {
+            ctx.chipBg.setAttribute('x', 4);
+            ctx.chipBg.setAttribute('width', textLen);
+            ctx.chipText.setAttribute('x', 10);
         }
     },
 
@@ -253,15 +322,14 @@ const ExperimentOverview = {
         const elapsedM = Math.floor((s.now_offset_s % 3600) / 60);
         const wrap = el('div', 'expov-header');
 
-        // Session identification line — skip the small id if it's a duplicate
-        // of the display name (common when session has no human label yet).
+        // Session identification — the navbar already carries the id on
+        // every tab, so we only render a name line when it actually adds
+        // info (i.e. a human label, not a hash). The data-source badge is
+        // still useful and gets its own row so it stays visible.
         const metaRow = el('div', 'expov-header-row expov-header-row-meta');
-        metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
-        if (s.session_id && s.session_id !== s.session_name) {
-            metaRow.appendChild(elText('span', 'expov-session-id', s.session_id));
+        if (s.session_name && s.session_name !== s.session_id) {
+            metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
         }
-        // Badge reflects the data source so devs can tell at a glance whether
-        // they're looking at the live strategy or the static fallback.
         if (this.isLive) {
             metaRow.appendChild(elText('span', 'expov-live-badge', 'live'));
         } else {
@@ -473,15 +541,44 @@ const ExperimentOverview = {
         }
         svg.appendChild(axisG);
 
-        // ----- "now" line (spans all rows)
-        const nowLine = svgEl('line', {
-            x1: nowX, x2: nowX, y1: TOP_AXIS_H - 4, y2: H - BOTTOM_PAD,
+        // ----- "now" marker: translatable group containing the vertical line
+        // and a live clock chip. The chip advances every tick and shows the
+        // countdown to the next base-interval acquisition window. The group
+        // gets translated by _tickNow, so we don't rebuild SVG every second.
+        const nowMarker = svgEl('g', { class: 'expov-svg-now-marker' });
+        nowMarker.appendChild(svgEl('line', {
+            x1: 0, x2: 0, y1: TOP_AXIS_H - 4, y2: H - BOTTOM_PAD,
             class: 'expov-svg-now-line'
+        }));
+        // Chip sits just below the axis labels (which live at y=12 and y=22)
+        // so it doesn't sit on top of the "+0h / wallclock" annotation when
+        // the now-line is near the start of the timeline.
+        const chipBg = svgEl('rect', {
+            x: 4, y: TOP_AXIS_H - 6, width: 120, height: 14, rx: 7,
+            class: 'expov-svg-now-chip-bg'
         });
-        svg.appendChild(nowLine);
-        svg.appendChild(svgEl('text', {
-            x: nowX + 4, y: 26, class: 'expov-svg-now-label'
-        }, 'now'));
+        const chipText = svgEl('text', {
+            x: 10, y: TOP_AXIS_H + 4, class: 'expov-svg-now-label'
+        }, '');
+        nowMarker.appendChild(chipBg);
+        nowMarker.appendChild(chipText);
+        svg.appendChild(nowMarker);
+
+        // Stash the bits the ticker needs to update without re-rendering.
+        this._nowTickerCtx = {
+            marker: nowMarker,
+            chipBg: chipBg,
+            chipText: chipText,
+            xForT,
+            startedAtMs: new Date(s.started_at).getTime(),
+            renderedAtMs: Date.now(),
+            renderedOffsetS: s.now_offset_s,
+            baseIntervalS: s.base_interval_s || 0,
+            horizonS: s.horizon_s,
+            laneLeft: LEFT,
+            laneRight: LEFT + LANE_W,
+        };
+        this._updateNowMarker();
 
         // ----- one group per embryo
         s.embryos.forEach((emb, i) => {

@@ -157,6 +157,17 @@ class TimelapseStateTracker:
                     "transition_between": data.get("transition_between"),
                     "observed_features": data.get("observed_features"),
                     "shape": data.get("shape"),
+                    # Two-stage dopaminergic classifier fields. These were
+                    # being dropped on persistence, so after a reload the
+                    # JSON view in the reasoning panel showed only
+                    # `reasoning` even though they were present on the
+                    # original live event.
+                    "intensity_level": data.get("intensity_level"),
+                    "structure_quality": data.get("structure_quality"),
+                    "has_hatched": data.get("has_hatched"),
+                    "findings": data.get("findings"),
+                    "contrastive_reasoning": data.get("contrastive_reasoning"),
+                    "temporal_analysis": data.get("temporal_analysis"),
                 }
                 if eid not in self.detection_reasoning:
                     self.detection_reasoning[eid] = []

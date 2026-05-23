@@ -2488,21 +2488,30 @@ const EmbryosManager = {
         // block from "VLM Summary" to "Classifier" so the two-stage
         // architecture is visually explicit.
         const hasDescription = !!item.description;
+        // Icon + label are wrapped in spans so CSS can flex-align them and
+        // size the icon independently — emoji glyphs don't share text
+        // baselines and look misaligned when interpolated as raw text.
         const perceiverDetailHtml = hasDescription
             ? `<div class="detail-perceiver">
-                   <div class="reasoning-label">&#x1F441; Perceiver</div>
+                   <div class="reasoning-label perceiver-label"><span class="stage-icon" aria-hidden="true">&#x1F441;</span><span class="stage-text">Perceiver</span></div>
                    <div class="vlm-perceiver-text-detail">${this.escapeHtml(item.description)}</div>
                </div>`
             : '';
-        const classifierLabel = hasDescription ? '&#x2699; Classifier' : 'VLM Summary';
+        const classifierLabel = hasDescription
+            ? '<span class="stage-icon" aria-hidden="true">&#x2699;</span><span class="stage-text">Classifier</span>'
+            : 'VLM Summary';
         // Pretty-printed JSON of the classifier output (only for the
         // two-stage path — single-call detectors don't carry these
-        // structured fields).
+        // structured fields). Newer dopaminergic_signal payloads nest the
+        // fields under `findings`; older ones put them at the top level —
+        // fall back to `findings` so the JSON view never silently drops
+        // them when only one shape is present.
+        const f = item.findings || {};
         const classifierJsonDetailHtml = hasDescription
             ? `<pre class="classifier-json"><code>${this.escapeHtml(JSON.stringify({
-                   intensity_level: item.intensity_level,
-                   structure_quality: item.structure_quality,
-                   has_hatched: item.has_hatched,
+                   intensity_level: item.intensity_level ?? f.intensity_level ?? null,
+                   structure_quality: item.structure_quality ?? f.structure_quality ?? null,
+                   has_hatched: item.has_hatched ?? f.has_hatched ?? null,
                    reasoning: item.reasoning,
                }, null, 2))}</code></pre>`
             : '';
@@ -2750,7 +2759,7 @@ const EmbryosManager = {
                     ${reasoningTraceHtml}
                     ${perceiverDetailHtml}
                     <div class="detail-reasoning">
-                        <div class="reasoning-label">${classifierLabel}</div>
+                        <div class="reasoning-label ${hasDescription ? 'classifier-label' : ''}">${classifierLabel}</div>
                         <div class="reasoning-text">${linkedReasoning}</div>
                         ${classifierJsonDetailHtml}
                     </div>
@@ -3060,24 +3069,28 @@ const EmbryosManager = {
             const isTwoStage = !!detection.description;
             const perceiverBlock = detection.description
                 ? `<div class="vlm-perceiver-text">
-                       <span class="vlm-stage-label perceiver">&#x1F441; Perceiver</span>
+                       <span class="vlm-stage-label perceiver"><span class="stage-icon" aria-hidden="true">&#x1F441;</span><span class="stage-text">Perceiver</span></span>
                        <div class="vlm-stage-body">${this.escapeHtml(detection.description)}</div>
                    </div>`
                 : '';
             // Pretty-printed JSON of the classifier's structured output —
             // shown alongside the prose so the audience can see the
             // exact decision the classifier emitted to the orchestrator.
+            // Fall back to `findings` for fields the newer detector nests
+            // there. Without this, missing top-level keys silently drop
+            // from the JSON view.
+            const df = detection.findings || {};
             const classifierJsonBlock = isTwoStage
                 ? `<pre class="classifier-json"><code>${this.escapeHtml(JSON.stringify({
-                       intensity_level: detection.intensity_level,
-                       structure_quality: detection.structure_quality,
-                       has_hatched: detection.has_hatched,
+                       intensity_level: detection.intensity_level ?? df.intensity_level ?? null,
+                       structure_quality: detection.structure_quality ?? df.structure_quality ?? null,
+                       has_hatched: detection.has_hatched ?? df.has_hatched ?? null,
                        reasoning: detection.reasoning,
                    }, null, 2))}</code></pre>`
                 : '';
             const classifierBlock = detection.reasoning
                 ? `<div class="detection-reasoning-text ${isTwoStage ? 'two-stage' : ''}">
-                       ${isTwoStage ? '<span class="vlm-stage-label classifier">&#x2699; Classifier</span>' : ''}
+                       ${isTwoStage ? '<span class="vlm-stage-label classifier"><span class="stage-icon" aria-hidden="true">&#x2699;</span><span class="stage-text">Classifier</span></span>' : ''}
                        <div class="vlm-stage-body">${linkedReasoning}</div>
                        ${classifierJsonBlock}
                    </div>`

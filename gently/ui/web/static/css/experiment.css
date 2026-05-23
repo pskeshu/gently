@@ -249,6 +249,13 @@
     font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
 }
+.expov-svg-now-chip-bg {
+    fill: var(--accent);
+    fill-opacity: 0.12;
+    stroke: var(--accent);
+    stroke-opacity: 0.55;
+    stroke-width: 1;
+}
 .expov-svg-label {
     fill: var(--text);
     font-size: 13px;

@@ -6488,7 +6488,9 @@ kbd {
 }
 
 .vlm-stage-label {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
     background: var(--accent-cyan);
     color: white;
     font-size: 0.65rem;
@@ -6541,6 +6543,55 @@ kbd {
     font-style: italic;
     white-space: pre-wrap;
     word-wrap: break-word;
+}
+
+/* Two-stage labels in the detail panel: keep typography identical to the
+   classifier label so the pair reads as sibling stage tags, then tint
+   each one with its stage colour. Use inline-flex so the icon glyph and
+   the text share a vertical center (raw inline text leaves emoji sitting
+   on the baseline, misaligned with capitals). */
+.detail-perceiver .reasoning-label,
+.detail-reasoning .reasoning-label.classifier-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 0.5rem;
+    line-height: 1;
+}
+/* Align everything (perceiver label, perceiver body text, classifier
+   label, classifier body text) to the same left column. The classifier
+   container has padding-left: 20px, so we match that:
+     - perceiver label: padding-left 20px
+     - perceiver body: 17px padding + 3px left border = 20px inset
+   This gives a single shared text-start column for both stages. */
+.detail-perceiver .reasoning-label {
+    color: var(--accent-cyan);
+    padding-left: 20px;
+}
+.detail-reasoning .reasoning-label.classifier-label { color: var(--accent-purple); }
+.vlm-perceiver-text-detail { padding-left: 17px; }
+
+/* Icon glyph: render at the cap-height of the label so the eye/gear
+   doesn't dominate or sit below the baseline. line-height: 1 keeps the
+   emoji from inflating the row. */
+.reasoning-label .stage-icon,
+.vlm-stage-label .stage-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1em;
+    height: 1em;
+    font-size: 1.05em;
+    line-height: 1;
+    font-style: normal;
+}
+.reasoning-label .stage-text,
+.vlm-stage-label .stage-text {
+    line-height: 1;
 }
 
 /* Pretty-printed classifier JSON — shown below the prose reasoning so
