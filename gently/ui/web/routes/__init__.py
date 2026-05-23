@@ -15,6 +15,7 @@ from .websocket import create_router as create_websocket_router
 from .agent_ws import create_router as create_agent_ws_router
 from .campaigns import create_router as create_campaigns_router
 from .chat import create_router as create_chat_router
+from .experiments import create_router as create_experiments_router
 
 
 def register_all_routes(server):
@@ -23,6 +24,7 @@ def register_all_routes(server):
         create_pages_router,
         create_sessions_router,
         create_campaigns_router,
+        create_experiments_router,
         create_images_router,
         create_volumes_router,
         create_data_router,
