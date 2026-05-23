@@ -1,9 +1,14 @@
 /**
  * Experiment Overview Tab — vector-graphics view of the planned timelapse.
  *
- * MOCKUP: data is stubbed below in STUB_STRATEGY. The real version will fetch
- * GET /api/experiments/{session_id}/strategy and pass the returned JSON
- * directly to ExperimentOverview.render(strategy).
+ * Data source priority:
+ *   1. GET /api/experiments/current/strategy  — live snapshot from FileStore.
+ *   2. STUB_STRATEGY below                    — used when the live fetch
+ *                                               fails or no session exists.
+ *
+ * The render path is data-shape-driven and doesn't care which source the
+ * snapshot came from — only ``ExperimentOverview.isLive`` differs so the
+ * header badge can say "live" or "mockup · stubbed data".
  */
 
 const STUB_STRATEGY = {
@@ -142,11 +147,41 @@ const ExperimentOverview = {
     initialized: false,
     expandedMode: null,
     activeView: 'overview',  // 'overview' | 'rules'
+    activeStrategy: null,    // last fetched/loaded snapshot
+    isLive: false,           // true when activeStrategy came from the API
 
-    init() {
+    async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
-        this.render(STUB_STRATEGY);
+        const strategy = await this.loadStrategy();
+        this.activeStrategy = strategy;
+        this.render(strategy);
         this.initialized = true;
+    },
+
+    async loadStrategy() {
+        try {
+            const resp = await fetch('/api/experiments/current/strategy', {
+                cache: 'no-store'
+            });
+            if (!resp.ok) {
+                console.warn(
+                    '[ExperimentOverview] strategy fetch returned',
+                    resp.status, '- falling back to stub'
+                );
+                this.isLive = false;
+                return STUB_STRATEGY;
+            }
+            const data = await resp.json();
+            this.isLive = true;
+            return data;
+        } catch (e) {
+            console.warn(
+                '[ExperimentOverview] strategy fetch error - falling back to stub:',
+                e
+            );
+            this.isLive = false;
+            return STUB_STRATEGY;
+        }
     },
 
     setView(view) {
@@ -156,7 +191,9 @@ const ExperimentOverview = {
         document.querySelectorAll('[data-experiment-view]').forEach(b => {
             b.classList.toggle('active', b.dataset.experimentView === view);
         });
-        this.render(STUB_STRATEGY);
+        // Re-render against the last fetched strategy (no re-fetch on tab
+        // switch — refresh happens on tab activation in the bootstrap).
+        this.render(this.activeStrategy || STUB_STRATEGY);
     },
 
     render(s) {
@@ -216,11 +253,20 @@ const ExperimentOverview = {
         const elapsedM = Math.floor((s.now_offset_s % 3600) / 60);
         const wrap = el('div', 'expov-header');
 
-        // Session identification line
+        // Session identification line — skip the small id if it's a duplicate
+        // of the display name (common when session has no human label yet).
         const metaRow = el('div', 'expov-header-row expov-header-row-meta');
         metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
-        metaRow.appendChild(elText('span', 'expov-session-id', s.session_id));
-        metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
+        if (s.session_id && s.session_id !== s.session_name) {
+            metaRow.appendChild(elText('span', 'expov-session-id', s.session_id));
+        }
+        // Badge reflects the data source so devs can tell at a glance whether
+        // they're looking at the live strategy or the static fallback.
+        if (this.isLive) {
+            metaRow.appendChild(elText('span', 'expov-live-badge', 'live'));
+        } else {
+            metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
+        }
         wrap.appendChild(metaRow);
 
         // Compact key-metric strip
@@ -236,7 +282,10 @@ const ExperimentOverview = {
         };
         metricsRow.appendChild(metric('elapsed', `${elapsedH}h ${elapsedM}m`));
         metricsRow.appendChild(metric('base', `${s.base_interval_s}s`));
-        metricsRow.appendChild(metric('budget', `${(s.dose_budget_base_ms/1000).toFixed(0)}s × role`));
+        const budgetText = (s.dose_budget_base_ms != null && isFinite(s.dose_budget_base_ms))
+            ? `${(s.dose_budget_base_ms / 1000).toFixed(0)}s × role`
+            : 'no limit';
+        metricsRow.appendChild(metric('budget', budgetText));
         metricsRow.appendChild(metric('embryos', `${s.embryos.length} · ${roleStr}`));
         wrap.appendChild(metricsRow);
 
@@ -475,9 +524,10 @@ const ExperimentOverview = {
         g.appendChild(svgEl('text', {
             x: 32, y: labelY, class: 'expov-svg-label'
         }, emb.id));
-        // role tag (kept short — "10×" annotation moves to dose label)
+        // role tag — eyebrow above the id (avoids colliding with long ids)
         g.appendChild(svgEl('text', {
-            x: 60, y: labelY, class: 'expov-svg-role-tag'
+            x: 14, y: rowTop + ROW_PAD - 1,
+            class: 'expov-svg-role-tag'
         }, emb.role));
 
         // Phase pill: current mode at glance
@@ -533,17 +583,16 @@ const ExperimentOverview = {
                 x: x0, y: laneY, width, height: LANE_H, rx: 2,
                 class: cls
             }));
-            // Inline cadence label inside the rect, when there's room.
-            // Reads "120s" / "60s" / "30s · cool" — small, centered, low-contrast.
-            if (ph.mode !== 'burst' && ph.cadence_s && width >= 42) {
-                const label = ph.mode === 'cooldown'
-                    ? `${ph.cadence_s}s · cool`
-                    : `${ph.cadence_s}s`;
+            // Cadence text inside the rect is intentionally omitted — the
+            // gutter pill (currentPhase) and the colored rect (mode) already
+            // convey it. Keep an inline label only for cooldown, which is a
+            // transient state the pill won't be showing.
+            if (ph.mode === 'cooldown' && ph.cadence_s && width >= 42) {
                 g.appendChild(svgEl('text', {
                     x: x0 + width / 2, y: laneMid + 3.5,
                     'text-anchor': 'middle',
                     class: 'expov-svg-phase-label'
-                }, label));
+                }, `${ph.cadence_s}s · cool`));
             }
             // Burst: keep the bright block + balloon since it's the most
             // attention-worthy event in the lane
@@ -757,12 +806,13 @@ const ExperimentOverview = {
                 class: 'expov-svg-power-area'
             }));
         }
-        // Power label with current value
+        // Power label with current value — "@" reads as "at this power"
+        // and avoids confusion with the bullet-separator used elsewhere
         g.appendChild(svgEl('text', {
             x: LEFT - 8, y: powerY + powerH / 2 + 3,
             'text-anchor': 'end',
             class: 'expov-svg-sublabel'
-        }, `488 · ${emb.laser_488_pct_now}%`));
+        }, `488 @ ${emb.laser_488_pct_now}%`));
 
         // ---- Dose gauge ----------------------------------------------
         const doseY = powerYBase + 6;
@@ -786,11 +836,17 @@ const ExperimentOverview = {
             'text-anchor': 'end',
             class: 'expov-svg-sublabel'
         }, doseLabel));
-        // Inside the bar: usage figure
+        // Inside the bar: usage figure — "used of budget" is more scannable
+        // than "x / y s" which reads like a fraction
+        const usedS = (emb.dose_used_ms / 1000).toFixed(1);
+        const budgetS = (emb.dose_budget_ms / 1000).toFixed(1);
+        const doseText = emb.dose_budget_ms > 0
+            ? `${usedS}s of ${budgetS}s (${Math.round(dosePct * 100)}%)`
+            : `${usedS}s used`;
         g.appendChild(svgEl('text', {
             x: LEFT + 6, y: doseY + DOSE_H - 2,
             class: 'expov-svg-dose-text'
-        }, `${(emb.dose_used_ms/1000).toFixed(1)} / ${(emb.dose_budget_ms/1000).toFixed(1)} s`));
+        }, doseText));
 
         return g;
     },

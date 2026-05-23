@@ -54,6 +54,18 @@
     letter-spacing: 0.05em;
     margin-left: auto;  /* push to right */
 }
+.expov-live-badge {
+    padding: 2px 8px;
+    background: rgba(34, 197, 94, 0.18);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.45);
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-left: auto;  /* push to right */
+}
 .expov-session-name {
     font-family: 'Instrument Serif', serif;
     font-style: italic;
@@ -244,9 +256,11 @@
 }
 .expov-svg-role-tag {
     fill: var(--text-muted);
-    font-size: 10px;
+    font-size: 9px;
+    font-weight: 600;
     font-family: 'JetBrains Mono', monospace;
-    text-transform: lowercase;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
 }
 .expov-svg-sublabel {
     fill: var(--text-muted);
