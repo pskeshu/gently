@@ -108,7 +108,7 @@ class DopaminergicSignalDetector(Detector):
         self._claude = claude_client
         self._perceiver_model = perceiver_model or model
         self._classifier_model = classifier_model
-        self._warned_no_calibration: set = set()
+        self._calibration_notice_logged = False  # once-per-detector-instance
 
     async def run(
         self,
@@ -138,14 +138,16 @@ class DopaminergicSignalDetector(Detector):
                 and calibration.get("dark") is not None
                 and calibration.get("flat") is not None
             )
-            if not has_two_point and embryo_id not in self._warned_no_calibration:
-                logger.warning(
-                    "[%s] no dark/flat calibration for %s — falling back to "
-                    "dynamic-range scaling. Absolute brightness judgements "
-                    "(NONE vs WEAK) will be less reliable.",
-                    self.name, embryo_id,
+            if not has_two_point and not self._calibration_notice_logged:
+                # Once per detector instance, at DEBUG so it's only
+                # surfaced when explicitly asking for verbose logs; this
+                # is a routine fallback, not an error.
+                logger.debug(
+                    "[%s] running without dark/flat calibration; using "
+                    "fixed dynamic-range scaling (-100 baseline, /4).",
+                    self.name,
                 )
-                self._warned_no_calibration.add(embryo_id)
+                self._calibration_notice_logged = True
 
             b64_image = _volume_to_b64(volume, calibration)
             if b64_image is None:
@@ -210,7 +212,8 @@ class DopaminergicSignalDetector(Detector):
     async def _call_perceiver(
         self, claude, model: str, b64_image: str,
     ) -> Tuple[str, str]:
-        """Stage 1: image → free prose description."""
+        """Stage 1: image → free prose description. Stateless — each
+        timepoint is evaluated independently."""
         response = await asyncio.to_thread(
             claude.messages.create,
             model=model,
@@ -327,14 +330,16 @@ def _volume_to_b64(volume: np.ndarray, calibration: Optional[Dict] = None) -> Op
         else:
             # No calibration: subtract a fixed dark baseline of 100 counts
             # (raw background floor for this camera) and floor at 0, then
-            # scale by sensor dynamic range. Cameras here produce 12-bit
-            # data in uint16 containers — divisor 16 maps 0..4095 →
-            # 0..255, with bright puncta clipping naturally to white.
-            # The baseline subtraction pulls true background to black so
-            # body autofluorescence and dim puncta stand above it.
+            # scale to make the embryo body autofluorescence visible.
+            # We use /4 (not /16) because the body autofluor only sits
+            # ~5-35 counts above the background floor — /16 maps that
+            # range to 0-2 out of 255, invisible to the VLM. /4 maps it
+            # to 1-9 (faintly visible) and lets bright puncta clip to
+            # white at 255, which is fine — the classifier reasons about
+            # STRONG vs SATURATING from prose, not from raw pixel values.
             arr = proj.astype(np.float32)
             arr = np.maximum(arr - 100.0, 0.0)
-            proj = np.clip(arr / 16.0, 0, 255).astype(np.uint8)
+            proj = np.clip(arr / 4.0, 0, 255).astype(np.uint8)
 
     img = PILImage.fromarray(proj)
     buf = io.BytesIO()
