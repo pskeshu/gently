@@ -237,6 +237,8 @@ def build_strategy_snapshot(
         embryo_roles=embryo_roles,
         dose_budget_base_ms=dose_budget_base_ms,
         base_interval_s=base_interval_s,
+        started_at=started_at,
+        now_offset_s=now_offset_s,
     )
 
     # ---- Replay timeline.jsonl -> dynamic history -----------------------
@@ -478,6 +480,8 @@ def _build_embryos_static(
     embryo_roles: Dict[str, str],
     dose_budget_base_ms: Optional[float],
     base_interval_s: float,
+    started_at: Optional[datetime] = None,
+    now_offset_s: Optional[float] = None,
 ) -> List[dict]:
     """Build the per-embryo static portion of the snapshot.
 
@@ -541,8 +545,41 @@ def _build_embryos_static(
             # Filled in by _project_forward.
             "projected_cadence_s": initial_cadence,
             "projected_end_s": None,
+            # When the embryo was marked complete/terminated, as seconds
+            # from session start. Null while still acquiring. The
+            # frontend uses this to draw a TERMINATED cap and stop the
+            # projection bar; without it, a finished embryo's row would
+            # appear to still be acquiring forever.
+            "terminated_at_s": _terminated_at_offset(
+                ed, started_at, now_offset_s
+            ),
         })
     return out
+
+
+def _terminated_at_offset(
+    ed: dict,
+    started_at: Optional[datetime],
+    now_offset_s: Optional[float],
+) -> Optional[float]:
+    """Map an embryo's ``completed_at`` ISO timestamp into seconds-from-
+    session-start. Returns ``None`` if the embryo isn't complete yet or
+    we don't have the data to compute the offset.
+    """
+    if not ed.get("is_complete"):
+        return None
+    iso = ed.get("completed_at")
+    if not iso or started_at is None:
+        return None
+    t = _parse_iso(iso)
+    if t is None:
+        return None
+    delta = (t - started_at).total_seconds()
+    if delta < 0:
+        return 0.0
+    if now_offset_s is not None:
+        return min(delta, now_offset_s)
+    return delta
 
 
 # ---------------------------------------------------------------------------

@@ -119,8 +119,10 @@ class TimelapseStateTracker:
 
         elif event_type == "ACQUISITION_COMPLETED":
             self.status = "COMPLETED"
+            completed_at = datetime.now().isoformat()
             for embryo in self.embryos.values():
                 embryo["is_complete"] = True
+                embryo.setdefault("completed_at", completed_at)
 
         elif event_type == "ACQUISITION_STOPPED":
             self.status = "STOPPED"
@@ -217,6 +219,9 @@ class TimelapseStateTracker:
                 }
                 if detector_name == "hatching":
                     self.embryos[eid]["is_complete"] = True
+                    self.embryos[eid].setdefault(
+                        "completed_at", datetime.now().isoformat()
+                    )
 
         elif event_type == "VERIFICATION_STARTED":
             # Verification round started for embryo

@@ -288,6 +288,89 @@
 .expov-svg-phase-cooldown   { fill: #a78bfa; opacity: 0.50; }
 .expov-svg-phase-paused     { fill: #3b82f6; opacity: 0.28; }
 
+/* Per-acquisition dot: one soft circle per past firing along the top
+   edge of the lane. Discrete (one mark per timepoint) but the circular
+   shape doesn't read as a barcode even at high density — dense regions
+   look like a stippled band, sparse regions like beads on a string. */
+.expov-svg-acq-dot {
+    fill: rgba(255, 255, 255, 0.7);
+}
+/* Legacy hairline tick — kept for any code that still references it. */
+.expov-svg-acq-tick {
+    stroke: rgba(255, 255, 255, 0.55);
+    stroke-width: 1;
+    shape-rendering: crispEdges;
+}
+
+/* Vertical divider at the moment cadence changes — anchors the chip. */
+.expov-svg-cadence-divider {
+    stroke: rgba(255, 255, 255, 0.6);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+
+/* Chip showing "300→60s · T34" above the divider. */
+.expov-svg-cadence-chip-bg {
+    fill: rgba(15, 23, 42, 0.85);
+    stroke: rgba(255, 255, 255, 0.35);
+    stroke-width: 1;
+}
+.expov-svg-cadence-chip {
+    fill: #f8fafc;
+    font-size: 9px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Power-change chip — same shape as cadence, tinted cyan to match
+   the in-strip power-ramp annotation below the lane so the two
+   power encodings read as one system. */
+.expov-svg-power-chip-bg {
+    fill: rgba(8, 51, 68, 0.85);
+    stroke: rgba(34, 211, 238, 0.55);
+    stroke-width: 1;
+}
+.expov-svg-power-chip {
+    fill: #67e8f9;
+    font-size: 9px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+.expov-svg-power-chip-stem {
+    stroke: rgba(34, 211, 238, 0.55);
+    stroke-width: 1;
+    stroke-dasharray: 2 2;
+}
+
+/* Tiny "T34" stamp below each trigger diamond. */
+.expov-svg-trigger-tp {
+    fill: var(--text-muted);
+    font-size: 8.5px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Terminated embryo cap — replaces the dashed projection bar at the
+   termination point so a finished embryo doesn't look mid-acquisition.
+   Uses cyan (live/done signal) rather than red to avoid implying an
+   error state. */
+.expov-svg-terminated-bar {
+    stroke: var(--accent-cyan, #5be7c4);
+    stroke-width: 1.5;
+    stroke-opacity: 0.85;
+}
+.expov-svg-terminated-stop {
+    fill: var(--accent-cyan, #5be7c4);
+    fill-opacity: 0.95;
+}
+.expov-svg-terminated-label {
+    fill: var(--accent-cyan, #5be7c4);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    font-family: 'JetBrains Mono', monospace;
+}
+
 /* Inline cadence label rendered inside the phase rect */
 .expov-svg-phase-label {
     fill: #fff;

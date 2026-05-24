@@ -713,29 +713,299 @@ const ExperimentOverview = {
             }
         });
 
-        // Projected future segment (dashed) past 'now' to a horizon.
-        // Color is grey for indefinite, amber when ending at dose exhaust.
-        const projStartT = s.now_offset_s;
-        let projEndT = s.horizon_s;
-        let projEndsAtBudget = false;
-        if (emb.projected_end_s) projEndT = Math.min(projEndT, emb.projected_end_s);
-        if (emb.dose_exhaust_at_s && emb.dose_exhaust_at_s < projEndT) {
-            projEndT = emb.dose_exhaust_at_s;
-            projEndsAtBudget = true;
+        // ---- Acquisition density heatmap ----------------------------
+        // Instead of one hairline per acquisition (reads as a barcode),
+        // we encode acquisition density as a luminance gradient over
+        // the past portion of the lane: sparse = lane stays muted,
+        // dense = a brighter band. The eye reads acquisition rate as
+        // brightness — no discrete marks, no clutter.
+        //
+        // Counts are derived from phase cadence then rescaled to match
+        // the authoritative `tp_acquired`, so the gradient never lies
+        // about how many timepoints fired even when the backend phase
+        // history is stale or incorrect.
+        const tickEnd = s.now_offset_s;
+        const ackPhases = emb.phases
+            .map((ph, i) => ({ ph, i }))
+            .filter(({ ph }) => ph.mode !== 'burst' && ph.cadence_s);
+        const predicted = ackPhases.map(({ ph }) => {
+            const phEnd = Math.min(ph.end ?? tickEnd, tickEnd);
+            const dur = phEnd - ph.start;
+            return dur > 0 ? Math.max(1, Math.floor(dur / ph.cadence_s) + 1) : 0;
+        });
+        const predictedTotal = predicted.reduce((a, b) => a + b, 0);
+        const actualTotal = Number.isFinite(emb.tp_acquired)
+            ? emb.tp_acquired : predictedTotal;
+        const scale = predictedTotal > 0 ? actualTotal / predictedTotal : 0;
+        const acquisitions = [];
+        ackPhases.forEach(({ ph }, idx) => {
+            const phEnd = Math.min(ph.end ?? tickEnd, tickEnd);
+            const dur = phEnd - ph.start;
+            if (dur <= 0) return;
+            const n = Math.max(1, Math.round(predicted[idx] * scale));
+            for (let j = 0; j < n; j++) {
+                acquisitions.push(ph.start + (dur * (j + 0.5)) / n);
+            }
+        });
+
+        if (acquisitions.length > 0 && tickEnd > 0) {
+            // Layer 1 (background): smoothed luminance gradient
+            // encoding overall acquisition density along the lane.
+            // The triangular kernel kills aliasing stripes caused by
+            // evenly-spaced acquisitions falling into bins.
+            const BINS = 64;
+            const binSec = tickEnd / BINS;
+            const raw = new Array(BINS).fill(0);
+            for (const t of acquisitions) {
+                const bin = Math.min(BINS - 1, Math.max(0, Math.floor(t / binSec)));
+                raw[bin] += 1;
+            }
+            const kernel = [1, 2, 3, 4, 5, 4, 3, 2, 1];
+            const kSum = kernel.reduce((a, b) => a + b, 0);
+            const kOff = Math.floor(kernel.length / 2);
+            const density = new Array(BINS).fill(0);
+            for (let i = 0; i < BINS; i++) {
+                let acc = 0, w = 0;
+                for (let k = 0; k < kernel.length; k++) {
+                    const j = i + k - kOff;
+                    if (j < 0 || j >= BINS) continue;
+                    acc += raw[j] * kernel[k];
+                    w += kernel[k];
+                }
+                density[i] = w > 0 ? acc / w * (kSum / w) : 0;
+            }
+            const maxD = Math.max(...density, 1e-6);
+            const gradId = `expov-density-${(emb.id || 'e').replace(/\W+/g, '_')}-r${rowTop}`;
+            const grad = svgEl('linearGradient', {
+                id: gradId, x1: '0%', x2: '100%', y1: '0%', y2: '0%'
+            });
+            for (let i = 0; i < BINS; i++) {
+                const intensity = density[i] / maxD;
+                // Lower ceiling than the heatmap-only version (0.22 vs
+                // 0.38) because the dots above will carry the per-event
+                // signal; the band just hints at rate.
+                const alpha = 0.03 + 0.22 * intensity;
+                grad.appendChild(svgEl('stop', {
+                    offset: `${(i / (BINS - 1)) * 100}%`,
+                    'stop-color': '#ffffff',
+                    'stop-opacity': alpha.toFixed(3),
+                }));
+            }
+            g.appendChild(grad);
+            const pastW = xForT(tickEnd) - LEFT;
+            if (pastW > 0) {
+                g.appendChild(svgEl('rect', {
+                    x: LEFT, y: laneY,
+                    width: pastW, height: LANE_H,
+                    fill: `url(#${gradId})`,
+                    rx: 2,
+                    'pointer-events': 'none'
+                }));
+            }
+            // Layer 2 (foreground): one soft round dot per acquisition
+            // along the top edge of the lane — keeps the per-event
+            // temporal discreteness the heatmap alone hides.
+            const dotY = laneY + 2;
+            for (const t of acquisitions) {
+                const tx = xForT(t);
+                g.appendChild(svgEl('circle', {
+                    cx: tx, cy: dotY, r: 1.3,
+                    class: 'expov-svg-acq-dot'
+                }));
+            }
         }
-        const xProjStart = xForT(projStartT);
-        const xProjEnd = xForT(projEndT);
-        if (xProjEnd > xProjStart) {
+
+        // ---- Cadence-change markers ---------------------------------
+        // Where consecutive phases differ in cadence (or mode), drop a
+        // vertical divider across the lane and a "300→60s · T34" chip
+        // above so the change is named and time-stamped in the lane.
+        // Apply the same scale factor used for tick rendering so the
+        // T# stamps shown on diamonds and cadence chips agree with the
+        // visible tick density and the authoritative tp_acquired count.
+        // Otherwise the chip might say "T118" on an embryo where we
+        // only drew 54 ticks — visually contradictory.
+        const tpIndexAt = (atS) => {
+            let count = 0;
+            for (const ph of emb.phases) {
+                if (!ph.cadence_s) continue;
+                if (atS < ph.start) break;
+                const phEnd = Math.min(atS, ph.end ?? atS);
+                count += Math.floor((phEnd - ph.start) / ph.cadence_s) + 1;
+            }
+            return Math.max(1, Math.round(count * scale));
+        };
+        // Track placed chip x-positions to avoid stacking chips on top
+        // of one another (e.g. the burst-balloon already sits there).
+        const placedChipX = [];
+        const burstXs = emb.phases
+            .filter(p => p.mode === 'burst')
+            .map(p => xForT(p.start));
+        const isCollision = (x) => {
+            const min = 70;  // px buffer
+            if (burstXs.some(bx => Math.abs(bx - x) < min)) return true;
+            return placedChipX.some(px => Math.abs(px - x) < min);
+        };
+        // Walk phases and detect transitions, but COLLAPSE consecutive
+        // identical (mode + cadence) phases so a row of redundant phase
+        // records doesn't generate redundant dividers/chips.
+        let prevEffective = emb.phases[0];
+        for (let i = 1; i < emb.phases.length; i++) {
+            const curr = emb.phases[i];
+            const prev = prevEffective;
+            const sameCadence = prev.cadence_s === curr.cadence_s;
+            const sameMode = prev.mode === curr.mode;
+            if (sameCadence && sameMode) {
+                continue;  // collapse: prevEffective stays the same
+            }
+            prevEffective = curr;
+            if (prev.mode === 'burst' || curr.mode === 'burst') continue;
+            const cx = xForT(curr.start);
+            if (cx > xForT(s.now_offset_s)) continue;
+            // Divider is cheap to keep even on collision; the chip is what
+            // crowds the space, so we skip just the chip when crowded.
             g.appendChild(svgEl('line', {
-                x1: xProjStart, y1: laneMid, x2: xProjEnd, y2: laneMid,
-                class: projEndsAtBudget
-                    ? 'expov-svg-projected-bar warn'
-                    : 'expov-svg-projected-bar'
+                x1: cx, x2: cx, y1: laneY, y2: laneBottom,
+                class: 'expov-svg-cadence-divider'
             }));
+            if (isCollision(cx)) continue;
+            const tp = tpIndexAt(curr.start);
+            const prevS = prev.cadence_s ?? '?';
+            const currS = curr.cadence_s ?? '?';
+            const chipText = `${prevS}→${currS}s · T${tp}`;
+            const chipW = chipText.length * 5.6 + 10;
+            const chipY = laneY - 13;
+            g.appendChild(svgEl('rect', {
+                x: cx - chipW / 2, y: chipY,
+                width: chipW, height: 12, rx: 3,
+                class: 'expov-svg-cadence-chip-bg'
+            }));
+            g.appendChild(svgEl('text', {
+                x: cx, y: chipY + 9,
+                'text-anchor': 'middle',
+                class: 'expov-svg-cadence-chip'
+            }, chipText));
+            placedChipX.push(cx);
+        }
+
+        // ---- Power-change chips -------------------------------------
+        // Same visual language as cadence chips, but parked in a row
+        // above so the two encodings stack neatly when they happen at
+        // the same trigger. Each chip names the rule outcome
+        // ("488 ↓ 5%→3%") and the timepoint it landed at.
+        const placedPowerChipX = [];
+        const hist488 = emb.power_history_488 || [];
+        // Walk the history, collect actual transitions (pairs where pct
+        // changes), then cluster consecutive close ones so a multi-step
+        // ramp gets a single annotation.
+        const transitions = [];
+        for (let k = 0; k < hist488.length - 1; k++) {
+            const a = hist488[k];
+            const b = hist488[k + 1];
+            if (a.pct === b.pct) continue;
+            transitions.push({ from: a, to: b });
+        }
+        const CLUSTER_S = 60;
+        const clusters = [];
+        for (const tr of transitions) {
+            const last = clusters[clusters.length - 1];
+            if (last && tr.to.at - last[last.length - 1].to.at <= CLUSTER_S) {
+                last.push(tr);
+            } else {
+                clusters.push([tr]);
+            }
+        }
+        for (const cluster of clusters) {
+            const first = cluster[0];
+            const tail = cluster[cluster.length - 1];
+            // Anchor the chip at the actual change time, not at any
+            // trailing anchor record (those can land past `now` and
+            // get hidden by the past-only guard).
+            const atS = Math.min(tail.to.at, s.now_offset_s);
+            const cx = xForT(atS);
+            const arrow = tail.to.pct < first.from.pct ? '↓' : '↑';
+            const chipText = `488 ${arrow} ${first.from.pct}%→${tail.to.pct}% · T${tpIndexAt(atS)}`;
+            const chipW = chipText.length * 5.6 + 10;
+            // Sit just above the burst-balloon band (which lives at
+            // laneY-22..-10) so we stay within this row's vertical
+            // budget — laneY-40 would have crossed into the row above.
+            // Burst balloons live at separate x positions on every
+            // case I've seen, so dropping the burst-collision check
+            // lets the chip render even when a burst is on the same
+            // lane elsewhere.
+            const chipY = laneY - 25;
+            const crowded =
+                placedPowerChipX.some(px => Math.abs(px - cx) < 70);
+            g.appendChild(svgEl('line', {
+                x1: cx, x2: cx, y1: chipY + 12, y2: laneY,
+                class: 'expov-svg-power-chip-stem'
+            }));
+            if (crowded) continue;
+            g.appendChild(svgEl('rect', {
+                x: cx - chipW / 2, y: chipY,
+                width: chipW, height: 12, rx: 3,
+                class: 'expov-svg-power-chip-bg'
+            }));
+            g.appendChild(svgEl('text', {
+                x: cx, y: chipY + 9,
+                'text-anchor': 'middle',
+                class: 'expov-svg-power-chip'
+            }, chipText));
+            placedPowerChipX.push(cx);
+        }
+
+        // Projected future segment (dashed) past 'now' to a horizon —
+        // skipped entirely when the embryo has been terminated, since
+        // there's no future to project. projEndT is hoisted because
+        // downstream code (stop-icon, dose-exhaust line) anchors to it.
+        const isTerminated = emb.terminated_at_s != null
+            && emb.terminated_at_s <= s.now_offset_s;
+        const projStartT = s.now_offset_s;
+        let projEndT = isTerminated ? emb.terminated_at_s : s.horizon_s;
+        let projEndsAtBudget = false;
+        if (!isTerminated) {
+            if (emb.projected_end_s) projEndT = Math.min(projEndT, emb.projected_end_s);
+            if (emb.dose_exhaust_at_s && emb.dose_exhaust_at_s < projEndT) {
+                projEndT = emb.dose_exhaust_at_s;
+                projEndsAtBudget = true;
+            }
+            const xProjStart = xForT(projStartT);
+            const xProjEnd = xForT(projEndT);
+            if (xProjEnd > xProjStart) {
+                g.appendChild(svgEl('line', {
+                    x1: xProjStart, y1: laneMid, x2: xProjEnd, y2: laneMid,
+                    class: projEndsAtBudget
+                        ? 'expov-svg-projected-bar warn'
+                        : 'expov-svg-projected-bar'
+                }));
+            }
+        }
+        // Terminated cap: small vertical stop bar at the termination
+        // point + a "■ DONE · T##" label below the lane so a finished
+        // embryo doesn't look like it's still acquiring.
+        if (isTerminated) {
+            const termX = xForT(emb.terminated_at_s);
+            g.appendChild(svgEl('line', {
+                x1: termX, x2: termX,
+                y1: laneY - 2, y2: laneBottom + 2,
+                class: 'expov-svg-terminated-bar'
+            }));
+            g.appendChild(svgEl('rect', {
+                x: termX - 2, y: laneY + LANE_H / 2 - 3,
+                width: 6, height: 6,
+                class: 'expov-svg-terminated-stop'
+            }));
+            const tp = tpIndexAt(emb.terminated_at_s);
+            const capText = `DONE · T${tp}`;
+            g.appendChild(svgEl('text', {
+                x: termX + 6, y: laneBottom + 9,
+                class: 'expov-svg-terminated-label'
+            }, capText));
         }
 
         // Trigger diamonds — placed in the upper half of the lane to avoid
-        // colliding with the burst balloon above
+        // colliding with the burst balloon above. Each diamond gets a tiny
+        // T# label below it so the user can see at which timepoint the
+        // rule fired without hovering.
         (emb.trigger_events || []).forEach(te => {
             const x = xForT(te.at);
             const dy = laneY + 6;
@@ -751,6 +1021,11 @@ const ExperimentOverview = {
                                   (te.count ? ` (×${te.count})` : '');
             dia.appendChild(tooltip);
             g.appendChild(dia);
+            g.appendChild(svgEl('text', {
+                x: x, y: laneBottom + 9,
+                'text-anchor': 'middle',
+                class: 'expov-svg-trigger-tp'
+            }, `T${tpIndexAt(te.at)}`));
         });
 
         // Dose-exhaust warning: ⚠ + time-to-exhaust positioned ABOVE the lane
