@@ -703,6 +703,13 @@ class DiSPIMMicroscope(Microscope):
                 if key in data:
                     val = data[key]
                     entry: Dict[str, Any] = {}
+                    # Per-frame epoch time from the Bluesky event doc — lets the
+                    # orchestrator stamp each saved frame with its real acquisition
+                    # time instead of having to interpolate from the burst's
+                    # aggregate timing.
+                    ev_time = ev.get('time')
+                    if ev_time is not None:
+                        entry['acquired_at_epoch'] = float(ev_time)
                     if isinstance(val, np.ndarray):
                         entry['volume'] = val
                         entry['shape'] = val.shape

@@ -19,7 +19,8 @@ from abc import ABC, abstractmethod
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
@@ -182,9 +183,29 @@ class BurstAcquisition(ExclusiveAcquisition):
         if sustained_hz <= 0 and duration_s > 0:
             sustained_hz = len(frames_captured) / duration_s
 
-        # Generate MP4 from captured frames (best-effort).
-        mp4_path = await _maybe_generate_mp4(
+        # Persist per-frame TIFFs + projections + manifest BEFORE the MP4 attempt
+        # so a codec hiccup can't lose the raw burst data.
+        burst_dir = _persist_burst_to_disk(
             orchestrator=orchestrator,
+            embryo=embryo,
+            embryo_id=self.target_embryo_id,
+            request_id=self.request_id,
+            mode=self.mode,
+            frames_requested=self.frames,
+            frames_data=frames_data,
+            loop_start=loop_start,
+            duration_s=duration_s,
+            sustained_hz=sustained_hz,
+            galvo_amplitude=galvo_amplitude,
+            galvo_center=galvo_center,
+            piezo_amplitude=piezo_amplitude,
+            piezo_center=piezo_center,
+            laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+        )
+
+        # Generate MP4 (derivative artifact; safe to fail).
+        mp4_path = await _maybe_generate_mp4(
+            burst_dir=burst_dir,
             embryo_id=self.target_embryo_id,
             request_id=self.request_id,
             frames=frames_captured,
@@ -236,9 +257,185 @@ class BurstAcquisition(ExclusiveAcquisition):
             })
 
 
-async def _maybe_generate_mp4(
+def _resolve_burst_dir(orchestrator, embryo_id: str, request_id: str) -> Optional[Path]:
+    """Return ``bursts/{request_id}/`` under the embryo's session folder.
+
+    Uses ``FileStore._session_dir`` so the short session_id resolves to the full
+    ``YYYYMMDD_HHMM_slug_id8`` folder — historic bursts wrote to a shadow
+    ``sessions/{short_id}/`` path because of a direct ``root/sessions/{id}``
+    join here.
+    """
+    store = getattr(orchestrator, "_store", None)
+    sid = getattr(orchestrator, "_session_id", None)
+    if store is None or sid is None:
+        return None
+    session_dir: Optional[Path] = None
+    for attr in ("_session_dir", "session_dir"):
+        fn = getattr(store, attr, None)
+        if callable(fn):
+            try:
+                session_dir = fn(sid)
+            except Exception:
+                session_dir = None
+            if session_dir is not None:
+                break
+    if session_dir is None:
+        # Last-resort fallback: previous behaviour (will write to the shadow folder).
+        logger.warning("FileStore has no session_dir resolver; falling back to root/sessions/%s", sid)
+        session_dir = store.root / "sessions" / sid
+
+    burst_dir = session_dir / "embryos" / embryo_id / "bursts" / request_id
+    burst_dir.mkdir(parents=True, exist_ok=True)
+    return burst_dir
+
+
+def _persist_burst_to_disk(
     *,
     orchestrator,
+    embryo,
+    embryo_id: str,
+    request_id: str,
+    mode: str,
+    frames_requested: int,
+    frames_data: List[Dict[str, Any]],
+    loop_start: datetime,
+    duration_s: float,
+    sustained_hz: float,
+    galvo_amplitude: float,
+    galvo_center: float,
+    piezo_amplitude: float,
+    piezo_center: float,
+    laser_power_488_pct: Optional[float],
+) -> Optional[Path]:
+    """Save per-frame TIFFs + meta + projections + a burst.yaml manifest.
+
+    Best-effort: any per-frame failure is logged and skipped, the rest still
+    gets written. Returns the burst directory (or ``None`` if it could not be
+    resolved).
+    """
+    burst_dir = _resolve_burst_dir(orchestrator, embryo_id, request_id)
+    if burst_dir is None:
+        logger.warning("Burst persistence skipped: no store/session bound")
+        return None
+
+    try:
+        import tifffile
+    except ImportError:
+        logger.warning("Burst persistence skipped: tifffile not available")
+        return burst_dir
+
+    try:
+        import yaml as _yaml
+    except ImportError:
+        _yaml = None
+
+    proj_dir = burst_dir / "projections"
+    proj_dir.mkdir(exist_ok=True)
+
+    # Position recorded for the manifest.
+    pos = getattr(embryo, "stage_position", {}) or {}
+    sid = getattr(orchestrator, "_session_id", None)
+
+    saved_frames: List[Dict[str, Any]] = []
+    for i, fr in enumerate(frames_data, start=1):
+        vol = fr.get("volume")
+        if vol is None:
+            continue
+        arr = np.asarray(vol)
+        tif_path = burst_dir / f"t{i:04d}.tif"
+        meta_path = burst_dir / f"t{i:04d}.meta.yaml"
+        proj_path = proj_dir / f"t{i:04d}.jpg"
+
+        # Real per-frame acquisition time from the Bluesky event doc; fall back
+        # to even spacing across the measured burst duration.
+        epoch = fr.get("acquired_at_epoch")
+        if epoch is not None:
+            acquired_at = datetime.fromtimestamp(float(epoch)).isoformat()
+        else:
+            if duration_s > 0 and len(frames_data) > 1:
+                offset = (i - 1) * duration_s / max(1, len(frames_data) - 1)
+            else:
+                offset = (i - 1) * (1.0 if mode == "1hz" else 0.0)
+            acquired_at = datetime.fromtimestamp(loop_start.timestamp() + offset).isoformat()
+
+        try:
+            tifffile.imwrite(str(tif_path), arr)
+        except Exception as exc:
+            logger.warning("[%s] burst frame %d TIFF write failed: %s", embryo_id, i, exc)
+            continue
+
+        # Projection via the same helper used for regular volumes.
+        try:
+            from gently.core.imaging import generate_jpeg_projection
+            generate_jpeg_projection(arr, proj_path)
+        except Exception as exc:
+            logger.debug("[%s] burst frame %d projection failed: %s", embryo_id, i, exc)
+
+        meta = {
+            "session_id": sid,
+            "embryo_id": embryo_id,
+            "request_id": request_id,
+            "frame_index": i,
+            "shape": list(arr.shape),
+            "dtype": str(arr.dtype),
+            "acquired_at": acquired_at,
+            "metadata": {
+                "num_slices": int(getattr(embryo, "num_slices", 1)) if hasattr(embryo, "num_slices") else None,
+                "exposure_ms": float(getattr(embryo, "exposure_ms", 0.0)) if hasattr(embryo, "exposure_ms") else None,
+                "acquisition_mode": "burst",
+                "burst_mode": mode,
+                "laser_power_488_pct": laser_power_488_pct,
+                "role": "burst",
+            },
+        }
+        if _yaml is not None:
+            try:
+                with meta_path.open("w", encoding="utf-8") as f:
+                    _yaml.safe_dump(meta, f, sort_keys=False)
+            except Exception as exc:
+                logger.debug("[%s] burst frame %d meta write failed: %s", embryo_id, i, exc)
+        saved_frames.append({
+            "frame_index": i,
+            "tif": tif_path.name,
+            "projection": f"projections/{proj_path.name}",
+            "acquired_at": acquired_at,
+        })
+
+    manifest = {
+        "request_id": request_id,
+        "session_id": sid,
+        "embryo_id": embryo_id,
+        "mode": mode,
+        "frames_requested": frames_requested,
+        "frames_captured": len(saved_frames),
+        "started_at": loop_start.isoformat(),
+        "duration_s": duration_s,
+        "sustained_hz": sustained_hz,
+        "embryo_position": {"x": pos.get("x"), "y": pos.get("y")},
+        "laser_power_488_pct": laser_power_488_pct,
+        "scan": {
+            "galvo_amplitude": galvo_amplitude,
+            "galvo_center": galvo_center,
+            "piezo_amplitude": piezo_amplitude,
+            "piezo_center": piezo_center,
+        },
+        "frames": saved_frames,
+    }
+    if _yaml is not None:
+        try:
+            with (burst_dir / "burst.yaml").open("w", encoding="utf-8") as f:
+                _yaml.safe_dump(manifest, f, sort_keys=False)
+        except Exception as exc:
+            logger.warning("[%s] burst manifest write failed: %s", embryo_id, exc)
+
+    logger.info("[%s] persisted %d/%d burst frames -> %s",
+                embryo_id, len(saved_frames), frames_requested, burst_dir)
+    return burst_dir
+
+
+async def _maybe_generate_mp4(
+    *,
+    burst_dir: Optional[Path],
     embryo_id: str,
     request_id: str,
     frames: List[np.ndarray],
@@ -247,12 +444,10 @@ async def _maybe_generate_mp4(
 
     Mirrors the codec-fallback pattern in :mod:`gently.app.video_maker`
     (mp4v → avc1 → XVID → MJPG). Returns ``None`` if no frames, no codec
-    opens, or the session isn't backed by a store — the burst still
+    opens, or the burst directory wasn't resolved — the burst still
     succeeds either way.
     """
-    if not frames:
-        return None
-    if not (getattr(orchestrator, "_store", None) and getattr(orchestrator, "_session_id", None)):
+    if not frames or burst_dir is None:
         return None
 
     try:
@@ -262,13 +457,7 @@ async def _maybe_generate_mp4(
         return None
 
     try:
-        from pathlib import Path
-        burst_dir = (
-            orchestrator._store.root / "sessions" / orchestrator._session_id
-            / "embryos" / embryo_id / "bursts"
-        )
-        burst_dir.mkdir(parents=True, exist_ok=True)
-        mp4_path = burst_dir / f"{request_id}.mp4"
+        mp4_path = burst_dir / "burst.mp4"
 
         # Reduce 3D frames to 2D max-projections, normalize to uint8, and
         # convert to 3-channel BGR for VideoWriter.
