@@ -167,6 +167,12 @@ class EmbryoState:
     detection_triggered_at: Optional[int] = None
     detection_type: Optional[str] = None
     no_object_since_timepoint: Optional[int] = None
+    # Count of consecutive "no_object" detections. Reset to 0 whenever
+    # the embryo is detected again. When this crosses the role's
+    # ``no_object_consecutive_terminal`` threshold, the orchestrator
+    # treats the embryo as gone (likely hatched / drifted off) and
+    # marks it complete.
+    consecutive_no_object: int = 0
 
     # Async cadence (Phase 4). Each embryo has its own next_due_at;
     # _run_loop is a priority queue keyed on next_due_at, not a synchronized

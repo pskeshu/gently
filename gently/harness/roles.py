@@ -36,6 +36,14 @@ class EmbryoRole:
     photodose_budget_multiplier: float = 1.0
     ui_color: str = "#888888"
     ui_icon: str = "circle"
+    # After N consecutive "no_object" detections, treat the embryo as
+    # gone (likely hatched / drifted out of FOV) and terminate imaging.
+    # None means "never terminate on consecutive no_object" — keep the
+    # existing recheck-forever behavior. Calibration embryos don't
+    # drift back; once they're out of view they stay out, so they get
+    # a short threshold. Test embryos can occasionally pop out and
+    # back, so they get a longer one.
+    no_object_consecutive_terminal: Optional[int] = None
 
 
 REGISTRY: Dict[str, EmbryoRole] = {
@@ -47,6 +55,7 @@ REGISTRY: Dict[str, EmbryoRole] = {
         photodose_budget_multiplier=1.0,
         ui_color="#888888",
         ui_icon="circle",
+        no_object_consecutive_terminal=None,
     ),
     "test": EmbryoRole(
         name="test",
@@ -61,6 +70,7 @@ REGISTRY: Dict[str, EmbryoRole] = {
         photodose_budget_multiplier=1.0,
         ui_color="#ff66cc",  # magenta
         ui_icon="star",
+        no_object_consecutive_terminal=5,  # forgiving — they might drift back
     ),
     "calibration": EmbryoRole(
         name="calibration",
@@ -74,6 +84,7 @@ REGISTRY: Dict[str, EmbryoRole] = {
         photodose_budget_multiplier=10.0,
         ui_color="#00cccc",  # cyan
         ui_icon="diamond",
+        no_object_consecutive_terminal=2,  # they don't drift back; gone == gone
     ),
 }
 

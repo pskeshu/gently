@@ -883,6 +883,25 @@ class TimelapseOrchestrator:
 
         Supports both single conditions and composite conditions.
         """
+        # Role-based no-object terminal: safety net independent of the
+        # user-configured stop condition. Fires when an embryo has been
+        # detected as "no_object" for N consecutive checks (threshold
+        # from the role definition), the canonical signature of an
+        # embryo that hatched / drifted out of the FOV.
+        from gently.harness.roles import REGISTRY as _ROLE_REGISTRY
+        role = _ROLE_REGISTRY.get(getattr(embryo_state, "role", "test"))
+        if (role is not None
+                and role.no_object_consecutive_terminal is not None
+                and embryo_state.consecutive_no_object >= role.no_object_consecutive_terminal):
+            embryo_state.is_complete = True
+            embryo_state.completion_reason = (
+                f"no_object x {embryo_state.consecutive_no_object} consecutive "
+                f"(role={role.name} threshold={role.no_object_consecutive_terminal}; "
+                f"likely hatched / out of FOV)"
+            )
+            logger.info(f"Embryo {embryo_state.id} stopped: {embryo_state.completion_reason}")
+            return
+
         # Check all conditions (primary + additional) with OR logic
         for cond in embryo_state.stop_condition.all_conditions():
             reason = self._evaluate_single_condition(cond, embryo_state)
@@ -2535,6 +2554,13 @@ class TimelapseOrchestrator:
         else:
             pseudo_stage = "no_object" if intensity_level == "NONE" else (intensity_level or "unknown")
 
+        # Track consecutive no_object across roles — drives the role-based
+        # terminal stop in _check_stop_condition.
+        if pseudo_stage == "no_object":
+            embryo_state.consecutive_no_object += 1
+        else:
+            embryo_state.consecutive_no_object = 0
+
         if self._store and self._perception_run_id and self._session_id:
             try:
                 self._store.store_prediction(
@@ -2686,12 +2712,15 @@ class TimelapseOrchestrator:
 
             # Track no_object state
             if result.stage == "no_object":
+                embryo_state.consecutive_no_object += 1
                 if embryo_state.no_object_since_timepoint is None:
                     embryo_state.no_object_since_timepoint = timepoint
                     logger.info(f"Embryo {embryo_id} marked as no_object at t={timepoint}")
-            elif embryo_state.no_object_since_timepoint is not None:
-                logger.info(f"Embryo {embryo_id} object found at t={timepoint}, resuming perception")
-                embryo_state.no_object_since_timepoint = None
+            else:
+                if embryo_state.no_object_since_timepoint is not None:
+                    logger.info(f"Embryo {embryo_id} object found at t={timepoint}, resuming perception")
+                    embryo_state.no_object_since_timepoint = None
+                embryo_state.consecutive_no_object = 0
 
             # Get session for temporal context
             session = self.perceiver.get_session(embryo_id)
