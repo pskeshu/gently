@@ -619,6 +619,133 @@ class DiSPIMMicroscope(Microscope):
 
         return {'error': result.get('error', 'Acquisition failed'), 'success': False}
 
+    async def acquire_burst(
+        self,
+        frames: int = 60,
+        mode: str = "1hz",
+        num_slices: int = 1,
+        exposure_ms: float = 5.0,
+        galvo_amplitude: float = 0.5,
+        galvo_center: float = 0.0,
+        piezo_amplitude: float = 25.0,
+        piezo_center: float = 50.0,
+        laser_config: str = None,
+        laser_power_488_pct: float = None,
+        laser_power_561_pct: float = None,
+        laser_power_405_pct: float = None,
+        laser_power_637_pct: float = None,
+        timeout: float = None,
+    ) -> Dict:
+        """
+        Acquire ``frames`` volumes back-to-back as a single device-layer plan.
+
+        Submits ``burst_plan``, which holds MMCore (and ``pause_state_updates``)
+        for the entire burst — no inter-frame race for the position pollers.
+        Each frame becomes one Bluesky event with its own file-referenced
+        volume.
+
+        Parameters mirror :meth:`acquire_volume`. ``mode`` is ``"1hz"`` or
+        ``"asap"``. ``timeout`` defaults to ``frames * 3.0`` seconds (enough
+        headroom for 1 Hz cadence plus device overhead).
+
+        Returns
+        -------
+        dict
+            ``{'success': bool, 'frames': [...], 'frames_captured': int,
+               'duration_s': float, 'sustained_hz': float}``
+            where each entry in ``frames`` is ``{'volume': np.ndarray,
+            'volume_path': str|None, 'shape': tuple}``.
+        """
+        plan_kwargs = {
+            'volume_scanner': 'volume_scanner',
+            'frames': frames,
+            'mode': mode,
+            'num_slices': num_slices,
+            'exposure_ms': exposure_ms,
+            'galvo_amplitude': galvo_amplitude,
+            'galvo_center': galvo_center,
+            'piezo_amplitude': piezo_amplitude,
+            'piezo_center': piezo_center,
+        }
+        if laser_config is not None:
+            plan_kwargs['laser_config'] = laser_config
+        if laser_power_488_pct is not None:
+            plan_kwargs['laser_power_488_pct'] = laser_power_488_pct
+        if laser_power_561_pct is not None:
+            plan_kwargs['laser_power_561_pct'] = laser_power_561_pct
+        if laser_power_405_pct is not None:
+            plan_kwargs['laser_power_405_pct'] = laser_power_405_pct
+        if laser_power_637_pct is not None:
+            plan_kwargs['laser_power_637_pct'] = laser_power_637_pct
+
+        if timeout is None:
+            # 3 s/frame headroom (1 s pacing + ~1.5 s plan overhead) with a 60 s floor.
+            timeout = max(60.0, frames * 3.0)
+
+        result = await self._submit_plan_and_wait(
+            'burst_plan',
+            kwargs=plan_kwargs,
+            timeout=timeout,
+        )
+
+        if not result.get('success'):
+            return {'success': False, 'error': result.get('error', 'Burst failed')}
+
+        # _submit_plan_and_wait already swapped file_refs for ndarrays in-place.
+        # Walk every event and pull (volume, path) per frame.
+        frames_out: List[Dict] = []
+        docs = result.get('documents', {}) or {}
+        events = docs.get('events', []) or []
+        candidates = ('volume_scanner', 'camera', 'camera_image')
+        for ev in events:
+            data = ev.get('data', {}) or {}
+            for key in candidates:
+                if key in data:
+                    val = data[key]
+                    entry: Dict[str, Any] = {}
+                    if isinstance(val, np.ndarray):
+                        entry['volume'] = val
+                        entry['shape'] = val.shape
+                    elif self._is_file_ref(val):
+                        arr, path = self._resolve_file_ref(val)
+                        entry['volume'] = arr
+                        entry['shape'] = arr.shape
+                        entry['volume_path'] = str(path)
+                    else:
+                        entry['volume'] = np.array(val)
+                        entry['shape'] = entry['volume'].shape
+                    if '__resolved_paths__' in data:
+                        # _submit_plan_and_wait doesn't currently populate this
+                        # for events, but support it if a future change does.
+                        rp = data['__resolved_paths__']
+                        if isinstance(rp, dict) and key in rp:
+                            entry['volume_path'] = str(rp[key])
+                    frames_out.append(entry)
+                    break
+
+        # Pull aggregate timing from the stop document's exit_status / return.
+        # burst_plan returns a dict but Bluesky doesn't ship it in the stop
+        # doc; reconstruct from event timestamps as a fallback.
+        duration_s = 0.0
+        sustained_hz = 0.0
+        if events:
+            first_t = events[0].get('time')
+            last_t = events[-1].get('time')
+            if first_t is not None and last_t is not None and last_t > first_t:
+                duration_s = float(last_t - first_t)
+                if duration_s > 0:
+                    sustained_hz = len(frames_out) / duration_s
+
+        return {
+            'success': True,
+            'frames': frames_out,
+            'frames_captured': len(frames_out),
+            'frames_requested': frames,
+            'duration_s': duration_s,
+            'sustained_hz': sustained_hz,
+            'mode': mode,
+        }
+
     # =========================================================================
     # LED / Camera Controls
     # =========================================================================

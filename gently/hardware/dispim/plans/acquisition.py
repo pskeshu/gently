@@ -893,6 +893,157 @@ def acquire_single_volume_plan(volume_scanner,
     return results
 
 
+def burst_plan(volume_scanner,
+               frames: int = 60,
+               mode: str = "1hz",
+               num_slices: int = 1,
+               exposure_ms: float = 5.0,
+               galvo_amplitude: float = 0.5,
+               galvo_center: float = 0.0,
+               piezo_amplitude: float = 25.0,
+               piezo_center: float = 50.0,
+               laser_config: str = "488 only",
+               laser_power_488_pct: float = None,
+               laser_power_561_pct: float = None,
+               laser_power_405_pct: float = None,
+               laser_power_637_pct: float = None,
+               timing_params: Optional[Dict] = None,
+               metadata: Optional[Dict] = None):
+    """
+    Acquire a burst of N volumes back-to-back as a single Bluesky run.
+
+    Configures the volume scanner once, then yields ``trigger_and_read`` N
+    times. The whole burst runs inside one ``run_decorator`` so the device
+    layer holds ``pause_state_updates()`` for the entire duration — no
+    inter-frame gap for the position pollers to race into.
+
+    Each ``trigger_and_read`` produces one event document; ``collect_docs``
+    in the device layer turns the volume into a file reference, so the
+    HTTP response stays small (60 paths, not 60 arrays).
+
+    Parameters
+    ----------
+    volume_scanner : DiSPIMVolumeScanner
+        Volume scanner compound device.
+    frames : int
+        Number of volumes to capture (default 60).
+    mode : {"1hz", "asap"}
+        ``"1hz"`` paces each frame to a 1 s tick; ``"asap"`` chains
+        acquisitions as fast as the hardware delivers.
+    num_slices : int
+        Z-slices per volume. Default 1 (snap-style — fastest path to ~1 Hz).
+    exposure_ms : float
+        Camera exposure per slice.
+    galvo_amplitude, galvo_center, piezo_amplitude, piezo_center : float
+        Scan geometry — same meaning as in ``acquire_single_volume_plan``.
+    laser_config : str
+        Laser preset, e.g. ``"488 only"``.
+    laser_power_488_pct, laser_power_561_pct, laser_power_405_pct, laser_power_637_pct : float, optional
+        Per-line laser power %. Hard-limited at the device layer.
+    timing_params : Dict, optional
+        Custom SPIM timing parameters.
+    metadata : Dict, optional
+        Extra metadata merged into the start document.
+
+    Yields
+    ------
+    msg : Msg
+        Bluesky plan messages.
+
+    Returns
+    -------
+    Dict
+        ``{'frames_captured', 'frames_requested', 'mode', 'duration_s',
+           'sustained_hz'}``. Volumes are not in the return value — they
+        ride out in the run's event documents.
+    """
+    if mode not in ("1hz", "asap"):
+        mode = "1hz"
+    target_dt = 1.0 if mode == "1hz" else 0.0
+
+    _md = {
+        'plan_name': 'burst',
+        'frames': frames,
+        'mode': mode,
+        'num_slices': num_slices,
+        'exposure_ms': exposure_ms,
+        'laser_config': laser_config,
+        'laser_power_488_pct': laser_power_488_pct,
+        'laser_power_561_pct': laser_power_561_pct,
+        'laser_power_405_pct': laser_power_405_pct,
+        'laser_power_637_pct': laser_power_637_pct,
+    }
+    if metadata:
+        _md.update(metadata)
+
+    results = {
+        'frames_captured': 0,
+        'frames_requested': frames,
+        'mode': mode,
+        'duration_s': 0.0,
+        'sustained_hz': 0.0,
+    }
+
+    @bpp.run_decorator(md=_md)
+    def inner():
+        logger.info("=" * 70)
+        logger.info("BURST ACQUISITION")
+        logger.info("Frames: %d, Mode: %s, Slices/frame: %d", frames, mode, num_slices)
+        power_log = []
+        if laser_power_488_pct is not None: power_log.append(f"488@{laser_power_488_pct}%")
+        if laser_power_561_pct is not None: power_log.append(f"561@{laser_power_561_pct}%")
+        if laser_power_405_pct is not None: power_log.append(f"405@{laser_power_405_pct}%")
+        if laser_power_637_pct is not None: power_log.append(f"637@{laser_power_637_pct}%")
+        if power_log:
+            logger.info("Laser power: %s", ", ".join(power_log))
+        logger.info("=" * 70)
+
+        # Configure once — keeps laser/scanner/piezo settings stable for the
+        # whole burst and saves the per-frame configure overhead.
+        volume_scanner.configure(
+            num_slices=num_slices,
+            exposure_ms=exposure_ms,
+            galvo_amplitude=galvo_amplitude,
+            galvo_center=galvo_center,
+            piezo_amplitude=piezo_amplitude,
+            piezo_center=piezo_center,
+            timing_params=timing_params,
+            laser_config=laser_config,
+            laser_power_488_pct=laser_power_488_pct,
+            laser_power_561_pct=laser_power_561_pct,
+            laser_power_405_pct=laser_power_405_pct,
+            laser_power_637_pct=laser_power_637_pct,
+        )
+
+        burst_start = time.time()
+        for i in range(frames):
+            tick_start = time.time()
+            # One event per frame, each carrying its own volume file_ref.
+            yield from bps.trigger_and_read([volume_scanner])
+            results['frames_captured'] = i + 1
+
+            # Pacing — only between frames, not after the last.
+            if i < frames - 1 and target_dt > 0:
+                elapsed = time.time() - tick_start
+                wait = target_dt - elapsed
+                if wait > 0:
+                    yield from bps.sleep(wait)
+
+        duration = time.time() - burst_start
+        results['duration_s'] = duration
+        results['sustained_hz'] = (
+            results['frames_captured'] / duration if duration > 0 else 0.0
+        )
+
+        logger.info(
+            "BURST COMPLETE — %d/%d frames in %.2fs (%.2f Hz)",
+            results['frames_captured'], frames, duration, results['sustained_hz'],
+        )
+
+    yield from inner()
+    return results
+
+
 def timelapse_volume_plan(volume_scanner,
                            num_timepoints: int,
                            interval_seconds: float,

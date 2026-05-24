@@ -115,9 +115,6 @@ class BurstAcquisition(ExclusiveAcquisition):
                 error=f"Embryo {self.target_embryo_id!r} not in active timelapse",
             )
 
-        target_dt = 1.0 if self.mode == "1hz" else 0.0
-        start = datetime.now()
-
         # Phase 10 dedicated burst events (Phase 7 originally rode
         # STATUS_CHANGED; now we have first-class types).
         orchestrator._emit_event(EventType.BURST_START, {
@@ -126,10 +123,6 @@ class BurstAcquisition(ExclusiveAcquisition):
             "frames": self.frames,
             "mode": self.mode,
         })
-
-        # Collect captured volumes for MP4 generation at the end.
-        frames_captured: List[np.ndarray] = []
-        frame_paths: List[str] = []
 
         # Hardware kwargs from the embryo's calibration (mirrors _acquire_embryo)
         cal = embryo.calibration or {}
@@ -146,49 +139,48 @@ class BurstAcquisition(ExclusiveAcquisition):
             except Exception as e:
                 logger.warning("Burst move-to failed for %s: %s", self.target_embryo_id, e)
 
-        # Tight acquisition loop.
+        # Single device-layer plan holds the MMCore lock and pause_state_updates
+        # for the entire burst, eliminating the per-frame state-poller race.
+        # Progress events are approximated locally on a timer (see _progress_ticker)
+        # because the plan only returns when all frames are done.
         loop_start = datetime.now()
-        for i in range(self.frames):
-            tick_start = datetime.now()
+        progress_task = asyncio.create_task(
+            self._progress_ticker(orchestrator, EventType.BURST_FRAME)
+        )
+        try:
+            result = await orchestrator.client.acquire_burst(
+                frames=self.frames,
+                mode=self.mode,
+                num_slices=self.num_slices,
+                exposure_ms=embryo.exposure_ms,
+                galvo_amplitude=galvo_amplitude,
+                galvo_center=galvo_center,
+                piezo_amplitude=piezo_amplitude,
+                piezo_center=piezo_center,
+                laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+            )
+        except Exception as e:
+            logger.error("Burst failed for %s: %s", self.target_embryo_id, e)
+            result = {"success": False, "error": str(e), "frames": []}
+        finally:
+            progress_task.cancel()
             try:
-                result = await orchestrator.client.acquire_volume(
-                    num_slices=self.num_slices,
-                    exposure_ms=embryo.exposure_ms,
-                    galvo_amplitude=galvo_amplitude,
-                    galvo_center=galvo_center,
-                    piezo_amplitude=piezo_amplitude,
-                    piezo_center=piezo_center,
-                    laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
-                )
-            except Exception as e:
-                logger.error("Burst frame %d failed for %s: %s", i, self.target_embryo_id, e)
-                continue
+                await progress_task
+            except (asyncio.CancelledError, Exception):
+                pass
 
-            vol = result.get("volume")
-            if vol is not None:
-                frames_captured.append(np.asarray(vol))
-            vp = result.get("volume_path")
-            if vp:
-                frame_paths.append(str(vp))
+        frames_data = result.get("frames") or []
+        frames_captured: List[np.ndarray] = [
+            np.asarray(f["volume"]) for f in frames_data if f.get("volume") is not None
+        ]
 
-            # Periodic event for UI / persistence (every 5th frame to keep noise down).
-            if i % 5 == 0:
-                orchestrator._emit_event(EventType.BURST_FRAME, {
-                    "embryo_id": self.target_embryo_id,
-                    "request_id": self.request_id,
-                    "frame_idx": i,
-                    "total_frames": self.frames,
-                })
-
-            # Cadence pacing.
-            if target_dt > 0:
-                elapsed = (datetime.now() - tick_start).total_seconds()
-                wait = target_dt - elapsed
-                if wait > 0:
-                    await asyncio.sleep(wait)
-
-        duration_s = (datetime.now() - loop_start).total_seconds()
-        sustained_hz = (len(frames_captured) / duration_s) if duration_s > 0 else 0.0
+        # Prefer the plan's measured timing; fall back to wall-clock if absent.
+        duration_s = float(result.get("duration_s") or 0.0)
+        if duration_s <= 0:
+            duration_s = (datetime.now() - loop_start).total_seconds()
+        sustained_hz = float(result.get("sustained_hz") or 0.0)
+        if sustained_hz <= 0 and duration_s > 0:
+            sustained_hz = len(frames_captured) / duration_s
 
         # Generate MP4 from captured frames (best-effort).
         mp4_path = await _maybe_generate_mp4(
@@ -197,6 +189,8 @@ class BurstAcquisition(ExclusiveAcquisition):
             request_id=self.request_id,
             frames=frames_captured,
         )
+
+        success = bool(result.get("success")) and len(frames_captured) > 0
 
         orchestrator._emit_event(EventType.BURST_COMPLETE, {
             "embryo_id": self.target_embryo_id,
@@ -208,14 +202,38 @@ class BurstAcquisition(ExclusiveAcquisition):
         })
 
         return ExclusiveResult(
-            success=True,
+            success=success,
             target_embryo_id=self.target_embryo_id,
             request_id=self.request_id,
             frames_captured=len(frames_captured),
             duration_s=duration_s,
             output_path=mp4_path,
             extra={"sustained_hz": sustained_hz, "mode": self.mode},
+            error=result.get("error") if not success else None,
         )
+
+    async def _progress_ticker(self, orchestrator, frame_event_type):
+        """Approximate per-frame progress for the UI while the plan runs.
+
+        The device-layer plan returns only when all frames are done, so we
+        can't observe per-frame completion here. For 1 Hz mode the cadence
+        is known; for ASAP we tick at 1 s as a best-guess. Cancelled by
+        ``run`` once the plan returns.
+        """
+        target_dt = 1.0  # 1 s tick for both 1hz and asap modes
+        tick_interval = 5.0  # match the old "every 5th frame" cadence
+        start = datetime.now()
+        while True:
+            await asyncio.sleep(tick_interval)
+            elapsed = (datetime.now() - start).total_seconds()
+            approx_idx = min(self.frames - 1, int(elapsed / target_dt))
+            orchestrator._emit_event(frame_event_type, {
+                "embryo_id": self.target_embryo_id,
+                "request_id": self.request_id,
+                "frame_idx": approx_idx,
+                "total_frames": self.frames,
+                "approximate": True,
+            })
 
 
 async def _maybe_generate_mp4(
@@ -225,11 +243,22 @@ async def _maybe_generate_mp4(
     request_id: str,
     frames: List[np.ndarray],
 ) -> Optional[str]:
-    """Best-effort MP4 generation. Returns None if no frames or imageio
-    isn't available — the burst still succeeds either way."""
+    """Best-effort MP4 generation using OpenCV's VideoWriter.
+
+    Mirrors the codec-fallback pattern in :mod:`gently.app.video_maker`
+    (mp4v → avc1 → XVID → MJPG). Returns ``None`` if no frames, no codec
+    opens, or the session isn't backed by a store — the burst still
+    succeeds either way.
+    """
     if not frames:
         return None
     if not (getattr(orchestrator, "_store", None) and getattr(orchestrator, "_session_id", None)):
+        return None
+
+    try:
+        import cv2  # type: ignore
+    except ImportError:
+        logger.warning("MP4 generation skipped: cv2 not available")
         return None
 
     try:
@@ -241,7 +270,8 @@ async def _maybe_generate_mp4(
         burst_dir.mkdir(parents=True, exist_ok=True)
         mp4_path = burst_dir / f"{request_id}.mp4"
 
-        # Reduce 3D frames to 2D max-projections for the movie.
+        # Reduce 3D frames to 2D max-projections, normalize to uint8, and
+        # convert to 3-channel BGR for VideoWriter.
         proj_frames: List[np.ndarray] = []
         for f in frames:
             v = np.squeeze(f)
@@ -257,18 +287,44 @@ async def _maybe_generate_mp4(
                     v = ((v.astype(np.float32) - lo) / (hi - lo) * 255).astype(np.uint8)
                 else:
                     v = np.zeros_like(v, dtype=np.uint8)
-            proj_frames.append(v)
+            proj_frames.append(cv2.cvtColor(v, cv2.COLOR_GRAY2BGR))
 
         if not proj_frames:
             return None
 
-        try:
-            import imageio.v2 as imageio
-        except ImportError:
-            import imageio  # type: ignore
-        imageio.mimwrite(str(mp4_path), proj_frames, fps=10)
-        logger.info("Wrote burst MP4: %s (%d frames)", mp4_path, len(proj_frames))
-        return str(mp4_path)
+        height, width = proj_frames[0].shape[:2]
+        codecs = (
+            ('mp4v', '.mp4'),
+            ('avc1', '.mp4'),
+            ('XVID', '.avi'),
+            ('MJPG', '.avi'),
+        )
+        writer = None
+        chosen_codec = None
+        chosen_path = mp4_path
+        for codec, ext in codecs:
+            test_path = mp4_path.with_suffix(ext)
+            fourcc = cv2.VideoWriter_fourcc(*codec)
+            w = cv2.VideoWriter(str(test_path), fourcc, 10, (width, height), isColor=True)
+            if w.isOpened():
+                writer = w
+                chosen_codec = codec
+                chosen_path = test_path
+                break
+            w.release()
+
+        if writer is None:
+            logger.warning("MP4 generation skipped: no working codec (tried mp4v/avc1/XVID/MJPG)")
+            return None
+
+        for frame in proj_frames:
+            writer.write(frame)
+        writer.release()
+        logger.info(
+            "Wrote burst movie: %s (%d frames, codec=%s)",
+            chosen_path, len(proj_frames), chosen_codec,
+        )
+        return str(chosen_path)
     except Exception as e:
         logger.warning("MP4 generation failed: %s", e)
         return None

@@ -171,6 +171,7 @@ class DeviceLayerServer(Service):
         # Anything in this set runs with state polling paused.
         self._heavy_plans = frozenset({
             'acquire_single_volume_plan',
+            'burst_plan',
             'timelapse_volume_plan',
             'focus_sweep_plan',
             'calibrate_piezo_galvo_plan',
@@ -378,9 +379,11 @@ class DeviceLayerServer(Service):
             from .plans.acquisition import (
                 calibrate_piezo_galvo_plan,
                 acquire_single_volume_plan,
+                burst_plan,
             )
             self.plans['calibrate_piezo_galvo_plan'] = calibrate_piezo_galvo_plan
             self.plans['acquire_single_volume_plan'] = acquire_single_volume_plan
+            self.plans['burst_plan'] = burst_plan
             logger.info("Loaded main acquisition plans")
         except ImportError:
             logger.info("Main acquisition plans not available")
