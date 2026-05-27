@@ -146,6 +146,8 @@ export interface TuiActions {
   // Queue
   enqueueMessage: (text: string) => void;
   dequeueMessage: () => string | undefined;
+  clearQueue: () => void;
+  removeQueuedAt: (index: number) => void;
 
   clearMessages: () => void;
   enqueueChoice: (request: ChoiceRequest, requestId: string) => void;
@@ -528,6 +530,13 @@ export function createTuiStore() {
       set({ messageQueue: rest });
       return next;
     },
+
+    clearQueue: () => set({ messageQueue: [] }),
+
+    removeQueuedAt: (index) =>
+      set((s) => ({
+        messageQueue: s.messageQueue.filter((_, i) => i !== index),
+      })),
 
     // Clear all messages
     clearMessages: () =>
