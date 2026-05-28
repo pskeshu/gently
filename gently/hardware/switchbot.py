@@ -40,9 +40,22 @@ _COMMANDS = {
     "off":   bytes([0x57, 0x01, 0x02]),
     "press": bytes([0x57, 0x01, 0x00]),
 }
+# Dedicated status query: returns battery %, firmware version, mode flags.
+# This is the only reliable source of battery — action-command responses
+# also include status bytes but in a different format (byte 1 there isn't
+# battery despite what's documented for older firmware).
+_QUERY_STATUS = bytes([0x57, 0x02])
+# Status-query response format (firmware ≥ 6.x):
+#   byte 0 = 0x01 success
+#   byte 1 = battery %
+#   byte 2 = firmware version (BCD-ish: high nibble.low nibble — 0x42 = v4.2)
+#   bytes 3+ = mode flags / timer count / counters (firmware-dependent)
+_STATUS_BATTERY_IDX = 1
+_STATUS_FIRMWARE_IDX = 2
 # First byte of the success response. Older Bot firmware returns 0x01 alone;
-# modern firmware (≥ Bot v4.x) returns 0x05 followed by a status frame —
-# byte 1 = battery %, byte 2 = flag bits. Both mean "press landed."
+# modern firmware (≥ Bot v4.x) returns 0x05 for action commands followed by
+# action-status bytes. Both are "command landed" — the action payload format
+# differs from the status-query payload format, so don't reuse parsers.
 _RESP_OK = (0x01, 0x05)
 
 
@@ -104,6 +117,12 @@ class SwitchBot:
         self.timeout = timeout
         self.parent = None              # required for Bluesky bps.mv()
         self._state = "unknown"         # last commanded on/off state
+        # Status fields populated only by read_status(). Left as None until
+        # first contact — action commands deliberately don't update these,
+        # see note on _STATUS_BATTERY_IDX above.
+        self._battery_pct: int | None = None
+        self._firmware: int | None = None
+        self._status_ts: float | None = None
         self._lock = threading.Lock()   # serialize BLE access (one radio, one bot)
 
     # -- Bluesky settable protocol -------------------------------------------
@@ -135,15 +154,58 @@ class SwitchBot:
         threading.Thread(target=worker, name=f"{self.name}-set", daemon=True).start()
         return status
 
+    # -- Dedicated status query (no actuation) -------------------------------
+    def read_status(self) -> dict:
+        """Query battery / firmware / mode without touching the switch arm.
+
+        Synchronous: runs its own BLE connect → query → disconnect on the
+        caller's thread. Updates the cached status fields on success so
+        read() surfaces fresh values to the device-state stream. Use this
+        for periodic polls (~hourly is fine; battery doesn't move quickly).
+
+        Returns a dict ``{battery_pct, firmware, raw_hex}``; raises
+        SwitchBotError on BLE / protocol failure.
+        """
+        with self._lock:
+            data = asyncio.run(
+                _send_command(self.address, _QUERY_STATUS, self.timeout)
+            )
+        info = {
+            "raw_hex": data.hex(),
+            "battery_pct": data[_STATUS_BATTERY_IDX] if len(data) > _STATUS_BATTERY_IDX else None,
+            "firmware": data[_STATUS_FIRMWARE_IDX] if len(data) > _STATUS_FIRMWARE_IDX else None,
+        }
+        if info["battery_pct"] is not None:
+            self._battery_pct = info["battery_pct"]
+        if info["firmware"] is not None:
+            self._firmware = info["firmware"]
+        self._status_ts = time.time()
+        logger.info("SwitchBot %s status: %s", self.name, info)
+        return info
+
     # -- Bluesky readable protocol -------------------------------------------
     def read(self):
-        return OrderedDict({
-            self.name: {"value": self._state, "timestamp": time.time()}
+        ts = time.time()
+        out = OrderedDict({
+            self.name: {"value": self._state, "timestamp": ts}
         })
+        if self._battery_pct is not None:
+            out[f"{self.name}_battery_pct"] = {
+                "value": self._battery_pct,
+                "timestamp": self._status_ts or ts,
+            }
+        if self._firmware is not None:
+            out[f"{self.name}_firmware"] = {
+                "value": self._firmware,
+                "timestamp": self._status_ts or ts,
+            }
+        return out
 
     def describe(self):
         return OrderedDict({
-            self.name: {"source": f"switchbot:{self.address}", "dtype": "string", "shape": []}
+            self.name: {"source": f"switchbot:{self.address}", "dtype": "string", "shape": []},
+            f"{self.name}_battery_pct": {"source": f"switchbot:{self.address}", "dtype": "integer", "shape": []},
+            f"{self.name}_firmware":    {"source": f"switchbot:{self.address}", "dtype": "integer", "shape": []},
         })
 
     def read_configuration(self):
