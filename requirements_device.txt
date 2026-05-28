@@ -22,3 +22,6 @@ pyyaml>=6.0
 # SAM embryo detection (optional, needs CUDA GPU)
 # torch>=2.0.0
 # segment-anything
+
+# BLE accessory control (SwitchBot Bot — diSPIM room light)
+bleak>=0.21.0
