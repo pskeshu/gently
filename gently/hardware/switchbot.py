@@ -40,7 +40,10 @@ _COMMANDS = {
     "off":   bytes([0x57, 0x01, 0x02]),
     "press": bytes([0x57, 0x01, 0x00]),
 }
-_RESP_OK = 0x01  # first byte of the response notification on success
+# First byte of the success response. Older Bot firmware returns 0x01 alone;
+# modern firmware (≥ Bot v4.x) returns 0x05 followed by a status frame —
+# byte 1 = battery %, byte 2 = flag bits. Both mean "press landed."
+_RESP_OK = (0x01, 0x05)
 
 
 class SwitchBotError(RuntimeError):
@@ -75,7 +78,7 @@ async def _send_command(address: str, command: bytes, timeout: float) -> bytes:
                 pass
 
     data = response["data"]
-    if not data or data[0] != _RESP_OK:
+    if not data or data[0] not in _RESP_OK:
         raise SwitchBotError(f"SwitchBot returned non-OK response: {data.hex()}")
     return data
 
