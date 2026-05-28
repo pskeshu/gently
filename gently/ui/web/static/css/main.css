@@ -3607,11 +3607,23 @@ kbd {
 .board-col { padding: 0 0.5rem; }
 .board-col-embryo { width: 100px; flex-shrink: 0; }
 .board-col-stage { width: 130px; flex-shrink: 0; }
-.board-col-conf { width: 60px; flex-shrink: 0; text-align: center; }
-.board-col-rate { width: 70px; flex-shrink: 0; text-align: center; }
-.board-col-eta { width: 70px; flex-shrink: 0; text-align: center; }
+.board-col-clock { width: 72px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.board-col-stereo { width: 140px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.board-col-pace { width: 90px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.board-col-eta { width: 70px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .board-col-spark { flex: 1; min-width: 100px; }
 .board-col-alert { width: 110px; flex-shrink: 0; text-align: right; }
+
+/* Pace cell coloring — green when on reference, orange when slow,
+   red when seriously slow. Class names mirror _formatPace(). */
+.board-col-pace.pace-unknown { color: var(--text-muted); }
+.board-col-pace.pace-normal  { color: var(--accent-green, #4ade80); }
+.board-col-pace.pace-slow    { color: #fb923c; }
+.board-col-pace.pace-slow-bad { color: #f87171; font-weight: 600; }
+
+/* Subtle overdue mark in the stereo cell when clock has run past the
+   expected stage duration. */
+.stereo-overdue { color: #fb923c; margin-left: 4px; }
 
 .board-rows { flex: 1; }
 
