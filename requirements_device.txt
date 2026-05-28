@@ -25,3 +25,7 @@ pyyaml>=6.0
 
 # BLE accessory control (SwitchBot Bot — diSPIM room light)
 bleak>=0.21.0
+
+# ACUITYnano thermal controller transports
+pyserial>=3.5
+paho-mqtt>=1.6.0
