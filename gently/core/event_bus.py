@@ -44,6 +44,7 @@ class EventType(Enum):
     EMBRYO_CENTERED = auto()
     EMBRYO_CALIBRATED = auto()
     EMBRYO_SKIPPED = auto()
+    EMBRYO_TERMINATED = auto()  # {embryo_id, completion_reason} - emitted when an embryo's imaging stops (any reason: no_object terminal, stop condition met, errors, user removal)
 
     # Analysis events
     ANALYSIS_STARTED = auto()
