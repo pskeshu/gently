@@ -237,6 +237,39 @@ class DeviceLayerServer(Service):
         for name in self.devices:
             logger.debug("  - %s", name)
 
+        # Optional BLE accessory: SwitchBot Bot. It's a Bluetooth device, not a
+        # Micro-Manager adapter, so it's created here (independently of MMCore)
+        # and added to the same registry. Plans address it by name, e.g.
+        # bps.mv(switchbot, 'on'). Config-gated: no `switchbot:` section => no-op.
+        sb_cfg = self.config.get('switchbot')
+        if sb_cfg:
+            try:
+                from gently.hardware.switchbot import SwitchBot
+                sb_name = sb_cfg.get('name', 'switchbot')
+                self.devices[sb_name] = SwitchBot(
+                    address=sb_cfg['address'],
+                    name=sb_name,
+                    timeout=sb_cfg.get('timeout', 20.0),
+                )
+                logger.info("Created SwitchBot '%s' at %s", sb_name, sb_cfg['address'])
+            except Exception as exc:
+                logger.warning("Could not create SwitchBot: %s", exc)
+
+        # Optional temperature controller (ACUITYnano). Like the SwitchBot it's
+        # not an MMCore adapter — created here from config and added to the same
+        # registry. Plans block on it via bps.mv(temperature, 20.0) until the
+        # controller reports SYSTEM LOCKED. Config-gated: no `temperature:` => no-op.
+        temp_cfg = self.config.get('temperature')
+        if temp_cfg:
+            try:
+                from gently.hardware.temperature import create_temperature_controller
+                tc = create_temperature_controller(temp_cfg)
+                self.devices[tc.name] = tc
+                logger.info("Created temperature controller '%s' (backend=%s)",
+                            tc.name, temp_cfg.get('backend', 'serial'))
+            except Exception as exc:
+                logger.warning("Could not create temperature controller: %s", exc)
+
         # Push XY safety bounds down to the ASI Tiger firmware so the joystick
         # can't drive past Layer-1 software limits. The XY_STAGE_*_UM constants
         # in devices/stage.py are the single source of truth — both the
@@ -1294,6 +1327,74 @@ class DeviceLayerServer(Service):
                 'traceback': traceback.format_exc()
             }, status=500)
 
+    async def handle_get_temperature_status(self, request):
+        """GET /api/temperature/status - current temperature, setpoint, lock state."""
+        try:
+            temp = self.devices.get('temperature')
+            if temp is None:
+                return web.json_response({'success': False, 'error': 'temperature device not found'})
+            r = temp.read()
+            return web.json_response({
+                'success': True,
+                'temperature_c': r.get(temp.name, {}).get('value'),
+                'setpoint_c': r.get(f'{temp.name}_setpoint', {}).get('value'),
+                'state': r.get(f'{temp.name}_state', {}).get('value'),
+                'peltier_c': r.get(f'{temp.name}_peltier', {}).get('value'),
+            })
+        except Exception as e:
+            import traceback
+            return web.json_response({'success': False, 'error': str(e),
+                                      'traceback': traceback.format_exc()}, status=500)
+
+    async def handle_set_temperature(self, request):
+        """POST /api/temperature/set - command setpoint. Body: {target_c, wait?}.
+
+        Non-blocking by default (controller ramps; poll status). wait=true blocks
+        until SYSTEM LOCKED or the device's stabilize timeout.
+        """
+        try:
+            data = await request.json()
+            target = float(data.get('target_c'))
+            wait = bool(data.get('wait', False))
+            if not (0.0 <= target <= 99.9):
+                return web.json_response({'success': False,
+                                          'error': f'target {target} outside [0.0, 99.9]'})
+            temp = self.devices.get('temperature')
+            if temp is None:
+                return web.json_response({'success': False, 'error': 'temperature device not found'})
+
+            if not wait:
+                temp.enable(True)
+                temp.setpoint(target)
+                r = temp.read()
+                return web.json_response({
+                    'success': True, 'target_c': target, 'waited': False,
+                    'message': f'commanded {target} C (ramping)',
+                    'temperature_c': r.get(temp.name, {}).get('value'),
+                    'state': r.get(f'{temp.name}_state', {}).get('value'),
+                })
+
+            import time
+            status = temp.set(target)
+            timeout = float(getattr(temp, 'stabilize_timeout', 600.0)) + 10
+            start = time.time()
+            while not status.done and (time.time() - start) < timeout:
+                await asyncio.sleep(0.5)
+            r = temp.read()
+            if status.done and status.success:
+                return web.json_response({
+                    'success': True, 'target_c': target, 'waited': True,
+                    'message': f'locked at {target} C',
+                    'temperature_c': r.get(temp.name, {}).get('value'),
+                    'state': r.get(f'{temp.name}_state', {}).get('value'),
+                })
+            return web.json_response({'success': False, 'target_c': target,
+                                      'error': f'did not stabilize at {target} C within {timeout:.0f}s'})
+        except Exception as e:
+            import traceback
+            return web.json_response({'success': False, 'error': str(e),
+                                      'traceback': traceback.format_exc()}, status=500)
+
     async def handle_set_camera_led_mode(self, request):
         """POST /api/camera/led_mode - Enable/disable automatic LED for bottom camera"""
         try:
@@ -2236,6 +2337,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_get('/api/plans', self.handle_get_plans)
         self._app.router.add_get('/api/led/status', self.handle_get_led_status)
         self._app.router.add_post('/api/led/set', self.handle_set_led)
+        self._app.router.add_get('/api/temperature/status', self.handle_get_temperature_status)
+        self._app.router.add_post('/api/temperature/set', self.handle_set_temperature)
         self._app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
         self._app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
         self._app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)

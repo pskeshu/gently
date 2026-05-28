@@ -802,6 +802,15 @@ class DiSPIMMicroscope(Microscope):
         """Get current LED status."""
         return await self._api_get('/api/led/status')
 
+    async def set_temperature(self, target_c: float) -> Dict:
+        """Command the thermal-controller setpoint (Celsius). Non-blocking — the
+        controller ramps; poll get_temperature() for the lock state."""
+        return await self._api_post('/api/temperature/set', {'target_c': target_c})
+
+    async def get_temperature(self) -> Dict:
+        """Get current temperature, setpoint, and lock state."""
+        return await self._api_get('/api/temperature/status')
+
     # ------------------------------------------------------------------
     # Live device-state readout (streamed from the device layer poller)
     # ------------------------------------------------------------------
