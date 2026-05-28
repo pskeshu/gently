@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "gently"
-version = "0.20.0"
+version = "0.21.0.dev0"
 description = "Agentic harnessing for microscopy"
 readme = "docs/README.md"
 license = {text = "MIT"}
