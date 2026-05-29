@@ -726,33 +726,237 @@ def predict_hatching(
 
 @tool(
     name="set_autonomy",
-    description="""Enable or disable autonomous mode (the decision-moment wake-router).
-When ON, the agent wakes itself between user messages on important perception events
-(developmental stage transitions, potential arrest, hatching, embryo termination, or
-errors) and may adjust acquisition on its own (interval, power, stop conditions,
-bursts). Default is OFF. Device-layer safety limits still bound any action.
-Use when the user says "enable autopilot", "watch and adapt on your own", "go
-autonomous", or "turn off autonomy".""",
+    description="""Set the autonomy mode of the decision-moment wake-router (default OFF).
+Modes:
+  'off'  — never act on its own; only respond to your messages.
+  'ask'  — on a notable event (stage transition, arrest, hatching, termination,
+           errors) the agent PROPOSES a change and waits for you to Approve /
+           Modify / Skip in the chat before acting.
+  'auto' — the agent adapts acquisition on its own (still bounded by device
+           limits; a few irreversible actions always require your confirmation).
+You can switch modes mid-run. Use when the user says "enable autopilot/autonomous",
+"ask me before changing things", "go fully autonomous", or "turn off autonomy".""",
     category=ToolCategory.ANALYSIS,
     examples=[
-        ToolExample("Enable autonomous mode", {"enabled": True}),
-        ToolExample("Turn off autopilot", {"enabled": False}),
+        ToolExample("Ask me before adapting", {"mode": "ask"}),
+        ToolExample("Go fully autonomous", {"mode": "auto"}),
+        ToolExample("Turn off autonomy", {"mode": "off"}),
     ],
 )
-def set_autonomy(enabled: bool = True, context: Dict = None) -> str:
-    """Toggle the decision-moment wake-router."""
+def set_autonomy(mode: str = None, enabled: bool = None, context: Dict = None) -> str:
+    """Set the wake-router mode (off/ask/auto). `enabled` kept for back-compat."""
     agent, err = require_agent(context)
     if err:
         return err
     router = getattr(agent, "wake_router", None)
     if router is None:
         return "Autonomy is not available (wake-router failed to initialize)."
-    state = router.set_enabled(enabled)
-    if state:
-        return ("Autonomous mode ENABLED. I'll wake on stage transitions, potential "
-                "arrest, hatching, termination, and errors — and adapt acquisition as "
-                "needed. Say 'turn off autonomy' to stop.")
-    return "Autonomous mode disabled. I'll only act when you message me."
+    if mode is not None:
+        m = str(mode).strip().lower()
+        if m not in ("off", "ask", "auto"):
+            return "mode must be 'off', 'ask', or 'auto'."
+        router.set_mode(m)
+    elif enabled is not None:
+        router.set_enabled(bool(enabled))
+    else:
+        return "Specify mode ('off', 'ask', or 'auto')."
+    cur = router.mode
+    if cur == "auto":
+        return ("Autonomy set to AUTO. I'll wake on stage transitions, arrest, "
+                "hatching, termination, and errors and adapt acquisition on my own "
+                "(irreversible actions still need your okay). Say 'ask mode' or "
+                "'turn off autonomy' to change.")
+    if cur == "ask":
+        return ("Autonomy set to ASK. On a notable event I'll propose a change and "
+                "wait for your Approve / Modify / Skip before doing anything.")
+    return "Autonomy OFF. I'll only act when you message me."
+
+
+# ---------------------------------------------------------------------------
+# Live cadence / dose modulation — direct knobs for a running timelapse.
+# ---------------------------------------------------------------------------
+
+
+@tool(
+    name="modify_timelapse_interval",
+    description="""Change the base acquisition interval for ALL embryos on a running timelapse, effective immediately.
+Re-anchors every embryo's next acquisition to now + the new interval and notifies the UI.
+Lower interval = more frequent imaging = more photodose; raise it to be gentler.
+Use when the user says "image every N minutes/seconds now", "speed up/slow down the whole run".
+For a single embryo use set_embryo_cadence instead.""",
+    category=ToolCategory.EXPERIMENT,
+    examples=[
+        ToolExample("Image every 2 minutes now", {"new_interval_seconds": 120}),
+        ToolExample("Slow everything down to 10 minutes", {"new_interval_seconds": 600}),
+    ],
+)
+def modify_timelapse_interval(new_interval_seconds: float, context: Dict = None) -> str:
+    """Globally re-anchor the timelapse interval (live)."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+    return orchestrator.modify_interval(new_interval_seconds)
+
+
+@tool(
+    name="set_embryo_cadence",
+    description="""Change ONE embryo's acquisition cadence on a running timelapse, effective immediately.
+Set new_interval_seconds to re-anchor that embryo's next acquisition to now + interval (lower = more frequent = more dose).
+Set new_phase to 'normal' to resume a paused embryo, or 'paused' to pause it.
+NOTE: re-issuing the SAME interval with the SAME phase is a no-op (it won't re-anchor).
+Use for per-embryo tuning, e.g. speed up the one that's developing fastest.""",
+    category=ToolCategory.EXPERIMENT,
+    examples=[
+        ToolExample("Image embryo_2 every minute", {"embryo_id": "embryo_2", "new_interval_seconds": 60}),
+        ToolExample("Resume embryo_3", {"embryo_id": "embryo_3", "new_phase": "normal"}),
+    ],
+)
+def set_embryo_cadence(
+    embryo_id: str,
+    new_interval_seconds: float = None,
+    new_phase: str = None,
+    context: Dict = None,
+) -> str:
+    """Per-embryo cadence change routed through the re-anchoring path."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+    embryo, err = get_embryo_or_error(agent, embryo_id)
+    if err:
+        return err
+    if new_interval_seconds is None and new_phase is None:
+        return "Specify new_interval_seconds and/or new_phase."
+    if new_interval_seconds is not None and new_interval_seconds < 1:
+        return "Interval must be >= 1 second."
+    if new_phase is not None and new_phase not in ("normal", "fast", "burst", "paused"):
+        return "new_phase must be one of: normal, fast, burst, paused."
+    # Detect the no-op (transition_cadence silently does nothing, and would NOT
+    # re-anchor next_due_at, if neither interval nor phase actually changes).
+    cur_interval = getattr(embryo, "interval_seconds", None)
+    cur_phase = getattr(embryo, "cadence_phase", None)
+    interval_change = new_interval_seconds is not None and new_interval_seconds != cur_interval
+    phase_change = new_phase is not None and new_phase != cur_phase
+    if not interval_change and not phase_change:
+        shown = f"{cur_interval:.0f}s" if cur_interval is not None else "default"
+        return f"{embryo.id}: no change (already interval={shown}, phase={cur_phase})."
+    orchestrator.transition_cadence(
+        embryo,
+        new_interval_seconds=new_interval_seconds if interval_change else None,
+        new_phase=new_phase if phase_change else None,
+        reason="agent:set_embryo_cadence",
+    )
+    bits = []
+    if interval_change:
+        bits.append(f"interval={new_interval_seconds:.0f}s")
+    if phase_change:
+        bits.append(f"phase={new_phase}")
+    due = getattr(embryo, "next_due_at", None)
+    tail = f"; next acquisition ~{due.strftime('%H:%M:%S')}" if due else ""
+    return f"{embryo.id}: {', '.join(bits)}{tail}"
+
+
+@tool(
+    name="set_photodose_budget",
+    description="""Set or clear the per-embryo photodose budget (a hard cap on cumulative laser exposure).
+base_dose_budget_ms is the ceiling for a 1x-role (test) embryo; calibration embryos get 10x.
+When an embryo's cumulative exposure exceeds its budget it is auto-PAUSED to protect the sample.
+Pass null/None to DISABLE the cap. Raising the budget also resumes embryos that were paused for the old cap.
+Use to enforce gentleness on precious samples, or to lift the cap when the user okays more dose.""",
+    category=ToolCategory.EXPERIMENT,
+    examples=[
+        ToolExample("Cap each embryo at 5 seconds of light", {"base_dose_budget_ms": 5000}),
+        ToolExample("Remove the photodose cap", {"base_dose_budget_ms": None}),
+    ],
+)
+def set_photodose_budget(
+    base_dose_budget_ms: float = None,
+    resume_paused: bool = True,
+    context: Dict = None,
+) -> str:
+    """Set/clear the photodose budget; optionally resume budget-paused embryos."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+    # Capture who was budget-paused BEFORE set_photodose_budget clears the set,
+    # so we only resume embryos paused for the budget (not manual pauses/bursts).
+    prev_exceeded = set(getattr(orchestrator, "_dose_budget_exceeded", set()) or set())
+    msg = orchestrator.set_photodose_budget(base_dose_budget_ms)
+    resumed = []
+    if resume_paused:
+        states = getattr(orchestrator, "_embryo_states", {}) or {}
+        try:
+            from gently.harness.roles import REGISTRY as ROLE_REGISTRY
+        except Exception:
+            ROLE_REGISTRY = {}
+        for eid in prev_exceeded:
+            e = states.get(eid)
+            if e is None or getattr(e, "cadence_phase", None) != "paused":
+                continue
+            # Only resume if the embryo is now UNDER the new budget (or the cap
+            # was disabled); otherwise it would just immediately re-pause.
+            if base_dose_budget_ms is not None:
+                rdef = ROLE_REGISTRY.get(getattr(e, "role", "test")) if hasattr(ROLE_REGISTRY, "get") else None
+                mult = getattr(rdef, "photodose_budget_multiplier", 1.0) if rdef else 1.0
+                if (getattr(e, "total_exposure_ms", 0.0) or 0.0) > base_dose_budget_ms * mult:
+                    continue
+            orchestrator.transition_cadence(e, new_phase="normal", reason="agent:budget change resume")
+            resumed.append(eid)
+    if resumed:
+        msg += f" Resumed: {', '.join(sorted(resumed))}."
+    return msg
+
+
+@tool(
+    name="get_photodose_status",
+    description="""Report each embryo's cumulative light exposure vs its photodose budget, and which are paused over budget.
+Use to reason about gentleness before/after changing the budget, power, or cadence.""",
+    category=ToolCategory.ANALYSIS,
+    examples=[ToolExample("How much light has each embryo gotten?", {})],
+)
+def get_photodose_status(context: Dict = None) -> str:
+    """Read-only photodose / budget status across embryos."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+    orchestrator, err = require_timelapse_orchestrator(agent)
+    if err:
+        return err
+    base = getattr(orchestrator, "_dose_budget_base_ms", None)
+    exceeded = getattr(orchestrator, "_dose_budget_exceeded", set()) or set()
+    states = getattr(orchestrator, "_embryo_states", {}) or {}
+    if base is None:
+        lines = ["Photodose budget: DISABLED (no cap).", ""]
+    else:
+        lines = [f"Photodose budget: {base:.0f} ms base (scaled per role).", ""]
+    try:
+        from gently.harness.roles import REGISTRY as ROLE_REGISTRY
+    except Exception:
+        ROLE_REGISTRY = {}
+    for eid in sorted(states):
+        e = states[eid]
+        used = getattr(e, "total_exposure_ms", 0.0) or 0.0
+        role = getattr(e, "role", "test")
+        if base is not None:
+            rdef = ROLE_REGISTRY.get(role) if hasattr(ROLE_REGISTRY, "get") else None
+            mult = getattr(rdef, "photodose_budget_multiplier", 1.0) if rdef else 1.0
+            cap = base * mult
+            pct = (used / cap * 100.0) if cap else 0.0
+            flag = "  [PAUSED: over budget]" if eid in exceeded else ""
+            lines.append(f"  {eid} ({role}): {used:.0f}/{cap:.0f} ms ({pct:.0f}%){flag}")
+        else:
+            lines.append(f"  {eid} ({role}): {used:.0f} ms used")
+    if len(lines) == 2:
+        lines.append("  (no embryos)")
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

@@ -43,6 +43,48 @@ class AgentBridge:
         self._wizard = None  # StartupWizard, set by init_wizard()
         self._active_remote: Optional[Dict[str, Any]] = None  # {"peer": PeerInfo, "campaign_id": str}
         self._pending_import: Optional[Dict] = None  # For /import-embryos picker
+        # Set by the web layer (register_display_broadcaster) so AGENT-INITIATED
+        # turns (the wake-router) can stream to all chat clients + the transcript.
+        self._display_broadcaster: Optional[Callable] = None
+
+    def register_display_broadcaster(self, broadcast_fn, choice_factory=None,
+                                     choice_discard=None) -> None:
+        """Register the web layer's broadcast fn for autonomous (wake) turns.
+
+        The wake-router has no per-connection send_fn, so to make autonomous
+        turns visible we route their chunks through the same _broadcast the web
+        route uses for user turns (records to the display transcript AND fans out
+        to every connected chat client). Also wires the agent's dangling
+        on_message_callback to this path, and (for ASK mode) the choice-future
+        factory so an autonomous turn can round-trip an approval picker.
+        Idempotent — last registration wins; the registered fns are router-scoped
+        and fan out to whoever is connected.
+        """
+        self._display_broadcaster = broadcast_fn
+        try:
+            self.agent.on_message_callback = self.broadcast_autonomous_chunk
+            if choice_factory is not None:
+                self.agent._wake_choice_factory = choice_factory
+            if choice_discard is not None:
+                self.agent._wake_choice_discard = choice_discard
+        except Exception:
+            pass
+
+    async def broadcast_autonomous_chunk(self, chunk) -> None:
+        """Fan one autonomous-turn chunk to all chat clients + the transcript.
+
+        No-op when no web client has registered a broadcaster (headless run) —
+        the wake turn still executes and is persisted to the conversation/log.
+        """
+        fn = self._display_broadcaster
+        if fn is None:
+            return
+        try:
+            res = fn(chunk)
+            if asyncio.iscoroutine(res):
+                await res
+        except Exception:
+            logger.debug("broadcast_autonomous_chunk failed", exc_info=True)
 
     async def handle_choice_response(self, request_id: str, selected: str, send_fn) -> bool:
         """Handle a choice response that may belong to a bridge-initiated picker.

@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Tunables (seconds).
 COALESCE_WINDOW = 20.0     # collapse a burst of events into one wake
 MIN_WAKE_INTERVAL = 120.0  # throttle non-critical wakes
+ASK_TIMEOUT_SEC = 300.0    # ASK mode: how long to wait for operator approval -> Skip
 
 # Events that always wake immediately (bypass MIN_WAKE_INTERVAL).
 CRITICAL_EVENTS = frozenset({
@@ -51,7 +52,7 @@ class WakeRouter:
     def __init__(self, agent, bus):
         self.agent = agent
         self.bus = bus
-        self.enabled = False
+        self.mode = "off"          # 'off' | 'ask' | 'auto'
         self._loop = None
         self._pending = []          # list[(EventType, dict)]
         self._flush_handle = None   # TimerHandle for the coalesce window
@@ -62,12 +63,24 @@ class WakeRouter:
         self._subscribe()
 
     # -- public control -------------------------------------------------
-    def set_enabled(self, enabled: bool) -> bool:
-        self.enabled = bool(enabled)
-        if not self.enabled:
+    @property
+    def enabled(self) -> bool:
+        return self.mode != "off"
+
+    def set_mode(self, mode: str) -> str:
+        mode = (mode or "off").strip().lower()
+        if mode not in ("off", "ask", "auto"):
+            mode = "off"
+        self.mode = mode
+        if mode == "off":
             self._cancel_flush()
             self._pending.clear()
-        logger.info("Wake-router %s", "ENABLED" if self.enabled else "disabled")
+        logger.info("Wake-router mode -> %s", mode.upper())
+        return self.mode
+
+    def set_enabled(self, enabled: bool) -> bool:
+        """Back-compat boolean toggle: maps to AUTO / OFF."""
+        self.set_mode("auto" if enabled else "off")
         return self.enabled
 
     def is_enabled(self) -> bool:
@@ -182,16 +195,28 @@ class WakeRouter:
         self._in_flight = True
         self._last_wake = now
         try:
-            note = self._build_wake_note(events)
-            logger.info("Wake-router firing autonomous turn (%d event(s))", len(events))
-            await self.agent.run_wake_turn(note)
+            ask = (self.mode == "ask")
+            note, trigger = self._build_wake_note(events, ask=ask)
+            logger.info("Wake-router firing %s turn (%d event(s)): %s",
+                        self.mode.upper(), len(events), trigger)
+            await self.agent.run_wake_turn(note, trigger=trigger, interactive=ask)
         except Exception:
             logger.exception("wake turn failed")
         finally:
             self._in_flight = False
+            # Events that arrived while we were busy (including deferred CRITICAL
+            # ones) are still in _pending — re-fire promptly rather than waiting
+            # out another coalesce window. _in_flight is now False so this flush
+            # will proceed instead of deferring (no busy-spin).
+            if self._pending and self.enabled:
+                self._schedule_flush(
+                    critical=any(et in CRITICAL_EVENTS for et, _ in self._pending))
 
     # -- wake package ---------------------------------------------------
-    def _build_wake_note(self, events) -> str:
+    def _build_wake_note(self, events, ask=False):
+        """Return (note, trigger_str). The note is the agent-facing wake prompt;
+        trigger_str is the short human-readable reason shown in the chat banner.
+        When ask=True the note instructs propose-then-confirm instead of acting."""
         from gently.harness.prompts.templates import build_perception_snapshot
         triggers = []
         for et, data in events:
@@ -223,13 +248,24 @@ class WakeRouter:
         except Exception:
             snap = ""
         snap = snap or "(no live perception data)"
+        trigger_str = "; ".join(triggers)
 
-        return (
-            "[AUTONOMOUS WAKE] Something changed while no one was typing — decide if "
-            "any acquisition change is warranted.\n\n"
-            f"What triggered this: {'; '.join(triggers)}\n\n"
+        head = (
+            "[AUTONOMOUS WAKE] Something changed while no one was typing.\n\n"
+            f"What triggered this: {trigger_str}\n\n"
             f"{snap}\n\n"
-            "If a change helps (adjust interval/power, add a stop condition, queue a "
-            "burst, or stop an embryo), do it now using your tools. If nothing needs "
-            "doing, say so briefly and take no action."
         )
+        if ask:
+            tail = (
+                "Decide whether any acquisition change is warranted. If so, briefly "
+                "state your proposed change and WHY, then call ask_user_choice with "
+                "options Approve / Modify / Skip and act ONLY if the operator approves. "
+                "If nothing needs doing, say so briefly and take no action (no need to ask)."
+            )
+        else:
+            tail = (
+                "If a change helps (adjust interval/power, add a stop condition, queue a "
+                "burst, or stop an embryo), do it now using your tools. If nothing needs "
+                "doing, say so briefly and take no action."
+            )
+        return head + tail, trigger_str

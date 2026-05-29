@@ -140,6 +140,28 @@
     white-space: pre-wrap; word-wrap: break-word;
 }
 
+/* ── Autonomous (wake) turns ────────────────────────────── */
+.ac-autonomous-banner {
+    display: flex; align-items: center; gap: 8px;
+    align-self: stretch;
+    margin: 2px 0;
+    padding: 6px 10px;
+    font-size: 11.5px; font-weight: 500;
+    color: var(--accent-purple);
+    background: rgba(167, 139, 250, 0.10);
+    border: 1px solid rgba(167, 139, 250, 0.28);
+    border-radius: 8px;
+}
+.ac-autonomous-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--accent-purple);
+    box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.20);
+    flex: 0 0 auto;
+}
+/* Autonomous agent bubbles get an accent rail + a distinct role label. */
+.ac-turn-autonomous { border-left: 2px solid rgba(167, 139, 250, 0.45); padding-left: 8px; }
+.ac-turn-autonomous .ac-role { color: var(--accent-purple); }
+
 /* ── Activity indicator ─────────────────────────────────── */
 .ac-activity {
     display: flex; align-items: center; gap: 9px;
@@ -220,6 +242,11 @@
 .ac-choice-label { font-weight: 600; font-size: 13px; }
 .ac-choice-desc { font-size: 12px; color: var(--text-muted); }
 .ac-choice-picked { border-color: var(--accent-green); background: rgba(74, 222, 128, 0.08); }
+.ac-choice-wake { border-color: rgba(167, 139, 250, 0.45); }
+.ac-choice-origin {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase;
+    color: var(--accent-purple); margin-bottom: 2px;
+}
 
 /* ── Applied-spec card ──────────────────────────────────── */
 .ac-spec {
@@ -293,4 +320,44 @@
 }
 .agent-chat-send:hover:not(:disabled) { background: var(--accent-hover); }
 .agent-chat-send:disabled { opacity: 0.5; cursor: default; }
-.agent-chat-send.ac-busy { background: var(--color-danger, #f87171); }
+/* Send now queues while busy (it no longer doubles as Stop), so just dim it. */
+.agent-chat-send.ac-busy { opacity: 0.6; }
+
+/* Explicit Stop (separate from Send), shown only during a cancellable turn. */
+.ac-stop {
+    flex: 0 0 auto; align-self: flex-end;
+    padding: 9px 12px; border-radius: 9px;
+    border: 1px solid var(--color-danger, #f87171);
+    background: transparent; color: var(--color-danger, #f87171);
+    font-weight: 600; font-size: 13px; cursor: pointer;
+}
+.ac-stop:hover { background: rgba(248, 113, 113, 0.12); }
+.ac-stop.hidden { display: none; }
+
+/* ── Queued-message panel (type-while-busy) ─────────────── */
+.ac-queue {
+    margin: 0 12px 6px;
+    border: 1px solid var(--border); border-radius: 9px;
+    background: rgba(127, 127, 127, 0.06);
+    padding: 6px; font-size: 12px;
+}
+.ac-queue.hidden { display: none; }
+.ac-queue-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 2px 4px 6px; color: var(--text-muted);
+}
+.ac-queue-clear {
+    background: none; border: none; color: var(--accent);
+    cursor: pointer; font-size: 11.5px; font-family: inherit;
+}
+.ac-queue-clear:hover { text-decoration: underline; }
+.ac-queue-item { display: flex; align-items: center; gap: 8px; padding: 4px; }
+.ac-queue-text {
+    flex: 1 1 auto; color: var(--text);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ac-queue-remove {
+    flex: 0 0 auto; background: none; border: none;
+    color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
+}
+.ac-queue-remove:hover { color: var(--color-danger, #f87171); }

@@ -48,7 +48,7 @@ def create_router(server) -> APIRouter:
     # Persisted to <session>/chat_display.json so it survives reconnects and
     # restarts; broadcast live so all instances stay in sync.
     _history: list = []
-    _history_state = {"sid": None, "path": None, "agent_buf": None}
+    _history_state = {"sid": None, "path": None, "agent_buf": None, "autonomous": False}
 
     async def _broadcast_control_status():
         """Tell every connected agent client who currently holds control."""
@@ -81,6 +81,7 @@ def create_router(server) -> APIRouter:
         _history_state["sid"] = sid
         _history_state["path"] = None
         _history_state["agent_buf"] = None
+        _history_state["autonomous"] = False
         try:
             if store and sid:
                 sdir = store._session_dir(sid)
@@ -140,7 +141,10 @@ def create_router(server) -> APIRouter:
     def _flush_agent_buf():
         buf = _history_state["agent_buf"]
         if buf:
-            _record({"role": "agent", "text": buf})
+            # An autonomous (wake) turn's text is recorded distinctly so replay
+            # shows it as "Gently · autonomous", not an ordinary agent reply.
+            role = "autonomous" if _history_state.get("autonomous") else "agent"
+            _record({"role": role, "text": buf})
         _history_state["agent_buf"] = None
 
     def _record_display(msg):
@@ -148,8 +152,15 @@ def create_router(server) -> APIRouter:
         t = msg.get("type")
         if t == "user_message":
             _flush_agent_buf()
+            _history_state["autonomous"] = False
             _record({"role": "user", "text": msg.get("text", ""),
                      "author": msg.get("author")})
+        elif t == "autonomous_start":
+            # An autonomous wake turn is beginning — record the trigger banner
+            # and mark following text as autonomous until stream_end.
+            _flush_agent_buf()
+            _history_state["autonomous"] = True
+            _record({"role": "autonomous_start", "trigger": msg.get("trigger", "")})
         elif t == "text":
             _history_state["agent_buf"] = (_history_state["agent_buf"] or "") + msg.get("text", "")
         elif t == "tool_call":
@@ -159,6 +170,7 @@ def create_router(server) -> APIRouter:
                      "summary": msg.get("result_summary")})
         elif t == "stream_end":
             _flush_agent_buf()
+            _history_state["autonomous"] = False
 
     async def _broadcast(msg):
         """Record to history + send a display message to ALL clients."""
@@ -273,6 +285,11 @@ def create_router(server) -> APIRouter:
             })
             await websocket.close()
             return
+
+        # Route autonomous (wake-router) turns through this router's _broadcast so
+        # they stream to all chat clients + persist to the display transcript.
+        # Idempotent; _broadcast is router-scoped and fans out to whoever is live.
+        bridge.register_display_broadcaster(_broadcast)
 
         # ── Authenticate the connection (account mode) ────────────
         # When user accounts are configured, identity comes from the signed
@@ -571,6 +588,14 @@ def create_router(server) -> APIRouter:
             future = asyncio.get_event_loop().create_future()
             _choice_futures[request_id] = future
             return future
+
+        def _discard_choice(request_id: str) -> None:
+            _choice_futures.pop(request_id, None)
+
+        # Give the bridge the choice-factory + discard too, so ASK-mode autonomous
+        # turns can round-trip an approval picker through this connection's channel
+        # and clean up the future on timeout/cancel.
+        bridge.register_display_broadcaster(_broadcast, choice_future_factory, _discard_choice)
 
         # Register this client for control arbitration; grant control if free
         # (only to clients allowed to drive — viewers never auto-hold).

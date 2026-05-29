@@ -147,6 +147,17 @@ class MicroscopyAgent:
         # must not interleave on the shared conversation_history.
         self._turn_lock = asyncio.Lock()
 
+        # Autonomy backstop: while a wake turn runs, _autonomous_active is True
+        # and the registry refuses these irreversible tools (they require a
+        # human). User turns are unaffected. _wake_choice_factory is set by the
+        # web bridge so ASK-mode wake turns can round-trip an approval picker.
+        self._autonomous_active = False
+        self._autonomous_blocked_tools = frozenset({
+            "set_laser_power", "remove_embryo", "stop_timelapse",
+        })
+        self._wake_choice_factory = None
+        self._wake_choice_discard = None
+
         # Interaction logger for structured logging (research data collection)
         self.interaction_logger: Optional[InteractionLogger] = None
 
@@ -972,45 +983,112 @@ class MicroscopyAgent:
             if acquired:
                 lock.release()
 
-    async def run_wake_turn(self, wake_note: str):
+    async def run_wake_turn(self, wake_note: str, trigger: str = None, interactive: bool = False):
         """Drive one autonomous (no-user) turn for the wake-router.
 
         Runs through the normal streaming pipeline (so it acquires the turn-lock
-        and is recorded to conversation history / auto-saved). Surfaces text via
-        on_message_callback if a UI wired one; always runs so the decision and
-        any tool actions are persisted even with no client attached. Only acts in
-        run mode.
+        and is recorded to conversation history / auto-saved). Brackets the turn
+        with an 'autonomous_start' (carrying the wake trigger) and a synthesized
+        'stream_end' so it streams to the web chat distinctly. Sets
+        _autonomous_active so the registry backstop refuses irreversible tools.
+        When interactive (ASK mode) a choice_request round-trips through the
+        operator; otherwise it is auto-cancelled. Run mode only.
         """
         if self.mode != "run":
             logger.info("Wake turn skipped — agent not in run mode (mode=%s)", self.mode)
             return ""
+
+        async def _emit(chunk):
+            cb = getattr(self, "on_message_callback", None)
+            if cb is None:
+                return
+            try:
+                res = cb(chunk)
+                if asyncio.iscoroutine(res):
+                    await res
+            except Exception:
+                logger.debug("on_message_callback failed for wake chunk", exc_info=True)
+
+        await _emit({"type": "autonomous_start", "trigger": trigger or ""})
         text_parts = []
+        self._autonomous_active = True
+        agen = self.handle_message_stream(wake_note)
+        sent_value = None
         try:
-            async for chunk in self.handle_message_stream(wake_note):
-                if isinstance(chunk, dict) and chunk.get("type") == "text":
+            while True:
+                try:
+                    if sent_value is None:
+                        chunk = await agen.__anext__()
+                    else:
+                        chunk = await agen.asend(sent_value)
+                        sent_value = None
+                except StopAsyncIteration:
+                    break
+                ctype = chunk.get("type") if isinstance(chunk, dict) else None
+                if ctype == "text":
                     text_parts.append(chunk.get("text", ""))
-                elif isinstance(chunk, dict) and chunk.get("type") == "choice_request":
-                    # A plain async-for resumes the generator with None, which the
-                    # picker resolves as 'cancelled'. Make that visible — there is
-                    # no operator to answer during an autonomous turn.
-                    cd = chunk.get("choice_data", {})
-                    logger.warning(
-                        "Wake turn invoked an interactive picker (%s); auto-cancelling "
-                        "— no operator present.", cd.get("question", "?"))
-                cb = getattr(self, "on_message_callback", None)
-                if cb is not None:
-                    try:
-                        res = cb(chunk)
-                        if asyncio.iscoroutine(res):
-                            await res
-                    except Exception:
-                        logger.debug("on_message_callback failed for wake chunk", exc_info=True)
+                if ctype == "choice_request":
+                    # Resolve via the operator (ASK) or auto-cancel (AUTO).
+                    sent_value = await self._resolve_wake_choice(chunk, _emit, interactive)
+                    continue  # don't re-emit the raw choice_request
+                await _emit(chunk)
         except Exception:
             logger.exception("run_wake_turn error")
+        finally:
+            self._autonomous_active = False
+            try:
+                # Release the turn-lock even if a picker hung / timed out.
+                await agen.aclose()
+            except Exception:
+                pass
+            await _emit({"type": "stream_end"})
         summary = "".join(text_parts).strip()
         if summary:
             logger.info("Autonomous wake turn result: %s", summary[:500])
         return summary
+
+    async def _resolve_wake_choice(self, chunk, emit, interactive):
+        """Resolve a choice_request raised during a wake turn.
+
+        AUTO (or no operator channel) -> 'cancelled'. ASK -> register a future via
+        the web choice-factory, broadcast the picker to clients, and await the
+        operator's selection (timeout -> 'skip' so an unanswered picker can't hold
+        the turn-lock forever)."""
+        choice_data = chunk.get("choice_data", {}) if isinstance(chunk, dict) else {}
+        factory = getattr(self, "_wake_choice_factory", None)
+        if not interactive or factory is None:
+            logger.info("Wake picker auto-cancelled (interactive=%s, channel=%s)",
+                        interactive, factory is not None)
+            return "cancelled"
+        try:
+            future = factory(choice_data)  # registers future + sets request_id
+        except Exception:
+            logger.exception("wake choice factory failed")
+            return "cancelled"
+        request_id = choice_data.get("request_id", "")
+        await emit({**chunk, "origin": "wake", "request_id": request_id})
+        from gently.app.wake_router import ASK_TIMEOUT_SEC
+        try:
+            selected = await asyncio.wait_for(future, timeout=ASK_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            logger.info("Wake ASK timed out (%.0fs) -> skip", ASK_TIMEOUT_SEC)
+            selected = "skip"
+        except asyncio.CancelledError:
+            # The picker future was cancelled (e.g. the operator disconnected) —
+            # treat as a cancelled proposal so the turn finishes cleanly.
+            logger.info("Wake ASK future cancelled -> cancelled")
+            selected = "cancelled"
+        except Exception:
+            selected = "cancelled"
+        finally:
+            # Don't leak the future in the router-scoped registry on timeout/cancel.
+            discard = getattr(self, "_wake_choice_discard", None)
+            if discard is not None and request_id:
+                try:
+                    discard(request_id)
+                except Exception:
+                    pass
+        return selected or "skip"
 
     async def get_tool_call(self, user_message: str) -> Optional[Dict]:
         """Dry-run tool call (for benchmarking)."""

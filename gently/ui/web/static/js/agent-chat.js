@@ -28,6 +28,12 @@ const AgentChat = (() => {
     let tools = [];               // [{name, description, params, ...}]
     let acItems = [];             // current completion items shown in the dropdown
     let acIdx = -1;               // highlighted item index
+    let autonomousTurn = false;   // true while rendering an autonomous (wake) turn
+    let agentBusy = false;        // a turn (user or autonomous) is currently running
+    let busySource = null;        // 'user' | 'wake' while busy
+    let msgQueue = [];            // messages typed while busy, sent on idle
+    let queuePanel = null;        // the "⏳ Queued (N)" panel element
+    let stopBtn = null;           // explicit Stop button (separate from Send)
 
     // DOM refs (resolved in init)
     let fab, panel, log, input, sendBtn, conn, banner, closeBtn, userEl, signoutBtn;
@@ -75,10 +81,11 @@ const AgentChat = (() => {
     function addTurn(role) {
         const wrap = document.createElement('div');
         wrap.className = `ac-turn ac-turn-${role}`;
+        if (role === 'agent' && autonomousTurn) wrap.classList.add('ac-turn-autonomous');
         if (role === 'agent') {
             const label = document.createElement('div');
             label.className = 'ac-role';
-            label.textContent = 'Gently';
+            label.textContent = autonomousTurn ? 'Gently · autonomous' : 'Gently';
             wrap.appendChild(label);
         }
         const content = document.createElement('div');
@@ -118,6 +125,14 @@ const AgentChat = (() => {
                 const c = addTurn('agent');
                 c._raw = it.text || '';
                 c.innerHTML = mdToHtml(c._raw);
+            } else if (it.role === 'autonomous_start') {
+                addAutonomousBanner(it.trigger || '');
+            } else if (it.role === 'autonomous') {
+                autonomousTurn = true;
+                const c = addTurn('agent');
+                c._raw = it.text || '';
+                c.innerHTML = mdToHtml(c._raw);
+                autonomousTurn = false;
             } else if (it.role === 'tool') {
                 const el = document.createElement('div');
                 el.className = 'ac-tool ac-tool-done';
@@ -129,6 +144,16 @@ const AgentChat = (() => {
                 addSystemLine(it.text, it.level || 'info');
             }
         });
+        scrollToBottom();
+    }
+
+    /** A divider announcing the agent woke itself, with the trigger reason. */
+    function addAutonomousBanner(trigger) {
+        const el = document.createElement('div');
+        el.className = 'ac-autonomous-banner';
+        const t = trigger ? `Gently woke up — ${trigger}` : 'Gently woke up';
+        el.innerHTML = `<span class="ac-autonomous-dot"></span><span>${escapeHtml(t)}</span>`;
+        log.appendChild(el);
         scrollToBottom();
     }
 
@@ -171,8 +196,18 @@ const AgentChat = (() => {
             case 'stream_start':
                 streaming = true;
                 currentAgentEl = null;  // created lazily on first text
-                setBusy(true);
+                setBusy(true, 'user');
                 setActivity('Working…');
+                break;
+
+            case 'autonomous_start':
+                // The agent woke itself — render a distinct banner + label the
+                // following text as autonomous (no stream_start precedes this).
+                hideActivity();
+                autonomousTurn = true;
+                currentAgentEl = null;
+                setBusy(true, 'wake');
+                addAutonomousBanner(msg.trigger || '');
                 break;
 
             case 'thinking':
@@ -256,6 +291,7 @@ const AgentChat = (() => {
             case 'stream_end':
                 streaming = false;
                 currentAgentEl = null;
+                autonomousTurn = false;
                 hideActivity();
                 setBusy(false);
                 break;
@@ -289,7 +325,13 @@ const AgentChat = (() => {
         const data = msg.choice_data || {};
         const reqId = msg.request_id || data.request_id || '';
         const wrap = document.createElement('div');
-        wrap.className = 'ac-choice';
+        wrap.className = 'ac-choice' + (msg.origin === 'wake' ? ' ac-choice-wake' : '');
+        if (msg.origin === 'wake') {
+            const tag = document.createElement('div');
+            tag.className = 'ac-choice-origin';
+            tag.textContent = 'Autonomy proposal — your approval needed';
+            wrap.appendChild(tag);
+        }
         const q = document.createElement('div');
         q.className = 'ac-choice-q';
         q.innerHTML = mdToHtml(data.question || 'Choose:');
@@ -482,9 +524,67 @@ const AgentChat = (() => {
         }
     }
 
-    function setBusy(busy) {
-        sendBtn.textContent = busy ? 'Stop' : 'Send';
-        sendBtn.classList.toggle('ac-busy', busy);
+    function setBusy(busy, source) {
+        agentBusy = !!busy;
+        busySource = agentBusy ? (source || 'user') : null;
+        // Send no longer doubles as Stop — it queues while busy. A separate Stop
+        // (shown only for a cancellable user turn) aborts the current turn.
+        if (stopBtn) stopBtn.classList.toggle('hidden', !(agentBusy && busySource === 'user'));
+        sendBtn.classList.toggle('ac-busy', agentBusy);
+        if (agentBusy) {
+            input.placeholder = (busySource === 'wake')
+                ? 'Gently is acting autonomously — your message will queue'
+                : 'Gently is working — your message will queue';
+        } else {
+            if (hasControl) input.placeholder = 'Message Gently…   ( / commands · @ tools )';
+            drainQueue();  // a turn just ended — send the next queued message
+        }
+    }
+
+    // ── Message queue (type-while-busy) ───────────────────────
+    function enqueue(text) { msgQueue.push(text); renderQueue(); }
+    function removeQueued(i) {
+        if (i >= 0 && i < msgQueue.length) { msgQueue.splice(i, 1); renderQueue(); }
+    }
+    function clearQueue() { msgQueue = []; renderQueue(); }
+    function drainQueue() {
+        if (agentBusy || !msgQueue.length) return;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;  // keep queued until reconnect
+        const next = msgQueue.shift();
+        renderQueue();
+        actuallySend(next);
+    }
+    function renderQueue() {
+        if (!queuePanel) return;
+        if (!msgQueue.length) { queuePanel.classList.add('hidden'); queuePanel.innerHTML = ''; return; }
+        queuePanel.classList.remove('hidden');
+        queuePanel.innerHTML = '';
+        const head = document.createElement('div');
+        head.className = 'ac-queue-head';
+        const lbl = document.createElement('span');
+        lbl.textContent = `⏳ Queued (${msgQueue.length})`;
+        const clear = document.createElement('button');
+        clear.className = 'ac-queue-clear';
+        clear.textContent = 'Clear all';
+        clear.addEventListener('click', clearQueue);
+        head.appendChild(lbl);
+        head.appendChild(clear);
+        queuePanel.appendChild(head);
+        msgQueue.forEach((m, i) => {
+            const row = document.createElement('div');
+            row.className = 'ac-queue-item';
+            const span = document.createElement('span');
+            span.className = 'ac-queue-text';
+            span.textContent = m;
+            const x = document.createElement('button');
+            x.className = 'ac-queue-remove';
+            x.textContent = '✕';
+            x.title = 'Remove from queue';
+            x.addEventListener('click', () => removeQueued(i));
+            row.appendChild(span);
+            row.appendChild(x);
+            queuePanel.appendChild(row);
+        });
     }
 
     function setConn(ok, label) {
@@ -520,23 +620,32 @@ const AgentChat = (() => {
     }
 
     // ── Input handling ────────────────────────────────────────
+    function actuallySend(text) {
+        if (text.startsWith('/')) {
+            addUserMessage(text);                       // commands aren't broadcast; echo locally
+            send({ type: 'command', command: text });   // slash commands (e.g. /status)
+            // Most commands reply with a single 'command_result' and no stream —
+            // do NOT mark the composer busy, or the queue would stick forever.
+            // Commands that DO stream (e.g. /wizard) set busy via stream_start.
+            return;
+        }
+        send({ type: 'chat', text });                   // echoed to all via 'user_message'
+        // Instant feedback before the first chunk arrives.
+        setBusy(true, 'user');
+        setActivity('Working…');
+    }
+
     function submit() {
-        if (streaming) { send({ type: 'cancel' }); return; }  // Send doubles as Stop
         hideCompletions();
         const text = input.value.trim();
         if (!text) return;
         if (!hasControl) { renderControl(); return; }
-        if (text.startsWith('/')) {
-            addUserMessage(text);                       // commands aren't broadcast; echo locally
-            send({ type: 'command', command: text });   // slash commands (e.g. /status)
-        } else {
-            send({ type: 'chat', text });               // echoed to all via 'user_message'
-        }
-        // Instant feedback before the first chunk arrives.
-        setBusy(true);
-        setActivity('Working…');
         input.value = '';
         autosize();
+        // While the agent is busy (a user OR autonomous turn), queue instead of
+        // cancelling — Send no longer doubles as Stop.
+        if (agentBusy) { enqueue(text); return; }
+        actuallySend(text);
     }
 
     function autosize() {
@@ -613,6 +722,19 @@ const AgentChat = (() => {
             acComplete = document.createElement('div');
             acComplete.className = 'ac-complete hidden';
             inputWrap.insertBefore(acComplete, inputWrap.firstChild);
+
+            // Queued-message panel (above the composer) for type-while-busy.
+            queuePanel = document.createElement('div');
+            queuePanel.className = 'ac-queue hidden';
+            if (inputWrap.parentNode) inputWrap.parentNode.insertBefore(queuePanel, inputWrap);
+
+            // Explicit Stop button — shown only during a cancellable user turn.
+            stopBtn = document.createElement('button');
+            stopBtn.className = 'ac-stop hidden';
+            stopBtn.textContent = 'Stop';
+            stopBtn.title = 'Stop the current turn';
+            stopBtn.addEventListener('click', () => { send({ type: 'cancel' }); setBusy(false); });
+            inputWrap.appendChild(stopBtn);
         }
 
         sendBtn.addEventListener('click', submit);
@@ -629,7 +751,11 @@ const AgentChat = (() => {
                 if (e.key === 'Escape') { e.preventDefault(); hideCompletions(); return; }
             }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
-            if (e.key === 'Escape' && streaming) { e.preventDefault(); send({ type: 'cancel' }); }
+            // Escape mirrors Stop: cancel a cancellable (user) turn and clear busy
+            // (a cancelled turn emits no stream_end, so clear optimistically).
+            if (e.key === 'Escape' && agentBusy && busySource === 'user') {
+                e.preventDefault(); send({ type: 'cancel' }); setBusy(false);
+            }
         });
     }
 

@@ -425,6 +425,20 @@ class ToolRegistry:
         else:
             exec_context = self._context
 
+        # Hybrid-autonomy backstop: during an autonomous (wake) turn, a small set
+        # of irreversible tools (laser-on, embryo termination, stopping the run)
+        # must NEVER execute without a human — even if the model tries to call
+        # them directly. The agent sets these flags around its autonomous turns;
+        # user-driven turns are unaffected. The blocked set is supplied by the
+        # agent so this layer stays free of app-specific tool names.
+        _agent = exec_context.get('agent') if isinstance(exec_context, dict) else None
+        if _agent is not None and getattr(_agent, '_autonomous_active', False):
+            blocked = getattr(_agent, '_autonomous_blocked_tools', None) or ()
+            if tool_name in blocked:
+                logger.info("Autonomy backstop blocked '%s' (irreversible)", tool_name)
+                return (f"'{tool_name}' is an irreversible action and cannot run "
+                        f"autonomously. Ask the operator to confirm it.")
+
         # Check microscope requirement
         if tool.requires_microscope:
             client = exec_context.get('client')
