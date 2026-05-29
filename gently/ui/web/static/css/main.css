@@ -3532,6 +3532,13 @@ kbd {
     padding: 0;
 }
 
+/* Filmstrip: rows on the left, reasoning/detail panel pinned on the right. */
+.view-filmstrip {
+    display: flex;
+    flex-direction: row;
+    overflow: hidden;  /* the two children scroll internally */
+}
+
 /* ========================================
    AMBIENT HEALTH PULSE
    ======================================== */
@@ -3714,8 +3721,11 @@ kbd {
        scrollbar shared by all rows. Labels pin to the left via
        position:sticky inside each row. */
     display: block;
+    flex: 1 1 auto;     /* take the space left of the detail panel */
+    min-width: 0;       /* allow shrinking so the panel keeps its width */
+    min-height: 0;
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-gutter: stable;
     position: relative;
@@ -3871,17 +3881,17 @@ kbd {
 }
 
 .filmstrip-detail {
+    /* Side panel: pinned to the right of the rows, full height, own scroll.
+       Hidden until a cell is clicked (see :empty below) so the rows use the
+       full width when nothing is selected. */
+    flex: 0 0 360px;
+    max-width: 42%;
+    border-left: 1px solid var(--border);
     background: var(--bg-card);
-    /* Cap the detail panel so it always leaves the rows visible AND
-       has a scrollable body of its own. Without this, when an item is
-       expanded the detail panel can grow past the viewport bottom and
-       the parent's scroll is unintuitive (mouse wheel over the rows
-       converts to horizontal). max-height keeps it bounded; overflow-y
-       lets long VLM summaries scroll on their own. */
-    max-height: 60vh;
     overflow-y: auto;
     overscroll-behavior: contain;
 }
+.filmstrip-detail:empty { display: none; }
 
 /* ========================================
    VITALS VIEW
