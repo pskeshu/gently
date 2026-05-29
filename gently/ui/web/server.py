@@ -274,6 +274,57 @@ class VisualizationServer(Service):
                     metadata={"embryo_id": eid, "timepoint": tp},
                 ))
                 added += 1
+
+        # Rehydrate the timelapse tracker's per-embryo perception state from
+        # predictions.jsonl so the Default / Film / reasoning views populate
+        # (those are driven by detection_reasoning, not the raw image store).
+        # Thumbnails resolve via the projection uids added above.
+        tracker = self.timelapse_tracker
+        try:
+            tracker.session_id = session_id
+            tracker.detection_reasoning = {}
+            tracker.projection_uids = {}
+            for emb in embryos:
+                eid = emb.get("embryo_id") if isinstance(emb, dict) else getattr(emb, "embryo_id", None)
+                if not eid:
+                    continue
+                try:
+                    preds = self.gently_store.get_predictions(session_id, eid) or []
+                except Exception:
+                    preds = []
+                if not preds:
+                    continue
+                items, puids, last_stage = [], {}, None
+                for p in preds:
+                    tp = p.get("timepoint")
+                    if tp is None:
+                        continue
+                    uid = f"volume_{eid}_t{tp:04d}"
+                    puids[tp] = uid
+                    stage = p.get("predicted_stage")
+                    last_stage = stage or last_stage
+                    items.append({
+                        "timepoint": tp,
+                        "stage": stage,
+                        "detected_stage": stage,
+                        "reasoning": p.get("reasoning"),
+                        "confidence": p.get("confidence"),
+                        "projection_uid": uid,
+                        "image_uid": uid,
+                        "detector_name": "perception",
+                    })
+                tracker.detection_reasoning[eid] = items
+                tracker.projection_uids[eid] = puids
+                entry = tracker.embryos.setdefault(eid, {
+                    "embryo_id": eid, "timepoints": 0, "is_complete": False,
+                    "detections": {}, "current_stage": None,
+                })
+                entry["timepoints"] = max((it["timepoint"] for it in items), default=0)
+                entry["current_stage"] = last_stage
+            tracker.total_timepoints = sum(len(v) for v in tracker.detection_reasoning.values())
+        except Exception:
+            logger.exception("Tracker perception rehydration failed")
+
         logger.info("Rehydrated %d projections for session %s", added, session_id)
         return added
 
