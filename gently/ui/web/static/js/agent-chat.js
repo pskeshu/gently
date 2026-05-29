@@ -262,8 +262,17 @@ const AgentChat = (() => {
             const who = holderLabel || 'another session';
             input.disabled = true;
             sendBtn.disabled = true;
-            if (me && me.authenticated && me.can_control === false) {
-                // Viewer role — watching is all this account can do.
+            if (me && me.accounts && !me.authenticated) {
+                // Anonymous — viewing is open; sign in to control.
+                banner.innerHTML = `<span class="ac-lock">Viewing — sign in to control.</span>`;
+                const btn = document.createElement('button');
+                btn.className = 'ac-take-control';
+                btn.textContent = 'Sign in';
+                btn.addEventListener('click', () => { window.location.href = '/login'; });
+                banner.appendChild(btn);
+                input.placeholder = 'Viewing — sign in to control…';
+            } else if (me && me.authenticated && me.can_control === false) {
+                // Viewer-role account — watching is all this account can do.
                 banner.innerHTML = `<span class="ac-lock">View-only access — you can watch but not control.</span>`;
                 input.placeholder = 'View-only access';
             } else {
@@ -356,8 +365,18 @@ const AgentChat = (() => {
             if (m && m.authenticated) {
                 userEl.textContent = m.username;
                 userEl.title = `Signed in as ${m.username} (${m.role})`;
+                signoutBtn.textContent = 'Sign out';
+                signoutBtn.dataset.action = 'logout';
+                signoutBtn.style.display = '';
+            } else if (m && m.accounts) {
+                // Anonymous — viewing is open; sign in to gain control.
+                userEl.textContent = 'viewing';
+                userEl.title = 'Not signed in — view-only';
+                signoutBtn.textContent = 'Sign in';
+                signoutBtn.dataset.action = 'login';
                 signoutBtn.style.display = '';
             } else {
+                // No accounts configured (legacy mode).
                 userEl.textContent = '';
                 signoutBtn.style.display = 'none';
             }
@@ -382,8 +401,12 @@ const AgentChat = (() => {
         fab.addEventListener('click', () => togglePanel());
         closeBtn.addEventListener('click', () => togglePanel(false));
         signoutBtn.addEventListener('click', async () => {
+            if (signoutBtn.dataset.action === 'login') {
+                window.location.href = '/login';
+                return;
+            }
             try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
-            window.location.href = '/login';
+            window.location.reload();
         });
         fetchMe();
         sendBtn.addEventListener('click', submit);

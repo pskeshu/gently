@@ -171,18 +171,15 @@ def create_router(server) -> APIRouter:
         from gently.ui.web.auth import SESSION_COOKIE
         _acct = get_account_store()
         username = None
-        can_control = True  # legacy default
+        can_control = True  # legacy default when no accounts are configured
         if _acct is not None and _acct.has_users():
+            # Viewing is open: anonymous clients may connect and *watch* the
+            # conversation. Only authenticated operators/admins can hold or
+            # take the control lock (enforced on the drive actions below).
             _token = websocket.cookies.get(SESSION_COOKIE)
             username = _acct.verify_session(_token) if _token else None
-            if username is None:
-                await websocket.send_json({
-                    "type": "error",
-                    "error": "Authentication required — please sign in.",
-                })
-                await websocket.close()
-                return
-            can_control = _acct.get_role(username) in CONTROL_ROLES
+            role = _acct.get_role(username) if username else None
+            can_control = role in CONTROL_ROLES
 
         # Assign a stable id for control arbitration. The label shown to other
         # clients is the username when authenticated, else a generic window id.
