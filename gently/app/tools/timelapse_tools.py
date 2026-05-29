@@ -142,16 +142,15 @@ def get_timelapse_status(context: Dict = None) -> str:
     lines.append(f"Completed embryos: {status_dict['completed_embryos']}")
     lines.append("")
 
-    if status_dict['next_embryo']:
-        lines.append(f"Next acquisition: {status_dict['next_embryo']} in {status_dict['next_acquisition_in_seconds']:.0f}s")
+    if status_dict.get('seconds_until_next_round') is not None:
+        lines.append(f"Next acquisition in {status_dict['seconds_until_next_round']:.0f}s")
         lines.append("")
 
     if status_dict['embryo_details']:
         lines.append("Embryo Details:")
         for eid, details in status_dict['embryo_details'].items():
             status_marker = "[done]" if details['is_complete'] else "[active]"
-            lines.append(f"  {status_marker} {eid}: t={details['timepoints']} "
-                        f"(interval={details['interval_seconds']}s)")
+            lines.append(f"  {status_marker} {eid}: t={details['timepoints']}")
             if details['is_complete']:
                 lines.append(f"      Completed: {details['completion_reason']}")
 
