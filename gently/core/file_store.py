@@ -156,10 +156,11 @@ def _write_yaml(path: Path, data: Any) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False,
                            allow_unicode=True)
-        # On Windows, rename over an existing file requires removing it first.
-        if path.exists():
-            path.unlink()
-        Path(tmp).rename(path)
+            f.flush()
+            os.fsync(f.fileno())
+        # os.replace is atomic and overwrites on Windows — no unlink gap that
+        # a crash/power-loss could leave the target missing.
+        os.replace(tmp, path)
     except BaseException:
         # Clean up temp file on failure
         try:
@@ -410,9 +411,9 @@ class FileStore:
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(snapshot, f, indent=2, ensure_ascii=False, default=str)
-            if path.exists():
-                path.unlink()
-            Path(tmp).rename(path)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, path)
         except BaseException:
             try:
                 os.unlink(tmp)
