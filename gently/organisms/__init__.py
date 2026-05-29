@@ -14,12 +14,22 @@ Usage:
 
 import importlib
 import logging
+import pkgutil
 from types import ModuleType
-from typing import Optional
+from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
 _active_organism: Optional[ModuleType] = None
+
+
+def available_organisms() -> List[str]:
+    """Names of the organism plugins shipped under gently.organisms."""
+    import gently.organisms as _pkg
+    return sorted(
+        m.name for m in pkgutil.iter_modules(_pkg.__path__)
+        if m.ispkg and not m.name.startswith("_")
+    )
 
 
 def load_organism(name: str) -> ModuleType:
@@ -43,7 +53,19 @@ def load_organism(name: str) -> ModuleType:
         If the organism module cannot be found.
     """
     global _active_organism
-    module = importlib.import_module(f"gently.organisms.{name}")
+    try:
+        module = importlib.import_module(f"gently.organisms.{name}")
+    except ModuleNotFoundError as e:
+        # Only treat a missing organism *package* as a config error; if a
+        # dependency *inside* the organism module is missing, re-raise so the
+        # real ImportError isn't masked.
+        if e.name in (f"gently.organisms.{name}", name):
+            avail = ", ".join(available_organisms()) or "(none found)"
+            raise ValueError(
+                f"Unknown organism '{name}'. Available: {avail}. "
+                f"Set 'organism:' in config/config.yml."
+            ) from e
+        raise
     _active_organism = module
     logger.info("Loaded organism module: %s (%s)", name, module.ORGANISM_DISPLAY_NAME)
     return module
