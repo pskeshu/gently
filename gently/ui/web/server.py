@@ -214,18 +214,68 @@ class VisualizationServer(Service):
 
         return None
 
+    def _current_session_id(self) -> Optional[str]:
+        """The live agent session (source of truth), falling back to the
+        timelapse tracker. The tracker's session_id goes stale after a resume
+        with no active timelapse, so the live agent session is preferred."""
+        bridge = getattr(self, "agent_bridge", None)
+        if bridge is not None and getattr(bridge, "agent", None) is not None:
+            sid = getattr(bridge.agent, "session_id", None)
+            if sid:
+                return sid
+        return self.timelapse_tracker.session_id
+
     def _resolve_projection_path(self, embryo_id: str, timepoint: int) -> Optional[Path]:
-        """Resolve projection file path from FileStore."""
-        if self.gently_store and self.timelapse_tracker.session_id:
+        """Resolve projection file path from FileStore (current session)."""
+        sid = self._current_session_id()
+        if self.gently_store and sid:
             try:
                 proj_path = self.gently_store.get_projection_path(
-                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                    sid, embryo_id, timepoint,
                 )
                 if proj_path and proj_path.exists():
                     return proj_path
             except Exception as e:
                 logger.debug(f"FileStore projection path lookup failed: {e}")
         return None
+
+    def rehydrate_session(self, session_id: str) -> int:
+        """Repopulate the in-memory image store with the FileStore's persisted
+        projections for a (resumed) session, so galleries and filmstrips show
+        its historical data.
+
+        Lightweight: only metadata-bearing ImageData entries are created (uid
+        ``volume_{embryo}_t{NNNN}``); the JPEG pixels load lazily on demand via
+        /api/images/{uid}/png (which falls back to the FileStore projection).
+        Resets the store first so the previous session's images don't linger.
+        Returns the number of projection entries added.
+        """
+        if self.gently_store is None or not session_id:
+            return 0
+        self.store = ImageStore()  # drop the previous session's images
+        added = 0
+        try:
+            embryos = self.gently_store.list_embryos(session_id) or []
+        except Exception:
+            embryos = []
+        for emb in embryos:
+            eid = emb.get("embryo_id") if isinstance(emb, dict) else getattr(emb, "embryo_id", None)
+            if not eid:
+                continue
+            try:
+                tps = self.gently_store.list_projection_timepoints(session_id, eid)
+            except Exception:
+                tps = []
+            for tp in tps:
+                self.store.add_image(ImageData(
+                    uid=f"volume_{eid}_t{tp:04d}",
+                    data_type="volume_projection",
+                    timestamp=f"{tp:06d}",  # monotonic with timepoint for ordering
+                    metadata={"embryo_id": eid, "timepoint": tp},
+                ))
+                added += 1
+        logger.info("Rehydrated %d projections for session %s", added, session_id)
+        return added
 
     def _subscribe_to_events(self):
         """Subscribe to EventBus for automatic updates - broadcasts ALL events"""

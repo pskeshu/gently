@@ -438,6 +438,13 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     if agent.viz_server is not None:
         agent.viz_server.agent_bridge = bridge
         agent.viz_server.set_context_store(context_store)
+        # If launched into an existing session, rehydrate its persisted
+        # imagery so the galleries/filmstrips show data from the start.
+        if session_to_resume:
+            try:
+                agent.viz_server.rehydrate_session(session_to_resume)
+            except Exception:
+                logger.debug("Startup rehydrate failed", exc_info=True)
 
     # ── Banner + serve ──────────────────────────────────────────────
     # The viz server runs in-process (uvicorn in a background task). With

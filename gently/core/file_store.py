@@ -792,6 +792,27 @@ class FileStore:
             return proj_path
         return None
 
+    def list_projection_timepoints(
+        self, session_id: str, embryo_id: str
+    ) -> List[int]:
+        """Cheaply list projection timepoints (glob only, no PIL/meta reads).
+
+        Used to rehydrate the viz image store on resume without paying the
+        per-file cost of list_projections().
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        proj_dir = sd / "embryos" / embryo_id / "projections"
+        if not proj_dir.exists():
+            return []
+        tps: List[int] = []
+        for jpg in proj_dir.glob("t*.jpg"):
+            m = re.match(r"t(\d+)\.jpg$", jpg.name)
+            if m:
+                tps.append(int(m.group(1)))
+        return sorted(tps)
+
     def get_projection_b64(
         self, session_id: str, embryo_id: str, timepoint: int
     ) -> Optional[str]:

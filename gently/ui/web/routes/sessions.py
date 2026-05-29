@@ -81,14 +81,22 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"resume failed: {e}")
         if not ok:
             raise HTTPException(status_code=500, detail="resume returned false")
+        # Rehydrate the viz image store from disk so the resumed session's
+        # projections/filmstrips show (pixels load lazily from the FileStore).
+        rehydrated = 0
+        try:
+            rehydrated = server.rehydrate_session(session_id)
+        except Exception:
+            logger.exception("rehydrate_session failed")
         # Tell every connected browser to reload — they'll reconnect to the
-        # new session's state (embryos, transcript).
+        # new session's state (embryos, transcript, rehydrated imagery).
         try:
             await server.manager.broadcast({"type": "session_changed",
                                             "session_id": session_id})
         except Exception:
             pass
-        return {"ok": True, "session_id": session_id, "active": True}
+        return {"ok": True, "session_id": session_id, "active": True,
+                "rehydrated_projections": rehydrated}
 
     @router.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):
