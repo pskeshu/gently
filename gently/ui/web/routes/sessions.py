@@ -1,6 +1,5 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
-import json
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -93,14 +92,29 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):
-        """Get full session state for review"""
-        path = server.sessions_dir / f"{session_id}.json"
-        if not path.exists():
+        """Get session state for review, from the live FileStore.
+
+        Maps the FileStore session snapshot onto the shape the Sessions review
+        view expects (embryo_states / conversation). detection_history isn't
+        reconstructed here (per-timepoint predictions live elsewhere).
+        """
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        info = store.get_session(session_id)
+        if info is None:
             raise HTTPException(status_code=404, detail="Session not found")
-        try:
-            with open(path, encoding='utf-8') as f:
-                return json.load(f)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to load session: {e}")
+        snapshot = store.load_session_snapshot(session_id) or {}
+        experiment = snapshot.get("experiment_data", {}) or {}
+        return {
+            "session_id": session_id,
+            "name": info.get("name") or session_id,
+            "description": info.get("description", ""),
+            "created_at": info.get("created_at", ""),
+            "last_active": info.get("last_active", ""),
+            "embryo_states": experiment.get("embryos", {}) or {},
+            "conversation": snapshot.get("conversation_history", []) or [],
+            "detection_history": {},
+        }
 
     return router
