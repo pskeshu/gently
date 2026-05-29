@@ -4,11 +4,16 @@ Launch the Microscopy Agent
 
 Conversational AI agent for diSPIM microscope control.
 
+Starts the agent + web visualization server, then opens the browser UI.
+The web UI is the control surface (the legacy Ink TUI is retired — its
+source is kept in the tree but no longer launched).
+
 Usage:
-    python launch_gently.py                      # Ink TUI (default)
-    python launch_gently.py --offline
+    python launch_gently.py                      # Start server + open browser
+    python launch_gently.py --no-browser         # Start server, don't open a browser
+    python launch_gently.py --offline            # Run without the device layer
     python launch_gently.py --sessions           # List sessions and exit
-    python launch_gently.py --resume             # Interactive session picker
+    python launch_gently.py --resume             # Resume most recent session
     python launch_gently.py --resume latest      # Resume most recent session
     python launch_gently.py --resume <id>        # Resume specific session
     python launch_gently.py -v                   # Verbose (INFO) logging
@@ -89,9 +94,39 @@ def list_sessions(store: FileStore):
     print("Use: python launch_gently.py --resume <id>")
 
 
+def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, resumed):
+    """Print a human-readable launch banner to the terminal.
+
+    This is the "what you see when you open it" surface now that the
+    server (not a TUI) is the long-running process.
+    """
+    line = "─" * 56
+    if offline:
+        dev = "○ offline (--offline)"
+    elif device_connected:
+        dev = "● connected"
+    else:
+        dev = "○ offline — run:  python start_device_layer.py"
+    url = viz_url or "(viz server failed to start — check the log)"
+    tag = "  [resumed session]" if resumed else ""
+    print()
+    print(f"  ✦ Gently is running.{tag}")
+    print(f"    {line}")
+    print(f"    Open:    {url}")
+    print(f"    Device:  {dev}")
+    print(f"    Storage: {storage_dir}")
+    print(f"    Logs:    {log_file}")
+    print(f"    Stop:    Ctrl-C")
+    print(f"    {line}")
+    print()
+
+
 def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     """
     Spawn the Ink TUI in session-picker mode and capture the selection.
+
+    Retired: kept for reference / potential reuse by a future web session
+    picker. No longer called by the launcher.
 
     Returns the selected session ID, or None for a new session.
     """
@@ -116,7 +151,7 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     return None
 
 
-async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING"):
+async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING", no_browser: bool = False):
     # Set up log file in storage directory
     storage_base = Path(os.environ.get("GENTLY_STORAGE", "D:/Gently3"))
     log_dir = storage_base / "logs"
@@ -151,30 +186,20 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         store.close()
         return
 
-    # Ensure TUI is available
-    tui_dist = Path(__file__).parent / "gently" / "tui" / "dist" / "index.js"
-    if not tui_dist.exists() or not shutil.which("node"):
-        print("Error: TUI not available.")
-        if not tui_dist.exists():
-            print("  Run: cd gently/tui && npm install && npm run build")
-        if not shutil.which("node"):
-            print("  Node.js not found in PATH")
-        store.close()
-        return
+    # Web-only: the TUI is retired. The browser is the control surface and
+    # the launcher just starts the server — no Node/dist requirement.
 
-    # Handle --resume (interactive picker, "latest", or specific session)
+    # Handle --resume. Interactive session picking has moved to the browser;
+    # without an explicit ID ("latest" or bare --resume) we resume the most
+    # recent session.
     session_to_resume = None
-    if pick_session:
-        # Two-phase launch: spawn Ink picker to select a session
-        items = _build_session_items(store)
-        if not items:
-            print("No saved sessions found. Starting new session.")
-        else:
-            session_to_resume = run_ink_picker(tui_dist, json.dumps(items))
-    elif resume_session == "latest":
+    if pick_session or resume_session == "latest":
         sessions = store.list_sessions()
         if sessions:
             session_to_resume = sessions[0].get("session_id")
+            if pick_session:
+                print(f"Resuming most recent session: {session_to_resume} "
+                      "(interactive session picking is moving into the browser)")
         else:
             print("No sessions found - starting fresh")
     elif resume_session:
@@ -391,29 +416,32 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         agent.viz_server.agent_bridge = bridge
         agent.viz_server.set_context_store(context_store)
 
-    ws_url = f"ws://localhost:{settings.network.viz_port}/ws/agent"
-
-    # Spawn the Node.js TUI — it inherits stdin/stdout/stderr so Ink
-    # takes over the terminal.
-    tui_proc = subprocess.Popen(
-        ["node", str(tui_dist), "--ws-url", ws_url],
-        stdin=sys.stdin,
-        stdout=sys.stdout,
-        stderr=sys.stderr,
+    # ── Banner + serve ──────────────────────────────────────────────
+    # The viz server runs in-process (uvicorn in a background task). With
+    # the TUI retired, the launcher's job is to keep that server alive and
+    # point the operator at the browser.
+    _print_banner(
+        viz_url=viz_url,
+        device_connected=bool(client and client.is_connected),
+        offline=offline,
+        storage_dir=storage_dir,
+        log_file=log_file,
+        resumed=session_to_resume is not None,
     )
 
-    try:
-        # Wait for TUI to exit (blocks the event loop in a thread so
-        # the asyncio loop stays responsive for the viz server).
-        exit_code = await asyncio.get_event_loop().run_in_executor(
-            None, tui_proc.wait
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        tui_proc.terminate()
+    if viz_url and not no_browser:
         try:
-            tui_proc.wait(timeout=5)
+            import webbrowser
+            webbrowser.open(viz_url)
         except Exception:
             pass
+
+    try:
+        # Serve until interrupted (Ctrl-C). Keep the event loop alive so
+        # the in-process viz server keeps handling browser clients.
+        await asyncio.Event().wait()
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        pass
     finally:
         # Suppress noisy CancelledError / overlapped IO errors from
         # uvicorn during shutdown on Windows.
@@ -448,6 +476,7 @@ def cli_main():
                         help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (INFO) logging")
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
+    parser.add_argument("--no-browser", action="store_true", help="Do not auto-open the web UI in a browser")
     args = parser.parse_args()
 
     log_level = "WARNING"
@@ -466,6 +495,7 @@ def cli_main():
             resume_session=resume_id,
             pick_session=pick_session,
             log_level=log_level,
+            no_browser=args.no_browser,
         ))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass

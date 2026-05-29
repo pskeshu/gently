@@ -14,6 +14,7 @@
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
+    <link rel="stylesheet" href="/static/css/agent-chat.css">
 </head>
 <body>
     {% include '_header.html' %}
@@ -499,6 +500,22 @@
     <!-- Ambient health pulse overlay -->
     <div class="ambient-pulse" id="ambient-pulse"></div>
 
+    <!-- Floating agent chat (web-side control surface) -->
+    <button id="agent-fab" class="agent-fab" title="Chat with Gently">✦</button>
+    <div id="agent-chat" class="agent-chat hidden">
+        <div class="agent-chat-header">
+            <span class="agent-chat-title">✦ Gently</span>
+            <span id="agent-chat-conn" class="agent-chat-conn ac-conn-bad" title="connecting…">●</span>
+            <button id="agent-chat-close" class="agent-chat-close" title="Close">×</button>
+        </div>
+        <div id="agent-control-banner" class="agent-control-banner hidden"></div>
+        <div id="agent-chat-log" class="agent-chat-log"></div>
+        <div class="agent-chat-input">
+            <textarea id="agent-chat-text" rows="1" placeholder="Message the agent…"></textarea>
+            <button id="agent-chat-send" class="agent-chat-send">Send</button>
+        </div>
+    </div>
+
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/event-bus.js"></script>
     <script src="/static/js/websocket.js"></script>
@@ -519,5 +536,6 @@
     <script src="/static/js/app.js"></script>
     <script src="/static/js/campaigns.js"></script>
     <script src="/static/js/review.js"></script>
+    <script src="/static/js/agent-chat.js"></script>
 </body>
 </html>

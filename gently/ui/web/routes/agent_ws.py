@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Optional
+from typing import Callable, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -30,6 +30,32 @@ def create_router(server) -> APIRouter:
 
     # Pending choice futures keyed by request_id
     _choice_futures: Dict[str, asyncio.Future] = {}
+
+    # ── Single-driver control arbitration ─────────────────────
+    # Shared across all /ws/agent clients (the router is created once).
+    # Only the control holder may drive the agent (chat/command/cancel);
+    # everyone else is an observer until they take control. This is the
+    # seed of the multi-user control lock and also prevents the shared
+    # agent conversation from being corrupted when >1 client connects.
+    _control: Dict[str, Optional[str]] = {"holder": None}
+    _clients: Dict[str, Callable] = {}
+    _client_labels: Dict[str, str] = {}
+    _client_counter = {"n": 0}
+
+    async def _broadcast_control_status():
+        """Tell every connected agent client who currently holds control."""
+        holder = _control["holder"]
+        holder_label = _client_labels.get(holder) if holder else None
+        for cid, fn in list(_clients.items()):
+            try:
+                await fn({
+                    "type": "control_status",
+                    "holder": holder,
+                    "holder_label": holder_label,
+                    "you_have_control": (cid == holder),
+                })
+            except Exception:
+                pass
 
     async def _run_wizard(wizard, websocket, send_fn, _choice_futures, bridge=None, log_transcript=None):
         """Run the wizard's interactive loop.
@@ -135,6 +161,13 @@ def create_router(server) -> APIRouter:
             })
             await websocket.close()
             return
+
+        # Assign a stable id for control arbitration. The first client to
+        # connect (in practice the TUI, spawned at launch) is labelled the
+        # terminal; later connections are browser windows.
+        _client_counter["n"] += 1
+        client_id = f"agent_client_{_client_counter['n']}"
+        client_label = "the terminal" if _client_counter["n"] == 1 else "a browser window"
 
         # Send connection metadata (version, tokens, embryo count, commands)
         meta = bridge.get_connect_metadata()
@@ -409,6 +442,13 @@ def create_router(server) -> APIRouter:
             _choice_futures[request_id] = future
             return future
 
+        # Register this client for control arbitration; grant control if free.
+        _clients[client_id] = send_fn
+        _client_labels[client_id] = client_label
+        if _control["holder"] is None:
+            _control["holder"] = client_id
+        await _broadcast_control_status()
+
         try:
             # ── Wizard phase ──────────────────────────────────────
             # Run startup wizard (if needed) before entering the REPL.
@@ -496,6 +536,38 @@ def create_router(server) -> APIRouter:
 
                 _log_transcript("in", data)
                 msg_type = data.get("type")
+
+                # ── Control arbitration ───────────────────────────
+                # A client requesting the wheel.
+                if msg_type == "take_control":
+                    prev = _control["holder"]
+                    _control["holder"] = client_id
+                    if prev and prev != client_id and prev in _clients:
+                        try:
+                            await _clients[prev]({
+                                "type": "notification",
+                                "level": "warning",
+                                "title": f"Control taken by {client_label}",
+                                "body": "You are now viewing.",
+                            })
+                        except Exception:
+                            pass
+                    await _broadcast_control_status()
+                    continue
+
+                # Only the holder may drive the agent. Observers are told
+                # to take control rather than silently corrupting the
+                # single shared conversation.
+                if msg_type in ("chat", "command", "cancel") and client_id != _control["holder"]:
+                    holder_label = _client_labels.get(_control["holder"]) or "another client"
+                    await send_fn({
+                        "type": "notification",
+                        "level": "info",
+                        "title": f"Viewing only — control is held by {holder_label}",
+                        "body": "Take control to drive the microscope.",
+                    })
+                    await _broadcast_control_status()
+                    continue
 
                 if msg_type == "chat":
                     text = data.get("text", "").strip()
@@ -615,11 +687,23 @@ def create_router(server) -> APIRouter:
                 active_task.cancel()
             if bootstrap_task is not None and not bootstrap_task.done():
                 bootstrap_task.cancel()
-            # Clean up pending futures
-            for future in _choice_futures.values():
-                if not future.done():
-                    future.cancel()
-            _choice_futures.clear()
+            # Release control arbitration for this client; hand the wheel
+            # to any remaining client (or free it) and resync everyone.
+            _clients.pop(client_id, None)
+            _client_labels.pop(client_id, None)
+            if _control["holder"] == client_id:
+                _control["holder"] = next(iter(_clients), None)
+                try:
+                    await _broadcast_control_status()
+                except Exception:
+                    pass
+            # Clean up pending futures only when the last client leaves —
+            # otherwise we'd cancel another connected client's pending choices.
+            if not _clients:
+                for future in _choice_futures.values():
+                    if not future.done():
+                        future.cancel()
+                _choice_futures.clear()
 
     return router
 

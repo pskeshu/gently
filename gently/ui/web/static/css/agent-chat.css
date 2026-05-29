@@ -1,0 +1,233 @@
+/* Floating agent-chat window — the web-side control surface. */
+
+.agent-fab {
+    position: fixed;
+    right: 22px;
+    bottom: 22px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    border: none;
+    cursor: pointer;
+    z-index: 1200;
+    font-size: 24px;
+    color: #fff;
+    background: var(--gradient-primary);
+    box-shadow: var(--shadow-glow-strong);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.agent-fab:hover { transform: translateY(-2px) scale(1.04); }
+.agent-fab.ac-fab-active { transform: rotate(45deg); }
+
+.agent-chat {
+    position: fixed;
+    right: 22px;
+    bottom: 90px;
+    width: 400px;
+    max-width: calc(100vw - 44px);
+    height: 560px;
+    max-height: calc(100vh - 130px);
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: 0 12px 48px rgba(0, 0, 0, 0.45);
+    z-index: 1199;
+    overflow: hidden;
+}
+.agent-chat.hidden, .agent-control-banner.hidden { display: none; }
+
+.agent-chat-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-hover);
+}
+.agent-chat-title { font-weight: 600; color: var(--text); flex: 0 0 auto; }
+.agent-chat-conn { font-size: 11px; margin-left: 4px; color: var(--text-muted); }
+.agent-chat-conn.ac-conn-ok { color: var(--accent-green); }
+.agent-chat-conn.ac-conn-bad { color: var(--color-danger, #f87171); }
+.agent-chat-close {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+}
+.agent-chat-close:hover { color: var(--text); }
+
+.agent-control-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 14px;
+    background: rgba(251, 146, 60, 0.12);
+    border-bottom: 1px solid var(--border);
+    color: var(--accent-orange, #fb923c);
+    font-size: 13px;
+}
+.ac-take-control {
+    margin-left: auto;
+    padding: 4px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--accent);
+    background: var(--accent);
+    color: #fff;
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 600;
+}
+.ac-take-control:hover { background: var(--accent-hover); }
+
+.agent-chat-log {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.ac-msg {
+    padding: 8px 12px;
+    border-radius: 12px;
+    max-width: 90%;
+    word-wrap: break-word;
+    white-space: normal;
+}
+.ac-user {
+    align-self: flex-end;
+    background: var(--accent);
+    color: #fff;
+    border-bottom-right-radius: 4px;
+}
+.ac-agent {
+    align-self: flex-start;
+    background: var(--bg-hover);
+    color: var(--text);
+    border-bottom-left-radius: 4px;
+}
+.ac-agent code, .ac-agent strong { color: var(--accent-cyan); }
+.ac-agent code {
+    background: rgba(0, 0, 0, 0.25);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 12.5px;
+}
+
+.ac-tool {
+    align-self: flex-start;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    padding: 3px 10px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border);
+}
+.ac-tool-done .ac-tool-check { color: var(--accent-green); }
+.ac-tool-spin { display: inline-block; animation: ac-spin 1.4s linear infinite; }
+@keyframes ac-spin { to { transform: rotate(360deg); } }
+
+.ac-thinking {
+    align-self: flex-start;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.8;
+}
+
+.ac-system {
+    align-self: center;
+    font-size: 12px;
+    color: var(--text-muted);
+    text-align: center;
+    padding: 2px 8px;
+}
+.ac-level-error { color: var(--color-danger, #f87171); }
+.ac-level-warning { color: var(--accent-orange, #fb923c); }
+.ac-level-success { color: var(--accent-green); }
+
+.ac-choice {
+    align-self: stretch;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: rgba(96, 165, 250, 0.06);
+}
+.ac-choice-q { color: var(--text); font-weight: 500; margin-bottom: 2px; }
+.ac-choice-opt {
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.ac-choice-opt:hover:not(:disabled) { border-color: var(--accent); background: var(--bg-hover); }
+.ac-choice-opt:disabled { opacity: 0.5; cursor: default; }
+.ac-choice-label { font-weight: 600; }
+.ac-choice-desc { font-size: 12px; color: var(--text-muted); }
+.ac-choice-picked { border-color: var(--accent-green); }
+
+.ac-spec {
+    align-self: flex-start;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 8px 12px;
+    background: var(--bg-hover);
+    font-size: 13px;
+}
+.ac-spec-title { font-weight: 600; color: var(--accent-purple); margin-bottom: 4px; }
+.ac-spec-row { display: flex; justify-content: space-between; gap: 16px; color: var(--text-muted); }
+.ac-spec-row span:last-child { color: var(--text); }
+
+.agent-chat-input {
+    display: flex;
+    gap: 8px;
+    padding: 10px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-hover);
+}
+.agent-chat-input textarea {
+    flex: 1 1 auto;
+    resize: none;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-card);
+    color: var(--text);
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    max-height: 140px;
+}
+.agent-chat-input textarea:focus { outline: none; border-color: var(--accent); }
+.agent-chat-input textarea:disabled { opacity: 0.6; }
+.agent-chat-send {
+    flex: 0 0 auto;
+    align-self: flex-end;
+    padding: 8px 16px;
+    border-radius: 10px;
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 600;
+    cursor: pointer;
+}
+.agent-chat-send:hover:not(:disabled) { background: var(--accent-hover); }
+.agent-chat-send:disabled { opacity: 0.5; cursor: default; }
+.agent-chat-send.ac-busy { background: var(--color-danger, #f87171); }
