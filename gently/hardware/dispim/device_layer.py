@@ -44,6 +44,7 @@ from gently.core.service import Service
 from gently.exceptions import HardwareError, AcquisitionError
 from gently.log_config import configure_logging
 from gently.settings import settings
+from gently.hardware import console_ui as cui
 
 # Bluesky imports
 from bluesky import RunEngine
@@ -184,15 +185,21 @@ class DeviceLayerServer(Service):
         logger.info("GENTLY DEVICE LAYER")
         logger.info("=" * 60)
 
+        cui.out()
+        cui.note("Starting device layer...", "bold")
+
         # [1/5] Load config
+        cui.step(1, 5, "Loading configuration")
         logger.info("[1/5] Loading configuration...")
         with open(self.config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         logger.info("Config loaded from %s", self.config_path)
+        cui.step_done(str(self.config_path))
 
         # [2/5] MMCore initialization, routed through the DiSPIMSystem facade
         # so this process never touches `core.*` directly outside the
         # devices/ package.
+        cui.step(2, 5, "Initializing Micro-Manager core")
         logger.info("[2/5] Initializing Micro-Manager Core (direct)...")
         from .devices.system import DiSPIMSystem
 
@@ -215,6 +222,7 @@ class DeviceLayerServer(Service):
         self.system.load_system_configuration(mm_config_path)
         logger.info("MMCore initialized (direct, in-process)")
         logger.info("Loaded devices: %s", self.system.get_loaded_devices())
+        cui.step_done(Path(mm_config_path).name)
 
         # Register MMCore event callback so we get push notifications for
         # property changes, stage moves, exposure changes, etc. — anything the
@@ -223,6 +231,7 @@ class DeviceLayerServer(Service):
         self._register_mmcore_callbacks()
 
         # [3/5] Create Ophyd devices
+        cui.step(3, 5, "Creating devices")
         logger.info("[3/5] Creating Ophyd devices...")
         from .device_factory import create_devices_from_mmcore
         # Suppress rich console output to avoid Unicode issues on Windows
@@ -269,6 +278,8 @@ class DeviceLayerServer(Service):
                             tc.name, temp_cfg.get('backend', 'serial'))
             except Exception as exc:
                 logger.warning("Could not create temperature controller: %s", exc)
+
+        cui.step_done(f"{len(self.devices)} devices")
 
         # Push XY safety bounds down to the ASI Tiger firmware so the joystick
         # can't drive past Layer-1 software limits. The XY_STAGE_*_UM constants
@@ -320,6 +331,7 @@ class DeviceLayerServer(Service):
                 logger.error("Could not enable XY joystick: %s", exc)
 
         # [4/5] Initialize RunEngine
+        cui.step(4, 5, "Initializing RunEngine")
         logger.info("[4/5] Initializing RunEngine...")
         self.RE = RunEngine({})
 
@@ -381,10 +393,13 @@ class DeviceLayerServer(Service):
 
         self.RE.subscribe(collect_docs)
         logger.info("RunEngine ready")
+        cui.step_done("ready")
 
         # [5/5] Load plans
+        cui.step(5, 5, "Loading plans")
         logger.info("[5/5] Loading plans...")
         self._load_plans()
+        cui.step_done(f"{len(self.plans)} plans")
 
         logger.info("=" * 60)
         logger.info("Device layer initialized successfully")
@@ -1326,6 +1341,77 @@ class DeviceLayerServer(Service):
                 'error': str(e),
                 'traceback': traceback.format_exc()
             }, status=500)
+
+    def _room_light_device(self):
+        """Resolve the room-light SwitchBot from the device registry.
+
+        Prefers the conventional 'room_light' key (config.yml name), but
+        falls back to scanning for any SwitchBot instance so a differently
+        named bot still works. Returns None when no bot is configured.
+        """
+        bot = self.devices.get('room_light')
+        if bot is not None:
+            return bot
+        try:
+            from gently.hardware.switchbot import SwitchBot
+        except Exception:
+            return None
+        for dev in self.devices.values():
+            if isinstance(dev, SwitchBot):
+                return dev
+        return None
+
+    async def handle_get_room_light_status(self, request):
+        """GET /api/room_light/status - cached on/off state of the room light.
+
+        Reads the SwitchBot's last-commanded state (no BLE round-trip, so it's
+        cheap to poll). 'unknown' until the first on/off command lands.
+        """
+        try:
+            bot = self._room_light_device()
+            if bot is None:
+                return web.json_response({'success': False, 'available': False,
+                                          'error': 'room_light device not configured'})
+            state = bot.read().get(bot.name, {}).get('value', 'unknown')
+            return web.json_response({'success': True, 'available': True, 'state': state})
+        except Exception as e:
+            import traceback
+            return web.json_response({'success': False, 'available': False, 'error': str(e),
+                                      'traceback': traceback.format_exc()}, status=500)
+
+    async def handle_set_room_light(self, request):
+        """POST /api/room_light/set - drive the room-light SwitchBot.
+
+        Body: {"state": "on" | "off" | "press"}. Blocks until the BLE command
+        lands (the bot's servo move is ~0.5-1 s plus connect latency).
+        """
+        try:
+            data = await request.json()
+            state = str(data.get('state', '')).lower()
+            if state not in ('on', 'off', 'press'):
+                return web.json_response({'success': False,
+                                          'error': f"state {state!r} must be on, off, or press"}, status=400)
+            bot = self._room_light_device()
+            if bot is None:
+                return web.json_response({'success': False,
+                                          'error': 'room_light device not configured'}, status=503)
+
+            status = bot.set(state)
+            import time
+            timeout = float(getattr(bot, 'timeout', 20.0)) + 5
+            start = time.time()
+            while not status.done and (time.time() - start) < timeout:
+                await asyncio.sleep(0.1)
+
+            if status.done and status.success:
+                new_state = bot.read().get(bot.name, {}).get('value', state)
+                return web.json_response({'success': True, 'state': new_state})
+            return web.json_response({'success': False,
+                                      'error': f'failed to set room light to {state}'}, status=502)
+        except Exception as e:
+            import traceback
+            return web.json_response({'success': False, 'error': str(e),
+                                      'traceback': traceback.format_exc()}, status=500)
 
     async def handle_get_temperature_status(self, request):
         """GET /api/temperature/status - current temperature, setpoint, lock state."""
@@ -2339,6 +2425,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post('/api/led/set', self.handle_set_led)
         self._app.router.add_get('/api/temperature/status', self.handle_get_temperature_status)
         self._app.router.add_post('/api/temperature/set', self.handle_set_temperature)
+        self._app.router.add_get('/api/room_light/status', self.handle_get_room_light_status)
+        self._app.router.add_post('/api/room_light/set', self.handle_set_room_light)
         self._app.router.add_post('/api/camera/led_mode', self.handle_set_camera_led_mode)
         self._app.router.add_post('/api/camera/exposure', self.handle_set_camera_exposure)
         self._app.router.add_get('/api/camera/exposure', self.handle_get_camera_exposure)
@@ -2390,10 +2478,72 @@ class DeviceLayerServer(Service):
         logger.info("Endpoints: GET /api/status, GET /api/devices, GET /api/plans, POST /api/queue/item/add, ...")
 
         await site.start()
+        self._print_ready_panel()
+
+    def _categorize_devices(self):
+        """Group device names into human-readable buckets for the console panel.
+
+        First-match-wins so 'room_light' lands in Accessory (not Light) and
+        'volume_scanner' in Motion. Accessory entries carry live state.
+        """
+        buckets = {"Motion": [], "Imaging": [], "Light": [], "Accessory": [], "Other": []}
+        for name in sorted(self.devices):
+            low = name.lower()
+            if low in ("room_light", "temperature"):
+                label = name
+                try:
+                    dev = self.devices[name]
+                    val = dev.read().get(dev.name, {}).get("value")
+                    if val is not None:
+                        label = f"{name} ({val})"
+                except Exception:
+                    pass
+                buckets["Accessory"].append(label)
+            elif "cam" in low or "snap" in low:
+                buckets["Imaging"].append(name)
+            elif any(k in low for k in ("stage", "piezo", "galvo", "scanner")):
+                buckets["Motion"].append(name)
+            elif any(k in low for k in ("laser", "led", "light", "illum")):
+                buckets["Light"].append(name)
+            else:
+                buckets["Other"].append(name)
+        return list(buckets.items())
+
+    def _print_ready_panel(self):
+        """Curated, always-visible status summary at the terminal.
+
+        Separate from the file log: the operator (often a biologist) gets the
+        URL the agent connects to, a grouped device inventory and accessory
+        states at a glance — instead of a silent console after the banner.
+        """
+        def _fmt(names, limit=6):
+            if len(names) <= limit:
+                return " · ".join(names)
+            return " · ".join(names[:limit]) + cui.c(f"  +{len(names) - limit} more", "grey")
+
+        host = self.host or "0.0.0.0"
+        url_host = "localhost" if host in ("0.0.0.0", "::", "") else host
+
+        cui.out()
+        cui.header(f"GENTLY{cui.MIDDOT}DEVICE LAYER", badge="READY", badge_style="green")
+        cui.row("URL", cui.c(f"http://{url_host}:{self.port}", "bold"))
+        cui.row("Hardware", str((self.config or {}).get("hardware", "dispim")))
+        cui.row("Devices", f"{len(self.devices)} loaded")
+        for label, names in self._categorize_devices():
+            if names:
+                cui.sub(label, _fmt(names))
+        cui.row("Detection", f"SAM on {self._sam_device} (loads on first use)")
+        cui.row("Plans", f"{len(self.plans)} available")
+        cui.rule(heavy=False)
+        cui.note("Waiting for the agent to connect.  Press Ctrl+C to stop.")
+        cui.rule(heavy=True)
+        cui.out()
 
     async def on_stop(self):
         """Shut down the HTTP server and plan executor."""
         logger.info("Shutting down...")
+        cui.out()
+        cui.note("Shutting down device layer...", "yellow")
         self._running = False
 
         # Cancel any pending coalesced-broadcast timer.
@@ -2446,6 +2596,7 @@ class DeviceLayerServer(Service):
         if self._runner:
             await self._runner.cleanup()
         logger.info("Device layer stopped.")
+        cui.note("Device layer stopped.", "grey")
 
     async def health_check(self) -> Dict:
         """Return health status with device count, queue size, SAM status."""

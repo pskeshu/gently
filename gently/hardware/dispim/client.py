@@ -802,6 +802,20 @@ class DiSPIMMicroscope(Microscope):
         """Get current LED status."""
         return await self._api_get('/api/led/status')
 
+    async def set_room_light(self, state: str = 'off') -> Dict:
+        """Switch the diSPIM room light on/off via the SwitchBot Bot.
+
+        Hits ``POST /api/room_light/set`` directly (no Bluesky queue, no
+        experiment trace) — a setup accessory poke. ``state`` is
+        'on' | 'off' | 'press'. Blocks at the device layer until the BLE
+        command lands (~1-2 s).
+        """
+        return await self._api_post('/api/room_light/set', {'state': state})
+
+    async def get_room_light_status(self) -> Dict:
+        """Read the room light's cached on/off state (no BLE round-trip)."""
+        return await self._api_get('/api/room_light/status')
+
     async def set_temperature(self, target_c: float) -> Dict:
         """Command the thermal-controller setpoint (Celsius). Non-blocking — the
         controller ramps; poll get_temperature() for the lock state."""

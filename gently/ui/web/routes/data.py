@@ -263,6 +263,47 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"stop failed: {exc}")
         return {"streaming": False}
 
+    def _resolve_client():
+        """Resolve the live microscope client from the agent bridge, or None."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        return getattr(agent, "client", None) if agent else None
+
+    @router.get("/api/devices/room_light/status")
+    async def get_room_light_status():
+        """Cached on/off state of the room-light SwitchBot (cheap to poll)."""
+        client = _resolve_client()
+        if client is None:
+            return {"available": False, "state": "unknown"}
+        try:
+            res = await client.get_room_light_status()
+        except Exception as exc:
+            logger.debug("room light status fetch failed: %s", exc)
+            return {"available": False, "state": "unknown"}
+        return {
+            "available": bool(res.get("available", res.get("success", False))),
+            "state": res.get("state", "unknown"),
+        }
+
+    @router.post("/api/devices/room_light/set",
+                 dependencies=[Depends(require_control)])
+    async def set_room_light(payload: dict = Body(...)):
+        """Switch the room light on/off. Body: {"state": "on"|"off"|"press"}."""
+        state = str(payload.get("state", "")).lower()
+        if state not in ("on", "off", "press"):
+            raise HTTPException(status_code=400, detail="state must be on, off, or press")
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            res = await client.set_room_light(state)
+        except Exception as exc:
+            logger.exception("Room light command failed")
+            raise HTTPException(status_code=502, detail=f"room light command failed: {exc}")
+        if not res.get("success"):
+            raise HTTPException(status_code=502, detail=res.get("error", "room light command failed"))
+        return {"state": res.get("state", state)}
+
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: Optional[str] = None):
         """Get calibration images"""

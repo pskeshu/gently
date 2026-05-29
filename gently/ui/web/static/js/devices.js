@@ -72,6 +72,15 @@ const DevicesManager = (function () {
     const _CAM_ZOOM_MAX = 8;
     const _CAM_ZOOM_STEP = 1.15;  // multiplicative per wheel notch
 
+    // Room-light toggle (header). Drives the SwitchBot Bot that switches the
+    // diSPIM room light. State is the bot's cached on/off; hidden until the
+    // device layer reports the accessory is configured.
+    let _roomLightToggle, _roomLightLabel;
+    let _roomLightState = 'unknown';
+    let _roomLightAvailable = false;
+    let _roomLightBusy = false;
+    let _roomLightTimer = null;
+
     let _lastTs = 0;
     let _previousTs = 0;
     let _lastWallTs = 0;
@@ -134,6 +143,9 @@ const DevicesManager = (function () {
         _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
         _camLed          = document.getElementById('devices-camera-led');
         _camMeta         = document.getElementById('devices-camera-meta');
+
+        _roomLightToggle = document.getElementById('devices-room-light-toggle');
+        _roomLightLabel  = document.getElementById('devices-room-light-label');
 
         // Recompute the scale bar caption whenever the canvas resizes.
         if (_mapSvg && window.ResizeObserver) {
@@ -1269,6 +1281,95 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
+    // Room-light toggle
+    // =====================================================================
+
+    function applyRoomLight(state, available) {
+        _roomLightState = state || 'unknown';
+        _roomLightAvailable = !!available;
+        if (!_roomLightToggle) return;
+        _roomLightToggle.hidden = !_roomLightAvailable;
+        _roomLightToggle.disabled = !_roomLightAvailable || _roomLightBusy;
+        const on = _roomLightState === 'on';
+        _roomLightToggle.classList.toggle('is-on', on);
+        _roomLightToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+        if (_roomLightLabel && !_roomLightBusy) {
+            _roomLightLabel.textContent = on ? 'Room light: on'
+                : (_roomLightState === 'off' ? 'Room light: off' : 'Room light');
+        }
+    }
+
+    async function loadRoomLightStatus() {
+        if (!_roomLightToggle || _roomLightBusy) return;
+        try {
+            const res = await fetch('/api/devices/room_light/status');
+            if (!res.ok) { applyRoomLight('unknown', false); return; }
+            const data = await res.json();
+            applyRoomLight(data.state, data.available);
+        } catch (err) {
+            console.debug('room light status fetch failed:', err);
+            applyRoomLight('unknown', false);
+        }
+    }
+
+    async function toggleRoomLight() {
+        if (!_roomLightToggle || _roomLightBusy || !_roomLightAvailable) return;
+        const next = _roomLightState === 'on' ? 'off' : 'on';
+        _roomLightBusy = true;
+        _roomLightToggle.classList.add('is-busy');
+        _roomLightToggle.disabled = true;
+        if (_roomLightLabel) {
+            _roomLightLabel.textContent = next === 'on' ? 'Turning on…' : 'Turning off…';
+        }
+
+        // Settle back to the resolved state, or surface a transient message
+        // (insufficient control / error) for 2 s before reverting.
+        const finish = (msg) => {
+            _roomLightBusy = false;
+            _roomLightToggle.classList.remove('is-busy');
+            if (msg) {
+                if (_roomLightLabel) _roomLightLabel.textContent = msg;
+                _roomLightToggle.disabled = false;
+                setTimeout(() => applyRoomLight(_roomLightState, _roomLightAvailable), 2000);
+            } else {
+                applyRoomLight(_roomLightState, _roomLightAvailable);
+            }
+        };
+
+        try {
+            const res = await fetch('/api/devices/room_light/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: next }),
+            });
+            if (res.status === 401 || res.status === 403) { finish('Need control'); return; }
+            if (!res.ok) {
+                console.error('room light set failed:', await res.text());
+                finish('Error');
+                return;
+            }
+            const data = await res.json();
+            _roomLightState = data.state || next;
+            finish(null);
+        } catch (err) {
+            console.error('room light toggle failed:', err);
+            finish('Error');
+        }
+    }
+
+    function setupRoomLight() {
+        if (!_roomLightToggle) return;
+        _roomLightToggle.addEventListener('click', toggleRoomLight);
+        loadRoomLightStatus();
+        // Light periodic refresh: state can also change from agent plans
+        // (e.g. brightfield imaging turns it on). Status read is cached at the
+        // device layer (no BLE), so polling is cheap; it also makes the toggle
+        // appear automatically once the device layer connects.
+        if (_roomLightTimer) clearInterval(_roomLightTimer);
+        _roomLightTimer = setInterval(loadRoomLightStatus, 15000);
+    }
+
+    // =====================================================================
     // View switching
     // =====================================================================
 
@@ -1327,6 +1428,7 @@ const DevicesManager = (function () {
         cacheDom();
         setupViewSwitcher();
         setupCameraWiring();
+        setupRoomLight();
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);

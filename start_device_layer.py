@@ -28,6 +28,58 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 
+def _render_startup_failure(exc, log_file):
+    """Turn a startup exception into a plain-language console panel.
+
+    The full traceback goes to the log file; the operator (often a biologist)
+    sees a diagnosis and concrete things to check. Recognises the common
+    "hardware powered off / COM port" case from the MMCore error text.
+    """
+    import re
+    import traceback
+    from gently.hardware import console_ui as cui
+
+    logging.getLogger("gently.device_layer").error(
+        "Startup failed:\n%s", "".join(traceback.format_exception(exc))
+    )
+
+    text = str(exc)
+    low = text.lower()
+    first_line = next((ln.strip() for ln in text.splitlines() if ln.strip()), "Unknown error")
+
+    summary = "The device layer could not start."
+    details = first_line
+    hints = []
+
+    dev_m = re.search(r'device "([^"]+)"', text)
+    device = dev_m.group(1) if dev_m else None
+
+    if device and "initialize" in low:
+        # MMCore failed to initialize a hardware device — almost always the
+        # instrument is off, unplugged, or its COM port is held by another app.
+        summary = "Can't reach the microscope - it looks powered off or disconnected."
+        details = f'Device "{device}" failed to initialize.'
+        if device.upper().startswith("COM"):
+            hints = [
+                "Is the microscope / stage controller powered on?",
+                "Are the USB / serial cables connected?",
+                f"Is another program using {device}? (e.g. Micro-Manager still open)",
+            ]
+        else:
+            hints = [
+                f'Check that "{device}" is powered on and connected.',
+                "Is another program (e.g. Micro-Manager) holding the hardware?",
+            ]
+    elif "access is denied" in low or "system error code 5" in low or "already" in low:
+        summary = "A hardware port is busy — another program may be holding it."
+        hints = [
+            "Close Micro-Manager or any other app using the microscope.",
+            "Then start the device layer again.",
+        ]
+
+    cui.error_panel("GENTLY DEVICE LAYER", summary, details, hints, log_file)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Gently Device Layer - Hardware Server",
@@ -100,15 +152,15 @@ The server provides:
 
     hardware_name = config.get("hardware", "dispim")
 
-    print("\n" + "=" * 60)
-    print("GENTLY DEVICE LAYER")
-    print("=" * 60)
-    print(f"\nConfiguration:")
-    print(f"  Hardware:    {hardware_name}")
-    print(f"  HTTP Port:   {args.port}")
-    print(f"  SAM Device:  {args.sam_device}")
-    print(f"  Config:      {args.config}")
-    print()
+    from gently.hardware import console_ui as cui
+    cui.out()
+    cui.header(f"GENTLY{cui.MIDDOT}DEVICE LAYER", badge="starting", badge_style="cyan")
+    cui.row("Hardware", str(hardware_name))
+    cui.row("HTTP port", str(args.port))
+    cui.row("SAM device", str(args.sam_device))
+    cui.row("Config", str(args.config))
+    cui.row("Log file", str(log_file))
+    cui.rule(heavy=True)
 
     # Load hardware module and create device layer
     from gently.hardware import load_hardware
@@ -129,7 +181,8 @@ The server provides:
         loop = asyncio.get_running_loop()
 
         def request_shutdown():
-            print("\n\nReceived interrupt signal...")
+            cui.out()
+            cui.note("Interrupt received - stopping...", "yellow")
             logging.getLogger("gently.device_layer.signal").warning(
                 "Interrupt signal received — initiating shutdown"
             )
@@ -154,7 +207,11 @@ The server provides:
     try:
         asyncio.run(run_server())
     except KeyboardInterrupt:
-        print("\n\nDevice layer stopped.")
+        cui.note("Device layer stopped.", "grey")
+    except Exception as exc:
+        # Hardware/init failure — show a diagnosis, not a raw traceback.
+        _render_startup_failure(exc, log_file)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

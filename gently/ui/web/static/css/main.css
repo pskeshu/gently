@@ -9494,6 +9494,48 @@ body.modal-open {
 .devices-status-led.stale::before { background: var(--map-warm); }
 .devices-status-led.error::before { background: #f87171; }
 
+/* --- Room-light toggle (header) -------------------------------------- */
+.devices-room-light {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.18rem 0.6rem 0.18rem 0.45rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.devices-room-light[hidden] { display: none; }
+.devices-room-light:hover:not(:disabled) {
+    border-color: var(--map-accent);
+    color: var(--map-ink);
+}
+.devices-room-light:disabled { opacity: 0.5; cursor: default; }
+.devices-room-light-bulb {
+    display: inline-flex;
+    align-items: center;
+    color: var(--map-ink-mute);
+    transition: color 0.15s, filter 0.15s;
+}
+/* "on" — warm glow on the bulb to read like a lit lamp */
+.devices-room-light.is-on {
+    border-color: rgba(255, 210, 74, 0.7);
+    color: #ffd24a;
+    background: rgba(255, 210, 74, 0.12);
+}
+.devices-room-light.is-on .devices-room-light-bulb {
+    color: #ffd24a;
+    filter: drop-shadow(0 0 5px rgba(255, 210, 74, 0.7));
+}
+.devices-room-light.is-busy { opacity: 0.65; cursor: progress; }
+
 /* --- Containers ------------------------------------------------------- */
 .devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .devices-view-details { gap: 1rem; }
