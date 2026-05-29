@@ -100,14 +100,18 @@ class SessionManager:
                 embryo.should_skip = embryo_data.get('should_skip', False)
                 embryo.skip_reason = embryo_data.get('skip_reason')
 
-        # Also load embryos from store's embryo table
+        # Also load embryos from store's embryo table. FileStore returns
+        # position_coarse / position_fine (with legacy position_x / position_y
+        # backfilled into coarse on read), so both calibration stages survive
+        # the resume.
         store_embryos = self.store.list_embryos(session_id)
         for e in store_embryos:
             eid = e['embryo_id']
             if eid not in experiment.embryos:
                 experiment.add_embryo(
                     embryo_id=eid,
-                    position={'x': e.get('position_x'), 'y': e.get('position_y')},
+                    position=e.get('position_coarse') or {},
+                    position_fine=e.get('position_fine') or {},
                     calibration=json.loads(e['calibration']) if e.get('calibration') else {},
                 )
 

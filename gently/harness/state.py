@@ -25,12 +25,15 @@ Historical: ``EmbryoAcquisitionState`` was removed in Phase 1.5 — its
 fields are now on ``EmbryoState`` directly.
 """
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from pathlib import Path
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 # Re-export CalibrationPrior from its hardware-specific home for backward compat.
 # CalibrationPrior is diSPIM-specific (piezo-galvo linear fit). Other hardware
@@ -131,8 +134,13 @@ class EmbryoState:
     # accidental Test→Calibration would burn extra dose on the precious sample.
     role: str = "test"
 
-    # Position
-    stage_position: Dict[str, float] = field(default_factory=dict)  # {'x': 1234.5, 'y': 5678.9}
+    # Position — two-stage: coarse (bottom-camera detection or manual map
+    # placement, always present once an embryo exists) and fine (populated
+    # later by SPIM-objective alignment). Resolved value is exposed by the
+    # `stage_position` property so downstream motion/perception can stay
+    # agnostic about which stage we're in.
+    position_coarse: Dict[str, float] = field(default_factory=dict)  # {'x': ..., 'y': ...}
+    position_fine: Dict[str, float] = field(default_factory=dict)    # empty until SPIM head alignment
     calibration: Dict = field(default_factory=dict)  # Galvo/piezo parameters
     detection_confidence: float = 0.0  # SAM/detection confidence score (0-1)
 
@@ -789,6 +797,33 @@ class EmbryoState:
 
         return f"{self.exposure_count} exposures, {time_str} total"
 
+    @property
+    def stage_position(self) -> Dict[str, float]:
+        """Resolved XY position — fine if SPIM-aligned, else coarse.
+
+        Coarse comes from the bottom-camera detection / manual map placement.
+        Fine comes from the SPIM-objective alignment workflow (not built yet).
+        Callers that just want "where is this embryo" read this; callers that
+        care about calibration state read position_coarse / position_fine
+        directly.
+        """
+        return self.position_fine if self.position_fine else self.position_coarse
+
+    @stage_position.setter
+    def stage_position(self, value: Dict[str, float]) -> None:
+        """Back-compat setter — writes to coarse.
+
+        Legacy callers that assigned `embryo.stage_position = {...}` were
+        writing a bottom-camera / manual position; that's the coarse stage.
+        New code should set position_coarse or position_fine explicitly.
+        """
+        self.position_coarse = value or {}
+
+    @property
+    def has_fine_position(self) -> bool:
+        """True once SPIM-objective alignment has refined the coarse position."""
+        return bool(self.position_fine)
+
     def to_dict(self) -> Dict:
         """Serialize for API responses"""
         return {
@@ -798,6 +833,9 @@ class EmbryoState:
             'user_label': self.user_label,
             'role': self.role,
             'stage_position': self.stage_position,
+            'position_coarse': self.position_coarse,
+            'position_fine': self.position_fine,
+            'has_fine_position': self.has_fine_position,
             'calibration': self.calibration,
             'detection_confidence': self.detection_confidence,
             'interval_seconds': self.interval_seconds,
@@ -845,15 +883,40 @@ class ExperimentState:
         # Updated after each successful calibration, used to initialize subsequent embryos
         self.calibration_prior: CalibrationPrior = CalibrationPrior()
 
+        # Observer hook — agent wires this at startup to publish EMBRYOS_UPDATE
+        # over the event bus. Kept as a plain callback so this module stays
+        # bus-agnostic.
+        self.on_embryos_changed: Optional[Callable[[], None]] = None
+
+    def notify_embryos_changed(self) -> None:
+        """Fire the on_embryos_changed observer if one is wired.
+
+        Call this after any mutation the agent can't intercept through
+        add_embryo / remove_embryo (e.g. a direct write to
+        embryo.position_coarse). UI hooks must not raise — failures here are
+        swallowed so state mutations stay durable.
+        """
+        cb = self.on_embryos_changed
+        if cb is None:
+            return
+        try:
+            cb()
+        except Exception:
+            logger.exception("ExperimentState.on_embryos_changed callback failed")
+
     def add_embryo(self, embryo_id: str, position: Dict = None,
                    calibration: Dict = None, user_label: Optional[str] = None,
                    confidence: float = 0.0, uid: Optional[str] = None,
-                   role: str = "test"):
+                   role: str = "test", position_fine: Dict = None):
         """Register new embryo.
 
         ``role`` must be a key in :data:`gently.harness.roles.REGISTRY`
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Unknown roles
         raise KeyError.
+
+        `position` is the coarse XY (bottom-camera detection or manual map
+        placement). `position_fine` is reserved for the future SPIM-objective
+        alignment workflow and defaults to empty.
 
         Emits an ``EMBRYO_DETECTED`` event so listeners (e.g. the viz
         server's TimelapseStateTracker, which feeds the device map)
@@ -871,12 +934,14 @@ class ExperimentState:
         self.embryos[embryo_id] = EmbryoState(
             id=embryo_id,
             uid=uid,
-            stage_position=pos,
+            position_coarse=position or {},
+            position_fine=position_fine or {},
             calibration=calibration or {},
             user_label=user_label,
             detection_confidence=confidence,
             role=role,
         )
+        self.notify_embryos_changed()
 
         # Fire the registration event. Late-bound import keeps this module
         # decoupled from the event bus until first use.
@@ -903,6 +968,7 @@ class ExperimentState:
         """Remove embryo from experiment (e.g., false detection)"""
         if embryo_id in self.embryos:
             del self.embryos[embryo_id]
+            self.notify_embryos_changed()
             return True
         return False
 
@@ -910,6 +976,7 @@ class ExperimentState:
         """Agent assigns intuitive name"""
         if embryo_id in self.embryos:
             self.embryos[embryo_id].nickname = nickname
+            self.notify_embryos_changed()
 
     def get_embryo_by_any_name(self, name: str) -> Optional[EmbryoState]:
         """Get embryo by ID, nickname, or user label"""

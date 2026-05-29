@@ -128,6 +128,18 @@ class TimelapseStateTracker:
             self.status = "STOPPED"
             # Don't mark embryos as complete - they were stopped, not finished
 
+        elif event_type == "EMBRYO_TERMINATED":
+            # A single embryo's imaging was halted by the orchestrator
+            # (no_object terminal, configured stop condition, errors, etc).
+            # Carry the completion_reason through so the UI can show why.
+            eid = data.get("embryo_id")
+            if eid and eid in self.embryos:
+                self.embryos[eid]["is_complete"] = True
+                self.embryos[eid]["completion_reason"] = data.get("completion_reason")
+                self.embryos[eid].setdefault(
+                    "completed_at", datetime.now().isoformat()
+                )
+
         elif event_type == "DETECTOR_EVALUATED":
             # All detector/perception evaluations (with reasoning) - populates reasoning panel
             eid = data.get("embryo_id")

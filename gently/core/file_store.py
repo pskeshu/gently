@@ -108,6 +108,43 @@ def _sanitize_for_yaml(obj):
     return obj
 
 
+def _coarse_from_legacy(record: dict) -> Optional[dict]:
+    """Extract coarse XY from an embryo.yaml record, accepting either the new
+    `position_coarse` dict or the legacy flat `position_x` / `position_y` keys.
+    Returns None if neither shape carries usable values.
+    """
+    coarse = record.get("position_coarse")
+    if isinstance(coarse, dict) and coarse:
+        return coarse
+    px, py = record.get("position_x"), record.get("position_y")
+    if px is None and py is None:
+        return None
+    out = {}
+    if px is not None:
+        out["x"] = px
+    if py is not None:
+        out["y"] = py
+    return out or None
+
+
+def _normalize_embryo_record(record: Optional[dict]) -> Optional[dict]:
+    """Backfill an embryo.yaml dict so callers always see the new schema.
+
+    Adds `position_coarse` derived from legacy `position_x` / `position_y` if
+    only the legacy fields are present, and ensures `position_fine` exists
+    (as None) for forward-compat. The original record is not mutated.
+    """
+    if record is None:
+        return None
+    out = dict(record)
+    if out.get("position_coarse") is None:
+        backfill = _coarse_from_legacy(out)
+        if backfill is not None:
+            out["position_coarse"] = backfill
+    out.setdefault("position_fine", None)
+    return out
+
+
 def _write_yaml(path: Path, data: Any) -> None:
     """Write YAML atomically: write to a temp file, then rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -432,6 +469,8 @@ class FileStore:
         nickname: str = None,
         position_x: float = None,
         position_y: float = None,
+        position_coarse: dict = None,
+        position_fine: dict = None,
         calibration: dict = None,
         role: str = None,
     ) -> None:
@@ -440,23 +479,38 @@ class FileStore:
         ``role`` is the experimental role key from gently.harness.roles.REGISTRY
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Persisted in
         embryo.yaml. None preserves the existing value on update.
+
+        Position has two stages: coarse (bottom-camera / manual map placement)
+        and fine (future SPIM-objective alignment). New callers should pass
+        position_coarse / position_fine as dicts of shape {"x": float, "y":
+        float}. Legacy callers passing position_x / position_y get folded into
+        coarse automatically.
         """
         ed = self._embryo_dir(session_id, embryo_id)
         ed.mkdir(parents=True, exist_ok=True)
+
+        # Fold legacy position_x / position_y into coarse if caller used the
+        # old kwargs and didn't pass coarse explicitly.
+        if position_coarse is None and (position_x is not None or position_y is not None):
+            position_coarse = {}
+            if position_x is not None:
+                position_coarse["x"] = position_x
+            if position_y is not None:
+                position_coarse["y"] = position_y
 
         yaml_path = ed / "embryo.yaml"
         existing = _read_yaml(yaml_path)
 
         if existing is not None:
-            # Update: COALESCE behaviour -- keep existing values when new ones
-            # are None, matching the old ON CONFLICT DO UPDATE SET logic.
+            # COALESCE update — keep existing values when new ones are None.
+            existing_coarse = _coarse_from_legacy(existing)
             embryo_data = {
                 "embryo_id": embryo_id,
                 "session_id": session_id,
                 "embryo_uid": embryo_uid if embryo_uid is not None else existing.get("embryo_uid"),
                 "nickname": nickname if nickname is not None else existing.get("nickname"),
-                "position_x": position_x if position_x is not None else existing.get("position_x"),
-                "position_y": position_y if position_y is not None else existing.get("position_y"),
+                "position_coarse": position_coarse if position_coarse is not None else existing_coarse,
+                "position_fine": position_fine if position_fine is not None else existing.get("position_fine"),
                 "calibration": calibration if calibration is not None else existing.get("calibration"),
                 "role": role if role is not None else existing.get("role", "test"),
                 "created_at": existing.get("created_at", _now()),
@@ -467,8 +521,8 @@ class FileStore:
                 "session_id": session_id,
                 "embryo_uid": embryo_uid,
                 "nickname": nickname,
-                "position_x": position_x,
-                "position_y": position_y,
+                "position_coarse": position_coarse,
+                "position_fine": position_fine,
                 "calibration": calibration,
                 "role": role if role is not None else "test",
                 "created_at": _now(),
@@ -477,13 +531,17 @@ class FileStore:
         _write_yaml(yaml_path, embryo_data)
 
     def get_embryo(self, session_id: str, embryo_id: str) -> Optional[EmbryoInfo]:
-        """Read embryo.yaml.  Returns None if not found."""
+        """Read embryo.yaml. Returns None if not found.
+
+        Backfills position_coarse from legacy position_x / position_y so
+        callers don't need to know about the old schema.
+        """
         sd = self._session_dir(session_id)
         if sd is None:
             return None
         yaml_path = sd / "embryos" / embryo_id / "embryo.yaml"
         data = _read_yaml(yaml_path)
-        return data
+        return _normalize_embryo_record(data)
 
     def list_embryos(self, session_id: str) -> List[EmbryoInfo]:
         """List all embryos for a session, sorted by embryo_id."""
@@ -500,7 +558,7 @@ class FileStore:
                 yaml_path = entry / "embryo.yaml"
                 data = _read_yaml(yaml_path)
                 if data is not None:
-                    result.append(data)
+                    result.append(_normalize_embryo_record(data))
         return result
 
     # ==================================================================

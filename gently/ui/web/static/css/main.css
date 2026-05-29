@@ -1482,12 +1482,200 @@ a.tab-link.active {
     background: #000;
     border-radius: 3px;
     border: 1px solid var(--border);
-    display: none;  /* shown when frame arrives via .has-frame */
-    opacity: 1;
+    display: inline-block;
+    opacity: 0.35;  /* dim until a real frame arrives (.has-frame) */
 }
 
 .cal-spim-thumb.has-frame {
-    display: inline-block;
+    opacity: 1;
+}
+
+/* Thumb wrapped in a button so click pops out a larger live view.
+   Sized to match the thumb so it remains clickable even before the
+   first frame arrives. */
+.cal-spim-thumb-btn {
+    position: relative;
+    padding: 0;
+    background: none;
+    border: 0;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    line-height: 0;
+    color: inherit;
+    width: 96px;
+    height: 72px;
+}
+
+.cal-spim-thumb-btn:focus-visible {
+    outline: 2px solid var(--accent, #4f8cff);
+    outline-offset: 2px;
+    border-radius: 4px;
+}
+
+.cal-spim-expand-icon {
+    position: absolute;
+    top: 2px;
+    right: 2px;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    font-size: 11px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    opacity: 0;
+    transition: opacity 0.12s ease;
+    pointer-events: none;
+}
+
+.cal-spim-thumb-btn:hover .cal-spim-expand-icon,
+.cal-spim-thumb-btn:focus-visible .cal-spim-expand-icon {
+    opacity: 1;
+}
+
+/* Hide the expand chip when the thumb has no frame yet — nothing to expand. */
+.cal-spim-thumb-btn:has(.cal-spim-thumb:not(.has-frame)) .cal-spim-expand-icon {
+    display: none;
+}
+
+/* ---------- Floating SPIM popout ---------- */
+.cal-spim-popout {
+    position: fixed;
+    top: 80px;
+    right: 24px;
+    width: 560px;
+    height: 480px;
+    min-width: 320px;
+    min-height: 260px;
+    z-index: 9000;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45),
+                0 2px 8px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    resize: both;
+}
+
+.cal-spim-popout[hidden] {
+    display: none;
+}
+
+.cal-spim-popout.dragging {
+    user-select: none;
+    cursor: grabbing;
+}
+
+.cal-spim-popout-header {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-elevated, var(--bg-card));
+    border-bottom: 1px solid var(--border);
+    cursor: grab;
+    touch-action: none;
+}
+
+.cal-spim-popout.dragging .cal-spim-popout-header {
+    cursor: grabbing;
+}
+
+.cal-spim-popout-led {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #4ade80;
+    box-shadow: 0 0 6px rgba(74, 222, 128, 0.7);
+    animation: cal-spim-led-blink 1.6s ease-in-out infinite;
+}
+
+.cal-spim-popout-led.idle {
+    background: var(--text-muted, #666);
+    box-shadow: none;
+    animation: none;
+}
+
+.cal-spim-popout-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--text);
+}
+
+.cal-spim-popout-embryo {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.cal-spim-popout-spacer {
+    flex: 1;
+}
+
+.cal-spim-popout-close {
+    background: transparent;
+    border: 0;
+    color: var(--text-muted);
+    font-size: 20px;
+    line-height: 1;
+    padding: 0 6px;
+    cursor: pointer;
+    border-radius: 4px;
+}
+
+.cal-spim-popout-close:hover {
+    color: var(--text);
+    background: var(--border);
+}
+
+.cal-spim-popout-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    overflow: hidden;
+    padding: 4px;
+}
+
+.cal-spim-popout-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    display: none;
+}
+
+.cal-spim-popout-img.has-frame {
+    display: block;
+}
+
+.cal-spim-popout-placeholder {
+    color: var(--text-muted);
+    font-size: 12px;
+    letter-spacing: 0.4px;
+}
+
+.cal-spim-popout-placeholder[hidden] {
+    display: none;
+}
+
+.cal-spim-popout-footer {
+    flex: 0 0 auto;
+    padding: 6px 12px;
+    border-top: 1px solid var(--border);
+    background: var(--bg-elevated, var(--bg-card));
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* When a live frame is active, let the SPIM cell breathe a bit so the
@@ -2035,6 +2223,20 @@ a.tab-link.active {
 .event-type-badge.session { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange); }
 .event-type-badge.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
 .event-type-badge.default { background: var(--bg-hover); color: var(--text-muted); }
+
+/* Log-record badges per level. The level is the badge text (DEBUG / INFO /
+   WARN / ERROR) for log rows; the LOG_RECORD type itself is collapsed into
+   the level so the column doesn't read the same string for every line. */
+.event-type-badge.log-debug { background: rgba(125, 134, 145, 0.18); color: #9ba3b0; }
+.event-type-badge.log-info  { background: rgba(88, 166, 255, 0.16); color: var(--accent); }
+.event-type-badge.log-warn  { background: rgba(210, 153, 34, 0.22); color: var(--accent-orange); }
+.event-type-badge.log-error { background: rgba(248, 81, 73, 0.22); color: #f85149; }
+
+/* Log line message: monospace, faint logger prefix, expandable trace. */
+.log-row .event-data { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+.log-logger { color: var(--text-muted); opacity: 0.85; margin-right: 0.5rem; }
+.log-message { color: var(--text); }
+.log-exc { color: #f85149; opacity: 0.85; }
 
 .event-source {
     color: var(--text-muted);
@@ -3405,11 +3607,23 @@ kbd {
 .board-col { padding: 0 0.5rem; }
 .board-col-embryo { width: 100px; flex-shrink: 0; }
 .board-col-stage { width: 130px; flex-shrink: 0; }
-.board-col-conf { width: 60px; flex-shrink: 0; text-align: center; }
-.board-col-rate { width: 70px; flex-shrink: 0; text-align: center; }
-.board-col-eta { width: 70px; flex-shrink: 0; text-align: center; }
+.board-col-clock { width: 72px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
+.board-col-stereo { width: 140px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.board-col-pace { width: 90px; flex-shrink: 0; text-align: center; font-variant-numeric: tabular-nums; }
+.board-col-eta { width: 70px; flex-shrink: 0; text-align: right; font-variant-numeric: tabular-nums; }
 .board-col-spark { flex: 1; min-width: 100px; }
 .board-col-alert { width: 110px; flex-shrink: 0; text-align: right; }
+
+/* Pace cell coloring — green when on reference, orange when slow,
+   red when seriously slow. Class names mirror _formatPace(). */
+.board-col-pace.pace-unknown { color: var(--text-muted); }
+.board-col-pace.pace-normal  { color: var(--accent-green, #4ade80); }
+.board-col-pace.pace-slow    { color: #fb923c; }
+.board-col-pace.pace-slow-bad { color: #f87171; font-weight: 600; }
+
+/* Subtle overdue mark in the stereo cell when clock has run past the
+   expected stage duration. */
+.stereo-overdue { color: #fb923c; margin-left: 4px; }
 
 .board-rows { flex: 1; }
 
@@ -9172,6 +9386,7 @@ body.modal-open {
     --map-zone-green:  90, 168, 122;     /* RGB triples for compositing */
     --map-zone-orange: 215, 152, 84;
     --map-zone-red:    220, 96,  88;
+    --map-embryo:      156, 120, 220;    /* lavender — distinct from zones and marker */
     --map-overlay-bg:    rgba(11, 14, 19, 0.78);
     --map-overlay-bg-2:  rgba(11, 14, 19, 0.92);
     --map-overlay-edge:  rgba(212, 221, 232, 0.18);
@@ -9189,6 +9404,7 @@ body.modal-open {
     --map-accent:    #0e7490;
     --map-accent-2:  #155e75;
     --map-warm:      #a16207;
+    --map-embryo:    100, 60, 180;       /* deeper purple for cream paper */
     --map-overlay-bg:    rgba(246, 243, 236, 0.82);
     --map-overlay-bg-2:  rgba(246, 243, 236, 0.96);
     --map-overlay-edge:  rgba(29, 43, 58, 0.18);
@@ -9429,6 +9645,53 @@ body.modal-open {
     100% { opacity: 0;    r: 28; }
 }
 
+/* --- Embryo waypoints ------------------------------------------------ */
+/* Coarse = bottom-camera / manual placement; fine = SPIM-objective
+   alignment. Coarse reads as an outlined ring (provisional), fine as a
+   filled disc (committed). Same hue so the row of embryos still reads as
+   one cohort, but visual weight signals calibration state at a glance. */
+.devices-embryo-group {
+    cursor: pointer;
+}
+.devices-embryo-ring {
+    fill: rgba(var(--map-embryo), 0.08);
+    stroke: rgba(var(--map-embryo), 0.85);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.65);
+    stroke: rgba(var(--map-embryo), 0.95);
+    stroke-width: 1.4;
+    vector-effect: non-scaling-stroke;
+}
+.devices-embryo-label {
+    fill: var(--map-ink);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-weight: 600;
+    text-anchor: middle;
+    dominant-baseline: central;
+    pointer-events: none;
+    paint-order: stroke;
+    stroke: var(--map-paper);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+/* Selected = "picked up" — outlined dashed, hollow fill, brighter label.
+   Click on empty map drops the picked-up embryo at that XY; Delete /
+   Backspace removes it; Escape deselects. */
+.devices-embryo-group.devices-embryo-selected .devices-embryo-ring,
+.devices-embryo-group.devices-embryo-selected .devices-embryo-disc {
+    fill: rgba(var(--map-embryo), 0.12);
+    stroke: rgba(var(--map-embryo), 1);
+    stroke-width: 2;
+    stroke-dasharray: 4 3;
+}
+.devices-embryo-group.devices-embryo-selected .devices-embryo-label {
+    fill: rgba(var(--map-embryo), 1);
+}
+
 /* --- Overlay panels (compass, readout, scalebar, legend) ------------- */
 .devices-compass,
 .devices-map-readout,
@@ -9635,8 +9898,43 @@ body.modal-open {
     display: block;
     opacity: 0;
     transition: opacity 0.25s;
+    /* Zoom anchored at frame centre; scroll-wheel + cursor adjust translate
+       so the point under the cursor stays under the cursor. */
+    transform-origin: center center;
+    will-change: transform;
 }
 .devices-camera-img.has-frame { opacity: 1; }
+
+/* Cursor hints for zoom/pan mode. Default cursor stays untouched at zoom 1
+   so the operator can still interact with overlays under the camera. */
+.devices-camera-stage.camera-zoomed   { cursor: grab; }
+.devices-camera-stage.camera-panning  { cursor: grabbing; }
+
+/* Centre reticle — full-span horizontal + vertical hairline marking the
+   FOV centre IN the image. SVG is a sibling of <img>; the inner <g>
+   receives the same translate/scale (in viewBox units) so the lines
+   track the camera image through zoom/pan instead of staying pinned to
+   the viewer rect. Transform lives on the <g>, not the SVG element, so
+   the renderer re-rasterises at each zoom step — otherwise the strokes
+   get bitmap-scaled and go blurry. */
+.devices-camera-crosshair {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.25s;
+}
+.devices-camera-stage:has(.devices-camera-img.has-frame) .devices-camera-crosshair {
+    opacity: 1;
+}
+.devices-camera-crosshair line {
+    stroke: var(--map-warm);
+    stroke-width: 1;
+    vector-effect: non-scaling-stroke;
+    stroke-opacity: 0.85;
+}
 
 .devices-camera-placeholder {
     position: absolute;

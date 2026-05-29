@@ -125,6 +125,11 @@ class MicroscopyAgent:
         # Event bus for async messaging (must be before perception manager)
         self._event_bus = get_event_bus()
 
+        # Broadcast the embryo list whenever it mutates. Hooked through the
+        # state object's observer so add/remove/nickname/restore all publish
+        # without each call site having to remember.
+        self.experiment.on_embryos_changed = self._publish_embryos_update
+
         # Perception system (gently-perception harness)
         self.perceiver = Perceiver()
 
@@ -140,6 +145,16 @@ class MicroscopyAgent:
 
         # Interaction logger for structured logging (research data collection)
         self.interaction_logger: Optional[InteractionLogger] = None
+
+        # Event capture — durable log of every EventBus event during this
+        # session. Substrate for offline replay / shadow-mode A/B of
+        # candidate orchestrator architectures.
+        self.event_capture = None
+
+        # Decision log — what production decided at each turn (tool calls,
+        # response text, prompt hash). Pairs with event capture so a
+        # candidate replay can be diffed against production turn-by-turn.
+        self.decision_log = None
 
         # Timelapse orchestrator (initialized when microscope connected)
         self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
@@ -202,6 +217,16 @@ class MicroscopyAgent:
 
         # Initialize interaction logger (for research data collection)
         self._init_interaction_logger()
+
+        # Start event capture into the session folder so offline replay /
+        # shadow-mode testing has a durable input stream. Filters out the
+        # high-volume telemetry types (DEVICE_STATE_UPDATE / BOTTOM_CAMERA_FRAME)
+        # by default so a long timelapse doesn't bury the meaningful events.
+        self._init_event_capture()
+
+        # Open the per-session production decision log and hand it to the
+        # conversation manager so each Claude round-trip is captured.
+        self._init_decision_log()
 
         # Wire interaction logger and choice handler to conversation manager
         self.conversation.interaction_logger = self.interaction_logger
@@ -452,6 +477,77 @@ class MicroscopyAgent:
             logging.getLogger(__name__).warning(f"Failed to init interaction logger: {e}")
             self.interaction_logger = None
 
+    def _init_event_capture(self):
+        """Open the per-session events.jsonl capture.
+
+        Resolves the session folder via FileStore._session_dir so the log
+        sits next to session.yaml / interaction_log.jsonl. Silent no-op
+        when the session folder can't be resolved (e.g. test harness with
+        a stripped-down agent) — replay just won't have a log to read.
+        """
+        from gently.eval import EventCapture
+        try:
+            session_dir = None
+            sid = self.session_id
+            if self.store is not None and sid:
+                session_dir = self.store._session_dir(sid)
+            if session_dir is None:
+                logging.getLogger(__name__).debug(
+                    "EventCapture: no session dir for %s — skipping", sid)
+                return
+            path = session_dir / "events.jsonl"
+            self.event_capture = EventCapture(path)
+            self.event_capture.start(self._event_bus)
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to init event capture")
+            self.event_capture = None
+
+    def stop_event_capture(self):
+        """Flush + close the events.jsonl. Idempotent; safe at shutdown."""
+        if self.event_capture is not None:
+            try:
+                self.event_capture.stop()
+            except Exception:
+                logging.getLogger(__name__).exception("EventCapture stop failed")
+            self.event_capture = None
+
+    def _init_decision_log(self):
+        """Open the per-session decisions.jsonl and wire it into conversation.
+
+        Each call to ConversationManager.call_claude writes one Decision
+        row (success or error) describing what production decided for the
+        user turn. Shadow candidates write their own rows into separate
+        logs and the two are diffed offline.
+        """
+        from gently.eval import DecisionLog
+        try:
+            session_dir = None
+            sid = self.session_id
+            if self.store is not None and sid:
+                session_dir = self.store._session_dir(sid)
+            if session_dir is None:
+                logging.getLogger(__name__).debug(
+                    "DecisionLog: no session dir for %s — skipping", sid)
+                return
+            path = session_dir / "decisions.jsonl"
+            self.decision_log = DecisionLog(path)
+            self.decision_log.open()
+            self.conversation.decision_log = self.decision_log
+        except Exception:
+            logging.getLogger(__name__).exception("Failed to init decision log")
+            self.decision_log = None
+
+    def stop_decision_log(self):
+        """Flush + close the decisions.jsonl. Idempotent; safe at shutdown."""
+        if self.decision_log is not None:
+            try:
+                self.decision_log.close()
+            except Exception:
+                logging.getLogger(__name__).exception("DecisionLog close failed")
+            self.decision_log = None
+            if hasattr(self, "conversation") and self.conversation is not None:
+                self.conversation.decision_log = None
+
     def _init_timelapse_orchestrator(self):
         """Initialize the timelapse orchestrator if microscope is connected."""
         if not self._has_microscope():
@@ -678,6 +774,36 @@ class MicroscopyAgent:
             source="agent",
         )
 
+    def _publish_embryos_update(self) -> None:
+        """Broadcast the current embryo list as an EMBRYOS_UPDATE event.
+
+        Wired into ExperimentState.on_embryos_changed at agent init so every
+        add / remove / restore / nickname change snaps a fresh full-list
+        snapshot onto the bus. The viz server's wildcard subscription forwards
+        it straight to connected browsers — that's how the Devices > Map page
+        learns about embryos without a poll loop.
+        """
+        if self._event_bus is None:
+            return
+        try:
+            embryos = [e.to_dict() for e in self.experiment.embryos.values()]
+        except Exception:
+            logger.exception("Failed to serialise embryos for EMBRYOS_UPDATE")
+            return
+        payload = {
+            "embryos": embryos,
+            "count": len(embryos),
+            "session_id": getattr(self, "session_id", None),
+        }
+        try:
+            self._event_bus.publish(
+                event_type=EventType.EMBRYOS_UPDATE,
+                data=payload,
+                source="agent.experiment",
+            )
+        except Exception:
+            logger.exception("Failed to publish EMBRYOS_UPDATE")
+
     def _mark_significant_action(self, action_type: str):
         """Mark that a significant action occurred (triggers auto-save)."""
         self._auto_save()
@@ -847,11 +973,16 @@ class MicroscopyAgent:
                     eid,
                 )
                 src_role = "unassigned"
+            coarse = row.get("position_coarse") or {}
+            fine = row.get("position_fine") or {}
             embryo_states[eid] = {
-                "stage_position": {
-                    "x": row.get("position_x"),
-                    "y": row.get("position_y"),
-                },
+                # stage_position remains for legacy consumers of this snapshot.
+                # It carries the resolved (fine ?? coarse) view; add_embryo()
+                # downstream treats it as coarse, but the explicit
+                # position_fine field below will override that on restore.
+                "stage_position": dict(fine) if fine else dict(coarse),
+                "position_coarse": dict(coarse),
+                "position_fine": dict(fine),
                 "calibration": row.get("calibration") or {},
                 "uid": row.get("embryo_uid"),
                 "user_label": row.get("nickname"),
@@ -874,6 +1005,7 @@ class MicroscopyAgent:
 
         if clear_existing:
             self.experiment.embryos.clear()
+            self.experiment.notify_embryos_changed()
 
         imported = []
         skipped = []
@@ -885,13 +1017,20 @@ class MicroscopyAgent:
                 continue
 
             try:
-                position = embryo_data.get('stage_position', {})
+                # Prefer explicit coarse/fine when the snapshot has them
+                # (FileStore path); fall back to flat stage_position for the
+                # legacy JSON-snapshot path which only carries the resolved view.
+                position_coarse = embryo_data.get('position_coarse')
+                position_fine = embryo_data.get('position_fine')
+                if position_coarse is None and position_fine is None:
+                    position_coarse = embryo_data.get('stage_position', {})
                 calibration = embryo_data.get('calibration', {})
                 source_uid = embryo_data.get('uid') or f"{session_id}_{embryo_id}"
 
                 self.experiment.add_embryo(
                     embryo_id=embryo_id,
-                    position=position,
+                    position=position_coarse or {},
+                    position_fine=position_fine or {},
                     calibration=calibration,
                     user_label=embryo_data.get('user_label'),
                     uid=source_uid,
@@ -1037,8 +1176,8 @@ class MicroscopyAgent:
             try:
                 self.store.register_embryo(
                     self.session_id, embryo_id,
-                    position_x=embryo.stage_position.get('x') if embryo.stage_position else None,
-                    position_y=embryo.stage_position.get('y') if embryo.stage_position else None,
+                    position_coarse=embryo.position_coarse or None,
+                    position_fine=embryo.position_fine or None,
                     calibration=embryo.calibration,
                     role=embryo.role,
                 )

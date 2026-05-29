@@ -59,7 +59,7 @@ const EmbryosManager = {
     dashboardConfig: {
         defaultView: 'default',
         board: {
-            columns: ['stage', 'confidence', 'rate', 'eta', 'sparkline', 'alert'],
+            columns: ['stage', 'clock', 'stereo', 'pace', 'eta', 'sparkline', 'alert'],
             sparklineLength: 20,
             warnOvertimeRatio: 1.5,
             criticalOvertimeRatio: 2.5
@@ -266,6 +266,23 @@ const EmbryosManager = {
                 // Deep merge with defaults
                 this.dashboardConfig = this._deepMerge(this.dashboardConfig, parsed);
             }
+            // Migrate legacy board columns: drop the never-populated
+            // 'confidence' column and the misleading 'rate' column in
+            // favour of clock/stereo/pace. Idempotent — runs on every load.
+            const cols = this.dashboardConfig.board?.columns;
+            if (Array.isArray(cols)) {
+                const filtered = cols.filter(c => c !== 'confidence' && c !== 'rate');
+                const ensure = (key, after) => {
+                    if (filtered.includes(key)) return;
+                    const idx = filtered.indexOf(after);
+                    if (idx === -1) filtered.push(key);
+                    else filtered.splice(idx + 1, 0, key);
+                };
+                ensure('clock', 'stage');
+                ensure('stereo', 'clock');
+                ensure('pace', 'stereo');
+                this.dashboardConfig.board.columns = filtered;
+            }
         } catch (e) {
             console.warn('Failed to load dashboard config:', e);
         }
@@ -370,9 +387,10 @@ const EmbryosManager = {
             <div class="board-header">
                 <span class="board-col board-col-embryo">Embryo</span>
                 ${cols.includes('stage') ? '<span class="board-col board-col-stage">Stage</span>' : ''}
-                ${cols.includes('confidence') ? '<span class="board-col board-col-conf">Conf</span>' : ''}
-                ${cols.includes('rate') ? '<span class="board-col board-col-rate">Rate</span>' : ''}
-                ${cols.includes('eta') ? '<span class="board-col board-col-eta">ETA</span>' : ''}
+                ${cols.includes('clock') ? '<span class="board-col board-col-clock" title="Clock time in current stage">Clock</span>' : ''}
+                ${cols.includes('stereo') ? '<span class="board-col board-col-stereo" title="Stereotypic developmental position (20°C reference)">Stereo</span>' : ''}
+                ${cols.includes('pace') ? '<span class="board-col board-col-pace" title="Clock / stereotypic time — 1.0× means on reference pace">Pace</span>' : ''}
+                ${cols.includes('eta') ? '<span class="board-col board-col-eta" title="Estimated clock-time to hatch, pace-corrected">ETA</span>' : ''}
                 ${cols.includes('sparkline') ? '<span class="board-col board-col-spark">Progression</span>' : ''}
                 ${cols.includes('alert') ? '<span class="board-col board-col-alert">Alert</span>' : ''}
             </div>
@@ -412,54 +430,27 @@ const EmbryosManager = {
         const latest = reasoning.length > 0 ? reasoning[reasoning.length - 1] : null;
         const cols = this.dashboardConfig.board.columns;
 
-        // Stage
         const stage = latest?.stage || embryo.current_stage || '—';
         const stageIcon = this.getStageIcon(stage);
         const stageName = this.formatStageName(stage);
 
-        // Confidence
-        const conf = latest ? this.normalizeConfidence(latest.confidence) : 'unknown';
-        const confDots = conf === 'high' ? '●●●' : conf === 'medium' ? '●●○' : conf === 'low' ? '●○○' : '○○○';
-        const confClass = conf === 'high' ? 'conf-high' : conf === 'medium' ? 'conf-med' : 'conf-low';
+        const align = this._computeAlignment(latest);
+        const overtime = align?.overtime;
 
-        // Rate
-        const overtime = latest?.temporal_analysis?.overtime_ratio;
-        let rateText = '—';
-        let rateClass = '';
-        if (overtime != null) {
-            const rate = (1 / overtime).toFixed(1);
-            rateText = overtime < 0.9 ? `${rate}x↑` : overtime > 1.1 ? `${rate}x↓` : `${rate}x→`;
-            rateClass = overtime < 0.9 ? 'rate-fast' : overtime > 1.5 ? 'rate-slow' : 'rate-normal';
-        }
+        const clockText = align ? this._formatMinutes(align.inStageClockMin) : '—';
+        const stereoText = align ? this._formatStereoLabel(align) : '—';
+        const pace = align ? this._formatPace(align) : { text: '—', className: '' };
+        const eta = align ? this._formatEta(align) : '—';
 
-        // ETA
-        let eta = '—';
-        if (stage && this.STAGE_TIMING[stage] != null) {
-            const stageMinutes = this.STAGE_TIMING[stage];
-            const hatchMinutes = this.STAGE_TIMING['hatched'] || 570;
-            const remaining = hatchMinutes - stageMinutes;
-            if (remaining > 0) {
-                const hours = (remaining / 60).toFixed(1);
-                eta = `~${hours}h`;
-            } else {
-                eta = 'done';
-            }
-        }
-
-        // Sparkline
         const sparklineSvg = cols.includes('sparkline') ? this._renderBoardSparkline(reasoning) : '';
 
-        // Alert
         const arrested = latest?.temporal_analysis?.is_potentially_arrested;
         const slow = overtime && overtime > (this.dashboardConfig.board.warnOvertimeRatio || 1.5);
-        const lowConf = conf === 'low';
         let alertHtml = '<span class="board-alert-none">—</span>';
         if (arrested) {
             alertHtml = '<span class="board-alert board-alert-critical">⚠ arrested</span>';
         } else if (slow) {
-            alertHtml = `<span class="board-alert board-alert-warn">⚠ slow ${overtime.toFixed(1)}x</span>`;
-        } else if (lowConf) {
-            alertHtml = '<span class="board-alert board-alert-warn">⚠ low conf</span>';
+            alertHtml = `<span class="board-alert board-alert-warn">⚠ slow ${overtime.toFixed(1)}×</span>`;
         }
 
         const status = embryo.isComplete ? 'complete' : embryo.lastError ? 'error' : 'running';
@@ -472,13 +463,107 @@ const EmbryosManager = {
                     <span class="board-embryo-name">${embryo.embryoId.replace(/embryo_?/i, 'E')}</span>
                 </span>
                 ${cols.includes('stage') ? `<span class="board-col board-col-stage"><span class="board-stage-badge" style="color:${this.STAGE_COLORS[stage] || 'var(--text)'}">${stageIcon} ${stageName}</span></span>` : ''}
-                ${cols.includes('confidence') ? `<span class="board-col board-col-conf ${confClass}">${confDots}</span>` : ''}
-                ${cols.includes('rate') ? `<span class="board-col board-col-rate ${rateClass}">${rateText}</span>` : ''}
+                ${cols.includes('clock') ? `<span class="board-col board-col-clock">${clockText}</span>` : ''}
+                ${cols.includes('stereo') ? `<span class="board-col board-col-stereo">${stereoText}</span>` : ''}
+                ${cols.includes('pace') ? `<span class="board-col board-col-pace ${pace.className}">${pace.text}</span>` : ''}
                 ${cols.includes('eta') ? `<span class="board-col board-col-eta">${eta}</span>` : ''}
                 ${cols.includes('sparkline') ? `<span class="board-col board-col-spark">${sparklineSvg}</span>` : ''}
                 ${cols.includes('alert') ? `<span class="board-col board-col-alert">${alertHtml}</span>` : ''}
             </div>
         `;
+    },
+
+    /** Compute clock↔stereotypic alignment from perception temporal_analysis.
+     *
+     * Definitions:
+     *   inStageClockMin  — wall-clock minutes elapsed in current stage
+     *   inStageStereoMin — stereotypic minutes "used" within the stage,
+     *                      capped at the stage's expected duration. An
+     *                      overdue embryo is stuck at the stage end in
+     *                      stereo time while clock keeps ticking.
+     *   overtime         — ratio inStageClockMin / expected_duration.
+     *                      >1 means the embryo has spent more clock time
+     *                      in the stage than the reference 20°C textbook
+     *                      duration. <1 just means "still within stage" —
+     *                      no slow/fast signal yet.
+     *   stereoAgeMin     — total stereotypic age, anchored at the start
+     *                      minute of the current stage in the reference
+     *                      table plus the (capped) in-stage stereo offset.
+     */
+    _computeAlignment(latest) {
+        const ta = latest?.temporal_analysis;
+        if (!ta || !ta.current_stage) return null;
+        const stage = ta.current_stage;
+        const stageStart = this.STAGE_TIMING[stage];
+        if (stageStart == null) return null;
+
+        const expDur = Number(ta.expected_duration_min) || 0;
+        const inClock = Number(ta.time_in_stage_min) || 0;
+        const overtime = Number(ta.overtime_ratio) || 0;
+
+        const inStereo = expDur > 0 ? Math.min(inClock, expDur) : inClock;
+        const stereoAge = stageStart + inStereo;
+
+        return {
+            stage,
+            stageStart,
+            expDur,
+            inStageClockMin: inClock,
+            inStageStereoMin: inStereo,
+            stereoAgeMin: stereoAge,
+            overtime,
+        };
+    },
+
+    /** Render the stereo cell: "≈early", "≈bean +12m", or "≈comma +88m ⚠"
+     * when overdue (stereo capped at stage end while clock keeps running). */
+    _formatStereoLabel(align) {
+        const stageName = this.formatStageName(align.stage);
+        const offsetMin = Math.round(align.inStageStereoMin);
+        const overdue = align.expDur > 0 && align.inStageClockMin > align.expDur + 1;
+        const offsetStr = offsetMin > 0 ? ` +${offsetMin}m` : '';
+        const overdueMark = overdue ? ' <span class="stereo-overdue" title="Clock ran past expected stage duration">⚠</span>' : '';
+        return `≈${stageName}${offsetStr}${overdueMark}`;
+    },
+
+    _formatPace(align) {
+        // Only emit a pace signal once we have meaningful clock data.
+        // Within the first few minutes the ratio is tiny and noisy — show
+        // a dashed placeholder so the column doesn't lie about precision.
+        const NORMAL_BAND = 1.05;
+        const SLOW_BAND = 1.5;
+        if (align.inStageClockMin < 1 || align.expDur <= 0) {
+            return { text: '—', className: 'pace-unknown' };
+        }
+        const r = align.overtime;
+        if (r <= NORMAL_BAND) {
+            return { text: '1.0×', className: 'pace-normal' };
+        }
+        if (r <= SLOW_BAND) {
+            return { text: `${r.toFixed(1)}× slow`, className: 'pace-slow' };
+        }
+        return { text: `⚠ ${r.toFixed(1)}×`, className: 'pace-slow-bad' };
+    },
+
+    /** ETA in hours from current stereotypic position to hatched, scaled
+     * by observed pace when the embryo is demonstrably slow. */
+    _formatEta(align) {
+        const hatchStereo = this.STAGE_TIMING['hatched'] || 570;
+        const remainStereo = hatchStereo - align.stereoAgeMin;
+        if (remainStereo <= 0) return 'done';
+        const paceFactor = align.overtime > 1.05 ? align.overtime : 1.0;
+        const remainClockMin = remainStereo * paceFactor;
+        return `~${(remainClockMin / 60).toFixed(1)}h`;
+    },
+
+    /** Compact minute formatter: "45s" / "10m" / "1h 22m" / "3h". */
+    _formatMinutes(min) {
+        if (min == null || !isFinite(min)) return '—';
+        if (min < 1) return `${Math.round(min * 60)}s`;
+        if (min < 60) return `${Math.round(min)}m`;
+        const h = Math.floor(min / 60);
+        const m = Math.round(min - h * 60);
+        return m > 0 ? `${h}h ${m}m` : `${h}h`;
     },
 
     _renderBoardSparkline(reasoning) {
@@ -565,12 +650,24 @@ const EmbryosManager = {
 
             const shortName = embryo.embryoId.replace(/embryo_?/i, 'E');
             const latestStage = sorted.length > 0 ? this.formatStageName(sorted[sorted.length - 1].stage) : '—';
+            const isTerminated = !!embryo.isComplete;
+            const termReason = embryo.completionReason || '';
+            // Short label for the badge — humanise the no_object terminal
+            // reason, otherwise keep the first clause of whatever the
+            // backend sent so the user still gets a hint.
+            const termBadge = isTerminated
+                ? (termReason.includes('no_object') ? 'HATCHED?' : 'STOPPED')
+                : '';
+            const termTooltip = isTerminated
+                ? `Terminated — ${termReason || 'no reason given'}`
+                : '';
 
-            html += `<div class="filmstrip-row">`;
+            html += `<div class="filmstrip-row${isTerminated ? ' terminated' : ''}"${termTooltip ? ` title="${termTooltip.replace(/"/g, '&quot;')}"` : ''}>`;
             html += `<div class="filmstrip-label">
                 <span class="filmstrip-name">${shortName}</span>
                 <span class="filmstrip-stage">${latestStage}</span>
                 <span class="filmstrip-count">${reasoning.length} eval</span>
+                ${isTerminated ? `<span class="filmstrip-terminated-badge">${termBadge}</span>` : ''}
             </div>`;
             html += `<div class="filmstrip-thumbs">`;
 
@@ -1000,7 +1097,7 @@ const EmbryosManager = {
                 intervalSeconds: embryoData.interval_seconds || this.state.baseInterval,
                 timepoints: embryoData.timepoints || 0,
                 isComplete: embryoData.is_complete || false,
-                completionReason: null,
+                completionReason: embryoData.completion_reason || null,
                 firstAcquired: embryoData.first_acquired ? new Date(embryoData.first_acquired) : null,
                 lastAcquired: embryoData.last_acquired ? new Date(embryoData.last_acquired) : null,
                 detections: embryoData.detections || {},
@@ -2726,10 +2823,17 @@ const EmbryosManager = {
             `;
         }
 
-        // Format confidence display
-        const confDisplay = typeof item.confidence === 'number'
-            ? `${Math.round(item.confidence * 100)}%`
-            : (item.confidence || 'Unknown');
+        // Format confidence display. Hide entirely when the detector
+        // doesn't emit a probabilistic confidence (e.g. dopaminergic_signal
+        // returns structured intensity/structure findings instead) — the
+        // string "Unknown confidence" was actively confusing.
+        const hasNumericConf = typeof item.confidence === 'number';
+        const hasTextConf = typeof item.confidence === 'string' && item.confidence.trim() !== '';
+        const confHtml = hasNumericConf
+            ? `<span class="verdict-confidence">${Math.round(item.confidence * 100)}% confidence</span>`
+            : hasTextConf
+                ? `<span class="verdict-confidence">${item.confidence}</span>`
+                : '';
 
         return `
             <div class="detail-panel-header">
@@ -2748,7 +2852,7 @@ const EmbryosManager = {
                     </div>
                     <div class="detail-verdict ${item.detected ? 'detected' : ''}">
                         <span class="verdict-stage">${item.stage ? this.formatStageName(item.stage) : (item.detected ? 'DETECTED' : 'Not detected')}</span>
-                        <span class="verdict-confidence">${confDisplay} confidence</span>
+                        ${confHtml}
                         ${transitionalHtml}
                     </div>
                     ${detectorFindingsHtml}
@@ -2979,12 +3083,21 @@ const EmbryosManager = {
             container.classList.remove('visible');
             container.innerHTML = '';
         }
+        // Filmstrip side panel — clearing innerHTML lets the :empty CSS
+        // rule collapse the panel and let the rows reclaim full width.
+        const filmstripDetail = document.getElementById('filmstrip-detail');
+        if (filmstripDetail) {
+            filmstripDetail.innerHTML = '';
+        }
         this.detailPanelVisible = false;
         this.currentDetailItem = null;
 
-        // Clear eval dot highlight
+        // Clear eval dot + filmstrip cell highlight
         document.querySelectorAll('.eval-dot.active').forEach(dot => {
             dot.classList.remove('active');
+        });
+        document.querySelectorAll('.filmstrip-cell.active').forEach(cell => {
+            cell.classList.remove('active');
         });
     },
 

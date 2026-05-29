@@ -360,6 +360,20 @@
                         </div>
                         <div class="devices-camera-stage">
                             <img class="devices-camera-img" id="devices-camera-img" alt="bottom camera live frame">
+                            <!-- Centre reticle. The <g> inside receives the same
+                                 transform as the <img> (re-expressed in viewBox
+                                 units) so it tracks the FOV centre through
+                                 zoom/pan. Transform sits on the inner <g> rather
+                                 than on the SVG element itself, so the renderer
+                                 re-rasterises at the new geometry instead of
+                                 bitmap-scaling 1px strokes. -->
+                            <svg class="devices-camera-crosshair" id="devices-camera-crosshair"
+                                 viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+                                <g id="devices-camera-crosshair-group">
+                                    <line x1="0" y1="50" x2="100" y2="50"/>
+                                    <line x1="50" y1="0" x2="50" y2="100"/>
+                                </g>
+                            </svg>
                             <div class="devices-camera-placeholder" id="devices-camera-placeholder">
                                 <div class="devices-camera-placeholder-icon">
                                     <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">

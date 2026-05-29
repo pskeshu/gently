@@ -32,11 +32,14 @@ const DevicesManager = (function () {
     let _mapWrap;
     let _scalebarLabel;
 
-    // Embryos overlay state: list of {embryo_id, x, y, role, ...}.
-    // Populated by /api/embryos/positions on init + EMBRYO_DETECTED /
-    // STATUS_CHANGED WS pushes thereafter. Roles drive the marker color
+    // Embryo waypoints — driven by EMBRYOS_UPDATE events (the canonical bulk
+    // mutation broadcast added by the embryos-broadcast commit) and the
+    // initial /api/embryos/current snapshot. Each entry mirrors
+    // EmbryoState.to_dict() (id, position_coarse, position_fine,
+    // has_fine_position, nickname, role, ...). Role drives marker color
     // (mirrors the marking-window legend: magenta=test, cyan=calibration,
-    // grey=unassigned).
+    // grey=unassigned). EMBRYO_DETECTED / STATUS_CHANGED listeners stay
+    // hooked as a belt-and-braces refresh path.
     let _embryos = [];
     const _ROLE_COLOR = {
         test: '#ff66cc',
@@ -44,14 +47,30 @@ const DevicesManager = (function () {
         unassigned: '#888888',
     };
 
+    // Map-side edit state. _selectedEmbryoId means "picked up": the next
+    // click on empty map space drops it there (with a confirm), Delete /
+    // Backspace removes it (with a confirm), Escape clears the selection.
+    let _selectedEmbryoId = null;
+
     // Bottom-camera panel DOM + state
     let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
+    let _camStage, _camCrosshair, _camCrosshairGroup;
     let _camStreaming = false;
     let _camLastFrameTs = 0;
     let _camHasFrame = false;
     let _camStaleTimer = null;
     const _CAM_FPS_WINDOW = 12;
     let _camFrameTimes = [];
+
+    // Camera zoom / pan. Identity transform = (zoom 1, tx 0, ty 0); pan only
+    // engages once zoom > 1. Reset on double-click and on stream-off.
+    let _camZoom = 1;
+    let _camTx = 0;
+    let _camTy = 0;
+    let _camPanLast = null;  // {x, y} clientX/Y of last pointermove during pan
+    const _CAM_ZOOM_MIN = 1;
+    const _CAM_ZOOM_MAX = 8;
+    const _CAM_ZOOM_STEP = 1.15;  // multiplicative per wheel notch
 
     let _lastTs = 0;
     let _previousTs = 0;
@@ -110,6 +129,9 @@ const DevicesManager = (function () {
         _camToggle       = document.getElementById('devices-camera-toggle');
         _camImg          = document.getElementById('devices-camera-img');
         _camPlaceholder  = document.getElementById('devices-camera-placeholder');
+        _camStage        = _camPanel ? _camPanel.querySelector('.devices-camera-stage') : null;
+        _camCrosshair    = document.getElementById('devices-camera-crosshair');
+        _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
         _camLed          = document.getElementById('devices-camera-led');
         _camMeta         = document.getElementById('devices-camera-meta');
 
@@ -254,6 +276,30 @@ const DevicesManager = (function () {
             renderMap();
         } catch (err) {
             console.debug('coverslip fetch failed:', err);
+        }
+    }
+
+    // Initial embryo snapshot — closes the gap for clients that connect
+    // mid-session, after the last EMBRYOS_UPDATE has already been broadcast
+    // and aged out of history. Subsequent updates arrive over the event bus.
+    async function loadEmbryosSnapshot() {
+        try {
+            const res = await fetch('/api/embryos/current');
+            if (!res.ok) return;
+            const data = await res.json();
+            handleEmbryosUpdate(data);
+        } catch (err) {
+            console.debug('embryos snapshot fetch failed:', err);
+        }
+    }
+
+    function handleEmbryosUpdate(payload) {
+        _embryos = (payload && Array.isArray(payload.embryos)) ? payload.embryos : [];
+        if (!_viewBox) {
+            computeViewBox();
+            renderMap();
+        } else {
+            renderEmbryos();
         }
     }
 
@@ -744,6 +790,215 @@ const DevicesManager = (function () {
         return Math.round(v).toString();
     }
 
+    // =====================================================================
+    // Embryo waypoints
+    // =====================================================================
+
+    // "embryo_007" / "embryo_7" -> 7. Falls back to a 1-based index from the
+    // caller so the label always shows *something*, even for stray ids.
+    function embryoLabelText(id, fallbackIndex) {
+        const m = id && String(id).match(/(\d+)/);
+        if (m) {
+            const n = parseInt(m[1], 10);
+            if (Number.isFinite(n)) return String(n);
+        }
+        return String(fallbackIndex + 1);
+    }
+
+    // Resolve XY for rendering — fine if SPIM-aligned, else coarse. Returns
+    // null when neither stage carries usable values so the entry is skipped
+    // (e.g. an embryo whose detection record came in malformed).
+    function embryoResolvedXY(emb) {
+        const f = emb && emb.position_fine;
+        if (f && Number.isFinite(f.x) && Number.isFinite(f.y)) return { x: f.x, y: f.y };
+        const c = emb && emb.position_coarse;
+        if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) return { x: c.x, y: c.y };
+        return null;
+    }
+
+    function renderEmbryos() {
+        if (!_mapEmbryos || !_viewBox) return;
+        _mapEmbryos.innerHTML = '';
+        if (!_embryos || !_embryos.length) return;
+        const span = Math.max(_viewBox.xMax - _viewBox.xMin,
+                              _viewBox.yMax - _viewBox.yMin);
+        const radius = span * 0.012;
+        const fontSize = span * 0.015;
+
+        _embryos.forEach((emb, i) => {
+            const xy = embryoResolvedXY(emb);
+            if (!xy) return;
+
+            const isFine = !!emb.has_fine_position;
+            const isSelected = _selectedEmbryoId !== null
+                            && emb.id === _selectedEmbryoId;
+
+            // Wrap circle + label in a group so a single closest() lookup
+            // finds the embryo regardless of which child the click hit.
+            const group = document.createElementNS(SVG_NS, 'g');
+            group.setAttribute('class',
+                'devices-embryo-group' + (isSelected ? ' devices-embryo-selected' : ''));
+            group.setAttribute('data-embryo-id', emb.id || '');
+            group.setAttribute('data-embryo-stage', isFine ? 'fine' : 'coarse');
+
+            const circle = document.createElementNS(SVG_NS, 'circle');
+            circle.setAttribute('cx', xy.x);
+            circle.setAttribute('cy', svgY(xy.y));
+            circle.setAttribute('r', radius);
+            circle.setAttribute('class',
+                isFine ? 'devices-embryo-disc' : 'devices-embryo-ring');
+            group.appendChild(circle);
+
+            const label = document.createElementNS(SVG_NS, 'text');
+            label.setAttribute('x', xy.x);
+            label.setAttribute('y', svgY(xy.y));
+            label.setAttribute('class', 'devices-embryo-label');
+            label.setAttribute('font-size', fontSize);
+            label.textContent = embryoLabelText(emb.id, i);
+            group.appendChild(label);
+
+            _mapEmbryos.appendChild(group);
+        });
+    }
+
+    // ---- Map-side edit interactions ------------------------------------
+    // Convert a pointer event's client coords into stage µm. SVG y axis is
+    // positive-down and stage y is positive-up, so the y component is
+    // negated to match the convention used elsewhere in this module.
+    function eventToStageXY(event) {
+        if (!_mapSvg || !_mapSvg.getScreenCTM) return null;
+        const ctm = _mapSvg.getScreenCTM();
+        if (!ctm) return null;
+        const pt = _mapSvg.createSVGPoint();
+        pt.x = event.clientX;
+        pt.y = event.clientY;
+        const local = pt.matrixTransform(ctm.inverse());
+        return { x: local.x, y: -local.y };
+    }
+
+    function findEmbryoIdAt(target) {
+        if (!target) return null;
+        const node = target.closest && target.closest('[data-embryo-id]');
+        return node ? node.getAttribute('data-embryo-id') : null;
+    }
+
+    function embryoById(id) {
+        return _embryos.find(e => e.id === id) || null;
+    }
+
+    function embryoNumberFor(emb) {
+        return embryoLabelText(emb.id, _embryos.indexOf(emb));
+    }
+
+    function setSelectedEmbryo(id) {
+        if (_selectedEmbryoId === id) return;
+        _selectedEmbryoId = id;
+        renderEmbryos();
+    }
+
+    function clearSelection() {
+        if (_selectedEmbryoId === null) return;
+        _selectedEmbryoId = null;
+        renderEmbryos();
+    }
+
+    async function attemptMoveSelected(targetStage) {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        if (!emb) { clearSelection(); return; }
+        const cur = embryoResolvedXY(emb);
+        const num = embryoNumberFor(emb);
+        const oldStr = cur ? `(${cur.x.toFixed(1)}, ${cur.y.toFixed(1)})` : '(unknown)';
+        const newStr = `(${targetStage.x.toFixed(1)}, ${targetStage.y.toFixed(1)})`;
+        if (!window.confirm(`Move embryo ${num} from ${oldStr} to ${newStr}?`)) {
+            return;  // keep the embryo picked up so they can try again
+        }
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}/position`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x: targetStage.x, y: targetStage.y }),
+            });
+            if (!res.ok) {
+                window.alert(`Move failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // EMBRYOS_UPDATE will arrive over the bus and refresh the layer;
+            // dropping clears the picked-up state regardless.
+            clearSelection();
+        } catch (err) {
+            console.error('move embryo:', err);
+            window.alert(`Move failed: ${err.message}`);
+        }
+    }
+
+    async function attemptDeleteSelected() {
+        const id = _selectedEmbryoId;
+        if (!id) return;
+        const emb = embryoById(id);
+        const num = emb ? embryoNumberFor(emb) : id;
+        if (!window.confirm(`Remove embryo ${num}?`)) return;
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(id)}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) {
+                window.alert(`Delete failed (${res.status}): ${await res.text()}`);
+                return;
+            }
+            // The embryo is gone from the server snapshot; EMBRYOS_UPDATE
+            // will arrive and drop it from _embryos. Clear locally too.
+            _selectedEmbryoId = null;
+        } catch (err) {
+            console.error('delete embryo:', err);
+            window.alert(`Delete failed: ${err.message}`);
+        }
+    }
+
+    function onMapPointerDown(event) {
+        // Ignore non-primary buttons so right-clicks etc. don't trigger UI.
+        if (event.button !== undefined && event.button !== 0) return;
+        const id = findEmbryoIdAt(event.target);
+        if (id) {
+            setSelectedEmbryo(id);
+            return;
+        }
+        // Empty-space click: drop the picked-up embryo here.
+        if (_selectedEmbryoId !== null) {
+            const stage = eventToStageXY(event);
+            if (stage) attemptMoveSelected(stage);
+        }
+    }
+
+    function onMapKeyDown(event) {
+        // Only honour keys when the operator is actually looking at the Map:
+        // not on another top-level tab, not on the Details subview, and not
+        // typing into an input / textarea / select / contenteditable.
+        if (typeof state !== 'undefined' && typeof TABS !== 'undefined'
+                && state.tab !== TABS.DEVICES) {
+            return;
+        }
+        if (_currentView !== 'map') return;
+        const a = document.activeElement;
+        if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA' ||
+                  a.tagName === 'SELECT' || a.isContentEditable)) {
+            return;
+        }
+        if (event.key === 'Escape') {
+            if (_selectedEmbryoId !== null) {
+                clearSelection();
+                event.preventDefault();
+            }
+            return;
+        }
+        if (_selectedEmbryoId === null) return;
+        if (event.key === 'Delete' || event.key === 'Backspace') {
+            event.preventDefault();  // Backspace would otherwise navigate back
+            attemptDeleteSelected();
+        }
+    }
+
     function updateMapMarker() {
         if (!_mapMarker || !_lastXY) return;
         const sx = _lastXY.X;
@@ -820,6 +1075,9 @@ const DevicesManager = (function () {
             if (_camPlaceholder) _camPlaceholder.hidden = false;
             if (_camMeta) _camMeta.textContent = 'stream off';
             if (_camStaleTimer) { clearTimeout(_camStaleTimer); _camStaleTimer = null; }
+            // Operator may have zoomed in; reset so the next stream session
+            // starts at 1× rather than inheriting a stale view.
+            resetCameraZoom();
         } else {
             _camFrameTimes = [];
             if (_camMeta) _camMeta.textContent = 'waiting…';
@@ -881,12 +1139,132 @@ const DevicesManager = (function () {
         }
     }
 
+    // ---- Camera zoom / pan ---------------------------------------------
+    function applyCameraTransform() {
+        if (!_camImg) return;
+        _camImg.style.transform =
+            `translate(${_camTx}px, ${_camTy}px) scale(${_camZoom})`;
+        // Reticle uses an SVG transform attribute on the inner <g> instead
+        // of a CSS transform on the SVG element — same geometric effect,
+        // but the SVG renderer re-rasterises at the new zoom so the 1px
+        // strokes stay crisp instead of getting bitmap-scaled.
+        if (_camCrosshairGroup && _camStage) {
+            const rect = _camStage.getBoundingClientRect();
+            // Convert pixel-space translation to viewBox units (viewBox is
+            // 0..100 in both axes, preserveAspectRatio=none).
+            const txV = rect.width  > 0 ? (_camTx * 100) / rect.width  : 0;
+            const tyV = rect.height > 0 ? (_camTy * 100) / rect.height : 0;
+            // translate(50+tx, 50+ty) scale(zoom) translate(-50, -50) keeps
+            // the viewBox centre (50, 50) as the zoom anchor and offsets by
+            // the converted pixel translation.
+            _camCrosshairGroup.setAttribute(
+                'transform',
+                `translate(${50 + txV} ${50 + tyV}) ` +
+                `scale(${_camZoom}) ` +
+                `translate(-50 -50)`
+            );
+        }
+    }
+
+    function resetCameraZoom() {
+        _camZoom = 1;
+        _camTx = 0;
+        _camTy = 0;
+        applyCameraTransform();
+        if (_camStage) _camStage.classList.remove('camera-zoomed', 'camera-panning');
+    }
+
+    // Keep at least the image centre within the visible window so the
+    // operator can't accidentally pan the entire frame off-screen. At
+    // zoom 1 this collapses to (0, 0).
+    function clampCameraPan() {
+        if (!_camStage) return;
+        const rect = _camStage.getBoundingClientRect();
+        const maxX = (rect.width  * (_camZoom - 1)) / 2;
+        const maxY = (rect.height * (_camZoom - 1)) / 2;
+        _camTx = Math.max(-maxX, Math.min(maxX, _camTx));
+        _camTy = Math.max(-maxY, Math.min(maxY, _camTy));
+    }
+
+    function onCameraWheel(event) {
+        if (!_camStage) return;
+        // Always preventDefault so the page doesn't scroll under the
+        // operator while they're framing a sample.
+        event.preventDefault();
+        const rect = _camStage.getBoundingClientRect();
+        const cx = event.clientX - rect.left - rect.width  / 2;
+        const cy = event.clientY - rect.top  - rect.height / 2;
+        const oldZoom = _camZoom;
+        const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
+        const newZoom = Math.max(_CAM_ZOOM_MIN,
+                                 Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
+        if (newZoom === oldZoom) return;
+
+        // Keep the image point under the cursor anchored under the cursor
+        // across the zoom: cursor_new = cursor_old after the transform
+        // change, which means newT = cursor - (cursor - oldT) * (new/old).
+        const ratio = newZoom / oldZoom;
+        _camTx = cx - (cx - _camTx) * ratio;
+        _camTy = cy - (cy - _camTy) * ratio;
+        _camZoom = newZoom;
+
+        if (Math.abs(_camZoom - 1) < 0.001) {
+            resetCameraZoom();
+            return;
+        }
+        clampCameraPan();
+        applyCameraTransform();
+        _camStage.classList.add('camera-zoomed');
+    }
+
+    function onCameraPointerDown(event) {
+        if (event.button !== 0) return;
+        if (_camZoom <= 1) return;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        try { _camStage.setPointerCapture(event.pointerId); } catch (_) {}
+        _camStage.classList.add('camera-panning');
+        event.preventDefault();
+    }
+
+    function onCameraPointerMove(event) {
+        if (!_camPanLast) return;
+        _camTx += event.clientX - _camPanLast.x;
+        _camTy += event.clientY - _camPanLast.y;
+        _camPanLast = { x: event.clientX, y: event.clientY };
+        clampCameraPan();
+        applyCameraTransform();
+    }
+
+    function onCameraPointerEnd(event) {
+        if (!_camPanLast) return;
+        _camPanLast = null;
+        try { _camStage.releasePointerCapture(event.pointerId); } catch (_) {}
+        if (_camStage) _camStage.classList.remove('camera-panning');
+    }
+
+    function onCameraDoubleClick(event) {
+        if (_camZoom !== 1 || _camTx !== 0 || _camTy !== 0) {
+            event.preventDefault();
+            resetCameraZoom();
+        }
+    }
+
     function setupCameraWiring() {
         if (!_camToggle) return;
         _camToggle.addEventListener('click', toggleCameraStream);
         applyCameraState(false);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', handleCameraFrame);
+        }
+        // Camera zoom/pan. wheel needs passive:false so we can preventDefault
+        // and stop the page from scrolling beneath the FOV.
+        if (_camStage) {
+            _camStage.addEventListener('wheel', onCameraWheel, { passive: false });
+            _camStage.addEventListener('pointerdown', onCameraPointerDown);
+            _camStage.addEventListener('pointermove', onCameraPointerMove);
+            _camStage.addEventListener('pointerup', onCameraPointerEnd);
+            _camStage.addEventListener('pointercancel', onCameraPointerEnd);
+            _camStage.addEventListener('dblclick', onCameraDoubleClick);
         }
     }
 
@@ -950,17 +1328,24 @@ const DevicesManager = (function () {
         setupViewSwitcher();
         setupCameraWiring();
         loadCoverslip();
-        loadEmbryos();
+        loadEmbryosSnapshot();
         switchView(_currentView);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
-            // Embryo events: a fresh marking session emits one
-            // EMBRYO_DETECTED per registered embryo (via
-            // ExperimentState.add_embryo). assign_embryo_roles emits
-            // STATUS_CHANGED with change=role_assigned per change.
+            ClientEventBus.on('EMBRYOS_UPDATE', handleEmbryosUpdate);
+            // Belt-and-braces: also listen for the fine-grained events that
+            // existed before EMBRYOS_UPDATE so direct emitters still refresh.
             ClientEventBus.on('EMBRYO_DETECTED', handleEmbryoDetected);
             ClientEventBus.on('STATUS_CHANGED', handleStatusChanged);
         }
+        // Map-side edit handlers. Pointer events on the SVG cover both
+        // "click an embryo" (selects it) and "click empty map" (drops the
+        // selected embryo). Keyboard listener is document-wide but guards
+        // against firing while an input is focused.
+        if (_mapSvg) {
+            _mapSvg.addEventListener('pointerdown', onMapPointerDown);
+        }
+        document.addEventListener('keydown', onMapKeyDown);
         setStatus('stale', 'waiting', 'no payload yet');
         syncInitialCameraState();
         // Stop the camera stream if the tab is closed while it's running,

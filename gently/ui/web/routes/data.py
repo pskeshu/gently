@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Optional
 
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
+
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,131 @@ def create_router(server) -> APIRouter:
             "microscope": microscope_up,
         }
 
+    def _require_agent_with_experiment():
+        """Resolve the live agent from the server bridge, or 503.
+
+        Edit endpoints write through ExperimentState so the notify hook fires
+        EMBRYOS_UPDATE and the Map re-renders without a follow-up fetch.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None or not hasattr(agent, "experiment"):
+            raise HTTPException(status_code=503, detail="Agent not ready")
+        return agent
+
+    @router.put("/api/embryos/{embryo_id}/position",
+                dependencies=[Depends(require_control)])
+    async def update_embryo_position(
+        embryo_id: str,
+        body: dict = Body(...),
+    ):
+        """Update an embryo's coarse XY position.
+
+        Map-side edits write to the coarse stage and CLEAR any prior fine
+        position — the operator is overriding the sighting, so any
+        SPIM-objective fine alignment derived from the old coarse is no
+        longer trustworthy and must be re-run.
+
+        Publishes OPERATOR_EDITED_EMBRYO with both the old and new
+        positions so candidates can reason about the magnitude of the
+        correction and trigger re-calibration suggestions.
+        """
+        agent = _require_agent_with_experiment()
+        emb = agent.experiment.embryos.get(embryo_id)
+        if emb is None:
+            raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+        try:
+            x = float(body.get("x"))
+            y = float(body.get("y"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="Body needs numeric x and y")
+        old_coarse = dict(emb.position_coarse) if emb.position_coarse else None
+        had_fine   = bool(emb.position_fine)
+        emb.position_coarse = {"x": x, "y": y}
+        emb.position_fine = {}
+        agent.experiment.notify_embryos_changed()
+
+        bus = getattr(agent, "_event_bus", None)
+        if bus is not None:
+            from gently.core.event_bus import EventType
+            try:
+                bus.publish(
+                    event_type=EventType.OPERATOR_EDITED_EMBRYO,
+                    data={
+                        "embryo_id": embryo_id,
+                        "old_position_coarse": old_coarse,
+                        "new_position_coarse": {"x": x, "y": y},
+                        "fine_position_invalidated": had_fine,
+                    },
+                    source="web:map-edit",
+                )
+            except Exception:
+                logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
+        return emb.to_dict()
+
+    @router.delete("/api/embryos/{embryo_id}",
+                   dependencies=[Depends(require_control)])
+    async def delete_embryo(embryo_id: str):
+        """Remove an embryo from the experiment.
+
+        Goes through ExperimentState.remove_embryo so the observer hook
+        fires EMBRYOS_UPDATE automatically. Also publishes
+        OPERATOR_REMOVED_EMBRYO carrying the embryo's last known position
+        — candidates can use that to e.g. clean up associated cache or
+        log the deletion in their own world model.
+        """
+        agent = _require_agent_with_experiment()
+        emb = agent.experiment.embryos.get(embryo_id)
+        last_position = None
+        if emb is not None:
+            last_position = {
+                "coarse": dict(emb.position_coarse) if emb.position_coarse else None,
+                "fine":   dict(emb.position_fine) if emb.position_fine else None,
+            }
+        if not agent.experiment.remove_embryo(embryo_id):
+            raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
+
+        bus = getattr(agent, "_event_bus", None)
+        if bus is not None:
+            from gently.core.event_bus import EventType
+            try:
+                bus.publish(
+                    event_type=EventType.OPERATOR_REMOVED_EMBRYO,
+                    data={
+                        "embryo_id": embryo_id,
+                        "last_position": last_position,
+                    },
+                    source="web:map-delete",
+                )
+            except Exception:
+                logger.exception("Failed to publish OPERATOR_REMOVED_EMBRYO")
+        return {"ok": True, "embryo_id": embryo_id}
+
+    @router.get("/api/embryos/current")
+    async def get_current_embryos():
+        """Return the agent's current embryo list as an EMBRYOS_UPDATE payload.
+
+        EMBRYOS_UPDATE is published only on mutation, so a Map page opened
+        mid-session would otherwise see an empty embryo layer until the next
+        add/remove/edit. This endpoint serves the same payload shape as the
+        event so clients can bootstrap and then switch to the live stream.
+        """
+        empty = {"embryos": [], "count": 0, "session_id": None}
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None or not hasattr(agent, "experiment"):
+            return empty
+        try:
+            embryos = [e.to_dict() for e in agent.experiment.embryos.values()]
+        except Exception:
+            logger.exception("Failed to serialise embryos for snapshot")
+            return empty
+        return {
+            "embryos": embryos,
+            "count": len(embryos),
+            "session_id": getattr(agent, "session_id", None),
+        }
+
     @router.get("/api/devices/coverslip")
     async def get_coverslip():
         """Return the coverslip outline metadata for the Map view.
@@ -98,7 +225,8 @@ def create_router(server) -> APIRouter:
             "last_frame_ts": getattr(monitor, "_last_frame_ts", None) if monitor else None,
         }
 
-    @router.post("/api/devices/bottom_camera/stream/start")
+    @router.post("/api/devices/bottom_camera/stream/start",
+                 dependencies=[Depends(require_control)])
     async def start_bottom_camera_stream():
         """Start the bottom-camera stream bridge.
 
@@ -119,7 +247,8 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=500, detail=f"start failed: {exc}")
         return {"streaming": monitor.running}
 
-    @router.post("/api/devices/bottom_camera/stream/stop")
+    @router.post("/api/devices/bottom_camera/stream/stop",
+                 dependencies=[Depends(require_control)])
     async def stop_bottom_camera_stream():
         """Stop the bottom-camera stream bridge. Idempotent."""
         bridge = getattr(server, "agent_bridge", None)

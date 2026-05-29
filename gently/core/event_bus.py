@@ -44,6 +44,7 @@ class EventType(Enum):
     EMBRYO_CENTERED = auto()
     EMBRYO_CALIBRATED = auto()
     EMBRYO_SKIPPED = auto()
+    EMBRYO_TERMINATED = auto()  # {embryo_id, completion_reason} - emitted when an embryo's imaging stops (any reason: no_object terminal, stop condition met, errors, user removal)
 
     # Analysis events
     ANALYSIS_STARTED = auto()
@@ -82,6 +83,20 @@ class EventType(Enum):
     LASER_CHANGED = auto()
     DEVICE_STATE_UPDATE = auto()   # Periodic device-state snapshot from device layer
     BOTTOM_CAMERA_FRAME = auto()   # Live JPEG frame from the bottom camera stream
+    EMBRYOS_UPDATE = auto()        # Full embryo list snapshot from agent.experiment
+
+    # Python logging.LogRecord republished onto the bus so the Events page
+    # surfaces what would otherwise only land in the terminal. See
+    # gently/core/log_bridge.py — opt-in handler.
+    LOG_RECORD = auto()
+
+    # Operator-action events. Distinct from EMBRYOS_UPDATE because they
+    # carry intent ("a human did this") rather than just state delta.
+    # Candidate orchestrators can subscribe and reason about what the
+    # operator just did without having to type it in chat.
+    OPERATOR_EDITED_EMBRYO    = auto()   # Map drag/drop -> PUT /api/embryos/{id}/position
+    OPERATOR_REMOVED_EMBRYO   = auto()   # Map delete  -> DELETE /api/embryos/{id}
+    OPERATOR_MARKED_EMBRYOS   = auto()   # Marking canvas "Done" — operator confirmed N positions
 
     # System events
     ERROR_OCCURRED = auto()
@@ -157,6 +172,9 @@ class EventType(Enum):
 _NO_HISTORY_TYPES = frozenset({
     EventType.DEVICE_STATE_UPDATE,
     EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
+    EventType.LOG_RECORD,           # log lines can hit hundreds/min during
+                                    # calibration; durable copy is in the
+                                    # gently_*.log file already
 })
 
 

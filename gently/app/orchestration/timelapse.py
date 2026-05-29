@@ -900,6 +900,11 @@ class TimelapseOrchestrator:
                 f"likely hatched / out of FOV)"
             )
             logger.info(f"Embryo {embryo_state.id} stopped: {embryo_state.completion_reason}")
+            self._emit_event(EventType.EMBRYO_TERMINATED, {
+                "embryo_id": embryo_state.id,
+                "completion_reason": embryo_state.completion_reason,
+                "timepoints_acquired": embryo_state.timepoints_acquired,
+            })
             return
 
         # Check all conditions (primary + additional) with OR logic
@@ -909,6 +914,11 @@ class TimelapseOrchestrator:
                 embryo_state.is_complete = True
                 embryo_state.completion_reason = reason
                 logger.info(f"Embryo {embryo_state.id} stopped: {reason}")
+                self._emit_event(EventType.EMBRYO_TERMINATED, {
+                    "embryo_id": embryo_state.id,
+                    "completion_reason": reason,
+                    "timepoints_acquired": embryo_state.timepoints_acquired,
+                })
                 return  # Stop on first matching condition
 
     def _evaluate_single_condition(

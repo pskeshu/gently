@@ -2,3 +2,12 @@ organism: "celegans"
 hardware: "dispim"
 mmconfig: "MMConfig_tracking_screening.cfg"
 mmdirectory: "C:/Program Files/Micro-Manager-1.4"
+
+# SwitchBot Bot — physical button-pusher mounted on the diSPIM room light
+# switch. Talks BLE direct (no SwitchBot Hub / cloud). Plans address it by
+# name, e.g. `bps.mv(room_light, 'on')`. Remove this block to skip
+# registration; the device layer is tolerant of either state.
+switchbot:
+  name: room_light
+  address: "EC:6F:04:06:5B:23"
+  timeout: 20.0

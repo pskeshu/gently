@@ -204,6 +204,26 @@ async def detect_embryos(
                 )
             added.append((emb_id, m.get("role", default_role)))
 
+        # OPERATOR_MARKED_EMBRYOS — operator confirmed via the web canvas.
+        # This is the intent signal eval/shadow listeners hook for ReactiveCandidate.
+        if added:
+            bus = getattr(agent, '_event_bus', None)
+            if bus is not None:
+                from gently.core.event_bus import EventType
+                try:
+                    bus.publish(
+                        event_type=EventType.OPERATOR_MARKED_EMBRYOS,
+                        data={
+                            'embryo_ids': [eid for eid, _ in added],
+                            'count': len(added),
+                            'stage_origin': list(stage_pos),
+                            'pre_edit_count': len(sam_embryos),
+                        },
+                        source='detect_embryos:web-editor',
+                    )
+                except Exception:
+                    pass
+
         role_counts = {}
         for _, r in added:
             role_counts[r] = role_counts.get(r, 0) + 1
@@ -373,7 +393,8 @@ async def edit_embryos(
         return "No embryos to edit. Run detect_embryos or manual_mark_embryos first."
 
     # Same flow as manual_mark_embryos: pre-populate with existing markers,
-    # let user edit, reconcile.
+    # let user edit, reconcile. notify_embryos_changed is fired by
+    # manual_mark_embryos / add_embryo internally.
     return await manual_mark_embryos(
         exposure_ms=exposure_ms,
         default_role=default_role,

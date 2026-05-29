@@ -17,6 +17,27 @@ from ..settings import settings
 logger = logging.getLogger(__name__)
 
 
+def _extend_tool_calls(out: List[Dict[str, Any]], content_blocks) -> None:
+    """Append every tool_use block in content_blocks to out.
+
+    Tolerates absent attributes (some SDK versions / mock objects) so it
+    never crashes the live agent on a content-shape surprise.
+    """
+    if not content_blocks:
+        return
+    for block in content_blocks:
+        try:
+            if getattr(block, "type", None) != "tool_use":
+                continue
+            out.append({
+                "name": getattr(block, "name", None),
+                "input": getattr(block, "input", None),
+                "id": getattr(block, "id", None),
+            })
+        except Exception:
+            continue
+
+
 class ConversationManager:
     """
     Manages Claude API conversations, tool execution, and token tracking.
@@ -47,6 +68,11 @@ class ConversationManager:
         self.interaction_logger = None
         self.choice_handler = None
         self.context_store = None  # for tool_label
+
+        # Decision capture for orchestrator A/B testing. Set by the agent
+        # alongside the EventCapture once the session folder is known. None
+        # = no capture, so tests / harnesses without a session still work.
+        self.decision_log = None
 
     # ===== Quick Response =====
 
@@ -175,6 +201,22 @@ class ConversationManager:
                 }
             )
 
+        # Snapshot inputs for decision capture BEFORE the tool loop starts
+        # appending to conversation_history. This is the state shadow
+        # candidates would need to reproduce production's input — same
+        # system_prompt and same starting messages.
+        decision_prompt_hash = None
+        if self.decision_log is not None:
+            try:
+                from gently.eval import prompt_hash as _prompt_hash
+                decision_prompt_hash = _prompt_hash(
+                    system_prompt, list(self.conversation_history),
+                )
+            except Exception:
+                logger.exception("Failed to compute decision prompt_hash")
+
+        tool_calls_collected: List[Dict[str, Any]] = []
+        assistant_message = ""
         error_occurred = None
 
         try:
@@ -194,6 +236,7 @@ class ConversationManager:
                 **api_kwargs
             )
             self._track_token_usage(response)
+            _extend_tool_calls(tool_calls_collected, response.content)
 
             # Process tool calls
             while response.stop_reason == "tool_use":
@@ -216,6 +259,7 @@ class ConversationManager:
                     **api_kwargs
                 )
                 self._track_token_usage(response)
+                _extend_tool_calls(tool_calls_collected, response.content)
 
             # Extract text response
             assistant_message = ""
@@ -242,6 +286,14 @@ class ConversationManager:
                     error=error_occurred,
                     error_traceback=error_tb,
                 )
+            self._write_production_decision(
+                user_message=user_message,
+                tool_calls=tool_calls_collected,
+                response_text=assistant_message,
+                duration_ms=(time.time() - start_time) * 1000.0,
+                prompt_hash_value=decision_prompt_hash,
+                error=error_occurred,
+            )
             raise
 
         if interaction and self.interaction_logger:
@@ -251,9 +303,53 @@ class ConversationManager:
                 total_duration_seconds=time.time() - start_time,
             )
 
+        self._write_production_decision(
+            user_message=user_message,
+            tool_calls=tool_calls_collected,
+            response_text=assistant_message,
+            duration_ms=(time.time() - start_time) * 1000.0,
+            prompt_hash_value=decision_prompt_hash,
+            error=None,
+        )
+
         auto_save_fn()
 
         return assistant_message
+
+    def _write_production_decision(
+        self,
+        *,
+        user_message: str,
+        tool_calls: List[Dict[str, Any]],
+        response_text: str,
+        duration_ms: float,
+        prompt_hash_value: Optional[str],
+        error: Optional[str],
+    ) -> None:
+        """Persist one production Decision row (best-effort).
+
+        Failures here are swallowed — decision capture must never break
+        the live agent. The DecisionLog itself is also tolerant of
+        serialisation errors.
+        """
+        if self.decision_log is None:
+            return
+        try:
+            from datetime import datetime
+            from gently.eval import Decision, DecisionTrigger
+            self.decision_log.append(Decision(
+                timestamp=datetime.now(),
+                agent="production",
+                trigger=DecisionTrigger.USER_MESSAGE,
+                trigger_detail=(user_message or "")[:200],
+                tool_calls=tool_calls,
+                response_text=response_text,
+                prompt_hash=prompt_hash_value,
+                duration_ms=duration_ms,
+                error=error,
+            ))
+        except Exception:
+            logger.exception("Failed to write production Decision")
 
     # ===== Dry-Run Tool Call (Benchmarking) =====
 

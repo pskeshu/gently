@@ -332,6 +332,40 @@ class DiSPIMXYStage:
                 )
             logger.info("ASI firmware limit %s = %.4f mm (verified)", prop, got)
 
+    def enable_joystick(self, enabled: bool = True) -> None:
+        """Set the ASI Tiger 'JoystickEnabled' property on the XY stage.
+
+        Tiger firmware persists this flag in its non-volatile card settings
+        (touched whenever someone calls SaveCardSettings — we don't, but
+        previous sessions may have). If it persisted as 'No', the physical
+        joystick is dead on boot until something writes 'Yes'. This method
+        is the boot-time fix; it's called from device_layer.initialize right
+        after the firmware soft limits are applied.
+
+        Read-back verified so a silent rejection by the adapter doesn't
+        leave the operator wondering why the controller still doesn't move.
+        """
+        target = "Yes" if enabled else "No"
+        prop = "JoystickEnabled"
+        try:
+            self.core.setProperty(self.name, prop, target)
+        except RuntimeError as exc:
+            raise HardwareError(
+                f"setProperty {prop}={target} failed on {self.name}: {exc}"
+            )
+        try:
+            got = self.core.getProperty(self.name, prop)
+        except RuntimeError as exc:
+            raise HardwareError(
+                f"getProperty {prop} read-back failed on {self.name}: {exc}"
+            )
+        if str(got).strip() != target:
+            raise HardwareError(
+                f"{prop} read-back mismatch on {self.name}: "
+                f"wrote '{target}', controller reports '{got}'."
+            )
+        logger.info("ASI %s.%s = %s (verified)", self.name, prop, got)
+
     # Synchronous convenience methods (usable outside RunEngine)
     def get_position(self) -> np.ndarray:
         """
