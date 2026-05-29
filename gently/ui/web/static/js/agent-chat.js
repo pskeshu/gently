@@ -18,11 +18,12 @@ const AgentChat = (() => {
     let hasControl = true;        // optimistic until the server says otherwise
     let holderLabel = null;
     let streaming = false;
-    let currentAgentEl = null;    // the agent bubble currently being streamed into
-    let thinkingEl = null;
+    let currentAgentEl = null;    // the agent content element being streamed into
+    let activityEl = null;        // the persistent "working…" indicator (reused)
+    let me = null;                // { authenticated, username, role, can_control }
 
     // DOM refs (resolved in init)
-    let fab, panel, log, input, sendBtn, connDot, banner, closeBtn;
+    let fab, panel, log, input, sendBtn, conn, banner, closeBtn, userEl, signoutBtn;
 
     // ── Safe rendering ────────────────────────────────────────
     function escapeHtml(s) {
@@ -41,19 +42,48 @@ const AgentChat = (() => {
         return html;
     }
 
-    // ── Message helpers ───────────────────────────────────────
-    function scrollToBottom() {
-        log.scrollTop = log.scrollHeight;
+    function scrollToBottom() { log.scrollTop = log.scrollHeight; }
+
+    // ── Activity indicator ────────────────────────────────────
+    // A single reusable "the agent is working" row, always pinned to the
+    // bottom of the log. This is the trust signal — something is happening.
+    function setActivity(label) {
+        if (!activityEl) {
+            activityEl = document.createElement('div');
+            activityEl.className = 'ac-activity';
+            activityEl.innerHTML =
+                '<span class="ac-dots"><i></i><i></i><i></i></span>' +
+                '<span class="ac-activity-label"></span>';
+        }
+        activityEl.querySelector('.ac-activity-label').textContent = label;
+        log.appendChild(activityEl);  // (re)pin to bottom
+        scrollToBottom();
+    }
+    function hideActivity() {
+        if (activityEl && activityEl.parentNode) activityEl.parentNode.removeChild(activityEl);
     }
 
-    function addBubble(role, htmlOrText, { html = false } = {}) {
-        const el = document.createElement('div');
-        el.className = `ac-msg ac-${role}`;
-        if (html) el.innerHTML = htmlOrText;
-        else el.textContent = htmlOrText;
-        log.appendChild(el);
+    // ── Message elements ──────────────────────────────────────
+    function addTurn(role) {
+        const wrap = document.createElement('div');
+        wrap.className = `ac-turn ac-turn-${role}`;
+        if (role === 'agent') {
+            const label = document.createElement('div');
+            label.className = 'ac-role';
+            label.textContent = 'Gently';
+            wrap.appendChild(label);
+        }
+        const content = document.createElement('div');
+        content.className = 'ac-content';
+        wrap.appendChild(content);
+        log.appendChild(wrap);
         scrollToBottom();
-        return el;
+        return content;
+    }
+
+    function addUserMessage(text) {
+        const content = addTurn('user');
+        content.textContent = text;
     }
 
     function addSystemLine(text, level = 'info') {
@@ -62,12 +92,6 @@ const AgentChat = (() => {
         el.textContent = text;
         log.appendChild(el);
         scrollToBottom();
-        return el;
-    }
-
-    function clearThinking() {
-        if (thinkingEl && thinkingEl.parentNode) thinkingEl.parentNode.removeChild(thinkingEl);
-        thinkingEl = null;
     }
 
     // ── Protocol handlers ─────────────────────────────────────
@@ -75,9 +99,7 @@ const AgentChat = (() => {
         switch (msg.type) {
             case 'connected':
                 reconnectDelay = 1000;
-                setConn(true);
-                // version / session in the header tooltip
-                if (msg.version) connDot.title = `connected · v${msg.version}`;
+                setConn(true, msg.version ? `Connected · v${msg.version}` : 'Connected');
                 break;
 
             case 'control_status':
@@ -88,25 +110,19 @@ const AgentChat = (() => {
 
             case 'stream_start':
                 streaming = true;
-                clearThinking();
                 currentAgentEl = null;  // created lazily on first text
                 setBusy(true);
+                setActivity('Working…');
                 break;
 
             case 'thinking':
-                if (!thinkingEl) {
-                    thinkingEl = document.createElement('div');
-                    thinkingEl.className = 'ac-thinking';
-                    thinkingEl.textContent = 'thinking…';
-                    log.appendChild(thinkingEl);
-                    scrollToBottom();
-                }
+                if (streaming) setActivity('Thinking…');
                 break;
 
             case 'text': {
-                clearThinking();
                 if (!currentAgentEl) {
-                    currentAgentEl = addBubble('agent', '', { html: true });
+                    hideActivity();
+                    currentAgentEl = addTurn('agent');
                     currentAgentEl._raw = '';
                 }
                 currentAgentEl._raw += (msg.text || '');
@@ -116,36 +132,37 @@ const AgentChat = (() => {
             }
 
             case 'tool_start': {
-                clearThinking();
+                hideActivity();           // the running tool row is the signal now
+                currentAgentEl = null;    // text after a tool starts a fresh bubble
                 const label = msg.tool_label || msg.tool_name || 'tool';
                 const el = document.createElement('div');
                 el.className = 'ac-tool ac-tool-running';
                 el.dataset.tool = msg.tool_name || '';
-                el.innerHTML = `<span class="ac-tool-spin">⚙</span> ${escapeHtml(label)}…`;
+                el.innerHTML = `<span class="ac-tool-spin"></span><span class="ac-tool-name">${escapeHtml(label)}</span>`;
                 log.appendChild(el);
                 scrollToBottom();
                 break;
             }
 
             case 'tool_call': {
-                // Mark the most recent running entry for this tool as done.
                 const running = [...log.querySelectorAll('.ac-tool-running')]
                     .filter(e => e.dataset.tool === (msg.tool_name || ''));
                 const el = running[running.length - 1];
                 const label = msg.tool_name || 'tool';
-                const dur = msg.duration ? ` · ${msg.duration.toFixed ? msg.duration.toFixed(1) : msg.duration}s` : '';
+                const dur = msg.duration
+                    ? ` · ${(msg.duration.toFixed ? msg.duration.toFixed(1) : msg.duration)}s` : '';
                 const summary = msg.result_summary ? ` — ${escapeHtml(msg.result_summary)}` : '';
                 if (el) {
                     el.className = 'ac-tool ac-tool-done';
-                    el.innerHTML = `<span class="ac-tool-check">✓</span> ${escapeHtml(label)}${dur}${summary}`;
-                } else {
-                    addBubble('tool', `✓ ${escapeHtml(label)}${dur}${summary}`, { html: true });
+                    el.innerHTML = `<span class="ac-tool-check">✓</span><span class="ac-tool-name">${escapeHtml(label)}</span><span class="ac-tool-meta">${dur}${summary}</span>`;
                 }
+                if (streaming) setActivity('Working…');  // agent continues after the tool
                 scrollToBottom();
                 break;
             }
 
             case 'choice_request':
+                hideActivity();
                 renderChoice(msg);
                 break;
 
@@ -155,8 +172,8 @@ const AgentChat = (() => {
 
             case 'stream_end':
                 streaming = false;
-                clearThinking();
                 currentAgentEl = null;
+                hideActivity();
                 setBusy(false);
                 break;
 
@@ -171,6 +188,7 @@ const AgentChat = (() => {
 
             case 'error':
                 streaming = false;
+                hideActivity();
                 setBusy(false);
                 addSystemLine(msg.error || 'Unknown error', 'error');
                 break;
@@ -179,18 +197,12 @@ const AgentChat = (() => {
                 send({ type: 'pong' });
                 break;
 
-            case 'pong':
-            case 'state_update':
-            case 'browse_result':
-                break;  // not surfaced in the chat window (yet)
-
             default:
-                break;  // unknown types ignored (forward-compatible)
+                break;  // pong / state_update / browse_result / unknown — ignored
         }
     }
 
     function renderChoice(msg) {
-        clearThinking();
         const data = msg.choice_data || {};
         const reqId = msg.request_id || data.request_id || '';
         const wrap = document.createElement('div');
@@ -208,10 +220,10 @@ const AgentChat = (() => {
             btn.innerHTML = `<span class="ac-choice-label">${escapeHtml(opt.label)}</span>${desc}`;
             btn.addEventListener('click', () => {
                 send({ type: 'choice_response', request_id: reqId, selected: opt.id });
-                // lock the picker and show the pick
                 [...wrap.querySelectorAll('button')].forEach(b => b.disabled = true);
                 wrap.classList.add('ac-choice-answered');
                 btn.classList.add('ac-choice-picked');
+                if (streaming) setActivity('Working…');
             });
             wrap.appendChild(btn);
         });
@@ -222,16 +234,19 @@ const AgentChat = (() => {
     function renderSpec(spec) {
         const rows = [];
         const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
-        add('strain', spec.strain);
-        add('temp °C', spec.temperature_c);
-        add('slices', spec.num_slices);
-        add('exposure ms', spec.exposure_ms);
-        add('interval s', spec.interval_s);
-        add('stop at', spec.stop_condition);
+        add('Strain', spec.strain);
+        add('Temperature', spec.temperature_c != null ? `${spec.temperature_c} °C` : null);
+        add('Slices', spec.num_slices);
+        add('Exposure', spec.exposure_ms != null ? `${spec.exposure_ms} ms` : null);
+        add('Interval', spec.interval_s != null ? `${spec.interval_s} s` : null);
+        add('Stop at', spec.stop_condition);
         if (!rows.length) return;
-        const html = '<div class="ac-spec-title">Imaging spec applied</div>' +
+        const el = document.createElement('div');
+        el.className = 'ac-spec';
+        el.innerHTML = '<div class="ac-spec-title">Imaging spec applied</div>' +
             rows.map(([k, v]) => `<div class="ac-spec-row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`).join('');
-        addBubble('spec', html, { html: true });
+        log.appendChild(el);
+        scrollToBottom();
     }
 
     // ── Control / UI state ────────────────────────────────────
@@ -241,19 +256,25 @@ const AgentChat = (() => {
             banner.innerHTML = '';
             input.disabled = false;
             sendBtn.disabled = false;
-            input.placeholder = 'Message the agent…';
+            input.placeholder = 'Message Gently…';
         } else {
             banner.classList.remove('hidden');
-            const who = holderLabel || 'another client';
-            banner.innerHTML = `<span>🔒 ${escapeHtml(who)} is driving</span>`;
-            const btn = document.createElement('button');
-            btn.className = 'ac-take-control';
-            btn.textContent = 'Take control';
-            btn.addEventListener('click', () => send({ type: 'take_control' }));
-            banner.appendChild(btn);
+            const who = holderLabel || 'another session';
             input.disabled = true;
             sendBtn.disabled = true;
-            input.placeholder = 'Viewing only — take control to drive…';
+            if (me && me.authenticated && me.can_control === false) {
+                // Viewer role — watching is all this account can do.
+                banner.innerHTML = `<span class="ac-lock">View-only access — you can watch but not control.</span>`;
+                input.placeholder = 'View-only access';
+            } else {
+                banner.innerHTML = `<span class="ac-lock">Control held by ${escapeHtml(who)}</span>`;
+                const btn = document.createElement('button');
+                btn.className = 'ac-take-control';
+                btn.textContent = 'Take control';
+                btn.addEventListener('click', () => send({ type: 'take_control' }));
+                banner.appendChild(btn);
+                input.placeholder = 'Viewing only — take control to drive…';
+            }
         }
     }
 
@@ -262,10 +283,10 @@ const AgentChat = (() => {
         sendBtn.classList.toggle('ac-busy', busy);
     }
 
-    function setConn(ok) {
-        connDot.classList.toggle('ac-conn-ok', ok);
-        connDot.classList.toggle('ac-conn-bad', !ok);
-        if (!ok) connDot.title = 'reconnecting…';
+    function setConn(ok, label) {
+        conn.classList.toggle('ac-conn-ok', ok);
+        conn.classList.toggle('ac-conn-bad', !ok);
+        conn.textContent = label || (ok ? 'Connected' : 'Reconnecting…');
     }
 
     // ── Transport ─────────────────────────────────────────────
@@ -275,12 +296,14 @@ const AgentChat = (() => {
 
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        setConn(false, 'Connecting…');
         ws = new WebSocket(`${proto}//${location.host}/ws/agent`);
         ws.onopen = () => { reconnectDelay = 1000; setConn(true); };
         ws.onclose = () => {
-            setConn(false);
+            setConn(false, 'Reconnecting…');
             setBusy(false);
             streaming = false;
+            hideActivity();
             setTimeout(connect, reconnectDelay);
             reconnectDelay = Math.min(reconnectDelay * 2, MAX_DELAY);
         };
@@ -298,12 +321,15 @@ const AgentChat = (() => {
         const text = input.value.trim();
         if (!text) return;
         if (!hasControl) { renderControl(); return; }
-        addBubble('user', text);
+        addUserMessage(text);
         if (text.startsWith('/')) {
             send({ type: 'command', command: text });  // slash commands (e.g. /status)
         } else {
             send({ type: 'chat', text });
         }
+        // Instant feedback before the first chunk arrives.
+        setBusy(true);
+        setActivity('Working…');
         input.value = '';
         autosize();
     }
@@ -323,6 +349,22 @@ const AgentChat = (() => {
         }
     }
 
+    // ── Identity ──────────────────────────────────────────────
+    function fetchMe() {
+        fetch('/api/auth/me').then(r => r.json()).then(m => {
+            me = m;
+            if (m && m.authenticated) {
+                userEl.textContent = m.username;
+                userEl.title = `Signed in as ${m.username} (${m.role})`;
+                signoutBtn.style.display = '';
+            } else {
+                userEl.textContent = '';
+                signoutBtn.style.display = 'none';
+            }
+            renderControl();
+        }).catch(() => {});
+    }
+
     // ── Init ──────────────────────────────────────────────────
     function init() {
         fab = document.getElementById('agent-fab');
@@ -330,13 +372,20 @@ const AgentChat = (() => {
         log = document.getElementById('agent-chat-log');
         input = document.getElementById('agent-chat-text');
         sendBtn = document.getElementById('agent-chat-send');
-        connDot = document.getElementById('agent-chat-conn');
+        conn = document.getElementById('agent-chat-conn');
         banner = document.getElementById('agent-control-banner');
         closeBtn = document.getElementById('agent-chat-close');
+        userEl = document.getElementById('agent-chat-user');
+        signoutBtn = document.getElementById('agent-chat-signout');
         if (!fab || !panel) return;  // markup not present
 
         fab.addEventListener('click', () => togglePanel());
         closeBtn.addEventListener('click', () => togglePanel(false));
+        signoutBtn.addEventListener('click', async () => {
+            try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (_) {}
+            window.location.href = '/login';
+        });
+        fetchMe();
         sendBtn.addEventListener('click', submit);
         input.addEventListener('input', autosize);
         input.addEventListener('keydown', (e) => {

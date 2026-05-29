@@ -9,7 +9,12 @@ def create_router(server) -> APIRouter:
 
     @router.get("/", response_class=HTMLResponse)
     async def index(request: Request):
-        """Serve the main SPA page"""
+        """Serve the main SPA page (redirect to login if accounts require it)."""
+        from gently.ui.web.accounts import get_account_store
+        from gently.ui.web.auth import current_username
+        store = get_account_store()
+        if store is not None and store.has_users() and not current_username(request):
+            return RedirectResponse("/login", status_code=302)
         return server.templates.TemplateResponse(
             "index.html",
             {"request": request, "active_section": "embryos", "is_live": True}

@@ -185,6 +185,20 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     write_manifest(storage_dir)
     store = FileStore(storage_dir)
 
+    # ── Accounts / auth ───────────────────────────────────────────
+    # Self-managed user accounts gate microscope control on the LAN. On first
+    # run we bootstrap an admin and print its one-time password in the banner.
+    # Set GENTLY_NO_AUTH=1 to disable accounts (legacy localhost-control mode).
+    admin_creds = None
+    if os.environ.get("GENTLY_NO_AUTH", "").strip().lower() not in ("1", "true", "yes"):
+        try:
+            from gently.ui.web.accounts import AccountStore, set_account_store
+            account_store = AccountStore(storage_dir / "auth")
+            set_account_store(account_store)
+            admin_creds = account_store.bootstrap_admin_if_empty()
+        except Exception as e:
+            logger.error("Account store init failed (continuing without auth): %s", e)
+
     # Handle --sessions (just list and exit)
     if show_sessions:
         list_sessions(store)
@@ -433,6 +447,13 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         log_file=log_file,
         resumed=session_to_resume is not None,
     )
+
+    if admin_creds:
+        _u, _p = admin_creds
+        print("  First-run admin account created — sign in at the URL above:")
+        print(f"      username: {_u}")
+        print(f"      password: {_p}")
+        print("  (Save this now. Add users via the admin API; GENTLY_NO_AUTH=1 disables auth.)\n")
 
     if viz_url and not no_browser:
         try:

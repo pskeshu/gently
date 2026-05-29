@@ -515,17 +515,24 @@
     <div class="ambient-pulse" id="ambient-pulse"></div>
 
     <!-- Floating agent chat (web-side control surface) -->
-    <button id="agent-fab" class="agent-fab" title="Chat with Gently">✦</button>
+    <button id="agent-fab" class="agent-fab" title="Chat with Gently">
+        <img src="/static/favicon.svg" alt="Gently" width="30" height="30">
+    </button>
     <div id="agent-chat" class="agent-chat hidden">
         <div class="agent-chat-header">
-            <span class="agent-chat-title">✦ Gently</span>
-            <span id="agent-chat-conn" class="agent-chat-conn ac-conn-bad" title="connecting…">●</span>
-            <button id="agent-chat-close" class="agent-chat-close" title="Close">×</button>
+            <div class="agent-chat-id">
+                <img class="agent-chat-mark" src="/static/favicon.svg" alt="" width="26" height="26">
+                <span class="agent-chat-title">Gently</span>
+                <span id="agent-chat-user" class="agent-chat-user"></span>
+            </div>
+            <span id="agent-chat-conn" class="agent-chat-conn ac-conn-bad">Connecting…</span>
+            <button id="agent-chat-signout" class="agent-chat-signout" title="Sign out" style="display:none">Sign out</button>
+            <button id="agent-chat-close" class="agent-chat-close" title="Close">&times;</button>
         </div>
         <div id="agent-control-banner" class="agent-control-banner hidden"></div>
         <div id="agent-chat-log" class="agent-chat-log"></div>
         <div class="agent-chat-input">
-            <textarea id="agent-chat-text" rows="1" placeholder="Message the agent…"></textarea>
+            <textarea id="agent-chat-text" rows="1" placeholder="Message Gently…"></textarea>
             <button id="agent-chat-send" class="agent-chat-send">Send</button>
         </div>
     </div>

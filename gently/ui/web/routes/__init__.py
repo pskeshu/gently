@@ -16,12 +16,14 @@ from .agent_ws import create_router as create_agent_ws_router
 from .campaigns import create_router as create_campaigns_router
 from .chat import create_router as create_chat_router
 from .experiments import create_router as create_experiments_router
+from .auth_routes import create_router as create_auth_router
 
 
 def register_all_routes(server):
     """Register all route groups on the server's FastAPI app."""
     for factory in (
         create_pages_router,
+        create_auth_router,
         create_sessions_router,
         create_campaigns_router,
         create_experiments_router,

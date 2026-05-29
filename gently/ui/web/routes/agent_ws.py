@@ -162,12 +162,33 @@ def create_router(server) -> APIRouter:
             await websocket.close()
             return
 
-        # Assign a stable id for control arbitration. The first client to
-        # connect (in practice the TUI, spawned at launch) is labelled the
-        # terminal; later connections are browser windows.
+        # ── Authenticate the connection (account mode) ────────────
+        # When user accounts are configured, identity comes from the signed
+        # session cookie (set at login). Viewers may watch but not drive;
+        # operators/admins may take the control lock. With no accounts
+        # configured we fall back to the legacy "anyone connected can drive".
+        from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+        from gently.ui.web.auth import SESSION_COOKIE
+        _acct = get_account_store()
+        username = None
+        can_control = True  # legacy default
+        if _acct is not None and _acct.has_users():
+            _token = websocket.cookies.get(SESSION_COOKIE)
+            username = _acct.verify_session(_token) if _token else None
+            if username is None:
+                await websocket.send_json({
+                    "type": "error",
+                    "error": "Authentication required — please sign in.",
+                })
+                await websocket.close()
+                return
+            can_control = _acct.get_role(username) in CONTROL_ROLES
+
+        # Assign a stable id for control arbitration. The label shown to other
+        # clients is the username when authenticated, else a generic window id.
         _client_counter["n"] += 1
         client_id = f"agent_client_{_client_counter['n']}"
-        client_label = "the terminal" if _client_counter["n"] == 1 else "a browser window"
+        client_label = username or f"window {_client_counter['n']}"
 
         # Send connection metadata (version, tokens, embryo count, commands)
         meta = bridge.get_connect_metadata()
@@ -442,10 +463,11 @@ def create_router(server) -> APIRouter:
             _choice_futures[request_id] = future
             return future
 
-        # Register this client for control arbitration; grant control if free.
+        # Register this client for control arbitration; grant control if free
+        # (only to clients allowed to drive — viewers never auto-hold).
         _clients[client_id] = send_fn
         _client_labels[client_id] = client_label
-        if _control["holder"] is None:
+        if _control["holder"] is None and can_control:
             _control["holder"] = client_id
         await _broadcast_control_status()
 
@@ -540,6 +562,15 @@ def create_router(server) -> APIRouter:
                 # ── Control arbitration ───────────────────────────
                 # A client requesting the wheel.
                 if msg_type == "take_control":
+                    if not can_control:
+                        await send_fn({
+                            "type": "notification",
+                            "level": "warning",
+                            "title": "View-only role",
+                            "body": "Your account can watch but not control the microscope.",
+                        })
+                        await _broadcast_control_status()
+                        continue
                     prev = _control["holder"]
                     _control["holder"] = client_id
                     if prev and prev != client_id and prev in _clients:

@@ -33,16 +33,31 @@ logger = logging.getLogger(__name__)
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 
-# Header name used to upgrade a remote session to control role. Single shared
-# token for now; per-user identities can be layered on later without changing
-# this module's public surface.
+# Header name used to upgrade a remote session to control role (legacy
+# single-shared-token path, used only when no user accounts are configured).
 _TOKEN_HEADER = "X-Gently-Token"
 _TOKEN_ENV    = "GENTLY_CONTROL_TOKEN"
+
+# Browser session cookie set by the login flow (see routes/auth_routes.py).
+SESSION_COOKIE = "gently_session"
 
 
 class Role(str, Enum):
     VIEW    = "view"
     CONTROL = "control"
+
+
+def current_username(request: Request) -> str | None:
+    """Return the authenticated username from the session cookie, or None.
+
+    None when no account store is configured or the cookie is missing/invalid.
+    """
+    from gently.ui.web.accounts import get_account_store
+    store = get_account_store()
+    if store is None:
+        return None
+    token = request.cookies.get(SESSION_COOKIE)
+    return store.verify_session(token) if token else None
 
 
 def _configured_token() -> str | None:
@@ -58,9 +73,25 @@ def _configured_token() -> str | None:
 def resolve_role(request: Request) -> Role:
     """Determine the effective role for a request.
 
-    Localhost is always control (the diSPIM box). Remote callers need to
-    present X-Gently-Token matching GENTLY_CONTROL_TOKEN.
+    Account mode (preferred): if user accounts are configured, identity comes
+    from the signed session cookie — operators/admins get control, everyone
+    else (including anonymous) gets view.
+
+    Legacy mode (no accounts configured): localhost is always control (the
+    diSPIM box); remote callers need X-Gently-Token matching
+    GENTLY_CONTROL_TOKEN. This keeps existing single-operator rigs working
+    until an admin provisions accounts.
     """
+    from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+    store = get_account_store()
+    if store is not None and store.has_users():
+        username = current_username(request)
+        if username:
+            role = store.get_role(username)
+            return Role.CONTROL if role in CONTROL_ROLES else Role.VIEW
+        return Role.VIEW
+
+    # Legacy mode — no accounts configured.
     client = request.client
     host = client.host if client else None
     if host in _LOOPBACK_HOSTS:
