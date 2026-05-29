@@ -56,6 +56,17 @@ def create_router(server) -> APIRouter:
             # Always send timelapse state on connect so client can reconcile
             # (if IDLE with no session_id, client will clear stale cached state)
             timelapse_state = server.timelapse_tracker.to_dict()
+            # The header's session id is driven by this payload; the tracker's
+            # session_id goes stale after a resume with no active timelapse, so
+            # override it with the live agent session (the source of truth).
+            try:
+                bridge = getattr(server, "agent_bridge", None)
+                if bridge is not None and getattr(bridge, "agent", None) is not None:
+                    live_sid = bridge.agent.session_id
+                    if live_sid:
+                        timelapse_state["session_id"] = live_sid
+            except Exception:
+                pass
             await websocket.send_json({
                 "type": "timelapse_state",
                 "data": timelapse_state

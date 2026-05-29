@@ -94,6 +94,32 @@ def create_router(server) -> APIRouter:
         except Exception:
             logger.debug("Could not load chat history", exc_info=True)
 
+        # Fallback: sessions created before chat_display.json existed (or any
+        # session resumed for the first time) — derive a best-effort transcript
+        # from the saved Claude conversation so the chat still shows history.
+        if not _history and store and sid:
+            try:
+                snap = store.load_session_snapshot(sid) or {}
+                for m in (snap.get("conversation_history") or []):
+                    role = m.get("role")
+                    content = m.get("content")
+                    if isinstance(content, list):
+                        text = "".join(
+                            b.get("text", "") for b in content
+                            if isinstance(b, dict) and b.get("type") == "text"
+                        )
+                    else:
+                        text = content if isinstance(content, str) else ""
+                    text = (text or "").strip()
+                    if not text:
+                        continue
+                    if role == "user":
+                        _history.append({"role": "user", "text": text})
+                    elif role == "assistant":
+                        _history.append({"role": "agent", "text": text})
+            except Exception:
+                logger.debug("Could not derive history from conversation", exc_info=True)
+
     def _save_history():
         p = _history_state["path"]
         if not p:
