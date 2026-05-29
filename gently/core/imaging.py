@@ -282,9 +282,23 @@ def generate_jpeg_projection(
         return None
 
     try:
-        max_proj = extract_view_a_and_max_project(volume)
-        normalized = normalize_to_uint8(max_proj, method="percentile",
-                                        p_low=1, p_high=99.5)
+        # Reduce to a single 3D view, then build the three-orthogonal-view
+        # layout (the projection we actually want — matches what the
+        # perceiver sees). View A comes from index 0 of a 4D (Views,Z,Y,X)
+        # volume; a 3D dual-view volume stores the two views concatenated
+        # along X (width >= 2*height), so take the left half (View A) —
+        # otherwise the projection is an A|B side-by-side, not a clean view.
+        vol = np.squeeze(volume)
+        if vol.ndim == 4:
+            vol = vol[0]
+        if vol.ndim == 3:
+            z, h, w = vol.shape
+            if w >= 2 * h:
+                vol = vol[:, :, : w // 2]
+            normalized, _ = projection_three_view(vol)
+        else:
+            normalized = normalize_to_uint8(vol, method="percentile",
+                                            p_low=1, p_high=99.5)
 
         pil_image = Image.fromarray(normalized)
 
