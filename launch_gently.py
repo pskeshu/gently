@@ -462,10 +462,30 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         except Exception:
             pass
 
+    # Keep the event loop alive so the in-process viz server keeps serving.
+    # On Windows the Proactor loop won't surface Ctrl-C while blocked on a
+    # bare Event().wait(), so install signal handlers and poll on a short
+    # interval (which also lets a pending KeyboardInterrupt surface).
+    import signal as _signal
+    _loop = asyncio.get_running_loop()
+    _stop = asyncio.Event()
     try:
-        # Serve until interrupted (Ctrl-C). Keep the event loop alive so
-        # the in-process viz server keeps handling browser clients.
-        await asyncio.Event().wait()
+        _loop.add_signal_handler(_signal.SIGINT, _stop.set)
+        _loop.add_signal_handler(_signal.SIGTERM, _stop.set)
+    except (NotImplementedError, AttributeError, RuntimeError, ValueError):
+        # Windows Proactor: add_signal_handler is unsupported — fall back to
+        # signal.signal, waking the loop via call_soon_threadsafe.
+        def _sig(*_a):
+            _loop.call_soon_threadsafe(_stop.set)
+        try:
+            _signal.signal(_signal.SIGINT, _sig)
+            _signal.signal(_signal.SIGTERM, _sig)
+        except (ValueError, OSError):
+            pass
+
+    try:
+        while not _stop.is_set():
+            await asyncio.sleep(0.3)
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
