@@ -154,7 +154,11 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING", no_browser: bool = False):
     # Set up log file in storage directory
-    storage_base = Path(os.environ.get("GENTLY_STORAGE", "D:/Gently3"))
+    # Unified with FileStore: logs live under the same root as data
+    # (settings.storage.base_path reads GENTLY_STORAGE_PATH). Previously this
+    # read a separate GENTLY_STORAGE env var, so setting only one split logs
+    # from data.
+    storage_base = settings.storage.base_path
     log_dir = storage_base / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_file = str(log_dir / f"gently_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
