@@ -101,12 +101,17 @@ function eventMatchesSearch(event) {
 }
 
 function highlightSearchTerms(text) {
-    if (!searchQuery || !text) return text;
+    // Escape first — event keys/values/messages are arbitrary text (perception
+    // prose, file paths, agent output) and are inserted via innerHTML by the
+    // callers. Escaping here closes the XSS hole at every call site; the
+    // injected <mark> tags are the only markup we add.
+    const safe = escapeHtml(text == null ? '' : String(text));
+    if (!searchQuery) return safe;
     try {
         const regex = new RegExp(`(${escapeRegex(searchQuery)})`, 'gi');
-        return String(text).replace(regex, '<mark class="search-highlight">$1</mark>');
+        return safe.replace(regex, '<mark class="search-highlight">$1</mark>');
     } catch (e) {
-        return text;
+        return safe;
     }
 }
 
