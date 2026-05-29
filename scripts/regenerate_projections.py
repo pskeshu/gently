@@ -16,6 +16,11 @@ import re
 import sys
 from pathlib import Path
 
+# Ensure the project root is importable when run as scripts/regenerate_projections.py
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from gently.settings import settings
 from gently.core.imaging import load_volume, generate_jpeg_projection
 
