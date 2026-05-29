@@ -102,15 +102,24 @@ def create_router(server) -> APIRouter:
             except Exception as e:
                 logger.warning(f"Failed to load image {uid} from DataStore: {e}")
 
-        # Fallback to FileStore JPEG projections (persistent on-disk)
+        # Fallback to FileStore JPEG projections (persistent on-disk).
+        # Unlike the in-memory base64 images, an on-disk projection CAN change
+        # (e.g. regenerated after a projection-format fix), so we must NOT mark
+        # it immutable with a content-independent (uid) ETag — that pins the
+        # browser to the stale image. Use a content-aware ETag (mtime+size)
+        # and a short max-age so a regeneration is picked up.
         if server.gently_store and parsed:
             embryo_id, timepoint = parsed
             proj_path = server._resolve_projection_path(embryo_id, timepoint)
             if proj_path:
+                st = proj_path.stat()
                 return FileResponse(
                     str(proj_path),
                     media_type="image/jpeg",
-                    headers=cache_headers,
+                    headers={
+                        "Cache-Control": "public, max-age=3600",
+                        "ETag": f'"{uid}-{int(st.st_mtime)}-{st.st_size}"',
+                    },
                 )
 
         raise HTTPException(status_code=404, detail=f"Image {uid} not found")
