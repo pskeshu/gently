@@ -143,6 +143,10 @@ class MicroscopyAgent:
         self.on_message_callback: Optional[Callable] = None
         self.choice_handler: Optional[Callable] = None
 
+        # Serializes conversation turns: user turns and autonomous wake turns
+        # must not interleave on the shared conversation_history.
+        self._turn_lock = asyncio.Lock()
+
         # Interaction logger for structured logging (research data collection)
         self.interaction_logger: Optional[InteractionLogger] = None
 
@@ -240,6 +244,16 @@ class MicroscopyAgent:
 
         # Subscribe to CV result events for EmbryoState integration
         self._subscribe_to_cv_events()
+
+        # Decision-moment wake-router (opt-in, default OFF). Wakes the agent on
+        # wake-worthy perception/lifecycle events so it can adapt acquisition
+        # autonomously; enabled via the set_autonomy tool.
+        try:
+            from gently.app.wake_router import WakeRouter
+            self.wake_router = WakeRouter(self, self._event_bus)
+        except Exception:
+            logger.exception("Failed to init wake-router")
+            self.wake_router = None
 
         # Build initial system prompt
         self._update_system_prompt()
@@ -420,7 +434,8 @@ class MicroscopyAgent:
     def _update_system_prompt(self, context_summary: str = None):
         """Rebuild system prompt via PromptManager."""
         self.system_prompt = self.prompts.update_system_prompt(
-            self.experiment, self.client, self.mode, context_summary
+            self.experiment, self.client, self.mode, context_summary,
+            perceiver=getattr(self, "perceiver", None),
         )
 
     def _get_active_plan_summary(self) -> Optional[str]:
@@ -635,6 +650,45 @@ class MicroscopyAgent:
                     logger.warning(f"Error handling stage detected event: {e}")
 
             unsub = self._event_bus.subscribe(EventType.STAGE_DETECTED, on_stage_detected)
+            self._cv_subscriptions.append(unsub)
+
+            def on_perception(event):
+                # Bridge the perception loop's DETECTOR_EVALUATED into EmbryoState so
+                # the prompt/display developmental stage reflects the live Perceiver.
+                # (The STAGE_DETECTED wiring above is never emitted by the perception
+                # path — this closes that long-standing gap.) Record only on an
+                # actual stage CHANGE to keep cv_analyses a clean transition log and
+                # avoid per-timepoint disk/cache churn; live stability/timing is read
+                # straight from the Perceiver by the prompt snapshot + pull tool.
+                try:
+                    data = event.data
+                    if data.get("skipped") or data.get("detector_name") != "perception":
+                        return  # ignore recheck-skips and role=test pseudo-stages
+                    embryo_id = data.get("embryo_id")
+                    stage = data.get("stage")
+                    # 'no_object' is an empty-field sentinel, not a developmental
+                    # stage — don't mirror it into latest_developmental_stage.
+                    if (not stage or stage == "no_object" or not embryo_id
+                            or embryo_id not in self.experiment.embryos):
+                        return
+                    embryo = self.experiment.embryos[embryo_id]
+                    if stage == getattr(embryo, "latest_developmental_stage", None):
+                        return  # steady state — nothing new to mirror
+                    embryo.add_cv_result("stage_classification", {
+                        "stage": stage,
+                        "timepoint": data.get("timepoint"),
+                        "stability": data.get("stability"),
+                        "temporal_analysis": data.get("temporal_analysis"),
+                        "detector_name": "perception",
+                    })
+                    self.invalidate_context_cache()
+                    self._auto_save()
+                    logger.info("Perception: %s -> stage %s (t%s)",
+                                embryo_id, stage, data.get("timepoint"))
+                except Exception as e:
+                    logger.warning(f"Error handling perception event: {e}")
+
+            unsub = self._event_bus.subscribe(EventType.DETECTOR_EVALUATED, on_perception)
             self._cv_subscriptions.append(unsub)
 
             logger.debug("Subscribed to CV result events")
@@ -877,35 +931,86 @@ class MicroscopyAgent:
             yield {'type': 'text', 'text': quick_response}
             return
 
-        context_summary = await self.prompts.get_cached_context_summary(
-            self.experiment, self.timelapse_orchestrator, self.timeline_manager
-        )
-        self._update_system_prompt(context_summary)
-
-        self.conversation.conversation_history.append({
-            "role": "user",
-            "content": user_message
-        })
-
-        tools = self._get_tools_for_mode()
-        cached_prompt = self._get_cached_system_prompt()
-
-        inner_gen = self.conversation.call_claude_stream(
-            cached_prompt, tools,
-            tool_label_fn=self.conversation.tool_label,
-            auto_save_fn=self._auto_save,
-        )
-        sent_value = None
-
+        # Hold the turn-lock for the whole streamed turn so an autonomous wake
+        # turn cannot interleave on the shared conversation_history.
+        lock = getattr(self, "_turn_lock", None)
+        acquired = False
+        if lock is not None:
+            await lock.acquire()
+            acquired = True
         try:
-            while True:
-                if sent_value is None:
-                    chunk = await inner_gen.__anext__()
-                else:
-                    chunk = await inner_gen.asend(sent_value)
-                sent_value = yield chunk
-        except StopAsyncIteration:
-            return
+            context_summary = await self.prompts.get_cached_context_summary(
+                self.experiment, self.timelapse_orchestrator, self.timeline_manager
+            )
+            self._update_system_prompt(context_summary)
+
+            self.conversation.conversation_history.append({
+                "role": "user",
+                "content": user_message
+            })
+
+            tools = self._get_tools_for_mode()
+            cached_prompt = self._get_cached_system_prompt()
+
+            inner_gen = self.conversation.call_claude_stream(
+                cached_prompt, tools,
+                tool_label_fn=self.conversation.tool_label,
+                auto_save_fn=self._auto_save,
+            )
+            sent_value = None
+
+            try:
+                while True:
+                    if sent_value is None:
+                        chunk = await inner_gen.__anext__()
+                    else:
+                        chunk = await inner_gen.asend(sent_value)
+                    sent_value = yield chunk
+            except StopAsyncIteration:
+                return
+        finally:
+            if acquired:
+                lock.release()
+
+    async def run_wake_turn(self, wake_note: str):
+        """Drive one autonomous (no-user) turn for the wake-router.
+
+        Runs through the normal streaming pipeline (so it acquires the turn-lock
+        and is recorded to conversation history / auto-saved). Surfaces text via
+        on_message_callback if a UI wired one; always runs so the decision and
+        any tool actions are persisted even with no client attached. Only acts in
+        run mode.
+        """
+        if self.mode != "run":
+            logger.info("Wake turn skipped — agent not in run mode (mode=%s)", self.mode)
+            return ""
+        text_parts = []
+        try:
+            async for chunk in self.handle_message_stream(wake_note):
+                if isinstance(chunk, dict) and chunk.get("type") == "text":
+                    text_parts.append(chunk.get("text", ""))
+                elif isinstance(chunk, dict) and chunk.get("type") == "choice_request":
+                    # A plain async-for resumes the generator with None, which the
+                    # picker resolves as 'cancelled'. Make that visible — there is
+                    # no operator to answer during an autonomous turn.
+                    cd = chunk.get("choice_data", {})
+                    logger.warning(
+                        "Wake turn invoked an interactive picker (%s); auto-cancelling "
+                        "— no operator present.", cd.get("question", "?"))
+                cb = getattr(self, "on_message_callback", None)
+                if cb is not None:
+                    try:
+                        res = cb(chunk)
+                        if asyncio.iscoroutine(res):
+                            await res
+                    except Exception:
+                        logger.debug("on_message_callback failed for wake chunk", exc_info=True)
+        except Exception:
+            logger.exception("run_wake_turn error")
+        summary = "".join(text_parts).strip()
+        if summary:
+            logger.info("Autonomous wake turn result: %s", summary[:500])
+        return summary
 
     async def get_tool_call(self, user_message: str) -> Optional[Dict]:
         """Dry-run tool call (for benchmarking)."""

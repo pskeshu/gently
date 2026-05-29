@@ -623,6 +623,16 @@ class AgentBridge:
         except Exception as e:
             logger.error(f"Stream error: {e}", exc_info=True)
             await send_fn({"type": "error", "error": str(e)})
+        finally:
+            # Deterministically close the agent generator so its turn-lock (and
+            # any other resources) release immediately. Without this, a cancelled
+            # or aborted stream leaves the generator suspended at a `yield` still
+            # holding self._turn_lock until non-deterministic GC, stalling the
+            # next user turn and any autonomous wake turn on lock.acquire().
+            try:
+                await stream_iter.aclose()
+            except Exception:
+                pass
 
     async def handle_command(
         self,

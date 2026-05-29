@@ -6,7 +6,7 @@ Tools for managing adaptive timelapse acquisitions.
 
 from typing import Dict, List, Optional
 
-from gently.harness.tools.registry import tool, ToolCategory
+from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import (
     require_agent, get_embryo_or_error,
     require_timelapse_orchestrator, require_developmental_tracker
@@ -535,6 +535,32 @@ def get_stage_history(
     if err:
         return err
 
+    # Prefer the live perception session (the orchestrator's Perceiver, which the
+    # agent shares). The DevelopmentalTracker below is only populated by manual
+    # classify_embryo_stage calls, so it is usually empty in autonomous runs.
+    perceiver = getattr(agent, "perceiver", None)
+    session = perceiver.get_session(embryo_id) if perceiver else None
+    if session is not None and getattr(session, "current_stage", None):
+        s = session.summary()
+        lines = [
+            f"Stage progression for {embryo_id} (live perception):",
+            f"  Current stage: {s.get('current_stage')} (stable for {s.get('stability', 0)} obs)",
+            f"  Observations: {s.get('observation_count', 0)}",
+        ]
+        seq = s.get("stage_sequence") or []
+        if seq:
+            lines.append(f"  Trajectory: {' -> '.join(seq)}")
+        t = s.get("temporal")  # TemporalContext dataclass or None
+        if t is not None:
+            exp = getattr(t, "expected_duration_min", None)
+            seg = f"  Time in current stage: {getattr(t, 'time_in_stage_min', 0.0):.0f} min"
+            if exp:
+                seg += f" (expected ~{exp:.0f} min)"
+            lines.append(seg)
+            if getattr(t, "is_potentially_arrested", False):
+                lines.append("  ** potentially ARRESTED **")
+        return "\n".join(lines)
+
     tracker, err = require_developmental_tracker(agent)
     if err:
         return err
@@ -558,6 +584,42 @@ def get_stage_history(
     return "\n".join(lines)
 
 
+def _perceiver_hatching_estimate(session) -> Optional[float]:
+    """Estimate minutes until the 'hatching' stage from the perception session.
+
+    Uses gently_perception's own organism stage ordering + typical durations, so
+    no DevelopmentalStage enum mapping is needed. Returns None when unknown
+    (no_object / off-vocabulary stage), 0.0 when already hatching/hatched.
+    """
+    try:
+        from gently_perception.organism import CELEGANS
+    except Exception:
+        return None
+    stage = getattr(session, "current_stage", None)
+    if not stage or stage == "no_object":
+        return None
+    stages = list(CELEGANS.stages)
+    durations = dict(CELEGANS.stage_durations)
+    if stage in ("hatching", "hatched"):
+        return 0.0
+    if stage not in stages or "hatching" not in stages:
+        return None
+    idx = stages.index(stage)
+    target = stages.index("hatching")
+    if idx >= target:
+        return 0.0
+    # Remaining time in the current stage (expected minus already-elapsed).
+    elapsed = 0.0
+    t = session.summary().get("temporal")
+    if t is not None:
+        elapsed = getattr(t, "time_in_stage_min", 0.0) or 0.0
+    remaining = max(0.0, durations.get(stage, 0.0) - elapsed)
+    # Plus the full expected duration of each stage between current and hatching.
+    for s in stages[idx + 1:target]:
+        remaining += durations.get(s, 0.0)
+    return remaining
+
+
 @tool(
     name="predict_hatching",
     description="Predict time-to-hatching for an embryo with confidence intervals based on developmental stage",
@@ -572,6 +634,39 @@ def predict_hatching(
     agent, err = require_agent(context)
     if err:
         return err
+
+    # Prefer the live perception session; the DevelopmentalTracker is usually
+    # empty in autonomous runs (only manual classify_embryo_stage feeds it).
+    perceiver = getattr(agent, "perceiver", None)
+
+    def _perc_line(eid: str):
+        session = perceiver.get_session(eid) if perceiver else None
+        if session is None or not getattr(session, "current_stage", None):
+            return None
+        stage = session.current_stage
+        if stage in ("hatching", "hatched"):
+            return f"  {eid}: stage={stage} (hatching now / already hatched)"
+        est = _perceiver_hatching_estimate(session)
+        if est is None:
+            return f"  {eid}: stage={stage} (time-to-hatching unknown)"
+        return f"  {eid}: stage={stage}, ~{est / 60:.1f}h to hatching ({est:.0f} min)"
+
+    if perceiver is not None:
+        if all_embryos:
+            ids = list(agent.experiment.embryos.keys())
+            perc = [_perc_line(e) for e in ids]
+            if any(perc):
+                out = ["Hatching predictions (live perception):", ""]
+                out += [p for p in perc if p]
+                missing = [e for e, p in zip(ids, perc) if not p]
+                if missing:
+                    out.append("")
+                    out.append(f"(no perception yet for: {', '.join(missing)})")
+                return "\n".join(out)
+        elif embryo_id:
+            line = _perc_line(embryo_id)
+            if line:
+                return f"Hatching prediction for {embryo_id} (live perception):\n{line}"
 
     tracker, err = require_developmental_tracker(agent)
     if err:
@@ -627,6 +722,37 @@ def predict_hatching(
             lines.append(f"  Development rate: {abs(rate_pct):.1f}% {speed} than standard")
 
         return "\n".join(lines)
+
+
+@tool(
+    name="set_autonomy",
+    description="""Enable or disable autonomous mode (the decision-moment wake-router).
+When ON, the agent wakes itself between user messages on important perception events
+(developmental stage transitions, potential arrest, hatching, embryo termination, or
+errors) and may adjust acquisition on its own (interval, power, stop conditions,
+bursts). Default is OFF. Device-layer safety limits still bound any action.
+Use when the user says "enable autopilot", "watch and adapt on your own", "go
+autonomous", or "turn off autonomy".""",
+    category=ToolCategory.ANALYSIS,
+    examples=[
+        ToolExample("Enable autonomous mode", {"enabled": True}),
+        ToolExample("Turn off autopilot", {"enabled": False}),
+    ],
+)
+def set_autonomy(enabled: bool = True, context: Dict = None) -> str:
+    """Toggle the decision-moment wake-router."""
+    agent, err = require_agent(context)
+    if err:
+        return err
+    router = getattr(agent, "wake_router", None)
+    if router is None:
+        return "Autonomy is not available (wake-router failed to initialize)."
+    state = router.set_enabled(enabled)
+    if state:
+        return ("Autonomous mode ENABLED. I'll wake on stage transitions, potential "
+                "arrest, hatching, termination, and errors — and adapt acquisition as "
+                "needed. Say 'turn off autonomy' to stop.")
+    return "Autonomous mode disabled. I'll only act when you message me."
 
 
 # ---------------------------------------------------------------------------

@@ -47,7 +47,7 @@ class PromptManager:
         self.memory = None  # AgentMemory instance
 
     def update_system_prompt(self, experiment, client, mode: str,
-                             context_summary: str = None) -> str:
+                             context_summary: str = None, perceiver=None) -> str:
         """
         Rebuild system prompt with current experiment state and connection status.
 
@@ -96,6 +96,7 @@ class PromptManager:
             experiment, connection_status, context_summary,
             memory_awareness=memory_awareness,
             microscope=client,
+            perceiver=perceiver,
         )
 
     def get_tools_for_mode(self, mode: str, has_microscope: bool) -> list:

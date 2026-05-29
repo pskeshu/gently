@@ -290,12 +290,57 @@ The agent includes a powerful adaptive timelapse system that runs in the backgro
 """
 
 
+def build_perception_snapshot(perceiver, embryos) -> str:
+    """One compact line per embryo of live perception state for the system prompt.
+
+    Reads straight from the perception sessions (current stage, stability, time in
+    stage, arrest signal, short trajectory). Every read here is synchronous and
+    side-effect-free — it never triggers a VLM call. Returns '' when there is
+    nothing to show, so callers can drop the section entirely.
+    """
+    if not perceiver or not embryos:
+        return ""
+    lines = []
+    for embryo_id in sorted(embryos):
+        try:
+            session = perceiver.get_session(embryo_id)
+            summary = session.summary() if session is not None else None
+        except Exception:
+            summary = None
+        if not summary or not summary.get("current_stage"):
+            lines.append(f"- {embryo_id}: no perception yet")
+            continue
+        parts = [
+            f"stage={summary['current_stage']}",
+            f"stable={summary.get('stability', 0)}x",
+        ]
+        temporal = summary.get("temporal")  # TemporalContext dataclass or None
+        if temporal is not None:
+            tmin = getattr(temporal, "time_in_stage_min", None)
+            exp = getattr(temporal, "expected_duration_min", None)
+            if tmin is not None:
+                seg = f"in_stage={tmin:.0f}min"
+                if exp:
+                    seg += f"/{exp:.0f}"
+                parts.append(seg)
+            if getattr(temporal, "is_potentially_arrested", False):
+                parts.append("ARRESTED?")
+        seq = summary.get("stage_sequence") or []
+        if len(seq) > 1:
+            parts.append("traj=" + "->".join(seq[-4:]))
+        lines.append(f"- {embryo_id}: " + "  ".join(parts))
+    if not lines:
+        return ""
+    return "## Perception (live)\n\n" + "\n".join(lines)
+
+
 def build_system_prompt(
     experiment_state: ExperimentState,
     connection_status: dict = None,
     context_summary: str = None,
     memory_awareness: str = None,
     microscope=None,
+    perceiver=None,
 ) -> str:
     """
     Build complete system prompt for Claude
@@ -357,6 +402,15 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     else:
         context_section = ""
 
+    # Live per-embryo perception snapshot (deterministic, read straight from the
+    # perception sessions — bypasses the AI context-summary cache so stage data is
+    # never stale).
+    perception_section = ""
+    if perceiver is not None and experiment_state.embryos:
+        snap = build_perception_snapshot(perceiver, experiment_state.embryos)
+        if snap:
+            perception_section = f"\n{snap}\n"
+
     # Pull organism-specific content from the active organism module
     organism = get_organism()
     organism_display = organism.ORGANISM_DISPLAY_NAME
@@ -404,6 +458,7 @@ Your role is to:
 # Current Experiment State
 
 {embryo_summary}
+{perception_section}
 {context_section}
 # Tool Use Guidelines
 
