@@ -122,6 +122,51 @@ def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, res
     print()
 
 
+def _open_browser(url: str) -> None:
+    """Open the web UI, preferring Google Chrome.
+
+    Override with GENTLY_BROWSER (a webbrowser name like 'firefox', or a full
+    path to a browser executable). Falls back to the OS default browser if
+    Chrome can't be found, so this never blocks startup.
+    """
+    import webbrowser
+
+    override = os.environ.get("GENTLY_BROWSER", "").strip()
+
+    # 1) Registered browser names (override first, then Chrome aliases).
+    for name in ([override] if override else []) + ["chrome", "google-chrome", "chromium"]:
+        try:
+            webbrowser.get(name).open(url)
+            return
+        except Exception:
+            pass
+
+    # 2) Explicit executables (an override path, then known Chrome locations).
+    candidates = [override] if override else []
+    candidates += [
+        shutil.which("chrome"),
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for exe in candidates:
+        try:
+            if exe and Path(exe).exists():
+                webbrowser.register(
+                    "gently-browser", None,
+                    webbrowser.BackgroundBrowser(exe), preferred=True,
+                )
+                webbrowser.get("gently-browser").open(url)
+                return
+        except Exception:
+            pass
+
+    # 3) Fall back to the OS default.
+    try:
+        webbrowser.open(url)
+    except Exception:
+        pass
+
+
 def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     """
     Spawn the Ink TUI in session-picker mode and capture the selection.
@@ -467,11 +512,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         print("  (Save this now. Add users via the admin API; GENTLY_NO_AUTH=1 disables auth.)\n")
 
     if viz_url and not no_browser:
-        try:
-            import webbrowser
-            webbrowser.open(viz_url)
-        except Exception:
-            pass
+        _open_browser(viz_url)
 
     # Keep the event loop alive so the in-process viz server keeps serving.
     # On Windows the Proactor loop won't surface Ctrl-C while blocked on a
