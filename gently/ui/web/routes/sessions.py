@@ -1,9 +1,11 @@
-"""Session routes - list and retrieve saved sessions."""
+"""Session routes - list, retrieve, and resume saved sessions."""
 
 import json
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 
@@ -11,28 +13,83 @@ logger = logging.getLogger(__name__)
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
+    def _file_store():
+        """The live FileStore (current Gently3 layout), via the agent."""
+        bridge = getattr(server, "agent_bridge", None)
+        if bridge is not None and getattr(bridge, "agent", None) is not None:
+            st = getattr(bridge.agent, "store", None)
+            if st is not None:
+                return st
+        return getattr(server, "gently_store", None)
+
+    def _active_session_id():
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        return getattr(agent, "session_id", None) if agent is not None else None
+
     @router.get("/api/sessions")
     async def list_sessions():
-        """List available sessions with metadata"""
+        """List available sessions (from the live FileStore)."""
+        store = _file_store()
+        if store is None:
+            return {"sessions": []}
+        active_id = _active_session_id()
         sessions = []
-        if server.sessions_dir.exists():
-            for path in server.sessions_dir.glob("*.json"):
+        try:
+            for s in store.list_sessions():
+                sid = s.get("session_id")
                 try:
-                    with open(path, encoding='utf-8') as f:
-                        data = json.load(f)
-                    sessions.append({
-                        'session_id': data.get('session_id', path.stem),
-                        'name': data.get('name', path.stem),
-                        'created_at': data.get('created_at', ''),
-                        'last_active': data.get('last_active', ''),
-                        'embryo_count': len(data.get('embryo_states', {})),
-                        'description': data.get('description', '')
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to read session {path}: {e}")
-        # Sort by created_at descending (newest first)
-        sessions.sort(key=lambda x: x.get('created_at', ''), reverse=True)
-        return {'sessions': sessions}
+                    count = len(store.list_embryos(sid) or [])
+                except Exception:
+                    count = 0
+                sessions.append({
+                    "session_id": sid,
+                    "name": s.get("name") or sid,
+                    "created_at": s.get("created_at", ""),
+                    "last_active": s.get("last_active", ""),
+                    "embryo_count": count,
+                    "description": s.get("description", ""),
+                    "active": sid == active_id,
+                })
+        except Exception as e:
+            logger.warning("Failed to list sessions from FileStore: %s", e)
+        return {"sessions": sessions}
+
+    @router.post("/api/sessions/{session_id}/resume",
+                 dependencies=[Depends(require_control)])
+    async def resume_session(session_id: str):
+        """Switch the live agent to a different saved session.
+
+        Reuses the same machinery as CLI resume (saves the current session,
+        loads the target's embryos + conversation). Then nudges all browser
+        clients to reload so they pick up the new session's state and
+        transcript.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        if agent is None:
+            raise HTTPException(status_code=503, detail="Agent not ready")
+        store = getattr(agent, "store", None)
+        if store is None or store.get_session(session_id) is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        if session_id == getattr(agent, "session_id", None):
+            return {"ok": True, "session_id": session_id, "active": True,
+                    "note": "already active"}
+        try:
+            ok = agent.resume_session(session_id)
+        except Exception as e:
+            logger.exception("Session resume failed")
+            raise HTTPException(status_code=500, detail=f"resume failed: {e}")
+        if not ok:
+            raise HTTPException(status_code=500, detail="resume returned false")
+        # Tell every connected browser to reload — they'll reconnect to the
+        # new session's state (embryos, transcript).
+        try:
+            await server.manager.broadcast({"type": "session_changed",
+                                            "session_id": session_id})
+        except Exception:
+            pass
+        return {"ok": True, "session_id": session_id, "active": True}
 
     @router.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):

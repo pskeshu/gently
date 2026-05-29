@@ -127,6 +127,10 @@ function handleMessage(msg) {
             // Switch to embryos tab if not already there
             if (state.tab !== 'embryos') switchTab('embryos');
         }
+    } else if (msg.type === 'session_changed') {
+        // The live agent switched sessions (resume from the Sessions tab) —
+        // reload so every client picks up the new session's state + transcript.
+        window.location.href = '/';
     } else if (msg.type === 'ping') {
         state.ws.send(JSON.stringify({type: 'pong'}));
     } else if (msg.type === 'presence') {

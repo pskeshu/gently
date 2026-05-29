@@ -443,3 +443,30 @@
     color: var(--text-muted);
 }
 
+
+/* Resume-in-agent action on session list items */
+.session-resume-btn {
+    margin-top: 8px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    border: 1px solid var(--accent, #60a5fa);
+    background: transparent;
+    color: var(--accent, #60a5fa);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+.session-resume-btn:hover { background: var(--accent, #60a5fa); color: #fff; }
+.session-active-badge {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent-green, #4ade80);
+    border: 1px solid var(--accent-green, #4ade80);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+.session-item.active-session { border-left: 2px solid var(--accent-green, #4ade80); }

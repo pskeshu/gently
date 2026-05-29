@@ -86,15 +86,33 @@ const ReviewApp = {
         }
 
         list.innerHTML = filtered.map(s => `
-            <div class="session-item" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
-                <div class="session-name">${this.escapeHtml(s.name || s.session_id)}</div>
+            <div class="session-item ${s.active ? 'active-session' : ''}" data-session-id="${s.session_id}" onclick="ReviewApp.loadSession('${s.session_id}')">
+                <div class="session-name">${this.escapeHtml(s.name || s.session_id)}${s.active ? ' <span class="session-active-badge">active</span>' : ''}</div>
                 <div class="session-meta">
                     ${this.formatDate(s.created_at)}
                     ${s.embryo_count ? `<span class="dot"></span>${s.embryo_count} embryo${s.embryo_count !== 1 ? 's' : ''}` : ''}
                 </div>
                 ${s.description ? `<div class="session-desc">${this.escapeHtml(s.description)}</div>` : ''}
+                ${s.active ? '' : `<button class="session-resume-btn" onclick="event.stopPropagation(); ReviewApp.resumeSession('${s.session_id}')">Resume in agent</button>`}
             </div>
         `).join('');
+    },
+
+    async resumeSession(sessionId) {
+        if (!confirm('Switch the live agent to this session?\nThe current session is saved first.')) return;
+        try {
+            const resp = await fetch(`/api/sessions/${sessionId}/resume`, { method: 'POST' });
+            if (resp.ok) {
+                // Server broadcasts session_changed to reload all clients; we
+                // navigate home as well so the operator lands on the new session.
+                window.location.href = '/';
+            } else {
+                const d = await resp.json().catch(() => ({}));
+                alert('Resume failed: ' + (d.detail || ('HTTP ' + resp.status)));
+            }
+        } catch (e) {
+            alert('Resume failed: ' + e);
+        }
     },
 
     renderSessionContent() {

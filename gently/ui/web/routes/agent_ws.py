@@ -48,7 +48,7 @@ def create_router(server) -> APIRouter:
     # Persisted to <session>/chat_display.json so it survives reconnects and
     # restarts; broadcast live so all instances stay in sync.
     _history: list = []
-    _history_state = {"loaded": False, "path": None, "agent_buf": None}
+    _history_state = {"sid": None, "path": None, "agent_buf": None}
 
     async def _broadcast_control_status():
         """Tell every connected agent client who currently holds control."""
@@ -65,14 +65,23 @@ def create_router(server) -> APIRouter:
             except Exception:
                 pass
 
-    def _load_history_once(bridge):
-        if _history_state["loaded"]:
-            return
-        _history_state["loaded"] = True
+    def _load_history_for_session(bridge):
+        """Load the current session's display history, reloading if the
+        session changed (e.g. after a resume from the Sessions tab)."""
         try:
             agent = bridge.agent
             store = getattr(agent, "store", None)
             sid = getattr(agent, "session_id", None)
+        except Exception:
+            return
+        if sid == _history_state["sid"]:
+            return  # already loaded for this session
+        # Session changed (or first load): reset and reload from disk.
+        _history.clear()
+        _history_state["sid"] = sid
+        _history_state["path"] = None
+        _history_state["agent_buf"] = None
+        try:
             if store and sid:
                 sdir = store._session_dir(sid)
                 if sdir:
@@ -548,7 +557,7 @@ def create_router(server) -> APIRouter:
 
         # Replay the uniform session transcript so every client (and every
         # reconnect/refresh) shows the same conversation.
-        _load_history_once(bridge)
+        _load_history_for_session(bridge)
         if _history:
             try:
                 await websocket.send_json({"type": "history", "items": list(_history)})
