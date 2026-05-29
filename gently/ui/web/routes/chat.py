@@ -16,9 +16,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 
@@ -106,7 +108,8 @@ def create_router(server) -> APIRouter:
         return {"turns": _load_history(path)}
 
     @router.post("/api/perception/chat/{sid}/{eid}/{tp}")
-    async def post_chat(sid: str, eid: str, tp: int, body: ChatRequest):
+    async def post_chat(sid: str, eid: str, tp: int, body: ChatRequest,
+                        _control=Depends(require_control)):
         """Append a user message and stream the assistant reply as SSE.
 
         Each SSE event is JSON: ``{"type": "delta", "text": "..."}`` for

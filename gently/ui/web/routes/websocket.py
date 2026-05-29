@@ -11,6 +11,30 @@ from ..models import ClientInfo
 
 logger = logging.getLogger(__name__)
 
+# /ws message types that mutate experiment state (define what gets imaged).
+# These are control actions and are gated by role; pure read/presence
+# messages stay open so anyone can watch.
+_MARKING_TYPES = frozenset({
+    "embryo_marked", "marking_update", "marking_done", "marking_redetect",
+})
+
+
+def _ws_can_control(websocket: WebSocket) -> bool:
+    """Whether this /ws client may perform control actions (marking).
+
+    Account mode: operators/admins (by session cookie) only. Legacy mode
+    (no accounts configured): open, preserving prior behavior.
+    """
+    from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+    from gently.ui.web.auth import SESSION_COOKIE
+    store = get_account_store()
+    if store is None or not store.has_users():
+        return True
+    token = websocket.cookies.get(SESSION_COOKIE)
+    user = store.verify_session(token) if token else None
+    role = store.get_role(user) if user else None
+    return role in CONTROL_ROLES
+
 
 def create_router(server) -> APIRouter:
     router = APIRouter()
@@ -76,6 +100,11 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
         data = json.loads(message)
         msg_type = data.get("type")
         embryo_id = data.get("embryo_id")
+
+        # Gate control actions (marking) by role; viewing/presence stays open.
+        if msg_type in _MARKING_TYPES and not _ws_can_control(websocket):
+            logger.warning("Ignored %s from a view-only /ws client", msg_type)
+            return
 
         if msg_type == "get_calibration":
             images = server.store.get_all_calibration(embryo_id)
