@@ -127,6 +127,20 @@ function handleMessage(msg) {
             // Switch to embryos tab if not already there
             if (state.tab !== 'embryos') switchTab('embryos');
         }
+    } else if (msg.type === 'open_volume') {
+        // The agent asked us to open the in-browser volume viewer — the
+        // web-native replacement for the old desktop napari window.
+        if (typeof ProjectionViewer !== 'undefined' && msg.embryo_id != null) {
+            const view = msg.view || '3d_viewer';
+            Promise.resolve(ProjectionViewer.open(msg.embryo_id, msg.timepoint))
+                .then(() => {
+                    // Default to the 3D viewer tab when the agent opens it.
+                    if (view && typeof ProjectionViewer.selectMethod === 'function') {
+                        ProjectionViewer.selectMethod(view);
+                    }
+                })
+                .catch((e) => console.warn('open_volume failed', e));
+        }
     } else if (msg.type === 'session_changed') {
         // The live agent switched sessions (resume from the Sessions tab) —
         // reload so every client picks up the new session's state + transcript.

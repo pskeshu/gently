@@ -152,6 +152,7 @@ class PromptManager:
                 "search_literature", "search_strains",
                 "validate_plan",
                 "batch_update_status", "batch_update_spec",
+                "snapshot_plan", "list_plan_versions", "restore_plan_version",
                 "save_plan_template", "list_templates", "apply_template",
                 "ask_user_choice",
             }

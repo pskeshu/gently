@@ -133,7 +133,6 @@ This design means experimental AI code — perception systems, coding agents, no
 | **Analysis** | analyze_volume, classify_embryo_stage | No |
 | **Experiment** | get_experiment_summary, query_embryo_status | No |
 | **Session** | list_sessions, import_embryos_from_session | No |
-| **Data** | list_runs, get_run_data, search_runs | No |
 | **Planning** | create_campaign, propose_plan, search_literature | No |
 | **Research** | search_literature, read_paper, search_strains | No |
 

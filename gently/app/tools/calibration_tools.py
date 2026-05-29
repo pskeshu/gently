@@ -973,18 +973,16 @@ async def calibrate_embryo(
         return f"Error: Not connected to microscope server. Cannot calibrate {embryo_id}."
 
     if use_v04_plan:
-        # Escape hatch hook. Not wired yet - delegating to the real Bluesky
-        # plan requires a RunEngine and device objects that live on the device
-        # layer, so the caller would have to submit the plan through the queue
-        # server. Since the surgical path already mirrors v0.4.0's behavior,
-        # this is a placeholder for a future hardware-regression follow-up.
-        raise NotImplementedError(
-            "use_v04_plan=True is not wired yet. The default surgical path "
-            "in calibrate_embryo already replicates the v0.4.0 calibration "
-            "plan's behavior (edge detection + inset + wide adaptive sweep). "
-            "If that path regresses on hardware, wire this branch to submit "
-            "gently.hardware.dispim.plans.calibration.calibrate_embryo_piezo_galvo "
-            "through the queue server's plan-submission API."
+        # Escape hatch reserved for a future hardware-regression follow-up. It is
+        # intentionally unwired (delegating to the real Bluesky plan needs a
+        # RunEngine + device objects that live on the device layer). Return a
+        # clear message instead of raising, so a model that sets this flag gets a
+        # graceful answer rather than a hard NotImplementedError — the default
+        # surgical path already mirrors v0.4.0 behavior.
+        return (
+            "use_v04_plan is not available: the default calibration path already "
+            "replicates the v0.4.0 plan (edge detection + inset + wide adaptive "
+            "sweep). Re-run calibrate_embryo without use_v04_plan."
         )
     logger.info("calibration path: surgical (v0.4.0-equivalent inset + adaptive sweep)")
 

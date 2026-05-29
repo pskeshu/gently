@@ -170,6 +170,14 @@
 .ac-tool-name { color: var(--text); }
 .ac-tool-meta { color: var(--text-muted); }
 .ac-tool-check { color: var(--accent-green); }
+
+/* Multi-line tool rows: head (icon + name + meta) over args / summary. */
+.ac-tool { flex-direction: column; align-items: stretch; gap: 4px; }
+.ac-tool-head { display: flex; align-items: center; gap: 8px; }
+.ac-tool-args { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
+.ac-tool-summary { color: var(--text-muted); padding-left: 19px; word-break: break-word; }
+.ac-tool-summary-err, .ac-tool-warn { color: var(--accent-orange, #fb923c); }
+.ac-tool-err { border-color: rgba(251, 146, 60, 0.35); }
 .ac-tool-spin {
     width: 11px; height: 11px; border-radius: 50%;
     border: 1.6px solid var(--border);
@@ -234,6 +242,36 @@
     display: flex; gap: 8px;
     padding: 12px;
     border-top: 1px solid var(--border);
+    position: relative;   /* anchor for the autocomplete dropdown */
+}
+
+/* ── Autocomplete dropdown ──────────────────────────────── */
+.ac-complete {
+    position: absolute;
+    left: 12px; right: 12px; bottom: calc(100% + 4px);
+    max-height: 240px; overflow-y: auto;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    box-shadow: 0 -8px 28px rgba(0, 0, 0, 0.45);
+    padding: 4px;
+    z-index: 5;
+}
+.ac-complete.hidden { display: none; }
+.ac-complete-item {
+    display: flex; flex-direction: column; gap: 1px;
+    padding: 6px 9px; border-radius: 6px;
+    cursor: pointer;
+}
+.ac-complete-item.active,
+.ac-complete-item:hover { background: var(--bg-hover, rgba(127, 127, 127, 0.12)); }
+.ac-complete-name {
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 12.5px; color: var(--accent);
+}
+.ac-complete-desc {
+    font-size: 11.5px; color: var(--text-muted);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .agent-chat-input textarea {
     flex: 1 1 auto; resize: none;

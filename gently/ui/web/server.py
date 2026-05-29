@@ -201,11 +201,15 @@ class VisualizationServer(Service):
             if path:
                 return path
 
-        # 2. Try FileStore (file-based, persistent)
-        if self.gently_store and self.timelapse_tracker.session_id:
+        # 2. Try FileStore (file-based, persistent). Key on the LIVE agent
+        # session, not the tracker's (which goes stale after a resume with no
+        # active timelapse) — mirrors _resolve_projection_path so an agent-driven
+        # open_volume hand-off doesn't 404 after a /resume.
+        sid = self._current_session_id()
+        if self.gently_store and sid:
             try:
                 vol_path = self.gently_store.get_volume_path(
-                    self.timelapse_tracker.session_id, embryo_id, timepoint,
+                    sid, embryo_id, timepoint,
                 )
                 if vol_path and vol_path.exists():
                     return str(vol_path)
@@ -681,6 +685,30 @@ class VisualizationServer(Service):
         })
 
         logger.info(f"Pushed 3D volume {uid} ({volume.shape}) to {len(self.manager.active_connections)} clients")
+
+    async def open_volume_in_browser(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        view: str = "3d_viewer",
+    ) -> int:
+        """Ask every connected browser to open the in-browser volume viewer.
+
+        This is the web-native replacement for the old napari ``view_volume``:
+        the agent triggers the existing ProjectionViewer (WebGL raymarcher +
+        projections) instead of launching a desktop Qt window that would block
+        the shared agent/web event loop. Returns the number of clients notified.
+        """
+        await self.manager.broadcast({
+            "type": "open_volume",
+            "embryo_id": embryo_id,
+            "timepoint": timepoint,
+            "view": view,
+        })
+        n = len(self.manager.active_connections)
+        logger.info("Requested browser open_volume for %s t%s (%d client(s))",
+                    embryo_id, timepoint, n)
+        return n
 
     async def on_start(self):
         """Start the visualization server"""

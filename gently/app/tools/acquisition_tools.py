@@ -302,10 +302,11 @@ async def capture_lightsheet(
 
 @tool(
     name="batch_lightsheet",
-    description="""Capture lightsheet images from ALL embryos and display them together in a single napari viewer.
+    description="""Capture lightsheet images from ALL embryos and show them together in the web UI.
 Use when user says "lightsheet all embryos", "capture all embryos", "show me all embryos in lightsheet".
-Moves to each embryo, captures a lightsheet image, then opens napari with all images as separate layers.
-Much more efficient than capturing one at a time.""",
+Moves to each embryo, captures a lightsheet image, saves it, and pushes it to the
+web viewer (live image strip) for everyone watching. Much more efficient than
+capturing one at a time.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
@@ -317,7 +318,7 @@ async def batch_lightsheet(
     galvo_position: float = 0.0,
     context: Dict = None
 ) -> str:
-    """Capture lightsheet images from all embryos and show in single napari viewer"""
+    """Capture lightsheet images from all embryos and show them in the web UI"""
     agent = context.get('agent')
     client = context.get('client')
 
@@ -403,32 +404,25 @@ async def batch_lightsheet(
 
     logger.info("Saved %d images to %s", len(images), save_dir)
 
-    # Open single napari viewer with all images as a stack
-    import napari
-    import numpy as np
-    logger.info("Opening napari with %d embryo images as stack...", len(images))
-
-    # Stack images into a single array for slider navigation
-    image_stack = np.stack(images, axis=0)
-
-    viewer = napari.Viewer(title=f"Batch Lightsheet - {len(images)} embryos")
-
-    # Add as single stack with slider (grayscale)
-    viewer.add_image(
-        image_stack,
-        name='Embryos',
-        colormap='gray',
-    )
-
-    # Print embryo ID mapping for reference
-    logger.info("Slider index -> Embryo ID:")
-    for i, eid in enumerate(embryo_ids):
-        logger.info("  %d: %s", i, eid)
-
-    napari.run()
+    # Push each captured image to the web UI \u2014 no blocking desktop window.
+    # They appear in the live viewer / recent strip for everyone watching.
+    pushed = 0
+    if agent.viz_server is not None:
+        for img, eid in zip(images, embryo_ids):
+            uid = f"batch_lightsheet_{eid}_{timestamp}"
+            agent.push_viz(
+                img, uid, "image",
+                {"embryo_id": eid, "source": "batch_lightsheet", "label": eid},
+            )
+            pushed += 1
+        logger.info("Pushed %d batch-lightsheet images to the web UI", pushed)
 
     # Summary
     summary = f"\u2713 Captured {len(images)} embryos: {', '.join(embryo_ids)}"
+    if pushed:
+        summary += f"\nShowing {pushed} image(s) in the web UI viewer."
+    elif agent.viz_server is None:
+        summary += "\n(Web UI not running \u2014 images saved to disk only.)"
     if errors:
         summary += f"\n\u26a0 Errors: {'; '.join(errors)}"
     summary += f"\nSaved to: {save_dir}"

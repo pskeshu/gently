@@ -118,6 +118,10 @@ const ProjectionViewer = {
         this.projections = [];
         this.selectedMethod = null;
         this.isOpen = true;
+        // Clear any volume from a previous open so a failed /api/volume-raw fetch
+        // can't leave the prior embryo/timepoint's 3D data bound (stale-render).
+        this.volumeData = null;
+        this.volumeShape = null;
 
         const modal = document.getElementById('projection-viewer-modal');
         const loading = document.getElementById('pv-loading');
@@ -280,6 +284,10 @@ const ProjectionViewer = {
     },
 
     selectMethod(method) {
+        // If the 3D view is requested but no volume loaded (e.g. /api/volume-raw
+        // failed while projections succeeded), fall back to the projections grid
+        // rather than showing an empty, never-initialized 3D panel.
+        if (method === '3d_viewer' && !this.volumeData) method = null;
         this.selectedMethod = method;
         this.renderProjections();
         this.renderTabs();

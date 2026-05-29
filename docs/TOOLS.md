@@ -13,7 +13,7 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 |------|-------------|
 | `acquire_volume` | Acquire a single 3D lightsheet volume for a specific embryo with calibration data |
 | `capture_lightsheet` | Capture a single 2D lightsheet fluorescence image at specified piezo/galvo position |
-| `batch_lightsheet` | Capture lightsheet images from ALL embryos and display as a stack |
+| `batch_lightsheet` | Capture lightsheet images from ALL embryos and show them in the web UI viewer |
 
 ### Analysis (`analysis_tools.py`)
 
@@ -29,22 +29,13 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 | `calibrate_embryo` | Run full piezo-galvo calibration for a specific embryo using Claude vision |
 | `calibrate_all_embryos` | Run piezo-galvo calibration for all detected embryos sequentially |
 
-### Data (`data_tools.py`)
-
-| Tool | Description |
-|------|-------------|
-| `list_runs` | List recent Bluesky runs from Databroker |
-| `get_run_data` | Get data from a specific Bluesky run |
-| `get_run_image` | Get an image from a Bluesky run for analysis |
-| `search_runs` | Search Databroker runs by metadata criteria |
-
 ### Detection (`detection_tools.py`)
 
 | Tool | Description |
 |------|-------------|
 | `detect_embryos` | Automatically detect embryos using brightness detection and SAM segmentation |
 | `manual_mark_embryos` | Open interactive window to manually mark embryos by clicking |
-| `edit_embryos` | Open napari editor to add/remove/move embryo positions |
+| `edit_embryos` | Add/remove/move embryo positions in the web map view |
 | `show_detected_embryos` | Capture fresh image and display all tracked embryos with labeled bounding boxes |
 
 ### Detectors (`detector_tools.py`)
@@ -145,7 +136,7 @@ Source: `gently/agent/tools/` (run mode) and `gently/agent/plan_mode/tools/` (pl
 | Tool | Description |
 |------|-------------|
 | `view_image` | Capture and display current bottom camera widefield image |
-| `view_volume` | Open a volume in napari for 3D visualization |
+| `view_volume` | Open a volume in the in-browser 3D viewer |
 | `list_volumes` | List available volumes for an embryo or all embryos |
 
 ---

@@ -604,6 +604,8 @@ class ConversationManager:
                         'tool_label': tool_label_fn(block.name, block.input),
                     }
 
+                    is_error_flag = False
+                    result_text = ""
                     try:
                         tool_result = await self._execute_single_tool(block.name, block.input)
 
@@ -620,24 +622,39 @@ class ConversationManager:
                             except (json.JSONDecodeError, TypeError):
                                 pass
 
+                        result_text = tool_result if isinstance(tool_result, str) else str(tool_result)
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
                             "content": tool_result
                         })
                     except Exception as e:
+                        is_error_flag = True
+                        result_text = f"Error: {str(e)}"
                         tool_results.append({
                             "type": "tool_result",
                             "tool_use_id": block.id,
-                            "content": f"Error: {str(e)}",
+                            "content": result_text,
                             "is_error": True
                         })
+
+                    # First non-empty line of the result, trimmed — gives the chat
+                    # UI a one-line summary so the operator can see what a tool did
+                    # (or didn't do), not just that it ran.
+                    result_summary = next(
+                        (ln.strip() for ln in (result_text or "").splitlines() if ln.strip()),
+                        "",
+                    )
+                    if len(result_summary) > 140:
+                        result_summary = result_summary[:139] + "…"
 
                     yield {
                         'type': 'tool_call',
                         'tool_name': block.name,
                         'tool_input': block.input,
                         'duration': time.time() - start_time,
+                        'result_summary': result_summary,
+                        'is_error': is_error_flag,
                     }
 
             self.conversation_history.append({

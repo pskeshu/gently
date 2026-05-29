@@ -1364,6 +1364,34 @@ class AgentBridge:
             })
         return commands
 
+    def get_tools_json(self) -> list:
+        """Serialize the agent tool registry for client-side autocomplete.
+
+        Trimmed on purpose (first description line + lightweight param list) so
+        the connect frame stays small. The web chat uses this for @tool-name
+        completion and to show a tool's arguments inline.
+        """
+        try:
+            from gently.harness.tools.registry import get_tool_registry
+            registry = get_tool_registry()
+        except Exception:
+            return []
+        tools = []
+        for t in registry.list_all():
+            desc = (t.description or "").strip().split("\n", 1)[0][:200]
+            category = getattr(t.category, "name", None) or str(t.category)
+            tools.append({
+                "name": t.name,
+                "description": desc,
+                "category": category,
+                "params": [
+                    {"name": p.name, "type": p.type, "required": bool(p.required)}
+                    for p in t.parameters if p.name != "context"
+                ],
+            })
+        tools.sort(key=lambda x: x["name"])
+        return tools
+
     # ------------------------------------------------------------------
     # Private helpers for structured command data
     # ------------------------------------------------------------------
@@ -1430,6 +1458,7 @@ class AgentBridge:
         meta = {
             "session_id": self.agent.session_id,
             "commands": self.get_commands_json(),
+            "tools": self.get_tools_json(),
             "version": getattr(gently, "__version__", "dev"),
             "tokens": self._get_token_snapshot(),
             "embryo_count": len(exp.embryos),

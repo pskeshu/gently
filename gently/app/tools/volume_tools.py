@@ -118,15 +118,17 @@ async def view_image(
 
 @tool(
     name="view_volume",
-    description="""Open a volume in napari for 3D visualization.
-Can open a volume by file path OR by embryo ID (opens latest volume or specific timepoint).
-Use when user says "open volume", "view volume", "show volume in napari", or "look at the 3D data".""",
+    description="""Open an acquired volume in the in-browser 3D viewer.
+Opens by embryo ID \u2014 the latest volume, or a specific timepoint. The volume
+appears in the web UI's volume viewer (interactive 3D raymarcher + projections)
+for everyone watching the session; nothing pops up on the instrument desktop.
+Use when the user says "open volume", "view volume", "show the 3D data", or
+"look at timepoint N of embryo X".""",
     category=ToolCategory.ANALYSIS,
     requires_microscope=False,
     examples=[
         ToolExample("Open latest volume for embryo 2", {"embryo_id": "embryo_2"}),
         ToolExample("Open specific timepoint", {"embryo_id": "embryo_2", "timepoint": 5}),
-        ToolExample("Open volume file", {"file_path": "D:/Gently/volumes/embryo_1_t0001.tif"}),
     ],
 )
 async def view_volume(
@@ -135,95 +137,71 @@ async def view_volume(
     file_path: str = None,
     context: Dict = None
 ) -> str:
-    """Open a volume in napari for visualization"""
-    import napari
-    import tifffile
-    import numpy as np
+    """Open a volume in the browser-based viewer (no blocking desktop window)."""
     from pathlib import Path
 
     agent, err = require_agent(context)
     if err:
         return err
 
-    volume = None
-    volume_path = None
-    title = "Volume Viewer"
+    session_id = agent.session_id
 
-    # Determine which volume to open
-    if file_path:
-        # Open from file path
-        volume_path = Path(file_path)
-        if not volume_path.exists():
+    # file_path is legacy. In-browser viewing is addressed by embryo + timepoint,
+    # so map a FileStore path (embryos/{embryo_id}/volumes/t{NNNN}.tif) back to
+    # those when possible.
+    if file_path and not embryo_id:
+        p = Path(file_path)
+        if not p.exists():
             return f"Error: File not found: {file_path}"
-        title = f"Volume: {volume_path.name}"
+        stem = p.stem  # e.g. "t0005"
+        try:
+            if stem.startswith("t"):
+                timepoint = int(stem[1:])
+            # .../embryos/{embryo_id}/volumes/t{NNNN}.tif \u2192 embryo dir is parent of "volumes"
+            embryo_id = p.parent.parent.name
+        except (ValueError, IndexError):
+            pass
+        if not embryo_id or timepoint is None:
+            return ("Volume viewing is now in-browser and addressed by embryo + "
+                    "timepoint. Please specify embryo_id (and optionally timepoint) "
+                    "rather than a raw file path.")
 
-    elif embryo_id:
-        # Get volume for embryo from FileStore
-        session_id = agent.session_id
+    if not embryo_id:
+        return "Error: Specify embryo_id (and optionally timepoint)."
 
-        if timepoint is not None:
-            # Try to find specific timepoint via FileStore
-            volume_path = agent.store.get_volume_path(session_id, embryo_id, timepoint)
-            if volume_path and volume_path.exists():
-                title = f"{embryo_id} - t{timepoint:04d}"
-            else:
-                # Check recent_images as fallback
-                embryo, err = get_embryo_or_error(agent, embryo_id)
-                if err:
-                    return err
-                if embryo.recent_images:
-                    matching = [img for img in embryo.recent_images if img.timepoint == timepoint]
-                    if matching:
-                        volume_path = Path(matching[0].volume_path)
-                        title = f"{embryo_id} - t{timepoint:04d}"
-
-                if not volume_path or not volume_path.exists():
-                    # List available timepoints from store
-                    volumes = agent.store.list_volumes(session_id, embryo_id)
-                    available = sorted([v['timepoint'] for v in volumes])
-                    return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
-        else:
-            # Find latest volume from store
+    # Resolve the timepoint (specific or latest) and confirm the volume exists.
+    if timepoint is not None:
+        volume_path = agent.store.get_volume_path(session_id, embryo_id, timepoint)
+        if not volume_path or not Path(volume_path).exists():
             volumes = agent.store.list_volumes(session_id, embryo_id)
-            if not volumes:
+            available = sorted(v['timepoint'] for v in volumes)
+            if not available:
                 return f"No volumes found for {embryo_id} in session {session_id}"
-
-            # Find highest timepoint
-            latest = max(volumes, key=lambda v: v['timepoint'])
-            latest_tp = latest['timepoint']
-            volume_path = agent.store.get_volume_path(session_id, embryo_id, latest_tp)
-
-            title = f"{embryo_id} - t{latest_tp:04d}"
-
+            return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
     else:
-        return "Error: Specify either embryo_id or file_path"
+        volumes = agent.store.list_volumes(session_id, embryo_id)
+        if not volumes:
+            return f"No volumes found for {embryo_id} in session {session_id}"
+        timepoint = max(v['timepoint'] for v in volumes)
 
-    # Load the volume
+    # Drive the in-browser viewer \u2014 no blocking Qt/desktop window.
+    viz = getattr(agent, "viz_server", None)
+    if viz is None:
+        return (f"Resolved {embryo_id} t{timepoint:04d}, but the web UI isn't running, "
+                f"so there's nowhere to display it. Start the web UI and try again.")
+
     try:
-        volume = tifffile.imread(str(volume_path))
-        logger.info("Loaded volume: %s, dtype=%s", volume.shape, volume.dtype)
+        n_clients = await viz.open_volume_in_browser(embryo_id, timepoint)
     except Exception as e:
-        return f"Error loading volume: {e}"
+        logger.exception("open_volume_in_browser failed")
+        return f"Error opening volume in the web viewer: {e}"
 
-    # Open in napari
-    logger.info("Opening napari viewer...")
-    viewer = napari.Viewer(title=title)
-
-    # Add volume with appropriate settings
-    viewer.add_image(
-        volume,
-        name='Volume',
-        colormap='gray',
-        rendering='mip',  # Maximum intensity projection for 3D
-    )
-
-    # Add scale bar info
-    viewer.scale_bar.visible = True
-    viewer.scale_bar.unit = "um"
-
-    napari.run()
-
-    return f"\u2713 Opened volume in napari: {volume_path.name} (shape: {volume.shape})"
+    url = f"http://localhost:{getattr(viz, 'port', 8080)}/"
+    if n_clients <= 0:
+        return (f"Resolved {embryo_id} t{timepoint:04d}, but no browser is connected. "
+                f"Open {url} and select that embryo/timepoint to view it.")
+    return (f"\u2713 Opening {embryo_id} t{timepoint:04d} in the web volume viewer "
+            f"({n_clients} view(s) connected) \u2014 {url}")
 
 
 @tool(

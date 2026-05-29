@@ -14,9 +14,11 @@ this file changes.
 
 Watchdog
 --------
-The SSE iterator can silently stall in the agent process — most reliably
-when a Qt window (napari) freezes the asyncio loop synchronously during a
-tool call, but in principle any half-open TCP path can cause it. aiohttp's
+The SSE iterator can silently stall in the agent process whenever a
+half-open TCP path or a long synchronous tool call wedges the asyncio loop.
+(Historically the worst offender was a Qt window — napari — blocking the
+loop during a tool call; that path is gone now that all visualization is
+in-browser, but the watchdog stays for general robustness.) aiohttp's
 async iterator won't raise on a stalled socket; the ``async for`` just
 waits forever. To recover, a sibling watchdog task tracks the timestamp of
 the last received event; if no event arrives within ``stale_timeout_sec``

@@ -22,8 +22,16 @@ const AgentChat = (() => {
     let activityEl = null;        // the persistent "working…" indicator (reused)
     let me = null;                // { authenticated, username, role, can_control }
 
+    // Autocomplete: slash-command + @tool registries (pushed by the server on
+    // connect) and the live dropdown state.
+    let commands = [];            // [{name, description, aliases, ...}]
+    let tools = [];               // [{name, description, params, ...}]
+    let acItems = [];             // current completion items shown in the dropdown
+    let acIdx = -1;               // highlighted item index
+
     // DOM refs (resolved in init)
     let fab, panel, log, input, sendBtn, conn, banner, closeBtn, userEl, signoutBtn;
+    let acComplete = null;        // the autocomplete dropdown element
 
     // ── Safe rendering ────────────────────────────────────────
     function escapeHtml(s) {
@@ -138,6 +146,11 @@ const AgentChat = (() => {
             case 'connected':
                 reconnectDelay = 1000;
                 setConn(true, msg.version ? `Connected · v${msg.version}` : 'Connected');
+                // The bridge ships the command + tool registries on connect.
+                // Capture them so the composer can offer autocomplete — the
+                // data was always on the wire; we just never used it.
+                commands = Array.isArray(msg.commands) ? msg.commands : [];
+                tools = Array.isArray(msg.tools) ? msg.tools : [];
                 break;
 
             case 'control_status':
@@ -182,10 +195,14 @@ const AgentChat = (() => {
                 hideActivity();           // the running tool row is the signal now
                 currentAgentEl = null;    // text after a tool starts a fresh bubble
                 const label = msg.tool_label || msg.tool_name || 'tool';
+                const args = fmtArgs(msg.tool_input);
                 const el = document.createElement('div');
                 el.className = 'ac-tool ac-tool-running';
                 el.dataset.tool = msg.tool_name || '';
-                el.innerHTML = `<span class="ac-tool-spin"></span><span class="ac-tool-name">${escapeHtml(label)}</span>`;
+                el.innerHTML =
+                    `<div class="ac-tool-head"><span class="ac-tool-spin"></span>` +
+                    `<span class="ac-tool-name">${escapeHtml(label)}</span></div>` +
+                    (args ? `<div class="ac-tool-args">${escapeHtml(args)}</div>` : '');
                 log.appendChild(el);
                 scrollToBottom();
                 break;
@@ -198,10 +215,29 @@ const AgentChat = (() => {
                 const label = msg.tool_name || 'tool';
                 const dur = msg.duration
                     ? ` · ${(msg.duration.toFixed ? msg.duration.toFixed(1) : msg.duration)}s` : '';
-                const summary = msg.result_summary ? ` — ${escapeHtml(msg.result_summary)}` : '';
+                const args = fmtArgs(msg.tool_input);
+                const summary = msg.result_summary || '';
+                // Show ⚠ instead of ✓ when the tool errored or its result reads
+                // like a failure — so the operator can tell when a tool did nothing.
+                const isErr = !!msg.is_error || looksLikeError(summary);
+                const icon = isErr
+                    ? `<span class="ac-tool-warn">⚠</span>`
+                    : `<span class="ac-tool-check">✓</span>`;
+                const html =
+                    `<div class="ac-tool-head">${icon}` +
+                    `<span class="ac-tool-name">${escapeHtml(label)}</span>` +
+                    `<span class="ac-tool-meta">${dur}</span></div>` +
+                    (args ? `<div class="ac-tool-args">${escapeHtml(args)}</div>` : '') +
+                    (summary ? `<div class="ac-tool-summary${isErr ? ' ac-tool-summary-err' : ''}">${escapeHtml(summary)}</div>` : '');
                 if (el) {
-                    el.className = 'ac-tool ac-tool-done';
-                    el.innerHTML = `<span class="ac-tool-check">✓</span><span class="ac-tool-name">${escapeHtml(label)}</span><span class="ac-tool-meta">${dur}${summary}</span>`;
+                    el.className = 'ac-tool ac-tool-done' + (isErr ? ' ac-tool-err' : '');
+                    el.innerHTML = html;
+                } else {
+                    // No matching running row (e.g. after a reconnect) — append fresh.
+                    const fresh = document.createElement('div');
+                    fresh.className = 'ac-tool ac-tool-done' + (isErr ? ' ac-tool-err' : '');
+                    fresh.innerHTML = html;
+                    log.appendChild(fresh);
                 }
                 if (streaming) setActivity('Working…');  // agent continues after the tool
                 scrollToBottom();
@@ -296,6 +332,118 @@ const AgentChat = (() => {
         scrollToBottom();
     }
 
+    // ── Tool argument formatting ──────────────────────────────
+    /** Compact, escaped "key=value" rendering of a tool's input for the chat. */
+    function fmtArgs(input) {
+        if (!input || typeof input !== 'object') return '';
+        const parts = [];
+        for (const [k, v] of Object.entries(input)) {
+            if (k === 'context' || v === null || v === undefined || v === '') continue;
+            let val = (typeof v === 'object') ? JSON.stringify(v) : String(v);
+            if (val.length > 48) val = val.slice(0, 47) + '…';
+            parts.push(`${k}=${val}`);
+        }
+        return parts.join('  ');
+    }
+
+    /** Heuristic: does a tool's result summary read like a failure?
+     *  Used to show ⚠ for tools that return an error STRING (the agent only
+     *  flags raised exceptions). Avoids false alarms like "No errors found". */
+    function looksLikeError(s) {
+        if (!s) return false;
+        const t = s.trim();
+        if (/^no\s+(errors?|issues?|problems?|anomal|changes?|warnings?)\b/i.test(t)) return false;
+        if (/^(error|failed|failure|unable|cannot|can'?t|could\s?n'?t|could not|denied|invalid|no |not )/i.test(t)) return true;
+        // mid-string failure markers, e.g. "Timepoint 7 not found for embryo_2".
+        return /\bnot (found|available|connected|recognized|valid|supported)\b/i.test(t);
+    }
+
+    // ── Autocomplete ──────────────────────────────────────────
+    /** The whitespace-delimited token immediately left of the caret. */
+    function currentToken() {
+        const v = input.value;
+        const pos = (input.selectionStart != null) ? input.selectionStart : v.length;
+        const before = v.slice(0, pos);
+        const m = before.match(/(\S+)$/);
+        return { token: m ? m[1] : '', start: m ? pos - m[1].length : pos, pos };
+    }
+
+    /** Compute completion items for the current input/caret, or []. */
+    function computeCompletions() {
+        const trimmed = input.value.trimStart().toLowerCase();
+        // Slash commands: whole-input prefix (mirrors the TUI). A trailing space
+        // (i.e. typing args) naturally yields no matches and hides the menu.
+        if (trimmed.startsWith('/')) {
+            return commands.filter(c =>
+                (c.name && c.name.toLowerCase().startsWith(trimmed)) ||
+                (c.aliases || []).some(a => String(a).toLowerCase().startsWith(trimmed))
+            ).slice(0, 8).map(c => ({ kind: 'command', name: c.name, desc: c.description || '' }));
+        }
+        // @tool mention: complete the token under the caret against tool names.
+        const tok = currentToken();
+        if (tok.token.startsWith('@') && tools.length) {
+            const q = tok.token.slice(1).toLowerCase();
+            return tools.filter(t => t.name.toLowerCase().includes(q))
+                .slice(0, 8)
+                .map(t => ({ kind: 'tool', name: t.name, desc: t.description || '', token: tok }));
+        }
+        return [];
+    }
+
+    function renderCompletions(items) {
+        acItems = items || [];
+        acIdx = acItems.length ? 0 : -1;
+        if (!acComplete) return;
+        if (!acItems.length) { hideCompletions(); return; }
+        acComplete.innerHTML = '';
+        acItems.forEach((it, i) => {
+            const row = document.createElement('div');
+            row.className = 'ac-complete-item' + (i === acIdx ? ' active' : '');
+            row.innerHTML =
+                `<span class="ac-complete-name">${escapeHtml(it.name)}</span>` +
+                (it.desc ? `<span class="ac-complete-desc">${escapeHtml(it.desc)}</span>` : '');
+            // mousedown (not click) so it fires before the textarea blurs.
+            row.addEventListener('mousedown', (e) => { e.preventDefault(); acceptCompletion(it); });
+            acComplete.appendChild(row);
+        });
+        acComplete.classList.remove('hidden');
+    }
+
+    function hideCompletions() {
+        acItems = [];
+        acIdx = -1;
+        if (acComplete) { acComplete.classList.add('hidden'); acComplete.innerHTML = ''; }
+    }
+
+    function updateCompletions() {
+        renderCompletions(computeCompletions());
+    }
+
+    function moveCompletion(delta) {
+        if (!acItems.length || !acComplete) return;
+        acIdx = (acIdx + delta + acItems.length) % acItems.length;
+        [...acComplete.children].forEach((c, i) => c.classList.toggle('active', i === acIdx));
+    }
+
+    function acceptCompletion(item) {
+        if (!item) return;
+        if (item.kind === 'command') {
+            input.value = item.name + ' ';
+            const p = input.value.length;
+            try { input.setSelectionRange(p, p); } catch (_) {}
+        } else if (item.kind === 'tool') {
+            const tok = item.token || currentToken();
+            const v = input.value;
+            const insert = '@' + item.name + ' ';
+            input.value = v.slice(0, tok.start) + insert + v.slice(tok.pos);
+            const p = tok.start + insert.length;
+            try { input.setSelectionRange(p, p); } catch (_) {}
+        }
+        hideCompletions();
+        input.focus();
+        autosize();
+    }
+
     // ── Control / UI state ────────────────────────────────────
     function renderControl() {
         if (hasControl) {
@@ -303,7 +451,7 @@ const AgentChat = (() => {
             banner.innerHTML = '';
             input.disabled = false;
             sendBtn.disabled = false;
-            input.placeholder = 'Message Gently…';
+            input.placeholder = 'Message Gently…   ( / commands · @ tools )';
         } else {
             banner.classList.remove('hidden');
             const who = holderLabel || 'another session';
@@ -374,6 +522,7 @@ const AgentChat = (() => {
     // ── Input handling ────────────────────────────────────────
     function submit() {
         if (streaming) { send({ type: 'cancel' }); return; }  // Send doubles as Stop
+        hideCompletions();
         const text = input.value.trim();
         if (!text) return;
         if (!hasControl) { renderControl(); return; }
@@ -456,9 +605,29 @@ const AgentChat = (() => {
             window.location.reload();
         });
         fetchMe();
+
+        // Build the autocomplete dropdown inside the composer (positioned above
+        // the textarea via CSS).
+        const inputWrap = input.parentNode;
+        if (inputWrap) {
+            acComplete = document.createElement('div');
+            acComplete.className = 'ac-complete hidden';
+            inputWrap.insertBefore(acComplete, inputWrap.firstChild);
+        }
+
         sendBtn.addEventListener('click', submit);
-        input.addEventListener('input', autosize);
+        input.addEventListener('input', () => { autosize(); updateCompletions(); });
+        // Close the menu shortly after blur (delay lets a mousedown selection land).
+        input.addEventListener('blur', () => setTimeout(hideCompletions, 120));
         input.addEventListener('keydown', (e) => {
+            // While the completion menu is open it owns the navigation keys.
+            if (acItems.length) {
+                if (e.key === 'ArrowDown') { e.preventDefault(); moveCompletion(1); return; }
+                if (e.key === 'ArrowUp') { e.preventDefault(); moveCompletion(-1); return; }
+                if (e.key === 'Tab') { e.preventDefault(); acceptCompletion(acItems[acIdx]); return; }
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); acceptCompletion(acItems[acIdx]); return; }
+                if (e.key === 'Escape') { e.preventDefault(); hideCompletions(); return; }
+            }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
             if (e.key === 'Escape' && streaming) { e.preventDefault(); send({ type: 'cancel' }); }
         });
