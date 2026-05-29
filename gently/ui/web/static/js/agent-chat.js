@@ -81,9 +81,47 @@ const AgentChat = (() => {
         return content;
     }
 
-    function addUserMessage(text) {
-        const content = addTurn('user');
+    function addUserMessage(text, author) {
+        const wrap = document.createElement('div');
+        wrap.className = 'ac-turn ac-turn-user';
+        if (author) {
+            const label = document.createElement('div');
+            label.className = 'ac-role ac-role-user';
+            label.textContent = author;
+            wrap.appendChild(label);
+        }
+        const content = document.createElement('div');
+        content.className = 'ac-content';
         content.textContent = text;
+        wrap.appendChild(content);
+        log.appendChild(wrap);
+        scrollToBottom();
+    }
+
+    /** Rebuild the transcript from a persisted/replayed history list. */
+    function renderHistory(items) {
+        log.innerHTML = '';
+        currentAgentEl = null;
+        activityEl = null;
+        (items || []).forEach(it => {
+            if (it.role === 'user') {
+                addUserMessage(it.text, it.author);
+            } else if (it.role === 'agent') {
+                const c = addTurn('agent');
+                c._raw = it.text || '';
+                c.innerHTML = mdToHtml(c._raw);
+            } else if (it.role === 'tool') {
+                const el = document.createElement('div');
+                el.className = 'ac-tool ac-tool-done';
+                const dur = it.duration ? ` · ${(it.duration.toFixed ? it.duration.toFixed(1) : it.duration)}s` : '';
+                const summary = it.summary ? ` — ${escapeHtml(it.summary)}` : '';
+                el.innerHTML = `<span class="ac-tool-check">✓</span><span class="ac-tool-name">${escapeHtml(it.name || 'tool')}</span><span class="ac-tool-meta">${dur}${summary}</span>`;
+                log.appendChild(el);
+            } else if (it.role === 'system') {
+                addSystemLine(it.text, it.level || 'info');
+            }
+        });
+        scrollToBottom();
     }
 
     function addSystemLine(text, level = 'info') {
@@ -106,6 +144,15 @@ const AgentChat = (() => {
                 hasControl = !!msg.you_have_control;
                 holderLabel = msg.holder_label || null;
                 renderControl();
+                break;
+
+            case 'history':
+                renderHistory(msg.items || []);
+                break;
+
+            case 'user_message':
+                hideActivity();
+                addUserMessage(msg.text, msg.author);
                 break;
 
             case 'stream_start':
@@ -215,7 +262,7 @@ const AgentChat = (() => {
         (data.options || []).forEach(opt => {
             const btn = document.createElement('button');
             btn.className = 'ac-choice-opt';
-            btn.disabled = !!opt.disabled;
+            btn.disabled = !!opt.disabled || !hasControl;  // observers see it read-only
             const desc = opt.description ? `<span class="ac-choice-desc">${escapeHtml(opt.description)}</span>` : '';
             btn.innerHTML = `<span class="ac-choice-label">${escapeHtml(opt.label)}</span>${desc}`;
             btn.addEventListener('click', () => {
@@ -330,11 +377,11 @@ const AgentChat = (() => {
         const text = input.value.trim();
         if (!text) return;
         if (!hasControl) { renderControl(); return; }
-        addUserMessage(text);
         if (text.startsWith('/')) {
-            send({ type: 'command', command: text });  // slash commands (e.g. /status)
+            addUserMessage(text);                       // commands aren't broadcast; echo locally
+            send({ type: 'command', command: text });   // slash commands (e.g. /status)
         } else {
-            send({ type: 'chat', text });
+            send({ type: 'chat', text });               // echoed to all via 'user_message'
         }
         // Instant feedback before the first chunk arrives.
         setBusy(true);

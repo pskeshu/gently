@@ -41,6 +41,14 @@ def create_router(server) -> APIRouter:
     _clients: Dict[str, Callable] = {}
     _client_labels: Dict[str, str] = {}
     _client_counter = {"n": 0}
+    _raw_clients: Dict[str, WebSocket] = {}  # client_id -> websocket (broadcast)
+
+    # ── Uniform display transcript ────────────────────────────
+    # A single conversation history shared by every client of this session.
+    # Persisted to <session>/chat_display.json so it survives reconnects and
+    # restarts; broadcast live so all instances stay in sync.
+    _history: list = []
+    _history_state = {"loaded": False, "path": None, "agent_buf": None}
 
     async def _broadcast_control_status():
         """Tell every connected agent client who currently holds control."""
@@ -54,6 +62,75 @@ def create_router(server) -> APIRouter:
                     "holder_label": holder_label,
                     "you_have_control": (cid == holder),
                 })
+            except Exception:
+                pass
+
+    def _load_history_once(bridge):
+        if _history_state["loaded"]:
+            return
+        _history_state["loaded"] = True
+        try:
+            agent = bridge.agent
+            store = getattr(agent, "store", None)
+            sid = getattr(agent, "session_id", None)
+            if store and sid:
+                sdir = store._session_dir(sid)
+                if sdir:
+                    p = sdir / "chat_display.json"
+                    _history_state["path"] = p
+                    if p.exists():
+                        loaded = json.loads(p.read_text(encoding="utf-8")) or []
+                        if isinstance(loaded, list):
+                            _history.extend(loaded)
+        except Exception:
+            logger.debug("Could not load chat history", exc_info=True)
+
+    def _save_history():
+        p = _history_state["path"]
+        if not p:
+            return
+        try:
+            tmp = p.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(_history[-500:]), encoding="utf-8")
+            tmp.replace(p)
+        except Exception:
+            pass
+
+    def _record(item):
+        _history.append(item)
+        if len(_history) > 500:
+            del _history[: len(_history) - 500]
+        _save_history()
+
+    def _flush_agent_buf():
+        buf = _history_state["agent_buf"]
+        if buf:
+            _record({"role": "agent", "text": buf})
+        _history_state["agent_buf"] = None
+
+    def _record_display(msg):
+        """Fold a streamed chunk into the persistent display history."""
+        t = msg.get("type")
+        if t == "user_message":
+            _flush_agent_buf()
+            _record({"role": "user", "text": msg.get("text", ""),
+                     "author": msg.get("author")})
+        elif t == "text":
+            _history_state["agent_buf"] = (_history_state["agent_buf"] or "") + msg.get("text", "")
+        elif t == "tool_call":
+            _flush_agent_buf()
+            _record({"role": "tool", "name": msg.get("tool_name"),
+                     "duration": msg.get("duration"),
+                     "summary": msg.get("result_summary")})
+        elif t == "stream_end":
+            _flush_agent_buf()
+
+    async def _broadcast(msg):
+        """Record to history + send a display message to ALL clients."""
+        _record_display(msg)
+        for cid, ws in list(_raw_clients.items()):
+            try:
+                await ws.send_json(msg)
             except Exception:
                 pass
 
@@ -464,9 +541,19 @@ def create_router(server) -> APIRouter:
         # (only to clients allowed to drive — viewers never auto-hold).
         _clients[client_id] = send_fn
         _client_labels[client_id] = client_label
+        _raw_clients[client_id] = websocket
         if _control["holder"] is None and can_control:
             _control["holder"] = client_id
         await _broadcast_control_status()
+
+        # Replay the uniform session transcript so every client (and every
+        # reconnect/refresh) shows the same conversation.
+        _load_history_once(bridge)
+        if _history:
+            try:
+                await websocket.send_json({"type": "history", "items": list(_history)})
+            except Exception:
+                pass
 
         try:
             # ── Wizard phase ──────────────────────────────────────
@@ -606,11 +693,19 @@ def create_router(server) -> APIRouter:
                     if active_task and not active_task.done():
                         active_task.cancel()
 
+                    # Echo the user's message to ALL clients (so observers see
+                    # what was asked), then stream the reply to everyone.
+                    await _broadcast({"type": "user_message", "text": text,
+                                      "author": client_label})
                     active_task = asyncio.create_task(
-                        bridge.stream_response(text, send_fn, choice_future_factory)
+                        bridge.stream_response(text, _broadcast, choice_future_factory)
                     )
 
                 elif msg_type == "choice_response":
+                    # Only the control holder answers pickers (observers see
+                    # them read-only).
+                    if _control["holder"] != client_id:
+                        continue
                     request_id = data.get("request_id", "")
                     selected = data.get("selected", "")
                     # Check if bridge owns this choice (e.g. /import-embryos picker)
@@ -719,6 +814,7 @@ def create_router(server) -> APIRouter:
             # to any remaining client (or free it) and resync everyone.
             _clients.pop(client_id, None)
             _client_labels.pop(client_id, None)
+            _raw_clients.pop(client_id, None)
             if _control["holder"] == client_id:
                 _control["holder"] = next(iter(_clients), None)
                 try:
