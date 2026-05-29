@@ -3532,11 +3532,13 @@ kbd {
     padding: 0;
 }
 
-/* Filmstrip: rows on the left, reasoning/detail panel pinned on the right. */
+/* Filmstrip: rows on the left, reasoning/detail panel pinned on the right.
+   (Recovered from the lost WIP commit 0269e18d.) */
 .view-filmstrip {
     display: flex;
     flex-direction: row;
-    overflow: hidden;  /* the two children scroll internally */
+    align-items: stretch;
+    overflow: hidden;
 }
 
 /* ========================================
@@ -3721,9 +3723,8 @@ kbd {
        scrollbar shared by all rows. Labels pin to the left via
        position:sticky inside each row. */
     display: block;
-    flex: 1 1 auto;     /* take the space left of the detail panel */
-    min-width: 0;       /* allow shrinking so the panel keeps its width */
-    min-height: 0;
+    flex: 1 1 0;        /* flex-1 child: shrinks/grows as the panel opens */
+    min-width: 0;
     overflow-x: auto;
     overflow-y: auto;
     scrollbar-width: thin;
@@ -3881,17 +3882,27 @@ kbd {
 }
 
 .filmstrip-detail {
-    /* Side panel: pinned to the right of the rows, full height, own scroll.
-       Hidden until a cell is clicked (see :empty below) so the rows use the
-       full width when nothing is selected. */
-    flex: 0 0 360px;
-    max-width: 42%;
-    border-left: 1px solid var(--border);
     background: var(--bg-card);
+    /* Right-side panel: fixed-ish width that shrinks gracefully on narrow
+       viewports. Scrolls vertically inside itself so long VLM summaries
+       don't push the layout. When empty (no frame selected) it collapses
+       entirely so the rows get full width. (Recovered from WIP 0269e18d.) */
+    flex: 0 0 auto;
+    width: clamp(360px, 32vw, 520px);
+    border-left: 1px solid var(--border);
     overflow-y: auto;
     overscroll-behavior: contain;
+    animation: filmstripDetailIn 0.18s ease-out;
 }
 .filmstrip-detail:empty { display: none; }
+@keyframes filmstripDetailIn {
+    from { transform: translateX(8px); opacity: 0; }
+    to   { transform: translateX(0);   opacity: 1; }
+}
+/* In the narrow side panel, stack the image | VLM summary split vertically. */
+#filmstrip-detail .detail-split {
+    grid-template-columns: 1fr;
+}
 
 /* ========================================
    VITALS VIEW
