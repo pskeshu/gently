@@ -156,6 +156,20 @@ First-run admin account created — sign in at the URL above:
 Accounts live under `<GENTLY_STORAGE_PATH>/auth/` (`users.yaml` + `secret.key`),
 outside the repo.
 
+## Make your first plan
+
+You don't need a microscope to try the core loop — **plan mode is pure agent reasoning and works under `--offline`**. The path from launch to an inspectable plan:
+
+1. **Open the agent chat.** Click **Agent** in the header (or press `Ctrl`/`Cmd`+`J`). New here? The **Home** tab's *Start an experiment* button runs a short setup wizard (also available anytime via `/wizard` — it sets the organism, the campaign, and what you're trying to learn).
+2. **Enter plan mode** — type `/plan` in the chat. The agent switches from *operator* to *scientific collaborator*: it won't touch hardware, it helps you design an experiment.
+3. **Describe what you want, in plain language.** For example:
+   > *"Follow GFP-tagged embryos from bean stage through elongation, imaging every 10 minutes, with a no-laser control — three embryos per condition."*
+
+   The agent drafts a **campaign**: a sequence of typed **plan items** — imaging 📷, bench 🧪, genetics 🧬, analysis 📊, decision points 🚦 — each with concrete specs (strain, interval, laser power, Z-slices, target window, success criteria). Keep replying to refine it; `/plan status` shows progress and `/plan exit` returns to run mode.
+4. **Inspect it in the plan viewer.** Open the **Plans** tab. Your campaign appears as a card — click it to open the **plan document**. Each item shows its status (○ planned · ◑ in progress · ● done) and specs; click one to see full details in the inspector. Switch layouts (document / board / graph / timeline) from the view controls, and browse plan **versions** as it evolves. (Typing `/campaign` in chat lists campaigns too.)
+
+That's the loop: **talk → plan → inspect.** With hardware connected (drop `--offline` and start the device layer), the same campaign drives acquisition — and perception events can wake the agent to adjust it as the embryos develop.
+
 ## Guides
 
 | Guide | Audience | What you'll learn |
