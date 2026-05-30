@@ -57,7 +57,7 @@ def create_router(server) -> APIRouter:
         return {"sessions": sessions}
 
     @router.get("/api/home/recent-images")
-    async def recent_images(limit: int = 8, sessions: int = 6):
+    async def recent_images(limit: int = 8, scan: int = 200):
         """Latest projection per embryo, aggregated across recent sessions.
 
         Unlike /api/snapshots (in-memory, current session only), this walks the
@@ -65,19 +65,24 @@ def create_router(server) -> APIRouter:
         sessions. Cheap by construction: recent session IDs come from folder
         names (no session.yaml parse), embryo IDs from directory names (no
         embryo.yaml parse), timepoints from a filename glob (no pixel decode),
-        and the walk stops as soon as `limit` images are collected. Bounds are
-        clamped so a crafted ?sessions=/?limit= can't turn this unauthenticated
-        read into a full-disk scan. Returns components; the client builds the
-        (encoded) image URL.
+        and the walk stops as soon as `limit` images are collected.
+
+        `scan` is the *budget* of most-recent sessions to walk while hunting for
+        images, NOT a hard window — empty/aborted sessions (common at the head:
+        a rig accrues many no-capture sessions) are skipped nearly for free
+        (one iterdir each), so the default is generous enough to reach older
+        sessions that actually hold projections. Both bounds are clamped so a
+        crafted ?scan=/?limit= can't turn this unauthenticated read into an
+        unbounded scan. Returns components; the client builds the (encoded) URL.
         """
         store = _file_store()
         if store is None:
             return {"images": []}
         limit = max(1, min(int(limit), 48))
-        sessions = max(1, min(int(sessions), 24))
+        scan = max(1, min(int(scan), 500))
         out = []
         try:
-            for sid in (store.recent_session_ids(sessions) or []):
+            for sid in (store.recent_session_ids(scan) or []):
                 try:
                     eids = store.list_embryo_ids(sid)
                 except Exception:
