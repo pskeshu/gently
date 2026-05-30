@@ -2,7 +2,7 @@
 
 Agentic harness for microscopy.
 
-**Status**: v0.11.0 — actively developed at Shroff Lab, Janelia.
+**Status**: 0.22.0.dev0 — actively developed at Shroff Lab, Janelia.
 
 ![Safety Architecture](docs/images/safety_architecture.png)
 
@@ -67,36 +67,36 @@ Currently, the sample abstraction is the `Embryo` object for *C. elegans* work. 
 
 ### Prerequisites
 
-- Python 3.11+
-- [Node.js](https://nodejs.org/) 18+ (for the Ink TUI)
+- Python 3.10+
 - An `ANTHROPIC_API_KEY` environment variable
+- *(Optional)* `GENTLY_STORAGE_PATH` — where sessions and data live (default `D:/Gently3`)
+
+Gently is **web-first**: the agent is driven from an in-page chat in your
+browser. There is no TUI to build (Node.js is only needed for the paper
+diagrams, not the app).
 
 ### Setup
 
 ```bash
-# Clone and install Python dependencies
 git clone https://github.com/pskeshu/gently.git
 cd gently
-pip install -r requirements.txt
-
-# Build the TUI (one-time, rebuild after TUI code changes)
-cd gently/tui
-npm install
-npm run build
-cd ../..
+pip install -e .            # installs the gently package + dependencies
 ```
 
 ### Launch
 
 ```bash
-# 1. Start the device layer (hardware control + SAM detection)
+# 1. Device layer (hardware control + SAM detection) — separate process, own terminal
 python start_device_layer.py
 
-# 2. Launch the agent
+# 2. Agent + web UI (starts the in-process server and opens your browser)
 python launch_gently.py
 
-# Or launch without hardware (for development / review)
+# Run without hardware (development / review)
 python launch_gently.py --offline
+
+# Don't auto-open a browser — open the printed URL yourself
+python launch_gently.py --no-browser
 
 # Resume a previous session
 python launch_gently.py --resume            # interactive picker
@@ -107,6 +107,38 @@ python launch_gently.py --resume <id>       # specific session
 python launch_gently.py -v                  # INFO level
 python launch_gently.py --debug             # DEBUG level
 ```
+
+The launcher prints a banner with the URL (default `http://localhost:8080`),
+device status, storage path, and log location. Open that URL in any browser on
+the LAN.
+
+### First sign-in (accounts)
+
+**Viewing is open** — the dashboard loads read-only for anyone, no login.
+Signing in *elevates* you to control (driving hardware, taking the
+single-operator lock); it isn't a gate on the page.
+
+On the **first run**, Gently creates one `admin` account and prints a one-time
+random password in the startup banner:
+
+```
+First-run admin account created — sign in at the URL above:
+    username: admin
+    password: <random>
+```
+
+- **Save it now** — the password is printed to the console once and never
+  written to the log (only a PBKDF2 hash is stored).
+- After signing in, add accounts (roles `viewer` / `operator` / `admin`) via the
+  admin-only `POST /api/auth/users`.
+- **Lost it?** There's no reset command yet — delete
+  `<GENTLY_STORAGE_PATH>/auth/users.yaml` and restart to bootstrap a fresh
+  `admin` (this clears all accounts).
+- **Just trying it locally?** `GENTLY_NO_AUTH=1` disables accounts entirely
+  (legacy mode: localhost gets control, remote callers need `X-Gently-Token`).
+
+Accounts live under `<GENTLY_STORAGE_PATH>/auth/` (`users.yaml` + `secret.key`),
+outside the repo.
 
 ## Guides
 
@@ -125,7 +157,7 @@ Four layers with strict downward-only dependencies. The **harness** (reusable ag
 gently/
 ├── core/                  # Layer 1: Foundation — zero domain knowledge
 │   ├── event_bus.py       #   Async pub/sub messaging
-│   ├── store.py           #   GentlyStore (SQLite + files)
+│   ├── file_store.py      #   FileStore (file-based: YAML / JSONL / TIF)
 │   ├── imaging.py         #   Projection, normalization, encoding
 │   └── coordinates.py     #   Pixel/stage transforms
 │
