@@ -388,6 +388,21 @@ class FileStore:
         sessions.sort(key=lambda s: s.get("last_active", ""), reverse=True)
         return sessions
 
+    def recent_session_ids(self, limit: int = 8) -> List[str]:
+        """Most-recent session IDs by folder-name date prefix, *cheaply*.
+
+        Folder names are ``{YYYYMMDD}_{HHMM}_{slug}_{id8}`` so a reverse lexical
+        sort of the index orders them newest-first by creation time — no
+        ``session.yaml`` parse required. This is a creation-recency proxy (a
+        long-dormant session that was just resumed sorts by its original date),
+        which is fine for at-a-glance landing views; use ``list_sessions`` when
+        exact ``last_active`` ordering matters.
+        """
+        items = sorted(self._index.items(), key=lambda kv: kv[1], reverse=True)
+        if limit and limit > 0:
+            items = items[:limit]
+        return [sid for sid, _ in items]
+
     def touch_session(self, session_id: str) -> None:
         """Update last_active timestamp."""
         sd = self._session_dir(session_id)
@@ -561,6 +576,22 @@ class FileStore:
                 if data is not None:
                     result.append(_normalize_embryo_record(data))
         return result
+
+    def list_embryo_ids(self, session_id: str) -> List[str]:
+        """Embryo IDs from directory names only — no ``embryo.yaml`` parse.
+
+        The directory name *is* the embryo_id in this layout (see
+        ``_embryo_dir`` / ``put_embryo``), so callers that only need the ids
+        (e.g. enumerating projections) can skip the per-embryo YAML read that
+        ``list_embryos`` pays.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        embryos_dir = sd / "embryos"
+        if not embryos_dir.exists():
+            return []
+        return [e.name for e in sorted(embryos_dir.iterdir()) if e.is_dir()]
 
     # ==================================================================
     # Volumes

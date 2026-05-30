@@ -6,13 +6,18 @@
  * that launches the setup flow (the wizard, which no longer auto-pops in chat).
  *
  * Read-only fetches against existing endpoints (/api/sessions, /api/campaigns,
- * /api/snapshots); mirrors the ReviewApp/CampaignsApp module pattern.
+ * /api/home/recent-images); mirrors the ReviewApp/CampaignsApp module pattern.
  */
 const HomeApp = (() => {
     let _inited = false;
     const SESSIONS_N = 5;
     const CAMPAIGNS_N = 5;
     const IMAGES_N = 8;
+    // Recent images are stable (latest projection per embryo). refresh() runs on
+    // every Home-tab entry, so guard against redundant disk-walking fetches:
+    // skip if one is in flight or the strip was loaded within IMAGES_TTL_MS.
+    const IMAGES_TTL_MS = 15000;
+    let _imgState = { at: 0, inflight: false };
 
     function relTime(iso) {
         if (!iso) return '';
@@ -90,26 +95,42 @@ const HomeApp = (() => {
         } catch (e) { empty(el, 'Could not load plans.'); }
     }
 
-    async function loadImages() {
+    async function loadImages(force) {
         const el = document.getElementById('home-recent-images');
         if (!el) return;
+        if (_imgState.inflight) return;
+        // _imgState.at is set only after a completed fetch (images or empty),
+        // never after an error — so failures still retry on the next entry.
+        if (!force && _imgState.at && (Date.now() - _imgState.at) < IMAGES_TTL_MS) return;
+        _imgState.inflight = true;
         try {
-            const data = await (await fetch('/api/snapshots')).json();
-            // /api/snapshots is timestamp-ASCENDING; take the tail for "recent".
-            const recent = (data.snapshots || []).slice(-IMAGES_N).reverse();
+            const data = await (await fetch(`/api/home/recent-images?limit=${IMAGES_N}`)).json();
+            // Latest projection per embryo across recent sessions (server orders
+            // most-recent session first).
+            const recent = (data.images || []).slice(0, IMAGES_N);
             if (!recent.length) {
-                empty(el, 'No images yet — they appear once a session is active.');
+                empty(el, 'No images yet — they appear once a session has captured volumes.');
+                _imgState.at = Date.now();
                 return;
             }
             el.innerHTML = '<div class="home-image-strip">' + recent.map(s => {
-                const m = s.metadata || {};
-                const label = m.embryo_id
-                    ? `${m.embryo_id}${m.timepoint != null ? ' · t' + m.timepoint : ''}` : '';
-                return `<div class="home-image" title="${escapeHtml(label)}">
-                    <img loading="lazy" src="/api/images/${encodeURIComponent(s.uid)}/png?size=96" alt="${escapeHtml(label)}">
+                const tp = (s.timepoint != null) ? ` · t${s.timepoint}` : '';
+                const label = `${s.embryo_id || ''}${tp}`;
+                const sub = s.session_name && s.session_name !== s.session_id
+                    ? ` (${s.session_name})` : '';
+                const src = `/api/sessions/${encodeURIComponent(s.session_id)}`
+                    + `/projection?embryo=${encodeURIComponent(s.embryo_id)}`
+                    + `&t=${encodeURIComponent(s.timepoint)}`;
+                return `<div class="home-image" title="${escapeHtml(label + sub)}">
+                    <img loading="lazy" src="${src}" alt="${escapeHtml(label)}">
                 </div>`;
             }).join('') + '</div>';
-        } catch (e) { empty(el, 'Could not load images.'); }
+            _imgState.at = Date.now();
+        } catch (e) {
+            empty(el, 'Could not load images.');
+        } finally {
+            _imgState.inflight = false;
+        }
     }
 
     function updateStatus() {

@@ -1,8 +1,10 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
 import logging
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 
 from gently.ui.web.auth import require_control
 
@@ -53,6 +55,96 @@ def create_router(server) -> APIRouter:
         except Exception as e:
             logger.warning("Failed to list sessions from FileStore: %s", e)
         return {"sessions": sessions}
+
+    @router.get("/api/home/recent-images")
+    async def recent_images(limit: int = 8, sessions: int = 6):
+        """Latest projection per embryo, aggregated across recent sessions.
+
+        Unlike /api/snapshots (in-memory, current session only), this walks the
+        FileStore on disk so the home page can show imagery from *previous*
+        sessions. Cheap by construction: recent session IDs come from folder
+        names (no session.yaml parse), embryo IDs from directory names (no
+        embryo.yaml parse), timepoints from a filename glob (no pixel decode),
+        and the walk stops as soon as `limit` images are collected. Bounds are
+        clamped so a crafted ?sessions=/?limit= can't turn this unauthenticated
+        read into a full-disk scan. Returns components; the client builds the
+        (encoded) image URL.
+        """
+        store = _file_store()
+        if store is None:
+            return {"images": []}
+        limit = max(1, min(int(limit), 48))
+        sessions = max(1, min(int(sessions), 24))
+        out = []
+        try:
+            for sid in (store.recent_session_ids(sessions) or []):
+                try:
+                    eids = store.list_embryo_ids(sid)
+                except Exception:
+                    eids = []
+                sname = None  # parsed lazily, only if this session contributes
+                for eid in eids:
+                    try:
+                        tps = store.list_projection_timepoints(sid, eid) or []
+                    except Exception:
+                        tps = []
+                    if not tps:
+                        continue
+                    if sname is None:
+                        try:
+                            info = store.get_session(sid)
+                        except Exception:
+                            info = None
+                        sname = (info.get("name") if info else None) or sid
+                    out.append({
+                        "session_id": sid,
+                        "session_name": sname,
+                        "embryo_id": eid,
+                        "timepoint": int(max(tps)),
+                    })
+                    if len(out) >= limit:
+                        break
+                if len(out) >= limit:
+                    break
+        except Exception as e:
+            logger.warning("recent_images failed: %s", e)
+        return {"images": out[:limit]}
+
+    @router.get("/api/sessions/{session_id}/projection")
+    async def get_session_projection(session_id: str, embryo: str, t: int):
+        """Serve a saved JPEG projection from any session on disk.
+
+        Path-traversal safe: the resolved file must live inside the session's
+        own directory, so a crafted `embryo` (e.g. '../..') can't escape.
+        """
+        store = _file_store()
+        if store is None:
+            raise HTTPException(status_code=503, detail="Store not available")
+        path = store.get_projection_path(session_id, embryo, t)
+        if path is None:
+            raise HTTPException(status_code=404, detail="Projection not found")
+        try:
+            sd = store._session_dir(session_id)
+            resolved = Path(path).resolve()
+            # Component-wise ancestor check (not str.startswith, which would
+            # let a sibling like `<sd>_evil` slip through the prefix match).
+            sd_resolved = Path(sd).resolve() if sd is not None else None
+            if sd_resolved is None or sd_resolved not in resolved.parents:
+                raise HTTPException(status_code=404, detail="Not found")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=404, detail="Not found")
+        try:
+            st = resolved.stat()
+            etag = f'"{int(st.st_mtime)}-{st.st_size}"'
+        except OSError:
+            etag = None
+        headers = {"Cache-Control": "private, max-age=60"}
+        if etag:
+            headers["ETag"] = etag
+        return FileResponse(str(resolved), media_type="image/jpeg",
+                            headers=headers)
 
     @router.post("/api/sessions/{session_id}/resume",
                  dependencies=[Depends(require_control)])
