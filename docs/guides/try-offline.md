@@ -4,29 +4,38 @@ Get the agent running in 10 minutes — no microscope needed.
 
 ## Prerequisites
 
-- **Python 3.11+**
-- **Node.js 18+** (for the terminal UI)
+- **Python 3.10+**
 - An **Anthropic API key** (`ANTHROPIC_API_KEY` environment variable)
+
+Gently is web-first — the agent runs in your browser, so there's no terminal UI to build (no Node.js needed for the app).
 
 ## Install
 
 ```bash
 git clone https://github.com/pskeshu/gently.git
 cd gently
-pip install -r requirements.txt
+```
 
-# Build the TUI (one-time)
-cd gently/tui
-npm install
-npm run build
-cd ../..
+Create an environment and install — **either path works**:
+
+```bash
+# venv + pip
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
+```
+
+```bash
+# or uv (https://docs.astral.sh/uv/)
+uv venv
+uv pip install -e .
 ```
 
 ## Launch
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-python launch_gently.py --offline
+export ANTHROPIC_API_KEY=sk-ant-...      # Windows: set ANTHROPIC_API_KEY=sk-ant-...
+python launch_gently.py --offline        # uv (no activate): uv run python launch_gently.py --offline
 ```
 
 The `--offline` flag skips the hardware connection. The full agent launches — conversation, perception, plan mode, memory — just without microscope control.
