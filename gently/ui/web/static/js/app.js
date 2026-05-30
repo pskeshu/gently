@@ -6,7 +6,7 @@
 const state = {
     ws: null,
     connected: false,
-    tab: TABS.EMBRYOS,  // Default to Embryos tab
+    tab: TABS.HOME,  // Default to the Home landing tab
     snapshots: [],
     calibration: [],
     embryos: [],
@@ -70,6 +70,9 @@ function switchTab(tabName) {
     document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
     const content = document.getElementById(`${tabName}-content`);
     if (content) content.classList.add('active');
+
+    // Lazy-init Home landing tab
+    if (tabName === TABS.HOME && typeof HomeApp !== 'undefined') HomeApp.init();
 
     // Render galleries
     if (tabName === TABS.CALIBRATION) renderCalibrationGallery();
@@ -631,7 +634,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT) {
+        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT) {
             switchTab(tab);
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);

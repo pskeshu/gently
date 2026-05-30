@@ -617,9 +617,14 @@ def create_router(server) -> APIRouter:
 
         try:
             # ── Wizard phase ──────────────────────────────────────
-            # Run startup wizard (if needed) before entering the REPL.
+            # The startup wizard no longer auto-pops in the chat — setup is now
+            # launched on demand from the Home page (which sends /wizard) or via
+            # the /wizard command. Re-enable auto-run by setting
+            # server.wizard_autorun = True. NOTE: wizard_ran below is still
+            # derived from wizard.needed, so the briefing/resolution path is
+            # unaffected by this gate.
             wizard = getattr(bridge, "_wizard", None)
-            if wizard is not None and wizard.needed:
+            if wizard is not None and wizard.needed and getattr(server, "wizard_autorun", False):
                 wizard_task = await _run_wizard(
                     wizard, websocket, send_fn, _choice_futures, bridge,
                     log_transcript=_log_transcript,

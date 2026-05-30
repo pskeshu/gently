@@ -25,6 +25,48 @@
     <div class="app-main">
 
     <!-- Calibration Tab -->
+    <!-- Home Tab (landing) -->
+    <div id="home-content" class="tab-content active">
+        <div class="home-scroll">
+            <div class="home-hero">
+                <div class="home-hero-text">
+                    <h2 class="home-hero-title">Welcome to Gently</h2>
+                    <div class="home-hero-status" id="home-status">Connecting…</div>
+                </div>
+                <button class="home-start-btn" id="home-start-btn">Start / continue an experiment</button>
+            </div>
+            <div class="home-grid">
+                <div class="panel home-card">
+                    <div class="home-card-head">
+                        <span class="home-card-title">Recent sessions</span>
+                        <a href="#sessions" class="home-card-link" data-go-tab="sessions">All</a>
+                    </div>
+                    <div class="home-card-body" id="home-recent-sessions">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+                <div class="panel home-card">
+                    <div class="home-card-head">
+                        <span class="home-card-title">Recent plans</span>
+                        <a href="#plans" class="home-card-link" data-go-tab="plans">All</a>
+                    </div>
+                    <div class="home-card-body" id="home-recent-campaigns">
+                        <div class="empty-state">Loading…</div>
+                    </div>
+                </div>
+                <div class="panel home-card home-card-wide">
+                    <div class="home-card-head">
+                        <span class="home-card-title">Recent images</span>
+                        <a href="#embryos" class="home-card-link" data-go-tab="embryos">All</a>
+                    </div>
+                    <div class="home-card-body" id="home-recent-images">
+                        <div class="empty-state">No images yet — they appear once a session is active.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="calibration-content" class="tab-content">
         <div class="calibration-header-bar">
             <h2 class="calibration-title">Calibration</h2>
@@ -127,7 +169,7 @@
     </div>
 
     <!-- Embryos Tab (default landing page) -->
-    <div id="embryos-content" class="tab-content active">
+    <div id="embryos-content" class="tab-content">
         <!-- Subtab bar -->
         <div class="embryos-subtab-bar">
             <div class="embryos-subtab active" data-subtab="monitoring" onclick="MarkingManager.switchSubtab('monitoring')">Monitoring</div>
@@ -576,6 +618,7 @@
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/home.js"></script>
     <script src="/static/js/campaigns.js"></script>
     <script src="/static/js/review.js"></script>
     <script src="/static/js/agent-chat.js"></script>

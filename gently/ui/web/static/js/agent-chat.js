@@ -952,5 +952,13 @@ const AgentChat = (() => {
 
     document.addEventListener('DOMContentLoaded', init);
 
-    return { togglePanel };
+    // Public: programmatically send a message/command (e.g. the Home page's
+    // "Start / continue an experiment" button sends '/wizard').
+    function runCommand(text) {
+        if (!text) return;
+        if (!hasControl) { renderControl(); return; }
+        actuallySend(text);
+    }
+
+    return { togglePanel, runCommand };
 })();
