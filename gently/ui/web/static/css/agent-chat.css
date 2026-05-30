@@ -38,7 +38,7 @@
 .agent-chat {
     position: absolute;
     top: 0; right: 0; bottom: 0;
-    width: var(--chat-w, 384px);
+    width: var(--chat-w, 460px);
     max-width: 92vw;
     display: flex;
     flex-direction: column;

@@ -718,7 +718,11 @@ const AgentChat = (() => {
 
     // ── Layout: dock, resize, persistence ─────────────────────
     const CHAT_MIN_W = 320;
-    function chatMaxW() { return Math.min(560, Math.round(window.innerWidth * 0.45)); }
+    const CHAT_DEFAULT_W = 460;
+    // Roomy ceiling: the panel shows agent reasoning, tool calls, approvals and
+    // pickers — content that wraps badly in a narrow column — so allow up to
+    // ~half the viewport (was min(560, 45vw), which capped power users too low).
+    function chatMaxW() { return Math.min(760, Math.round(window.innerWidth * 0.60)); }
 
     function emitLayoutChanged() {
         // Let the CSS settle, then notify viewers (e.g. the 3D canvas) to resize.
@@ -726,7 +730,7 @@ const AgentChat = (() => {
     }
 
     function curChatWidth() {
-        return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chat-w')) || 384;
+        return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chat-w')) || CHAT_DEFAULT_W;
     }
 
     function setChatWidth(px, persist) {
@@ -795,7 +799,7 @@ const AgentChat = (() => {
             resizeEl.addEventListener('pointerup', onUp);
             resizeEl.addEventListener('pointercancel', onUp);
         });
-        resizeEl.addEventListener('dblclick', () => { setChatWidth(384, true); emitLayoutChanged(); });
+        resizeEl.addEventListener('dblclick', () => { setChatWidth(CHAT_DEFAULT_W, true); emitLayoutChanged(); });
     }
 
     function restorePrefs() {
