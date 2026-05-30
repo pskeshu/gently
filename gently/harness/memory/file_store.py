@@ -28,6 +28,7 @@ under a single *agent_dir* directory as YAML files, organised by domain:
         assessments/{id}.yaml
 """
 
+import copy
 import dataclasses
 import json
 import logging
@@ -106,6 +107,11 @@ class FileContextStore:
     def __init__(self, agent_dir: Path):
         self.agent_dir = Path(agent_dir)
         self._ensure_dirs()
+        # YAML parse cache: str(path) -> ((mtime, size), parsed). Collapses the
+        # O(N^2) re-parsing in campaign-tree builds; auto-invalidated by file
+        # mtime/size changes and explicitly on _write_yaml. Set BEFORE the index
+        # rebuild below, which reads YAML through the cache.
+        self._yaml_cache: Dict[str, tuple] = {}
         # In-memory index: campaign_id -> folder Path
         self._campaign_index: Dict[str, Path] = {}
         self._rebuild_campaign_index()
@@ -177,22 +183,32 @@ class FileContextStore:
             yaml.dump(data, fh, Dumper=_ISODumper, default_flow_style=False,
                        allow_unicode=True, sort_keys=False)
         # Atomic rename (on Windows this replaces the target).
-        if os.name == "nt":
-            # os.replace is atomic on Windows when on same volume.
-            os.replace(str(tmp), str(path))
-        else:
-            os.replace(str(tmp), str(path))
+        os.replace(str(tmp), str(path))
+        # Invalidate the parse cache so the next read reloads (new mtime anyway).
+        self._yaml_cache.pop(str(path), None)
 
     def _read_yaml(self, path: Path):
-        """Read a YAML file; return None if missing or empty."""
-        if not path.exists():
+        """Read a YAML file, parse-cached by (mtime, size). Returns None if
+        missing or empty. The cached object is never handed out directly — every
+        return is a deepcopy — so callers may freely mutate the result without
+        corrupting the cache."""
+        try:
+            st = path.stat()
+        except OSError:
             return None
+        key = str(path)
+        sig = (st.st_mtime, st.st_size)
+        cached = self._yaml_cache.get(key)
+        if cached is not None and cached[0] == sig:
+            return copy.deepcopy(cached[1])
         try:
             with open(path, "r", encoding="utf-8") as fh:
-                return yaml.safe_load(fh)
+                data = yaml.safe_load(fh)
         except Exception:
             logger.warning(f"Failed to read {path}", exc_info=True)
             return None
+        self._yaml_cache[key] = (sig, data)
+        return copy.deepcopy(data)
 
     def _append_jsonl(self, path: Path, record: dict):
         """Append one JSON line to a file."""
