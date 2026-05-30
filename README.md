@@ -80,10 +80,26 @@ diagrams, not the app).
 ```bash
 git clone https://github.com/pskeshu/gently.git
 cd gently
-pip install -e .            # installs the gently package + dependencies
+```
+
+Then create an environment and install — **either path works**:
+
+```bash
+# venv + pip
+python -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .                   # installs the gently package + dependencies
+```
+
+```bash
+# or uv (https://docs.astral.sh/uv/) — faster, no separate activation step
+uv venv
+uv pip install -e .
 ```
 
 ### Launch
+
+> **uv users:** either activate the env first (`source .venv/bin/activate`) or prefix the commands below with `uv run` (e.g. `uv run python launch_gently.py`).
 
 ```bash
 # 1. Device layer (hardware control + SAM detection) — separate process, own terminal
