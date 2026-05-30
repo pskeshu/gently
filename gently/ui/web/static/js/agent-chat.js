@@ -36,7 +36,9 @@ const AgentChat = (() => {
     let stopBtn = null;           // explicit Stop button (separate from Send)
 
     // DOM refs (resolved in init)
-    let fab, panel, log, input, sendBtn, conn, banner, closeBtn, userEl, signoutBtn;
+    let panel, log, input, sendBtn, conn, banner, closeBtn, userEl, signoutBtn;
+    let toggleBtn, pinBtn, resizeEl, toggleDot, toggleBadge;  // docked-panel chrome
+    let pendingSlot = null;       // sticky slot for ASK approval proposals
     let acComplete = null;        // the autocomplete dropdown element
 
     // ── Safe rendering ────────────────────────────────────────
@@ -56,7 +58,33 @@ const AgentChat = (() => {
         return html;
     }
 
-    function scrollToBottom() { log.scrollTop = log.scrollHeight; }
+    // Pin-to-bottom autoscroll: only follow new content if the user is already
+    // near the bottom; otherwise count unseen items and show a "↓ N new" pill so
+    // a streaming agent never yanks the operator away from something they're reading.
+    let stickBottom = true;
+    let newCount = 0;
+    let jumpPill = null;
+    function nearBottom() { return (log.scrollHeight - log.scrollTop - log.clientHeight) < 60; }
+    function renderJumpPill() {
+        if (!jumpPill) return;
+        if (!stickBottom && newCount > 0) {
+            jumpPill.textContent = `↓ ${newCount} new`;
+            jumpPill.classList.remove('hidden');
+        } else {
+            jumpPill.classList.add('hidden');
+        }
+    }
+    function scrollToBottom(isNewItem = true) {
+        if (stickBottom) { log.scrollTop = log.scrollHeight; }
+        // Only count genuinely new items (bubbles/rows), not in-place streaming
+        // text edits — otherwise the "N new" pill inflates per chunk.
+        else { if (isNewItem) newCount += 1; renderJumpPill(); }
+    }
+    function jumpToBottom() {
+        stickBottom = true; newCount = 0;
+        log.scrollTop = log.scrollHeight;
+        renderJumpPill();
+    }
 
     // ── Activity indicator ────────────────────────────────────
     // A single reusable "the agent is working" row, always pinned to the
@@ -118,6 +146,7 @@ const AgentChat = (() => {
         log.innerHTML = '';
         currentAgentEl = null;
         activityEl = null;
+        stickBottom = true; newCount = 0;  // a full rebuild jumps to latest
         (items || []).forEach(it => {
             if (it.role === 'user') {
                 addUserMessage(it.text, it.author);
@@ -208,6 +237,7 @@ const AgentChat = (() => {
                 currentAgentEl = null;
                 setBusy(true, 'wake');
                 addAutonomousBanner(msg.trigger || '');
+                bumpBadge();
                 break;
 
             case 'thinking':
@@ -222,7 +252,7 @@ const AgentChat = (() => {
                 }
                 currentAgentEl._raw += (msg.text || '');
                 currentAgentEl.innerHTML = mdToHtml(currentAgentEl._raw);
-                scrollToBottom();
+                scrollToBottom(false);  // in-place edit, not a new item
                 break;
             }
 
@@ -282,6 +312,7 @@ const AgentChat = (() => {
             case 'choice_request':
                 hideActivity();
                 renderChoice(msg);
+                bumpBadge();
                 break;
 
             case 'applied_spec':
@@ -303,6 +334,7 @@ const AgentChat = (() => {
 
             case 'notification':
                 addSystemLine(msg.body ? `${msg.title} — ${msg.body}` : msg.title, msg.level || 'info');
+                bumpBadge();
                 break;
 
             case 'error':
@@ -324,9 +356,10 @@ const AgentChat = (() => {
     function renderChoice(msg) {
         const data = msg.choice_data || {};
         const reqId = msg.request_id || data.request_id || '';
+        const isWake = msg.origin === 'wake';
         const wrap = document.createElement('div');
-        wrap.className = 'ac-choice' + (msg.origin === 'wake' ? ' ac-choice-wake' : '');
-        if (msg.origin === 'wake') {
+        wrap.className = 'ac-choice' + (isWake ? ' ac-choice-wake' : '');
+        if (isWake) {
             const tag = document.createElement('div');
             tag.className = 'ac-choice-origin';
             tag.textContent = 'Autonomy proposal — your approval needed';
@@ -349,9 +382,20 @@ const AgentChat = (() => {
                 wrap.classList.add('ac-choice-answered');
                 btn.classList.add('ac-choice-picked');
                 if (streaming) setActivity('Working…');
+                if (isWake && pendingSlot) {
+                    setTimeout(() => { pendingSlot.classList.add('hidden'); pendingSlot.innerHTML = ''; }, 700);
+                }
             });
             wrap.appendChild(btn);
         });
+        // ASK approvals pin to the sticky slot above the composer so they can't
+        // scroll out of reach; ordinary choices stay inline in the transcript.
+        if (isWake && pendingSlot) {
+            pendingSlot.innerHTML = '';
+            pendingSlot.appendChild(wrap);
+            pendingSlot.classList.remove('hidden');
+            return;
+        }
         log.appendChild(wrap);
         scrollToBottom();
     }
@@ -591,6 +635,7 @@ const AgentChat = (() => {
         conn.classList.toggle('ac-conn-ok', ok);
         conn.classList.toggle('ac-conn-bad', !ok);
         conn.textContent = label || (ok ? 'Connected' : 'Reconnecting…');
+        if (toggleDot) toggleDot.classList.toggle('ok', ok);
     }
 
     // ── Transport ─────────────────────────────────────────────
@@ -655,12 +700,126 @@ const AgentChat = (() => {
 
     function togglePanel(open) {
         panelOpen = (open === undefined) ? !panelOpen : open;
-        panel.classList.toggle('hidden', !panelOpen);
-        fab.classList.toggle('ac-fab-active', panelOpen);
-        if (panelOpen) {
-            if (!ws) connect();
-            setTimeout(() => input.focus(), 50);
+        panel.classList.toggle('open', panelOpen);
+        if (toggleBtn) {
+            toggleBtn.setAttribute('aria-pressed', panelOpen ? 'true' : 'false');
+            toggleBtn.setAttribute('aria-expanded', panelOpen ? 'true' : 'false');
         }
+        if (panelOpen) {
+            clearBadge();
+            if (!ws) connect();
+            // Re-pin to the latest content (it may have streamed while closed,
+            // where scroll events don't fire to keep stickBottom current).
+            setTimeout(() => { input.focus(); jumpToBottom(); }, 50);
+        }
+        // Opening/closing while docked reflows .app-main — tell viewers to resize.
+        if (document.body.classList.contains('chat-docked')) emitLayoutChanged();
+    }
+
+    // ── Layout: dock, resize, persistence ─────────────────────
+    const CHAT_MIN_W = 320;
+    function chatMaxW() { return Math.min(560, Math.round(window.innerWidth * 0.45)); }
+
+    function emitLayoutChanged() {
+        // Let the CSS settle, then notify viewers (e.g. the 3D canvas) to resize.
+        requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('gently:layout-changed')));
+    }
+
+    function curChatWidth() {
+        return parseInt(getComputedStyle(document.documentElement).getPropertyValue('--chat-w')) || 384;
+    }
+
+    function setChatWidth(px, persist) {
+        const w = Math.max(CHAT_MIN_W, Math.min(chatMaxW(), Math.round(px)));
+        document.documentElement.style.setProperty('--chat-w', w + 'px');
+        if (persist) { try { localStorage.setItem('gently-chat-w', String(w)); } catch (_) {} }
+        return w;
+    }
+
+    function applyDock(docked, persist) {
+        document.body.classList.toggle('chat-docked', docked);
+        if (pinBtn) {
+            pinBtn.setAttribute('aria-pressed', docked ? 'true' : 'false');
+            pinBtn.title = docked ? 'Unpin (float over content)' : 'Pin to dock';
+        }
+        if (persist) { try { localStorage.setItem('gently-chat-docked', docked ? '1' : '0'); } catch (_) {} }
+        // Suppress the slide animation across the mode flip, then notify viewers.
+        panel.style.transition = 'none';
+        requestAnimationFrame(() => { panel.style.transition = ''; emitLayoutChanged(); });
+    }
+
+    function togglePin() {
+        const docked = !document.body.classList.contains('chat-docked');
+        if (docked && !panelOpen) togglePanel(true);  // pinning implies showing
+        applyDock(docked, true);
+    }
+
+    function setupResize() {
+        if (!resizeEl) return;
+        let startX = 0, startW = 0, dragging = false, rafId = 0, pid = null;
+        const onMove = (e) => {
+            if (!dragging) return;
+            setChatWidth(startW + (startX - e.clientX), false);  // right panel: drag left = wider
+            if (document.body.classList.contains('chat-docked')) {
+                if (rafId) cancelAnimationFrame(rafId);
+                rafId = requestAnimationFrame(emitLayoutChanged);  // coalesce dock reflow
+            }
+        };
+        const onUp = () => {
+            if (!dragging) return;
+            dragging = false;
+            resizeEl.classList.remove('dragging');
+            resizeEl.removeEventListener('pointermove', onMove);
+            resizeEl.removeEventListener('pointerup', onUp);
+            resizeEl.removeEventListener('pointercancel', onUp);
+            if (pid !== null && resizeEl.hasPointerCapture && resizeEl.hasPointerCapture(pid)) {
+                try { resizeEl.releasePointerCapture(pid); } catch (_) {}
+            }
+            pid = null;
+            document.body.style.userSelect = '';
+            setChatWidth(curChatWidth(), true);
+            emitLayoutChanged();
+        };
+        resizeEl.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;  // primary button only
+            e.preventDefault();
+            dragging = true;
+            startX = e.clientX;
+            startW = curChatWidth();
+            pid = e.pointerId;
+            // Capture so move/up/cancel always reach the handle (touch/pen-safe).
+            try { resizeEl.setPointerCapture(pid); } catch (_) {}
+            resizeEl.classList.add('dragging');
+            document.body.style.userSelect = 'none';
+            resizeEl.addEventListener('pointermove', onMove);
+            resizeEl.addEventListener('pointerup', onUp);
+            resizeEl.addEventListener('pointercancel', onUp);
+        });
+        resizeEl.addEventListener('dblclick', () => { setChatWidth(384, true); emitLayoutChanged(); });
+    }
+
+    function restorePrefs() {
+        try {
+            const w = parseInt(localStorage.getItem('gently-chat-w'));
+            if (w) setChatWidth(w, false);
+            if (localStorage.getItem('gently-chat-docked') === '1') applyDock(true, false);
+        } catch (_) {}
+    }
+
+    // Unseen-activity badge on the header toggle — so a closed panel still tells
+    // the operator the agent did something (woke, proposed an approval, notified).
+    let badgeCount = 0;
+    function bumpBadge() {
+        if (panelOpen) return;  // they're watching; no badge needed
+        badgeCount += 1;
+        if (toggleBadge) {
+            toggleBadge.textContent = badgeCount > 9 ? '9+' : String(badgeCount);
+            toggleBadge.classList.remove('hidden');
+        }
+    }
+    function clearBadge() {
+        badgeCount = 0;
+        if (toggleBadge) { toggleBadge.classList.add('hidden'); toggleBadge.textContent = ''; }
     }
 
     // ── Identity ──────────────────────────────────────────────
@@ -691,7 +850,6 @@ const AgentChat = (() => {
 
     // ── Init ──────────────────────────────────────────────────
     function init() {
-        fab = document.getElementById('agent-fab');
         panel = document.getElementById('agent-chat');
         log = document.getElementById('agent-chat-log');
         input = document.getElementById('agent-chat-text');
@@ -701,10 +859,27 @@ const AgentChat = (() => {
         closeBtn = document.getElementById('agent-chat-close');
         userEl = document.getElementById('agent-chat-user');
         signoutBtn = document.getElementById('agent-chat-signout');
-        if (!fab || !panel) return;  // markup not present
+        toggleBtn = document.getElementById('agent-chat-toggle');
+        pinBtn = document.getElementById('agent-chat-pin');
+        resizeEl = document.getElementById('agent-chat-resize');
+        toggleDot = document.getElementById('agent-chat-toggle-dot');
+        toggleBadge = document.getElementById('agent-chat-toggle-badge');
+        if (!panel) return;  // markup not present
 
-        fab.addEventListener('click', () => togglePanel());
+        restorePrefs();
+        if (toggleBtn) toggleBtn.addEventListener('click', () => togglePanel());
         closeBtn.addEventListener('click', () => togglePanel(false));
+        if (pinBtn) pinBtn.addEventListener('click', togglePin);
+        setupResize();
+        // Ctrl/Cmd+J toggles the panel from anywhere.
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && (e.key === 'j' || e.key === 'J')) {
+                e.preventDefault();              // suppress browser default (downloads) always
+                if (e.repeat) return;            // ignore held-key auto-repeat
+                if (document.activeElement === input) return;  // don't toggle while composing
+                togglePanel();
+            }
+        });
         signoutBtn.addEventListener('click', async () => {
             if (signoutBtn.dataset.action === 'login') {
                 window.location.href = '/login';
@@ -735,7 +910,23 @@ const AgentChat = (() => {
             stopBtn.title = 'Stop the current turn';
             stopBtn.addEventListener('click', () => { send({ type: 'cancel' }); setBusy(false); });
             inputWrap.appendChild(stopBtn);
+
+            // Sticky ASK-approval slot — above the queue + composer, never scrolls away.
+            pendingSlot = document.createElement('div');
+            pendingSlot.className = 'ac-pending hidden';
+            if (inputWrap.parentNode) inputWrap.parentNode.insertBefore(pendingSlot, queuePanel);
         }
+
+        // "↓ N new" jump pill + pin-to-bottom scroll tracking.
+        jumpPill = document.createElement('button');
+        jumpPill.className = 'ac-jump hidden';
+        jumpPill.addEventListener('click', jumpToBottom);
+        panel.appendChild(jumpPill);
+        log.addEventListener('scroll', () => {
+            stickBottom = nearBottom();
+            if (stickBottom) newCount = 0;
+            renderJumpPill();
+        });
 
         sendBtn.addEventListener('click', submit);
         input.addEventListener('input', () => { autosize(); updateCompletions(); });

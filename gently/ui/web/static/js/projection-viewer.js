@@ -306,6 +306,19 @@ const ProjectionViewer = {
         this.updateViewerVisibility();
     },
 
+    // Resize the WebGL canvas + camera to the container's current width.
+    // (Height is fixed at 400px; only width tracks the layout.) The animation
+    // loop handles re-rendering.
+    _resize3D() {
+        const container = document.getElementById('pv-3d-container');
+        if (!container || !this.renderer3d || !this.camera3d) return;
+        const w = container.clientWidth || 500;
+        const h = 400;
+        this.renderer3d.setSize(w, h);
+        this.camera3d.aspect = w / h;
+        this.camera3d.updateProjectionMatrix();
+    },
+
     // 3D Viewer Methods
     init3DViewer() {
         const container = document.getElementById('pv-3d-container');
@@ -326,6 +339,22 @@ const ProjectionViewer = {
         this.renderer3d.setClearColor(0x000000);
         container.innerHTML = '';
         container.appendChild(this.renderer3d.domElement);
+
+        // Keep the WebGL canvas in sync with its container width — the chat
+        // panel can dock/resize and the window can resize. The animation loop
+        // re-renders every frame, so on a size change we only need to resize the
+        // renderer + camera (coalesced to one rAF). Also listen for the explicit
+        // layout-change event the chat dock fires on pin/unpin.
+        if (this._resizeObserver) this._resizeObserver.disconnect();
+        this._resizeObserver = new ResizeObserver(() => {
+            if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);
+            this._resizeRaf = requestAnimationFrame(() => this._resize3D());
+        });
+        this._resizeObserver.observe(container);
+        if (!this._onLayoutChanged) {
+            this._onLayoutChanged = () => this._resize3D();
+            window.addEventListener('gently:layout-changed', this._onLayoutChanged);
+        }
 
         // Root group is the object the user rotates. Raymarched volume
         // mesh is added here. The group scale flips Y so the image
@@ -616,6 +645,18 @@ const ProjectionViewer = {
         if (this.animationId) {
             cancelAnimationFrame(this.animationId);
             this.animationId = null;
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
+        if (this._resizeRaf) {
+            cancelAnimationFrame(this._resizeRaf);
+            this._resizeRaf = null;
+        }
+        if (this._onLayoutChanged) {
+            window.removeEventListener('gently:layout-changed', this._onLayoutChanged);
+            this._onLayoutChanged = null;
         }
         // Dispose the volume cube's geometry, material, and 3D texture.
         if (this.volumeMesh) {

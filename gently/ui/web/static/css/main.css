@@ -34,6 +34,10 @@
 
     /* Image backgrounds */
     --img-bg: #000;
+
+    /* Docked agent panel */
+    --panel-edge-shadow: rgba(0, 0, 0, 0.55);
+    --border-strong: #444c56;
 }
 
 /* ========================================
@@ -70,6 +74,10 @@
 
     /* Image backgrounds */
     --img-bg: #1e293b;
+
+    /* Docked agent panel — softer shadow + stronger seam for light mode */
+    --panel-edge-shadow: rgba(0, 0, 0, 0.18);
+    --border-strong: #cbd5e1;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -88,6 +96,25 @@ body {
     flex-direction: column;
     overflow: hidden;
     transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* App shell: main column + docked agent panel side by side. The flex row lets
+   the panel become a real column (pushing content) when pinned to dock; in the
+   default overlay mode the panel is position:fixed and sits out of this flow. */
+.app-shell {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: row;
+    position: relative;   /* anchor for the overlay-mode agent panel */
+}
+.app-main {
+    flex: 1 1 auto;
+    min-width: 0;   /* allow canvases to shrink (not overflow) when docked */
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 }
 
 /* Smooth theme transitions for key elements */

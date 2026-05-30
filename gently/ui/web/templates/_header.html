@@ -25,6 +25,17 @@
         <div class="presence-container" id="presence-container">
             <!-- Avatars rendered by PresenceManager -->
         </div>
+        <!-- Agent chat toggle (docked side panel) -->
+        <button class="header-agent-toggle" id="agent-chat-toggle"
+                title="Agent  (Ctrl/Cmd+J)" aria-pressed="false"
+                aria-expanded="false" aria-controls="agent-chat">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+            </svg>
+            <span class="header-agent-label">Agent</span>
+            <span class="header-agent-dot" id="agent-chat-toggle-dot" aria-hidden="true"></span>
+            <span class="header-agent-badge hidden" id="agent-chat-toggle-badge" aria-hidden="true"></span>
+        </button>
         {% endif %}
         <!-- Settings link -->
         <a href="/settings" class="header-nav-link" title="Dashboard settings">
