@@ -178,6 +178,9 @@ That's the loop: **talk → plan → inspect.** With hardware connected (drop `-
 | [What Gently Can Do](docs/guides/capabilities.md) | Everyone | Perception, detection, plan mode, memory, mesh, safety |
 | [Build a Plugin](docs/guides/build-a-plugin.md) | Developers | Create organism and hardware plugins for other modalities |
 | [Hardware Setup](docs/guides/hardware-setup.md) | Labs | Connect a diSPIM, start the device layer, first acquisition |
+| [Sample & Hardware Model](docs/architecture/sample-hardware-domains.md) | Developers | Generalize samples, hardware operations, and device-profile boundaries |
+| [Sample Tracking Metrics](docs/architecture/sample-tracking-metrics.md) | Developers | Define reusable sample state, exposure, focus, and perception metrics |
+| [Hardware Profile Template](docs/architecture/hardware-profile-template.md) | Developers | Checklist for adding or documenting a new microscope profile |
 
 ## Architecture
 
