@@ -16,8 +16,9 @@ def create_router(server) -> APIRouter:
         chat window's "Sign in" affordance), not a gate on the page itself.
         """
         return server.templates.TemplateResponse(
+            request,
             "index.html",
-            {"request": request, "active_section": "embryos", "is_live": True}
+            {"active_section": "embryos", "is_live": True}
         )
 
     # Standalone URLs redirect to SPA with hash fragment for tab routing
@@ -37,8 +38,8 @@ def create_router(server) -> APIRouter:
     async def settings_page(request: Request):
         """Serve the dashboard settings page"""
         return server.templates.TemplateResponse(
+            request,
             "settings.html",
-            {"request": request}
         )
 
     return router

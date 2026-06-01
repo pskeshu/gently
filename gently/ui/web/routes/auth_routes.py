@@ -31,7 +31,7 @@ def create_router(server) -> APIRouter:
             return RedirectResponse("/", status_code=302)
         if current_username(request):
             return RedirectResponse("/", status_code=302)
-        return server.templates.TemplateResponse("login.html", {"request": request})
+        return server.templates.TemplateResponse(request, "login.html")
 
     @router.post("/api/auth/login")
     async def login(request: Request):
