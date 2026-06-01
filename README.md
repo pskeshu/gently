@@ -282,4 +282,6 @@ These papers provide theoretical background for gently's approach:
 
 ## License
 
-See [LICENSE](LICENSE) file.
+Copyright © 2026 Howard Hughes Medical Institute.
+
+Gently is licensed under the GNU General Public License v3.0 or later (GPL-3.0-or-later) — see the [LICENSE](LICENSE) file.
