@@ -1,9 +1,0 @@
-# PyTorch with CUDA 12.1 support (A5000 GPUs)
-# Install with: pip install -r requirements-cuda.txt
---index-url https://download.pytorch.org/whl/cu121
-
-torch>=2.0.0
-torchvision>=0.15.0
-
-# GPU monitoring for dynamic capability provider
-nvidia-ml-py>=12.0.0
