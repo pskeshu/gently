@@ -47,6 +47,16 @@ from ..harness.session.manager import SessionManager
 from ..harness.prompts.manager import PromptManager
 
 
+# Shown when the agent is launched in UI-only mode (--no-api). The web UI is
+# fully browsable, but anything that would call Claude is disabled.
+_NO_API_NOTICE = (
+    "The agent is running in **UI-only mode** (`--no-api`), so it can't "
+    "respond — no Anthropic API calls are made. You can browse the interface, "
+    "view saved sessions, and explore the UI. To enable chat, perception, and "
+    "plan generation, restart without `--no-api` and with `ANTHROPIC_API_KEY` set."
+)
+
+
 class MicroscopyAgent:
     """
     Conversational AI agent for microscopy experiments
@@ -67,6 +77,7 @@ class MicroscopyAgent:
         microscope_client=None,
         session_id: Optional[str] = None,
         store: FileStore = None,
+        no_api: bool = False,
     ):
         """
         Parameters
@@ -83,13 +94,24 @@ class MicroscopyAgent:
             Session ID to resume. If None, creates new session.
         store : FileStore
             Unified file-based data store. Required.
+        no_api : bool
+            UI-only mode: skip Anthropic API calls entirely. The full agent and
+            its sub-components are still constructed (so the web UI boots), but
+            message handling short-circuits with a clear notice instead of
+            calling Claude. Useful for browsing the UI without an API key.
         """
         if store is None:
             raise ValueError("FileStore is required. Pass store=FileStore(path) to agent.")
 
+        # UI-only mode: no real API calls. We still build the client object (so
+        # all sub-components that hold a reference work), but fall back to a
+        # placeholder key so construction never fails when no key is set, and
+        # the message entry points refuse to call Claude.
+        self.api_enabled = not no_api
+
         # API client with interleaved thinking support
         self.claude = anthropic.Anthropic(
-            api_key=api_key or os.getenv("ANTHROPIC_API_KEY"),
+            api_key=api_key or os.getenv("ANTHROPIC_API_KEY") or ("no-api-mode" if no_api else None),
             default_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"}
         )
         self.model = model
@@ -899,6 +921,9 @@ class MicroscopyAgent:
         ):
             return quick_response
 
+        if not self.api_enabled:
+            return _NO_API_NOTICE
+
         # Update system prompt with current state and context awareness
         context_summary = await self.prompts.get_cached_context_summary(
             self.experiment, self.timelapse_orchestrator, self.timeline_manager
@@ -940,6 +965,10 @@ class MicroscopyAgent:
             self.enter_plan_mode, self.exit_plan_mode,
         ):
             yield {'type': 'text', 'text': quick_response}
+            return
+
+        if not self.api_enabled:
+            yield {'type': 'text', 'text': _NO_API_NOTICE}
             return
 
         # Hold the turn-lock for the whole streamed turn so an autonomous wake

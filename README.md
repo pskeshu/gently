@@ -68,7 +68,11 @@ Currently, the sample abstraction is the `Embryo` object for *C. elegans* work. 
 ### Prerequisites
 
 - Python 3.10+
-- An `ANTHROPIC_API_KEY` environment variable
+- An `ANTHROPIC_API_KEY` — either exported in your shell
+  (`export ANTHROPIC_API_KEY=your-key`) or placed in a `.env` file in the
+  project root (`ANTHROPIC_API_KEY=your-key`), which is loaded automatically
+  on launch and is gitignored. *(Not required if you launch with `--no-api`
+  to browse the UI only — see Launch below.)*
 - *(Optional)* `GENTLY_STORAGE_PATH` — where sessions and data live (default `D:/Gently3`)
 
 Gently is **web-first**: the agent is driven from an in-page chat in your
@@ -77,51 +81,94 @@ diagrams, not the app).
 
 ### Setup
 
+This project uses [uv](https://docs.astral.sh/uv/) for environment and
+dependency management. If you don't have it yet, install it following the
+[uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
+(e.g. `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux).
+
+Gently depends on **`gently-perception`** (the VLM perception harness, repo
+`pskeshu/gently-perception`), which is not published to PyPI. Clone it as a
+**sibling** of `gently` so the path source in `pyproject.toml` can find it:
+
 ```bash
+# Clone both repos side by side
 git clone https://github.com/pskeshu/gently.git
+git clone https://github.com/pskeshu/gently-perception.git
+
+# Layout:
+#   <parent>/
+#     gently/             <- you run commands from here
+#     gently-perception/  <- resolved via [tool.uv.sources]
+```
+
+From the project root run:
+
+```bash
 cd gently
+uv sync
 ```
 
-Then create an environment and install — **either path works**:
+This creates a `.venv` in the project directory and installs the runtime + dev
+dependencies pinned in `uv.lock` (see `pyproject.toml` for the spec), including
+`gently-perception` as an editable install from the sibling clone. Activate it
+with `source .venv/bin/activate`, or just prefix commands with `uv run` (e.g.
+`uv run python ...`) to use it without activating.
+
+#### Optional extras
 
 ```bash
-# venv + pip
-python -m venv .venv
-source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e .                   # installs the gently package + dependencies
+# Device-layer accessories (microscope computer): BLE/serial/MQTT transports
+uv sync --extra device
+
+# GPU acceleration for SAM detection — install the CUDA build of PyTorch
+# (skip on CPU-only machines; the default torch from uv sync works there)
+uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ```
 
+#### Running tests
+
 ```bash
-# or uv (https://docs.astral.sh/uv/) — faster, no separate activation step
-uv venv
-uv pip install -e .
+uv run pytest
 ```
 
 ### Launch
 
-> **uv users:** either activate the env first (`source .venv/bin/activate`) or prefix the commands below with `uv run` (e.g. `uv run python launch_gently.py`).
+> The commands below use `uv run` so they work without activating the env. If you've activated it first (`source .venv/bin/activate`), the `uv run` prefix isn't necessary.
+
+To verify the install, you can start gently without an API key or hardware. The
+web UI boots and is browsable, though the agent itself (chat, perception, plan
+mode) stays disabled until you add a key:
+
+```bash
+uv run python launch_gently.py --offline --no-api
+```
+
+For the full launch:
 
 ```bash
 # 1. Device layer (hardware control + SAM detection) — separate process, own terminal
-python start_device_layer.py
+uv run python start_device_layer.py
 
 # 2. Agent + web UI (starts the in-process server and opens your browser)
-python launch_gently.py
+uv run python launch_gently.py
 
 # Run without hardware (development / review)
-python launch_gently.py --offline
+uv run python launch_gently.py --offline
+
+# UI-only — boot the web UI with no API key (chat/perception disabled)
+uv run python launch_gently.py --no-api
 
 # Don't auto-open a browser — open the printed URL yourself
-python launch_gently.py --no-browser
+uv run python launch_gently.py --no-browser
 
 # Resume a previous session
-python launch_gently.py --resume            # interactive picker
-python launch_gently.py --resume latest     # most recent session
-python launch_gently.py --resume <id>       # specific session
+uv run python launch_gently.py --resume            # interactive picker
+uv run python launch_gently.py --resume latest     # most recent session
+uv run python launch_gently.py --resume <id>       # specific session
 
 # Verbose / debug logging
-python launch_gently.py -v                  # INFO level
-python launch_gently.py --debug             # DEBUG level
+uv run python launch_gently.py -v                  # INFO level
+uv run python launch_gently.py --debug             # DEBUG level
 ```
 
 The launcher prints a banner with the URL (default `http://localhost:8080`),

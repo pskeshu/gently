@@ -12,6 +12,7 @@ Usage:
     python launch_gently.py                      # Start server + open browser
     python launch_gently.py --no-browser         # Start server, don't open a browser
     python launch_gently.py --offline            # Run without the device layer
+    python launch_gently.py --no-api             # UI-only: boot the web UI without an API key
     python launch_gently.py --sessions           # List sessions and exit
     python launch_gently.py --resume             # Resume most recent session
     python launch_gently.py --resume latest      # Resume most recent session
@@ -32,6 +33,22 @@ from pathlib import Path
 from datetime import datetime
 
 import yaml
+
+# Load a project-root .env (if present) so ANTHROPIC_API_KEY and other
+# settings can live in a file instead of being exported every session.
+# Existing environment variables take precedence.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:
+    pass
+
+# The gently imports below pull in heavy dependencies (anthropic, torch, scipy,
+# perception) and take several seconds. Print immediate feedback first so the
+# terminal isn't silent during that load. Skipped for --help/--version.
+if not any(flag in sys.argv for flag in ("-h", "--help")):
+    print("Starting gently — loading modules (this can take a few seconds)...", flush=True)
 
 from gently.log_config import configure_logging
 from gently.core.log_bridge import configure_log_bridge
@@ -95,7 +112,7 @@ def list_sessions(store: FileStore):
     print("Use: python launch_gently.py --resume <id>")
 
 
-def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, resumed):
+def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, resumed, no_api=False):
     """Print a human-readable launch banner to the terminal.
 
     This is the "what you see when you open it" surface now that the
@@ -108,12 +125,14 @@ def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, res
         dev = "● connected"
     else:
         dev = "○ offline — run:  python start_device_layer.py"
+    agent_status = "○ disabled — UI only (--no-api)" if no_api else "● enabled"
     url = viz_url or "(viz server failed to start — check the log)"
     tag = "  [resumed session]" if resumed else ""
     print()
     print(f"  ✦ Gently is running.{tag}")
     print(f"    {line}")
     print(f"    Open:    {url}")
+    print(f"    Agent:   {agent_status}")
     print(f"    Device:  {dev}")
     print(f"    Storage: {storage_dir}")
     print(f"    Logs:    {log_file}")
@@ -197,7 +216,7 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     return None
 
 
-async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING", no_browser: bool = False):
+async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING", no_browser: bool = False, no_api: bool = False):
     # Set up log file in storage directory
     # Unified with FileStore: logs live under the same root as data
     # (settings.storage.base_path reads GENTLY_STORAGE_PATH). Previously this
@@ -329,6 +348,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         storage_path=storage_dir,
         session_id=session_to_resume,
         store=store,
+        no_api=no_api,
     )
 
     # Generate TLS certificate for mesh communication
@@ -502,6 +522,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         storage_dir=storage_dir,
         log_file=log_file,
         resumed=session_to_resume is not None,
+        no_api=no_api,
     )
 
     if admin_creds:
@@ -562,13 +583,11 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
 def cli_main():
     """Sync entry point for ``gently`` console script (pyproject.toml)."""
-    if not os.getenv("ANTHROPIC_API_KEY"):
-        print("Error: ANTHROPIC_API_KEY not set")
-        print("Set with: set ANTHROPIC_API_KEY=your-key")
-        exit(1)
-
     parser = argparse.ArgumentParser(description="Launch Microscopy Agent")
     parser.add_argument("--offline", action="store_true", help="Run without server connections")
+    parser.add_argument("--no-api", action="store_true",
+                        help="UI-only mode: boot the web UI without any Anthropic API key. "
+                             "Chat, perception, and plan generation are disabled.")
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
     parser.add_argument("--resume", nargs="?", const="__PICK__", metavar="ID",
                         help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
@@ -576,6 +595,17 @@ def cli_main():
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
     parser.add_argument("--no-browser", action="store_true", help="Do not auto-open the web UI in a browser")
     args = parser.parse_args()
+
+    # An API key is required unless running in UI-only mode.
+    if not args.no_api and not os.getenv("ANTHROPIC_API_KEY"):
+        print("Error: ANTHROPIC_API_KEY not set")
+        if os.name == "nt":
+            print("Set with: set ANTHROPIC_API_KEY=your-key")
+        else:
+            print("Set with: export ANTHROPIC_API_KEY=your-key")
+        print("Or add it to a .env file in the project root: ANTHROPIC_API_KEY=your-key")
+        print("Or run UI-only without a key: python launch_gently.py --no-api")
+        exit(1)
 
     log_level = "WARNING"
     if args.verbose:
@@ -594,6 +624,7 @@ def cli_main():
             pick_session=pick_session,
             log_level=log_level,
             no_browser=args.no_browser,
+            no_api=args.no_api,
         ))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass

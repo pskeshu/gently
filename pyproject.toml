@@ -34,6 +34,9 @@ dependencies = [
     "jinja2>=3.1.0",
     "pyyaml>=6.0",
     "matplotlib>=3.7.0",
+    "python-dotenv>=1.0.0",
+    # Perception harness — cloned as a sibling repo (see [tool.uv.sources])
+    "gently-perception",
     # Device control
     "pymmcore>=11.1.1",
     "bluesky>=1.11.0",
@@ -51,9 +54,23 @@ dependencies = [
 sam = [
     "segment-anything",
 ]
+# Device-layer accessories for the microscope computer. Core hardware-control
+# deps (pymmcore, bluesky, ophyd) are already in [project.dependencies]; these
+# are the extras the device layer needs: BLE (SwitchBot room light), serial and
+# MQTT transports (ACUITYnano thermal controller). Install: uv sync --extra device
+device = [
+    "bleak>=0.21.0",
+    "pyserial>=3.5",
+    "paho-mqtt>=1.6.0",
+]
 
 [project.scripts]
 gently = "launch_gently:cli_main"
+
+# gently-perception is not published to PyPI; it lives in a sibling clone of
+# pskeshu/gently-perception and is installed editable from there.
+[tool.uv.sources]
+gently-perception = { path = "../gently-perception", editable = true }
 
 [tool.setuptools.packages.find]
 include = ["gently*"]
