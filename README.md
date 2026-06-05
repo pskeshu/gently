@@ -87,42 +87,48 @@ dependency management. If you don't have it yet, install it following the
 (e.g. `curl -LsSf https://astral.sh/uv/install.sh | sh` on macOS/Linux).
 
 Gently depends on **`gently-perception`** (the VLM perception harness, repo
-`pskeshu/gently-perception`), which is not published to PyPI. Clone it as a
-**sibling** of `gently` so the path source in `pyproject.toml` can find it:
+`gently-project/gently-perception`), which is not published to PyPI. For development, it is
+installed as an **editable sibling clone**, so clone both repos side by side:
 
 ```bash
-# Clone both repos side by side
-git clone https://github.com/pskeshu/gently.git
-git clone https://github.com/pskeshu/gently-perception.git
+git clone git@github.com:gently-project/gently.git
+git clone git@github.com:gently-project/gently-perception.git
 
 # Layout:
 #   <parent>/
 #     gently/             <- you run commands from here
-#     gently-perception/  <- resolved via [tool.uv.sources]
-```
+#     gently-perception/  <- editable, resolved via [tool.uv.sources]
 
-From the project root run:
-
-```bash
 cd gently
-uv sync
+uv sync                    # base env (add --extra ... for torch etc., see below)
 ```
 
-This creates a `.venv` in the project directory and installs the runtime + dev
-dependencies pinned in `uv.lock` (see `pyproject.toml` for the spec), including
-`gently-perception` as an editable install from the sibling clone. Activate it
-with `source .venv/bin/activate`, or just prefix commands with `uv run` (e.g.
-`uv run python ...`) to use it without activating.
+> The `git@github.com:` URLs use **SSH**, which needs an
+> [SSH key configured with GitHub](https://docs.github.com/en/authentication/connecting-to-github-with-ssh).
+> If you don't use SSH, clone over HTTPS instead
+> (`https://github.com/gently-project/<repo>.git`).
+
+`[tool.uv.sources]` resolves `gently-perception` to the sibling as an editable
+install, so your perception edits are live immediately and survive `uv sync`. If
+the sibling isn't cloned, `uv sync` fails by design — clone it first.
+
+You get a `.venv` in the project directory with the runtime + dev dependencies
+pinned in `uv.lock`. Activate it with `source .venv/bin/activate`, or prefix
+commands with `uv run` (e.g. `uv run python ...`) to use it without activating.
 
 #### Optional extras
+
+PyTorch is **not** in the base install — the CUDA build is machine-specific, so
+it lives in mutually-exclusive extras wired to the right PyTorch index:
 
 ```bash
 # Device-layer accessories (microscope computer): BLE/serial/MQTT transports
 uv sync --extra device
 
-# GPU acceleration for SAM detection — install the CUDA build of PyTorch
-# (skip on CPU-only machines; the default torch from uv sync works there)
-uv pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# PyTorch (needed for SAM detection and the ML pipeline)
+# NOTE: the GPU and CPU builds are mutually exclusive, so they can't be combined.
+uv sync --extra torch-gpu   # CUDA 11.8 build (GPU box, e.g. the microscope PC)
+uv sync --extra torch-cpu   # CPU-only build (dev laptop / CI)
 ```
 
 #### Running tests
