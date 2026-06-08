@@ -256,8 +256,9 @@ def get_stage_position_plan(xy_stage):
     >>> current_pos = yield from get_stage_position_plan(xy_stage)
     >>> print(f"Stage at: {current_pos}")
     """
-    result = yield from bps.rd(xy_stage)
-    return result[xy_stage.name]['value']
+    # bps.rd returns the device's single reading value directly (here the
+    # [x, y] position array), not a {name: {value}} dict.
+    return (yield from bps.rd(xy_stage))
 
 
 def move_to_pixel_plan(xy_stage,
@@ -1337,3 +1338,292 @@ def get_light_source_power_plan(
         'pct': value,
         'success': True,
     }
+
+
+# ============================================================================
+# SPIM HEAD FOCUS
+# Bring the SPIM head down onto an XY-positioned embryo, lock focus, then
+# register the two objective views on top of each other via the XY stage.
+# ============================================================================
+
+def spim_head_focus_descent_plan(
+    fdrive,
+    camera,
+    led=None,
+    *,
+    traverse_to_um: float = 5000.0,
+    coarse_step_um: float = 1000.0,
+    coarse_stop_um: float = 500.0,
+    fine_top_um: float = 150.0,
+    fine_bottom_um: float = 35.0,
+    fine_step_um: float = 5.0,
+    focus_algorithm: str = "volath",
+    coarse_settle_s: float = 2.0,
+    fine_settle_s: float = 0.5,
+    led_state: str = "Open",
+    detect_roi: bool = True,
+) -> Generator[Any, Any, dict]:
+    """
+    Bring the SPIM head down onto an (already XY-positioned) embryo and lock focus.
+
+    The head parks fully raised (~25000 um, "Load Sample") and the embryo only
+    comes into focus near the bottom of travel (~50 um), so almost the whole
+    descent is empty space -- and full-travel F moves are slow. Rather than scan
+    the entire 25000->50 range, this descends in three phases:
+
+      1. Traverse -- one fast move down to ``traverse_to_um`` (default 5000). No imaging.
+      2. Coarse   -- step down by ``coarse_step_um`` (1000) to ``coarse_stop_um``
+                     (~500), settling at each step. No focus decision yet.
+      3. Fine     -- bounded sweep-and-fit from ``fine_top_um`` (150) down to
+                     ``fine_bottom_um`` (35, >= the 30 um hard floor) in
+                     ``fine_step_um`` (5) steps: snap ``camera`` + score each
+                     frame, fit the focus curve (gently.analysis.focus), and
+                     move to the best-focus position.
+
+    ``led`` (transmitted illumination) is opened for the descent and ALWAYS
+    closed afterwards (finalize), mirroring the bottom camera's LED discipline.
+
+    Every F move is clamped to ``fdrive.limits`` (30-25000 um); the 30 um floor
+    is the hard collision stop and ``fine_bottom_um`` must sit above it.
+
+    Parameters
+    ----------
+    fdrive : DiSPIMFDrive
+        SPIM-head F-drive positioner (``bps.mv(fdrive, z)``).
+    camera : DiSPIMCamera
+        SPIM objective camera; ``camera.snap()`` returns the frame to score.
+    led : DiSPIMLED, optional
+        Transmitted-light source. Opened during the descent, closed after.
+    focus_algorithm : str
+        Focus metric: 'volath' (default), 'gradient', 'variance', 'fft_bandpass'.
+
+    Returns
+    -------
+    dict
+        success, best_position_um, best_score, r_squared, start_position_um,
+        and fine_curve (list of (z_um, score) tuples).
+    """
+    from gently.analysis.focus import (
+        FocusAnalysisConfig, FocusDataPoint, analyze_focus_sweep, score_single_image,
+    )
+
+    lo, hi = fdrive.limits
+    config = FocusAnalysisConfig(algorithm=focus_algorithm)
+    out: Dict[str, Any] = {}
+
+    def _clamp(z: float) -> float:
+        return max(lo, min(hi, float(z)))
+
+    def _grab_and_score():
+        frame = camera.snap()
+        # A single SPIM snap may be a side-by-side dual view; score the brighter
+        # objective half (focus is per-objective). Heuristic: width >> height.
+        if frame.ndim == 2 and frame.shape[1] >= frame.shape[0] * 1.5:
+            view = select_best_camera_view(frame)
+        else:
+            view = frame
+        score, roi = score_single_image(view, config, detect_roi=detect_roi)
+        return view, score, roi
+
+    def inner():
+        # bps.rd returns the device's single reading value directly (a float
+        # here) in this bluesky version -- not a {name: {value}} dict.
+        start_z = float((yield from bps.rd(fdrive)))
+        logger.info("[SPIM head focus] start %.1f um, floor %.0f um", start_z, lo)
+
+        if led is not None:
+            yield from bps.mv(led, led_state)
+
+        # Phase 1 -- fast traverse (skip if already below the traverse height)
+        z = start_z
+        if z > traverse_to_um:
+            z = _clamp(traverse_to_um)
+            logger.info("[SPIM head focus] traverse -> %.0f um (slow move)", z)
+            yield from bps.mv(fdrive, z)
+            yield from bps.sleep(coarse_settle_s)
+
+        # Phase 2 -- coarse stepped descent to ~coarse_stop_um
+        while z > coarse_stop_um + 1e-6:
+            z = _clamp(max(coarse_stop_um, z - coarse_step_um))
+            logger.info("[SPIM head focus] coarse -> %.0f um", z)
+            yield from bps.mv(fdrive, z)
+            yield from bps.sleep(coarse_settle_s)
+
+        # Phase 3 -- fine bounded sweep-and-fit through the focus window
+        top, bottom = _clamp(fine_top_um), _clamp(fine_bottom_um)
+        n = max(3, int(round(abs(top - bottom) / max(fine_step_um, 1e-6))) + 1)
+        positions = [_clamp(p) for p in np.linspace(top, bottom, n)]  # descending
+        logger.info("[SPIM head focus] fine scan %.0f->%.0f um in %d steps", top, bottom, n)
+
+        sweep = []
+        for zp in positions:
+            yield from bps.mv(fdrive, zp)
+            yield from bps.sleep(fine_settle_s)
+            view, score, roi = _grab_and_score()
+            sweep.append(FocusDataPoint(position=zp, score=score, image=view, roi=roi))
+            logger.debug("[SPIM head focus] z=%.1f score=%.3g", zp, score)
+
+        result = analyze_focus_sweep(sweep, config)
+        if result.success:
+            best = _clamp(result.best_position)
+        else:
+            best = _clamp(max(sweep, key=lambda d: d.score).position)
+
+        yield from bps.mv(fdrive, best)
+        yield from bps.sleep(fine_settle_s)
+
+        out.update(
+            success=bool(result.success),
+            best_position_um=float(best),
+            best_score=float(result.best_score),
+            r_squared=float(result.r_squared),
+            start_position_um=start_z,
+            fine_curve=[(float(d.position), float(d.score)) for d in sweep],
+        )
+        logger.info("[SPIM head focus] locked %.1f um (score %.3g, R2=%.3f, fit=%s)",
+                    best, result.best_score, result.r_squared, result.success)
+
+    def cleanup():
+        if led is not None:
+            yield from bps.mv(led, "Closed")
+
+    yield from bpp.finalize_wrapper(inner(), cleanup())
+    return out
+
+
+def register_views_xy_plan(
+    camera,
+    xy_stage,
+    *,
+    view_pixel_size_um: float,
+    tolerance_px: float = 20.0,
+    max_iters: int = 4,
+    settle_s: float = 0.5,
+    led=None,
+    led_state: str = "Open",
+    reference_view: int = 0,
+    x_sign: float = -1.0,
+    y_sign: float = 1.0,
+) -> Generator[Any, Any, dict]:
+    """
+    Register the two SPIM objective views on top of each other via the XY stage.
+
+    Snaps ``camera`` (a side-by-side dual view: left = view A, right = view B),
+    detects the embryo centroid in each half, and moves the XY stage to bring
+    the embryo to the centre of the ``reference_view`` (0 = A/left, 1 = B/right).
+    The residual offset in the *other* view is recorded each iteration as the
+    registration error. Iterates up to ``max_iters`` or until the reference
+    view is within ``tolerance_px``.
+
+    The view->stage mapping is the rig-specific part and likely needs tuning:
+      - ``view_pixel_size_um`` is the effective um/pixel of the OBJECTIVE view
+        (NOT the bottom camera) -- required.
+      - ``x_sign`` / ``y_sign`` flip the stage axes to match the camera
+        orientation. Defaults follow the bottom-camera convention (X inverted);
+        confirm them on the rig from the reported per-iteration residuals (if
+        the offset grows instead of shrinking, flip the offending sign).
+
+    XY moves are bounded by the stage's own hardware limits, so a mis-tuned
+    sign fails loudly (limit error) rather than driving anywhere unsafe.
+
+    Returns
+    -------
+    dict
+        converged (bool), iterations (per-iter offsets per view, in px),
+        final_stage_um, and (if nothing was found) error.
+    """
+    from gently.core.coordinates import pixel_displacement_to_stage_movement
+
+    out: Dict[str, Any] = {"converged": False, "iterations": []}
+
+    def _views(frame):
+        if frame.ndim == 2 and frame.shape[1] >= frame.shape[0] * 1.5:
+            mid = frame.shape[1] // 2
+            return [frame[:, :mid], frame[:, mid:]]
+        return [frame]
+
+    def _centroid_offset(view):
+        # (dx, dy) of the embryo centroid from the view centre, in pixels;
+        # None if no embryo (detect_embryo_roi falls back to the whole frame).
+        y0, y1, x0, x1 = detect_embryo_roi(view)
+        h, w = view.shape
+        if (y1 - y0) >= h and (x1 - x0) >= w:
+            return None
+        cx, cy = (x0 + x1) / 2.0, (y0 + y1) / 2.0
+        return (cx - w / 2.0, cy - h / 2.0)
+
+    def inner():
+        if led is not None:
+            yield from bps.mv(led, led_state)
+
+        for _ in range(max_iters):
+            frame = camera.snap()
+            views = _views(frame)
+            offsets = [_centroid_offset(v) for v in views]
+            out["iterations"].append({
+                "offsets_px": [None if o is None else (float(o[0]), float(o[1])) for o in offsets]
+            })
+
+            ref = offsets[reference_view] if reference_view < len(offsets) else None
+            if ref is None:
+                seen = [o for o in offsets if o is not None]
+                if not seen:
+                    out["error"] = "no embryo detected in any view"
+                    break
+                ref = seen[0]
+
+            if max(abs(ref[0]), abs(ref[1])) <= tolerance_px:
+                out["converged"] = True
+                break
+
+            dx_um, dy_um = pixel_displacement_to_stage_movement(ref[0], ref[1], view_pixel_size_um)
+            cur = yield from bps.rd(xy_stage)   # -> [x, y] um (single reading value)
+            target = [cur[0] + x_sign * dx_um, cur[1] + y_sign * dy_um]
+            yield from bps.mov(xy_stage, target)
+            yield from bps.sleep(settle_s)
+
+        final = yield from bps.rd(xy_stage)
+        out["final_stage_um"] = [float(final[0]), float(final[1])]
+
+    def cleanup():
+        if led is not None:
+            yield from bps.mv(led, "Closed")
+
+    yield from bpp.finalize_wrapper(inner(), cleanup())
+    return out
+
+
+def spim_head_focus_and_align_plan(
+    fdrive,
+    camera,
+    xy_stage,
+    led=None,
+    *,
+    view_pixel_size_um: Optional[float] = None,
+    align: bool = True,
+    focus_kwargs: Optional[Dict] = None,
+    align_kwargs: Optional[Dict] = None,
+) -> Generator[Any, Any, dict]:
+    """
+    Full SPIM-head focus workflow for one XY-positioned embryo.
+
+    Descends and locks focus (``spim_head_focus_descent_plan``), then registers
+    the two objective views via the XY stage (``register_views_xy_plan``).
+
+    ``align=True`` requires ``view_pixel_size_um`` (objective-view um/pixel).
+    """
+    out: Dict[str, Any] = {}
+    out["focus"] = yield from spim_head_focus_descent_plan(
+        fdrive, camera, led=led, **(focus_kwargs or {})
+    )
+    if align:
+        if view_pixel_size_um is None:
+            raise ValueError(
+                "align=True requires view_pixel_size_um "
+                "(objective-view um/pixel calibration)"
+            )
+        out["align"] = yield from register_views_xy_plan(
+            camera, xy_stage, view_pixel_size_um=view_pixel_size_um,
+            led=led, **(align_kwargs or {}),
+        )
+    return out

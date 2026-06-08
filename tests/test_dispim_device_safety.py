@@ -236,9 +236,9 @@ def make_piezo(core=None, limits=(-200.0, 200.0)):
     return DiSPIMPiezo("Piezo", core or make_core(), limits=limits)
 
 
-def make_fdrive(core=None, limits=(20.0, 25000.0)):
+def make_fdrive(core=None):
     from gently.hardware.dispim.devices.piezo import DiSPIMFDrive
-    return DiSPIMFDrive("FDrive", core or make_core(), limits=limits)
+    return DiSPIMFDrive("FDrive", core or make_core())
 
 
 def make_scanner(core=None, limits=(-5.0, 5.0)):
@@ -381,7 +381,8 @@ class TestPiezoBounds:
 
 
 class TestFDriveBounds:
-    """F-drive must reject positions outside 20-25000µm limits."""
+    """F-drive (SPIM head) must reject positions outside the 30-25000 µm
+    hard limits (module constants F_DRIVE_MIN_UM / F_DRIVE_MAX_UM)."""
 
     def test_valid_position(self):
         fdrive = make_fdrive()
@@ -391,13 +392,38 @@ class TestFDriveBounds:
 
     def test_below_lower_limit_raises(self):
         fdrive = make_fdrive()
-        with pytest.raises(ValueError, match="outside limits"):
+        with pytest.raises(ValueError, match="outside hardware limits"):
             fdrive.set(19.9)
 
     def test_above_upper_limit_raises(self):
         fdrive = make_fdrive()
-        with pytest.raises(ValueError, match="outside limits"):
+        with pytest.raises(ValueError, match="outside hardware limits"):
             fdrive.set(25001.0)
+
+    def test_at_floor_allowed(self):
+        fdrive = make_fdrive()
+        status = fdrive.set(30.0)
+        status.wait(timeout=2)
+        assert fdrive.core._positions["FDrive"] == 30.0
+
+    def test_at_ceiling_allowed(self):
+        fdrive = make_fdrive()
+        status = fdrive.set(25000.0)
+        status.wait(timeout=2)
+        assert fdrive.core._positions["FDrive"] == 25000.0
+
+    def test_just_below_floor_raises(self):
+        fdrive = make_fdrive()
+        with pytest.raises(ValueError, match="outside hardware limits"):
+            fdrive.set(29.99)
+
+    def test_limits_property_is_module_constants(self):
+        from gently.hardware.dispim.devices.piezo import (
+            F_DRIVE_MIN_UM, F_DRIVE_MAX_UM,
+        )
+        fdrive = make_fdrive()
+        assert fdrive.limits == (F_DRIVE_MIN_UM, F_DRIVE_MAX_UM)
+        assert fdrive.limits == (30.0, 25000.0)
 
 
 class TestScannerBounds:
