@@ -81,6 +81,13 @@ const DevicesManager = (function () {
     let _roomLightBusy = false;
     let _roomLightTimer = null;
 
+    // Temperature-controller panel DOM + state
+    let _tempEl, _tempReadout, _tempInput, _tempSet;
+    let _tempState = 'unknown';
+    let _tempAvailable = false;
+    let _tempBusy = false;
+    let _tempTimer = null;
+
     let _lastTs = 0;
     let _previousTs = 0;
     let _lastWallTs = 0;
@@ -146,6 +153,11 @@ const DevicesManager = (function () {
 
         _roomLightToggle = document.getElementById('devices-room-light-toggle');
         _roomLightLabel  = document.getElementById('devices-room-light-label');
+
+        _tempEl      = document.getElementById('devices-temp');
+        _tempReadout = document.getElementById('devices-temp-readout');
+        _tempInput   = document.getElementById('devices-temp-input');
+        _tempSet     = document.getElementById('devices-temp-set');
 
         // Recompute the scale bar caption whenever the canvas resizes.
         if (_mapSvg && window.ResizeObserver) {
@@ -1370,6 +1382,111 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
+    // Temperature controller (ACUITYnano) — readout + setpoint
+    // =====================================================================
+
+    function fmtTemp(v) {
+        return (v === null || v === undefined || isNaN(v)) ? '—' : Number(v).toFixed(1) + '°';
+    }
+
+    function applyTemperature(data) {
+        _tempAvailable = !!(data && data.available);
+        if (!_tempEl) return;
+        _tempEl.hidden = !_tempAvailable;
+        if (!_tempAvailable) return;
+        _tempState = (data && data.state) || 'unknown';
+        const locked = /LOCK/i.test(_tempState);
+        _tempEl.classList.toggle('is-locked', locked);
+        if (_tempBusy) return;  // a set() is in flight; leave its transient label
+        const cur = fmtTemp(data.temperature_c);
+        const hasSp = data.setpoint_c !== null && data.setpoint_c !== undefined;
+        const sp = hasSp ? fmtTemp(data.setpoint_c) : null;
+        _tempReadout.textContent = sp ? (cur + ' → ' + sp) : cur;
+        _tempReadout.title = 'Water ' + cur + (sp ? (', setpoint ' + sp) : '')
+            + (locked ? ' (locked)' : '');
+        // Seed the input with the current setpoint once, while untouched, so the
+        // operator sees where it is before nudging it.
+        if (_tempInput && document.activeElement !== _tempInput && _tempInput.value === '' && hasSp) {
+            _tempInput.value = Number(data.setpoint_c).toFixed(1);
+        }
+    }
+
+    async function loadTemperatureStatus() {
+        if (!_tempEl || _tempBusy) return;
+        try {
+            const res = await fetch('/api/devices/temperature/status');
+            if (!res.ok) { applyTemperature({ available: false }); return; }
+            applyTemperature(await res.json());
+        } catch (err) {
+            console.debug('temperature status fetch failed:', err);
+            applyTemperature({ available: false });
+        }
+    }
+
+    async function setTemperature() {
+        if (!_tempEl || _tempBusy || !_tempAvailable) return;
+        const target = parseFloat(_tempInput && _tempInput.value);
+        if (isNaN(target) || target < 0 || target > 99.9) {
+            _tempReadout.textContent = '0–99.9 °C';
+            setTimeout(loadTemperatureStatus, 1500);
+            return;
+        }
+        _tempBusy = true;
+        _tempEl.classList.add('is-busy');
+        if (_tempSet) _tempSet.disabled = true;
+        _tempReadout.textContent = 'Set ' + target.toFixed(1) + '°…';
+
+        // Settle back to the resolved state, or surface a transient message
+        // (insufficient control / error) for 2 s before reverting.
+        const finish = (msg) => {
+            _tempBusy = false;
+            _tempEl.classList.remove('is-busy');
+            if (_tempSet) _tempSet.disabled = false;
+            if (msg) {
+                _tempReadout.textContent = msg;
+                setTimeout(loadTemperatureStatus, 2000);
+            } else {
+                loadTemperatureStatus();  // controller ramps; poll shows progress
+            }
+        };
+
+        try {
+            const res = await fetch('/api/devices/temperature/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_c: target }),
+            });
+            if (res.status === 401 || res.status === 403) { finish('Need control'); return; }
+            if (!res.ok) {
+                console.error('temperature set failed:', await res.text());
+                finish('Error');
+                return;
+            }
+            await res.json();
+            finish(null);
+        } catch (err) {
+            console.error('temperature set failed:', err);
+            finish('Error');
+        }
+    }
+
+    function setupTemperature() {
+        if (!_tempEl) return;
+        if (_tempSet) _tempSet.addEventListener('click', setTemperature);
+        if (_tempInput) {
+            _tempInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); setTemperature(); }
+            });
+        }
+        loadTemperatureStatus();
+        // Periodic refresh: the setpoint can also change from agent plans, and a
+        // commanded ramp settles over time. Status is cached at the device layer,
+        // so polling is cheap; it also reveals the control once the layer connects.
+        if (_tempTimer) clearInterval(_tempTimer);
+        _tempTimer = setInterval(loadTemperatureStatus, 15000);
+    }
+
+    // =====================================================================
     // View switching
     // =====================================================================
 
@@ -1429,6 +1546,7 @@ const DevicesManager = (function () {
         setupViewSwitcher();
         setupCameraWiring();
         setupRoomLight();
+        setupTemperature();
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);

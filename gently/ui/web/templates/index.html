@@ -304,6 +304,20 @@
                     </div>
                 </div>
                 <div class="devices-status">
+                    <div class="devices-temp" id="devices-temp" title="Temperature controller" hidden>
+                        <span class="devices-temp-icon" aria-hidden="true">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"
+                                 stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/>
+                            </svg>
+                        </span>
+                        <span class="devices-temp-readout" id="devices-temp-readout" title="Water temperature → setpoint">—</span>
+                        <input class="devices-temp-input" id="devices-temp-input" type="number"
+                               min="0" max="99.9" step="0.1" inputmode="decimal" placeholder="°C"
+                               aria-label="Target temperature in Celsius">
+                        <button class="devices-temp-set" id="devices-temp-set" type="button"
+                                title="Set temperature setpoint">Set</button>
+                    </div>
                     <button class="devices-room-light" id="devices-room-light-toggle" type="button"
                             title="Toggle room light" aria-pressed="false" hidden disabled>
                         <span class="devices-room-light-bulb" aria-hidden="true">

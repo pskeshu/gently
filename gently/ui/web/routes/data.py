@@ -304,6 +304,61 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=res.get("error", "room light command failed"))
         return {"state": res.get("state", state)}
 
+    @router.get("/api/devices/temperature/status")
+    async def get_temperature_status():
+        """Live water temperature, setpoint, and lock state (cheap to poll).
+
+        Cached at the device layer (no per-call hardware round trip), so the
+        Devices header can poll it like the room light. ``available`` is false
+        when no controller is configured/connected, which hides the control.
+        """
+        client = _resolve_client()
+        if client is None:
+            return {"available": False, "state": "unknown"}
+        try:
+            res = await client.get_temperature()
+        except Exception as exc:
+            logger.debug("temperature status fetch failed: %s", exc)
+            return {"available": False, "state": "unknown"}
+        return {
+            "available": bool(res.get("success", False)),
+            "temperature_c": res.get("temperature_c"),
+            "setpoint_c": res.get("setpoint_c"),
+            "state": res.get("state", "unknown"),
+            "peltier_c": res.get("peltier_c"),
+        }
+
+    @router.post("/api/devices/temperature/set",
+                 dependencies=[Depends(require_control)])
+    async def set_temperature(payload: dict = Body(...)):
+        """Command the temperature setpoint. Body: {"target_c": float}.
+
+        Non-blocking: the controller ramps and the status poll reflects progress
+        (and the SYSTEM LOCKED state once it stabilizes).
+        """
+        try:
+            target = float(payload.get("target_c"))
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="target_c must be a number")
+        if not (0.0 <= target <= 99.9):
+            raise HTTPException(status_code=400, detail="target_c must be between 0.0 and 99.9 C")
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            res = await client.set_temperature(target)
+        except Exception as exc:
+            logger.exception("Temperature command failed")
+            raise HTTPException(status_code=502, detail=f"temperature command failed: {exc}")
+        if not res.get("success"):
+            raise HTTPException(status_code=502, detail=res.get("error", "temperature command failed"))
+        return {
+            "target_c": res.get("target_c", target),
+            "temperature_c": res.get("temperature_c"),
+            "state": res.get("state", "unknown"),
+            "waited": res.get("waited", False),
+        }
+
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: Optional[str] = None):
         """Get calibration images"""
