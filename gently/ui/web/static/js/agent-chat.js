@@ -636,6 +636,8 @@ const AgentChat = (() => {
         conn.classList.toggle('ac-conn-bad', !ok);
         conn.textContent = label || (ok ? 'Connected' : 'Reconnecting…');
         if (toggleDot) toggleDot.classList.toggle('ok', ok);
+        // Feed the shared connection store (agent /ws/agent liveness).
+        if (typeof ConnectionStatus !== 'undefined') ConnectionStatus.setAgent(ok);
     }
 
     // ── Transport ─────────────────────────────────────────────
