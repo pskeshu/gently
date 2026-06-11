@@ -121,6 +121,16 @@ class TransferSettings:
 
 
 @dataclass(frozen=True)
+class UISettings:
+    """Web UI feature flags."""
+    # New agent-first UX paradigm (welcome→shell unfold, dual-rendered agent
+    # asks, inference-first plan mode, shared-visibility surface). Off by
+    # default; flip per-deployment via GENTLY_UX_V2=1 while the migration
+    # soaks behind the flag. The v1 dashboard stays the default until then.
+    ux_v2: bool = field(default_factory=lambda: _env("UX_V2", False))
+
+
+@dataclass(frozen=True)
 class Settings:
     """Top-level settings container."""
 
@@ -132,6 +142,7 @@ class Settings:
     api: ApiSettings = field(default_factory=ApiSettings)
     ml: MlSettings = field(default_factory=MlSettings)
     transfer: TransferSettings = field(default_factory=TransferSettings)
+    ui: UISettings = field(default_factory=UISettings)
 
 
 # Singleton — import this everywhere
