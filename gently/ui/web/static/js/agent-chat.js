@@ -16,6 +16,7 @@ const AgentChat = (() => {
 
     let panelOpen = false;
     let hasControl = true;        // optimistic until the server says otherwise
+    const answeredAsks = new Set();  // request_ids answered from EITHER surface (transcript / main stage)
     let holderLabel = null;
     let streaming = false;
     let currentAgentEl = null;    // the agent content element being streamed into
@@ -211,6 +212,8 @@ const AgentChat = (() => {
                 hasControl = !!msg.you_have_control;
                 holderLabel = msg.holder_label || null;
                 renderControl();
+                // The main-stage ask renderer re-renders read-only on control loss.
+                if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('AGENT_CONTROL', { hasControl });
                 break;
 
             case 'history':
@@ -342,6 +345,7 @@ const AgentChat = (() => {
                 hideActivity();
                 setBusy(false);
                 addSystemLine(msg.error || 'Unknown error', 'error');
+                clearPendingAsks();  // a cancelled/errored turn sends no choice_response
                 break;
 
             case 'ping':
@@ -353,12 +357,19 @@ const AgentChat = (() => {
         }
     }
 
-    function renderChoice(msg) {
-        const data = msg.choice_data || {};
-        const reqId = msg.request_id || data.request_id || '';
-        const isWake = msg.origin === 'wake';
+    // Build an ask card from a choice_data payload. Pure: the caller supplies
+    // hasControl + onPick, so the SAME builder renders in the chat transcript
+    // and on the main stage (#ask-stage) — one payload, two renderers.
+    function buildAskCard(data, opts) {
+        opts = opts || {};
+        const reqId = opts.reqId || '';
+        const isWake = !!opts.isWake;
+        const canAct = !!opts.hasControl && !answeredAsks.has(reqId);
+        const onPick = opts.onPick || function () {};
+
         const wrap = document.createElement('div');
         wrap.className = 'ac-choice' + (isWake ? ' ac-choice-wake' : '');
+        wrap.dataset.reqId = reqId;
         if (isWake) {
             const tag = document.createElement('div');
             tag.className = 'ac-choice-origin';
@@ -373,30 +384,101 @@ const AgentChat = (() => {
         (data.options || []).forEach(opt => {
             const btn = document.createElement('button');
             btn.className = 'ac-choice-opt';
-            btn.disabled = !!opt.disabled || !hasControl;  // observers see it read-only
+            btn.disabled = !!opt.disabled || !canAct;  // observers / already-answered → read-only
             const desc = opt.description ? `<span class="ac-choice-desc">${escapeHtml(opt.description)}</span>` : '';
             btn.innerHTML = `<span class="ac-choice-label">${escapeHtml(opt.label)}</span>${desc}`;
-            btn.addEventListener('click', () => {
-                send({ type: 'choice_response', request_id: reqId, selected: opt.id });
-                [...wrap.querySelectorAll('button')].forEach(b => b.disabled = true);
-                wrap.classList.add('ac-choice-answered');
-                btn.classList.add('ac-choice-picked');
-                if (streaming) setActivity('Working…');
-                if (isWake && pendingSlot) {
-                    setTimeout(() => { pendingSlot.classList.add('hidden'); pendingSlot.innerHTML = ''; }, 700);
-                }
-            });
+            btn.addEventListener('click', () => onPick(opt.id));
             wrap.appendChild(btn);
         });
-        // ASK approvals pin to the sticky slot above the composer so they can't
-        // scroll out of reach; ordinary choices stay inline in the transcript.
+
+        // Free-text escape — the bridge routes an unknown selection to LLM
+        // resolution, so the agent's asend always unblocks. (The TUI had this;
+        // the web ask cards previously did not.)
+        if (canAct) {
+            const ow = document.createElement('div');
+            ow.className = 'ac-choice-otherwrap';
+            const otherBtn = document.createElement('button');
+            otherBtn.className = 'ac-choice-opt ac-choice-other';
+            otherBtn.innerHTML = '<span class="ac-choice-label">Something else…</span>';
+            const form = document.createElement('div');
+            form.className = 'ac-choice-otherform hidden';
+            const ti = document.createElement('input');
+            ti.type = 'text';
+            ti.className = 'ac-choice-otherinput';
+            ti.placeholder = 'Type your own answer…';
+            const go = document.createElement('button');
+            go.className = 'ac-choice-othergo';
+            go.textContent = '→';
+            const submitOther = () => { const v = ti.value.trim(); if (v) onPick(v); };
+            otherBtn.addEventListener('click', () => { otherBtn.classList.add('hidden'); form.classList.remove('hidden'); ti.focus(); });
+            go.addEventListener('click', submitOther);
+            ti.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); submitOther(); } });
+            form.appendChild(ti); form.appendChild(go);
+            ow.appendChild(otherBtn); ow.appendChild(form);
+            wrap.appendChild(ow);
+        }
+
+        if (answeredAsks.has(reqId)) wrap.classList.add('ac-choice-answered');
+        return wrap;
+    }
+
+    // Send the answer ONCE (idempotent across both surfaces), then fire the
+    // clear off the CHOICE lifecycle — NOT stream_end (which lands after the
+    // answer for in-turn asks, and never for a cancelled turn).
+    function answerChoice(reqId, selected) {
+        if (!reqId || answeredAsks.has(reqId)) return;
+        answeredAsks.add(reqId);
+        send({ type: 'choice_response', request_id: reqId, selected });
+        if (streaming) setActivity('Working…');
+        if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('ASK_CLEARED', { request_id: reqId });
+    }
+
+    // Disable + mark-answered any transcript / sticky-slot ask card for this
+    // request_id ('*' = all). The main stage clears itself via its own handler.
+    function markAnswered(reqId) {
+        [log, pendingSlot].forEach(scope => {
+            if (!scope) return;
+            scope.querySelectorAll('.ac-choice').forEach(card => {
+                if (reqId !== '*' && card.dataset.reqId !== reqId) return;
+                card.querySelectorAll('button').forEach(b => b.disabled = true);
+                card.classList.add('ac-choice-answered');
+            });
+        });
+        if (pendingSlot) {
+            const slotCard = pendingSlot.querySelector('.ac-choice');
+            if (reqId === '*' || (slotCard && slotCard.dataset.reqId === reqId)) {
+                setTimeout(() => { pendingSlot.classList.add('hidden'); pendingSlot.innerHTML = ''; }, 700);
+            }
+        }
+    }
+
+    // Retire all pending asks (turn cancelled/errored, or socket dropped).
+    function clearPendingAsks() {
+        if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('ASK_CLEARED', { request_id: '*' });
+        else markAnswered('*');
+    }
+
+    function renderChoice(msg) {
+        const data = msg.choice_data || {};
+        const reqId = msg.request_id || data.request_id || '';
+        const isWake = msg.origin === 'wake';
+        const card = buildAskCard(data, {
+            reqId, isWake, hasControl,
+            onPick: (sel) => answerChoice(reqId, sel),
+        });
+        // Mirror onto the main stage (ask-stage.js renders it prominently).
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.emit('AGENT_ASK', { request_id: reqId, choice_data: data, origin: msg.origin });
+        }
+        // ASK approvals pin to the sticky slot above the composer; ordinary
+        // choices stay inline in the transcript.
         if (isWake && pendingSlot) {
             pendingSlot.innerHTML = '';
-            pendingSlot.appendChild(wrap);
+            pendingSlot.appendChild(card);
             pendingSlot.classList.remove('hidden');
             return;
         }
-        log.appendChild(wrap);
+        log.appendChild(card);
         scrollToBottom();
     }
 
@@ -655,6 +737,7 @@ const AgentChat = (() => {
             setBusy(false);
             streaming = false;
             hideActivity();
+            clearPendingAsks();  // stale asks: clear the stage on socket drop
             setTimeout(connect, reconnectDelay);
             reconnectDelay = Math.min(reconnectDelay * 2, MAX_DELAY);
         };
@@ -873,6 +956,11 @@ const AgentChat = (() => {
         if (!panel) return;  // markup not present
 
         restorePrefs();
+        // Dual-render: retire a transcript ask card when its ask is answered
+        // (from the transcript OR the main stage) or the turn is cancelled.
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('ASK_CLEARED', ({ request_id }) => markAnswered(request_id));
+        }
         if (toggleBtn) toggleBtn.addEventListener('click', () => togglePanel());
         closeBtn.addEventListener('click', () => togglePanel(false));
         if (pinBtn) pinBtn.addEventListener('click', togglePin);
@@ -914,7 +1002,7 @@ const AgentChat = (() => {
             stopBtn.className = 'ac-stop hidden';
             stopBtn.textContent = 'Stop';
             stopBtn.title = 'Stop the current turn';
-            stopBtn.addEventListener('click', () => { send({ type: 'cancel' }); setBusy(false); });
+            stopBtn.addEventListener('click', () => { send({ type: 'cancel' }); setBusy(false); clearPendingAsks(); });
             inputWrap.appendChild(stopBtn);
 
             // Sticky ASK-approval slot — above the queue + composer, never scrolls away.
@@ -951,7 +1039,7 @@ const AgentChat = (() => {
             // Escape mirrors Stop: cancel a cancellable (user) turn and clear busy
             // (a cancelled turn emits no stream_end, so clear optimistically).
             if (e.key === 'Escape' && agentBusy && busySource === 'user') {
-                e.preventDefault(); send({ type: 'cancel' }); setBusy(false);
+                e.preventDefault(); send({ type: 'cancel' }); setBusy(false); clearPendingAsks();
             }
         });
     }
@@ -966,5 +1054,5 @@ const AgentChat = (() => {
         actuallySend(text);
     }
 
-    return { togglePanel, runCommand };
+    return { togglePanel, runCommand, buildAskCard, answerChoice, hasControl: () => hasControl };
 })();

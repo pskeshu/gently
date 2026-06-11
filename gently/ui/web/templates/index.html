@@ -15,14 +15,18 @@
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
     <link rel="stylesheet" href="/static/css/agent-chat.css">
+    <link rel="stylesheet" href="/static/css/ask-stage.css">
 </head>
-<body>
+<body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% include '_header.html' %}
     {% include '_navbar.html' %}
     <!-- App shell: main content + docked agent panel (flex row for pin-to-dock).
          Header + navbar stay full-width above this. -->
     <div class="app-shell">
     <div class="app-main">
+
+    {# ux_v2: the agent's current pending ask, dual-rendered here + in the chat. #}
+    {% if ux_v2 %}<div id="ask-stage" class="ask-stage hidden" aria-live="polite"></div>{% endif %}
 
     <!-- Calibration Tab -->
     <!-- Home Tab (landing) -->
@@ -637,5 +641,6 @@
     <script src="/static/js/campaigns.js"></script>
     <script src="/static/js/review.js"></script>
     <script src="/static/js/agent-chat.js"></script>
+    <script src="/static/js/ask-stage.js"></script>
 </body>
 </html>
