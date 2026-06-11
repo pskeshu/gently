@@ -60,6 +60,8 @@ function updateCalibrationCount() {
 function switchTab(tabName) {
     if (!tabName) return;
     state.tab = tabName;
+    // ux_v2 grouped rail mirrors the active tab off this single chokepoint.
+    if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('TAB_CHANGED', tabName);
 
     // Update tab styling
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));

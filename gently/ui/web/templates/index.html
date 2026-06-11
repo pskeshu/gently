@@ -16,6 +16,7 @@
     <link rel="stylesheet" href="/static/css/experiment.css">
     <link rel="stylesheet" href="/static/css/agent-chat.css">
     <link rel="stylesheet" href="/static/css/ask-stage.css">
+    <link rel="stylesheet" href="/static/css/shell.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% include '_header.html' %}
@@ -23,7 +24,33 @@
     <!-- App shell: main content + docked agent panel (flex row for pin-to-dock).
          Header + navbar stay full-width above this. -->
     <div class="app-shell">
+    {% if ux_v2 %}
+    <aside class="v2-rail" id="v2-rail">
+      <nav class="v2-nav">
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">Now</div>
+          <button class="v2-nav-item" data-tab="home">Home</button>
+          <button class="v2-nav-item" data-tab="experiment">Experiment</button>
+          <button class="v2-nav-item" data-tab="embryos">Embryos</button>
+        </div>
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">Library</div>
+          <button class="v2-nav-item" data-tab="plans">Plans</button>
+          <button class="v2-nav-item" data-tab="sessions">Sessions</button>
+        </div>
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">System</div>
+          <button class="v2-nav-item" data-tab="devices">Devices</button>
+          <button class="v2-nav-item" data-tab="calibration">Calibration</button>
+          <button class="v2-nav-item" data-tab="events">Logs</button>
+        </div>
+      </nav>
+      <button class="v2-rail-chat" id="v2-rail-chat"><span class="v2-rail-orb"></span>Talk to Gently</button>
+    </aside>
+    {% endif %}
     <div class="app-main">
+
+    {% if ux_v2 %}<div class="v2-strip" id="v2-strip"><span class="v2-strip-live"><span class="v2-strip-dot"></span>LIVE</span><span class="v2-strip-status" id="v2-strip-status"></span></div>{% endif %}
 
     {# ux_v2: the agent's current pending ask, dual-rendered here + in the chat. #}
     {% if ux_v2 %}<div id="ask-stage" class="ask-stage hidden" aria-live="polite"></div>{% endif %}
@@ -642,5 +669,6 @@
     <script src="/static/js/review.js"></script>
     <script src="/static/js/agent-chat.js"></script>
     <script src="/static/js/ask-stage.js"></script>
+    <script src="/static/js/shell.js"></script>
 </body>
 </html>

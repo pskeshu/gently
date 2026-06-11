@@ -1,0 +1,79 @@
+/* ux_v2 shell chrome: grouped left-rail nav + session-context strip.
+   Everything is scoped under body.ux-v2 so the v1 dashboard is byte-for-byte
+   untouched — no consolidation of the existing duplicate .tab rulesets here
+   (that cleanup is deferred to the final phase). */
+
+/* Replace the flat 8-tab bar with the rail. */
+body.ux-v2 .tabs { display: none; }
+
+/* ── Left rail ─────────────────────────────────────────────── */
+body.ux-v2 .v2-rail {
+    flex: 0 0 212px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 14px 10px;
+    border-right: 1px solid var(--border, #e4e9f0);
+    background: var(--bg-card, #fff);
+    overflow-y: auto;
+    animation: v2-rise .45s ease backwards;
+}
+body.ux-v2 .v2-nav-group { margin-bottom: 6px; }
+body.ux-v2 .v2-nav-label {
+    font-size: 10px; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--text-muted, #94a3b8); padding: 10px 10px 4px;
+}
+body.ux-v2 .v2-nav-item {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: 0; cursor: pointer; text-align: left;
+    padding: 8px 10px; border-radius: 8px;
+    font: inherit; font-size: 13.5px;
+    color: var(--text-secondary, #475569);
+    transition: background .15s, color .15s;
+}
+body.ux-v2 .v2-nav-item:hover { background: var(--bg-hover, #f1f5f9); color: var(--text, #0f172a); }
+body.ux-v2 .v2-nav-item.active {
+    background: var(--accent-soft, #eaf1ff);
+    color: var(--accent, #2f6df6);
+    font-weight: 600;
+}
+body.ux-v2 .v2-rail-chat {
+    margin-top: auto;
+    display: flex; align-items: center; gap: 9px;
+    background: none; border: 1px solid var(--border, #e4e9f0); border-radius: 10px;
+    padding: 9px 12px; cursor: pointer;
+    font: inherit; font-size: 13px;
+    color: var(--text-secondary, #475569);
+    transition: border-color .15s, color .15s;
+}
+body.ux-v2 .v2-rail-chat:hover { border-color: var(--accent, #2f6df6); color: var(--accent, #2f6df6); }
+body.ux-v2 .v2-rail-orb {
+    width: 18px; height: 18px; border-radius: 50%; flex: none;
+    background: radial-gradient(closest-side at 38% 34%, #fff, #bcd3ff 42%, var(--accent, #2f6df6) 100%);
+}
+
+/* ── Session-context strip (top of main) ───────────────────── */
+body.ux-v2 .v2-strip {
+    flex: none;
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 16px;
+    border-bottom: 1px solid var(--border, #e4e9f0);
+    background: var(--bg-card, #fff);
+    font-size: 12.5px; color: var(--text-muted, #94a3b8);
+    animation: v2-rise .45s ease backwards .05s;
+}
+body.ux-v2 .v2-strip-live {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .08em; color: #ef4444;
+}
+body.ux-v2 .v2-strip-dot {
+    width: 8px; height: 8px; border-radius: 50%; background: #ef4444;
+}
+body.ux-v2 .v2-strip-status { margin-left: auto; font-variant-numeric: tabular-nums; }
+
+body.ux-v2 .app-main { animation: v2-rise .5s ease backwards .1s; }
+
+@keyframes v2-rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) {
+    body.ux-v2 .v2-rail, body.ux-v2 .v2-strip, body.ux-v2 .app-main { animation: none; }
+}
