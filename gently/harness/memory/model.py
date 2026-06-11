@@ -240,6 +240,11 @@ class ImagingSpec:
     success_criteria: str | None = None
     comparison_to: str | None = None  # "Compare to WT session 1"
 
+    # Per-field provenance for INFERRED values — field name -> {source, confidence}.
+    # e.g. {"laser_wavelength_nm": {"source": "inferred:genotype", "confidence": "medium"}}
+    # Lets the UI tag each value with where it came from and what to confirm.
+    provenance: Dict[str, Dict[str, str]] = field(default_factory=dict)
+
 
 @dataclass
 class BenchSpec:
