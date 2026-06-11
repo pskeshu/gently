@@ -10,6 +10,7 @@ from .agent_ws import create_router as create_agent_ws_router
 from .auth_routes import create_router as create_auth_router
 from .campaigns import create_router as create_campaigns_router
 from .chat import create_router as create_chat_router
+from .context import create_router as create_context_router
 from .data import create_router as create_data_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
@@ -33,6 +34,7 @@ def register_all_routes(server):
         create_websocket_router,
         create_agent_ws_router,
         create_chat_router,
+        create_context_router,
     ):
         router = factory(server)
         server.app.include_router(router)

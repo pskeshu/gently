@@ -77,3 +77,28 @@ body.ux-v2 .app-main { animation: v2-rise .5s ease backwards .1s; }
 @media (prefers-reduced-motion: reduce) {
     body.ux-v2 .v2-rail, body.ux-v2 .v2-strip, body.ux-v2 .app-main { animation: none; }
 }
+
+/* ── Shared-visibility surface (the agent's view) ──────────── */
+body.ux-v2 .cx-surface {
+    margin: 0 0 16px;
+    border: 1px solid var(--border, #e4e9f0);
+    border-radius: 14px;
+    background: var(--bg-card, #fff);
+    padding: 14px 16px;
+}
+body.ux-v2 .cx-surface.hidden { display: none; }
+body.ux-v2 .cx-title { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted, #94a3b8); margin-bottom: 8px; }
+body.ux-v2 .cx-lens { margin-bottom: 10px; }
+body.ux-v2 .cx-lens-h { font-size: 11px; font-weight: 600; color: var(--text-secondary, #475569); margin: 6px 0 4px; }
+body.ux-v2 .cx-item { display: flex; align-items: center; gap: 9px; padding: 5px 0; flex-wrap: wrap; }
+body.ux-v2 .cx-text { flex: 1; min-width: 0; font-size: 13px; color: var(--text, #0f172a); }
+body.ux-v2 .cx-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+body.ux-v2 .cx-dot.cx-q { background: #d97706; }
+body.ux-v2 .cx-dot.cx-w { background: var(--accent, #2f6df6); }
+body.ux-v2 .cx-dot.cx-e { background: var(--accent-green, #16a34a); }
+body.ux-v2 .cx-act { flex: none; border: 1px solid var(--border, #e4e9f0); background: none; color: var(--text-secondary, #475569); border-radius: 8px; padding: 3px 10px; font: inherit; font-size: 12px; cursor: pointer; }
+body.ux-v2 .cx-act:hover { border-color: var(--accent, #2f6df6); color: var(--accent, #2f6df6); }
+body.ux-v2 .cx-answer { display: flex; gap: 6px; align-items: center; flex: 1 0 100%; margin-top: 4px; }
+body.ux-v2 .cx-answer.hidden { display: none; }
+body.ux-v2 .cx-answer-input { flex: 1; min-width: 0; border: 1px solid var(--border, #cbd5e1); border-radius: 8px; padding: 6px 9px; font: inherit; font-size: 12px; }
+body.ux-v2 .cx-answer-go { border: 0; background: var(--accent, #2f6df6); color: #fff; border-radius: 8px; padding: 6px 10px; cursor: pointer; }

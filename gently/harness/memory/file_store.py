@@ -1908,6 +1908,15 @@ class FileContextStore:
     # Expectations
     # ==================================================================
 
+    def _notify_context_change(self, kind: str = "context") -> None:
+        """Emit CONTEXT_UPDATED on the global bus so the shared-visibility
+        surface refreshes live. Best-effort — a bus failure never breaks a write."""
+        try:
+            from gently.core.event_bus import emit, EventType
+            emit(EventType.CONTEXT_UPDATED, {"kind": kind}, source="context_store")
+        except Exception:
+            pass
+
     def add_expectation(self, exp: Expectation):
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
@@ -1925,6 +1934,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
     def get_pending_expectations(self) -> list[Expectation]:
         path = self.agent_dir / "active" / "expectations.yaml"
@@ -1956,6 +1966,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
     # ==================================================================
     # Watchpoints
@@ -1975,6 +1986,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
     def get_active_watchpoints(self) -> list[Watchpoint]:
         path = self.agent_dir / "active" / "watchpoints.yaml"
@@ -2002,6 +2014,7 @@ class FileContextStore:
                 item["status"] = "resolved"
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
     # ==================================================================
     # Questions
@@ -2021,6 +2034,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
     def get_open_questions(self) -> list[Question]:
         path = self.agent_dir / "active" / "questions.yaml"
@@ -2042,6 +2056,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
     # ==================================================================
     # Learnings

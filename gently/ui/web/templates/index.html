@@ -59,6 +59,7 @@
     <!-- Home Tab (landing) -->
     <div id="home-content" class="tab-content active">
         <div class="home-scroll">
+        {% if ux_v2 %}<aside id="context-surface" class="cx-surface hidden"></aside>{% endif %}
             <div class="home-hero">
                 <div class="home-hero-text">
                     <h2 class="home-hero-title">Welcome to Gently</h2>
@@ -670,5 +671,6 @@
     <script src="/static/js/agent-chat.js"></script>
     <script src="/static/js/ask-stage.js"></script>
     <script src="/static/js/shell.js"></script>
+    <script src="/static/js/context-surface.js"></script>
 </body>
 </html>
