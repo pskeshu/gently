@@ -251,9 +251,12 @@ class AgentBridge:
             spec_dict: dict[str, Any] = {}
             for field in (
                 "strain",
+                "genotype",
+                "reporter",
                 "temperature_c",
                 "num_slices",
                 "exposure_ms",
+                "laser_wavelength_nm",
                 "interval_s",
                 "stop_condition",
                 "success_criteria",
@@ -261,6 +264,11 @@ class AgentBridge:
                 val = getattr(spec, field, None)
                 if val is not None:
                     spec_dict[field] = val
+            # Carry per-field provenance so the UI can tag inferred values
+            # (e.g. "561 nm · inferred · medium") and show what to confirm.
+            prov = getattr(spec, "provenance", None)
+            if prov:
+                spec_dict["provenance"] = prov
             if spec_dict:
                 meta["spec"] = spec_dict
 

@@ -40,3 +40,17 @@
     background: var(--accent, #2f6df6); color: #fff;
     border-radius: 8px; padding: 8px 12px; line-height: 1;
 }
+
+/* Per-field provenance tag on imaging-spec rows (Phase 3b): shows where an
+   inferred value came from, e.g. "inferred · medium". */
+.ac-spec-src {
+    margin-left: 6px;
+    font-size: 10px;
+    letter-spacing: .02em;
+    color: var(--text-muted, #94a3b8);
+    background: var(--bg-hover, #f1f5f9);
+    border-radius: 999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    vertical-align: middle;
+}

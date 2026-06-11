@@ -483,19 +483,35 @@ const AgentChat = (() => {
     }
 
     function renderSpec(spec) {
+        const prov = spec.provenance || {};
         const rows = [];
-        const add = (k, v) => { if (v !== undefined && v !== null && v !== '') rows.push([k, v]); };
-        add('Strain', spec.strain);
-        add('Temperature', spec.temperature_c != null ? `${spec.temperature_c} °C` : null);
-        add('Slices', spec.num_slices);
-        add('Exposure', spec.exposure_ms != null ? `${spec.exposure_ms} ms` : null);
-        add('Interval', spec.interval_s != null ? `${spec.interval_s} s` : null);
-        add('Stop at', spec.stop_condition);
+        // (label, value, fieldKey) — fieldKey ties a row to its provenance entry.
+        const add = (label, value, key) => {
+            if (value === undefined || value === null || value === '') return;
+            rows.push({ label, value, src: key ? prov[key] : null });
+        };
+        add('Strain', spec.strain, 'strain');
+        add('Genotype', spec.genotype, 'genotype');
+        add('Reporter', spec.reporter, 'reporter');
+        add('Channel', spec.laser_wavelength_nm != null ? `${spec.laser_wavelength_nm} nm` : null, 'laser_wavelength_nm');
+        add('Temperature', spec.temperature_c != null ? `${spec.temperature_c} °C` : null, 'temperature_c');
+        add('Slices', spec.num_slices, 'num_slices');
+        add('Exposure', spec.exposure_ms != null ? `${spec.exposure_ms} ms` : null, 'exposure_ms');
+        add('Interval', spec.interval_s != null ? `${spec.interval_s} s` : null, 'interval_s');
+        add('Stop at', spec.stop_condition, 'stop_condition');
         if (!rows.length) return;
+        // A small "where did this come from" tag for inferred values.
+        const srcTag = (src) => {
+            if (!src || !src.source) return '';
+            const where = String(src.source).split(':')[0];
+            const conf = src.confidence ? ` · ${src.confidence}` : '';
+            const title = escapeHtml(String(src.source) + (src.confidence ? ` (confidence: ${src.confidence})` : ''));
+            return ` <span class="ac-spec-src" title="${title}">${escapeHtml(where + conf)}</span>`;
+        };
         const el = document.createElement('div');
         el.className = 'ac-spec';
-        el.innerHTML = '<div class="ac-spec-title">Imaging spec applied</div>' +
-            rows.map(([k, v]) => `<div class="ac-spec-row"><span>${escapeHtml(k)}</span><span>${escapeHtml(v)}</span></div>`).join('');
+        el.innerHTML = '<div class="ac-spec-title">Imaging spec</div>' +
+            rows.map(r => `<div class="ac-spec-row"><span>${escapeHtml(r.label)}</span><span class="ac-spec-val">${escapeHtml(r.value)}${srcTag(r.src)}</span></div>`).join('');
         log.appendChild(el);
         scrollToBottom();
     }
