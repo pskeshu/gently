@@ -30,10 +30,14 @@ const ContextSurface = (() => {
         if (!el) return;
         const hc = hasControl();
         const questions = data.questions || [], watchpoints = data.watchpoints || [], expectations = data.expectations || [];
-        if (!questions.length && !watchpoints.length && !expectations.length) {
-            el.innerHTML = ''; el.classList.add('hidden'); return;
-        }
         el.classList.remove('hidden');
+        if (!questions.length && !watchpoints.length && !expectations.length) {
+            // Show an empty-state rather than vanishing, so the surface is
+            // discoverable before the agent has formed any beliefs.
+            el.innerHTML = '<div class="cx-title">Agent’s view</div>' +
+                '<div class="cx-empty">Nothing yet — the agent’s expectations, watchpoints, and open questions appear here as it works.</div>';
+            return;
+        }
 
         const qHtml = questions.map(it => `
             <div class="cx-item" data-kind="questions" data-id="${esc(it.id)}">
