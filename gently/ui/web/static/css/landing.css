@@ -1,0 +1,227 @@
+/* ux_v2 landing — the agent-first welcome that the prototype sketched, ported
+   into production. A full-bleed overlay shown on first entry that recedes into
+   the workspace once the user picks a path. Everything is scoped under
+   body.ux-v2 and the #v2-landing node only renders when the flag is on, so v1
+   is byte-for-byte untouched. Visual language mirrors ux-prototype/landing.html
+   but reuses production's CSS variables (with the prototype hexes as fallback)
+   so it tracks the app theme. */
+
+.v2-landing {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    overflow: hidden;
+    background:
+        radial-gradient(1100px 700px at 78% -8%, #eaf1ff 0%, transparent 55%),
+        radial-gradient(900px 600px at 8% 108%, #eafaf0 0%, transparent 55%),
+        var(--bg, #f6f8fb);
+    transition: opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1), visibility .5s;
+}
+/* The calm screen "unfolds" into the workspace: fade + slight scale-up, then
+   the node is pulled from the layout (display:none set by JS after the
+   transition) so it never traps clicks. */
+.v2-landing.dismissed {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(1.015);
+    pointer-events: none;
+}
+.v2-landing::before {
+    content: "";
+    position: absolute;
+    inset: -20vmax;
+    background: radial-gradient(closest-side, rgba(47,109,246,.10), transparent 70%);
+    filter: blur(30px);
+    animation: v2land-drift 26s cubic-bezier(.22,1,.36,1) infinite alternate;
+    pointer-events: none;
+}
+@keyframes v2land-drift {
+    0%   { transform: translate(-6vw,-4vh) scale(1); }
+    100% { transform: translate(8vw,6vh) scale(1.15); }
+}
+
+.v2-landing-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 760px;
+    width: 100%;
+}
+.v2-landing-rise { animation: v2land-rise .6s cubic-bezier(.22,1,.36,1) backwards; }
+.v2-landing-rise[data-i="1"] { animation-delay: .07s; }
+.v2-landing-rise[data-i="2"] { animation-delay: .14s; }
+.v2-landing-rise[data-i="3"] { animation-delay: .21s; }
+@keyframes v2land-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* agent presence */
+.v2-landing-agent { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.v2-landing-orb {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: radial-gradient(closest-side at 38% 34%, #ffffff, #bcd3ff 40%, var(--accent, #2f6df6) 100%);
+    box-shadow: 0 6px 22px rgba(47,109,246,.45), inset 0 0 12px rgba(255,255,255,.6);
+    animation: v2land-breathe 4s ease-in-out infinite;
+}
+@keyframes v2land-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.v2-landing-say {
+    font-size: clamp(20px, 3vw, 28px); font-weight: 600; letter-spacing: -.02em;
+    text-align: center; max-width: 22ch; line-height: 1.25; color: var(--text, #0f172a);
+}
+.v2-landing-say .dim { color: var(--text-muted, #94a3b8); font-weight: 500; }
+
+/* choice cards */
+.v2-landing-choices {
+    display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 18px;
+    margin-top: 34px; width: min(720px, 92vw);
+}
+@media (max-width: 620px) { .v2-landing-choices { grid-template-columns: 1fr; } }
+.v2-choice {
+    text-align: left; cursor: pointer; position: relative; overflow: hidden;
+    border: 1px solid var(--border, #e4e9f0); background: var(--bg-card, #fff);
+    border-radius: 18px; padding: 22px 22px 20px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 28px rgba(15,23,42,.06);
+    font: inherit; color: var(--text, #0f172a);
+    transition: transform .26s cubic-bezier(.22,1,.36,1), box-shadow .26s cubic-bezier(.22,1,.36,1), border-color .26s;
+}
+.v2-choice:hover {
+    transform: translateY(-4px); border-color: #cfdcf5;
+    box-shadow: 0 2px 6px rgba(15,23,42,.06), 0 18px 50px rgba(47,109,246,.14);
+}
+.v2-choice:active { transform: translateY(-1px) scale(.995); }
+.v2-choice-ic {
+    width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+    background: var(--accent-soft, #eaf1ff); color: var(--accent, #2f6df6); margin-bottom: 14px;
+}
+.v2-choice.alt .v2-choice-ic { background: var(--accent-green-soft, #e7f6ec); color: var(--accent-green, #16a34a); }
+.v2-choice h3 { margin: 0 0 6px; font-size: 17px; letter-spacing: -.01em; }
+.v2-choice p { margin: 0; color: var(--text-secondary, #475569); font-size: 13.5px; line-height: 1.5; }
+.v2-choice-tag {
+    position: absolute; top: 16px; right: 16px;
+    font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted, #94a3b8);
+    border: 1px solid var(--border, #e4e9f0); border-radius: 999px; padding: 3px 9px;
+}
+.v2-choice-go {
+    margin-top: 16px; display: flex; align-items: center; gap: 6px;
+    color: var(--accent, #2f6df6); font-size: 13px; font-weight: 600;
+    opacity: 0; transform: translateX(-4px); transition: .26s cubic-bezier(.22,1,.36,1);
+}
+.v2-choice.alt .v2-choice-go { color: var(--accent-green, #16a34a); }
+.v2-choice:hover .v2-choice-go { opacity: 1; transform: none; }
+
+/* escape hatch — chat is the last resort, an obvious pill */
+.v2-escape { margin-top: 26px; display: flex; flex-direction: column; align-items: center; }
+.v2-escape-toggle {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font: inherit; font-size: 13px;
+    background: var(--bg-card, #fff); border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    padding: 8px 15px; border-radius: 999px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 28px rgba(15,23,42,.06);
+    transition: color .2s, border-color .2s, transform .2s cubic-bezier(.22,1,.36,1);
+}
+.v2-escape-toggle:hover { color: var(--text, #0f172a); border-color: #cfd9e6; transform: translateY(-1px); }
+.v2-escape-toggle .v2-escape-caret { display: inline-block; transition: transform .3s cubic-bezier(.22,1,.36,1); opacity: .55; }
+.v2-escape.open .v2-escape-toggle .v2-escape-caret { transform: rotate(180deg); }
+.v2-escape-field {
+    display: flex; align-items: center; gap: 8px; width: min(520px, 90vw);
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height .4s cubic-bezier(.22,1,.36,1), opacity .4s cubic-bezier(.22,1,.36,1), margin .4s cubic-bezier(.22,1,.36,1);
+}
+.v2-escape.open .v2-escape-field { max-height: 64px; opacity: 1; margin-top: 12px; }
+.v2-escape-field input {
+    flex: 1; min-width: 0; border: 1px solid var(--border, #e4e9f0); background: var(--bg-card, #fff);
+    border-radius: 12px; padding: 12px 14px; font: inherit; font-size: 14px; color: var(--text, #0f172a);
+    outline: none; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    transition: border-color .2s, box-shadow .2s;
+}
+.v2-escape-field input:focus { border-color: var(--accent, #2f6df6); box-shadow: 0 0 0 4px rgba(47,109,246,.12); }
+.v2-escape-send {
+    appearance: none; border: 0; cursor: pointer; flex: none; width: 42px; height: 42px; border-radius: 12px;
+    background: var(--accent, #2f6df6); color: #fff; display: grid; place-items: center;
+    box-shadow: 0 6px 16px rgba(47,109,246,.35); transition: transform .2s cubic-bezier(.22,1,.36,1), filter .2s;
+}
+.v2-escape-send:hover { transform: translateY(-1px); filter: brightness(1.05); }
+
+/* one-way skip into the workspace (e.g. a reload mid-session) */
+.v2-landing-skip {
+    margin-top: 28px; background: none; border: 0; cursor: pointer; font: inherit; font-size: 12.5px;
+    color: var(--text-muted, #94a3b8); padding: 6px 10px; border-radius: 8px;
+    transition: color .2s;
+}
+.v2-landing-skip:hover { color: var(--text-secondary, #475569); }
+
+/* Under ux_v2 the landing IS the welcome moment, so the legacy home hero
+   (static "Welcome to Gently" + start button) would be a duplicate behind it —
+   hide it. The recent-* cards and the context surface stay. */
+body.ux-v2 .home-hero { display: none; }
+
+/* ── Two-screen system: welcome ↔ in-place plan wizard ───────── */
+.v2-landing-inner { max-width: 980px; }   /* widen for the plan layout */
+.v2-landing .v2-screen { display: none; width: 100%; }
+.v2-landing[data-screen="welcome"] .v2-screen-welcome {
+    display: flex; flex-direction: column; align-items: center;
+    max-width: 760px; margin: 0 auto;
+}
+.v2-landing[data-screen="plan"] .v2-screen-plan {
+    display: flex; flex-direction: column;
+    animation: v2land-rise .45s cubic-bezier(.22,1,.36,1) backwards;
+}
+
+/* plan header */
+.v2-plan-head { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
+.v2-plan-orb { width: 34px; height: 34px; }
+.v2-plan-who { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8); }
+.v2-plan-title { font-size: 18px; font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); }
+.v2-plan-back {
+    margin-left: auto; background: none; border: 0; cursor: pointer; font: inherit; font-size: 13px;
+    color: var(--text-muted, #94a3b8); padding: 6px 10px; border-radius: 8px; transition: color .2s, background .2s;
+}
+.v2-plan-back:hover { color: var(--text, #0f172a); background: rgba(15,23,42,.05); }
+
+/* plan body: ask stage + assembling plan */
+.v2-plan-wrap { display: grid; grid-template-columns: 1.35fr .9fr; gap: 20px; align-items: start; }
+@media (max-width: 720px) { .v2-plan-wrap { grid-template-columns: 1fr; } }
+.v2-plan-main { min-height: 220px; }
+.v2-plan-ask:empty { display: none; }
+.v2-plan-thinking { display: flex; align-items: center; gap: 9px; color: var(--text-muted, #94a3b8); font-size: 13.5px; padding: 22px 4px; }
+.v2-plan-thinking.hidden { display: none; }
+.v2-typing { display: inline-flex; gap: 5px; align-items: center; }
+.v2-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #2f6df6); opacity: .4; animation: v2-blink 1.1s infinite; }
+.v2-typing i:nth-child(2) { animation-delay: .15s; }
+.v2-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes v2-blink { 0%,100% { opacity: .25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+.v2-plan-side {
+    background: var(--bg-card, #fff); border: 1px solid var(--border, #e4e9f0); border-radius: 14px; padding: 16px 18px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 28px rgba(15,23,42,.06);
+}
+.v2-plan-side-h { font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: var(--text-muted, #94a3b8); margin-bottom: 12px; }
+.v2-plan-side-empty { color: var(--text-muted, #94a3b8); font-size: 13px; font-style: italic; }
+.v2-plan-row { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-top: 1px dashed var(--border, #e4e9f0); }
+.v2-plan-row:first-child { border-top: 0; }
+.v2-plan-row .k { font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase; color: var(--text-muted, #94a3b8); }
+.v2-plan-row .v { font-size: 14px; color: var(--text, #0f172a); font-weight: 550; }
+
+/* plan footer */
+.v2-plan-foot { display: flex; align-items: center; gap: 10px; margin-top: 22px; }
+.v2-plan-chat {
+    margin-right: auto; background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 8px 14px; font: inherit; font-size: 13px; cursor: pointer; transition: border-color .2s, color .2s;
+}
+.v2-plan-chat:hover { border-color: #cfd9e6; color: var(--text, #0f172a); }
+.v2-plan-continue {
+    background: var(--accent, #2f6df6); color: #fff; border: 0; border-radius: 10px; padding: 10px 16px;
+    font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; transition: transform .2s cubic-bezier(.22,1,.36,1), filter .2s;
+}
+.v2-plan-continue:hover { transform: translateY(-1px); filter: brightness(1.05); }
+
+@media (prefers-reduced-motion: reduce) {
+    .v2-landing, .v2-landing::before, .v2-landing-rise, .v2-landing-orb,
+    .v2-landing[data-screen="plan"] .v2-screen-plan, .v2-typing i {
+        animation: none !important;
+        transition-duration: .12s !important;
+    }
+}

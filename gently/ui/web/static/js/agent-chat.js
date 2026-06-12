@@ -12,6 +12,9 @@
 const AgentChat = (() => {
     let ws = null;
     let reconnectDelay = 1000;
+    // Commands/messages requested before the socket is open (e.g. from the
+    // landing, with the chat panel closed) — flushed in order on ws.onopen.
+    let pendingProgrammatic = [];
     const MAX_DELAY = 30000;
 
     let panelOpen = false;
@@ -743,11 +746,17 @@ const AgentChat = (() => {
         if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
     }
 
+    // Flush programmatic sends queued before the socket opened (see runCommand).
+    function flushProgrammatic() {
+        if (!pendingProgrammatic.length) return;
+        pendingProgrammatic.splice(0).forEach(t => actuallySend(t));
+    }
+
     function connect() {
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         setConn(false, 'Connecting…');
         ws = new WebSocket(`${proto}//${location.host}/ws/agent`);
-        ws.onopen = () => { reconnectDelay = 1000; setConn(true); };
+        ws.onopen = () => { reconnectDelay = 1000; setConn(true); flushProgrammatic(); };
         ws.onclose = () => {
             setConn(false, 'Reconnecting…');
             setBusy(false);
@@ -1067,7 +1076,12 @@ const AgentChat = (() => {
     function runCommand(text) {
         if (!text) return;
         if (!hasControl) { renderControl(); return; }
-        actuallySend(text);
+        // Works whether or not the chat panel is open, so the landing can drive
+        // the agent (enter plan mode) without foregrounding the chat REPL. If the
+        // socket isn't up yet, queue and connect — it flushes on open.
+        if (ws && ws.readyState === WebSocket.OPEN) { actuallySend(text); return; }
+        pendingProgrammatic.push(text);
+        if (!ws) connect();
     }
 
     return { togglePanel, runCommand, buildAskCard, answerChoice, hasControl: () => hasControl };
