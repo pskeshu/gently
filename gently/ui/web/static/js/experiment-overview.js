@@ -1,147 +1,12 @@
 /**
- * Experiment Overview Tab — vector-graphics view of the planned timelapse.
+ * Experiment Overview Tab — vector-graphics view of the live imaging tactics
+ * (cadence patterns + reactive-monitoring rules) for the running experiment.
  *
- * Data source priority:
- *   1. GET /api/experiments/current/strategy  — live snapshot from FileStore.
- *   2. STUB_STRATEGY below                    — used when the live fetch
- *                                               fails or no session exists.
- *
- * The render path is data-shape-driven and doesn't care which source the
- * snapshot came from — only ``ExperimentOverview.isLive`` differs so the
- * header badge can say "live" or "mockup · stubbed data".
+ * Data source: GET /api/experiments/current/strategy — the live snapshot from
+ * FileStore. When there is no active experiment (or the fetch isn't ready), the
+ * view shows a calm empty state; it never renders stubbed/mock data.
  */
 
-const STUB_STRATEGY = {
-    session_id: "20260522_1430_dopaminergic_demo_a3f8e1c2",
-    session_name: "dopaminergic-reporter demo",
-    started_at: "2026-05-22T14:30:00",
-    now_offset_s: 8100,         // 2h 15min into the run
-    horizon_s: 14400,           // 4h total view window (past + projected)
-    base_interval_s: 120,
-    dose_budget_base_ms: 50000,
-    per_timepoint_ms: 500,      // 50 slices × 10ms
-    monitoring_modes: [
-        {
-            name: "expression_monitoring",
-            description: "Anticipating fluorescent-reporter onset on Test embryos: accelerate to 60s on signal, ramp 488 down on saturation.",
-            applies_to_roles: ["test"],
-            params: {
-                fast_interval: 60,
-                rampdown_step_pct: 1.0,
-                rampdown_floor_pct: 2.0,
-                rampdown_ceiling_pct: 6.0
-            }
-        },
-        {
-            name: "pre_terminal_monitoring",
-            description: "Anticipating organism pre-terminal stage (pretzel): accelerate to 30s on detection.",
-            applies_to_roles: ["test"],
-            params: { fast_interval: 30 }
-        }
-    ],
-    triggers: [
-        { id: "t1", kind: "interval_rule", label: "signal onset",
-          when_text: "dopaminergic ≥ WEAK", then_text: "120s → 60s",
-          applies_to: ["test"], one_time: true },
-        { id: "t2", kind: "power_rule", label: "488 ramp down",
-          when_text: "intensity = SATURATING (×3)", then_text: "488 ↓ 1%/step, floor 2%",
-          applies_to: ["test"] },
-        { id: "t3", kind: "burst", label: "structure-triggered burst",
-          when_text: "structure_quality = GOOD", then_text: "burst 200 frames @ 20 Hz",
-          applies_to: ["test"] },
-        { id: "t4", kind: "interval_rule", label: "pre-terminal speedup",
-          when_text: "stage = pretzel", then_text: "60s → 30s",
-          applies_to: ["test"], one_time: true }
-    ],
-    embryos: [
-        {
-            id: "E1", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 12500, dose_budget_ms: 50000,
-            tp_acquired: 25,
-            stop_condition: "hatching+3 OR 24h duration",
-            stop_kind: "bounded",
-            laser_488_pct_now: 3.0,
-            phases: [
-                { mode: "base",     start: 0,    end: 1800, cadence_s: 120 },
-                { mode: "fast",     start: 1800, end: 3600, cadence_s: 60 },
-                { mode: "burst",    start: 3600, end: 3610, frames: 200, hz: 20 },
-                { mode: "cooldown", start: 3610, end: 3640, cadence_s: 60 },
-                { mode: "fast",     start: 3640, end: 8100, cadence_s: 60 }
-            ],
-            trigger_events: [
-                { trigger_id: "t1", at: 1800 },
-                { trigger_id: "t3", at: 3600 },
-                { trigger_id: "t2", at: 5400, count: 3 }
-            ],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 5400, pct: 4.0 },
-                { at: 5460, pct: 3.0 },
-                { at: 8100, pct: 3.0 }
-            ],
-            // Future projection at current cadence (60s, fast). Hatching not
-            // deterministic so projected_end_s is null — render fades to ∞.
-            projected_cadence_s: 60,
-            projected_end_s: null
-        },
-        {
-            id: "E2", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 6500, dose_budget_ms: 50000,
-            tp_acquired: 13,
-            stop_condition: "hatching+3 OR 24h duration",
-            stop_kind: "bounded",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            projected_cadence_s: 120,
-            projected_end_s: null
-        },
-        {
-            id: "E3", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 38000, dose_budget_ms: 50000,
-            tp_acquired: 76,
-            stop_condition: "manual",
-            stop_kind: "open_ended",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            // Projected dose-exhaust horizon = 4.0h from now (warning condition)
-            projected_cadence_s: 120,
-            projected_end_s: null,
-            dose_exhaust_at_s: 12000   // budget will run out at this elapsed time
-        },
-        {
-            id: "C1", role: "calibration", color: "#22d3ee", icon: "◆",
-            dose_used_ms: 33500, dose_budget_ms: 500000,   // 10× multiplier
-            tp_acquired: 67,
-            stop_condition: "manual",
-            stop_kind: "open_ended",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            projected_cadence_s: 120,
-            projected_end_s: null
-        }
-    ]
-};
 
 const ExperimentOverview = {
     initialized: false,
@@ -164,23 +29,19 @@ const ExperimentOverview = {
                 cache: 'no-store'
             });
             if (!resp.ok) {
-                console.warn(
-                    '[ExperimentOverview] strategy fetch returned',
-                    resp.status, '- falling back to stub'
-                );
+                // No active experiment / not ready yet — show the empty state,
+                // never stubbed data.
+                console.warn('[ExperimentOverview] strategy fetch returned', resp.status);
                 this.isLive = false;
-                return STUB_STRATEGY;
+                return null;
             }
             const data = await resp.json();
             this.isLive = true;
             return data;
         } catch (e) {
-            console.warn(
-                '[ExperimentOverview] strategy fetch error - falling back to stub:',
-                e
-            );
+            console.warn('[ExperimentOverview] strategy fetch error:', e);
             this.isLive = false;
-            return STUB_STRATEGY;
+            return null;
         }
     },
 
@@ -193,7 +54,7 @@ const ExperimentOverview = {
         });
         // Re-render against the last fetched strategy (no re-fetch on tab
         // switch — refresh happens on tab activation in the bootstrap).
-        this.render(this.activeStrategy || STUB_STRATEGY);
+        this.render(this.activeStrategy);
     },
 
     render(s) {
@@ -204,6 +65,12 @@ const ExperimentOverview = {
         }
         // Tear down any prior ticker before we blow away the SVG it pointed at.
         this._stopNowTicker();
+        if (!s) {
+            // No active experiment — a calm empty state, never stubbed data.
+            root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted,#94a3b8);font-size:13px;">' +
+                'No active experiment — the imaging tactics (cadence, reactive rules) will appear here once a run is live.</div>';
+            return;
+        }
         try {
             root.innerHTML = '';
             if (this.activeView === 'rules') {
@@ -301,7 +168,6 @@ const ExperimentOverview = {
         const metaRow = el('div', 'expov-header-row expov-header-row-meta');
         metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
         metaRow.appendChild(elText('span', 'expov-session-id', s.session_id));
-        metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
         header.appendChild(metaRow);
         root.appendChild(header);
 
@@ -330,11 +196,7 @@ const ExperimentOverview = {
         if (s.session_name && s.session_name !== s.session_id) {
             metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
         }
-        if (this.isLive) {
-            metaRow.appendChild(elText('span', 'expov-live-badge', 'live'));
-        } else {
-            metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
-        }
+        metaRow.appendChild(elText('span', 'expov-live-badge', 'live'));
         wrap.appendChild(metaRow);
 
         // Compact key-metric strip
