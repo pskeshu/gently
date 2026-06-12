@@ -124,10 +124,10 @@ class TransferSettings:
 class UISettings:
     """Web UI feature flags."""
     # New agent-first UX paradigm (welcome→shell unfold, dual-rendered agent
-    # asks, inference-first plan mode, shared-visibility surface). Off by
-    # default; flip per-deployment via GENTLY_UX_V2=1 while the migration
-    # soaks behind the flag. The v1 dashboard stays the default until then.
-    ux_v2: bool = field(default_factory=lambda: _env("UX_V2", False))
+    # asks, inference-first plan mode, shared-visibility surface). Now ON by
+    # default; the v1 dashboard remains available as a fallback via
+    # GENTLY_UX_V2=0 until the v1 markup is removed in a later cleanup step.
+    ux_v2: bool = field(default_factory=lambda: _env("UX_V2", True))
 
 
 @dataclass(frozen=True)
