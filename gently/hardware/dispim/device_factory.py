@@ -34,6 +34,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
         - lightsheet_snap: DiSPIMLightSheetSnap
         - scanner: DiSPIMScanner
         - piezo: DiSPIMPiezo
+        - fdrive: DiSPIMFDrive (SPIM head Z / F axis)
 
     Example
     -------
@@ -67,6 +68,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
         'camera_name': 'HamCam1',
         'scanner_name': 'Scanner:AB:33',
         'piezo_name': 'PiezoStage:P:34',
+        'fdrive_name': 'ZStage:V:37',
         'bottom_camera_name': 'Bottom PCO',
         'led_name': 'LED:X:31'
     }
@@ -126,6 +128,13 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore,
         logger.info("Created XY stage: %s", cfg['xy_stage_name'])
     except Exception as e:
         logger.warning("Could not create XY stage: %s", e)
+
+    try:
+        from .devices import DiSPIMFDrive
+        devices['fdrive'] = DiSPIMFDrive(name=cfg['fdrive_name'], core=core)
+        logger.info("Created F-drive (SPIM head): %s", cfg['fdrive_name'])
+    except Exception as e:
+        logger.warning("Could not create F-drive (SPIM head): %s", e)
 
     try:
         if cfg.get('led_name'):

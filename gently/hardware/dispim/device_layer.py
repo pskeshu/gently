@@ -177,6 +177,11 @@ class DeviceLayerServer(Service):
             'focus_sweep_plan',
             'calibrate_piezo_galvo_plan',
             'multi_embryo_calibration_workflow',
+            # Slow F-drive traverse (25000 -> ~50 um) + fine focus scan + the
+            # XY view-registration loop all hold MMCore for a while.
+            'spim_head_focus_descent_plan',
+            'register_views_xy_plan',
+            'spim_head_focus_and_align_plan',
         })
 
     async def initialize(self):
@@ -447,6 +452,20 @@ class DeviceLayerServer(Service):
             logger.info("Loaded main acquisition plans")
         except ImportError:
             logger.info("Main acquisition plans not available")
+
+        # SPIM head focus + dual-view registration plans
+        try:
+            from .plans.acquisition import (
+                spim_head_focus_descent_plan,
+                register_views_xy_plan,
+                spim_head_focus_and_align_plan,
+            )
+            self.plans['spim_head_focus_descent_plan'] = spim_head_focus_descent_plan
+            self.plans['register_views_xy_plan'] = register_views_xy_plan
+            self.plans['spim_head_focus_and_align_plan'] = spim_head_focus_and_align_plan
+            logger.info("Loaded SPIM head focus plans")
+        except ImportError:
+            logger.info("SPIM head focus plans not available")
 
     def _resolve_device_args(self, kwargs: Dict[str, Any]) -> Dict[str, Any]:
         """Replace device name strings with actual device objects"""
