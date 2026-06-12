@@ -14,6 +14,8 @@ from datetime import datetime
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from gently.settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -744,9 +746,18 @@ def create_router(server) -> APIRouter:
                         pass
 
             if not wizard_ran:
-                if bridge.should_enter_resolution():
+                enter_resolution = bridge.should_enter_resolution()
+                # Under ux_v2 the agent-first landing owns the session-entry
+                # decision ("Plan an experiment" / "Take a quick look"), so the
+                # legacy connect-time resolution picker would just duplicate it —
+                # and contradict it, by offering "Standalone" after the user has
+                # already chosen to plan. Stay quiet on connect for new sessions;
+                # the landing drives plan-mode (/plan) or standalone instead.
+                if enter_resolution and not settings.ui.ux_v2:
                     bootstrap_task = asyncio.create_task(_run_resolution_bootstrap())
-                else:
+                elif not enter_resolution:
+                    # Resume / already-resolved sessions still get their briefing
+                    # (it sits behind the landing overlay until dismissed).
                     briefing = bridge.get_session_briefing()
                     if briefing:
                         await send_fn({"type": "stream_start"})

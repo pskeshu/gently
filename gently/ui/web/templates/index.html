@@ -53,7 +53,7 @@
           </div>
 
           <div class="v2-escape v2-landing-rise" data-i="3" id="v2-escape">
-            <button class="v2-escape-toggle" id="v2-escape-toggle">
+            <button class="v2-escape-toggle" id="v2-escape-toggle" aria-expanded="false">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg>
               or just tell me what you need
               <span class="v2-escape-caret"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
@@ -81,19 +81,22 @@
           </div>
           <div class="v2-plan-wrap">
             <div class="v2-plan-main">
+              <div class="v2-plan-activity" id="v2-plan-activity"></div>
               <div class="v2-plan-ask" id="v2-plan-ask" aria-live="polite"></div>
               <div class="v2-plan-thinking" id="v2-plan-thinking"><span class="v2-typing"><i></i><i></i><i></i></span> thinking through the next step…</div>
+              <div class="v2-plan-error hidden" id="v2-plan-error" role="alert"></div>
             </div>
             <aside class="v2-plan-side">
               <div class="v2-plan-side-h">The plan</div>
               <div class="v2-plan-side-list" id="v2-plan-summary">
-                <div class="v2-plan-side-empty">Assembling from your choices…</div>
+                <div class="v2-plan-side-empty">The plan will take shape here as Gently designs it.</div>
               </div>
             </aside>
           </div>
           <div class="v2-plan-foot">
             <button class="v2-plan-chat" id="v2-plan-chat">Open conversation</button>
-            <button class="v2-plan-continue" id="v2-plan-continue">Continue in workspace ›</button>
+            <span class="v2-plan-foot-spacer"></span>
+            <button class="v2-plan-skip" id="v2-plan-continue">Continue in workspace ›</button>
           </div>
         </section>
 
