@@ -10,12 +10,14 @@ import json
 import logging
 import re
 import time
-from typing import Any
+from typing import Dict, List, Optional, Any
+
+from ..settings import settings
 
 logger = logging.getLogger(__name__)
 
 
-def _extend_tool_calls(out: list[dict[str, Any]], content_blocks) -> None:
+def _extend_tool_calls(out: List[Dict[str, Any]], content_blocks) -> None:
     """Append every tool_use block in content_blocks to out.
 
     Tolerates absent attributes (some SDK versions / mock objects) so it
@@ -27,13 +29,11 @@ def _extend_tool_calls(out: list[dict[str, Any]], content_blocks) -> None:
         try:
             if getattr(block, "type", None) != "tool_use":
                 continue
-            out.append(
-                {
-                    "name": getattr(block, "name", None),
-                    "input": getattr(block, "input", None),
-                    "id": getattr(block, "id", None),
-                }
-            )
+            out.append({
+                "name": getattr(block, "name", None),
+                "input": getattr(block, "input", None),
+                "id": getattr(block, "id", None),
+            })
         except Exception:
             continue
 
@@ -55,7 +55,7 @@ class ConversationManager:
         self._tool_registry = tool_registry
 
         # Conversation state
-        self.conversation_history: list[dict] = []
+        self.conversation_history: List[Dict] = []
 
         # Token counters
         self.total_input_tokens: int = 0
@@ -76,9 +76,8 @@ class ConversationManager:
 
     # ===== Quick Response =====
 
-    def try_quick_response(
-        self, message: str, experiment, mode: str, enter_plan_fn, exit_plan_fn
-    ) -> str | None:
+    def try_quick_response(self, message: str, experiment, mode: str,
+                           enter_plan_fn, exit_plan_fn) -> Optional[str]:
         """
         Answer simple queries from state without LLM call.
 
@@ -107,13 +106,7 @@ class ConversationManager:
             return experiment.get_summary()
 
         # Plan mode switching via natural language
-        plan_enter_phrases = (
-            "plan mode",
-            "enter plan",
-            "switch to plan",
-            "let's plan",
-            "design an experiment",
-        )
+        plan_enter_phrases = ("plan mode", "enter plan", "switch to plan", "let's plan", "design an experiment")
         plan_exit_phrases = ("exit plan", "leave plan", "back to run", "run mode")
 
         if mode != "plan" and any(p in message_lower for p in plan_enter_phrases):
@@ -149,36 +142,54 @@ class ConversationManager:
         if mode == "plan":
             return True
 
+        import re
         msg_lower = message.lower()
 
-        if re.search(r"\bthink(ing)?\b", message, re.IGNORECASE):
+        if re.search(r'\bthink(ing)?\b', message, re.IGNORECASE):
             return True
-        if re.search(r"\bcalibrat", msg_lower):
+        if re.search(r'\bcalibrat', msg_lower):
             return True
-        if re.search(r"\b(plan|timelapse|time-lapse|acquisition)\b", msg_lower):
+        if re.search(r'\b(plan|timelapse|time-lapse|acquisition)\b', msg_lower):
             return True
-        if re.search(
-            r"\b(analy[sz]e|look at|check|inspect|review).*(image|volume|embryo)",
-            msg_lower,
-        ):
+        if re.search(r'\b(analy[sz]e|look at|check|inspect|review).*(image|volume|embryo)', msg_lower):
             return True
-        if re.search(r"\b(all|every|each)\s+(embryo|sample)", msg_lower):
+        if re.search(r'\b(all|every|each)\s+(embryo|sample)', msg_lower):
             return True
-        if re.search(
-            r"\b(first|then|after|next|finally)\b.*\b(first|then|after|next|finally)\b",
-            msg_lower,
-        ):
+        if re.search(r'\b(first|then|after|next|finally)\b.*\b(first|then|after|next|finally)\b', msg_lower):
             return True
-        if re.search(r"\b(why|problem|issue|error|wrong|fail|debug|troubleshoot)", msg_lower):
+        if re.search(r'\b(why|problem|issue|error|wrong|fail|debug|troubleshoot)', msg_lower):
             return True
 
         return False
 
     # ===== Non-Streaming API Call =====
 
-    async def call_claude(
-        self, user_message: str, system_prompt, tools, mode: str, auto_save_fn
-    ) -> str:
+    async def _create_with_refusal_fallback(self, api_kwargs):
+        """messages.create with main-tier resilience: if the model rejects the
+        request with a 400 (e.g. Fable 5 under <30-day org data retention, or
+        unavailable) OR declines it (stop_reason="refusal", empty content), retry
+        the SAME request once on the fallback model (Opus 4.8) — so gently keeps
+        working whether or not Fable 5 is currently serviceable. The moment the
+        org retention is fixed, Fable 5 serves with no code change."""
+        from anthropic import BadRequestError
+        fb = settings.models.refusal_fallback
+        model = api_kwargs.get("model")
+        try:
+            response = await self._call_api_with_retry(self.claude.messages.create, **api_kwargs)
+        except BadRequestError:
+            if not fb or fb == model:
+                raise
+            logger.warning("Model %s rejected the request (400); falling back to %s", model, fb)
+            return await self._call_api_with_retry(self.claude.messages.create, **{**api_kwargs, "model": fb})
+        if response.stop_reason == "refusal" and fb and fb != model:
+            logger.warning("Model %s declined the turn; retrying on %s", model, fb)
+            response = await self._call_api_with_retry(
+                self.claude.messages.create, **{**api_kwargs, "model": fb}
+            )
+        return response
+
+    async def call_claude(self, user_message: str, system_prompt, tools,
+                          mode: str, auto_save_fn) -> str:
         """
         Call Claude API with full context and tool access (non-streaming).
 
@@ -210,8 +221,8 @@ class ConversationManager:
             interaction = self.interaction_logger.start_interaction(
                 user_prompt=user_message,
                 system_state={
-                    "acquisition_status": "unknown",
-                },
+                    'acquisition_status': 'unknown',
+                }
             )
 
         # Snapshot inputs for decision capture BEFORE the tool loop starts
@@ -222,15 +233,13 @@ class ConversationManager:
         if self.decision_log is not None:
             try:
                 from gently.eval import prompt_hash as _prompt_hash
-
                 decision_prompt_hash = _prompt_hash(
-                    system_prompt,
-                    list(self.conversation_history),
+                    system_prompt, list(self.conversation_history),
                 )
             except Exception:
                 logger.exception("Failed to compute decision prompt_hash")
 
-        tool_calls_collected: list[dict[str, Any]] = []
+        tool_calls_collected: List[Dict[str, Any]] = []
         assistant_message = ""
         error_occurred = None
 
@@ -243,38 +252,51 @@ class ConversationManager:
                 "max_tokens": 16000 if use_thinking else 4096,
             }
             if use_thinking:
-                budget = 30000 if mode == "plan" else 10000
-                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                # Fable 5 / Opus 4.8 reject thinking budget_tokens (400) — thinking
+                # is adaptive; control depth via effort instead of a token budget.
+                api_kwargs["output_config"] = {"effort": "high" if mode == "plan" else "medium"}
 
-            response = await self._call_api_with_retry(self.claude.messages.create, **api_kwargs)
+            response = await self._create_with_refusal_fallback(api_kwargs)
             self._track_token_usage(response)
             _extend_tool_calls(tool_calls_collected, response.content)
 
             # Process tool calls
             while response.stop_reason == "tool_use":
-                tool_results = await self._execute_tools_with_logging(response.content, interaction)
+                tool_results = await self._execute_tools_with_logging(
+                    response.content, interaction
+                )
 
-                self.conversation_history.append({"role": "assistant", "content": response.content})
-                self.conversation_history.append({"role": "user", "content": tool_results})
+                self.conversation_history.append({
+                    "role": "assistant",
+                    "content": response.content
+                })
+                self.conversation_history.append({
+                    "role": "user",
+                    "content": tool_results
+                })
 
                 api_kwargs["messages"] = self.conversation_history
-                response = await self._call_api_with_retry(
-                    self.claude.messages.create, **api_kwargs
-                )
+                response = await self._create_with_refusal_fallback(api_kwargs)
                 self._track_token_usage(response)
                 _extend_tool_calls(tool_calls_collected, response.content)
 
-            # Extract text response
-            assistant_message = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    assistant_message += block.text
+            # Extract text response. Fable 5 may refuse (stop_reason="refusal")
+            # with empty content — surface it instead of returning blank.
+            if response.stop_reason == "refusal":
+                assistant_message = "(The request was declined by the model's safety system. Try rephrasing.)"
+            else:
+                assistant_message = ""
+                for block in response.content:
+                    if hasattr(block, 'text'):
+                        assistant_message += block.text
 
-            self.conversation_history.append({"role": "assistant", "content": response.content})
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response.content
+            })
 
         except Exception as e:
             import traceback
-
             error_occurred = str(e)
             error_tb = traceback.format_exc()
             assistant_message = f"Error: {error_occurred}"
@@ -321,11 +343,11 @@ class ConversationManager:
         self,
         *,
         user_message: str,
-        tool_calls: list[dict[str, Any]],
+        tool_calls: List[Dict[str, Any]],
         response_text: str,
         duration_ms: float,
-        prompt_hash_value: str | None,
-        error: str | None,
+        prompt_hash_value: Optional[str],
+        error: Optional[str],
     ) -> None:
         """Persist one production Decision row (best-effort).
 
@@ -337,28 +359,24 @@ class ConversationManager:
             return
         try:
             from datetime import datetime
-
             from gently.eval import Decision, DecisionTrigger
-
-            self.decision_log.append(
-                Decision(
-                    timestamp=datetime.now(),
-                    agent="production",
-                    trigger=DecisionTrigger.USER_MESSAGE,
-                    trigger_detail=(user_message or "")[:200],
-                    tool_calls=tool_calls,
-                    response_text=response_text,
-                    prompt_hash=prompt_hash_value,
-                    duration_ms=duration_ms,
-                    error=error,
-                )
-            )
+            self.decision_log.append(Decision(
+                timestamp=datetime.now(),
+                agent="production",
+                trigger=DecisionTrigger.USER_MESSAGE,
+                trigger_detail=(user_message or "")[:200],
+                tool_calls=tool_calls,
+                response_text=response_text,
+                prompt_hash=prompt_hash_value,
+                duration_ms=duration_ms,
+                error=error,
+            ))
         except Exception:
             logger.exception("Failed to write production Decision")
 
     # ===== Dry-Run Tool Call (Benchmarking) =====
 
-    async def get_tool_call(self, user_message: str, system_prompt, tools) -> dict | None:
+    async def get_tool_call(self, user_message: str, system_prompt, tools) -> Optional[Dict]:
         """
         Get what tool Claude would call without executing it (dry-run mode).
 
@@ -381,7 +399,10 @@ class ConversationManager:
         start_time = time.time()
 
         messages = self.conversation_history.copy()
-        messages.append({"role": "user", "content": user_message})
+        messages.append({
+            "role": "user",
+            "content": user_message
+        })
 
         try:
             api_kwargs = {
@@ -392,13 +413,19 @@ class ConversationManager:
                 "max_tokens": 4096,
             }
 
-            response = await self._call_api_with_retry(self.claude.messages.create, **api_kwargs)
+            response = await self._call_api_with_retry(
+                self.claude.messages.create,
+                **api_kwargs
+            )
 
             latency_ms = (time.time() - start_time) * 1000
 
-            input_tokens = getattr(response.usage, "input_tokens", 0)
-            output_tokens = getattr(response.usage, "output_tokens", 0)
+            input_tokens = getattr(response.usage, 'input_tokens', 0)
+            output_tokens = getattr(response.usage, 'output_tokens', 0)
 
+            # A refusal returns empty content — treat as "no tool call".
+            if response.stop_reason == "refusal" or not response.content:
+                return None
             for block in response.content:
                 if block.type == "tool_use":
                     return {
@@ -417,7 +444,7 @@ class ConversationManager:
 
     # ===== Tool Execution =====
 
-    async def _execute_tools_with_logging(self, content_blocks, interaction) -> list[dict]:
+    async def _execute_tools_with_logging(self, content_blocks, interaction) -> List[Dict]:
         """
         Execute Claude's tool calls with interaction logging.
 
@@ -449,10 +476,7 @@ class ConversationManager:
                     if self.choice_handler and isinstance(result, str):
                         try:
                             choice_data = json.loads(result)
-                            if (
-                                isinstance(choice_data, dict)
-                                and choice_data.get("_type") == CHOICE_RESPONSE_TYPE
-                            ):
+                            if isinstance(choice_data, dict) and choice_data.get("_type") == CHOICE_RESPONSE_TYPE:
                                 user_selection = await self.choice_handler(choice_data)
                                 result = user_selection
                         except (json.JSONDecodeError, TypeError):
@@ -476,20 +500,19 @@ class ConversationManager:
                         error_message=error_message,
                     )
 
-                results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": block.id,
-                        "content": result,
-                        "is_error": is_error,
-                    }
-                )
+                results.append({
+                    "type": "tool_result",
+                    "tool_use_id": block.id,
+                    "content": result,
+                    "is_error": is_error,
+                })
 
         return results
 
     # ===== Streaming API Call =====
 
-    async def call_claude_stream(self, system_prompt, tools, tool_label_fn, auto_save_fn):
+    async def call_claude_stream(self, system_prompt, tools,
+                                 tool_label_fn, auto_save_fn):
         """
         Call Claude API with streaming enabled.
 
@@ -509,24 +532,31 @@ class ConversationManager:
         dict
             Chunks as they arrive from Claude
         """
-        from anthropic import APIStatusError
+        from anthropic import APIStatusError, BadRequestError
 
-        def stream_and_collect():
-            events = []
-            final_message = None
-
-            with self.claude.messages.stream(
-                model=self.model,
-                system=system_prompt,
-                messages=self.conversation_history,
-                tools=tools,
-                max_tokens=4096,
-            ) as stream:
-                for event in stream:
-                    events.append(event)
-                final_message = stream.get_final_message()
-
-            return events, final_message
+        def stream_and_collect(model):
+            def _run(m):
+                events = []
+                with self.claude.messages.stream(
+                    model=m,
+                    system=system_prompt,
+                    messages=self.conversation_history,
+                    tools=tools,
+                    max_tokens=4096
+                ) as stream:
+                    for event in stream:
+                        events.append(event)
+                    return events, stream.get_final_message()
+            try:
+                return _run(model)
+            except BadRequestError:
+                # Fable 5 under <30-day org data retention (or unavailable) rejects
+                # with a 400 — fall back to Opus 4.8 so the turn still streams.
+                fb = settings.models.refusal_fallback
+                if not fb or fb == model:
+                    raise
+                logger.warning("Stream model %s rejected the request (400); falling back to %s", model, fb)
+                return _run(fb)
 
         # Run streaming in thread with retry logic
         max_retries = 3
@@ -534,61 +564,66 @@ class ConversationManager:
 
         for attempt in range(max_retries):
             try:
-                events, final_message = await asyncio.to_thread(stream_and_collect)
+                events, final_message = await asyncio.to_thread(stream_and_collect, self.model)
                 self._track_token_usage(final_message)
                 break
             except APIStatusError as e:
-                error_type = getattr(e, "body", {})
+                error_type = getattr(e, 'body', {})
                 if isinstance(error_type, dict):
-                    error_type = error_type.get("error", {}).get("type", "")
+                    error_type = error_type.get('error', {}).get('type', '')
 
-                if (
-                    error_type in ("overloaded_error", "rate_limit_error")
-                    or "overloaded" in str(e).lower()
-                ):
+                if error_type in ('overloaded_error', 'rate_limit_error') or 'overloaded' in str(e).lower():
                     if attempt < max_retries - 1:
-                        wait_time = retry_delay * (2**attempt)
-                        logger.warning(
-                            f"API overloaded, retrying in {wait_time:.1f}s"
-                            f" (attempt {attempt + 1}/{max_retries})"
-                        )
-                        yield {
-                            "type": "text",
-                            "text": f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n",
-                        }
+                        wait_time = retry_delay * (2 ** attempt)
+                        logger.warning(f"API overloaded, retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                        yield {'type': 'text', 'text': f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n"}
                         await asyncio.sleep(wait_time)
                         continue
                 raise
         else:
             raise RuntimeError("API overloaded after multiple retries")
 
-        # Diagnostic: log stop_reason and tool block counts
+        # Refusal → retry the whole streamed turn on the fallback model (Opus 4.8)
+        # before giving up. The original partial output is discarded (we re-collect
+        # and only yield the fallback's events below).
+        fb = settings.models.refusal_fallback
+        if final_message.stop_reason == "refusal" and fb and fb != self.model:
+            logger.warning("Model %s declined the streamed turn; retrying on %s", self.model, fb)
+            events, final_message = await asyncio.to_thread(stream_and_collect, fb)
+            self._track_token_usage(final_message)
+
+        # Last resort: if even the fallback declined, surface it and stop —
+        # discard any partial, don't iterate empty content or process tools.
+        if final_message.stop_reason == "refusal":
+            logger.warning("Claude declined the request (model=%s)", self.model)
+            yield {'type': 'text', 'text': "(The request was declined by the model's safety system. Try rephrasing.)"}
+            return
+
+        # Diagnostic: per-response counts. DEBUG, not WARNING — stop_reason=tool_use
+        # with matching tool blocks is normal; the genuine anomaly is the
+        # logger.error below (tool blocks present but stop_reason != tool_use).
         tool_block_count = sum(
-            1 for b in final_message.content if hasattr(b, "type") and b.type == "tool_use"
+            1 for b in final_message.content
+            if hasattr(b, 'type') and b.type == 'tool_use'
         )
-        logger.warning(
-            "Claude response: stop_reason=%s, content_blocks=%d, tool_use_blocks=%d,"
-            " tools_passed=%d, model=%s",
-            final_message.stop_reason,
-            len(final_message.content),
-            tool_block_count,
-            len(tools),
-            self.model,
+        logger.debug(
+            "Claude response: stop_reason=%s, content_blocks=%d, tool_use_blocks=%d, tools_passed=%d, model=%s",
+            final_message.stop_reason, len(final_message.content),
+            tool_block_count, len(tools), self.model,
         )
         if tool_block_count > 0 and final_message.stop_reason != "tool_use":
             logger.error(
                 "BUG: Claude returned %d tool_use blocks but stop_reason=%s (expected 'tool_use')",
-                tool_block_count,
-                final_message.stop_reason,
+                tool_block_count, final_message.stop_reason,
             )
 
         # Process events and yield text
         full_text = []
         for event in events:
             if event.type == "content_block_delta":
-                if hasattr(event.delta, "text"):
+                if hasattr(event.delta, 'text'):
                     full_text.append(event.delta.text)
-                    yield {"type": "text", "text": event.delta.text}
+                    yield {'type': 'text', 'text': event.delta.text}
 
         # Detect fake XML tool calls in text (Claude writing tool_use as text)
         joined_text = "".join(full_text)
@@ -596,8 +631,7 @@ class ConversationManager:
             logger.error(
                 "DETECTED: Claude wrote XML tool tags as plain text instead of "
                 "using API tool_use mechanism. stop_reason=%s, text_preview=%.200s",
-                final_message.stop_reason,
-                joined_text[:200],
+                final_message.stop_reason, joined_text[:200],
             )
 
         response_content = final_message.content
@@ -611,14 +645,14 @@ class ConversationManager:
 
             tool_results = []
             for block in response_content:
-                if hasattr(block, "type") and block.type == "tool_use":
+                if hasattr(block, 'type') and block.type == "tool_use":
                     start_time = time.time()
 
                     yield {
-                        "type": "tool_start",
-                        "tool_name": block.name,
-                        "tool_input": block.input,
-                        "tool_label": tool_label_fn(block.name, block.input),
+                        'type': 'tool_start',
+                        'tool_name': block.name,
+                        'tool_input': block.input,
+                        'tool_label': tool_label_fn(block.name, block.input),
                     }
 
                     is_error_flag = False
@@ -628,44 +662,32 @@ class ConversationManager:
 
                         if isinstance(tool_result, str):
                             try:
-                                from gently.app.tools.interaction_tools import (
-                                    CHOICE_RESPONSE_TYPE,
-                                )
-
+                                from gently.app.tools.interaction_tools import CHOICE_RESPONSE_TYPE
                                 choice_data = json.loads(tool_result)
-                                if (
-                                    isinstance(choice_data, dict)
-                                    and choice_data.get("_type") == CHOICE_RESPONSE_TYPE
-                                ):
+                                if isinstance(choice_data, dict) and choice_data.get("_type") == CHOICE_RESPONSE_TYPE:
                                     user_selection = yield {
-                                        "type": "choice_request",
-                                        "choice_data": choice_data,
+                                        'type': 'choice_request',
+                                        'choice_data': choice_data
                                     }
                                     tool_result = user_selection or "cancelled"
                             except (json.JSONDecodeError, TypeError):
                                 pass
 
-                        result_text = (
-                            tool_result if isinstance(tool_result, str) else str(tool_result)
-                        )
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": tool_result,
-                            }
-                        )
+                        result_text = tool_result if isinstance(tool_result, str) else str(tool_result)
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": tool_result
+                        })
                     except Exception as e:
                         is_error_flag = True
                         result_text = f"Error: {str(e)}"
-                        tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": result_text,
-                                "is_error": True,
-                            }
-                        )
+                        tool_results.append({
+                            "type": "tool_result",
+                            "tool_use_id": block.id,
+                            "content": result_text,
+                            "is_error": True
+                        })
 
                     # First non-empty line of the result, trimmed — gives the chat
                     # UI a one-line summary so the operator can see what a tool did
@@ -678,16 +700,22 @@ class ConversationManager:
                         result_summary = result_summary[:139] + "…"
 
                     yield {
-                        "type": "tool_call",
-                        "tool_name": block.name,
-                        "tool_input": block.input,
-                        "duration": time.time() - start_time,
-                        "result_summary": result_summary,
-                        "is_error": is_error_flag,
+                        'type': 'tool_call',
+                        'tool_name': block.name,
+                        'tool_input': block.input,
+                        'duration': time.time() - start_time,
+                        'result_summary': result_summary,
+                        'is_error': is_error_flag,
                     }
 
-            self.conversation_history.append({"role": "assistant", "content": response_content})
-            self.conversation_history.append({"role": "user", "content": tool_results})
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response_content
+            })
+            self.conversation_history.append({
+                "role": "user",
+                "content": tool_results
+            })
 
             auto_save_fn()
 
@@ -709,12 +737,15 @@ class ConversationManager:
 
         else:
             # No tool calls - add final message to history
-            self.conversation_history.append({"role": "assistant", "content": response_content})
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": response_content
+            })
             auto_save_fn()
 
     # ===== Tool Label =====
 
-    def tool_label(self, tool_name: str, tool_input: dict) -> str:
+    def tool_label(self, tool_name: str, tool_input: Dict) -> str:
         """Build a human-readable label for a tool call.
 
         Used in tool_start chunks so the TUI shows biologist-friendly
@@ -728,13 +759,8 @@ class ConversationManager:
             campaign = self.context_store.get_campaign(campaign_id)
             if campaign:
                 campaign_label = campaign.shorthand or campaign.description
-                if tool_name in (
-                    "propose_plan",
-                    "get_plan_status",
-                    "export_plan",
-                    "snapshot_plan",
-                    "list_plan_versions",
-                ):
+                if tool_name in ("propose_plan", "get_plan_status", "export_plan",
+                                 "snapshot_plan", "list_plan_versions"):
                     return campaign_label
                 if tool_name == "create_campaign" and inp.get("parent_id"):
                     return f"phase under {campaign_label}"
@@ -752,12 +778,8 @@ class ConversationManager:
 
         # Item reference tools
         item_ref = inp.get("item_ref") or inp.get("ref") or inp.get("item_id")
-        if item_ref and tool_name in (
-            "get_plan_item",
-            "update_plan_item",
-            "delete_plan_item",
-            "move_plan_item",
-        ):
+        if item_ref and tool_name in ("get_plan_item", "update_plan_item",
+                                       "delete_plan_item", "move_plan_item"):
             if self.context_store:
                 item = self.context_store.resolve_plan_item(str(item_ref), campaign_id=campaign_id)
                 if item:
@@ -784,9 +806,8 @@ class ConversationManager:
 
         return ""
 
-    async def _execute_single_tool(
-        self, tool_name: str, tool_input: dict, context: dict | None = None
-    ) -> str:
+    async def _execute_single_tool(self, tool_name: str, tool_input: Dict,
+                                   context: Optional[Dict] = None) -> str:
         """Execute a single tool call using the tool registry.
 
         Parameters
@@ -806,13 +827,13 @@ class ConversationManager:
 
     def _track_token_usage(self, response):
         """Track token usage from API response, including cache metrics."""
-        if hasattr(response, "usage"):
+        if hasattr(response, 'usage'):
             usage = response.usage
             self.total_input_tokens += usage.input_tokens
             self.total_output_tokens += usage.output_tokens
             self.api_call_count += 1
-            self.cache_creation_tokens += getattr(usage, "cache_creation_input_tokens", 0)
-            self.cache_read_tokens += getattr(usage, "cache_read_input_tokens", 0)
+            self.cache_creation_tokens += getattr(usage, 'cache_creation_input_tokens', 0)
+            self.cache_read_tokens += getattr(usage, 'cache_read_input_tokens', 0)
 
     @property
     def current_context_tokens(self) -> int:
@@ -823,14 +844,14 @@ class ConversationManager:
 
         conv_chars = 0
         for msg in self.conversation_history:
-            content = msg.get("content", "")
+            content = msg.get('content', '')
             if isinstance(content, str):
                 conv_chars += len(content)
             elif isinstance(content, list):
                 for block in content:
                     if isinstance(block, dict):
-                        conv_chars += len(str(block.get("text", "")))
-                    elif hasattr(block, "text"):
+                        conv_chars += len(str(block.get('text', '')))
+                    elif hasattr(block, 'text'):
                         conv_chars += len(str(block.text))
                     else:
                         conv_chars += len(str(block))
@@ -896,22 +917,19 @@ class ConversationManager:
             try:
                 return await asyncio.to_thread(api_func, *args, **kwargs)
             except APIStatusError as e:
-                error_type = getattr(e, "body", {})
+                error_type = getattr(e, 'body', {})
                 if isinstance(error_type, dict):
-                    error_type = error_type.get("error", {}).get("type", "")
+                    error_type = error_type.get('error', {}).get('type', '')
 
                 is_retryable = (
-                    error_type in ("overloaded_error", "rate_limit_error")
-                    or "overloaded" in str(e).lower()
-                    or "rate_limit" in str(e).lower()
+                    error_type in ('overloaded_error', 'rate_limit_error') or
+                    'overloaded' in str(e).lower() or
+                    'rate_limit' in str(e).lower()
                 )
 
                 if is_retryable and attempt < max_retries - 1:
-                    wait_time = retry_delay * (2**attempt)
-                    logger.warning(
-                        f"API error ({error_type}), retrying in {wait_time:.1f}s"
-                        f" (attempt {attempt + 1}/{max_retries})"
-                    )
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"API error ({error_type}), retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(wait_time)
                     continue
 

@@ -20,10 +20,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from gently.ui.web.auth import require_control
+from gently.settings import settings
 
 logger = logging.getLogger(__name__)
 
-CHAT_MODEL = "claude-opus-4-7"
+# Per-timepoint VLM chat → perception tier (Opus 4.8); centralized, not hardcoded.
+CHAT_MODEL = settings.models.perception
 SYSTEM_PROMPT = (
     "You are helping a biologist interpret a microscopy perception "
     "assessment of a C. elegans embryo at a specific timepoint. You can "

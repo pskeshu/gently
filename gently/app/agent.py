@@ -14,41 +14,38 @@ Integrated with:
 import asyncio
 import logging
 import os
-from collections.abc import Callable
+from typing import Dict, List, Optional, Callable, Any, TYPE_CHECKING
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 import anthropic
 import numpy as np
 
-from ..exceptions import StorageError
+from ..exceptions import StorageError, AgentError
 from ..settings import settings
 
 if TYPE_CHECKING:
     from ..ui.web.server import VisualizationServer
-from gently_perception import Perceiver
 
-from ..core import EventType, emit, get_event_bus
-from ..core.file_store import FileStore
-from ..harness.conversation import ConversationManager
-from ..harness.orchestration.plan_synthesis import (
-    PlanLibrary,
-    PlanSynthesizer,
-    PlanValidator,
-)
-from ..harness.prompts.manager import PromptManager
-from ..harness.session.interaction_logger import InteractionLogger
-from ..harness.session.manager import SessionManager
-from ..harness.session.timeline import TimelineManager
-from ..harness.state import ExperimentState
+logger = logging.getLogger(__name__)
+
+from ..harness.state import ExperimentState, EmbryoState, ImageRecord
+from ..harness.orchestration.plan_synthesis import PlanSynthesizer, PlanLibrary, PlanValidator
 from ..harness.tools.registry import get_tool_registry
+from gently_perception import Perceiver
 
 # Import tools package to trigger @tool decorator registration
 from . import tools as _tools  # noqa: F401
+from ..harness.session.interaction_logger import InteractionLogger
 from .orchestration.timelapse import TimelapseOrchestrator
+from ..harness.session.timeline import TimelineManager
+from ..core import EventType, get_event_bus, emit
+from ..core.file_store import FileStore
 
-logger = logging.getLogger(__name__)
+from ..harness.conversation import ConversationManager
+from ..harness.session.manager import SessionManager
+from ..harness.prompts.manager import PromptManager
+
 
 # Shown when the agent is launched in UI-only mode (--no-api). The web UI is
 # fully browsable, but anything that would call Claude is disabled.
@@ -74,7 +71,7 @@ class MicroscopyAgent:
 
     def __init__(
         self,
-        api_key: str | None = None,
+        api_key: Optional[str] = None,
         storage_path: Path = Path("./experiment_data"),
         model: str = settings.models.main,
         microscope_client=None,
@@ -112,12 +109,11 @@ class MicroscopyAgent:
         # the message entry points refuse to call Claude.
         self.api_enabled = not no_api
 
-        # API client with interleaved thinking support
+        # Shared API client. No interleaved-thinking beta header: it's GA on the
+        # 4.6+ models and obsolete on Fable 5 (always-on thinking); the header is
+        # dropped so it can't conflict with the new model family.
         self.claude = anthropic.Anthropic(
-            api_key=api_key
-            or os.getenv("ANTHROPIC_API_KEY")
-            or ("no-api-mode" if no_api else None),
-            default_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
+            api_key=api_key or os.getenv("ANTHROPIC_API_KEY") or ("no-api-mode" if no_api else None),
         )
         self.model = model
 
@@ -129,7 +125,7 @@ class MicroscopyAgent:
         self.mode: str = "run"
 
         # Context store (agent's mind — set via set_context_store)
-        self.context_store: Any | None = None
+        self.context_store: Optional[Any] = None
 
         # Experiment state
         self.experiment = ExperimentState()
@@ -145,7 +141,8 @@ class MicroscopyAgent:
 
         # Plan synthesis
         self.plan_synthesizer = PlanSynthesizer(
-            plan_library=PlanLibrary(), validator=PlanValidator()
+            plan_library=PlanLibrary(),
+            validator=PlanValidator()
         )
 
         # Event bus for async messaging (must be before perception manager)
@@ -166,8 +163,8 @@ class MicroscopyAgent:
         self.client = self.microscope
 
         # Callbacks
-        self.on_message_callback: Callable | None = None
-        self.choice_handler: Callable | None = None
+        self.on_message_callback: Optional[Callable] = None
+        self.choice_handler: Optional[Callable] = None
 
         # Serializes conversation turns: user turns and autonomous wake turns
         # must not interleave on the shared conversation_history.
@@ -178,18 +175,14 @@ class MicroscopyAgent:
         # human). User turns are unaffected. _wake_choice_factory is set by the
         # web bridge so ASK-mode wake turns can round-trip an approval picker.
         self._autonomous_active = False
-        self._autonomous_blocked_tools = frozenset(
-            {
-                "set_laser_power",
-                "remove_embryo",
-                "stop_timelapse",
-            }
-        )
+        self._autonomous_blocked_tools = frozenset({
+            "set_laser_power", "remove_embryo", "stop_timelapse",
+        })
         self._wake_choice_factory = None
         self._wake_choice_discard = None
 
         # Interaction logger for structured logging (research data collection)
-        self.interaction_logger: InteractionLogger | None = None
+        self.interaction_logger: Optional[InteractionLogger] = None
 
         # Event capture — durable log of every EventBus event during this
         # session. Substrate for offline replay / shadow-mode A/B of
@@ -202,13 +195,13 @@ class MicroscopyAgent:
         self.decision_log = None
 
         # Timelapse orchestrator (initialized when microscope connected)
-        self.timelapse_orchestrator: TimelapseOrchestrator | None = None
+        self.timelapse_orchestrator: Optional[TimelapseOrchestrator] = None
 
         # Timeline manager for tracking events
-        self.timeline_manager: TimelineManager | None = None
+        self.timeline_manager: Optional[TimelineManager] = None
 
         # Visualization server for real-time feedback
-        self.viz_server: VisualizationServer | None = None
+        self.viz_server: Optional["VisualizationServer"] = None
 
         # Device-state monitor (bridges device-layer SSE → EventBus)
         self.device_state_monitor = None
@@ -226,10 +219,10 @@ class MicroscopyAgent:
         )
         # Wire tool execution context
         self.conversation._tool_context = {
-            "agent": self,
-            "client": getattr(self, "microscope", None),
-            "microscope": getattr(self, "microscope", None),
-            "databroker": getattr(self, "databroker", None),
+            'agent': self,
+            'client': getattr(self, 'microscope', None),
+            'microscope': getattr(self, 'microscope', None),
+            'databroker': getattr(self, 'databroker', None),
         }
 
         # Session manager (persistence)
@@ -249,22 +242,16 @@ class MicroscopyAgent:
             success, history = self.sessions._resume_session(session_id, self.experiment)
             if success:
                 self.conversation.conversation_history = history
-            self._emit_event(
-                EventType.SESSION_RESTORED,
-                {
-                    "session_id": session_id,
-                    "embryo_count": len(self.experiment.embryos),
-                    "message_count": len(self.conversation.conversation_history),
-                },
-            )
+            self._emit_event(EventType.SESSION_RESTORED, {
+                'session_id': session_id,
+                'embryo_count': len(self.experiment.embryos),
+                'message_count': len(self.conversation.conversation_history),
+            })
         else:
             self.sessions.create_session()
-            self._emit_event(
-                EventType.SESSION_STARTED,
-                {
-                    "session_id": self.sessions.session_id,
-                },
-            )
+            self._emit_event(EventType.SESSION_STARTED, {
+                'session_id': self.sessions.session_id,
+            })
 
         # Initialize interaction logger (for research data collection)
         self._init_interaction_logger()
@@ -297,7 +284,6 @@ class MicroscopyAgent:
         # autonomously; enabled via the set_autonomy tool.
         try:
             from gently.app.wake_router import WakeRouter
-
             self.wake_router = WakeRouter(self, self._event_bus)
         except Exception:
             logger.exception("Failed to init wake-router")
@@ -314,7 +300,7 @@ class MicroscopyAgent:
         return self.sessions.session_id
 
     @property
-    def _session_id(self) -> str | None:
+    def _session_id(self) -> Optional[str]:
         """Internal session ID (backward compat)."""
         return self.sessions._session_id
 
@@ -323,7 +309,7 @@ class MicroscopyAgent:
         self.sessions._session_id = value
 
     @property
-    def conversation_history(self) -> list[dict]:
+    def conversation_history(self) -> List[Dict]:
         """Get conversation history."""
         return self.conversation.conversation_history
 
@@ -368,7 +354,6 @@ class MicroscopyAgent:
         self.prompts.context_store = context_store
         # Create agent memory harness
         from ..harness.memory.interface import AgentMemory
-
         self.memory = AgentMemory(context_store, session_id=self.session_id)
         self.prompts.memory = self.memory
 
@@ -378,13 +363,8 @@ class MicroscopyAgent:
             return "Already in plan mode."
         self.mode = "plan"
         import gently.harness.plan_mode.tools  # noqa: F401
-
         self._update_system_prompt()
-        emit(
-            EventType.STATUS_CHANGED,
-            {"field": "agent_mode", "value": "plan"},
-            source="agent",
-        )
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "plan"}, source="agent")
         logger.info("Entered plan mode")
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
@@ -462,8 +442,7 @@ class MicroscopyAgent:
                 if item and self.session_id and self.context_store:
                     try:
                         self.context_store.link_session_campaign(
-                            self.session_id,
-                            item.campaign_id,
+                            self.session_id, item.campaign_id,
                         )
                     except Exception:
                         pass
@@ -480,11 +459,7 @@ class MicroscopyAgent:
             self.prompts.invalidate_context_cache()
 
         self._update_system_prompt()
-        emit(
-            EventType.STATUS_CHANGED,
-            {"field": "agent_mode", "value": "run"},
-            source="agent",
-        )
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "run"}, source="agent")
         logger.info("Exited plan mode")
         return result
 
@@ -493,14 +468,11 @@ class MicroscopyAgent:
     def _update_system_prompt(self, context_summary: str | None = None):
         """Rebuild system prompt via PromptManager."""
         self.system_prompt = self.prompts.update_system_prompt(
-            self.experiment,
-            self.client,
-            self.mode,
-            context_summary,
+            self.experiment, self.client, self.mode, context_summary,
             perceiver=getattr(self, "perceiver", None),
         )
 
-    def _get_active_plan_summary(self) -> str | None:
+    def _get_active_plan_summary(self) -> Optional[str]:
         """Delegation shim for agent bridge access."""
         return self.prompts.get_active_plan_summary()
 
@@ -530,7 +502,7 @@ class MicroscopyAgent:
             self.experiment, self.conversation.conversation_history, self.system_prompt
         )
 
-    def list_sessions(self) -> list[dict]:
+    def list_sessions(self) -> List[Dict]:
         """List available sessions."""
         return self.sessions.list_sessions()
 
@@ -563,7 +535,6 @@ class MicroscopyAgent:
         a stripped-down agent) — replay just won't have a log to read.
         """
         from gently.eval import EventCapture
-
         try:
             session_dir = None
             sid = self.session_id
@@ -571,8 +542,7 @@ class MicroscopyAgent:
                 session_dir = self.store._session_dir(sid)
             if session_dir is None:
                 logging.getLogger(__name__).debug(
-                    "EventCapture: no session dir for %s — skipping", sid
-                )
+                    "EventCapture: no session dir for %s — skipping", sid)
                 return
             path = session_dir / "events.jsonl"
             self.event_capture = EventCapture(path)
@@ -599,7 +569,6 @@ class MicroscopyAgent:
         logs and the two are diffed offline.
         """
         from gently.eval import DecisionLog
-
         try:
             session_dir = None
             sid = self.session_id
@@ -607,8 +576,7 @@ class MicroscopyAgent:
                 session_dir = self.store._session_dir(sid)
             if session_dir is None:
                 logging.getLogger(__name__).debug(
-                    "DecisionLog: no session dir for %s — skipping", sid
-                )
+                    "DecisionLog: no session dir for %s — skipping", sid)
                 return
             path = session_dir / "decisions.jsonl"
             self.decision_log = DecisionLog(path)
@@ -706,15 +674,12 @@ class MicroscopyAgent:
                     embryo_id = data.get("embryo_id")
                     if embryo_id and embryo_id in self.experiment.embryos:
                         embryo = self.experiment.embryos[embryo_id]
-                        embryo.add_cv_result(
-                            "stage_classification",
-                            {
-                                "stage": data.get("stage"),
-                                "confidence": data.get("confidence"),
-                                "nuclei_count": data.get("nuclei_count"),
-                                "timepoint": data.get("timepoint"),
-                            },
-                        )
+                        embryo.add_cv_result("stage_classification", {
+                            "stage": data.get("stage"),
+                            "confidence": data.get("confidence"),
+                            "nuclei_count": data.get("nuclei_count"),
+                            "timepoint": data.get("timepoint"),
+                        })
                 except Exception as e:
                     logger.warning(f"Error handling stage detected event: {e}")
 
@@ -737,34 +702,23 @@ class MicroscopyAgent:
                     stage = data.get("stage")
                     # 'no_object' is an empty-field sentinel, not a developmental
                     # stage — don't mirror it into latest_developmental_stage.
-                    if (
-                        not stage
-                        or stage == "no_object"
-                        or not embryo_id
-                        or embryo_id not in self.experiment.embryos
-                    ):
+                    if (not stage or stage == "no_object" or not embryo_id
+                            or embryo_id not in self.experiment.embryos):
                         return
                     embryo = self.experiment.embryos[embryo_id]
                     if stage == getattr(embryo, "latest_developmental_stage", None):
                         return  # steady state — nothing new to mirror
-                    embryo.add_cv_result(
-                        "stage_classification",
-                        {
-                            "stage": stage,
-                            "timepoint": data.get("timepoint"),
-                            "stability": data.get("stability"),
-                            "temporal_analysis": data.get("temporal_analysis"),
-                            "detector_name": "perception",
-                        },
-                    )
+                    embryo.add_cv_result("stage_classification", {
+                        "stage": stage,
+                        "timepoint": data.get("timepoint"),
+                        "stability": data.get("stability"),
+                        "temporal_analysis": data.get("temporal_analysis"),
+                        "detector_name": "perception",
+                    })
                     self.invalidate_context_cache()
                     self._auto_save()
-                    logger.info(
-                        "Perception: %s -> stage %s (t%s)",
-                        embryo_id,
-                        stage,
-                        data.get("timepoint"),
-                    )
+                    logger.info("Perception: %s -> stage %s (t%s)",
+                                embryo_id, stage, data.get("timepoint"))
                 except Exception as e:
                     logger.warning(f"Error handling perception event: {e}")
 
@@ -779,9 +733,7 @@ class MicroscopyAgent:
 
     # ===== Visualization Server Methods =====
 
-    async def start_viz_server(
-        self, port: int = settings.network.viz_port, ssl_certfile=None, ssl_keyfile=None
-    ):
+    async def start_viz_server(self, port: int = settings.network.viz_port, ssl_certfile=None, ssl_keyfile=None):
         """Start the visualization server for real-time feedback."""
         if self.viz_server is not None:
             logger.info("Visualization server already running")
@@ -831,7 +783,6 @@ class MicroscopyAgent:
         if self.microscope is not None and self.device_state_monitor is None:
             try:
                 from .device_state_monitor import DeviceStateMonitor
-
                 self.device_state_monitor = DeviceStateMonitor(self.microscope)
                 await self.device_state_monitor.start()
                 logger.info("Device-state monitor started")
@@ -845,7 +796,6 @@ class MicroscopyAgent:
         if self.microscope is not None and self.bottom_camera_monitor is None:
             try:
                 from .bottom_camera_monitor import BottomCameraStreamMonitor
-
                 self.bottom_camera_monitor = BottomCameraStreamMonitor(self.microscope)
                 logger.info("Bottom-camera monitor ready (not started)")
             except Exception as e:
@@ -876,14 +826,16 @@ class MicroscopyAgent:
         array: np.ndarray,
         uid: str,
         data_type: str = "image",
-        metadata: dict[str, Any] | None = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ):
         """Non-blocking push of image to visualization server."""
         if self.viz_server is None:
             return
 
         try:
-            asyncio.create_task(self.viz_server.push_image(array, uid, data_type, metadata or {}))
+            asyncio.create_task(
+                self.viz_server.push_image(array, uid, data_type, metadata or {})
+            )
         except RuntimeError:
             pass
         except Exception as e:
@@ -902,7 +854,7 @@ class MicroscopyAgent:
         """
         return self.client is not None
 
-    def _emit_event(self, event_type: EventType, data: dict | None = None):
+    def _emit_event(self, event_type: EventType, data: Optional[Dict] = None):
         """Emit an event to the event bus."""
         self._event_bus.publish(
             event_type=event_type,
@@ -943,13 +895,10 @@ class MicroscopyAgent:
     def _mark_significant_action(self, action_type: str):
         """Mark that a significant action occurred (triggers auto-save)."""
         self._auto_save()
-        self._emit_event(
-            EventType.SESSION_SAVED,
-            {
-                "session_id": self.sessions._session_id,
-                "action_type": action_type,
-            },
-        )
+        self._emit_event(EventType.SESSION_SAVED, {
+            'session_id': self.sessions._session_id,
+            'action_type': action_type,
+        })
 
     # ===== Public Message API =====
 
@@ -968,11 +917,8 @@ class MicroscopyAgent:
             Response from agent
         """
         if quick_response := self.conversation.try_quick_response(
-            user_message,
-            self.experiment,
-            self.mode,
-            self.enter_plan_mode,
-            self.exit_plan_mode,
+            user_message, self.experiment, self.mode,
+            self.enter_plan_mode, self.exit_plan_mode,
         ):
             return quick_response
 
@@ -986,7 +932,10 @@ class MicroscopyAgent:
         self._update_system_prompt(context_summary)
 
         # Add user message to history
-        self.conversation.conversation_history.append({"role": "user", "content": user_message})
+        self.conversation.conversation_history.append({
+            "role": "user",
+            "content": user_message
+        })
 
         tools = self._get_tools_for_mode()
         cached_prompt = self._get_cached_system_prompt()
@@ -1013,17 +962,14 @@ class MicroscopyAgent:
             Chunks with 'type' and data
         """
         if quick_response := self.conversation.try_quick_response(
-            user_message,
-            self.experiment,
-            self.mode,
-            self.enter_plan_mode,
-            self.exit_plan_mode,
+            user_message, self.experiment, self.mode,
+            self.enter_plan_mode, self.exit_plan_mode,
         ):
-            yield {"type": "text", "text": quick_response}
+            yield {'type': 'text', 'text': quick_response}
             return
 
         if not self.api_enabled:
-            yield {"type": "text", "text": _NO_API_NOTICE}
+            yield {'type': 'text', 'text': _NO_API_NOTICE}
             return
 
         # Hold the turn-lock for the whole streamed turn so an autonomous wake
@@ -1039,14 +985,16 @@ class MicroscopyAgent:
             )
             self._update_system_prompt(context_summary)
 
-            self.conversation.conversation_history.append({"role": "user", "content": user_message})
+            self.conversation.conversation_history.append({
+                "role": "user",
+                "content": user_message
+            })
 
             tools = self._get_tools_for_mode()
             cached_prompt = self._get_cached_system_prompt()
 
             inner_gen = self.conversation.call_claude_stream(
-                cached_prompt,
-                tools,
+                cached_prompt, tools,
                 tool_label_fn=self.conversation.tool_label,
                 auto_save_fn=self._auto_save,
             )
@@ -1141,11 +1089,8 @@ class MicroscopyAgent:
         choice_data = chunk.get("choice_data", {}) if isinstance(chunk, dict) else {}
         factory = getattr(self, "_wake_choice_factory", None)
         if not interactive or factory is None:
-            logger.info(
-                "Wake picker auto-cancelled (interactive=%s, channel=%s)",
-                interactive,
-                factory is not None,
-            )
+            logger.info("Wake picker auto-cancelled (interactive=%s, channel=%s)",
+                        interactive, factory is not None)
             return "cancelled"
         try:
             future = factory(choice_data)  # registers future + sets request_id
@@ -1155,7 +1100,6 @@ class MicroscopyAgent:
         request_id = choice_data.get("request_id", "")
         await emit({**chunk, "origin": "wake", "request_id": request_id})
         from gently.app.wake_router import ASK_TIMEOUT_SEC
-
         try:
             selected = await asyncio.wait_for(future, timeout=ASK_TIMEOUT_SEC)
         except asyncio.TimeoutError:
@@ -1178,7 +1122,7 @@ class MicroscopyAgent:
                     pass
         return selected or "skip"
 
-    async def get_tool_call(self, user_message: str) -> dict | None:
+    async def get_tool_call(self, user_message: str) -> Optional[Dict]:
         """Dry-run tool call (for benchmarking)."""
         context_summary = await self.prompts.get_cached_context_summary(
             self.experiment, self.timelapse_orchestrator, self.timeline_manager
@@ -1190,25 +1134,25 @@ class MicroscopyAgent:
 
     # === Experiment Management Methods ===
 
-    def load_embryos_from_database(self, database: dict):
+    def load_embryos_from_database(self, database: Dict):
         """Load embryos from calibration database."""
-        if "embryos" not in database:
+        if 'embryos' not in database:
             return
 
-        for embryo_id, embryo_data in database["embryos"].items():
-            position = embryo_data.get("stage_position_after_centering_um", {})
-            calibration = embryo_data.get("calibration", {})
+        for embryo_id, embryo_data in database['embryos'].items():
+            position = embryo_data.get('stage_position_after_centering_um', {})
+            calibration = embryo_data.get('calibration', {})
 
             self.experiment.add_embryo(
                 embryo_id=embryo_id,
                 position=position,
                 calibration=calibration,
-                uid=embryo_data.get("uid"),
+                uid=embryo_data.get('uid'),
             )
 
         self._update_system_prompt()
 
-    def import_embryos_from_session(self, session_id: str, clear_existing: bool = False) -> dict:
+    def import_embryos_from_session(self, session_id: str, clear_existing: bool = False) -> Dict:
         """
         Import embryos from another session into the current experiment.
 
@@ -1264,14 +1208,14 @@ class MicroscopyAgent:
         if not embryo_states:
             session_data = self.store.load_session_snapshot(session_id)
             if session_data:
-                embryo_states = session_data.get("embryo_states", {})
+                embryo_states = session_data.get('embryo_states', {})
 
         if not embryo_states:
             return {
-                "success": False,
-                "error": "No embryos found in session",
-                "imported": [],
-                "skipped": [],
+                'success': False,
+                'error': "No embryos found in session",
+                'imported': [],
+                'skipped': [],
             }
 
         if clear_existing:
@@ -1291,30 +1235,30 @@ class MicroscopyAgent:
                 # Prefer explicit coarse/fine when the snapshot has them
                 # (FileStore path); fall back to flat stage_position for the
                 # legacy JSON-snapshot path which only carries the resolved view.
-                position_coarse = embryo_data.get("position_coarse")
-                position_fine = embryo_data.get("position_fine")
+                position_coarse = embryo_data.get('position_coarse')
+                position_fine = embryo_data.get('position_fine')
                 if position_coarse is None and position_fine is None:
-                    position_coarse = embryo_data.get("stage_position", {})
-                calibration = embryo_data.get("calibration", {})
-                source_uid = embryo_data.get("uid") or f"{session_id}_{embryo_id}"
+                    position_coarse = embryo_data.get('stage_position', {})
+                calibration = embryo_data.get('calibration', {})
+                source_uid = embryo_data.get('uid') or f"{session_id}_{embryo_id}"
 
                 self.experiment.add_embryo(
                     embryo_id=embryo_id,
                     position=position_coarse or {},
                     position_fine=position_fine or {},
                     calibration=calibration,
-                    user_label=embryo_data.get("user_label"),
+                    user_label=embryo_data.get('user_label'),
                     uid=source_uid,
-                    role=embryo_data.get("role") or "unassigned",
+                    role=embryo_data.get('role') or 'unassigned',
                 )
 
                 embryo = self.experiment.embryos[embryo_id]
-                embryo.nickname = embryo_data.get("nickname")
-                embryo.interval_seconds = embryo_data.get("interval_seconds")
-                embryo.num_slices = embryo_data.get("num_slices", 50)
-                embryo.exposure_ms = embryo_data.get("exposure_ms", 10.0)
-                embryo.priority = embryo_data.get("priority", "normal")
-                embryo.acquisition_mode = embryo_data.get("acquisition_mode", "volume")
+                embryo.nickname = embryo_data.get('nickname')
+                embryo.interval_seconds = embryo_data.get('interval_seconds')
+                embryo.num_slices = embryo_data.get('num_slices', 50)
+                embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
+                embryo.priority = embryo_data.get('priority', 'normal')
+                embryo.acquisition_mode = embryo_data.get('acquisition_mode', 'volume')
 
                 # Light budget import. Prefer fields already on embryo_data
                 # (future schema may persist these directly on embryo.yaml);
@@ -1325,22 +1269,27 @@ class MicroscopyAgent:
                 # removed and the import should fail loudly if dose is
                 # missing.
                 dose = self._compute_imported_dose(session_id, embryo_id)
-                embryo.exposure_count = embryo_data.get("exposure_count") or dose["exposure_count"]
+                embryo.exposure_count = (
+                    embryo_data.get('exposure_count')
+                    or dose['exposure_count']
+                )
                 embryo.total_exposure_ms = (
-                    embryo_data.get("total_exposure_ms") or dose["total_exposure_ms"]
+                    embryo_data.get('total_exposure_ms')
+                    or dose['total_exposure_ms']
                 )
                 embryo.timepoints_acquired = (
-                    embryo_data.get("timepoints_acquired") or dose["exposure_count"]
+                    embryo_data.get('timepoints_acquired')
+                    or dose['exposure_count']
                 )
 
-                last_imaged_str = embryo_data.get("last_imaged")
+                last_imaged_str = embryo_data.get('last_imaged')
                 if last_imaged_str:
                     try:
                         embryo.last_imaged = datetime.fromisoformat(last_imaged_str)
                     except (ValueError, TypeError):
-                        embryo.last_imaged = dose["last_imaged"]
+                        embryo.last_imaged = dose['last_imaged']
                 else:
-                    embryo.last_imaged = dose["last_imaged"]
+                    embryo.last_imaged = dose['last_imaged']
 
                 imported.append(embryo_id)
 
@@ -1351,14 +1300,14 @@ class MicroscopyAgent:
         self._mark_significant_action("embryo_import")
 
         return {
-            "success": len(imported) > 0,
-            "imported": imported,
-            "skipped": skipped,
-            "errors": errors,
-            "source_session": session_id,
+            'success': len(imported) > 0,
+            'imported': imported,
+            'skipped': skipped,
+            'errors': errors,
+            'source_session': session_id,
         }
 
-    def _compute_imported_dose(self, source_session_id: str, embryo_id: str) -> dict:
+    def _compute_imported_dose(self, source_session_id: str, embryo_id: str) -> Dict:
         """Reconstruct an embryo's realized 488 nm photodose from the source
         session's per-volume meta files.
 
@@ -1373,68 +1322,66 @@ class MicroscopyAgent:
         TODO: replace with reading a persisted ``dose:`` block from
         embryo.yaml once dose-tracking is first-class.
         """
+        import yaml
         from datetime import datetime
         from pathlib import Path
 
-        import yaml
-
         result = {
-            "exposure_count": 0,
-            "total_exposure_ms": 0.0,
-            "last_imaged": None,
+            'exposure_count': 0,
+            'total_exposure_ms': 0.0,
+            'last_imaged': None,
         }
 
         if not self.store:
             return result
 
         # FileStore exposes _session_dir(session_id) → resolved Path.
-        session_dir_fn = getattr(self.store, "_session_dir", None)
+        session_dir_fn = getattr(self.store, '_session_dir', None)
         sd = session_dir_fn(source_session_id) if callable(session_dir_fn) else None
         if sd is None:
             return result
 
-        vols_dir = Path(sd) / "embryos" / embryo_id / "volumes"
+        vols_dir = Path(sd) / 'embryos' / embryo_id / 'volumes'
         if not vols_dir.is_dir():
             return result
 
         latest = None
-        for meta_path in sorted(vols_dir.glob("*.meta.yaml")):
+        for meta_path in sorted(vols_dir.glob('*.meta.yaml')):
             try:
                 doc = yaml.safe_load(meta_path.read_text()) or {}
             except Exception:
                 continue
-            md = doc.get("metadata") or {}
-            num_slices = md.get("num_slices")
+            md = doc.get('metadata') or {}
+            num_slices = md.get('num_slices')
             if num_slices is None:
-                shape = doc.get("shape") or []
+                shape = doc.get('shape') or []
                 num_slices = shape[0] if shape else 0
-            exposure_ms = md.get("exposure_ms") or 0.0
+            exposure_ms = md.get('exposure_ms') or 0.0
             try:
-                result["total_exposure_ms"] += float(num_slices) * float(exposure_ms)
+                result['total_exposure_ms'] += float(num_slices) * float(exposure_ms)
             except (TypeError, ValueError):
                 pass
-            result["exposure_count"] += 1
-            acq = doc.get("acquired_at")
+            result['exposure_count'] += 1
+            acq = doc.get('acquired_at')
             if acq and (latest is None or acq > latest):
                 latest = acq
 
         if latest:
             try:
-                result["last_imaged"] = datetime.fromisoformat(latest)
+                result['last_imaged'] = datetime.fromisoformat(latest)
             except (ValueError, TypeError):
                 pass
 
         return result
 
-    async def on_volume_acquired(
-        self, embryo_id: str, timepoint: int, volume_data, volume_path=None
-    ):
+    async def on_volume_acquired(self, embryo_id: str, timepoint: int,
+                                volume_data, volume_path=None):
         """Callback when a volume is acquired."""
         embryo = self.experiment.embryos.get(embryo_id)
         if not embryo:
             return
 
-        if hasattr(volume_data, "read_volume"):
+        if hasattr(volume_data, 'read_volume'):
             volume = volume_data.read_volume()
         else:
             volume = volume_data
@@ -1443,8 +1390,7 @@ class MicroscopyAgent:
         if self.store and self.session_id:
             try:
                 self.store.register_embryo(
-                    self.session_id,
-                    embryo_id,
+                    self.session_id, embryo_id,
                     position_coarse=embryo.position_coarse or None,
                     position_fine=embryo.position_fine or None,
                     calibration=embryo.calibration,
@@ -1461,19 +1407,14 @@ class MicroscopyAgent:
                 }
                 if volume_path is not None:
                     stored_path = self.store.register_volume(
-                        self.session_id,
-                        embryo_id,
-                        timepoint,
+                        self.session_id, embryo_id, timepoint,
                         incoming_path=Path(volume_path),
                         metadata=acq_metadata,
                         volume_data=volume,
                     )
                 else:
                     stored_path = self.store.put_volume(
-                        self.session_id,
-                        embryo_id,
-                        timepoint,
-                        volume,
+                        self.session_id, embryo_id, timepoint, volume,
                         metadata=acq_metadata,
                     )
             except StorageError:
@@ -1488,9 +1429,9 @@ class MicroscopyAgent:
         if self.viz_server and volume is not None:
             try:
                 from gently.core.imaging import (
-                    apply_crop_bounds,
-                    compute_crop_bounds,
                     projection_three_view,
+                    compute_crop_bounds,
+                    apply_crop_bounds,
                 )
 
                 view_a = volume[0] if volume.ndim == 4 else volume
@@ -1498,18 +1439,14 @@ class MicroscopyAgent:
                 if view_a.ndim == 3:
                     z_depth, height, width = view_a.shape
                     if width > height * 2:
-                        view_a = view_a[:, :, : width // 2]
+                        view_a = view_a[:, :, :width // 2]
                     bounds = compute_crop_bounds(view_a)
                     cropped = apply_crop_bounds(view_a, bounds)
                     three_view_img, _ = projection_three_view(cropped)
                 else:
                     three_view_img = view_a.astype(np.float32)
                     if three_view_img.max() > three_view_img.min():
-                        three_view_img = (
-                            (three_view_img - three_view_img.min())
-                            / (three_view_img.max() - three_view_img.min())
-                            * 255
-                        )
+                        three_view_img = (three_view_img - three_view_img.min()) / (three_view_img.max() - three_view_img.min()) * 255
                     three_view_img = three_view_img.astype(np.uint8)
 
                 self.push_viz(
@@ -1517,32 +1454,29 @@ class MicroscopyAgent:
                     uid=projection_uid,
                     data_type="volume_projection",
                     metadata={
-                        "embryo_id": embryo_id,
-                        "timepoint": timepoint,
-                        "shape": list(volume.shape),
-                        "projection_uid": projection_uid,
-                        "volume_uid": volume_uid,
-                        "projection_type": "three_view",
-                    },
+                        'embryo_id': embryo_id,
+                        'timepoint': timepoint,
+                        'shape': list(volume.shape),
+                        'projection_uid': projection_uid,
+                        'volume_uid': volume_uid,
+                        'projection_type': 'three_view',
+                    }
                 )
             except Exception as e:
                 logger.warning(f"Failed to push to viz: {e}")
 
-        self._emit_event(
-            EventType.VOLUME_ACQUIRED,
-            {
-                "embryo_id": embryo_id,
-                "timepoint": timepoint,
-                "volume_uid": volume_uid,
-                "projection_uid": projection_uid,
-                "volume_path": str(stored_path) if stored_path else None,
-                "shape": list(volume.shape),
-            },
-        )
+        self._emit_event(EventType.VOLUME_ACQUIRED, {
+            'embryo_id': embryo_id,
+            'timepoint': timepoint,
+            'volume_uid': volume_uid,
+            'projection_uid': projection_uid,
+            'volume_path': str(stored_path) if stored_path else None,
+            'shape': list(volume.shape),
+        })
 
         return {
-            "volume_uid": volume_uid,
-            "projection_uid": projection_uid,
+            'volume_uid': volume_uid,
+            'projection_uid': projection_uid,
         }
 
     def should_stop_experiment(self) -> bool:
@@ -1551,31 +1485,22 @@ class MicroscopyAgent:
             return False
         return all(e.should_skip for e in self.experiment.embryos.values())
 
-    def get_embryo_acquisition_order(self) -> list[str]:
+    def get_embryo_acquisition_order(self) -> List[str]:
         """Get embryo acquisition order based on priority."""
-        high = [
-            e.id
-            for e in self.experiment.embryos.values()
-            if e.priority == "high" and not e.should_skip
-        ]
-        normal = [
-            e.id
-            for e in self.experiment.embryos.values()
-            if e.priority == "normal" and not e.should_skip
-        ]
-        low = [
-            e.id
-            for e in self.experiment.embryos.values()
-            if e.priority == "low" and not e.should_skip
-        ]
+        high = [e.id for e in self.experiment.embryos.values() if e.priority == "high" and not e.should_skip]
+        normal = [e.id for e in self.experiment.embryos.values() if e.priority == "normal" and not e.should_skip]
+        low = [e.id for e in self.experiment.embryos.values() if e.priority == "low" and not e.should_skip]
         return high + normal + low
 
-    def decide_parameters(self, embryo_id: str, timepoint: int) -> dict:
+    def decide_parameters(self, embryo_id: str, timepoint: int) -> Dict:
         """Get current acquisition parameters for embryo."""
         embryo = self.experiment.embryos.get(embryo_id)
         if not embryo:
-            return {"num_slices": 50, "exposure_ms": 10.0}
-        return {"num_slices": embryo.num_slices, "exposure_ms": embryo.exposure_ms}
+            return {'num_slices': 50, 'exposure_ms': 10.0}
+        return {
+            'num_slices': embryo.num_slices,
+            'exposure_ms': embryo.exposure_ms
+        }
 
     def decide_next_interval(self, timepoint: int) -> float:
         """Decide interval until next timepoint."""
@@ -1600,9 +1525,8 @@ class MicroscopyAgent:
                 logger.warning(f"[BLANK_CHECK] {embryo_id}: Numerical check indicates blank image")
                 return True
 
-            import base64
             import io
-
+            import base64
             from PIL import Image
 
             if max_proj.max() > 0:
@@ -1612,11 +1536,10 @@ class MicroscopyAgent:
 
             img = Image.fromarray(normalized)
             buffer = io.BytesIO()
-            img.save(buffer, format="PNG")
+            img.save(buffer, format='PNG')
             b64_image = base64.b64encode(buffer.getvalue()).decode()
 
-            prompt = """Look at this microscopy image. Is this a VALID microscopy image or a
-BLANK/CORRUPTED image?
+            prompt = """Look at this microscopy image. Is this a VALID microscopy image or a BLANK/CORRUPTED image?
 
 A BLANK or CORRUPTED image shows:
 - Mostly uniform gray/black with no structure
@@ -1634,22 +1557,20 @@ Respond with ONLY: VALID or BLANK"""
                 self.claude.messages.create,
                 model=settings.models.fast,
                 max_tokens=10,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": b64_image,
-                                },
-                            },
-                        ],
-                    }
-                ],
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64_image
+                            }
+                        }
+                    ]
+                }]
             )
 
             result = response.content[0].text.strip().upper()
@@ -1660,11 +1581,7 @@ Respond with ONLY: VALID or BLANK"""
 
             return is_blank
 
-        except (
-            anthropic.APIConnectionError,
-            anthropic.RateLimitError,
-            anthropic.APIStatusError,
-        ) as e:
+        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
             logger.error(f"[BLANK_CHECK] Claude API error for {embryo_id}: {e}")
             return False
         except Exception as e:

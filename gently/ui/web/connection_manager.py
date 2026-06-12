@@ -158,7 +158,10 @@ class ConnectionManager:
                 try:
                     await connection.send_text(message_json)
                 except Exception as e:
-                    logger.warning(f"Failed to send to websocket: {e}")
+                    # Expected when a client disconnects/reloads mid-broadcast
+                    # (send after websocket.close). The connection is dropped
+                    # below, so this is debug-level, not a warning.
+                    logger.debug("Dropping a websocket that errored on send (client likely gone): %s", e)
                     disconnected.append(connection)
 
             # Remove disconnected clients
