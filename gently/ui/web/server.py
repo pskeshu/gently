@@ -788,9 +788,9 @@ class VisualizationServer(Service):
             sock.bind((self.host, self.port))
         except OSError:
             raise OSError(
-                f"Port {self.port} is already in use. "
-                "Is another instance of the agent running? "
-                "Close it first and try again."
+                f"Port {self.port} is already in use — another instance may be running. "
+                f"Free it with:  fuser -k {self.port}/tcp  "
+                f"(or: lsof -ti:{self.port} | xargs -r kill), then try again."
             ) from None
         finally:
             sock.close()
