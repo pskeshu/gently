@@ -11,3 +11,28 @@ switchbot:
   name: room_light
   address: "EC:6F:04:06:5B:23"
   timeout: 20.0
+
+# ACUITYnano Precision Thermal Controller (Peltier/TEC, 0.0–99.9 °C). When this
+# block is present the device layer registers a `temperature` device and the
+# Devices tab shows a setpoint control; plans can also block on it via
+# `bps.mv(temperature, 20.0)`. Remove/comment the block to skip registration.
+#
+# backend: mqtt talks to the controller over the vendor's MQTT bridge
+# (acuitynano_precision_thermalizer_api). With no broker/port/user/password
+# keys it uses the vendor package's embedded HiveMQ Cloud defaults — set them
+# here only to point at a different broker. The vendor package must be
+# installed on the device-layer machine (not on PyPI).
+temperature:
+  name: temperature
+  backend: serial          # serial | mqtt | mock — USB serial is the working
+                           # link on this machine (MQTT cloud is firewalled)
+  com_port: "COM8"
+  baud_rate: 115200
+  stabilize_timeout: 600   # seconds to wait for "[ SYSTEM LOCKED ]" on a blocking set
+  feedback_peltier: false  # true = control off the peltier sensor instead of water
+  # MQTT alternative (vendor HiveMQ Cloud defaults; needs outbound TLS :8883):
+  # backend: mqtt
+  # broker: "your-broker.example.com"   # optional — overrides the embedded default
+  # port: 8883
+  # user: "username"
+  # password: "secret"

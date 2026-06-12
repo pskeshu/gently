@@ -9671,6 +9671,71 @@ body.modal-open {
 }
 .devices-room-light.is-busy { opacity: 0.65; cursor: progress; }
 
+/* --- Temperature controller ------------------------------------------- */
+/* Readout + setpoint input + Set, styled as a pill to sit beside the
+   room-light toggle in the Devices header. Hidden until a controller is
+   available (mirrors the room light). */
+.devices-temp {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.12rem 0.28rem 0.12rem 0.5rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+}
+.devices-temp[hidden] { display: none; }
+.devices-temp-icon { display: inline-flex; align-items: center; color: var(--map-ink-mute); transition: color 0.15s, filter 0.15s; }
+/* "locked" — cool glow once the controller reports SYSTEM LOCKED */
+.devices-temp.is-locked { border-color: rgba(90, 200, 250, 0.6); color: #5ac8fa; background: rgba(90, 200, 250, 0.1); }
+.devices-temp.is-locked .devices-temp-icon { color: #5ac8fa; filter: drop-shadow(0 0 5px rgba(90, 200, 250, 0.6)); }
+.devices-temp.is-busy { opacity: 0.7; cursor: progress; }
+.devices-temp-readout {
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.02em;
+    min-width: 3.4em;
+    text-align: right;
+    white-space: nowrap;
+}
+.devices-temp-input {
+    width: 3.4em;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-paper, rgba(0, 0, 0, 0.2));
+    border-radius: 6px;
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    -moz-appearance: textfield;
+}
+.devices-temp-input:focus { outline: none; border-color: var(--map-accent); }
+.devices-temp-input::-webkit-outer-spin-button,
+.devices-temp-input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.devices-temp-set {
+    padding: 0.16rem 0.5rem;
+    border: 1px solid var(--map-overlay-edge);
+    background: var(--map-overlay-bg);
+    border-radius: 999px;
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.devices-temp-set:hover:not(:disabled) { border-color: var(--map-accent); color: var(--map-ink); }
+.devices-temp-set:disabled { opacity: 0.5; cursor: default; }
+
 /* --- Containers ------------------------------------------------------- */
 .devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .devices-view-details { gap: 1rem; }
