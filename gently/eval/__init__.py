@@ -15,11 +15,11 @@ hardware. The three layers:
 See docs/EVAL.md (TODO) for usage.
 """
 
+from .candidates import ReactiveCandidate
+from .decision_log import Decision, DecisionLog, DecisionTrigger, prompt_hash
 from .event_capture import EventCapture
 from .event_replay import EventReplay
-from .decision_log import Decision, DecisionLog, DecisionTrigger, prompt_hash
-from .shadow import OrchestratorCandidate, ShadowRunner, NoOpCandidate
-from .candidates import ReactiveCandidate
+from .shadow import NoOpCandidate, OrchestratorCandidate, ShadowRunner
 
 __all__ = [
     "EventCapture",

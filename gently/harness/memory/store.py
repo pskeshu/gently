@@ -12,19 +12,18 @@ The store is composed from three domain mixins:
 
 import logging
 import sqlite3
+import uuid
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-import uuid
-
-from .model import (
-    Context,
-)
 
 from ._intentions import IntentionsMixin
 from ._ml_pipelines import MlPipelinesMixin
 from ._plans import PlansMixin
 from ._understanding import UnderstandingMixin
+from .model import (
+    Context,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -248,8 +247,10 @@ CREATE INDEX IF NOT EXISTS idx_session_campaigns_session ON session_campaigns(se
 CREATE INDEX IF NOT EXISTS idx_session_campaigns_campaign ON session_campaigns(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_planned_sessions_date ON planned_sessions(scheduled_date);
 CREATE INDEX IF NOT EXISTS idx_planned_sessions_status ON planned_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_ps ON planned_session_campaigns(planned_session_id);
-CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_c ON planned_session_campaigns(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_ps
+    ON planned_session_campaigns(planned_session_id);
+CREATE INDEX IF NOT EXISTS idx_planned_session_campaigns_c
+    ON planned_session_campaigns(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_campaign ON plan_items(campaign_id);
 CREATE INDEX IF NOT EXISTS idx_plan_items_status ON plan_items(status);
 CREATE INDEX IF NOT EXISTS idx_plan_items_type ON plan_items(type);
@@ -257,13 +258,15 @@ CREATE INDEX IF NOT EXISTS idx_plan_items_inherit ON plan_items(inherit_from);
 CREATE INDEX IF NOT EXISTS idx_plan_item_deps_item ON plan_item_dependencies(item_id);
 CREATE INDEX IF NOT EXISTS idx_plan_item_deps_dep ON plan_item_dependencies(depends_on_id);
 CREATE INDEX IF NOT EXISTS idx_plan_snapshots_campaign ON plan_snapshots(campaign_id);
-CREATE INDEX IF NOT EXISTS idx_plan_snapshots_version ON plan_snapshots(campaign_id, version_number);
+CREATE INDEX IF NOT EXISTS idx_plan_snapshots_version
+    ON plan_snapshots(campaign_id, version_number);
 """
 
 
 # ---------------------------------------------------------------------------
 # ContextStore
 # ---------------------------------------------------------------------------
+
 
 class ContextStore(IntentionsMixin, PlansMixin, UnderstandingMixin, MlPipelinesMixin):
     """

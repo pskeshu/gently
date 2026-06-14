@@ -11,7 +11,7 @@ import base64
 import io
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
@@ -20,7 +20,8 @@ from .base import Detector, DetectorResult
 logger = logging.getLogger(__name__)
 
 
-_BLANK_PROMPT = """Look at this microscopy image. Is this a VALID microscopy image or a BLANK/CORRUPTED image?
+_BLANK_PROMPT = """Look at this microscopy image. Is this a VALID microscopy image or a
+BLANK/CORRUPTED image?
 
 A BLANK or CORRUPTED image shows:
 - Mostly uniform gray/black with no structure
@@ -40,18 +41,19 @@ class BlankImageDetector(Detector):
 
     name = "blank_image"
 
-    def __init__(self, claude_client=None, model: Optional[str] = None):
+    def __init__(self, claude_client=None, model: str | None = None):
         self._claude = claude_client
         self._model = model
 
     async def run(
         self,
         volume: np.ndarray,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> DetectorResult:
-        from gently.settings import settings
-        from PIL import Image as PILImage
         import anthropic
+        from PIL import Image as PILImage
+
+        from gently.settings import settings
 
         embryo_id = context.get("embryo_id", "?")
         timepoint = int(context.get("timepoint", 0))
@@ -61,15 +63,20 @@ class BlankImageDetector(Detector):
         vol = np.squeeze(volume) if volume is not None else None
         if vol is None or vol.size == 0:
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
-                findings={"is_blank": True}, reasoning="Empty volume",
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                findings={"is_blank": True},
+                reasoning="Empty volume",
                 elapsed_ms=(time.time() - start) * 1000,
             )
 
         max_proj = np.max(vol, axis=0) if vol.ndim == 3 else vol
         if np.std(max_proj) < 1.0 or np.max(max_proj) < 10:
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
                 findings={"is_blank": True},
                 reasoning="Numerical check (low std / max)",
                 elapsed_ms=(time.time() - start) * 1000,
@@ -78,7 +85,9 @@ class BlankImageDetector(Detector):
         claude = self._claude or context.get("claude")
         if claude is None:
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
                 findings={"is_blank": False},
                 reasoning="No Claude client; deferred to numerical check (passed)",
                 elapsed_ms=(time.time() - start) * 1000,
@@ -87,8 +96,11 @@ class BlankImageDetector(Detector):
         # Normalize, encode, ask Claude
         if max_proj.max() == 0:
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
-                findings={"is_blank": True}, reasoning="Max projection is all zeros",
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
+                findings={"is_blank": True},
+                reasoning="Max projection is all zeros",
                 elapsed_ms=(time.time() - start) * 1000,
             )
         normalized = (max_proj / max_proj.max() * 255).astype(np.uint8)
@@ -101,38 +113,53 @@ class BlankImageDetector(Detector):
                 claude.messages.create,
                 model=self._model or settings.models.fast,
                 max_tokens=10,
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _BLANK_PROMPT},
-                        {"type": "image", "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64_image,
-                        }},
-                    ],
-                }],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _BLANK_PROMPT},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": b64_image,
+                                },
+                            },
+                        ],
+                    }
+                ],
             )
             text = (response.content[0].text if response.content else "").strip().upper()
             is_blank = "BLANK" in text
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
                 findings={"is_blank": is_blank},
                 reasoning=text,
                 raw_response=text,
                 elapsed_ms=(time.time() - start) * 1000,
             )
-        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
+        except (
+            anthropic.APIConnectionError,
+            anthropic.RateLimitError,
+            anthropic.APIStatusError,
+        ) as e:
             logger.error("[%s] Claude API error for %s: %s", self.name, embryo_id, e)
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
                 error=f"API error: {e}",
                 elapsed_ms=(time.time() - start) * 1000,
             )
         except Exception as e:
             logger.exception("[%s] unexpected error", self.name)
             return DetectorResult(
-                detector_name=self.name, embryo_id=embryo_id, timepoint=timepoint,
+                detector_name=self.name,
+                embryo_id=embryo_id,
+                timepoint=timepoint,
                 error=str(e),
                 elapsed_ms=(time.time() - start) * 1000,
             )

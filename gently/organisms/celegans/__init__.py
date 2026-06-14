@@ -10,21 +10,45 @@ organism module.
 
 from pathlib import Path
 
-from .stages import (
-    DevelopmentalStage,
-    STAGES,
-    STAGE_CRITERIA,
-    TRANSITION_ZONES,
-    get_transition_zone,
-    get_adjacent_stages,
-    get_stage_description,
-    format_stage_criteria_for_prompt,
-    get_all_criteria_for_prompt,
-)
 from .biology import BIOLOGY_KNOWLEDGE
-from .detector_presets import get_detector_presets
 from .detection_defaults import DETECTION_DEFAULTS
+from .detector_presets import get_detector_presets
 from .perception_prompt import PERCEPTION_SYSTEM_PROMPT
+from .stages import (
+    STAGE_CRITERIA,
+    STAGES,
+    TRANSITION_ZONES,
+    DevelopmentalStage,
+    format_stage_criteria_for_prompt,
+    get_adjacent_stages,
+    get_all_criteria_for_prompt,
+    get_stage_description,
+    get_transition_zone,
+)
+
+__all__ = [
+    "BIOLOGY_KNOWLEDGE",
+    "DETECTION_DEFAULTS",
+    "get_detector_presets",
+    "PERCEPTION_SYSTEM_PROMPT",
+    "STAGE_CRITERIA",
+    "STAGES",
+    "TRANSITION_ZONES",
+    "DevelopmentalStage",
+    "format_stage_criteria_for_prompt",
+    "get_adjacent_stages",
+    "get_all_criteria_for_prompt",
+    "get_stage_description",
+    "get_transition_zone",
+    "ORGANISM_NAME",
+    "ORGANISM_DISPLAY_NAME",
+    "SAMPLE_TERM",
+    "SAMPLE_TERM_PLURAL",
+    "TERMINAL_STAGES",
+    "STOP_CONDITIONS",
+    "PRE_TERMINAL_SPEEDUP_STAGE",
+    "EXAMPLES_PATH",
+]
 
 # --- Organism identity ---
 ORGANISM_NAME = "celegans"

@@ -19,14 +19,14 @@ import json
 import sys
 import time
 from collections import deque
-from typing import Any, Deque, Dict, Optional, Tuple
+from typing import Any
 
 import aiohttp
 
 
-def _split_positions(positions: Dict[str, Any]) -> Tuple[Optional[float], Optional[float],
-                                                         Optional[float],
-                                                         Optional[float], Optional[float]]:
+def _split_positions(
+    positions: dict[str, Any],
+) -> tuple[float | None, float | None, float | None, float | None, float | None]:
     """(x, y, z, galvo_a, galvo_b) from a positions payload, any missing as None."""
     x = y = z = a = b = None
     for entry in (positions or {}).values():
@@ -40,7 +40,7 @@ def _split_positions(positions: Dict[str, Any]) -> Tuple[Optional[float], Option
     return x, y, z, a, b
 
 
-def _fmt(v: Optional[float], digits: int = 2) -> str:
+def _fmt(v: float | None, digits: int = 2) -> str:
     if v is None:
         return f"{'—':>10}"
     return f"{v:>10.{digits}f}"
@@ -51,7 +51,7 @@ async def watch(host: str, port: int, log_mode: bool) -> None:
     print(f"Connecting to {url}…", file=sys.stderr)
 
     # Track last 20 arrivals for FPS calculation.
-    arrivals: Deque[float] = deque(maxlen=20)
+    arrivals: deque[float] = deque(maxlen=20)
     last_print = 0.0
     count = 0
 
@@ -120,8 +120,11 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=60610)
-    p.add_argument("--log", action="store_true",
-                   help="Print one line per update instead of overwriting")
+    p.add_argument(
+        "--log",
+        action="store_true",
+        help="Print one line per update instead of overwriting",
+    )
     args = p.parse_args()
 
     try:

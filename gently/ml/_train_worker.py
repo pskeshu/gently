@@ -43,7 +43,7 @@ def main():
         sys.exit(1)
 
     try:
-        import torchvision.models as models
+        import torchvision.models as models  # noqa: F401
     except ImportError:
         _write_progress(progress_file, {"error": "torchvision not installed"})
         sys.exit(1)
@@ -56,7 +56,7 @@ def main():
         sys.exit(1)
 
     # Build datasets
-    from gently.ml.data_loader import GentlyDataset, create_data_splits
+    from gently.ml.data_loader import create_data_splits
 
     architecture = model_config.get("architecture", "resnet18")
     num_classes = model_config.get("num_classes", 8)
@@ -75,8 +75,11 @@ def main():
 
     # Create datasets from labels
     train_data, val_data, test_data = create_data_splits(
-        labels_data, data_root, input_size,
-        train_ratio=0.7, val_ratio=0.15,
+        labels_data,
+        data_root,
+        input_size,
+        train_ratio=0.7,
+        val_ratio=0.15,
     )
 
     train_loader = DataLoader(train_data, batch_size=batch_size, shuffle=True, num_workers=2)
@@ -171,17 +174,20 @@ def main():
             patience_counter += 1
 
         # Write progress
-        _write_progress(progress_file, {
-            "epoch": epoch + 1,
-            "total_epochs": epochs,
-            "train_loss": round(train_loss, 4),
-            "train_accuracy": round(train_acc, 4),
-            "val_loss": round(val_loss, 4),
-            "val_accuracy": round(val_acc, 4),
-            "best_val_accuracy": round(best_val_acc, 4),
-            "lr": optimizer.param_groups[0]["lr"],
-            "timestamp": time.time(),
-        })
+        _write_progress(
+            progress_file,
+            {
+                "epoch": epoch + 1,
+                "total_epochs": epochs,
+                "train_loss": round(train_loss, 4),
+                "train_accuracy": round(train_acc, 4),
+                "val_loss": round(val_loss, 4),
+                "val_accuracy": round(val_acc, 4),
+                "best_val_accuracy": round(best_val_acc, 4),
+                "lr": optimizer.param_groups[0]["lr"],
+                "timestamp": time.time(),
+            },
+        )
 
         # Early stopping
         if patience_counter >= early_stopping_patience:
@@ -218,7 +224,12 @@ def _build_model(architecture, num_classes, pretrained, input_channels, dropout)
         if input_channels != 3:
             old_conv = model.conv1
             model.conv1 = nn.Conv2d(
-                input_channels, 64, kernel_size=7, stride=2, padding=3, bias=False,
+                input_channels,
+                64,
+                kernel_size=7,
+                stride=2,
+                padding=3,
+                bias=False,
             )
             if pretrained and input_channels == 1:
                 # Average RGB weights for grayscale
@@ -241,7 +252,8 @@ def _build_model(architecture, num_classes, pretrained, input_channels, dropout)
             old_conv = model.features[0][0]
             out_channels = old_conv.out_channels
             model.features[0][0] = nn.Conv2d(
-                input_channels, out_channels,
+                input_channels,
+                out_channels,
                 kernel_size=old_conv.kernel_size,
                 stride=old_conv.stride,
                 padding=old_conv.padding,
@@ -260,7 +272,8 @@ def _build_model(architecture, num_classes, pretrained, input_channels, dropout)
             old_conv = model.features[0][0]
             out_channels = old_conv.out_channels
             model.features[0][0] = nn.Conv2d(
-                input_channels, out_channels,
+                input_channels,
+                out_channels,
                 kernel_size=old_conv.kernel_size,
                 stride=old_conv.stride,
                 padding=old_conv.padding,
@@ -278,7 +291,8 @@ def _build_model(architecture, num_classes, pretrained, input_channels, dropout)
             old_conv = model.features[0][0]
             out_channels = old_conv.out_channels
             model.features[0][0] = nn.Conv2d(
-                input_channels, out_channels,
+                input_channels,
+                out_channels,
                 kernel_size=old_conv.kernel_size,
                 stride=old_conv.stride,
                 padding=old_conv.padding,

@@ -18,8 +18,8 @@ Built-in modes:
 Activate a mode via ``TimelapseOrchestrator.enable_monitoring_mode(name)``.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
 
 
 @dataclass
@@ -31,11 +31,12 @@ class MonitoringMode:
     the active modes so the UI / persistence layer can show what
     anticipation logic is in play.
     """
+
     name: str = ""
     description: str = ""
-    applies_to_roles: List[str] = field(default_factory=list)
+    applies_to_roles: list[str] = field(default_factory=list)
 
-    def activate(self, orchestrator, embryo_ids: Optional[List[str]] = None):
+    def activate(self, orchestrator, embryo_ids: list[str] | None = None):
         """Install the mode's rules / detectors on the orchestrator."""
         raise NotImplementedError
 
@@ -54,6 +55,7 @@ class ExpressionMonitoringMode(MonitoringMode):
 
     Burst on good structure is handled by Phase 7's BurstAcquisition.
     """
+
     fast_interval: float = 60.0
     onset_confirm_timepoints: int = 2
     rampdown_step_pct: float = 1.0
@@ -80,7 +82,7 @@ class ExpressionMonitoringMode(MonitoringMode):
         if not self.applies_to_roles:
             self.applies_to_roles = ["test"]
 
-    def activate(self, orchestrator, embryo_ids: Optional[List[str]] = None):
+    def activate(self, orchestrator, embryo_ids: list[str] | None = None):
         orchestrator.add_test_onset_speedup(
             fast_interval=self.fast_interval,
             confirm_timepoints=self.onset_confirm_timepoints,
@@ -108,6 +110,7 @@ class PreTerminalMonitoringMode(MonitoringMode):
     Wraps ``enable_pre_hatching_speedup`` declaratively. Uses the
     organism's PRE_TERMINAL_SPEEDUP_STAGE as the trigger.
     """
+
     fast_interval: float = 30.0
 
     def __post_init__(self):
@@ -119,7 +122,7 @@ class PreTerminalMonitoringMode(MonitoringMode):
                 f"to {self.fast_interval}s on detection."
             )
 
-    def activate(self, orchestrator, embryo_ids: Optional[List[str]] = None):
+    def activate(self, orchestrator, embryo_ids: list[str] | None = None):
         orchestrator.add_pre_terminal_speedup(fast_interval=self.fast_interval)
 
 
@@ -133,20 +136,20 @@ class IdleMode(MonitoringMode):
         if not self.description:
             self.description = "No active anticipation; standard timelapse cadence."
 
-    def activate(self, orchestrator, embryo_ids: Optional[List[str]] = None):
+    def activate(self, orchestrator, embryo_ids: list[str] | None = None):
         pass
 
 
 # Public registry. ``enable_monitoring_mode(name)`` on the orchestrator
 # looks up by key.
-MONITORING_MODES: Dict[str, Callable[[], MonitoringMode]] = {
+MONITORING_MODES: dict[str, Callable[[], MonitoringMode]] = {
     "idle": IdleMode,
     "expression_monitoring": ExpressionMonitoringMode,
     "pre_terminal_monitoring": PreTerminalMonitoringMode,
 }
 
 
-def get_monitoring_mode(name: str) -> Optional[MonitoringMode]:
+def get_monitoring_mode(name: str) -> MonitoringMode | None:
     """Return an instance of the named monitoring mode, or None if unknown."""
     factory = MONITORING_MODES.get(name)
     if factory is None:

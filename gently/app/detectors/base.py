@@ -11,7 +11,7 @@ BlankImageDetector) or thin wrappers around the existing
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
@@ -26,18 +26,19 @@ class DetectorResult:
     structure_quality: "GOOD"}`` for the dopaminergic detector,
     ``{stage: "pretzel"}`` for the perception proxy).
     """
+
     detector_name: str
     embryo_id: str
     timepoint: int
-    findings: Dict[str, Any] = field(default_factory=dict)
-    confidence: Optional[float] = None
-    reasoning: Optional[str] = None
-    raw_response: Optional[str] = None
+    findings: dict[str, Any] = field(default_factory=dict)
+    confidence: float | None = None
+    reasoning: str | None = None
+    raw_response: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
-    elapsed_ms: Optional[float] = None
-    error: Optional[str] = None
+    elapsed_ms: float | None = None
+    error: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "detector_name": self.detector_name,
             "embryo_id": self.embryo_id,
@@ -76,7 +77,7 @@ class Detector(ABC):
     async def run(
         self,
         volume: np.ndarray,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> DetectorResult:
         """Observe the volume and return a structured result."""
         ...

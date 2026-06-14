@@ -5,9 +5,9 @@ Tools for offline testing of perception engine accuracy against ground truth lab
 """
 
 from .ground_truth import GroundTruth
-from .testset import OfflineTestset, TestCase
-from .runner import PerceptionBenchmark, BenchmarkConfig, EmbryoResult
 from .metrics import PerceptionMetrics
+from .runner import BenchmarkConfig, EmbryoResult, PerceptionBenchmark
+from .testset import OfflineTestset, TestCase
 
 __all__ = [
     "GroundTruth",

@@ -6,29 +6,26 @@ parsing context updates from LLM responses.
 """
 
 import json
-from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any
 
 from .model import (
     Campaign,
-    Project,
-    SessionIntent,
-    PlannedSession,
+    Context,
+    EmbryoUnderstanding,
+    Expectation,
+    ExpectationStatus,
     Learning,
     Observation,
-    Expectation,
-    Watchpoint,
-    Question,
-    EmbryoUnderstanding,
-    Context,
-    Significance,
-    Confidence,
-    ExpectationStatus,
+    PlannedSession,
     PlannedSessionStatus,
+    Project,
+    Question,
+    SessionIntent,
+    Watchpoint,
 )
 
 
-def context_to_dict(context: Context) -> Dict[str, Any]:
+def context_to_dict(context: Context) -> dict[str, Any]:
     """
     Serialize a Context to a dictionary.
 
@@ -38,7 +35,9 @@ def context_to_dict(context: Context) -> Dict[str, Any]:
         "intentions": {
             "campaigns": [_campaign_to_dict(c) for c in context.intentions.campaigns],
             "projects": [_project_to_dict(p) for p in context.intentions.projects],
-            "planned_sessions": [_planned_session_to_dict(ps) for ps in context.intentions.planned_sessions],
+            "planned_sessions": [
+                _planned_session_to_dict(ps) for ps in context.intentions.planned_sessions
+            ],
             "current_focus": context.intentions.current_focus,
             "session_intent": _session_intent_to_dict(context.intentions.session_intent)
             if context.intentions.session_intent
@@ -46,10 +45,11 @@ def context_to_dict(context: Context) -> Dict[str, Any]:
         },
         "understanding": {
             "embryo_states": {
-                eid: _embryo_to_dict(e)
-                for eid, e in context.understanding.embryo_states.items()
+                eid: _embryo_to_dict(e) for eid, e in context.understanding.embryo_states.items()
             },
-            "learnings": [_learning_to_dict(l) for l in context.understanding.learnings],
+            "learnings": [
+                _learning_to_dict(learning) for learning in context.understanding.learnings
+            ],
         },
         "observations": [_observation_to_dict(o) for o in context.observations],
         "expectations": [_expectation_to_dict(e) for e in context.expectations],
@@ -82,8 +82,11 @@ def context_summary(context: Context) -> str:
             lines.append(f"  - {c.display_name}{progress}")
 
     # Planned sessions
-    upcoming = [ps for ps in context.intentions.planned_sessions
-                if ps.status == PlannedSessionStatus.PLANNED]
+    upcoming = [
+        ps
+        for ps in context.intentions.planned_sessions
+        if ps.status == PlannedSessionStatus.PLANNED
+    ]
     if upcoming:
         lines.append(f"Planned sessions: {len(upcoming)} upcoming")
         for ps in upcoming[:2]:
@@ -100,7 +103,10 @@ def context_summary(context: Context) -> str:
         tracked = [e for e in embryos.values() if e.is_tracked]
         hatched = [e for e in embryos.values() if e.is_hatched]
         attention = [e for e in embryos.values() if e.needs_attention]
-        lines.append(f"Embryos: {len(tracked)} tracked, {len(hatched)} hatched, {len(attention)} need attention")
+        lines.append(
+            f"Embryos: {len(tracked)} tracked, {len(hatched)} hatched,"
+            f" {len(attention)} need attention"
+        )
 
     # Expectations
     pending = [e for e in context.expectations if e.status == ExpectationStatus.PENDING]
@@ -113,7 +119,9 @@ def context_summary(context: Context) -> str:
         lines.append(f"Watchpoints: {len(active_wp)} active")
 
     # Questions
-    open_q = [q for q in context.attention.open_questions if q.status.value in ("open", "investigating")]
+    open_q = [
+        q for q in context.attention.open_questions if q.status.value in ("open", "investigating")
+    ]
     if open_q:
         lines.append(f"Questions: {len(open_q)} open")
 
@@ -128,7 +136,8 @@ def context_summary(context: Context) -> str:
 # Helper functions
 # ---------------------------------------------------------------------------
 
-def _campaign_to_dict(c: Campaign) -> Dict[str, Any]:
+
+def _campaign_to_dict(c: Campaign) -> dict[str, Any]:
     return {
         "id": c.id,
         "description": c.description,
@@ -143,7 +152,7 @@ def _campaign_to_dict(c: Campaign) -> Dict[str, Any]:
     }
 
 
-def _project_to_dict(p: Project) -> Dict[str, Any]:
+def _project_to_dict(p: Project) -> dict[str, Any]:
     return {
         "id": p.id,
         "description": p.description,
@@ -154,7 +163,7 @@ def _project_to_dict(p: Project) -> Dict[str, Any]:
     }
 
 
-def _planned_session_to_dict(ps: PlannedSession) -> Dict[str, Any]:
+def _planned_session_to_dict(ps: PlannedSession) -> dict[str, Any]:
     return {
         "id": ps.id,
         "title": ps.title,
@@ -172,7 +181,7 @@ def _planned_session_to_dict(ps: PlannedSession) -> Dict[str, Any]:
     }
 
 
-def _session_intent_to_dict(s: SessionIntent) -> Dict[str, Any]:
+def _session_intent_to_dict(s: SessionIntent) -> dict[str, Any]:
     return {
         "session_id": s.session_id,
         "planned_intent": s.planned_intent,
@@ -183,17 +192,17 @@ def _session_intent_to_dict(s: SessionIntent) -> Dict[str, Any]:
     }
 
 
-def _learning_to_dict(l: Learning) -> Dict[str, Any]:
+def _learning_to_dict(learning: Learning) -> dict[str, Any]:
     return {
-        "id": l.id,
-        "content": l.content,
-        "confidence": l.confidence.value,
-        "basis": l.basis,
-        "created_at": l.created_at.isoformat(),
+        "id": learning.id,
+        "content": learning.content,
+        "confidence": learning.confidence.value,
+        "basis": learning.basis,
+        "created_at": learning.created_at.isoformat(),
     }
 
 
-def _embryo_to_dict(e: EmbryoUnderstanding) -> Dict[str, Any]:
+def _embryo_to_dict(e: EmbryoUnderstanding) -> dict[str, Any]:
     return {
         "embryo_id": e.embryo_id,
         "current_stage": e.current_stage,
@@ -208,7 +217,7 @@ def _embryo_to_dict(e: EmbryoUnderstanding) -> Dict[str, Any]:
     }
 
 
-def _observation_to_dict(o: Observation) -> Dict[str, Any]:
+def _observation_to_dict(o: Observation) -> dict[str, Any]:
     return {
         "id": o.id,
         "timestamp": o.timestamp.isoformat(),
@@ -222,7 +231,7 @@ def _observation_to_dict(o: Observation) -> Dict[str, Any]:
     }
 
 
-def _expectation_to_dict(e: Expectation) -> Dict[str, Any]:
+def _expectation_to_dict(e: Expectation) -> dict[str, Any]:
     return {
         "id": e.id,
         "target": e.target,
@@ -236,7 +245,7 @@ def _expectation_to_dict(e: Expectation) -> Dict[str, Any]:
     }
 
 
-def _watchpoint_to_dict(w: Watchpoint) -> Dict[str, Any]:
+def _watchpoint_to_dict(w: Watchpoint) -> dict[str, Any]:
     return {
         "id": w.id,
         "target": w.target,
@@ -247,7 +256,7 @@ def _watchpoint_to_dict(w: Watchpoint) -> Dict[str, Any]:
     }
 
 
-def _question_to_dict(q: Question) -> Dict[str, Any]:
+def _question_to_dict(q: Question) -> dict[str, Any]:
     return {
         "id": q.id,
         "content": q.content,

@@ -12,11 +12,11 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .ground_truth import GroundTruth
-from .testset import OfflineTestset, TestCase
 from .metrics import PerceptionMetrics, compute_metrics
+from .testset import OfflineTestset
 
 logger = logging.getLogger(__name__)
 
@@ -39,20 +39,20 @@ class BenchmarkConfig:
 
     # Test settings
     start_timepoint: int = 0
-    max_timepoints_per_embryo: Optional[int] = None
-    embryo_ids: Optional[List[str]] = None  # None = all
+    max_timepoints_per_embryo: int | None = None
+    embryo_ids: list[str] | None = None  # None = all
 
     # Ablation toggles
     include_temporal_context: bool = True
     include_previous_observations: bool = True
 
     # Custom system prompt override
-    system_prompt_override: Optional[str] = None
+    system_prompt_override: str | None = None
 
     # Metadata
     description: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "model": self.model,
             "temperature": self.temperature,
@@ -78,20 +78,20 @@ class PredictionResult:
 
     timepoint: int
     predicted_stage: str
-    ground_truth_stage: Optional[str]
+    ground_truth_stage: str | None
     confidence: float
     is_transitional: bool
-    transition_between: Optional[List[str]]
+    transition_between: list[str] | None
     reasoning: str
-    reasoning_trace: Optional[Dict[str, Any]]  # Serialized ReasoningTrace
+    reasoning_trace: dict[str, Any] | None  # Serialized ReasoningTrace
     tool_calls: int
-    tools_used: List[str]
+    tools_used: list[str]
 
     # Multi-phase verification fields
     verification_triggered: bool = False
     phase_count: int = 1
-    verification_result: Optional[Dict[str, Any]] = None
-    candidate_stages: Optional[List[Dict[str, Any]]] = None
+    verification_result: dict[str, Any] | None = None
+    candidate_stages: list[dict[str, Any]] | None = None
 
     @property
     def is_correct(self) -> bool:
@@ -113,7 +113,7 @@ class PredictionResult:
         except ValueError:
             return False
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timepoint": self.timepoint,
             "predicted_stage": self.predicted_stage,
@@ -139,9 +139,9 @@ class EmbryoResult:
     """Results for a single embryo run."""
 
     embryo_id: str
-    predictions: List[PredictionResult] = field(default_factory=list)
+    predictions: list[PredictionResult] = field(default_factory=list)
     duration_seconds: float = 0.0
-    error: Optional[str] = None
+    error: str | None = None
 
     @property
     def accuracy(self) -> float:
@@ -159,7 +159,7 @@ class EmbryoResult:
         correct = sum(1 for p in self.predictions if p.is_adjacent_correct)
         return correct / len(self.predictions)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "embryo_id": self.embryo_id,
             "predictions": [p.to_dict() for p in self.predictions],
@@ -175,11 +175,11 @@ class BenchmarkReport:
     """Complete benchmark report."""
 
     config: BenchmarkConfig
-    embryo_results: List[EmbryoResult] = field(default_factory=list)
-    metrics: Optional[PerceptionMetrics] = None
+    embryo_results: list[EmbryoResult] = field(default_factory=list)
+    metrics: PerceptionMetrics | None = None
     started_at: datetime = field(default_factory=datetime.now)
-    completed_at: Optional[datetime] = None
-    session_id: Optional[str] = None
+    completed_at: datetime | None = None
+    session_id: str | None = None
 
     @property
     def total_predictions(self) -> int:
@@ -192,7 +192,7 @@ class BenchmarkReport:
             return 0.0
         return sum(1 for p in all_preds if p.is_correct) / len(all_preds)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "config": self.config.to_dict(),
             "embryo_results": [r.to_dict() for r in self.embryo_results],
@@ -222,7 +222,7 @@ class PerceptionBenchmark:
         self,
         testset: OfflineTestset,
         config: BenchmarkConfig,
-        engine: Optional[Any] = None,  # PerceptionEngine
+        engine: Any | None = None,  # PerceptionEngine
     ):
         """
         Parameters
@@ -246,7 +246,6 @@ class PerceptionBenchmark:
         # Lazy import to avoid circular dependencies
         import anthropic
         from gently.harness.perception.engine import PerceptionEngine
-        from gently.harness.perception.example_store import ExampleStore
 
         client = anthropic.Anthropic()
 
@@ -465,7 +464,8 @@ async def main():
         help="Description for this benchmark run",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose logging",
     )
@@ -481,6 +481,7 @@ async def main():
     # The perception engine reads stage definitions etc. from the active
     # organism module, which is normally loaded by launch_gently.py.
     from gently.organisms import load_organism
+
     load_organism("celegans")
 
     # Find session path

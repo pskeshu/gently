@@ -15,7 +15,7 @@ import json
 import logging
 import socket
 import time
-from typing import Callable, Optional
+from collections.abc import Callable
 
 from ..settings import settings
 
@@ -74,7 +74,7 @@ class _MeshProtocol(asyncio.DatagramProtocol):
         self._pairing_manager = pairing_manager
         self._audit_log = audit_log
         self._known_ids: set = set()
-        self.transport: Optional[asyncio.DatagramTransport] = None
+        self.transport: asyncio.DatagramTransport | None = None
 
     def connection_made(self, transport: asyncio.DatagramTransport):
         self.transport = transport
@@ -101,9 +101,12 @@ class _MeshProtocol(asyncio.DatagramProtocol):
             logger.debug(f"Mesh: rejected stale packet from {peer_id[:8]} (ts={ts})")
             if self._audit_log:
                 from .audit import AuditEvent
+
                 self._audit_log.log(
-                    AuditEvent.REPLAY_REJECTED, outcome="deny",
-                    peer_id=peer_id, ip=sender_ip,
+                    AuditEvent.REPLAY_REJECTED,
+                    outcome="deny",
+                    peer_id=peer_id,
+                    ip=sender_ip,
                     detail=f"ts_delta={abs(time.time() - ts):.1f}s",
                 )
             return
@@ -120,9 +123,12 @@ class _MeshProtocol(asyncio.DatagramProtocol):
                     logger.debug(f"Mesh: bad signature from {peer_id[:8]}")
                     if self._audit_log:
                         from .audit import AuditEvent
+
                         self._audit_log.log(
-                            AuditEvent.SIG_INVALID, outcome="deny",
-                            peer_id=peer_id, ip=sender_ip,
+                            AuditEvent.SIG_INVALID,
+                            outcome="deny",
+                            peer_id=peer_id,
+                            ip=sender_ip,
                         )
 
         if msg_type == "nudge":
@@ -138,7 +144,7 @@ class _MeshProtocol(asyncio.DatagramProtocol):
     def error_received(self, exc: Exception):
         logger.debug(f"Mesh UDP error: {exc}")
 
-    def connection_lost(self, exc: Optional[Exception]):
+    def connection_lost(self, exc: Exception | None):
         pass
 
     def forget_peer(self, instance_id: str):
@@ -169,9 +175,9 @@ class MeshDiscovery:
         self._pairing_manager = pairing_manager
         self._audit_log = audit_log
 
-        self._protocol: Optional[_MeshProtocol] = None
-        self._transport: Optional[asyncio.DatagramTransport] = None
-        self._broadcast_task: Optional[asyncio.Task] = None
+        self._protocol: _MeshProtocol | None = None
+        self._transport: asyncio.DatagramTransport | None = None
+        self._broadcast_task: asyncio.Task | None = None
         self._running = False
 
         # Callbacks — set by MeshService before start()
@@ -213,8 +219,7 @@ class MeshDiscovery:
         self._running = True
         self._broadcast_task = asyncio.create_task(self._broadcast_loop())
         logger.info(
-            f"Mesh discovery started on port {self.mesh_port} "
-            f"(instance={self.instance_id[:8]})"
+            f"Mesh discovery started on port {self.mesh_port} (instance={self.instance_id[:8]})"
         )
 
     async def stop(self):
@@ -259,9 +264,7 @@ class MeshDiscovery:
             packet = json.dumps(payload).encode("utf-8")
 
         try:
-            self._transport.sendto(
-                packet, ("255.255.255.255", self.mesh_port)
-            )
+            self._transport.sendto(packet, ("255.255.255.255", self.mesh_port))
         except OSError as e:
             logger.debug(f"Mesh nudge broadcast failed: {e}")
 
@@ -286,9 +289,7 @@ class MeshDiscovery:
 
             try:
                 if self._transport:
-                    self._transport.sendto(
-                        heartbeat, ("255.255.255.255", self.mesh_port)
-                    )
+                    self._transport.sendto(heartbeat, ("255.255.255.255", self.mesh_port))
             except OSError as e:
                 logger.debug(f"Mesh broadcast failed: {e}")
 

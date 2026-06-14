@@ -18,18 +18,16 @@ Usage:
     >>> camera_config = CameraConfig(mode=CameraMode.EXTERNAL_PROGRESSIVE, exposure_ms=10.0)
 """
 
-import math
 import json
-from dataclasses import dataclass, asdict
+import math
+from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Tuple
-from datetime import datetime
-
 
 # ============================================================================
 # ENUMERATIONS
 # ============================================================================
+
 
 class CameraMode(Enum):
     """
@@ -39,12 +37,14 @@ class CameraMode(Enum):
     - INTERNAL_AREA: For calibration, live view, manual acquisitions
     - EXTERNAL_PROGRESSIVE: For hardware-triggered SPIM volumes
     """
-    INTERNAL_AREA = "internal_area"              # Manual trigger, full sensor
+
+    INTERNAL_AREA = "internal_area"  # Manual trigger, full sensor
     EXTERNAL_PROGRESSIVE = "external_progressive"  # Hardware trigger, progressive readout
 
 
 class ScannerPattern(Enum):
     """Galvo scanner waveform patterns."""
+
     TRIANGLE = "1 - Triangle"
     SAWTOOTH = "2 - Sawtooth"
     RAMP = "3 - Ramp"
@@ -52,6 +52,7 @@ class ScannerPattern(Enum):
 
 class ScannerMode(Enum):
     """Galvo scanner axis control modes."""
+
     DISABLED = "1 - Disabled"
     INTERNAL = "2 - Internal"
     ENABLED_SYNCED = "3 - Enabled with axes synced"
@@ -60,6 +61,7 @@ class ScannerMode(Enum):
 # ============================================================================
 # HARDWARE PROFILES
 # ============================================================================
+
 
 @dataclass
 class HardwareProfile:
@@ -83,16 +85,18 @@ class HardwareProfile:
         Custom profile for faster camera:
         >>> profile = HardwareProfile(camera_reset_ms=2.0, camera_readout_ms=8.0)
     """
-    camera_reset_ms: float = 3.0            # Hamamatsu Flash4 reset time
-    camera_readout_ms: float = 10.0          # Typical for 2048x512 ROI
-    scan_laser_buffer_ms: float = 0.25       # Buffer before/after laser pulse
-    scan_filter_freq_khz: float = 0.2        # Scanner filter frequency
-    has_plogic: bool = False                 # PLogic card present
+
+    camera_reset_ms: float = 3.0  # Hamamatsu Flash4 reset time
+    camera_readout_ms: float = 10.0  # Typical for 2048x512 ROI
+    scan_laser_buffer_ms: float = 0.25  # Buffer before/after laser pulse
+    scan_filter_freq_khz: float = 0.2  # Scanner filter frequency
+    has_plogic: bool = False  # PLogic card present
 
 
 # ============================================================================
 # CAMERA CONFIGURATION
 # ============================================================================
+
 
 @dataclass
 class CameraConfig:
@@ -120,9 +124,10 @@ class CameraConfig:
         ...     exposure_ms=10.0
         ... )
     """
+
     mode: CameraMode
     exposure_ms: float
-    roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)  # Default diSPIM ROI
+    roi: tuple[int, int, int, int] = (128, 896, 2048, 512)  # Default diSPIM ROI
 
     def to_mm_properties(self) -> dict:
         """
@@ -138,15 +143,12 @@ class CameraConfig:
             ...     core.setProperty(camera_device, name, value)
         """
         if self.mode == CameraMode.INTERNAL_AREA:
-            return {
-                "TRIGGER SOURCE": "INTERNAL",
-                "SENSOR MODE": "AREA"
-            }
+            return {"TRIGGER SOURCE": "INTERNAL", "SENSOR MODE": "AREA"}
         elif self.mode == CameraMode.EXTERNAL_PROGRESSIVE:
             return {
                 "TRIGGER SOURCE": "EXTERNAL",
                 "SENSOR MODE": "PROGRESSIVE",
-                "TRIGGER ACTIVE": "EDGE"
+                "TRIGGER ACTIVE": "EDGE",
             }
         else:
             raise ValueError(f"Unknown camera mode: {self.mode}")
@@ -155,6 +157,7 @@ class CameraConfig:
 # ============================================================================
 # SCANNER/GALVO CONFIGURATION
 # ============================================================================
+
 
 @dataclass
 class GalvoAxisConfig:
@@ -188,6 +191,7 @@ class GalvoAxisConfig:
         ...     mode=ScannerMode.ENABLED_SYNCED
         ... )
     """
+
     amplitude_deg: float
     offset_deg: float
     pattern: ScannerPattern = ScannerPattern.TRIANGLE
@@ -212,7 +216,7 @@ class GalvoAxisConfig:
             f"SingleAxis{axis}Amplitude(deg)": float(self.amplitude_deg),
             f"SingleAxis{axis}Offset(deg)": float(self.offset_deg),
             f"SingleAxis{axis}Pattern": self.pattern.value,
-            f"SingleAxis{axis}Mode": self.mode.value
+            f"SingleAxis{axis}Mode": self.mode.value,
         }
 
 
@@ -234,6 +238,7 @@ class ScannerConfig:
         ...     beam_enabled=True
         ... )
     """
+
     x_axis: GalvoAxisConfig
     y_axis: GalvoAxisConfig
     beam_enabled: bool = True
@@ -262,9 +267,9 @@ class ScannerConfig:
 # SPIM TIMING CALCULATION
 # ============================================================================
 
+
 def calculate_spim_timing(
-    camera_exposure_ms: float,
-    hardware_profile: Optional[HardwareProfile] = None
+    camera_exposure_ms: float, hardware_profile: HardwareProfile | None = None
 ) -> dict:
     """
     Calculate SPIM hardware timing parameters for synchronized acquisition.
@@ -356,21 +361,22 @@ def calculate_spim_timing(
     frame_rate = 1000.0 / slice_duration if slice_duration > 0 else 0.0
 
     return {
-        'scanDelay': scan_delay,
-        'scanPeriod': scan_period,
-        'laserDelay': laser_delay,
-        'laserDuration': laser_duration,
-        'cameraDelay': camera_delay,
-        'cameraDuration': camera_duration,  # Must be > 0!
-        'cameraExposure': camera_exposure,
-        'sliceDuration': slice_duration,
-        'frameRate': frame_rate
+        "scanDelay": scan_delay,
+        "scanPeriod": scan_period,
+        "laserDelay": laser_delay,
+        "laserDuration": laser_duration,
+        "cameraDelay": camera_delay,
+        "cameraDuration": camera_duration,  # Must be > 0!
+        "cameraExposure": camera_exposure,
+        "sliceDuration": slice_duration,
+        "frameRate": frame_rate,
     }
 
 
 # ============================================================================
 # PIEZO-GALVO CALIBRATION
 # ============================================================================
+
 
 @dataclass
 class PiezoGalvoCalibration:
@@ -420,6 +426,7 @@ class PiezoGalvoCalibration:
         Calculate piezo position for given galvo angle:
         >>> piezo_pos = calib.galvo_to_piezo(0.15)  # galvo at +0.15°
     """
+
     slope_um_per_deg: float
     offset_um: float
     galvo_top_deg: float
@@ -432,10 +439,10 @@ class PiezoGalvoCalibration:
     device_galvo: str = "Scanner:AB:33"
 
     # Optional metadata
-    edge_top_deg: Optional[float] = None
-    edge_bottom_deg: Optional[float] = None
-    calib_inset_fraction: Optional[float] = None
-    calib_strategy: Optional[str] = None
+    edge_top_deg: float | None = None
+    edge_bottom_deg: float | None = None
+    calib_inset_fraction: float | None = None
+    calib_strategy: str | None = None
 
     def galvo_to_piezo(self, galvo_deg: float) -> float:
         """
@@ -469,7 +476,7 @@ class PiezoGalvoCalibration:
         """
         return (piezo_um - self.offset_um) / self.slope_um_per_deg
 
-    def get_scan_range(self, tolerance_multiplier: float = 1.0) -> Tuple[float, float]:
+    def get_scan_range(self, tolerance_multiplier: float = 1.0) -> tuple[float, float]:
         """
         Get galvo scan range with optional tolerance multiplier.
 
@@ -486,7 +493,7 @@ class PiezoGalvoCalibration:
         # If we have edge data, adjust tolerance
         if self.edge_top_deg is not None and self.edge_bottom_deg is not None:
             # Estimate original tolerance
-            original_tolerance = (self.galvo_top_deg - self.edge_top_deg)  # Should be negative
+            original_tolerance = self.galvo_top_deg - self.edge_top_deg  # Should be negative
 
             # Apply multiplier
             new_tolerance = abs(original_tolerance) * tolerance_multiplier
@@ -501,7 +508,7 @@ class PiezoGalvoCalibration:
             return (self.galvo_top_deg, self.galvo_bottom_deg)
 
     @classmethod
-    def from_file(cls, path: Path) -> 'PiezoGalvoCalibration':
+    def from_file(cls, path: Path) -> "PiezoGalvoCalibration":
         """
         Load calibration from JSON file.
 
@@ -523,7 +530,7 @@ class PiezoGalvoCalibration:
         if not path.exists():
             raise FileNotFoundError(f"Calibration file not found: {path}")
 
-        with open(path, 'r') as f:
+        with open(path) as f:
             data = json.load(f)
 
         return cls(**data)
@@ -542,7 +549,7 @@ class PiezoGalvoCalibration:
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(path, 'w') as f:
+        with open(path, "w") as f:
             json.dump(asdict(self), f, indent=2)
 
     def __str__(self) -> str:
@@ -560,6 +567,7 @@ class PiezoGalvoCalibration:
 # PRESET CONFIGURATIONS
 # ============================================================================
 
+
 def get_calibration_camera_config(exposure_ms: float = 50.0) -> CameraConfig:
     """
     Get camera configuration for calibration mode.
@@ -570,10 +578,7 @@ def get_calibration_camera_config(exposure_ms: float = 50.0) -> CameraConfig:
     Returns:
         CameraConfig for INTERNAL trigger, AREA sensor mode
     """
-    return CameraConfig(
-        mode=CameraMode.INTERNAL_AREA,
-        exposure_ms=exposure_ms
-    )
+    return CameraConfig(mode=CameraMode.INTERNAL_AREA, exposure_ms=exposure_ms)
 
 
 def get_hardware_spim_camera_config(exposure_ms: float = 10.0) -> CameraConfig:
@@ -586,10 +591,7 @@ def get_hardware_spim_camera_config(exposure_ms: float = 10.0) -> CameraConfig:
     Returns:
         CameraConfig for EXTERNAL trigger, PROGRESSIVE sensor mode
     """
-    return CameraConfig(
-        mode=CameraMode.EXTERNAL_PROGRESSIVE,
-        exposure_ms=exposure_ms
-    )
+    return CameraConfig(mode=CameraMode.EXTERNAL_PROGRESSIVE, exposure_ms=exposure_ms)
 
 
 def get_standard_scanner_config(y_amplitude_deg: float = 0.04) -> ScannerConfig:
@@ -607,13 +609,13 @@ def get_standard_scanner_config(y_amplitude_deg: float = 0.04) -> ScannerConfig:
             amplitude_deg=8.0,
             offset_deg=0.0005,
             pattern=ScannerPattern.TRIANGLE,
-            mode=ScannerMode.ENABLED_SYNCED
+            mode=ScannerMode.ENABLED_SYNCED,
         ),
         y_axis=GalvoAxisConfig(
             amplitude_deg=y_amplitude_deg,
             offset_deg=0.0,
             pattern=ScannerPattern.TRIANGLE,
-            mode=ScannerMode.ENABLED_SYNCED
+            mode=ScannerMode.ENABLED_SYNCED,
         ),
-        beam_enabled=True
+        beam_enabled=True,
     )

@@ -3,18 +3,18 @@
 import base64
 import io
 import logging
-from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import Response
 
-from ..volume_helpers import load_volume_from_disk, image_to_base64_png
+from ..volume_helpers import image_to_base64_png, load_volume_from_disk
 
 logger = logging.getLogger(__name__)
 
 try:
     from PIL import Image
+
     PIL_AVAILABLE = True
 except ImportError:
     PIL_AVAILABLE = False
@@ -31,7 +31,8 @@ def create_router(server) -> APIRouter:
         Args:
             embryo_id: Embryo identifier
             timepoint: Timepoint number (1-indexed)
-            method: Projection method - 'all', 'three_view', 'dual_view', 'depth_colored', 'multi_slice'
+            method: Projection method - 'all', 'three_view', 'dual_view',
+                'depth_colored', 'multi_slice'
 
         Returns:
             List of projections with method name, description, and base64 PNG data
@@ -41,7 +42,10 @@ def create_router(server) -> APIRouter:
         # Look up volume path (timelapse tracker + FileStore fallback)
         volume_path = server._resolve_volume_path(embryo_id, timepoint)
         if not volume_path:
-            raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No volume for {embryo_id} at timepoint {timepoint}",
+            )
 
         # Load volume from disk
         try:
@@ -52,29 +56,32 @@ def create_router(server) -> APIRouter:
             vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
 
         except FileNotFoundError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
         except Exception as e:
             logger.error(f"Failed to load volume: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}") from e
 
         PROJECTION_METHODS = {
-            'three_view': projection_three_view,
+            "three_view": projection_three_view,
         }
 
         # Try to import additional projection methods from explorer
         try:
             from gently.dataset.explorer_server import (
-                projection_dual_view,
                 projection_depth_colored,
+                projection_dual_view,
                 projection_multi_slice,
                 projection_spin_3d,
             )
-            PROJECTION_METHODS.update({
-                'dual_view': projection_dual_view,
-                'depth_colored': projection_depth_colored,
-                'multi_slice': projection_multi_slice,
-                'spin_3d': projection_spin_3d,
-            })
+
+            PROJECTION_METHODS.update(
+                {
+                    "dual_view": projection_dual_view,
+                    "depth_colored": projection_depth_colored,
+                    "multi_slice": projection_multi_slice,
+                    "spin_3d": projection_spin_3d,
+                }
+            )
         except ImportError:
             pass  # Explorer projections not available
 
@@ -84,22 +91,31 @@ def create_router(server) -> APIRouter:
             for method_name, method_func in PROJECTION_METHODS.items():
                 try:
                     proj_img, desc = method_func(vol)
-                    projections.append({
-                        "method": method_name,
-                        "description": desc,
-                        "data": image_to_base64_png(proj_img),
-                    })
+                    projections.append(
+                        {
+                            "method": method_name,
+                            "description": desc,
+                            "data": image_to_base64_png(proj_img),
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Projection {method_name} failed: {e}")
         else:
             if method not in PROJECTION_METHODS:
-                raise HTTPException(status_code=400, detail=f"Unknown method: {method}. Available: {list(PROJECTION_METHODS.keys())}")
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Unknown method: {method}. Available: {list(PROJECTION_METHODS.keys())}"
+                    ),
+                )
             proj_img, desc = PROJECTION_METHODS[method](vol)
-            projections.append({
-                "method": method,
-                "description": desc,
-                "data": image_to_base64_png(proj_img),
-            })
+            projections.append(
+                {
+                    "method": method,
+                    "description": desc,
+                    "data": image_to_base64_png(proj_img),
+                }
+            )
 
         return {
             "embryo_id": embryo_id,
@@ -120,7 +136,10 @@ def create_router(server) -> APIRouter:
         # Look up volume path (timelapse tracker + FileStore fallback)
         volume_path = server._resolve_volume_path(embryo_id, timepoint)
         if not volume_path:
-            raise HTTPException(status_code=404, detail=f"No volume for {embryo_id} at timepoint {timepoint}")
+            raise HTTPException(
+                status_code=404,
+                detail=f"No volume for {embryo_id} at timepoint {timepoint}",
+            )
 
         try:
             vol = load_volume_from_disk(volume_path)
@@ -137,7 +156,7 @@ def create_router(server) -> APIRouter:
 
             # Encode as base64
             vol_bytes = vol_uint8.tobytes()
-            vol_b64 = base64.b64encode(vol_bytes).decode('utf-8')
+            vol_b64 = base64.b64encode(vol_bytes).decode("utf-8")
 
             # Physical voxel size for isometric 3D rendering.
             # Matches the default in gently.core.imaging.projection_three_view:
@@ -155,17 +174,17 @@ def create_router(server) -> APIRouter:
             }
 
         except FileNotFoundError as e:
-            raise HTTPException(status_code=404, detail=str(e))
+            raise HTTPException(status_code=404, detail=str(e)) from e
         except Exception as e:
             logger.error(f"Failed to load volume: {e}")
-            raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}")
+            raise HTTPException(status_code=500, detail=f"Failed to load volume: {e}") from e
 
     @router.get("/api/volumes3d")
     async def list_volumes_3d():
         """Get list of 3D volumes (without heavy data)"""
         return {
             "volumes_3d": server.store.get_all_volumes_3d(),
-            "count": len(server.store._volumes_3d)
+            "count": len(server.store._volumes_3d),
         }
 
     @router.get("/api/volumes3d/{uid}")
@@ -188,7 +207,7 @@ def create_router(server) -> APIRouter:
         if PIL_AVAILABLE:
             img = Image.fromarray(rgb)
             buffer = io.BytesIO()
-            img.save(buffer, format='PNG')
+            img.save(buffer, format="PNG")
             return Response(content=buffer.getvalue(), media_type="image/png")
 
         raise HTTPException(status_code=500, detail="PIL not available")
@@ -209,14 +228,17 @@ def create_router(server) -> APIRouter:
                     volume = np.zeros(volume.shape, dtype=np.uint8)
             return {
                 "shape": list(volume.shape),
-                "data": base64.b64encode(volume.tobytes()).decode('utf-8'),
-                "uid": uid
+                "data": base64.b64encode(volume.tobytes()).decode("utf-8"),
+                "uid": uid,
             }
 
         # Check if it's a regular image with stored volume data
         image = server.store.get_image_by_uid(uid)
         if image and image.shape and len(image.shape) == 3:
-            raise HTTPException(status_code=404, detail=f"Volume data for {uid} not available - only segmented volumes supported")
+            raise HTTPException(
+                status_code=404,
+                detail=f"Volume data for {uid} not available - only segmented volumes supported",
+            )
 
         raise HTTPException(status_code=404, detail=f"Volume {uid} not found")
 
@@ -227,27 +249,25 @@ def create_router(server) -> APIRouter:
             data = await request.json()
 
             # Decode the volume and masks from base64
-            volume_b64 = data.get('volume_b64')
-            masks_b64 = data.get('masks_b64')
-            uid = data.get('uid')
-            shape = data.get('shape')
-            dtype_vol = data.get('dtype_vol', 'uint16')
-            dtype_mask = data.get('dtype_mask', 'uint16')
-            metadata = data.get('metadata', {})
+            volume_b64 = data.get("volume_b64")
+            masks_b64 = data.get("masks_b64")
+            uid = data.get("uid")
+            shape = data.get("shape")
+            dtype_vol = data.get("dtype_vol", "uint16")
+            dtype_mask = data.get("dtype_mask", "uint16")
+            metadata = data.get("metadata", {})
 
             if not all([volume_b64, masks_b64, uid, shape]):
                 raise HTTPException(status_code=400, detail="Missing required fields")
 
             # Decode arrays
-            volume = np.frombuffer(
-                base64.b64decode(volume_b64),
-                dtype=np.dtype(dtype_vol)
-            ).reshape(shape)
+            volume = np.frombuffer(base64.b64decode(volume_b64), dtype=np.dtype(dtype_vol)).reshape(
+                shape
+            )
 
-            masks = np.frombuffer(
-                base64.b64decode(masks_b64),
-                dtype=np.dtype(dtype_mask)
-            ).reshape(shape)
+            masks = np.frombuffer(base64.b64decode(masks_b64), dtype=np.dtype(dtype_mask)).reshape(
+                shape
+            )
 
             # Push using the existing method
             await server.push_volume_3d(volume, masks, uid, metadata)
@@ -256,6 +276,6 @@ def create_router(server) -> APIRouter:
 
         except Exception as e:
             logger.error(f"Failed to push 3D volume via HTTP: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     return router

@@ -18,24 +18,26 @@ import asyncio
 import base64
 import os
 from pathlib import Path
-from typing import Optional, Tuple, Dict
+
 import anthropic
 
 from gently.settings import settings
+
 from .plans.calibration import EMBRYO_CENTERING_PROMPT, EMBRYO_EDGE_PROMPT
 
 _MEDIA_TYPE_MAP = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif',
-    '.webp': 'image/webp',
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".gif": "image/gif",
+    ".webp": "image/webp",
 }
 
 
 # ============================================================================
 # ASYNC CLAUDE CLIENT
 # ============================================================================
+
 
 class AsyncClaudeClient:
     """
@@ -65,14 +67,14 @@ class AsyncClaudeClient:
 
     def __init__(
         self,
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
         model: str = settings.models.perception,
         max_tokens: int = 100,
-        timeout: float = 30.0
+        timeout: float = 30.0,
     ):
         """Initialize async Claude client."""
         if api_key is None:
-            api_key = os.environ.get('ANTHROPIC_API_KEY')
+            api_key = os.environ.get("ANTHROPIC_API_KEY")
             if api_key is None:
                 raise ValueError(
                     "ANTHROPIC_API_KEY not found in environment. "
@@ -99,12 +101,12 @@ class AsyncClaudeClient:
         str
             Base64-encoded image data
         """
-        with open(image_path, 'rb') as f:
+        with open(image_path, "rb") as f:
             image_data = f.read()
-        return base64.standard_b64encode(image_data).decode('utf-8')
+        return base64.standard_b64encode(image_data).decode("utf-8")
 
     @staticmethod
-    def parse_yes_no_response(response_text: str) -> Tuple[bool, str]:
+    def parse_yes_no_response(response_text: str) -> tuple[bool, str]:
         """
         Parse Claude's yes/no response format.
 
@@ -124,14 +126,14 @@ class AsyncClaudeClient:
         str
             Description from remaining lines
         """
-        lines = response_text.strip().split('\n', 1)
+        lines = response_text.strip().split("\n", 1)
 
         if len(lines) == 0:
             return False, "Empty response"
 
         # Parse first line for yes/no
         first_line = lines[0].strip().lower()
-        is_yes = 'yes' in first_line
+        is_yes = "yes" in first_line
 
         # Get description from remaining lines
         description = lines[1].strip() if len(lines) > 1 else "No description provided"
@@ -139,10 +141,8 @@ class AsyncClaudeClient:
         return is_yes, description
 
     async def check_embryo_centered(
-        self,
-        image_path: Path,
-        custom_prompt: Optional[str] = None
-    ) -> Tuple[bool, str]:
+        self, image_path: Path, custom_prompt: str | None = None
+    ) -> tuple[bool, str]:
         """
         Check if embryo is centered and visible in image.
 
@@ -179,7 +179,7 @@ class AsyncClaudeClient:
         image_data = self.encode_image(image_path)
 
         # Get media type from file extension
-        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), 'image/png')
+        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), "image/png")
 
         # Prepare prompt
         prompt = custom_prompt if custom_prompt else EMBRYO_CENTERING_PROMPT
@@ -190,25 +190,24 @@ class AsyncClaudeClient:
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
-                    }]
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_data,
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
                 ),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
 
             # Extract text response
@@ -225,10 +224,8 @@ class AsyncClaudeClient:
             return False, f"Claude API error: {str(e)}"
 
     async def detect_embryo_presence(
-        self,
-        image_path: Path,
-        custom_prompt: Optional[str] = None
-    ) -> Tuple[bool, int, str]:
+        self, image_path: Path, custom_prompt: str | None = None
+    ) -> tuple[bool, int, str]:
         """
         Detect if embryo is present at current Z position (for edge detection).
 
@@ -271,7 +268,7 @@ class AsyncClaudeClient:
         image_data = self.encode_image(image_path)
 
         # Get media type
-        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), 'image/png')
+        media_type = _MEDIA_TYPE_MAP.get(image_path.suffix.lower(), "image/png")
 
         # Prepare prompt
         prompt = custom_prompt if custom_prompt else EMBRYO_EDGE_PROMPT
@@ -282,35 +279,34 @@ class AsyncClaudeClient:
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
-                    }]
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_data,
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
                 ),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
 
             # Extract text response
             response_text = response.content[0].text
 
             # Parse response - now 3 lines: yes/no, score, description
-            lines = response_text.strip().split('\n')
+            lines = response_text.strip().split("\n")
 
             # Line 1: yes/no
-            is_present = 'yes' in lines[0].lower() if lines else False
+            is_present = "yes" in lines[0].lower() if lines else False
 
             # Line 2: feature score (1-10)
             feature_score = 0
@@ -320,14 +316,15 @@ class AsyncClaudeClient:
                     score_line = lines[1].strip()
                     # Handle cases like "8" or "Score: 8" or "8/10"
                     import re
-                    match = re.search(r'\d+', score_line)
+
+                    match = re.search(r"\d+", score_line)
                     if match:
                         feature_score = min(10, max(0, int(match.group())))
                 except (ValueError, IndexError):
                     feature_score = 5 if is_present else 0  # Default
 
             # Line 3+: description
-            description = '\n'.join(lines[2:]).strip() if len(lines) > 2 else "No description"
+            description = "\n".join(lines[2:]).strip() if len(lines) > 2 else "No description"
 
             # If not present, ensure score is 0
             if not is_present:
@@ -344,8 +341,8 @@ class AsyncClaudeClient:
         self,
         montage_path: Path,
         selected_position_um: float,
-        prompt_template: Optional[str] = None
-    ) -> Tuple[str, str]:
+        prompt_template: str | None = None,
+    ) -> tuple[str, str]:
         """
         Validate algorithmic focus selection by analyzing montage.
 
@@ -384,9 +381,11 @@ class AsyncClaudeClient:
 
         # Default validation prompt
         if prompt_template is None:
-            prompt_template = """You are an expert microscopist reviewing focus quality in embryo images.
+            prompt_template = """You are an expert microscopist reviewing focus quality in
+embryo images.
 
-This montage shows a focus sweep through an embryo sample. Each panel is labeled with its Z position in micrometers.
+This montage shows a focus sweep through an embryo sample. Each panel is labeled with its
+Z position in micrometers.
 
 Our FFT-based algorithm selected position: {position:.2f} µm as optimal focus.
 
@@ -412,7 +411,7 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
 
         # Encode image
         image_data = self.encode_image(montage_path)
-        media_type = 'image/png'
+        media_type = "image/png"
 
         try:
             # Make async API call
@@ -420,41 +419,40 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=150,  # Slightly longer for reasoning
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
-                    }]
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_data,
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
                 ),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
 
             # Extract response
             response_text = response.content[0].text
-            lines = response_text.strip().split('\n', 1)
+            lines = response_text.strip().split("\n", 1)
 
             decision = lines[0].strip().upper()
             reasoning = lines[1].strip() if len(lines) > 1 else "No reasoning provided"
 
             # Normalize decision
-            if 'CONFIRM' in decision:
-                decision = 'CONFIRM'
-            elif 'REJECT' in decision:
-                decision = 'REJECT'
+            if "CONFIRM" in decision:
+                decision = "CONFIRM"
+            elif "REJECT" in decision:
+                decision = "REJECT"
             else:
-                decision = 'REJECT'  # Default to reject if unclear
+                decision = "REJECT"  # Default to reject if unclear
                 reasoning = f"Unclear response: {decision}. {reasoning}"
 
             return decision, reasoning
@@ -468,8 +466,8 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
         self,
         montage_path: Path,
         offsets: list[float],
-        labels: Optional[list[str]] = None
-    ) -> Tuple[int, str, str]:
+        labels: list[str] | None = None,
+    ) -> tuple[int, str, str]:
         """
         Select the best-focused image from a montage using Vision.
 
@@ -506,16 +504,14 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
         montage_path = Path(montage_path)
 
         if not montage_path.exists():
-            return 1, 'B', f"Montage file not found, defaulting to center"
+            return 1, "B", "Montage file not found, defaulting to center"
 
         # Default labels
         if labels is None:
-            labels = [chr(ord('A') + i) for i in range(len(offsets))]
+            labels = [chr(ord("A") + i) for i in range(len(offsets))]
 
         # Build offset description for prompt
-        offset_desc = ", ".join(
-            f"{labels[i]}={offsets[i]:+.1f}µm" for i in range(len(offsets))
-        )
+        offset_desc = ", ".join(f"{labels[i]}={offsets[i]:+.1f}µm" for i in range(len(offsets)))
 
         prompt = f"""You are an expert microscopist comparing focus quality in embryo images.
 
@@ -529,7 +525,7 @@ Select which position shows the SHARPEST focus with:
 - Best overall image clarity and contrast
 
 RESPOND FORMAT:
-Line 1: Just the letter ({', '.join(labels)})
+Line 1: Just the letter ({", ".join(labels)})
 Line 2: Brief reasoning (1 sentence)
 
 Example:
@@ -538,37 +534,36 @@ Center position shows sharpest nuclear boundaries with maximum contrast."""
 
         # Encode image
         image_data = self.encode_image(montage_path)
-        media_type = 'image/png'
+        media_type = "image/png"
 
         try:
             response = await asyncio.wait_for(
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=100,
-                    messages=[{
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": media_type,
-                                    "data": image_data
-                                }
-                            },
-                            {
-                                "type": "text",
-                                "text": prompt
-                            }
-                        ]
-                    }]
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": media_type,
+                                        "data": image_data,
+                                    },
+                                },
+                                {"type": "text", "text": prompt},
+                            ],
+                        }
+                    ],
                 ),
-                timeout=self.timeout
+                timeout=self.timeout,
             )
 
             # Parse response
             response_text = response.content[0].text.strip()
-            lines = response_text.split('\n', 1)
+            lines = response_text.split("\n", 1)
 
             # Extract selected label (first non-empty character that's a valid label)
             selected = None
@@ -590,15 +585,24 @@ Center position shows sharpest nuclear boundaries with maximum contrast."""
         except asyncio.TimeoutError:
             # Default to center on timeout
             center_idx = len(offsets) // 2
-            return center_idx, labels[center_idx], f"Claude API timeout, defaulting to center"
+            return (
+                center_idx,
+                labels[center_idx],
+                "Claude API timeout, defaulting to center",
+            )
         except Exception as e:
             center_idx = len(offsets) // 2
-            return center_idx, labels[center_idx], f"Claude API error: {str(e)}, defaulting to center"
+            return (
+                center_idx,
+                labels[center_idx],
+                f"Claude API error: {str(e)}, defaulting to center",
+            )
 
 
 # ============================================================================
 # SYNCHRONOUS WRAPPER FOR BACKWARDS COMPATIBILITY
 # ============================================================================
+
 
 class ClaudeClient:
     """
@@ -612,19 +616,17 @@ class ClaudeClient:
         """Initialize sync client (wraps async client)."""
         self.async_client = AsyncClaudeClient(**kwargs)
 
-    def check_embryo_centered(self, image_path: Path) -> Tuple[bool, str]:
+    def check_embryo_centered(self, image_path: Path) -> tuple[bool, str]:
         """Sync version of check_embryo_centered."""
         return asyncio.run(self.async_client.check_embryo_centered(image_path))
 
-    def detect_embryo_presence(self, image_path: Path) -> Tuple[bool, int, str]:
+    def detect_embryo_presence(self, image_path: Path) -> tuple[bool, int, str]:
         """Sync version of detect_embryo_presence."""
         return asyncio.run(self.async_client.detect_embryo_presence(image_path))
 
     def validate_focus_montage(
-        self,
-        montage_path: Path,
-        selected_position_um: float
-    ) -> Tuple[str, str]:
+        self, montage_path: Path, selected_position_um: float
+    ) -> tuple[str, str]:
         """Sync version of validate_focus_montage."""
         return asyncio.run(
             self.async_client.validate_focus_montage(montage_path, selected_position_um)

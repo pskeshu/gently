@@ -12,7 +12,6 @@ import ipaddress
 import logging
 import ssl
 from pathlib import Path
-from typing import Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +20,7 @@ KEY_FILENAME = "mesh_key.pem"
 CERT_DAYS = 3650  # ~10 years
 
 
-def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
+def ensure_tls_cert(config_dir: Path) -> tuple[Path | None, Path | None]:
     """
     Ensure a TLS cert/key pair exists in config_dir.
 
@@ -51,9 +50,11 @@ def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
         private_key = ec.generate_private_key(ec.SECP256R1())
 
         now = datetime.datetime.now(datetime.timezone.utc)
-        subject = issuer = x509.Name([
-            x509.NameAttribute(NameOID.COMMON_NAME, "gently-mesh"),
-        ])
+        subject = issuer = x509.Name(
+            [
+                x509.NameAttribute(NameOID.COMMON_NAME, "gently-mesh"),
+            ]
+        )
 
         cert = (
             x509.CertificateBuilder()
@@ -64,20 +65,24 @@ def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
             .not_valid_before(now)
             .not_valid_after(now + datetime.timedelta(days=CERT_DAYS))
             .add_extension(
-                x509.SubjectAlternativeName([
-                    x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
-                ]),
+                x509.SubjectAlternativeName(
+                    [
+                        x509.IPAddress(ipaddress.IPv4Address("0.0.0.0")),
+                    ]
+                ),
                 critical=False,
             )
             .sign(private_key, hashes.SHA256())
         )
 
         # Write PEM files
-        key_path.write_bytes(private_key.private_bytes(
-            encoding=serialization.Encoding.PEM,
-            format=serialization.PrivateFormat.PKCS8,
-            encryption_algorithm=serialization.NoEncryption(),
-        ))
+        key_path.write_bytes(
+            private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            )
+        )
         cert_path.write_bytes(cert.public_bytes(serialization.Encoding.PEM))
 
         logger.info(f"Generated TLS cert: {cert_path}")
@@ -85,8 +90,7 @@ def ensure_tls_cert(config_dir: Path) -> Tuple[Optional[Path], Optional[Path]]:
 
     except ImportError:
         logger.warning(
-            "cryptography package not installed — TLS disabled "
-            "(pip install cryptography)"
+            "cryptography package not installed — TLS disabled (pip install cryptography)"
         )
         return None, None
     except Exception as e:
@@ -114,7 +118,8 @@ def get_cert_fingerprint(cert_path: Path) -> str:
 
 
 def build_server_ssl_context(
-    cert_path: Path, key_path: Path,
+    cert_path: Path,
+    key_path: Path,
 ) -> ssl.SSLContext:
     """Build an SSL context for the uvicorn/FastAPI server."""
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)

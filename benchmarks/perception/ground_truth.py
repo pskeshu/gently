@@ -7,11 +7,18 @@ Loads and queries ground truth labels from transition timepoint format.
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
-
 
 # Stage progression order
-STAGE_ORDER = ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"]
+STAGE_ORDER = [
+    "early",
+    "bean",
+    "comma",
+    "1.5fold",
+    "2fold",
+    "pretzel",
+    "hatching",
+    "hatched",
+]
 
 
 @dataclass
@@ -24,14 +31,14 @@ class GroundTruth:
     """
 
     # {embryo_id: {stage: start_timepoint}}
-    transitions: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    transitions: dict[str, dict[str, int]] = field(default_factory=dict)
 
     # Metadata
-    session_id: Optional[str] = None
-    annotator: Optional[str] = None
-    notes: Optional[str] = None
+    session_id: str | None = None
+    annotator: str | None = None
+    notes: str | None = None
 
-    def get_stage_at(self, embryo_id: str, timepoint: int) -> Optional[str]:
+    def get_stage_at(self, embryo_id: str, timepoint: int) -> str | None:
         """
         Get the ground truth stage for a given embryo at a given timepoint.
 
@@ -63,15 +70,13 @@ class GroundTruth:
 
         return current_stage
 
-    def get_transition_timepoint(
-        self, embryo_id: str, stage: str
-    ) -> Optional[int]:
+    def get_transition_timepoint(self, embryo_id: str, stage: str) -> int | None:
         """Get the timepoint when a stage starts for a given embryo."""
         if embryo_id not in self.transitions:
             return None
         return self.transitions[embryo_id].get(stage)
 
-    def get_stages_for_embryo(self, embryo_id: str) -> List[str]:
+    def get_stages_for_embryo(self, embryo_id: str) -> list[str]:
         """Get list of stages (in order) for a given embryo."""
         if embryo_id not in self.transitions:
             return []
@@ -79,10 +84,7 @@ class GroundTruth:
         embryo_transitions = self.transitions[embryo_id]
 
         # Sort by start timepoint
-        sorted_stages = sorted(
-            embryo_transitions.keys(),
-            key=lambda s: embryo_transitions[s]
-        )
+        sorted_stages = sorted(embryo_transitions.keys(), key=lambda s: embryo_transitions[s])
         return sorted_stages
 
     def get_timepoint_range(self, embryo_id: str) -> tuple:
@@ -101,11 +103,11 @@ class GroundTruth:
         return (min(starts), max(starts))
 
     @property
-    def embryo_ids(self) -> List[str]:
+    def embryo_ids(self) -> list[str]:
         """Get list of all embryo IDs with ground truth."""
         return list(self.transitions.keys())
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize to dictionary for JSON storage."""
         return {
             "session_id": self.session_id,
@@ -115,7 +117,7 @@ class GroundTruth:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> "GroundTruth":
+    def from_dict(cls, data: dict) -> "GroundTruth":
         """Load from dictionary."""
         return cls(
             transitions=data.get("transitions", {}),
@@ -127,7 +129,7 @@ class GroundTruth:
     @classmethod
     def from_json(cls, path: Path) -> "GroundTruth":
         """Load ground truth from JSON file."""
-        with open(path, "r") as f:
+        with open(path) as f:
             data = json.load(f)
         return cls.from_dict(data)
 
@@ -139,9 +141,9 @@ class GroundTruth:
 
 
 def create_ground_truth_from_email_format(
-    annotations: Dict[str, str],
-    session_id: Optional[str] = None,
-    annotator: Optional[str] = None,
+    annotations: dict[str, str],
+    session_id: str | None = None,
+    annotator: str | None = None,
 ) -> GroundTruth:
     """
     Create GroundTruth from email-style annotations.

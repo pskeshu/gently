@@ -8,7 +8,6 @@ from conversation and experiment orchestration.
 import json
 import logging
 import uuid
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ class SessionManager:
     def __init__(self, store, storage_path):
         self.store = store
         self.storage_path = storage_path
-        self._session_id: Optional[str] = None
+        self._session_id: str | None = None
 
     @property
     def session_id(self) -> str:
@@ -74,31 +73,31 @@ class SessionManager:
         conversation_history = []
 
         if snapshot:
-            raw_history = snapshot.get('conversation_history', [])
+            raw_history = snapshot.get("conversation_history", [])
             conversation_history = self.sanitize_loaded_messages(raw_history)
 
-            experiment_data = snapshot.get('experiment_data', {})
-            experiment.active_plan_item_id = experiment_data.get('active_plan_item_id')
-            embryo_states = experiment_data.get('embryos', {})
+            experiment_data = snapshot.get("experiment_data", {})
+            experiment.active_plan_item_id = experiment_data.get("active_plan_item_id")
+            embryo_states = experiment_data.get("embryos", {})
 
             for embryo_id, embryo_data in embryo_states.items():
-                pos = embryo_data.get('stage_position', {})
+                pos = embryo_data.get("stage_position", {})
                 experiment.add_embryo(
                     embryo_id=embryo_id,
                     position=pos,
-                    calibration=embryo_data.get('calibration', {}),
-                    user_label=embryo_data.get('user_label'),
-                    uid=embryo_data.get('uid'),
+                    calibration=embryo_data.get("calibration", {}),
+                    user_label=embryo_data.get("user_label"),
+                    uid=embryo_data.get("uid"),
                 )
                 embryo = experiment.embryos[embryo_id]
-                embryo.nickname = embryo_data.get('nickname')
-                embryo.interval_seconds = embryo_data.get('interval_seconds')
-                embryo.num_slices = embryo_data.get('num_slices', 50)
-                embryo.exposure_ms = embryo_data.get('exposure_ms', 10.0)
-                embryo.priority = embryo_data.get('priority', 'normal')
-                embryo.timepoints_acquired = embryo_data.get('timepoints_acquired', 0)
-                embryo.should_skip = embryo_data.get('should_skip', False)
-                embryo.skip_reason = embryo_data.get('skip_reason')
+                embryo.nickname = embryo_data.get("nickname")
+                embryo.interval_seconds = embryo_data.get("interval_seconds")
+                embryo.num_slices = embryo_data.get("num_slices", 50)
+                embryo.exposure_ms = embryo_data.get("exposure_ms", 10.0)
+                embryo.priority = embryo_data.get("priority", "normal")
+                embryo.timepoints_acquired = embryo_data.get("timepoints_acquired", 0)
+                embryo.should_skip = embryo_data.get("should_skip", False)
+                embryo.skip_reason = embryo_data.get("skip_reason")
 
         # Also load embryos from store's embryo table. FileStore returns
         # position_coarse / position_fine (with legacy position_x / position_y
@@ -106,13 +105,13 @@ class SessionManager:
         # the resume.
         store_embryos = self.store.list_embryos(session_id)
         for e in store_embryos:
-            eid = e['embryo_id']
+            eid = e["embryo_id"]
             if eid not in experiment.embryos:
                 experiment.add_embryo(
                     embryo_id=eid,
-                    position=e.get('position_coarse') or {},
-                    position_fine=e.get('position_fine') or {},
-                    calibration=json.loads(e['calibration']) if e.get('calibration') else {},
+                    position=e.get("position_coarse") or {},
+                    position_fine=e.get("position_fine") or {},
+                    calibration=json.loads(e["calibration"]) if e.get("calibration") else {},
                 )
 
         self.store.touch_session(session_id)
@@ -141,11 +140,14 @@ class SessionManager:
         if not self._session_id:
             return False
         try:
-            self.store.save_session_snapshot(self._session_id, {
-                'conversation_history': self.serialize_messages(conversation_history),
-                'experiment_data': experiment.to_dict(),
-                'system_prompt': system_prompt,
-            })
+            self.store.save_session_snapshot(
+                self._session_id,
+                {
+                    "conversation_history": self.serialize_messages(conversation_history),
+                    "experiment_data": experiment.to_dict(),
+                    "system_prompt": system_prompt,
+                },
+            )
             self._sync_embryos_to_db(experiment)
             self.store.touch_session(self._session_id)
             return True
@@ -158,11 +160,14 @@ class SessionManager:
         if not self._session_id:
             return
         try:
-            self.store.save_session_snapshot(self._session_id, {
-                'conversation_history': self.serialize_messages(conversation_history),
-                'experiment_data': experiment.to_dict(),
-                'system_prompt': system_prompt,
-            })
+            self.store.save_session_snapshot(
+                self._session_id,
+                {
+                    "conversation_history": self.serialize_messages(conversation_history),
+                    "experiment_data": experiment.to_dict(),
+                    "system_prompt": system_prompt,
+                },
+            )
             self._sync_embryos_to_db(experiment)
             self.store.touch_session(self._session_id)
         except Exception:
@@ -173,15 +178,16 @@ class SessionManager:
         for embryo_id, embryo in experiment.embryos.items():
             pos = embryo.stage_position or {}
             self.store.register_embryo(
-                self._session_id, embryo_id,
-                embryo_uid=getattr(embryo, 'uid', None),
-                nickname=getattr(embryo, 'user_label', None),
-                position_x=pos.get('x'),
-                position_y=pos.get('y'),
+                self._session_id,
+                embryo_id,
+                embryo_uid=getattr(embryo, "uid", None),
+                nickname=getattr(embryo, "user_label", None),
+                position_x=pos.get("x"),
+                position_y=pos.get("y"),
                 calibration=embryo.calibration,
             )
 
-    def list_sessions(self) -> List[Dict]:
+    def list_sessions(self) -> list[dict]:
         """
         List available sessions from FileStore.
 
@@ -192,8 +198,9 @@ class SessionManager:
         """
         return self.store.list_sessions()
 
-    def resume_session(self, session_id: str, experiment, conversation_mgr,
-                       prompt_mgr_update_fn) -> bool:
+    def resume_session(
+        self, session_id: str, experiment, conversation_mgr, prompt_mgr_update_fn
+    ) -> bool:
         """
         Resume a session (public interface for CLI).
 
@@ -234,7 +241,7 @@ class SessionManager:
     # ===== Message Serialization =====
 
     @staticmethod
-    def sanitize_loaded_messages(messages: List[Dict]) -> List[Dict]:
+    def sanitize_loaded_messages(messages: list[dict]) -> list[dict]:
         """Fix conversation history loaded from JSON snapshots.
 
         Old snapshots may contain content blocks that were serialized
@@ -244,7 +251,7 @@ class SessionManager:
         """
         clean = []
         for msg in messages:
-            content = msg.get('content')
+            content = msg.get("content")
             if content is None:
                 continue
             if isinstance(content, str):
@@ -256,16 +263,16 @@ class SessionManager:
                     if isinstance(block, dict):
                         valid_blocks.append(block)
                     elif isinstance(block, str):
-                        if block.startswith(('TextBlock(', 'ToolUseBlock(')):
+                        if block.startswith(("TextBlock(", "ToolUseBlock(")):
                             continue
                         valid_blocks.append(block)
                 if valid_blocks:
-                    clean.append({**msg, 'content': valid_blocks})
+                    clean.append({**msg, "content": valid_blocks})
                 continue
         return clean
 
     @staticmethod
-    def serialize_messages(messages: List[Dict]) -> List[Dict]:
+    def serialize_messages(messages: list[dict]) -> list[dict]:
         """Convert conversation history to JSON-safe plain dicts.
 
         Anthropic SDK returns content blocks as objects (TextBlock,
@@ -273,30 +280,31 @@ class SessionManager:
         repr strings. This converts everything to plain dicts so the
         history round-trips cleanly through JSON.
         """
+
         def _block_to_dict(block):
             if isinstance(block, dict):
                 return block
             if isinstance(block, str):
                 return block
-            if hasattr(block, 'model_dump'):
+            if hasattr(block, "model_dump"):
                 return block.model_dump()
-            if hasattr(block, 'to_dict'):
+            if hasattr(block, "to_dict"):
                 return block.to_dict()
-            if hasattr(block, 'type'):
-                d = {'type': block.type}
-                if block.type == 'text' and hasattr(block, 'text'):
-                    d['text'] = block.text
-                elif block.type == 'tool_use':
-                    d['id'] = getattr(block, 'id', '')
-                    d['name'] = getattr(block, 'name', '')
-                    d['input'] = getattr(block, 'input', {})
+            if hasattr(block, "type"):
+                d = {"type": block.type}
+                if block.type == "text" and hasattr(block, "text"):
+                    d["text"] = block.text
+                elif block.type == "tool_use":
+                    d["id"] = getattr(block, "id", "")
+                    d["name"] = getattr(block, "name", "")
+                    d["input"] = getattr(block, "input", {})
                 return d
             return str(block)
 
         serialized = []
         for msg in messages:
-            content = msg.get('content')
+            content = msg.get("content")
             if isinstance(content, list):
                 content = [_block_to_dict(b) for b in content]
-            serialized.append({**msg, 'content': content})
+            serialized.append({**msg, "content": content})
         return serialized

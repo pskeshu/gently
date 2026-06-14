@@ -2,15 +2,13 @@
 Tests for MeshService — peer lifecycle, reaper, queries.
 """
 
-import asyncio
 import time
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 from gently.mesh.mesh_service import MeshService
-from gently.mesh.models import PeerCapability, PeerInfo, PeerStatus
+from gently.mesh.models import PeerCapability
 
 
 @pytest.fixture

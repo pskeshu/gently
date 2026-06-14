@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import logging
-import os
 
 import pytest
 
 from gently.core.event_bus import EventBus, EventType
 from gently.core.log_bridge import (
+    _NEVER_BRIDGE,
     LogToBusHandler,
     configure_log_bridge,
-    _NEVER_BRIDGE,
 )
 
 
@@ -227,8 +226,10 @@ def test_third_party_included_when_opted_in(bus_with_capture, monkeypatch):
     finally:
         # Strip handler from every logger we might have attached to —
         # belt and braces, since the function defaults to a long list.
-        for name in (list(logging.Logger.manager.loggerDict.keys()) +
-                     ["gently", "gently_perception"]):
+        for name in list(logging.Logger.manager.loggerDict.keys()) + [
+            "gently",
+            "gently_perception",
+        ]:
             try:
                 logging.getLogger(name).removeHandler(h)
             except Exception:

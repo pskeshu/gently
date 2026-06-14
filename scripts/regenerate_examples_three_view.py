@@ -11,18 +11,19 @@ Usage:
     python scripts/regenerate_examples_three_view.py
 """
 
+# Add parent to path for imports
+import sys
 from pathlib import Path
+
 import numpy as np
 from PIL import Image
 
-# Add parent to path for imports
-import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from gently.core.imaging import (
-    projection_three_view,
-    compute_crop_bounds,
     apply_crop_bounds,
+    compute_crop_bounds,
+    projection_three_view,
 )
 
 STAGES_PATH = Path(__file__).parent.parent / "gently" / "examples" / "stages"
@@ -67,7 +68,7 @@ def regenerate_stage(stage: str) -> bool:
     if volume.ndim == 3:
         z_depth, height, width = volume.shape
         if width > height * 2:
-            volume = volume[:, :, :width // 2]
+            volume = volume[:, :, : width // 2]
             print(f"  Extracted View A: {volume.shape}")
 
     # Auto-crop to embryo region
@@ -81,8 +82,8 @@ def regenerate_stage(stage: str) -> bool:
 
     # Save as JPEG
     pil_img = Image.fromarray(three_view_img)
-    if pil_img.mode != 'RGB':
-        pil_img = pil_img.convert('RGB')
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
 
     output_path = stage_dir / "three_view.jpg"
     pil_img.save(output_path, quality=90)

@@ -18,12 +18,12 @@ import asyncio
 import json
 import sys
 import time
-from typing import Any, Dict
+from typing import Any
 
 import aiohttp
 
 
-def _fmt_positions(positions: Dict[str, Any]) -> str:
+def _fmt_positions(positions: dict[str, Any]) -> str:
     if not positions:
         return "(no positions)"
     parts = []
@@ -40,7 +40,7 @@ def _fmt_positions(positions: Dict[str, Any]) -> str:
     return " | ".join(parts)
 
 
-def _print_event(idx: int, payload: Dict[str, Any], raw: bool) -> None:
+def _print_event(idx: int, payload: dict[str, Any], raw: bool) -> None:
     if raw:
         print(json.dumps(payload), flush=True)
         return
@@ -74,7 +74,7 @@ async def watch_stream(host: str, port: int, raw: bool) -> None:
             if resp.status != 200:
                 print(f"HTTP {resp.status}: {await resp.text()}", file=sys.stderr)
                 sys.exit(1)
-            print(f"Connected. Press Ctrl+C to stop.\n", file=sys.stderr)
+            print("Connected. Press Ctrl+C to stop.\n", file=sys.stderr)
 
             buffer = b""
             idx = 0
@@ -104,7 +104,7 @@ async def watch_stream(host: str, port: int, raw: bool) -> None:
                         continue
                     idx += 1
                     if is_snapshot and not raw:
-                        print(f"-- snapshot --", flush=True)
+                        print("-- snapshot --", flush=True)
                     _print_event(idx, payload, raw)
 
             elapsed = time.monotonic() - t0
@@ -132,12 +132,17 @@ def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=60610)
-    p.add_argument("--once", action="store_true",
-                   help="Fetch one-shot via /api/devices/state and exit")
-    p.add_argument("--refresh", action="store_true",
-                   help="With --once, force a fresh read (?refresh=1)")
-    p.add_argument("--raw", action="store_true",
-                   help="Print raw JSON (one object per line)")
+    p.add_argument(
+        "--once",
+        action="store_true",
+        help="Fetch one-shot via /api/devices/state and exit",
+    )
+    p.add_argument(
+        "--refresh",
+        action="store_true",
+        help="With --once, force a fresh read (?refresh=1)",
+    )
+    p.add_argument("--raw", action="store_true", help="Print raw JSON (one object per line)")
     args = p.parse_args()
 
     try:

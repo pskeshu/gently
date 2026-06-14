@@ -13,8 +13,8 @@ Usage:
     python start_device_layer.py --sam-device cpu
 """
 
-import asyncio
 import argparse
+import asyncio
 import logging
 import signal
 import sys
@@ -37,6 +37,7 @@ def _render_startup_failure(exc, log_file):
     """
     import re
     import traceback
+
     from gently.hardware import console_ui as cui
 
     logging.getLogger("gently.device_layer").error(
@@ -94,29 +95,25 @@ The server provides:
     - HTTP API on the specified port for plan submission
     - Hardware control via the configured hardware module
     - SAM embryo detection via /api/detect_embryos (if supported)
-        """
+        """,
     )
-    parser.add_argument(
-        "--port",
-        type=int,
-        default=60610,
-        help="HTTP API port (default: 60610)"
-    )
+    parser.add_argument("--port", type=int, default=60610, help="HTTP API port (default: 60610)")
     parser.add_argument(
         "--sam-device",
         default="cuda",
         choices=["cuda", "cpu"],
-        help="Device for SAM model inference (default: cuda)"
+        help="Device for SAM model inference (default: cuda)",
     )
     parser.add_argument(
         "--config",
         default="config/config.yml",
-        help="Path to config.yml (default: config/config.yml)"
+        help="Path to config.yml (default: config/config.yml)",
     )
 
     args = parser.parse_args()
 
     from datetime import datetime
+
     from gently.settings import settings
 
     log_dir = Path(settings.storage.base_path) / "logs"
@@ -137,7 +134,9 @@ The server provides:
 
     file_handler = logging.FileHandler(str(log_file), encoding="utf-8")
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(logging.Formatter("%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno)d %(message)s"))
+    file_handler.setFormatter(
+        logging.Formatter("%(asctime)s %(name)s %(levelname)s %(funcName)s:%(lineno)d %(message)s")
+    )
 
     logging.basicConfig(level=logging.DEBUG, handlers=[console, file_handler])
     logging.getLogger().info("Logging to %s", log_file)
@@ -153,6 +152,7 @@ The server provides:
     hardware_name = config.get("hardware", "dispim")
 
     from gently.hardware import console_ui as cui
+
     cui.out()
     cui.header(f"GENTLY{cui.MIDDOT}DEVICE LAYER", badge="starting", badge_style="cyan")
     cui.row("Hardware", str(hardware_name))
@@ -164,17 +164,20 @@ The server provides:
 
     # Load hardware module and create device layer
     from gently.hardware import load_hardware
+
     hw = load_hardware(hardware_name)
 
-    if not hasattr(hw, 'create_device_layer'):
+    if not hasattr(hw, "create_device_layer"):
         print(f"Error: Hardware module '{hardware_name}' does not provide create_device_layer().")
         print("The hardware module must implement this factory function.")
         sys.exit(1)
 
-    server = hw.create_device_layer({
-        'config_path': args.config,
-        'sam_device': args.sam_device,
-    })
+    server = hw.create_device_layer(
+        {
+            "config_path": args.config,
+            "sam_device": args.sam_device,
+        }
+    )
 
     async def run_server():
         # Set up signal handling within the async context
@@ -186,11 +189,11 @@ The server provides:
             logging.getLogger("gently.device_layer.signal").warning(
                 "Interrupt signal received — initiating shutdown"
             )
-            if hasattr(server, '_shutdown_event'):
+            if hasattr(server, "_shutdown_event"):
                 server._shutdown_event.set()
 
         # On Windows, use signal.signal; on Unix, use loop.add_signal_handler
-        if sys.platform == 'win32':
+        if sys.platform == "win32":
             # Windows: use signal module with thread-safe callback
             def win_signal_handler(sig, frame):
                 loop.call_soon_threadsafe(request_shutdown)

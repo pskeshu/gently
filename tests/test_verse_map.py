@@ -2,17 +2,12 @@
 Tests for VerseMap — persistent topology map.
 """
 
-import json
-import time
 import pytest
 
 from gently.mesh.models import (
     DatasetAdvertisement,
-    GpuInfo,
     PeerCapability,
     PeerInfo,
-    PeerStatus,
-    PersistedPeer,
 )
 from gently.mesh.verse_map import VerseMap
 
@@ -22,8 +17,15 @@ def verse_map(config_dir):
     return VerseMap(config_dir)
 
 
-def _make_peer(instance_id="p1", hostname="lab-pc", ip="192.168.1.10",
-               has_gpu=False, has_microscope=False, roles=None, datasets=None):
+def _make_peer(
+    instance_id="p1",
+    hostname="lab-pc",
+    ip="192.168.1.10",
+    has_gpu=False,
+    has_microscope=False,
+    roles=None,
+    datasets=None,
+):
     caps = PeerCapability(
         has_gpu=has_gpu,
         has_microscope=has_microscope,
@@ -101,8 +103,7 @@ class TestPeerTracking:
         verse_map.on_peer_discovered(peer)
 
         # Update with GPU capabilities
-        peer.capabilities = PeerCapability(has_gpu=True, gpu_name="A5000",
-                                            roles=["ml_trainer"])
+        peer.capabilities = PeerCapability(has_gpu=True, gpu_name="A5000", roles=["ml_trainer"])
         verse_map.on_peer_updated(peer)
 
         pp = verse_map.get_peer("p1")
@@ -145,9 +146,7 @@ class TestRouting:
 
     def test_find_data_peers_by_session(self, verse_map):
         ds = DatasetAdvertisement(session_id="s1", embryo_count=10)
-        verse_map.on_peer_discovered(
-            _make_peer("p1", datasets=[ds])
-        )
+        verse_map.on_peer_discovered(_make_peer("p1", datasets=[ds]))
         verse_map.on_peer_discovered(_make_peer("p2"))
 
         # Find peers with session s1
@@ -160,9 +159,7 @@ class TestRouting:
         assert len(found_all) == 1
 
     def test_find_resource_by_role(self, verse_map):
-        verse_map.on_peer_discovered(
-            _make_peer("p1", roles=["ml_trainer"])
-        )
+        verse_map.on_peer_discovered(_make_peer("p1", roles=["ml_trainer"]))
         verse_map.on_peer_discovered(_make_peer("p2"))
 
         found = verse_map.find_resource("ml_trainer")

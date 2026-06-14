@@ -17,7 +17,7 @@ import tifffile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from gently.app.detectors.dopaminergic_signal import _volume_to_b64
+from gently.app.detectors.dopaminergic_signal import _volume_to_b64  # noqa: E402
 
 SESSION = Path(r"D:/Gently3/sessions/20260522_1801_unnamed_ec5ea7ba")
 OUT = Path("./perceiver_input")

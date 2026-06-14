@@ -19,9 +19,9 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Iterator, Optional
 
 from gently.core.event_bus import Event, EventBus
 
@@ -50,19 +50,16 @@ class EventReplay:
                 try:
                     record = json.loads(raw)
                 except json.JSONDecodeError:
-                    logger.warning("EventReplay: malformed line %d in %s",
-                                   line_no, self.path)
+                    logger.warning("EventReplay: malformed line %d in %s", line_no, self.path)
                     continue
                 try:
                     yield Event.from_dict(record)
                 except KeyError:
                     # Unknown EventType — could be a newer enum the
                     # capturing process knew about. Skip rather than abort.
-                    logger.warning("EventReplay: unknown event_type on line %d",
-                                   line_no)
+                    logger.warning("EventReplay: unknown event_type on line %d", line_no)
                 except Exception:
-                    logger.exception("EventReplay: parse failure on line %d",
-                                     line_no)
+                    logger.exception("EventReplay: parse failure on line %d", line_no)
 
     def replay(
         self,
@@ -70,7 +67,7 @@ class EventReplay:
         *,
         real_time: bool = False,
         time_scale: float = 1.0,
-        on_event: Optional[Callable[[Event], None]] = None,
+        on_event: Callable[[Event], None] | None = None,
     ) -> int:
         """Replay the captured events to ``target``. Returns count emitted.
 
@@ -94,7 +91,7 @@ class EventReplay:
             raise ValueError("time_scale must be > 0")
 
         emitted = 0
-        prev_ts: Optional[datetime] = None
+        prev_ts: datetime | None = None
         wall_start = time.monotonic()
         for ev in self.events():
             if real_time and prev_ts is not None:
@@ -112,7 +109,10 @@ class EventReplay:
         wall = time.monotonic() - wall_start
         logger.info(
             "EventReplay: emitted %d events in %.2fs (real_time=%s, time_scale=%g)",
-            emitted, wall, real_time, time_scale,
+            emitted,
+            wall,
+            real_time,
+            time_scale,
         )
         return emitted
 

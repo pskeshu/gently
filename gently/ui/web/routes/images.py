@@ -2,11 +2,10 @@
 
 import base64
 import logging
-from typing import Optional
 
 import numpy as np
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import Response, FileResponse
+from fastapi.responses import FileResponse, Response
 
 from ..volume_helpers import parse_volume_uid
 
@@ -66,17 +65,22 @@ def create_router(server) -> APIRouter:
                 if data is None and parsed:
                     embryo_id, timepoint = parsed
                     if embryo_id in server.timelapse_tracker.projection_uids:
-                        real_uid = server.timelapse_tracker.projection_uids[embryo_id].get(timepoint)
+                        real_uid = server.timelapse_tracker.projection_uids[embryo_id].get(
+                            timepoint
+                        )
                         if real_uid:
                             data = server.data_store.retrieve(real_uid)
                 if data is not None:
                     from io import BytesIO
+
                     from PIL import Image
+
                     from gently.core.imaging import (
-                        projection_three_view,
-                        compute_crop_bounds,
                         apply_crop_bounds,
+                        compute_crop_bounds,
+                        projection_three_view,
                     )
+
                     # Handle numpy array
                     if isinstance(data, np.ndarray):
                         # Handle 4D volumes (Views, Z, Y, X) - take View A
@@ -87,18 +91,24 @@ def create_router(server) -> APIRouter:
                             z_depth, height, width = data.shape
                             # Handle dual-view format
                             if width > height * 2:
-                                data = data[:, :, :width // 2]
+                                data = data[:, :, : width // 2]
                             # Auto-crop and project
                             bounds = compute_crop_bounds(data)
                             data = apply_crop_bounds(data, bounds)
                             data, _ = projection_three_view(data)
                         # Normalize to uint8 if needed
                         if data.dtype != np.uint8:
-                            data = ((data - data.min()) / (data.max() - data.min() + 1e-8) * 255).astype(np.uint8)
+                            data = (
+                                (data - data.min()) / (data.max() - data.min() + 1e-8) * 255
+                            ).astype(np.uint8)
                         img = Image.fromarray(data)
                         buf = BytesIO()
-                        img.save(buf, format='PNG')
-                        return Response(content=buf.getvalue(), media_type="image/png", headers=cache_headers)
+                        img.save(buf, format="PNG")
+                        return Response(
+                            content=buf.getvalue(),
+                            media_type="image/png",
+                            headers=cache_headers,
+                        )
             except Exception as e:
                 logger.warning(f"Failed to load image {uid} from DataStore: {e}")
 
@@ -131,21 +141,18 @@ def create_router(server) -> APIRouter:
             data = await request.json()
 
             # Decode the image from base64
-            image_b64 = data.get('image_b64')
-            uid = data.get('uid')
-            shape = data.get('shape')
-            dtype = data.get('dtype', 'uint8')
-            data_type = data.get('data_type', 'cv_visualization')
-            metadata = data.get('metadata', {})
+            image_b64 = data.get("image_b64")
+            uid = data.get("uid")
+            shape = data.get("shape")
+            dtype = data.get("dtype", "uint8")
+            data_type = data.get("data_type", "cv_visualization")
+            metadata = data.get("metadata", {})
 
             if not all([image_b64, uid, shape]):
                 raise HTTPException(status_code=400, detail="Missing required fields")
 
             # Decode array
-            array = np.frombuffer(
-                base64.b64decode(image_b64),
-                dtype=np.dtype(dtype)
-            ).reshape(shape)
+            array = np.frombuffer(base64.b64decode(image_b64), dtype=np.dtype(dtype)).reshape(shape)
 
             # Push using the existing method
             await server.push_image(array, uid, data_type, metadata)
@@ -154,6 +161,6 @@ def create_router(server) -> APIRouter:
 
         except Exception as e:
             logger.error(f"Failed to push image via HTTP: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e)) from e
 
     return router

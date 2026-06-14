@@ -4,10 +4,8 @@ Analysis and VLM Tools
 Tools for analyzing embryo images using Claude Vision.
 """
 
-from typing import Dict, Optional
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_agent, get_embryo_or_error
+from gently.harness.tools.helpers import get_embryo_or_error, require_agent
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
@@ -19,8 +17,8 @@ async def analyze_volume(
     embryo_id: str,
     analysis_prompt: str,
     use_recent_context: bool = False,
-    timepoint: Optional[int] = None,
-    context: Dict = None
+    timepoint: int | None = None,
+    context: dict = None,
 ) -> str:
     """Analyze embryo volume with Claude Vision"""
     agent, err = require_agent(context)
@@ -36,7 +34,7 @@ async def analyze_volume(
             embryo_id=embryo.id,
             prompt=analysis_prompt,
             use_context=use_recent_context,
-            timepoint=timepoint
+            timepoint=timepoint,
         )
         return result
     except Exception as e:
@@ -60,9 +58,9 @@ Use when the user asks "what stage is embryo X", "is anything stuck/arrested",
     ],
 )
 def get_recent_perceptions(
-    embryo_id: Optional[str] = None,
+    embryo_id: str | None = None,
     n: int = 5,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Read live per-embryo perception state from the perception sessions.
 
@@ -99,8 +97,9 @@ def get_recent_perceptions(
             exp = getattr(temporal, "expected_duration_min", None)
             seg = f"  time in stage: {tmin:.0f} min"
             if exp:
-                seg += (f" (expected ~{exp:.0f} min, "
-                        f"{getattr(temporal, 'overtime_ratio', 0.0):.1f}x)")
+                seg += (
+                    f" (expected ~{exp:.0f} min, {getattr(temporal, 'overtime_ratio', 0.0):.1f}x)"
+                )
             lines.append(seg)
             if getattr(temporal, "is_potentially_arrested", False):
                 lines.append("  ** potentially ARRESTED **")
@@ -112,8 +111,9 @@ def get_recent_perceptions(
                 reason = (getattr(o, "reasoning", "") or "").strip().replace("\n", " ")
                 if len(reason) > 160:
                     reason = reason[:159] + "…"
-                lines.append(f"    t{getattr(o, 'timepoint', '?')}: "
-                             f"{getattr(o, 'stage', '?')} - {reason}")
+                lines.append(
+                    f"    t{getattr(o, 'timepoint', '?')}: {getattr(o, 'stage', '?')} - {reason}"
+                )
         return "\n".join(lines)
 
     if embryo_id:
@@ -134,7 +134,7 @@ def get_recent_perceptions(
     description="Get summary of all detections across all embryos",
     category=ToolCategory.DETECTION,
 )
-def get_detection_summary(context: Dict) -> str:
+def get_detection_summary(context: dict) -> str:
     """Get detection summary"""
     agent, err = require_agent(context)
     if err:
@@ -148,7 +148,10 @@ def get_detection_summary(context: Dict) -> str:
             for det_name, results in embryo.detection_results.items():
                 if results:
                     latest = results[-1]
-                    lines.append(f"  - {det_name}: {latest.get('detected', False)} at t={latest.get('timepoint', '?')}")
+                    lines.append(
+                        f"  - {det_name}: {latest.get('detected', False)}"
+                        f" at t={latest.get('timepoint', '?')}"
+                    )
             lines.append("")
 
     if len(lines) == 2:

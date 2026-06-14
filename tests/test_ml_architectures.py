@@ -2,16 +2,22 @@
 Tests for ML architecture registry.
 """
 
-import pytest
-
 from gently.ml.architectures import ARCHITECTURE_REGISTRY, get_suitable_architectures
 
 
 class TestArchitectureRegistry:
     def test_all_entries_have_required_fields(self):
-        required = {"name", "family", "param_count_m", "min_vram_gb",
-                     "recommended_vram_gb", "min_dataset_size",
-                     "recommended_dataset_size", "training_speed", "suitability"}
+        required = {
+            "name",
+            "family",
+            "param_count_m",
+            "min_vram_gb",
+            "recommended_vram_gb",
+            "min_dataset_size",
+            "recommended_dataset_size",
+            "training_speed",
+            "suitability",
+        }
         for arch_id, meta in ARCHITECTURE_REGISTRY.items():
             for field in required:
                 assert field in meta, f"{arch_id} missing '{field}'"

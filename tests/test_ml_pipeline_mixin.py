@@ -2,8 +2,6 @@
 Tests for MlPipelinesMixin — ML tables in ContextStore.
 """
 
-import pytest
-
 
 class TestMlPipelines:
     def test_create_pipeline(self, context_store):
@@ -20,7 +18,8 @@ class TestMlPipelines:
     def test_get_pipeline(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         created = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         fetched = context_store.get_ml_pipeline(created["id"])
         assert fetched is not None
@@ -40,10 +39,13 @@ class TestMlPipelines:
     def test_update_pipeline(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         created = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         updated = context_store.update_ml_pipeline(
-            created["id"], status="training", best_accuracy=0.85,
+            created["id"],
+            status="training",
+            best_accuracy=0.85,
         )
         assert updated["status"] == "training"
         assert updated["best_accuracy"] == 0.85
@@ -67,7 +69,8 @@ class TestTrainingRuns:
     def test_create_run(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         pipeline = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         run = context_store.create_training_run(
             pipeline_id=pipeline["id"],
@@ -79,7 +82,8 @@ class TestTrainingRuns:
     def test_update_run(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         pipeline = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         run = context_store.create_training_run(pipeline_id=pipeline["id"])
         updated = context_store.update_training_run(
@@ -95,7 +99,8 @@ class TestTrainingRuns:
     def test_list_runs(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         pipeline = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         context_store.create_training_run(pipeline_id=pipeline["id"])
         context_store.create_training_run(pipeline_id=pipeline["id"])
@@ -124,7 +129,8 @@ class TestDataAssessments:
     def test_assessment_with_pipeline(self, context_store):
         campaign_id = context_store.create_campaign(description="Test ML")
         pipeline = context_store.create_ml_pipeline(
-            campaign_id=campaign_id, name="P1",
+            campaign_id=campaign_id,
+            name="P1",
         )
         assessment = context_store.save_data_assessment(
             pipeline_id=pipeline["id"],

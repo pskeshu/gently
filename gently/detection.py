@@ -10,22 +10,31 @@ detection modules handle image analysis.
 """
 
 import logging
+
 import numpy as np
-from typing import Optional, Tuple, List
-from scipy.ndimage import uniform_filter, gaussian_filter, sobel, label, binary_opening, binary_closing
+from scipy.ndimage import (
+    binary_closing,
+    binary_opening,
+    gaussian_filter,
+    label,
+    sobel,
+    uniform_filter,
+)
 
 logger = logging.getLogger(__name__)
 
 
-def detect_embryo_roi(image: np.ndarray,
-                     kernel_size_fraction: float = 0.1,
-                     min_kernel_size: int = 24,
-                     variance_weight: float = 0.4,
-                     gradient_weight: float = 0.4,
-                     intensity_weight: float = 0.2,
-                     threshold_std: float = 1.5,
-                     min_area_fraction: float = 0.05,
-                     max_area_fraction: float = 0.5) -> Optional[Tuple[int, int, int, int]]:
+def detect_embryo_roi(
+    image: np.ndarray,
+    kernel_size_fraction: float = 0.1,
+    min_kernel_size: int = 24,
+    variance_weight: float = 0.4,
+    gradient_weight: float = 0.4,
+    intensity_weight: float = 0.2,
+    threshold_std: float = 1.5,
+    min_area_fraction: float = 0.05,
+    max_area_fraction: float = 0.5,
+) -> tuple[int, int, int, int] | None:
     """
     Detect embryo region of interest for sparse bottom camera images
 
@@ -83,9 +92,11 @@ def detect_embryo_roi(image: np.ndarray,
         intensity_contrast = np.abs(img_norm - background_level)
 
         # Combine detection methods
-        combined_score = (variance_weight * local_var +
-                         gradient_weight * gradient_mag +
-                         intensity_weight * intensity_contrast)
+        combined_score = (
+            variance_weight * local_var
+            + gradient_weight * gradient_mag
+            + intensity_weight * intensity_contrast
+        )
 
         # Find regions above threshold
         threshold = np.mean(combined_score) + threshold_std * np.std(combined_score)
@@ -104,7 +115,7 @@ def detect_embryo_roi(image: np.ndarray,
         # Find largest connected component (most likely embryo)
         region_sizes = [(labeled_regions == i).sum() for i in range(1, num_regions + 1)]
         largest_region_idx = np.argmax(region_sizes) + 1
-        largest_region_mask = (labeled_regions == largest_region_idx)
+        largest_region_mask = labeled_regions == largest_region_idx
 
         # Get bounding box with padding
         rows, cols = np.where(largest_region_mask)
@@ -123,7 +134,7 @@ def detect_embryo_roi(image: np.ndarray,
         total_area = image.shape[0] * image.shape[1]
 
         # Check if ROI is reasonable size
-        if min_area_fraction <= roi_area/total_area <= max_area_fraction:
+        if min_area_fraction <= roi_area / total_area <= max_area_fraction:
             return (x_min, y_min, w, h)
         else:
             return None
@@ -133,9 +144,9 @@ def detect_embryo_roi(image: np.ndarray,
         return None
 
 
-def detect_multiple_embryos(image: np.ndarray,
-                           max_embryos: int = 5,
-                           min_separation: int = 50) -> List[Tuple[int, int, int, int]]:
+def detect_multiple_embryos(
+    image: np.ndarray, max_embryos: int = 5, min_separation: int = 50
+) -> list[tuple[int, int, int, int]]:
     """
     Detect multiple embryo regions in bottom camera images
 
@@ -187,7 +198,7 @@ def detect_multiple_embryos(image: np.ndarray,
         # Get all regions with their sizes and centers
         regions = []
         for i in range(1, num_regions + 1):
-            region_mask = (labeled_regions == i)
+            region_mask = labeled_regions == i
             region_size = region_mask.sum()
 
             # Skip tiny regions
@@ -211,14 +222,16 @@ def detect_multiple_embryos(image: np.ndarray,
             w = x_max - x_min
             h = y_max - y_min
 
-            regions.append({
-                'roi': (x_min, y_min, w, h),
-                'center': (x_center, y_center),
-                'size': region_size
-            })
+            regions.append(
+                {
+                    "roi": (x_min, y_min, w, h),
+                    "center": (x_center, y_center),
+                    "size": region_size,
+                }
+            )
 
         # Sort by size (largest first)
-        regions.sort(key=lambda x: x['size'], reverse=True)
+        regions.sort(key=lambda x: x["size"], reverse=True)
 
         # Filter out overlapping regions
         selected_regions = []
@@ -226,14 +239,15 @@ def detect_multiple_embryos(image: np.ndarray,
             if len(selected_regions) >= max_embryos:
                 break
 
-            center = region['center']
+            center = region["center"]
 
             # Check separation from already selected regions
             too_close = False
             for selected in selected_regions:
-                selected_center = selected['center']
-                distance = np.sqrt((center[0] - selected_center[0])**2 +
-                                 (center[1] - selected_center[1])**2)
+                selected_center = selected["center"]
+                distance = np.sqrt(
+                    (center[0] - selected_center[0]) ** 2 + (center[1] - selected_center[1]) ** 2
+                )
                 if distance < min_separation:
                     too_close = True
                     break
@@ -241,14 +255,14 @@ def detect_multiple_embryos(image: np.ndarray,
             if not too_close:
                 selected_regions.append(region)
 
-        return [r['roi'] for r in selected_regions]
+        return [r["roi"] for r in selected_regions]
 
     except Exception as e:
         logger.error("Multiple embryo detection failed: %s", e)
         return []
 
 
-def get_embryo_focus_roi(image: np.ndarray) -> Optional[Tuple[int, int, int, int]]:
+def get_embryo_focus_roi(image: np.ndarray) -> tuple[int, int, int, int] | None:
     """
     Simple interface for getting embryo ROI for focus analysis
 

@@ -25,16 +25,15 @@ import argparse
 import asyncio
 import json
 import re
-import signal
 import sys
 import time
 from collections import Counter
-from typing import Any, Dict, Optional
+from typing import Any
 
 import aiohttp
 
 
-def _fmt_event(idx: int, payload: Dict[str, Any]) -> str:
+def _fmt_event(idx: int, payload: dict[str, Any]) -> str:
     kind = payload.get("kind", "?")
     t = payload.get("t", 0.0)
     extras = {k: v for k, v in payload.items() if k not in ("kind", "t")}
@@ -42,7 +41,7 @@ def _fmt_event(idx: int, payload: Dict[str, Any]) -> str:
     return f"[{idx:>5}] t={t:.3f}  {kind:<32} {extras_str}"
 
 
-async def watch(host: str, port: int, raw: bool, grep: Optional[str], tally: bool) -> None:
+async def watch(host: str, port: int, raw: bool, grep: str | None, tally: bool) -> None:
     url = f"http://{host}:{port}/api/devices/callbacks/stream"
     pattern = re.compile(grep, re.IGNORECASE) if grep else None
     tally_counts: Counter[str] = Counter()
@@ -100,8 +99,11 @@ def main() -> None:
     p.add_argument("--port", type=int, default=60610)
     p.add_argument("--raw", action="store_true", help="Print full JSON per line")
     p.add_argument("--grep", help="Only print events whose `kind` matches this regex")
-    p.add_argument("--tally", action="store_true",
-                   help="At exit, print a count of each event kind seen")
+    p.add_argument(
+        "--tally",
+        action="store_true",
+        help="At exit, print a count of each event kind seen",
+    )
     args = p.parse_args()
 
     try:

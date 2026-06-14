@@ -24,6 +24,7 @@ NOTE: the vendor `acuitynano_precision_thermalizer_*` packages are NOT on PyPI â
 install them on the device-layer machine. Local logic can be exercised with the
 built-in mock backend: `python gently/hardware/temperature.py --mock 20`.
 """
+
 from __future__ import annotations
 
 import logging
@@ -43,12 +44,18 @@ def _make_backend(cfg: dict):
     if backend == "mock":
         return _MockBackend()
     if backend == "serial":
-        from acuitynano_precision_thermalizer_serial import AcuityNanoPrecisionThermalizerSerial
+        from acuitynano_precision_thermalizer_serial import (
+            AcuityNanoPrecisionThermalizerSerial,
+        )
+
         return AcuityNanoPrecisionThermalizerSerial(
             cfg["com_port"], baud_rate=cfg.get("baud_rate", 115200)
         )
     if backend == "mqtt":
-        from acuitynano_precision_thermalizer_api import AcuityNanoPrecisionThermalizerAPI
+        from acuitynano_precision_thermalizer_api import (
+            AcuityNanoPrecisionThermalizerAPI,
+        )
+
         # The vendor package ships with an embedded HiveMQ Cloud broker + creds,
         # so MQTT can run with no config. Pass only the keys actually provided,
         # to override those embedded defaults (and keep secrets in config, not code).
@@ -57,7 +64,7 @@ def _make_backend(cfg: dict):
     raise ValueError(f"unknown temperature backend {backend!r} (use 'serial', 'mqtt', or 'mock')")
 
 
-def create_temperature_controller(cfg: dict) -> "TemperatureController":
+def create_temperature_controller(cfg: dict) -> TemperatureController:
     """Factory used by the device layer: build transport + wrap as a device."""
     backend = _make_backend(cfg)
     if "feedback_peltier" in cfg and hasattr(backend, "set_feedback_sensor"):
@@ -87,8 +94,8 @@ class TemperatureController:
         self._dev = backend
         self.name = name
         self.stabilize_timeout = float(stabilize_timeout)
-        self.parent = None            # required for Bluesky bps.mv()
-        self._setpoint = None         # last commanded target
+        self.parent = None  # required for Bluesky bps.mv()
+        self._setpoint = None  # last commanded target
         self._lock = threading.Lock()
 
     # -- Bluesky settable protocol -------------------------------------------
@@ -105,7 +112,7 @@ class TemperatureController:
         def worker():
             with self._lock:
                 try:
-                    self._dev.set_temperature(target)   # vendor also validates range
+                    self._dev.set_temperature(target)  # vendor also validates range
                     self._dev.enable_tec(True)
                     locked = self._dev.wait_for_target(timeout_seconds=self.stabilize_timeout)
                 except Exception as exc:
@@ -117,9 +124,12 @@ class TemperatureController:
                 logger.info("temperature %s locked at %.2f C", self.name, target)
                 status.set_finished()
             else:
-                status.set_exception(TimeoutError(
-                    f"{self.name} did not stabilize at {target} C within {self.stabilize_timeout}s"
-                ))
+                status.set_exception(
+                    TimeoutError(
+                        f"{self.name} did not stabilize at {target} C"
+                        f" within {self.stabilize_timeout}s"
+                    )
+                )
 
         threading.Thread(target=worker, name=f"{self.name}-set", daemon=True).start()
         return status
@@ -136,13 +146,20 @@ class TemperatureController:
     def read(self):
         now = time.time()
         data = OrderedDict()
-        data[self.name] = {"value": self._safe(self._dev.get_water_temp), "timestamp": now}
+        data[self.name] = {
+            "value": self._safe(self._dev.get_water_temp),
+            "timestamp": now,
+        }
         data[f"{self.name}_setpoint"] = {"value": self._setpoint, "timestamp": now}
         data[f"{self.name}_state"] = {
-            "value": self._safe(self._dev.get_system_state, default="unknown"), "timestamp": now
+            "value": self._safe(self._dev.get_system_state, default="unknown"),
+            "timestamp": now,
         }
         if self._has_peltier():
-            data[f"{self.name}_peltier"] = {"value": self._safe(self._dev.get_peltier_temp), "timestamp": now}
+            data[f"{self.name}_peltier"] = {
+                "value": self._safe(self._dev.get_peltier_temp),
+                "timestamp": now,
+            }
         return data
 
     def describe(self):
@@ -238,5 +255,7 @@ if __name__ == "__main__":
         print("[mock] read ->", {k: v["value"] for k, v in dev.read().items()})
         print("OK")
     else:
-        print("Real-hardware self-test needs the vendor SDK + a controller. "
-              "Run with --mock to exercise the device logic locally.")
+        print(
+            "Real-hardware self-test needs the vendor SDK + a controller. "
+            "Run with --mock to exercise the device logic locally."
+        )

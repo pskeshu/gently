@@ -14,12 +14,12 @@ Each interaction captures:
 """
 
 import json
+import logging
 import subprocess
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-import logging
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +27,13 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ToolCallRecord:
     """Record of a single tool call"""
+
     tool_name: str
-    tool_input: Dict[str, Any]
+    tool_input: dict[str, Any]
     result: str
     duration_seconds: float
     is_error: bool = False
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
 @dataclass
@@ -43,6 +44,7 @@ class InteractionRecord:
     An interaction is one user message and the agent's response,
     including any tool calls made during that response.
     """
+
     # Unique ID for this interaction
     interaction_id: str
 
@@ -51,44 +53,42 @@ class InteractionRecord:
     timestamp: datetime
 
     # System state snapshot at time of request
-    system_state: Dict[str, Any] = field(default_factory=dict)
+    system_state: dict[str, Any] = field(default_factory=dict)
 
     # What happened
-    tool_calls: List[ToolCallRecord] = field(default_factory=list)
+    tool_calls: list[ToolCallRecord] = field(default_factory=list)
     assistant_response: str = ""
     total_duration_seconds: float = 0.0
 
     # Errors
-    error: Optional[str] = None
-    error_traceback: Optional[str] = None
+    error: str | None = None
+    error_traceback: str | None = None
 
     # Correction detection (filled in after next turn)
     was_corrected: bool = False
-    correction_prompt: Optional[str] = None
-    correction_indicators: List[str] = field(default_factory=list)
+    correction_prompt: str | None = None
+    correction_indicators: list[str] = field(default_factory=list)
 
     # Metadata
     session_id: str = ""
     codebase_version: str = ""
     model: str = ""
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize to dictionary for JSON storage"""
         d = asdict(self)
         # Convert datetime to ISO format
-        d['timestamp'] = self.timestamp.isoformat()
+        d["timestamp"] = self.timestamp.isoformat()
         # Convert tool calls
-        d['tool_calls'] = [asdict(tc) for tc in self.tool_calls]
+        d["tool_calls"] = [asdict(tc) for tc in self.tool_calls]
         return d
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'InteractionRecord':
+    def from_dict(cls, d: dict) -> "InteractionRecord":
         """Deserialize from dictionary"""
         d = d.copy()
-        d['timestamp'] = datetime.fromisoformat(d['timestamp'])
-        d['tool_calls'] = [
-            ToolCallRecord(**tc) for tc in d.get('tool_calls', [])
-        ]
+        d["timestamp"] = datetime.fromisoformat(d["timestamp"])
+        d["tool_calls"] = [ToolCallRecord(**tc) for tc in d.get("tool_calls", [])]
         return cls(**d)
 
 
@@ -152,7 +152,7 @@ class InteractionLogger:
         self.log_file = self.logs_dir / f"{session_id}.jsonl"
 
         # In-memory buffer of recent interactions (for correction detection)
-        self._recent_interactions: List[InteractionRecord] = []
+        self._recent_interactions: list[InteractionRecord] = []
         self._max_recent = 10
 
         # Get codebase version (git commit)
@@ -171,7 +171,7 @@ class InteractionLogger:
                 capture_output=True,
                 text=True,
                 cwd=str(self.storage_path.parent),
-                timeout=5
+                timeout=5,
             )
             if result.returncode == 0:
                 return result.stdout.strip()
@@ -182,7 +182,7 @@ class InteractionLogger:
     def start_interaction(
         self,
         user_prompt: str,
-        system_state: Dict[str, Any],
+        system_state: dict[str, Any],
     ) -> InteractionRecord:
         """
         Start recording a new interaction
@@ -219,11 +219,11 @@ class InteractionLogger:
         self,
         interaction: InteractionRecord,
         tool_name: str,
-        tool_input: Dict[str, Any],
+        tool_input: dict[str, Any],
         result: str,
         duration_seconds: float,
         is_error: bool = False,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ):
         """
         Record a tool call within an interaction
@@ -268,8 +268,8 @@ class InteractionLogger:
         interaction: InteractionRecord,
         assistant_response: str,
         total_duration_seconds: float,
-        error: Optional[str] = None,
-        error_traceback: Optional[str] = None,
+        error: str | None = None,
+        error_traceback: str | None = None,
     ):
         """
         Complete and save an interaction record
@@ -342,17 +342,13 @@ class InteractionLogger:
                 f"(indicators: {indicators_found})"
             )
 
-    def _save_interaction(
-        self,
-        interaction: InteractionRecord,
-        append: bool = True
-    ):
+    def _save_interaction(self, interaction: InteractionRecord, append: bool = True):
         """Save interaction to JSONL file"""
         try:
             if append:
                 # Append to log file
-                with open(self.log_file, 'a', encoding='utf-8') as f:
-                    f.write(json.dumps(interaction.to_dict()) + '\n')
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(interaction.to_dict()) + "\n")
             else:
                 # Need to update existing record - rewrite file
                 # This is less efficient but corrections are rare
@@ -368,7 +364,7 @@ class InteractionLogger:
         # Read all interactions
         interactions = []
         try:
-            with open(self.log_file, 'r', encoding='utf-8') as f:
+            with open(self.log_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         record = InteractionRecord.from_dict(json.loads(line))
@@ -382,30 +378,30 @@ class InteractionLogger:
 
         # Rewrite file
         try:
-            with open(self.log_file, 'w', encoding='utf-8') as f:
+            with open(self.log_file, "w", encoding="utf-8") as f:
                 for record in interactions:
-                    f.write(json.dumps(record.to_dict()) + '\n')
+                    f.write(json.dumps(record.to_dict()) + "\n")
         except Exception as e:
             logger.error(f"Failed to rewrite log file: {e}")
 
-    def _sanitize_state(self, state: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Remove large/sensitive data from state snapshot"""
         sanitized = {}
 
         # Keep summary info
-        if 'embryos' in state:
-            sanitized['embryo_count'] = len(state['embryos'])
-            sanitized['embryo_ids'] = list(state['embryos'].keys())
+        if "embryos" in state:
+            sanitized["embryo_count"] = len(state["embryos"])
+            sanitized["embryo_ids"] = list(state["embryos"].keys())
 
-        if 'detectors' in state:
-            sanitized['detector_count'] = len(state['detectors'])
+        if "detectors" in state:
+            sanitized["detector_count"] = len(state["detectors"])
 
-        if 'acquisition_status' in state:
-            sanitized['acquisition_status'] = state['acquisition_status']
+        if "acquisition_status" in state:
+            sanitized["acquisition_status"] = state["acquisition_status"]
 
         return sanitized
 
-    def _sanitize_tool_input(self, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+    def _sanitize_tool_input(self, tool_input: dict[str, Any]) -> dict[str, Any]:
         """Remove large/binary data from tool input"""
         sanitized = {}
         for key, value in tool_input.items():
@@ -425,14 +421,14 @@ class InteractionLogger:
                 sanitized[key] = f"[{type(value).__name__}]"
         return sanitized
 
-    def get_session_stats(self) -> Dict[str, Any]:
+    def get_session_stats(self) -> dict[str, Any]:
         """Get statistics for current session"""
         if not self.log_file.exists():
             return {
-                'total_interactions': 0,
-                'corrections': 0,
-                'errors': 0,
-                'tool_calls': 0,
+                "total_interactions": 0,
+                "corrections": 0,
+                "errors": 0,
+                "tool_calls": 0,
             }
 
         total = 0
@@ -441,35 +437,35 @@ class InteractionLogger:
         tool_calls = 0
 
         try:
-            with open(self.log_file, 'r', encoding='utf-8') as f:
+            with open(self.log_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         record = json.loads(line)
                         total += 1
-                        if record.get('was_corrected'):
+                        if record.get("was_corrected"):
                             corrections += 1
-                        if record.get('error'):
+                        if record.get("error"):
                             errors += 1
-                        tool_calls += len(record.get('tool_calls', []))
+                        tool_calls += len(record.get("tool_calls", []))
         except Exception:
             pass
 
         return {
-            'total_interactions': total,
-            'corrections': corrections,
-            'errors': errors,
-            'tool_calls': tool_calls,
-            'correction_rate': corrections / total if total > 0 else 0,
+            "total_interactions": total,
+            "corrections": corrections,
+            "errors": errors,
+            "tool_calls": tool_calls,
+            "correction_rate": corrections / total if total > 0 else 0,
         }
 
-    def load_session_interactions(self) -> List[InteractionRecord]:
+    def load_session_interactions(self) -> list[InteractionRecord]:
         """Load all interactions from current session"""
         if not self.log_file.exists():
             return []
 
         interactions = []
         try:
-            with open(self.log_file, 'r', encoding='utf-8') as f:
+            with open(self.log_file, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         record = InteractionRecord.from_dict(json.loads(line))

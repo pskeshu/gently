@@ -6,34 +6,45 @@ All tools are automatically registered via the @tool decorator when imported.
 """
 
 # Import all tool modules to register their tools
-from . import experiment_tools
-from . import stage_tools
-from . import led_tools
-from . import light_source_tools
-from . import temperature_tools
-from . import calibration_tools
-from . import acquisition_tools
-from . import volume_tools
-from . import analysis_tools
-from . import timelapse_tools
-from . import session_tools
-from . import focus_tools
-from . import interaction_tools
-from . import detection_tools
-from . import plan_execution_tools
-from . import memory_tools
-from . import resolution_tools
-from gently.harness.plan_mode.tools import lab_context as _lab_context  # query_lab_history in run mode
+from gently.harness.plan_mode.tools import (
+    lab_context as _lab_context,  # noqa: F401
+)
 
-# Import tool registry utilities
-from gently.harness.tools.registry import get_tool_registry, ToolCategory
-
+# query_lab_history in run mode
 # Re-export helper utilities for convenience
 from gently.harness.tools.helpers import (
-    require_agent, get_embryo_or_error, require_microscope,
-    require_interaction_logger, require_developmental_tracker,
-    require_timelapse_orchestrator, require_databroker,
-    get_timestamp_string, format_duration
+    format_duration,
+    get_embryo_or_error,
+    get_timestamp_string,
+    require_agent,
+    require_databroker,
+    require_developmental_tracker,
+    require_interaction_logger,
+    require_microscope,
+    require_timelapse_orchestrator,
+)
+
+# Import tool registry utilities
+from gently.harness.tools.registry import ToolCategory, get_tool_registry
+
+from . import (
+    acquisition_tools,
+    analysis_tools,
+    calibration_tools,
+    detection_tools,
+    experiment_tools,
+    focus_tools,
+    interaction_tools,
+    led_tools,
+    light_source_tools,
+    memory_tools,
+    plan_execution_tools,
+    resolution_tools,
+    session_tools,
+    stage_tools,
+    temperature_tools,
+    timelapse_tools,
+    volume_tools,
 )
 
 
@@ -48,3 +59,36 @@ def register_all_tools():
 
 # Auto-register on import
 _registered = register_all_tools()
+
+__all__ = [
+    # Helper utilities
+    "format_duration",
+    "get_embryo_or_error",
+    "get_timestamp_string",
+    "require_agent",
+    "require_databroker",
+    "require_developmental_tracker",
+    "require_interaction_logger",
+    "require_microscope",
+    "require_timelapse_orchestrator",
+    # Tool registry
+    "ToolCategory",
+    # Tool modules (imported for registration side effects)
+    "acquisition_tools",
+    "analysis_tools",
+    "calibration_tools",
+    "detection_tools",
+    "experiment_tools",
+    "focus_tools",
+    "interaction_tools",
+    "led_tools",
+    "light_source_tools",
+    "memory_tools",
+    "plan_execution_tools",
+    "resolution_tools",
+    "session_tools",
+    "stage_tools",
+    "temperature_tools",
+    "timelapse_tools",
+    "volume_tools",
+]

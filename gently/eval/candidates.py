@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from gently.core.event_bus import Event
 
@@ -33,18 +33,18 @@ class _ReactiveWorldModel:
 
     # {embryo_id: {"coarse": {x, y} | None, "fine": {x, y} | None,
     #              "has_fine": bool, "confidence": float}}
-    embryos: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    embryos: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # Last live stage XY (µm) from a STAGE_MOVED event.
-    last_stage_um: Optional[Dict[str, float]] = None
+    last_stage_um: dict[str, float] | None = None
 
     # Last error message + timestamp, so the candidate can avoid
     # spam-proposing escalations for the same recurring failure.
-    last_error: Optional[Dict[str, Any]] = None
+    last_error: dict[str, Any] | None = None
 
     # Count of events seen, by type name — useful debug field that also
     # ends up in the decision context_summary.
-    seen: Dict[str, int] = field(default_factory=dict)
+    seen: dict[str, int] = field(default_factory=dict)
 
 
 class ReactiveCandidate(OrchestratorCandidate):
@@ -126,7 +126,7 @@ class ReactiveCandidate(OrchestratorCandidate):
 
     def _ingest_embryos_update(self, event: Event) -> None:
         embryos = (event.data or {}).get("embryos") or []
-        new_world: Dict[str, Dict[str, Any]] = {}
+        new_world: dict[str, dict[str, Any]] = {}
         for emb in embryos:
             new_world[emb.get("id", "")] = {
                 "coarse": emb.get("position_coarse"),
@@ -147,24 +147,26 @@ class ReactiveCandidate(OrchestratorCandidate):
         data = event.data or {}
         eid = data.get("embryo_id") or ""
         invalidated = bool(data.get("fine_position_invalidated"))
-        tool_calls: List[Dict[str, Any]] = []
+        tool_calls: list[dict[str, Any]] = []
         # Only propose a recalibration when there was a fine position
         # that the edit just invalidated. New coarse without any prior
         # fine has nothing to refresh yet.
         if invalidated:
-            tool_calls.append({
-                "name": "recalibrate_embryo",
-                "input": {"embryo_id": eid},
-                "id": None,
-            })
+            tool_calls.append(
+                {
+                    "name": "recalibrate_embryo",
+                    "input": {"embryo_id": eid},
+                    "id": None,
+                }
+            )
         self.log_decision(
             trigger=DecisionTrigger.EVENT,
             trigger_detail="OPERATOR_EDITED_EMBRYO",
             tool_calls=tool_calls,
             response_text=(
                 f"Operator moved {eid}; proposing recalibration."
-                if invalidated else
-                f"Operator moved {eid}; no prior fine -- no action."
+                if invalidated
+                else f"Operator moved {eid}; no prior fine -- no action."
             ),
             recent_event_ids=[event.event_id],
             context_summary=self._summary(),
@@ -174,21 +176,23 @@ class ReactiveCandidate(OrchestratorCandidate):
         data = event.data or {}
         ids = data.get("embryo_ids") or []
         count = data.get("count", len(ids))
-        tool_calls: List[Dict[str, Any]] = []
+        tool_calls: list[dict[str, Any]] = []
         if count:
-            tool_calls.append({
-                "name": "calibrate_all_embryos",
-                "input": {"embryo_ids": list(ids)},
-                "id": None,
-            })
+            tool_calls.append(
+                {
+                    "name": "calibrate_all_embryos",
+                    "input": {"embryo_ids": list(ids)},
+                    "id": None,
+                }
+            )
         self.log_decision(
             trigger=DecisionTrigger.EVENT,
             trigger_detail="OPERATOR_MARKED_EMBRYOS",
             tool_calls=tool_calls,
             response_text=(
                 f"Operator marked {count} embryos; proposing calibration."
-                if count else
-                "Operator marked zero embryos; no action."
+                if count
+                else "Operator marked zero embryos; no action."
             ),
             recent_event_ids=[event.event_id],
             context_summary=self._summary(),
@@ -200,11 +204,13 @@ class ReactiveCandidate(OrchestratorCandidate):
         self.log_decision(
             trigger=DecisionTrigger.EVENT,
             trigger_detail="OPERATOR_REMOVED_EMBRYO",
-            tool_calls=[{
-                "name": "forget_embryo",
-                "input": {"embryo_id": eid},
-                "id": None,
-            }],
+            tool_calls=[
+                {
+                    "name": "forget_embryo",
+                    "input": {"embryo_id": eid},
+                    "id": None,
+                }
+            ],
             response_text=f"Operator removed {eid}; proposing cache tidy-up.",
             recent_event_ids=[event.event_id],
             context_summary=self._summary(),
@@ -212,6 +218,7 @@ class ReactiveCandidate(OrchestratorCandidate):
 
     def _react_error(self, event: Event) -> None:
         from datetime import datetime
+
         data = event.data or {}
         msg = str(data.get("msg") or data.get("error") or data.get("message") or "unknown")
         now = datetime.now()
@@ -227,7 +234,10 @@ class ReactiveCandidate(OrchestratorCandidate):
                 trigger=DecisionTrigger.EVENT,
                 trigger_detail="ERROR_OCCURRED",
                 tool_calls=[],
-                response_text=f"Suppressed repeat error within {self.ERROR_SUPPRESS_WINDOW_SEC:.0f}s window: {msg[:120]}",
+                response_text=(
+                    f"Suppressed repeat error within"
+                    f" {self.ERROR_SUPPRESS_WINDOW_SEC:.0f}s window: {msg[:120]}"
+                ),
                 recent_event_ids=[event.event_id],
                 context_summary=self._summary(),
             )
@@ -235,11 +245,13 @@ class ReactiveCandidate(OrchestratorCandidate):
         self.log_decision(
             trigger=DecisionTrigger.EVENT,
             trigger_detail="ERROR_OCCURRED",
-            tool_calls=[{
-                "name": "escalate_to_operator",
-                "input": {"error_message": msg, "source": event.source},
-                "id": None,
-            }],
+            tool_calls=[
+                {
+                    "name": "escalate_to_operator",
+                    "input": {"error_message": msg, "source": event.source},
+                    "id": None,
+                }
+            ],
             response_text=f"New error -- proposing escalation: {msg[:120]}",
             recent_event_ids=[event.event_id],
             context_summary=self._summary(),
@@ -253,5 +265,6 @@ class ReactiveCandidate(OrchestratorCandidate):
         stage = self.world.last_stage_um
         stage_str = f"({stage['x']:.1f}, {stage['y']:.1f})" if stage else "unknown"
         seen = sum(self.world.seen.values())
-        return (f"{n_emb} embryos ({n_fine} fine-calibrated); "
-                f"stage {stage_str}; {seen} events ingested")
+        return (
+            f"{n_emb} embryos ({n_fine} fine-calibrated); stage {stage_str}; {seen} events ingested"
+        )

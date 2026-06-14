@@ -9,6 +9,7 @@ Provides:
 - Federated averaging for distributed training
 """
 
+from .architectures import ARCHITECTURE_REGISTRY, get_suitable_architectures
 from .models import (
     DataSplit,
     MLPipeline,
@@ -18,7 +19,6 @@ from .models import (
     TrainingRun,
     TrainingStatus,
 )
-from .architectures import ARCHITECTURE_REGISTRY, get_suitable_architectures
 
 __all__ = [
     "ARCHITECTURE_REGISTRY",

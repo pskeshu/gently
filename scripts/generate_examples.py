@@ -15,12 +15,11 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from scripts.projection_explorer import (
-    ensure_dependencies,
     discover_volumes,
+    ensure_dependencies,
     load_volume,
     normalize_image,
 )
-
 
 # Ground truth for embryo 2
 EMBRYO_2_TRANSITIONS = {
@@ -35,12 +34,12 @@ EMBRYO_2_TRANSITIONS = {
 # Timepoints to sample for each stage (showing progression within stage)
 # Pick timepoints that span the stage duration
 STAGE_TIMEPOINTS = {
-    "early": [5, 12, 20, 28],       # T0-32: 4 timepoints
-    "bean": [34, 36, 38],            # T33-38: 3 timepoints (short stage)
-    "comma": [40, 42, 44],           # T39-44: 3 timepoints (short stage)
-    "1.5fold": [47, 52, 57],         # T45-59: 3 timepoints
-    "2fold": [62, 68, 75],           # T60-79: 3 timepoints
-    "pretzel": [82, 88, 95],         # T80+: 3 timepoints
+    "early": [5, 12, 20, 28],  # T0-32: 4 timepoints
+    "bean": [34, 36, 38],  # T33-38: 3 timepoints (short stage)
+    "comma": [40, 42, 44],  # T39-44: 3 timepoints (short stage)
+    "1.5fold": [47, 52, 57],  # T45-59: 3 timepoints
+    "2fold": [62, 68, 75],  # T60-79: 3 timepoints
+    "pretzel": [82, 88, 95],  # T80+: 3 timepoints
 }
 
 
@@ -56,12 +55,14 @@ def crop_to_content(img, padding=10):
         gray = img.astype(np.float32)
 
     # Estimate background as the median of edge pixels
-    edge_pixels = np.concatenate([
-        gray[0, :],      # top row
-        gray[-1, :],     # bottom row
-        gray[:, 0],      # left column
-        gray[:, -1],     # right column
-    ])
+    edge_pixels = np.concatenate(
+        [
+            gray[0, :],  # top row
+            gray[-1, :],  # bottom row
+            gray[:, 0],  # left column
+            gray[:, -1],  # right column
+        ]
+    )
     background = np.median(edge_pixels)
 
     # Threshold: significantly above background (background + 25% of dynamic range)
@@ -76,6 +77,7 @@ def crop_to_content(img, padding=10):
 
     # Use morphological operations to clean up noise
     from scipy import ndimage as ndi
+
     # Close small gaps, then open to remove small noise
     content_mask = ndi.binary_closing(content_mask, iterations=2)
     content_mask = ndi.binary_opening(content_mask, iterations=2)
@@ -147,7 +149,7 @@ def create_stage_montage(volumes_list, timepoints, stage_name):
     from PIL import Image as PILImage
 
     scaled_sides = []
-    for i, (top, side) in enumerate(zip(top_views, side_views)):
+    for _i, (top, side) in enumerate(zip(top_views, side_views, strict=False)):
         target_width = top.shape[1]  # Match TOP width
         # Scale height to be visible (3x original Z depth)
         target_height = max(top.shape[0] // 3, side.shape[0] * 3)
@@ -174,7 +176,7 @@ def create_stage_montage(volumes_list, timepoints, stage_name):
         x_off = (target_w - w) // 2
         if img.ndim == 3:
             img = img[:, :, 0] if img.shape[2] > 1 else img.squeeze()
-        result[y_off:y_off+h, x_off:x_off+w] = img
+        result[y_off : y_off + h, x_off : x_off + w] = img
         return result
 
     padded_tops = [pad_center(t, max_top_h, cell_w) for t in top_views]
@@ -182,7 +184,7 @@ def create_stage_montage(volumes_list, timepoints, stage_name):
 
     # Create separator
     sep_w = 2
-    n_cols = len(padded_tops)
+    len(padded_tops)
 
     # Build rows with separators
     def build_row(views):
@@ -211,13 +213,13 @@ def create_stage_montage(volumes_list, timepoints, stage_name):
     try:
         font = ImageFont.truetype("arial.ttf", 12)
         small_font = ImageFont.truetype("arial.ttf", 10)
-    except:
+    except Exception:
         font = ImageFont.load_default()
         small_font = font
 
     # Add timepoint labels at bottom
     label_h = 16
-    labeled_img = Image.new('L', (img.width, img.height + label_h), 0)
+    labeled_img = Image.new("L", (img.width, img.height + label_h), 0)
     labeled_img.paste(img, (0, 0))
     draw = ImageDraw.Draw(labeled_img)
 
@@ -231,12 +233,17 @@ def create_stage_montage(volumes_list, timepoints, stage_name):
         # Get text size
         bbox = draw.textbbox((0, 0), label, font=small_font)
         text_w = bbox[2] - bbox[0]
-        draw.text((cell_center - text_w // 2, img.height + 2), label, fill=200, font=small_font)
+        draw.text(
+            (cell_center - text_w // 2, img.height + 2),
+            label,
+            fill=200,
+            font=small_font,
+        )
         x_pos += cell_w
 
     # Add row labels on left
     final_w = labeled_img.width + 35
-    final_img = Image.new('L', (final_w, labeled_img.height), 0)
+    final_img = Image.new("L", (final_w, labeled_img.height), 0)
     final_img.paste(labeled_img, (35, 0))
     draw = ImageDraw.Draw(final_img)
 
@@ -291,8 +298,9 @@ def main():
     output_dir = Path("gently/examples/stages")
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    from PIL import Image
     import json
+
+    from PIL import Image
 
     # Generate montage and save volumes for each stage
     for stage, timepoints in STAGE_TIMEPOINTS.items():
@@ -308,7 +316,7 @@ def main():
             Image.fromarray(montage).save(output_path, quality=95)
             print(f"  Saved: {output_path} ({montage.shape[1]}x{montage.shape[0]})")
         else:
-            print(f"  ERROR: Failed to create montage")
+            print("  ERROR: Failed to create montage")
 
         # Save volumes for all timepoints in this stage
         volumes_dir = stage_dir / "volumes"
@@ -324,11 +332,13 @@ def main():
                 # Save as compressed numpy with timepoint in filename
                 volume_out = volumes_dir / f"T{tp:03d}.npz"
                 np.savez_compressed(volume_out, volume=volume)
-                saved_volumes.append({
-                    "timepoint": tp,
-                    "filename": f"T{tp:03d}.npz",
-                    "shape": list(volume.shape),
-                })
+                saved_volumes.append(
+                    {
+                        "timepoint": tp,
+                        "filename": f"T{tp:03d}.npz",
+                        "shape": list(volume.shape),
+                    }
+                )
                 print(f"  Saved volume: T{tp} ({volume.shape})")
 
         # Save metadata

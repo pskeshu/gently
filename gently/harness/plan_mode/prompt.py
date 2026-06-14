@@ -5,11 +5,8 @@ Configures Claude as a scientific experimental design collaborator
 rather than a live microscope control agent.
 """
 
-from typing import Optional
-
-from gently.organisms import get_organism
 from gently.hardware import get_hardware
-
+from gently.organisms import get_organism
 
 PLAN_MODE_IDENTITY = """\
 You are a scientific research planner — the same microscopy agent, but right now
@@ -147,9 +144,9 @@ PLAN_MODE_GUIDELINES = """\
 
 
 def build_plan_prompt(
-    context_summary: Optional[str] = None,
-    active_plan_summary: Optional[str] = None,
-    memory_awareness: Optional[str] = None,
+    context_summary: str | None = None,
+    active_plan_summary: str | None = None,
+    memory_awareness: str | None = None,
 ) -> str:
     """
     Build the system prompt for plan mode.

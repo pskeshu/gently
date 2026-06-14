@@ -7,10 +7,12 @@ Quick validation test for the recursive autofocus functionality using mock devic
 Tests the plan structure and parameter handling without requiring real hardware.
 """
 
-import sys
 import logging
-from unittest.mock import Mock, MagicMock
+import sys
+from unittest.mock import Mock
+
 import numpy as np
+
 
 # Mock pymmcore for testing without hardware
 class MockPyMMCore:
@@ -33,15 +35,16 @@ class MockPyMMCore:
             # Return mock image data
             return np.random.randint(0, 1000, (100, 100), dtype=np.uint16)
 
+
 # Install mock
-if 'pymmcore' not in sys.modules:
-    sys.modules['pymmcore'] = MockPyMMCore()
+if "pymmcore" not in sys.modules:
+    sys.modules["pymmcore"] = MockPyMMCore()
 
 # Import after mocking
-from gently.hardware.dispim.devices import DiSPIMCamera, DiSPIMZstage
-from gently.hardware.dispim.plans.acquisition import recursive_focus_single_round
-from bluesky import RunEngine
-import bluesky.plan_stubs as bps
+from bluesky import RunEngine  # noqa: E402
+
+from gently.hardware.dispim.devices import DiSPIMCamera, DiSPIMZstage  # noqa: E402
+from gently.hardware.dispim.plans.acquisition import recursive_focus_single_round  # noqa: E402
 
 
 def test_device_limits():
@@ -60,7 +63,7 @@ def test_device_limits():
 
     for pos in test_positions:
         try:
-            status = z_stage.set(pos)
+            z_stage.set(pos)
             print(f"✓ Position {pos} handled successfully")
         except ValueError as e:
             print(f"✗ Position {pos} failed: {e}")
@@ -91,26 +94,27 @@ def test_recursive_autofocus_plan():
     coarse_steps = 5  # Fewer steps for quick test
     fine_steps = 7
 
-    print(f"Testing with:")
-    print(f"  Coarse range: ±{coarse_range/2} μm ({coarse_steps} steps)")
-    print(f"  Fine range: ±{fine_range/2} μm ({fine_steps} steps)")
+    print("Testing with:")
+    print(f"  Coarse range: ±{coarse_range / 2} μm ({coarse_steps} steps)")
+    print(f"  Fine range: ±{fine_range / 2} μm ({fine_steps} steps)")
     print(f"  Starting position: {mock_core.current_position} μm")
     print()
 
     try:
         # Run the recursive autofocus plan
         plan = recursive_focus_single_round(
-            z_stage, camera,
+            z_stage,
+            camera,
             coarse_range=coarse_range,
             fine_range=fine_range,
             coarse_steps=coarse_steps,
-            fine_steps=fine_steps
+            fine_steps=fine_steps,
         )
 
         # Execute plan
-        result = RE(plan)
+        RE(plan)
 
-        print(f"✓ Recursive autofocus plan executed successfully")
+        print("✓ Recursive autofocus plan executed successfully")
         print(f"Final position: {mock_core.current_position:.2f} μm")
 
         # Verify position is within limits
@@ -122,6 +126,7 @@ def test_recursive_autofocus_plan():
     except Exception as e:
         print(f"✗ Recursive autofocus plan failed: {e}")
         import traceback
+
         traceback.print_exc()
 
     print()
@@ -146,7 +151,7 @@ def test_position_bounds():
 
     for pos, description, should_pass in test_cases:
         try:
-            status = z_stage.set(pos)
+            z_stage.set(pos)
             if should_pass:
                 print(f"✓ {description} ({pos}): Accepted")
             else:

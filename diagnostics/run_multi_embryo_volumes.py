@@ -9,14 +9,15 @@ Usage:
     python run_multi_embryo_volumes.py
 """
 
-import time
 import json
-import numpy as np
-from pathlib import Path
+import time
 from datetime import datetime, timedelta
-from client import get_mmc
-import tifffile
+from pathlib import Path
+
+import numpy as np
 import rpyc
+import tifffile
+from client import get_mmc
 from tqdm import tqdm
 
 # Device configuration
@@ -36,9 +37,11 @@ OUTPUT_DIR = Path("multi_embryo_volumes")
 def load_database():
     """Load embryo database."""
     if not DATABASE_FILE.exists():
-        raise FileNotFoundError(f"Database not found: {DATABASE_FILE}\nRun multi_embryo_calibration.py first!")
+        raise FileNotFoundError(
+            f"Database not found: {DATABASE_FILE}\nRun multi_embryo_calibration.py first!"
+        )
 
-    with open(DATABASE_FILE, 'r') as f:
+    with open(DATABASE_FILE) as f:
         return json.load(f)
 
 
@@ -58,8 +61,8 @@ def move_to_embryo(embryo_data):
     embryo_data : dict
         Embryo information from database
     """
-    target_x = embryo_data['stage_position_after_centering_um']['x']
-    target_y = embryo_data['stage_position_after_centering_um']['y']
+    target_x = embryo_data["stage_position_after_centering_um"]["x"]
+    target_y = embryo_data["stage_position_after_centering_um"]["y"]
 
     print(f"  Moving to embryo position: ({target_x:.2f}, {target_y:.2f}) µm")
 
@@ -94,7 +97,7 @@ def configure_hardware_for_volume(calibration, num_slices):
 
     # Stop any existing sequence acquisition (from previous embryo or calibration)
     if core.isSequenceRunning():
-        print(f"    Stopping previous sequence...")
+        print("    Stopping previous sequence...")
         core.stopSequenceAcquisition()
         time.sleep(0.5)
 
@@ -105,14 +108,14 @@ def configure_hardware_for_volume(calibration, num_slices):
     try:
         core.setProperty(GALVO_DEVICE, "SPIMState", "Idle")
         time.sleep(0.2)
-    except:
+    except Exception:
         pass
 
     # Extract calibration parameters
-    slope = calibration['slope_um_per_deg']
-    offset = calibration['offset_um']
-    galvo_top = calibration.get('edge_top_deg', calibration['galvo_top_deg'])
-    galvo_bottom = calibration.get('edge_bottom_deg', calibration['galvo_bottom_deg'])
+    slope = calibration["slope_um_per_deg"]
+    offset = calibration["offset_um"]
+    galvo_top = calibration.get("edge_top_deg", calibration["galvo_top_deg"])
+    galvo_bottom = calibration.get("edge_bottom_deg", calibration["galvo_bottom_deg"])
 
     # Calculate galvo parameters
     galvo_center = (galvo_top + galvo_bottom) / 2.0
@@ -126,8 +129,14 @@ def configure_hardware_for_volume(calibration, num_slices):
     piezo_range = piezo_bottom - piezo_top
     piezo_amplitude = piezo_range / 2.0
 
-    print(f"    Galvo: center={galvo_center:+.4f}°, amplitude=±{galvo_amplitude:.4f}° (range: {galvo_range:.4f}°)")
-    print(f"    Piezo: center={piezo_center:.1f}µm, amplitude=±{piezo_amplitude:.1f}µm (range: {piezo_range:.1f}µm)")
+    print(
+        f"    Galvo: center={galvo_center:+.4f}°, amplitude=±{galvo_amplitude:.4f}°"
+        f" (range: {galvo_range:.4f}°)"
+    )
+    print(
+        f"    Piezo: center={piezo_center:.1f}µm, amplitude=±{piezo_amplitude:.1f}µm"
+        f" (range: {piezo_range:.1f}µm)"
+    )
 
     # System startup
     core.setConfig("System", "Startup")
@@ -189,13 +198,13 @@ def configure_hardware_for_volume(calibration, num_slices):
     core.setProperty(PIEZO_DEVICE, "SPIMState", "Armed")
 
     time.sleep(0.3)
-    print(f"  ✓ Hardware configured for hardware-triggered acquisition")
+    print("  ✓ Hardware configured for hardware-triggered acquisition")
 
     return {
-        'galvo_center': galvo_center,
-        'galvo_amplitude': galvo_amplitude,
-        'piezo_center': piezo_center,
-        'piezo_amplitude': piezo_amplitude
+        "galvo_center": galvo_center,
+        "galvo_amplitude": galvo_amplitude,
+        "piezo_center": piezo_center,
+        "piezo_amplitude": piezo_amplitude,
     }
 
 
@@ -238,7 +247,7 @@ def acquire_volume_for_embryo(embryo_id, calibration, num_slices=50):
 
     # Trigger SPIM state machine
     core.setProperty(GALVO_DEVICE, "SPIMState", "Running")
-    print(f"  ✓ SPIM triggered")
+    print("  ✓ SPIM triggered")
 
     # Collect images
     images = []
@@ -296,52 +305,59 @@ def save_volume(volume, embryo_id, embryo_number, output_dir):
 
 def main():
     """Main multi-embryo volume acquisition workflow."""
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
     print("MULTI-EMBRYO VOLUME ACQUISITION")
-    print(f"{'='*70}")
+    print(f"{'=' * 70}")
 
     try:
         # Load database
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("LOADING DATABASE")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         database = load_database()
 
-        embryos = database.get('embryos', {})
+        embryos = database.get("embryos", {})
         num_embryos = len(embryos)
 
         print(f"  Database: {DATABASE_FILE}")
         print(f"  Found {num_embryos} embryo(s)")
 
         if num_embryos == 0:
-            print(f"\n  ⚠ No embryos in database!")
-            print(f"  Run multi_embryo_calibration.py first.")
+            print("\n  ⚠ No embryos in database!")
+            print("  Run multi_embryo_calibration.py first.")
             return
 
         # List embryos
-        print(f"\n  Embryos:")
+        print("\n  Embryos:")
         for emb_id, emb_data in embryos.items():
-            emb_num = emb_data.get('embryo_number', '?')
-            pos = emb_data['stage_position_after_centering_um']
+            emb_num = emb_data.get("embryo_number", "?")
+            pos = emb_data["stage_position_after_centering_um"]
             print(f"    {emb_id} (#{emb_num}): ({pos['x']:.1f}, {pos['y']:.1f}) µm")
 
         # Acquisition parameters
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("ACQUISITION PARAMETERS")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
-        num_slices = int(input(f"  Number of slices per volume (default 50): ").strip() or "50")
+        num_slices = int(input("  Number of slices per volume (default 50): ").strip() or "50")
         print(f"  ✓ Will acquire {num_slices} slices per embryo")
 
         # Timelapse parameters
-        num_timepoints = int(input(f"  Number of timepoints (default 1 for single acquisition): ").strip() or "1")
+        num_timepoints = int(
+            input("  Number of timepoints (default 1 for single acquisition): ").strip() or "1"
+        )
         interval_minutes = 0
         if num_timepoints > 1:
-            interval_minutes = float(input(f"  Interval between timepoints in minutes (e.g., 2): ").strip() or "2")
+            interval_minutes = float(
+                input("  Interval between timepoints in minutes (e.g., 2): ").strip() or "2"
+            )
             total_duration_hours = (num_timepoints - 1) * interval_minutes / 60.0
-            print(f"  ✓ Timelapse: {num_timepoints} timepoints every {interval_minutes} min ({total_duration_hours:.1f} hours total)")
+            print(
+                f"  ✓ Timelapse: {num_timepoints} timepoints every {interval_minutes} min"
+                f" ({total_duration_hours:.1f} hours total)"
+            )
         else:
-            print(f"  ✓ Single acquisition (no timelapse)")
+            print("  ✓ Single acquisition (no timelapse)")
 
         # Create output directory
         session_dir = OUTPUT_DIR / datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -358,8 +374,11 @@ def main():
             desc="Timepoints",
             unit="tp",
             position=0,
-            colour='green',
-            bar_format='{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]'
+            colour="green",
+            bar_format=(
+                "{desc}: {percentage:3.0f}%|{bar}| {n_fmt}/{total_fmt}"
+                " [{elapsed}<{remaining}, {rate_fmt}]"
+            ),
         )
 
         for timepoint in range(num_timepoints):
@@ -367,13 +386,15 @@ def main():
             elapsed_hours = (timepoint_start_time - session_start_time) / 3600.0
 
             # Update timepoint progress bar
-            timepoint_pbar.set_description(f"Timepoint {timepoint+1}/{num_timepoints} (Elapsed: {elapsed_hours:.1f}h)")
+            timepoint_pbar.set_description(
+                f"Timepoint {timepoint + 1}/{num_timepoints} (Elapsed: {elapsed_hours:.1f}h)"
+            )
 
-            print(f"\n{'='*70}")
+            print(f"\n{'=' * 70}")
             print(f"TIMEPOINT {timepoint + 1}/{num_timepoints}")
             if num_timepoints > 1:
                 print(f"Elapsed: {elapsed_hours:.2f} hours")
-            print(f"{'='*70}")
+            print(f"{'=' * 70}")
 
             # Acquire volume for each embryo
             timepoint_results = []
@@ -385,51 +406,53 @@ def main():
                 unit="embryo",
                 position=1,
                 leave=False,
-                colour='cyan'
+                colour="cyan",
             )
 
             for idx, (emb_id, emb_data) in enumerate(embryos.items(), 1):
-                emb_num = emb_data.get('embryo_number', idx)
+                emb_num = emb_data.get("embryo_number", idx)
 
                 embryo_pbar.set_description(f"  Embryo {emb_num} (t{timepoint:04d})")
 
                 print(f"\n[Embryo {idx}/{num_embryos}] {emb_id} (Embryo #{emb_num})")
-                print(f"{'─'*70}")
+                print(f"{'─' * 70}")
 
                 # Move to embryo
                 move_to_embryo(emb_data)
 
                 # Configure hardware
-                calibration = emb_data['calibration']
+                calibration = emb_data["calibration"]
                 configure_hardware_for_volume(calibration, num_slices)
 
                 # Acquire volume
                 volume = acquire_volume_for_embryo(emb_id, calibration, num_slices)
 
                 if volume is None:
-                    print(f"  ✗ Failed to acquire volume")
-                    timepoint_results.append({
-                        'embryo_id': emb_id,
-                        'timepoint': timepoint,
-                        'success': False
-                    })
+                    print("  ✗ Failed to acquire volume")
+                    timepoint_results.append(
+                        {"embryo_id": emb_id, "timepoint": timepoint, "success": False}
+                    )
                     embryo_pbar.update(1)
                     continue
 
                 # Save volume with timepoint in filename
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = session_dir / f"{emb_id}_embryo{emb_num:03d}_t{timepoint:04d}_{timestamp}.tif"
+                filename = (
+                    session_dir / f"{emb_id}_embryo{emb_num:03d}_t{timepoint:04d}_{timestamp}.tif"
+                )
                 tifffile.imwrite(filename, volume)
                 print(f"  ✓ Saved: {filename.name}")
 
-                timepoint_results.append({
-                    'embryo_id': emb_id,
-                    'embryo_number': emb_num,
-                    'timepoint': timepoint,
-                    'success': True,
-                    'filename': str(filename),
-                    'shape': volume.shape
-                })
+                timepoint_results.append(
+                    {
+                        "embryo_id": emb_id,
+                        "embryo_number": emb_num,
+                        "timepoint": timepoint,
+                        "success": True,
+                        "filename": str(filename),
+                        "shape": volume.shape,
+                    }
+                )
 
                 print(f"  ✓ Complete: {volume.shape}")
                 embryo_pbar.update(1)
@@ -447,10 +470,10 @@ def main():
 
                 if wait_time > 0:
                     next_timepoint_time = datetime.now() + timedelta(seconds=wait_time)
-                    print(f"\n{'─'*70}")
-                    print(f"Waiting {wait_time/60:.1f} minutes until next timepoint...")
+                    print(f"\n{'─' * 70}")
+                    print(f"Waiting {wait_time / 60:.1f} minutes until next timepoint...")
                     print(f"Next timepoint at: {next_timepoint_time.strftime('%H:%M:%S')}")
-                    print(f"{'─'*70}")
+                    print(f"{'─' * 70}")
 
                     # Progress bar for waiting
                     wait_pbar = tqdm(
@@ -459,7 +482,7 @@ def main():
                         unit="s",
                         position=1,
                         leave=False,
-                        colour='yellow'
+                        colour="yellow",
                     )
                     for _ in range(int(wait_time)):
                         time.sleep(1)
@@ -469,70 +492,81 @@ def main():
                     # Sleep remaining fractional seconds
                     time.sleep(wait_time - int(wait_time))
                 else:
-                    print(f"\n{'─'*70}")
-                    print(f"⚠ Warning: Acquisition took {timepoint_duration/60:.1f} min (longer than {interval_minutes} min interval)")
-                    print(f"Proceeding immediately to next timepoint...")
-                    print(f"{'─'*70}")
+                    print(f"\n{'─' * 70}")
+                    print(
+                        f"⚠ Warning: Acquisition took {timepoint_duration / 60:.1f} min"
+                        f" (longer than {interval_minutes} min interval)"
+                    )
+                    print("Proceeding immediately to next timepoint...")
+                    print(f"{'─' * 70}")
 
         timepoint_pbar.close()
 
         # Cleanup
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("CLEANUP")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         core.setConfig("Laser", "ALL OFF")
-        print(f"  ✓ Lasers OFF")
+        print("  ✓ Lasers OFF")
 
         # Summary
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("ACQUISITION COMPLETE")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
 
         total_duration = time.time() - session_start_time
-        successful = sum(1 for r in all_results if r['success'])
+        successful = sum(1 for r in all_results if r["success"])
         total_acquisitions = num_embryos * num_timepoints
 
-        print(f"\n  Session duration: {total_duration/3600:.2f} hours")
+        print(f"\n  Session duration: {total_duration / 3600:.2f} hours")
         print(f"  Timepoints: {num_timepoints}")
         print(f"  Embryos per timepoint: {num_embryos}")
         print(f"  Successful acquisitions: {successful}/{total_acquisitions}")
         print(f"  Output directory: {session_dir}")
 
-        print(f"\n  Results:")
+        print("\n  Results:")
         for result in all_results:
-            if result['success']:
-                t = result.get('timepoint', 0)
-                print(f"    ✓ {result['embryo_id']} t{t:04d}: {result['shape']} → {Path(result['filename']).name}")
+            if result["success"]:
+                t = result.get("timepoint", 0)
+                print(
+                    f"    ✓ {result['embryo_id']} t{t:04d}: {result['shape']}"
+                    f" → {Path(result['filename']).name}"
+                )
             else:
-                t = result.get('timepoint', 0)
+                t = result.get("timepoint", 0)
                 print(f"    ✗ {result['embryo_id']} t{t:04d}: Failed")
 
         # Save acquisition log
         log_file = session_dir / "acquisition_log.json"
-        with open(log_file, 'w') as f:
-            json.dump({
-                'timestamp': datetime.now().isoformat(),
-                'session_duration_hours': total_duration / 3600.0,
-                'num_embryos': num_embryos,
-                'num_slices': num_slices,
-                'num_timepoints': num_timepoints,
-                'interval_minutes': interval_minutes,
-                'total_acquisitions': total_acquisitions,
-                'successful_acquisitions': successful,
-                'results': all_results
-            }, f, indent=2)
+        with open(log_file, "w") as f:
+            json.dump(
+                {
+                    "timestamp": datetime.now().isoformat(),
+                    "session_duration_hours": total_duration / 3600.0,
+                    "num_embryos": num_embryos,
+                    "num_slices": num_slices,
+                    "num_timepoints": num_timepoints,
+                    "interval_minutes": interval_minutes,
+                    "total_acquisitions": total_acquisitions,
+                    "successful_acquisitions": successful,
+                    "results": all_results,
+                },
+                f,
+                indent=2,
+            )
 
         print(f"\n  ✓ Log saved: {log_file}")
-        print(f"\n{'='*70}\n")
+        print(f"\n{'=' * 70}\n")
 
     except KeyboardInterrupt:
-        print(f"\n\nInterrupted\n")
+        print("\n\nInterrupted\n")
     except Exception as e:
-        print(f"\n{'='*70}")
+        print(f"\n{'=' * 70}")
         print("ERROR")
-        print(f"{'='*70}")
+        print(f"{'=' * 70}")
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
 
 

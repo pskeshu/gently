@@ -8,22 +8,20 @@ device_layer.py server (Bluesky plans + SAM detection).
 import asyncio
 import logging
 import traceback
-from typing import Any, Dict, List, Optional, Tuple
-import numpy as np
-import aiohttp
+from typing import Any
 
-logger = logging.getLogger(__name__)
+import aiohttp
+import numpy as np
 
 from gently.core.coordinates import (
-    pixel_to_stage_position,
-    stage_to_pixel_position,
-    get_um_per_pixel,
-    DEFAULT_PIXEL_SIZE_UM,
     DEFAULT_OBJECTIVE_MAG,
+    DEFAULT_PIXEL_SIZE_UM,
 )
+from gently.exceptions import DeviceLayerError, NetworkError
 from gently.harness.microscope import Microscope
 from gently.settings import settings
-from gently.exceptions import DeviceLayerError, NetworkError, AcquisitionError
+
+logger = logging.getLogger(__name__)
 
 
 class DiSPIMMicroscope(Microscope):
@@ -99,7 +97,7 @@ class DiSPIMMicroscope(Microscope):
                 async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
                     if resp.status == 200:
                         sam_status = await resp.json()
-                        self._sam_available = sam_status.get('available', False)
+                        self._sam_available = sam_status.get("available", False)
             except aiohttp.ClientError:
                 self._sam_available = False
 
@@ -166,9 +164,7 @@ class DiSPIMMicroscope(Microscope):
     def _ensure_connected(self):
         """Raise error if not connected"""
         if not self.is_connected:
-            raise ConnectionError(
-                "Not connected to Microscope Server. Call connect() first."
-            )
+            raise ConnectionError("Not connected to Microscope Server. Call connect() first.")
 
     # =========================================================================
     # Session Configuration (FileStore integration)
@@ -217,8 +213,9 @@ class DiSPIMMicroscope(Microscope):
         -------
         tuple of (np.ndarray, Path)
         """
-        import tifffile
         from pathlib import Path
+
+        import tifffile
 
         path = Path(ref["path"])
         arr = tifffile.imread(str(path))
@@ -268,9 +265,9 @@ class DiSPIMMicroscope(Microscope):
     async def _submit_plan_and_wait(
         self,
         plan_name: str,
-        kwargs: Dict = None,
+        kwargs: dict = None,
         timeout: float = 120.0,
-    ) -> Dict:
+    ) -> dict:
         """Submit a Bluesky plan to the server and wait for completion.
 
         Parameters
@@ -300,37 +297,37 @@ class DiSPIMMicroscope(Microscope):
             async with self._session.post(
                 f"{self.http_url}/api/queue/item/add",
                 json=payload,
-                timeout=aiohttp.ClientTimeout(total=timeout)
+                timeout=aiohttp.ClientTimeout(total=timeout),
             ) as resp:
                 if resp.status != 200:
                     error_text = await resp.text()
                     return {
-                        'success': False,
-                        'error': f"HTTP {resp.status}: {error_text}",
+                        "success": False,
+                        "error": f"HTTP {resp.status}: {error_text}",
                     }
 
                 result = await resp.json()
 
                 # Resolve file references (zero-copy transfer)
                 if isinstance(result, dict):
-                    docs = result.get('documents', {})
-                    events = docs.get('events', [])
+                    docs = result.get("documents", {})
+                    events = docs.get("events", [])
                     for event in events:
-                        data = event.get('data', {})
+                        data = event.get("data", {})
                         for key, val in list(data.items()):
                             if self._is_file_ref(val):
                                 arr, path = self._resolve_file_ref(val)
                                 data[key] = arr
                                 # Store path for downstream use
-                                if 'volume_path' not in result:
-                                    result['volume_path'] = str(path)
+                                if "volume_path" not in result:
+                                    result["volume_path"] = str(path)
 
                 return result
 
         except asyncio.TimeoutError:
             return {
-                'success': False,
-                'error': f"Plan '{plan_name}' timed out after {timeout}s",
+                "success": False,
+                "error": f"Plan '{plan_name}' timed out after {timeout}s",
             }
         except aiohttp.ClientError as e:
             raise NetworkError(f"Device layer request failed: {e}") from e
@@ -339,7 +336,7 @@ class DiSPIMMicroscope(Microscope):
     # Stage Control
     # =========================================================================
 
-    async def move_to_position(self, x: float, y: float) -> Dict:
+    async def move_to_position(self, x: float, y: float) -> dict:
         """
         Move stage to absolute position.
 
@@ -351,16 +348,15 @@ class DiSPIMMicroscope(Microscope):
         logger.info("Moving to (%.1f, %.1f) µm", x, y)
 
         result = await self._submit_plan_and_wait(
-            'move_stage_plan',
-            kwargs={'xy_stage': 'xy_stage', 'x': x, 'y': y}
+            "move_stage_plan", kwargs={"xy_stage": "xy_stage", "x": x, "y": y}
         )
 
-        if result.get('success'):
-            return {'success': True, 'x': x, 'y': y}
+        if result.get("success"):
+            return {"success": True, "x": x, "y": y}
 
         return result
 
-    async def get_stage_position(self) -> Tuple[float, float]:
+    async def get_stage_position(self) -> tuple[float, float]:
         """
         Get current stage position.
 
@@ -369,21 +365,23 @@ class DiSPIMMicroscope(Microscope):
         tuple of (float, float)
             Current (x, y) position in micrometers
         """
-        result = await self._submit_plan_and_wait('read_stage_plan', kwargs={'xy_stage': 'xy_stage'})
+        result = await self._submit_plan_and_wait(
+            "read_stage_plan", kwargs={"xy_stage": "xy_stage"}
+        )
 
-        if result.get('success'):
-            docs = result.get('documents', {})
-            events = docs.get('events', [])
+        if result.get("success"):
+            docs = result.get("documents", {})
+            events = docs.get("events", [])
             if events:
-                data = events[0].get('data', {})
+                data = events[0].get("data", {})
                 # Look for stage coordinates
-                for key in ['XY:31', 'xy_stage', 'stage']:
+                for key in ["XY:31", "xy_stage", "stage"]:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (list, tuple)) and len(val) >= 2:
                             return (float(val[0]), float(val[1]))
                         if isinstance(val, dict):
-                            return (float(val.get('x', 0)), float(val.get('y', 0)))
+                            return (float(val.get("x", 0)), float(val.get("y", 0)))
 
         raise DeviceLayerError("Failed to read stage position")
 
@@ -396,20 +394,20 @@ class DiSPIMMicroscope(Microscope):
         float
             Current Z position in micrometers
         """
-        result = await self._submit_plan_and_wait('read_piezo_plan', kwargs={'piezo': 'piezo'})
+        result = await self._submit_plan_and_wait("read_piezo_plan", kwargs={"piezo": "piezo"})
 
-        if result.get('success'):
-            docs = result.get('documents', {})
-            events = docs.get('events', [])
+        if result.get("success"):
+            docs = result.get("documents", {})
+            events = docs.get("events", [])
             if events:
-                data = events[0].get('data', {})
-                for key in ['PiezoStage:P:34', 'piezo', 'z_stage']:
+                data = events[0].get("data", {})
+                for key in ["PiezoStage:P:34", "piezo", "z_stage"]:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (int, float)):
                             return float(val)
                         if isinstance(val, dict):
-                            return float(val.get('z', val.get('position', 0)))
+                            return float(val.get("z", val.get("position", 0)))
 
         raise DeviceLayerError("Failed to read piezo position")
 
@@ -419,10 +417,10 @@ class DiSPIMMicroscope(Microscope):
 
     async def calibrate_piezo_galvo(
         self,
-        piezo_positions: Optional[List[float]] = None,
-        galvo_positions: Optional[List[float]] = None,
+        piezo_positions: list[float] | None = None,
+        galvo_positions: list[float] | None = None,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """
         Run piezo-galvo calibration plan.
 
@@ -431,23 +429,21 @@ class DiSPIMMicroscope(Microscope):
         dict
             Calibration results with optimal positions
         """
-        plan_kwargs = {'lightsheet_snap': 'lightsheet_snap'}
+        plan_kwargs = {"lightsheet_snap": "lightsheet_snap"}
         if piezo_positions is not None:
-            plan_kwargs['piezo_positions'] = piezo_positions
+            plan_kwargs["piezo_positions"] = piezo_positions
         if galvo_positions is not None:
-            plan_kwargs['galvo_positions'] = galvo_positions
+            plan_kwargs["galvo_positions"] = galvo_positions
         plan_kwargs.update(kwargs)
 
         result = await self._submit_plan_and_wait(
-            'calibrate_piezo_galvo_plan',
-            kwargs=plan_kwargs,
-            timeout=300.0
+            "calibrate_piezo_galvo_plan", kwargs=plan_kwargs, timeout=300.0
         )
 
-        if result.get('success'):
+        if result.get("success"):
             return {
-                'success': True,
-                'calibration': result.get('calibration', {}),
+                "success": True,
+                "calibration": result.get("calibration", {}),
             }
 
         return result
@@ -456,22 +452,24 @@ class DiSPIMMicroscope(Microscope):
     # Imaging
     # =========================================================================
 
-    def _extract_image(self, result: dict, candidate_keys: List[str], multi_event: bool = False) -> Optional[tuple]:
+    def _extract_image(
+        self, result: dict, candidate_keys: list[str], multi_event: bool = False
+    ) -> tuple | None:
         """Extract image array from plan result documents.
 
         Returns (array, path) or None if not found.
         """
-        if not result.get('success'):
+        if not result.get("success"):
             return None
 
-        docs = result.get('documents', {})
-        events = docs.get('events', [])
+        docs = result.get("documents", {})
+        events = docs.get("events", [])
         if not events:
             return None
 
         search_events = events if multi_event else [events[0]]
         for event in search_events:
-            data = event.get('data', {})
+            data = event.get("data", {})
             for key in candidate_keys:
                 if key in data:
                     val = data[key]
@@ -484,11 +482,11 @@ class DiSPIMMicroscope(Microscope):
 
     async def capture_lightsheet_image(
         self,
-        piezo_position: Optional[float] = None,
-        galvo_position: Optional[float] = None,
+        piezo_position: float | None = None,
+        galvo_position: float | None = None,
         exposure_ms: float = 10.0,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """
         Capture a single lightsheet image at specified position.
 
@@ -504,35 +502,36 @@ class DiSPIMMicroscope(Microscope):
         Returns
         -------
         dict
-            ``{'image': np.ndarray, 'piezo_position': float, 'galvo_position': float, 'success': bool}``
+            ``{'image': np.ndarray, 'piezo_position': float,
+            'galvo_position': float, 'success': bool}``
         """
         result = await self._submit_plan_and_wait(
-            'capture_lightsheet_image_plan',
+            "capture_lightsheet_image_plan",
             kwargs={
-                'lightsheet_snap': 'lightsheet_snap',
-                'scanner': 'scanner',
-                'piezo': 'piezo',
-                'laser_control': 'laser_control',
-                'piezo_position': piezo_position if piezo_position is not None else 50.0,
-                'galvo_position': galvo_position if galvo_position is not None else 0.0,
+                "lightsheet_snap": "lightsheet_snap",
+                "scanner": "scanner",
+                "piezo": "piezo",
+                "laser_control": "laser_control",
+                "piezo_position": piezo_position if piezo_position is not None else 50.0,
+                "galvo_position": galvo_position if galvo_position is not None else 0.0,
             },
-            timeout=30.0
+            timeout=30.0,
         )
 
-        extracted = self._extract_image(result, ['HamCam1', 'lightsheet_snap', 'camera'])
+        extracted = self._extract_image(result, ["HamCam1", "lightsheet_snap", "camera"])
         if extracted:
             arr, fpath = extracted
             ret = {
-                'image': arr,
-                'piezo_position': piezo_position or 0.0,
-                'galvo_position': galvo_position or 0.0,
-                'success': True,
+                "image": arr,
+                "piezo_position": piezo_position or 0.0,
+                "galvo_position": galvo_position or 0.0,
+                "success": True,
             }
             if fpath:
-                ret['image_path'] = fpath
+                ret["image_path"] = fpath
             return ret
 
-        return {'error': result.get('error', 'No image data'), 'success': False}
+        return {"error": result.get("error", "No image data"), "success": False}
 
     async def acquire_volume(
         self,
@@ -548,7 +547,7 @@ class DiSPIMMicroscope(Microscope):
         laser_power_405_pct: float = None,
         laser_power_637_pct: float = None,
         **kwargs,
-    ) -> Dict:
+    ) -> dict:
         """
         Acquire a 3D volume via synchronized galvo-piezo scan.
 
@@ -565,7 +564,8 @@ class DiSPIMMicroscope(Microscope):
         laser_config : str, optional
             Laser channel preset ("488 and 561", "488 only", etc.). None
             uses the device-layer default.
-        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct, laser_power_637_pct : float, optional
+        laser_power_488_pct, laser_power_561_pct, laser_power_405_pct,
+        laser_power_637_pct : float, optional
             Per-line laser power %. Hard-limited at the device layer
             (DiSPIMLightSource.POWER_LIMITS_PCT). None leaves current
             setpoint untouched.
@@ -576,48 +576,48 @@ class DiSPIMMicroscope(Microscope):
             ``{'volume': np.ndarray, 'shape': tuple, 'success': bool}``
         """
         plan_kwargs = {
-            'volume_scanner': 'volume_scanner',
-            'num_slices': num_slices,
-            'exposure_ms': exposure_ms,
-            'galvo_amplitude': galvo_amplitude,
-            'galvo_center': galvo_center,
-            'piezo_amplitude': piezo_amplitude,
-            'piezo_center': piezo_center,
+            "volume_scanner": "volume_scanner",
+            "num_slices": num_slices,
+            "exposure_ms": exposure_ms,
+            "galvo_amplitude": galvo_amplitude,
+            "galvo_center": galvo_center,
+            "piezo_amplitude": piezo_amplitude,
+            "piezo_center": piezo_center,
         }
         # Only forward kwargs the user explicitly set — leaves the
         # acquire_single_volume_plan defaults in place otherwise.
         if laser_config is not None:
-            plan_kwargs['laser_config'] = laser_config
+            plan_kwargs["laser_config"] = laser_config
         if laser_power_488_pct is not None:
-            plan_kwargs['laser_power_488_pct'] = laser_power_488_pct
+            plan_kwargs["laser_power_488_pct"] = laser_power_488_pct
         if laser_power_561_pct is not None:
-            plan_kwargs['laser_power_561_pct'] = laser_power_561_pct
+            plan_kwargs["laser_power_561_pct"] = laser_power_561_pct
         if laser_power_405_pct is not None:
-            plan_kwargs['laser_power_405_pct'] = laser_power_405_pct
+            plan_kwargs["laser_power_405_pct"] = laser_power_405_pct
         if laser_power_637_pct is not None:
-            plan_kwargs['laser_power_637_pct'] = laser_power_637_pct
+            plan_kwargs["laser_power_637_pct"] = laser_power_637_pct
 
         result = await self._submit_plan_and_wait(
-            'acquire_single_volume_plan',
-            kwargs=plan_kwargs,
-            timeout=120.0
+            "acquire_single_volume_plan", kwargs=plan_kwargs, timeout=120.0
         )
 
-        extracted = self._extract_image(result, ['volume_scanner', 'camera', 'camera_image'], multi_event=True)
+        extracted = self._extract_image(
+            result, ["volume_scanner", "camera", "camera_image"], multi_event=True
+        )
         if extracted:
             arr, fpath = extracted
             ret = {
-                'volume': arr,
-                'shape': arr.shape,
-                'success': True,
+                "volume": arr,
+                "shape": arr.shape,
+                "success": True,
             }
             if fpath:
-                ret['volume_path'] = str(fpath)
-            elif result.get('volume_path'):
-                ret['volume_path'] = result['volume_path']
+                ret["volume_path"] = str(fpath)
+            elif result.get("volume_path"):
+                ret["volume_path"] = result["volume_path"]
             return ret
 
-        return {'error': result.get('error', 'Acquisition failed'), 'success': False}
+        return {"error": result.get("error", "Acquisition failed"), "success": False}
 
     async def acquire_burst(
         self,
@@ -635,7 +635,7 @@ class DiSPIMMicroscope(Microscope):
         laser_power_405_pct: float = None,
         laser_power_637_pct: float = None,
         timeout: float = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Acquire ``frames`` volumes back-to-back as a single device-layer plan.
 
@@ -657,76 +657,76 @@ class DiSPIMMicroscope(Microscope):
             'volume_path': str|None, 'shape': tuple}``.
         """
         plan_kwargs = {
-            'volume_scanner': 'volume_scanner',
-            'frames': frames,
-            'mode': mode,
-            'num_slices': num_slices,
-            'exposure_ms': exposure_ms,
-            'galvo_amplitude': galvo_amplitude,
-            'galvo_center': galvo_center,
-            'piezo_amplitude': piezo_amplitude,
-            'piezo_center': piezo_center,
+            "volume_scanner": "volume_scanner",
+            "frames": frames,
+            "mode": mode,
+            "num_slices": num_slices,
+            "exposure_ms": exposure_ms,
+            "galvo_amplitude": galvo_amplitude,
+            "galvo_center": galvo_center,
+            "piezo_amplitude": piezo_amplitude,
+            "piezo_center": piezo_center,
         }
         if laser_config is not None:
-            plan_kwargs['laser_config'] = laser_config
+            plan_kwargs["laser_config"] = laser_config
         if laser_power_488_pct is not None:
-            plan_kwargs['laser_power_488_pct'] = laser_power_488_pct
+            plan_kwargs["laser_power_488_pct"] = laser_power_488_pct
         if laser_power_561_pct is not None:
-            plan_kwargs['laser_power_561_pct'] = laser_power_561_pct
+            plan_kwargs["laser_power_561_pct"] = laser_power_561_pct
         if laser_power_405_pct is not None:
-            plan_kwargs['laser_power_405_pct'] = laser_power_405_pct
+            plan_kwargs["laser_power_405_pct"] = laser_power_405_pct
         if laser_power_637_pct is not None:
-            plan_kwargs['laser_power_637_pct'] = laser_power_637_pct
+            plan_kwargs["laser_power_637_pct"] = laser_power_637_pct
 
         if timeout is None:
             # 3 s/frame headroom (1 s pacing + ~1.5 s plan overhead) with a 60 s floor.
             timeout = max(60.0, frames * 3.0)
 
         result = await self._submit_plan_and_wait(
-            'burst_plan',
+            "burst_plan",
             kwargs=plan_kwargs,
             timeout=timeout,
         )
 
-        if not result.get('success'):
-            return {'success': False, 'error': result.get('error', 'Burst failed')}
+        if not result.get("success"):
+            return {"success": False, "error": result.get("error", "Burst failed")}
 
         # _submit_plan_and_wait already swapped file_refs for ndarrays in-place.
         # Walk every event and pull (volume, path) per frame.
-        frames_out: List[Dict] = []
-        docs = result.get('documents', {}) or {}
-        events = docs.get('events', []) or []
-        candidates = ('volume_scanner', 'camera', 'camera_image')
+        frames_out: list[dict] = []
+        docs = result.get("documents", {}) or {}
+        events = docs.get("events", []) or []
+        candidates = ("volume_scanner", "camera", "camera_image")
         for ev in events:
-            data = ev.get('data', {}) or {}
+            data = ev.get("data", {}) or {}
             for key in candidates:
                 if key in data:
                     val = data[key]
-                    entry: Dict[str, Any] = {}
+                    entry: dict[str, Any] = {}
                     # Per-frame epoch time from the Bluesky event doc — lets the
                     # orchestrator stamp each saved frame with its real acquisition
                     # time instead of having to interpolate from the burst's
                     # aggregate timing.
-                    ev_time = ev.get('time')
+                    ev_time = ev.get("time")
                     if ev_time is not None:
-                        entry['acquired_at_epoch'] = float(ev_time)
+                        entry["acquired_at_epoch"] = float(ev_time)
                     if isinstance(val, np.ndarray):
-                        entry['volume'] = val
-                        entry['shape'] = val.shape
+                        entry["volume"] = val
+                        entry["shape"] = val.shape
                     elif self._is_file_ref(val):
                         arr, path = self._resolve_file_ref(val)
-                        entry['volume'] = arr
-                        entry['shape'] = arr.shape
-                        entry['volume_path'] = str(path)
+                        entry["volume"] = arr
+                        entry["shape"] = arr.shape
+                        entry["volume_path"] = str(path)
                     else:
-                        entry['volume'] = np.array(val)
-                        entry['shape'] = entry['volume'].shape
-                    if '__resolved_paths__' in data:
+                        entry["volume"] = np.array(val)
+                        entry["shape"] = entry["volume"].shape
+                    if "__resolved_paths__" in data:
                         # _submit_plan_and_wait doesn't currently populate this
                         # for events, but support it if a future change does.
-                        rp = data['__resolved_paths__']
+                        rp = data["__resolved_paths__"]
                         if isinstance(rp, dict) and key in rp:
-                            entry['volume_path'] = str(rp[key])
+                            entry["volume_path"] = str(rp[key])
                     frames_out.append(entry)
                     break
 
@@ -736,32 +736,32 @@ class DiSPIMMicroscope(Microscope):
         duration_s = 0.0
         sustained_hz = 0.0
         if events:
-            first_t = events[0].get('time')
-            last_t = events[-1].get('time')
+            first_t = events[0].get("time")
+            last_t = events[-1].get("time")
             if first_t is not None and last_t is not None and last_t > first_t:
                 duration_s = float(last_t - first_t)
                 if duration_s > 0:
                     sustained_hz = len(frames_out) / duration_s
 
         return {
-            'success': True,
-            'frames': frames_out,
-            'frames_captured': len(frames_out),
-            'frames_requested': frames,
-            'duration_s': duration_s,
-            'sustained_hz': sustained_hz,
-            'mode': mode,
+            "success": True,
+            "frames": frames_out,
+            "frames_captured": len(frames_out),
+            "frames_requested": frames,
+            "duration_s": duration_s,
+            "sustained_hz": sustained_hz,
+            "mode": mode,
         }
 
     # =========================================================================
     # LED / Camera Controls
     # =========================================================================
 
-    async def set_led(self, state: str = 'Closed') -> Dict:
+    async def set_led(self, state: str = "Closed") -> dict:
         """Set LED state ('Open' or 'Closed')."""
-        return await self._api_post('/api/led/set', {'state': state})
+        return await self._api_post("/api/led/set", {"state": state})
 
-    async def set_laser_power(self, wavelength: int, pct: float) -> Dict:
+    async def set_laser_power(self, wavelength: int, pct: float) -> dict:
         """Set per-line laser power %.
 
         Hits the device layer's ``POST /api/light_source/power`` directly
@@ -777,12 +777,15 @@ class DiSPIMMicroscope(Microscope):
         pct : float
             Setpoint percent (must be within hard limit for ``wavelength``).
         """
-        return await self._api_post('/api/light_source/power', {
-            'wavelength': int(wavelength),
-            'pct': float(pct),
-        })
+        return await self._api_post(
+            "/api/light_source/power",
+            {
+                "wavelength": int(wavelength),
+                "pct": float(pct),
+            },
+        )
 
-    async def get_laser_power(self, wavelength: int) -> Dict:
+    async def get_laser_power(self, wavelength: int) -> dict:
         """Read the current per-line laser power %.
 
         Hits ``GET /api/light_source/power?wavelength={wavelength}`` —
@@ -796,13 +799,13 @@ class DiSPIMMicroscope(Microscope):
             ) as resp:
                 return await resp.json()
         except Exception as e:
-            return {'success': False, 'error': str(e)}
+            return {"success": False, "error": str(e)}
 
-    async def get_led_status(self) -> Dict:
+    async def get_led_status(self) -> dict:
         """Get current LED status."""
-        return await self._api_get('/api/led/status')
+        return await self._api_get("/api/led/status")
 
-    async def set_room_light(self, state: str = 'off') -> Dict:
+    async def set_room_light(self, state: str = "off") -> dict:
         """Switch the diSPIM room light on/off via the SwitchBot Bot.
 
         Hits ``POST /api/room_light/set`` directly (no Bluesky queue, no
@@ -810,25 +813,25 @@ class DiSPIMMicroscope(Microscope):
         'on' | 'off' | 'press'. Blocks at the device layer until the BLE
         command lands (~1-2 s).
         """
-        return await self._api_post('/api/room_light/set', {'state': state})
+        return await self._api_post("/api/room_light/set", {"state": state})
 
-    async def get_room_light_status(self) -> Dict:
+    async def get_room_light_status(self) -> dict:
         """Read the room light's cached on/off state (no BLE round-trip)."""
-        return await self._api_get('/api/room_light/status')
+        return await self._api_get("/api/room_light/status")
 
-    async def set_temperature(self, target_c: float) -> Dict:
+    async def set_temperature(self, target_c: float) -> dict:
         """Command the thermal-controller setpoint (Celsius). Non-blocking — the
         controller ramps; poll get_temperature() for the lock state."""
-        return await self._api_post('/api/temperature/set', {'target_c': target_c})
+        return await self._api_post("/api/temperature/set", {"target_c": target_c})
 
-    async def get_temperature(self) -> Dict:
+    async def get_temperature(self) -> dict:
         """Get current temperature, setpoint, and lock state."""
-        return await self._api_get('/api/temperature/status')
+        return await self._api_get("/api/temperature/status")
 
     # ------------------------------------------------------------------
     # Live device-state readout (streamed from the device layer poller)
     # ------------------------------------------------------------------
-    async def get_device_state(self, refresh: bool = False) -> Dict:
+    async def get_device_state(self, refresh: bool = False) -> dict:
         """One-shot snapshot of all device positions + properties.
 
         Parameters
@@ -837,12 +840,12 @@ class DiSPIMMicroscope(Microscope):
             If True, force the device layer to re-read MMCore right now.
             Otherwise return the most recent poller snapshot (typically <500 ms old).
         """
-        path = '/api/devices/state'
+        path = "/api/devices/state"
         if refresh:
-            path += '?refresh=1'
+            path += "?refresh=1"
         return await self._api_get(path)
 
-    async def stream_device_states(self, timeout: Optional[float] = None):
+    async def stream_device_states(self, timeout: float | None = None):
         """Async generator yielding parsed device-state events from the SSE stream.
 
         Yields each event payload as a dict. Comment-style heartbeats (lines
@@ -892,11 +895,12 @@ class DiSPIMMicroscope(Microscope):
                     raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
                     try:
                         import json as _json
+
                         yield _json.loads(raw)
                     except Exception as exc:
                         logger.warning("Malformed SSE payload skipped: %s", exc)
 
-    async def stream_bottom_camera(self, timeout: Optional[float] = None):
+    async def stream_bottom_camera(self, timeout: float | None = None):
         """Async generator yielding JPEG frames from the bottom-camera SSE stream.
 
         Mirrors :meth:`stream_device_states`. The device layer's streamer task
@@ -935,21 +939,22 @@ class DiSPIMMicroscope(Microscope):
                     raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
                     try:
                         import json as _json
+
                         yield _json.loads(raw)
                     except Exception as exc:
                         logger.warning("Malformed bottom-camera SSE payload skipped: %s", exc)
 
-    async def set_camera_led_mode(self, use_led: bool = False) -> Dict:
+    async def set_camera_led_mode(self, use_led: bool = False) -> dict:
         """Enable/disable automatic LED for bottom camera captures."""
-        return await self._api_post('/api/camera/led_mode', {'use_led': use_led})
+        return await self._api_post("/api/camera/led_mode", {"use_led": use_led})
 
-    async def set_bottom_camera_exposure(self, exposure_ms: float) -> Dict:
+    async def set_bottom_camera_exposure(self, exposure_ms: float) -> dict:
         """Set bottom camera exposure time in milliseconds."""
-        return await self._api_post('/api/camera/exposure', {'exposure_ms': exposure_ms})
+        return await self._api_post("/api/camera/exposure", {"exposure_ms": exposure_ms})
 
-    async def get_bottom_camera_exposure(self) -> Dict:
+    async def get_bottom_camera_exposure(self) -> dict:
         """Get current bottom camera exposure time."""
-        return await self._api_get('/api/camera/exposure')
+        return await self._api_get("/api/camera/exposure")
 
     async def capture_bottom_image(self, use_led: bool = False, exposure_ms: float = None) -> dict:
         """
@@ -973,16 +978,17 @@ class DiSPIMMicroscope(Microscope):
         await self.set_camera_led_mode(use_led)
 
         result = await self._submit_plan_and_wait(
-            'capture_bottom_image_plan',
-            kwargs={'bottom_camera': 'bottom_camera'}
+            "capture_bottom_image_plan", kwargs={"bottom_camera": "bottom_camera"}
         )
 
-        extracted = self._extract_image(result, ['bottom_camera', 'bottom_camera_image', 'Bottom PCO'])
+        extracted = self._extract_image(
+            result, ["bottom_camera", "bottom_camera_image", "Bottom PCO"]
+        )
         if extracted:
             arr, fpath = extracted
-            return {'image': arr, 'image_path': fpath}
+            return {"image": arr, "image_path": fpath}
 
-        return {'image': np.zeros((100, 100), dtype=np.uint16), 'image_path': None}
+        return {"image": np.zeros((100, 100), dtype=np.uint16), "image_path": None}
 
     # =========================================================================
     # SAM Embryo Detection (HTTP API)
@@ -998,7 +1004,7 @@ class DiSPIMMicroscope(Microscope):
         brightness_percentile: float = 99.0,
         min_area: int = 5000,
         max_area: int = 150000,
-    ) -> Dict:
+    ) -> dict:
         """
         Capture image and detect embryos using brightness detection + SAM.
 
@@ -1031,7 +1037,7 @@ class DiSPIMMicroscope(Microscope):
             'image': np.ndarray, ...}``
         """
         if not self.has_sam:
-            return {'error': 'SAM detection not available on server'}
+            return {"error": "SAM detection not available on server"}
 
         self._ensure_connected()
 
@@ -1039,65 +1045,79 @@ class DiSPIMMicroscope(Microscope):
             logger.info("Calling /api/detect_embryos (server-side capture + SAM)...")
 
             payload = {
-                'pixel_size_um': pixel_size_um,
-                'objective_mag': objective_mag,
-                'use_claude_review': use_claude_review,
-                'min_confidence': min_confidence,
-                'brightness_percentile': brightness_percentile,
-                'min_area': min_area,
-                'max_area': max_area,
+                "pixel_size_um": pixel_size_um,
+                "objective_mag": objective_mag,
+                "use_claude_review": use_claude_review,
+                "min_confidence": min_confidence,
+                "brightness_percentile": brightness_percentile,
+                "min_area": min_area,
+                "max_area": max_area,
             }
             if exposure_ms is not None:
-                payload['exposure_ms'] = exposure_ms
+                payload["exposure_ms"] = exposure_ms
 
             async with self._session.post(
-                f"{self.http_url}/api/detect_embryos",
-                json=payload,
-                timeout=300
+                f"{self.http_url}/api/detect_embryos", json=payload, timeout=300
             ) as resp:
                 result = await resp.json()
 
-            if not result.get('success'):
+            if not result.get("success"):
                 return result
 
             # Ensure the caller has the image to feed into the map view.
-            if result.get('image') is None:
+            if result.get("image") is None:
                 image = await self._get_detection_image(result, exposure_ms)
                 if image is not None:
-                    result['image'] = image
+                    result["image"] = image
 
             return result
 
         except asyncio.TimeoutError:
-            return {'success': False, 'error': 'Detection timed out (5 min limit)'}
+            return {"success": False, "error": "Detection timed out (5 min limit)"}
         except aiohttp.ClientError as e:
-            return {'error': str(NetworkError(f"Device layer request failed: {e}")),
-                    'traceback': traceback.format_exc(), 'success': False}
+            return {
+                "error": str(NetworkError(f"Device layer request failed: {e}")),
+                "traceback": traceback.format_exc(),
+                "success": False,
+            }
         except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "success": False,
+            }
 
-    async def _get_detection_image(self, detection_result: dict, exposure_ms: float = None) -> Optional[np.ndarray]:
+    async def _get_detection_image(
+        self, detection_result: dict, exposure_ms: float = None
+    ) -> np.ndarray | None:
         """Load or capture an image for the detection editor."""
-        image_path = detection_result.get('image_path')
+        image_path = detection_result.get("image_path")
         if image_path:
             try:
                 import tifffile
+
                 return tifffile.imread(image_path)
             except Exception:
                 pass
         # Fallback: capture a fresh image
         snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
-        image = snap['image']
-        if snap.get('image_path'):
+        image = snap["image"]
+        if snap.get("image_path"):
             try:
-                snap['image_path'].unlink(missing_ok=True)
+                snap["image_path"].unlink(missing_ok=True)
             except OSError:
                 pass
         return image
 
-    async def view_image(self, image: np.ndarray = None, title: str = "Image View",
-                         exposure_ms: float = None, save_path: str = None,
-                         show: bool = True, embryo_annotations: list = None) -> Dict:
+    async def view_image(
+        self,
+        image: np.ndarray = None,
+        title: str = "Image View",
+        exposure_ms: float = None,
+        save_path: str = None,
+        show: bool = True,
+        embryo_annotations: list = None,
+    ) -> dict:
         """Save a bottom-camera image to disk (replaces the napari display).
 
         ``show`` and ``title`` are kept for backwards compatibility with
@@ -1107,54 +1127,63 @@ class DiSPIMMicroscope(Microscope):
         try:
             if image is None:
                 snap = await self.capture_bottom_image(exposure_ms=exposure_ms)
-                image = snap['image']
-                if snap.get('image_path'):
+                image = snap["image"]
+                if snap.get("image_path"):
                     try:
-                        snap['image_path'].unlink(missing_ok=True)
+                        snap["image_path"].unlink(missing_ok=True)
                     except OSError:
                         pass
 
             if image is None:
-                return {'success': False, 'error': 'No image to save'}
+                return {"success": False, "error": "No image to save"}
 
-            result = {'success': True, 'shape': list(image.shape)}
+            result = {"success": True, "shape": list(image.shape)}
             if save_path:
                 # Reuse the existing PNG writer; draws annotations if any.
                 from pathlib import Path as _Path
+
                 _Path(save_path).parent.mkdir(parents=True, exist_ok=True)
                 annots = []
-                for a in (embryo_annotations or []):
-                    px = a.get('pixel_x')
-                    py = a.get('pixel_y')
+                for a in embryo_annotations or []:
+                    px = a.get("pixel_x")
+                    py = a.get("pixel_y")
                     if px is None or py is None:
                         continue
-                    annots.append({
-                        'embryo_number': a.get('label') or a.get('embryo_id') or '?',
-                        'pixel_position': (px, py),
-                    })
+                    annots.append(
+                        {
+                            "embryo_number": a.get("label") or a.get("embryo_id") or "?",
+                            "pixel_position": (px, py),
+                        }
+                    )
                 if annots:
                     from gently.ui.web.embryo_marker import _save_marked_image
+
                     _save_marked_image(image, annots, _Path(save_path))
                 else:
                     from PIL import Image as _PILImage
+
                     arr = image
                     if arr.dtype != np.uint8:
                         lo, hi = arr.min(), arr.max()
                         arr = ((arr - lo) / max(hi - lo, 1) * 255).astype(np.uint8)
                     _PILImage.fromarray(arr).save(save_path)
-                result['saved_to'] = save_path
+                result["saved_to"] = save_path
             return result
         except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "success": False,
+            }
 
     async def view_embryos(
         self,
         image: np.ndarray,
-        embryos: List[Dict],
+        embryos: list[dict],
         title: str = "Embryos",
-        save_path: Optional[str] = None,
+        save_path: str | None = None,
         show: bool = True,
-    ) -> Dict:
+    ) -> dict:
         """Save an annotated PNG of embryos on an image (replaces napari).
 
         Markers in ``embryos`` may use ``center_x``/``center_y`` or
@@ -1163,32 +1192,40 @@ class DiSPIMMicroscope(Microscope):
         """
         try:
             if image is None or not embryos:
-                return {'success': False, 'error': 'No image or embryos to display'}
+                return {"success": False, "error": "No image or embryos to display"}
 
             annots = []
             for emb in embryos:
-                px = emb.get('center_x', emb.get('pixel_x', 0))
-                py = emb.get('center_y', emb.get('pixel_y', 0))
-                annots.append({
-                    'embryo_number': emb.get('embryo_id', '?'),
-                    'pixel_position': (px, py),
-                })
+                px = emb.get("center_x", emb.get("pixel_x", 0))
+                py = emb.get("center_y", emb.get("pixel_y", 0))
+                annots.append(
+                    {
+                        "embryo_number": emb.get("embryo_id", "?"),
+                        "pixel_position": (px, py),
+                    }
+                )
 
-            result = {'success': True, 'num_embryos': len(embryos)}
+            result = {"success": True, "num_embryos": len(embryos)}
             if save_path:
                 from pathlib import Path as _Path
+
                 _Path(save_path).parent.mkdir(parents=True, exist_ok=True)
                 from gently.ui.web.embryo_marker import _save_marked_image
+
                 _save_marked_image(image, annots, _Path(save_path))
-                result['saved_to'] = save_path
+                result["saved_to"] = save_path
             return result
         except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "success": False,
+            }
 
     async def capture_for_marking(
         self,
         exposure_ms: float = None,
-    ) -> Dict:
+    ) -> dict:
         """
         Capture a bottom-camera image for manual marking in the map view.
 
@@ -1206,34 +1243,38 @@ class DiSPIMMicroscope(Microscope):
 
         try:
             snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
-            image = snap['image']
+            image = snap["image"]
 
             if image is None or (image.shape == (100, 100) and image.max() == 0):
-                return {'success': False, 'error': 'Failed to capture image'}
+                return {"success": False, "error": "Failed to capture image"}
 
-            if snap.get('image_path'):
+            if snap.get("image_path"):
                 try:
-                    snap['image_path'].unlink(missing_ok=True)
+                    snap["image_path"].unlink(missing_ok=True)
                 except OSError:
                     pass
 
             stage_pos = await self.get_stage_position()
 
             return {
-                'success': True,
-                'image': image,
-                'stage_position': list(stage_pos),
-                'image_shape': list(image.shape),
+                "success": True,
+                "image": image,
+                "stage_position": list(stage_pos),
+                "image_shape": list(image.shape),
             }
 
         except Exception as e:
-            return {'error': str(e), 'traceback': traceback.format_exc(), 'success': False}
+            return {
+                "error": str(e),
+                "traceback": traceback.format_exc(),
+                "success": False,
+            }
 
     # =========================================================================
     # Status
     # =========================================================================
 
-    async def _get_server_status(self) -> Dict:
+    async def _get_server_status(self) -> dict:
         """Query device layer and SAM server status via HTTP."""
         status = {}
 
@@ -1243,18 +1284,18 @@ class DiSPIMMicroscope(Microscope):
                 async with self._session.get(f"{self.http_url}/api/status") as resp:
                     if resp.status == 200:
                         server_status = await resp.json()
-                        status['queue_server'] = {
-                            'manager_state': server_status.get('manager_state'),
-                            're_state': server_status.get('re_state', 'idle'),
-                            'devices': server_status.get('devices', []),
-                            'plans': server_status.get('plans', []),
+                        status["queue_server"] = {
+                            "manager_state": server_status.get("manager_state"),
+                            "re_state": server_status.get("re_state", "idle"),
+                            "devices": server_status.get("devices", []),
+                            "plans": server_status.get("plans", []),
                         }
                     else:
-                        status['queue_server'] = {'error': f'HTTP {resp.status}'}
+                        status["queue_server"] = {"error": f"HTTP {resp.status}"}
             except (aiohttp.ClientError, Exception) as e:
-                status['queue_server'] = {'error': str(e)}
+                status["queue_server"] = {"error": str(e)}
         else:
-            status['queue_server'] = {'connected': False}
+            status["queue_server"] = {"connected": False}
 
         # SAM status (via HTTP, same server)
         if self._session and self._qs_connected:
@@ -1262,20 +1303,19 @@ class DiSPIMMicroscope(Microscope):
                 async with self._session.get(f"{self.http_url}/api/sam/status") as resp:
                     if resp.status == 200:
                         sam_status = await resp.json()
-                        status['sam_server'] = {
-                            'available': sam_status.get('available', False),
-                            'loaded': sam_status.get('loaded', False),
-                            'device': sam_status.get('device', 'unknown'),
+                        status["sam_server"] = {
+                            "available": sam_status.get("available", False),
+                            "loaded": sam_status.get("loaded", False),
+                            "device": sam_status.get("device", "unknown"),
                         }
                     else:
-                        status['sam_server'] = {'error': f'HTTP {resp.status}'}
+                        status["sam_server"] = {"error": f"HTTP {resp.status}"}
             except (aiohttp.ClientError, Exception) as e:
-                status['sam_server'] = {'error': str(e)}
+                status["sam_server"] = {"error": str(e)}
         else:
-            status['sam_server'] = {'connected': False}
+            status["sam_server"] = {"connected": False}
 
         return status
-
 
     # =========================================================================
     # Microscope plan implementations
@@ -1325,7 +1365,7 @@ QueueServerClient = DiSPIMMicroscope
 
 async def create_queue_server_client(
     http_url: str = f"http://{settings.network.device_host}:{settings.network.device_port}",
-) -> Optional[DiSPIMMicroscope]:
+) -> DiSPIMMicroscope | None:
     """Create and connect a diSPIM microscope client."""
     client = DiSPIMMicroscope(http_url=http_url)
     if await client.connect():

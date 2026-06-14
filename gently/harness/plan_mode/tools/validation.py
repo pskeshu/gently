@@ -5,11 +5,9 @@ Validates hardware limits, stage consistency, duration estimates,
 detector validity, missing controls, dependency cycles, and completeness.
 """
 
-import json
 import logging
-from typing import Dict, List, Optional, Set, Tuple
 
-from ...tools.registry import tool, ToolCategory, ToolExample
+from ...tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +20,7 @@ HARDWARE_LIMITS = {
     "num_slices": (10, 200),
     "exposure_ms": (5.0, 100.0),
     "laser_power_pct": (0.0, 100.0),
-    "interval_s": (10, None),       # minimum 10s, no hard max
+    "interval_s": (10, None),  # minimum 10s, no hard max
     "piezo_amplitude_um": (None, 200.0),  # max ±200 μm
 }
 
@@ -40,9 +38,9 @@ STAGE_TIMING_20C = {
 
 # Temperature scaling factors (relative to 20°C)
 TEMP_SCALE = {
-    15.0: 24.0 / 14.0,   # ~1.71×  slower
+    15.0: 24.0 / 14.0,  # ~1.71×  slower
     20.0: 1.0,
-    25.0: 10.0 / 14.0,   # ~0.71×  faster
+    25.0: 10.0 / 14.0,  # ~0.71×  faster
 }
 
 CONTROL_KEYWORDS = {"control", "wildtype", "n2", "wt", "wild-type", "wild type"}
@@ -52,7 +50,8 @@ CONTROL_KEYWORDS = {"control", "wildtype", "n2", "wt", "wild-type", "wild type"}
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _get_temp_factor(temperature_c: Optional[float]) -> float:
+
+def _get_temp_factor(temperature_c: float | None) -> float:
     """Return scaling factor for developmental timing at given temperature."""
     if temperature_c is None:
         return 1.0
@@ -68,19 +67,19 @@ def _get_temp_factor(temperature_c: Optional[float]) -> float:
     return TEMP_SCALE[20.0] + frac * (TEMP_SCALE[25.0] - TEMP_SCALE[20.0])
 
 
-def _check_dependency_cycles(items) -> List[str]:
+def _check_dependency_cycles(items) -> list[str]:
     """DFS-based cycle detection on the dependency graph."""
     # Build adjacency list: item_id -> list of dependency IDs
-    adj: Dict[str, List[str]] = {}
-    id_to_title: Dict[str, str] = {}
+    adj: dict[str, list[str]] = {}
+    id_to_title: dict[str, str] = {}
     for item in items:
         adj[item.id] = list(item.depends_on)
         id_to_title[item.id] = item.title
 
     WHITE, GRAY, BLACK = 0, 1, 2
-    color: Dict[str, int] = {nid: WHITE for nid in adj}
-    cycles: List[str] = []
-    path: List[str] = []
+    color: dict[str, int] = {nid: WHITE for nid in adj}
+    cycles: list[str] = []
+    path: list[str] = []
 
     def dfs(node: str):
         if node not in color:
@@ -110,13 +109,16 @@ def _check_dependency_cycles(items) -> List[str]:
     return cycles
 
 
-def _stage_order(stage_name: str) -> Optional[int]:
+def _stage_order(stage_name: str) -> int | None:
     """Get ordinal position of a stage, or None if unrecognised."""
     from gently_perception.organism import CELEGANS
+
     stages = CELEGANS.stages
     aliases = {
-        "3fold": "pretzel", "threefold": "pretzel",
-        "1.5-fold": "1.5fold", "2-fold": "2fold",
+        "3fold": "pretzel",
+        "threefold": "pretzel",
+        "1.5-fold": "1.5fold",
+        "2-fold": "2fold",
     }
     normed = stage_name.lower().replace("-", "").replace(" ", "")
     name = aliases.get(normed, normed)
@@ -127,9 +129,10 @@ def _stage_order(stage_name: str) -> Optional[int]:
     return None
 
 
-def _normalise_stage(name: str) -> Optional[str]:
+def _normalise_stage(name: str) -> str | None:
     """Normalise a stage name to canonical form, or None."""
     from gently_perception.organism import CELEGANS
+
     stages = CELEGANS.stages
     low = name.lower().strip()
     for s in stages:
@@ -142,6 +145,7 @@ def _normalise_stage(name: str) -> Optional[str]:
 # ---------------------------------------------------------------------------
 # Tool
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="validate_plan",
@@ -161,7 +165,7 @@ def _normalise_stage(name: str) -> Optional[str]:
 )
 async def validate_plan(
     campaign_id: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Validate a plan and return errors/warnings."""
     agent = context.get("agent") if context else None
@@ -178,14 +182,18 @@ async def validate_plan(
     if not items:
         return f"Campaign '{campaign.description}' has no plan items to validate."
 
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     # Load detector presets for validation
     try:
         from gently.organisms import get_organism
+
         org = get_organism()
-        presets_mod = __import__(f"gently.organisms.{org.ORGANISM_NAME}.detector_presets", fromlist=["get_detector_presets"])
+        presets_mod = __import__(
+            f"gently.organisms.{org.ORGANISM_NAME}.detector_presets",
+            fromlist=["get_detector_presets"],
+        )
         valid_detectors = set(presets_mod.get_detector_presets().keys())
     except ImportError:
         valid_detectors = set()
@@ -199,16 +207,31 @@ async def validate_plan(
         label = f"[{item.type.value}] '{item.title}'"
 
         # Check for control mentions
-        text_blob = " ".join(filter(None, [
-            item.title, item.description, item.outcome,
-        ])).lower()
+        text_blob = " ".join(
+            filter(
+                None,
+                [
+                    item.title,
+                    item.description,
+                    item.outcome,
+                ],
+            )
+        ).lower()
         if item.imaging_spec:
-            text_blob += " " + " ".join(filter(None, [
-                item.imaging_spec.strain,
-                item.imaging_spec.genotype,
-                item.imaging_spec.reporter,
-                item.imaging_spec.success_criteria,
-            ])).lower()
+            text_blob += (
+                " "
+                + " ".join(
+                    filter(
+                        None,
+                        [
+                            item.imaging_spec.strain,
+                            item.imaging_spec.genotype,
+                            item.imaging_spec.reporter,
+                            item.imaging_spec.success_criteria,
+                        ],
+                    )
+                ).lower()
+            )
         if any(kw in text_blob for kw in CONTROL_KEYWORDS):
             has_control = True
 
@@ -221,13 +244,9 @@ async def validate_plan(
                 if val is None:
                     continue
                 if lo is not None and val < lo:
-                    errors.append(
-                        f"{label}: {field_name}={val} below minimum {lo}"
-                    )
+                    errors.append(f"{label}: {field_name}={val} below minimum {lo}")
                 if hi is not None and val > hi:
-                    errors.append(
-                        f"{label}: {field_name}={val} exceeds maximum {hi}"
-                    )
+                    errors.append(f"{label}: {field_name}={val} exceeds maximum {hi}")
 
             # Stage consistency
             if spec.start_stage and spec.stop_condition:

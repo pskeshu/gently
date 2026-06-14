@@ -27,7 +27,7 @@ from __future__ import annotations
 import logging
 import os
 import threading
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 from .event_bus import EventBus, EventType, get_event_bus
 
@@ -37,18 +37,26 @@ logger = logging.getLogger(__name__)
 # Loggers we never want on the Events page — they emit at the wrong layer
 # (their own log lines describe bus dispatch / events page WebSocket frames)
 # so republishing them would create feedback or infinite churn.
-_NEVER_BRIDGE = frozenset({
-    "gently.core.event_bus",
-    "gently.core.log_bridge",
-})
+_NEVER_BRIDGE = frozenset(
+    {
+        "gently.core.event_bus",
+        "gently.core.log_bridge",
+    }
+)
 
 # Loggers that count as "third-party noise" — silenced by default, can be
 # opted in with GENTLY_LOG_BUS_INCLUDE_THIRDPARTY=1.
 _THIRDPARTY_DEFAULTS: Sequence[str] = (
-    "uvicorn", "uvicorn.error", "uvicorn.access",
-    "aiohttp", "aiohttp.access",
-    "anthropic", "httpx", "httpcore",
-    "bluesky", "bluesky.RE.state",
+    "uvicorn",
+    "uvicorn.error",
+    "uvicorn.access",
+    "aiohttp",
+    "aiohttp.access",
+    "anthropic",
+    "httpx",
+    "httpcore",
+    "bluesky",
+    "bluesky.RE.state",
 )
 
 
@@ -117,12 +125,12 @@ class LogToBusHandler(logging.Handler):
 
 
 def configure_log_bridge(
-    bus: Optional[EventBus] = None,
+    bus: EventBus | None = None,
     *,
-    loggers: Optional[Iterable[str]] = None,
-    level: Optional[str] = None,
-    include_thirdparty: Optional[bool] = None,
-) -> Optional[LogToBusHandler]:
+    loggers: Iterable[str] | None = None,
+    level: str | None = None,
+    include_thirdparty: bool | None = None,
+) -> LogToBusHandler | None:
     """Attach a LogToBusHandler to the requested loggers.
 
     Returns the installed handler (or None if the bridge is disabled).
@@ -170,6 +178,8 @@ def configure_log_bridge(
         # become a LOG_RECORD event.
         logger.info(
             "Log bridge active: level=%s, loggers=%s, include_thirdparty=%s",
-            logging.getLevelName(level_int), attached, include_thirdparty,
+            logging.getLevelName(level_int),
+            attached,
+            include_thirdparty,
         )
     return handler

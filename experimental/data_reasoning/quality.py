@@ -7,7 +7,6 @@ are consistent.
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 from .models import DataQualityReport
 
@@ -26,7 +25,9 @@ class QualityAnalyzer:
     def __init__(self, gently_store=None):
         self._store = gently_store
 
-    def analyze(self, session_ids: Optional[list] = None, check_files: bool = False) -> DataQualityReport:
+    def analyze(
+        self, session_ids: list | None = None, check_files: bool = False
+    ) -> DataQualityReport:
         """Run quality checks on local data.
 
         Parameters
@@ -62,7 +63,11 @@ class QualityAnalyzer:
                     for vol in vols:
                         # Check volume file exists if requested
                         if check_files:
-                            vpath = vol.file_path if hasattr(vol, "file_path") else vol.get("file_path", "")
+                            vpath = (
+                                vol.file_path
+                                if hasattr(vol, "file_path")
+                                else vol.get("file_path", "")
+                            )
                             if vpath and Path(vpath).exists():
                                 report.readable_volumes += 1
                             elif vpath:
@@ -87,7 +92,11 @@ class QualityAnalyzer:
                             # Check for overlapping timepoint ranges
                             ranges = []
                             for gt in gts:
-                                start = gt.start_tp if hasattr(gt, "start_tp") else gt.get("start_tp", 0)
+                                start = (
+                                    gt.start_tp
+                                    if hasattr(gt, "start_tp")
+                                    else gt.get("start_tp", 0)
+                                )
                                 end = gt.end_tp if hasattr(gt, "end_tp") else gt.get("end_tp", 0)
                                 if start and end and start > end:
                                     report.inconsistent_annotations += 1

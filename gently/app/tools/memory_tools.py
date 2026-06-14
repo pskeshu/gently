@@ -4,12 +4,10 @@ Memory recall tools — let the agent query its persistent memory on demand.
 Thin wrappers around AgentMemory. Available in both run and plan modes.
 """
 
-from typing import Dict, Optional
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
-def _get_memory(context: Dict):
+def _get_memory(context: dict):
     """Extract AgentMemory from tool context."""
     agent = context.get("agent") if context else None
     if not agent or not hasattr(agent, "memory") or not agent.memory:
@@ -38,7 +36,7 @@ def _get_memory(context: Dict):
 )
 async def recall_campaigns(
     status: str = "active",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """List campaigns filtered by status."""
     memory = _get_memory(context)
@@ -68,7 +66,7 @@ async def recall_campaigns(
 async def recall_learnings(
     query: str = None,
     limit: int = 20,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Search or list learnings."""
     memory = _get_memory(context)
@@ -80,8 +78,7 @@ async def recall_learnings(
 @tool(
     name="recall_observations",
     description=(
-        "Search or list observations from past sessions. Can filter by "
-        "keyword or embryo ID."
+        "Search or list observations from past sessions. Can filter by keyword or embryo ID."
     ),
     category=ToolCategory.UTILITY,
     examples=[
@@ -99,7 +96,7 @@ async def recall_observations(
     query: str = None,
     embryo_id: str = None,
     limit: int = 20,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Search or list observations."""
     memory = _get_memory(context)
@@ -125,7 +122,7 @@ async def recall_observations(
 )
 async def recall_context(
     campaign_id: str = None,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Full context snapshot."""
     memory = _get_memory(context)

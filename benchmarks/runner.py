@@ -13,8 +13,6 @@ import asyncio
 import json
 import logging
 import sys
-from datetime import datetime
-from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
@@ -66,7 +64,6 @@ async def run_agent_benchmark(args):
 
 def compare_reports(args):
     """Compare two benchmark reports"""
-    from .agent.evaluator import BenchmarkReport, compare_reports as _compare
 
     with open(args.before) as f:
         before_data = json.load(f)
@@ -101,7 +98,10 @@ def compare_reports(args):
         delta_str = f"+{fmt.format(delta)}" if delta > 0 else fmt.format(delta)
         status = "improved" if delta > 0 else ("regressed" if delta < 0 else "unchanged")
 
-        logger.info(f"  {name}: {fmt.format(before_val)} -> {fmt.format(after_val)} ({delta_str}) [{status}]")
+        logger.info(
+            f"  {name}: {fmt.format(before_val)} -> {fmt.format(after_val)}"
+            f" ({delta_str}) [{status}]"
+        )
 
     # Token comparison
     before_tokens = before_data.get("tokens", {})
@@ -111,7 +111,7 @@ def compare_reports(args):
     after_total = after_tokens.get("total_input", 0) + after_tokens.get("total_output", 0)
     token_delta = after_total - before_total
 
-    logger.info(f"\nTokens:")
+    logger.info("\nTokens:")
     logger.info(f"  Total: {before_total:,} -> {after_total:,} ({token_delta:+,})")
 
     return 0

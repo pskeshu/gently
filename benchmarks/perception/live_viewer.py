@@ -13,22 +13,19 @@ Run with: python -m benchmarks.perception.live_viewer --session <path> --ground-
 
 import argparse
 import asyncio
-import base64
 import json
 import logging
 import sys
 import webbrowser
-from dataclasses import asdict
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 # FastAPI and websockets
 try:
+    import uvicorn
     from fastapi import FastAPI, WebSocket, WebSocketDisconnect
     from fastapi.responses import HTMLResponse
-    from fastapi.staticfiles import StaticFiles
-    import uvicorn
 except ImportError:
     print("Please install: pip install fastapi uvicorn websockets")
     sys.exit(1)
@@ -39,8 +36,8 @@ from .testset import OfflineTestset
 logger = logging.getLogger(__name__)
 
 # Global state for websocket connections
-connected_clients: List[WebSocket] = []
-benchmark_state: Dict[str, Any] = {
+connected_clients: list[WebSocket] = []
+benchmark_state: dict[str, Any] = {
     "status": "idle",
     "current_embryo": None,
     "current_timepoint": None,
@@ -52,7 +49,7 @@ is_paused: bool = False
 pause_event: asyncio.Event = None  # Will be initialized on startup
 
 
-async def broadcast(message: Dict):
+async def broadcast(message: dict):
     """Broadcast message to all connected clients."""
     if not connected_clients:
         return
@@ -396,7 +393,10 @@ HTML_PAGE = """
     <div class="header">
         <h1>Perception Benchmark Live Viewer</h1>
         <div style="display: flex; align-items: center; gap: 15px;">
-            <button id="pause-btn" onclick="togglePause()" style="padding: 8px 16px; font-size: 0.9em; cursor: pointer; background: #4caf50; color: white; border: none; border-radius: 4px;">⏸ Pause</button>
+            <button id="pause-btn" onclick="togglePause()"
+              style="padding: 8px 16px; font-size: 0.9em; cursor: pointer;
+                     background: #4caf50; color: white; border: none;
+                     border-radius: 4px;">⏸ Pause</button>
             <div id="status" class="status idle">Connecting...</div>
         </div>
     </div>
@@ -555,8 +555,10 @@ HTML_PAGE = """
                 // Display three-view combined image (XY+YZ+XZ orthogonal projections)
                 container.innerHTML = `
                     <div style="text-align: center;">
-                        <div style="color: #888; font-size: 12px; margin-bottom: 4px;">THREE-VIEW (XY | YZ / XZ)</div>
-                        <img src="data:image/jpeg;base64,${imgData.combined}" alt="Three-View T${timepoint}" style="max-height: 450px;">
+                        <div style="color: #888; font-size: 12px; margin-bottom: 4px;">
+                          THREE-VIEW (XY | YZ / XZ)</div>
+                        <img src="data:image/jpeg;base64,${imgData.combined}"
+                          alt="Three-View T${timepoint}" style="max-height: 450px;">
                     </div>`;
                 // Also get embryoId and groundTruth from stored data if not provided
                 embryoId = embryoId || imgData.embryoId;
@@ -628,10 +630,13 @@ HTML_PAGE = """
 
             // Update header
             document.querySelector('.trace-section h2').innerHTML =
-                `Reasoning Trace - T${timepoint} <button onclick="clearSelection()" style="float:right;font-size:0.8em;padding:2px 8px;cursor:pointer;">Show Live</button>`;
+                `Reasoning Trace - T${timepoint} <button onclick="clearSelection()"
+                  style="float:right;font-size:0.8em;padding:2px 8px;
+                         cursor:pointer;">Show Live</button>`;
 
             if (traceSteps.length === 0) {
-                list.innerHTML = '<div class="no-data">No trace recorded for T' + timepoint + '</div>';
+                list.innerHTML = '<div class="no-data">No trace recorded for T'
+                    + timepoint + '</div>';
                 return;
             }
 
@@ -685,12 +690,16 @@ HTML_PAGE = """
                     '<span class="verification-badge">verified</span>' : '';
 
                 html += `
-                    <div class="prediction-row ${rowClass}" onclick="selectTimepoint(${pred.timepoint})" style="cursor:pointer;">
+                    <div class="prediction-row ${rowClass}"
+                      onclick="selectTimepoint(${pred.timepoint})" style="cursor:pointer;">
                         <div>T${pred.timepoint}</div>
-                        <div><span class="stage-badge stage-${pred.predicted}">${pred.predicted}</span></div>
-                        <div><span class="stage-badge stage-${pred.ground_truth}">${pred.ground_truth}</span></div>
+                        <div><span class="stage-badge stage-${pred.predicted}"
+                          >${pred.predicted}</span></div>
+                        <div><span class="stage-badge stage-${pred.ground_truth}"
+                          >${pred.ground_truth}</span></div>
                         <div>${(pred.confidence * 100).toFixed(0)}%</div>
-                        <div>${pred.phase_count > 1 ? pred.phase_count + '-phase' : ''}${verifiedBadge}</div>
+                        <div>${pred.phase_count > 1
+                          ? pred.phase_count + '-phase' : ''}${verifiedBadge}</div>
                     </div>
                 `;
             }
@@ -749,10 +758,14 @@ async def websocket_endpoint(websocket: WebSocket):
     connected_clients.append(websocket)
 
     # Send current state
-    await websocket.send_text(json.dumps({
-        "type": "status",
-        "status": benchmark_state["status"],
-    }))
+    await websocket.send_text(
+        json.dumps(
+            {
+                "type": "status",
+                "status": benchmark_state["status"],
+            }
+        )
+    )
 
     try:
         while True:
@@ -789,8 +802,8 @@ class LiveBenchmarkRunner:
         embryo_id: str,
         enable_verification: bool = True,
         start_timepoint: int = 0,
-        max_timepoints: Optional[int] = None,
-        trace_dir: Optional[Path] = None,
+        max_timepoints: int | None = None,
+        trace_dir: Path | None = None,
     ):
         self.testset = testset
         self.embryo_id = embryo_id
@@ -798,7 +811,7 @@ class LiveBenchmarkRunner:
         self.start_timepoint = start_timepoint
         self.max_timepoints = max_timepoints
 
-        self.predictions: List[Dict] = []
+        self.predictions: list[dict] = []
         self.correct_count = 0
         self.adjacent_count = 0
         self.verified_count = 0
@@ -808,7 +821,7 @@ class LiveBenchmarkRunner:
         self.trace_dir = trace_dir or Path("benchmarks/results/traces")
         self.run_dir = self.trace_dir / f"{self.run_id}_{embryo_id}"
         self.run_dir.mkdir(parents=True, exist_ok=True)
-        self.traces: Dict[int, List[Dict]] = {}  # timepoint -> trace steps
+        self.traces: dict[int, list[dict]] = {}  # timepoint -> trace steps
 
         logger.info(f"Trace persistence enabled: {self.run_dir}")
 
@@ -861,23 +874,23 @@ class LiveBenchmarkRunner:
             benchmark_state["current_timepoint"] = test_case.timepoint
 
             # Send image(s)
-            await broadcast({
-                "type": "image",
-                "embryo_id": self.embryo_id,
-                "timepoint": test_case.timepoint,
-                "ground_truth": test_case.ground_truth_stage,
-                "image": test_case.image_b64,  # Combined for backward compat
-                "top_image": test_case.top_image_b64,
-                "side_image": test_case.side_image_b64,
-            })
+            await broadcast(
+                {
+                    "type": "image",
+                    "embryo_id": self.embryo_id,
+                    "timepoint": test_case.timepoint,
+                    "ground_truth": test_case.ground_truth_stage,
+                    "image": test_case.image_b64,  # Combined for backward compat
+                    "top_image": test_case.top_image_b64,
+                    "side_image": test_case.side_image_b64,
+                }
+            )
 
             # Clear trace for new prediction
             await broadcast({"type": "clear_trace"})
 
             # Run perception with trace streaming
-            result = await self._run_perception_with_streaming(
-                engine, session, test_case
-            )
+            result = await self._run_perception_with_streaming(engine, session, test_case)
 
             # Check accuracy
             is_correct = result.stage == test_case.ground_truth_stage
@@ -915,23 +928,29 @@ class LiveBenchmarkRunner:
             await broadcast(pred_msg)
 
             # Save trace for this timepoint
-            self._save_timepoint_trace(test_case.timepoint, result, test_case, is_correct, is_adjacent)
+            self._save_timepoint_trace(
+                test_case.timepoint, result, test_case, is_correct, is_adjacent
+            )
 
             # Send updated stats
             total = len(self.predictions)
-            await broadcast({
-                "type": "stats",
-                "accuracy": self.correct_count / total if total > 0 else None,
-                "adjacent": self.adjacent_count / total if total > 0 else None,
-                "total": total,
-                "verified": self.verified_count,
-            })
+            await broadcast(
+                {
+                    "type": "stats",
+                    "accuracy": self.correct_count / total if total > 0 else None,
+                    "adjacent": self.adjacent_count / total if total > 0 else None,
+                    "total": total,
+                    "verified": self.verified_count,
+                }
+            )
 
             # Add observation to session with simulated timestamp
             # Typical diSPIM acquisition interval is ~4 minutes per timepoint
-            simulated_timestamp = datetime.now() - timedelta(
-                minutes=(self.max_timepoints or 100) * 4
-            ) + timedelta(minutes=test_case.timepoint * 4)
+            simulated_timestamp = (
+                datetime.now()
+                - timedelta(minutes=(self.max_timepoints or 100) * 4)
+                + timedelta(minutes=test_case.timepoint * 4)
+            )
 
             session.add_observation(
                 timepoint=test_case.timepoint,
@@ -953,7 +972,6 @@ class LiveBenchmarkRunner:
 
     async def _run_perception_with_streaming(self, engine, session, test_case):
         """Run perception and stream trace steps."""
-        from gently.harness.perception.session import ReasoningStep
 
         # We need to hook into the reasoning trace
         # For now, run perception and stream the trace after
@@ -985,7 +1003,9 @@ class LiveBenchmarkRunner:
 
         return result
 
-    def _save_timepoint_trace(self, timepoint: int, result, test_case, is_correct: bool, is_adjacent: bool):
+    def _save_timepoint_trace(
+        self, timepoint: int, result, test_case, is_correct: bool, is_adjacent: bool
+    ):
         """Save trace for a single timepoint to disk."""
         trace_data = {
             "timepoint": timepoint,
@@ -1035,7 +1055,7 @@ async def run_benchmark_background(
     embryo_id: str,
     enable_verification: bool,
     start_timepoint: int = 0,
-    max_timepoints: Optional[int] = None,
+    max_timepoints: int | None = None,
 ):
     """Run benchmark in background after server starts."""
     print("[DEBUG] run_benchmark_background starting", flush=True)
@@ -1049,7 +1069,10 @@ async def run_benchmark_background(
 
         # Load data
         ground_truth = GroundTruth.from_json(ground_truth_path)
-        print(f"[DEBUG] Loaded ground truth: {len(ground_truth.transitions)} embryos", flush=True)
+        print(
+            f"[DEBUG] Loaded ground truth: {len(ground_truth.transitions)} embryos",
+            flush=True,
+        )
         testset = OfflineTestset(
             session_path=session_path,
             ground_truth=ground_truth,
@@ -1071,6 +1094,7 @@ async def run_benchmark_background(
     except Exception as e:
         print(f"[DEBUG] ERROR in run_benchmark_background: {e}", flush=True)
         import traceback
+
         traceback.print_exc()
 
 
@@ -1142,9 +1166,9 @@ def main():
     trace_dir = Path("benchmarks/results/traces")
     run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("Perception Benchmark Live Viewer")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"Session: {session_path}")
     print(f"Embryo: {args.embryo}")
     print(f"Start timepoint: T{args.start_timepoint}")
@@ -1152,7 +1176,7 @@ def main():
     print(f"Verification: {'disabled' if args.no_verification else 'enabled'}")
     print(f"Traces: {trace_dir / f'{run_id}_{args.embryo}'}")
     print(f"URL: http://localhost:{args.port}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     # Open browser
     if not args.no_browser:
@@ -1162,14 +1186,16 @@ def main():
     @app.on_event("startup")
     async def startup_event():
         print("[DEBUG] Startup event fired", flush=True)
-        asyncio.create_task(run_benchmark_background(
-            session_path=session_path,
-            ground_truth_path=gt_path,
-            embryo_id=args.embryo,
-            enable_verification=not args.no_verification,
-            start_timepoint=args.start_timepoint,
-            max_timepoints=args.max_timepoints,
-        ))
+        asyncio.create_task(
+            run_benchmark_background(
+                session_path=session_path,
+                ground_truth_path=gt_path,
+                embryo_id=args.embryo,
+                enable_verification=not args.no_verification,
+                start_timepoint=args.start_timepoint,
+                max_timepoints=args.max_timepoints,
+            )
+        )
         print("[DEBUG] Background task created", flush=True)
 
     # Run server

@@ -13,11 +13,10 @@ import sys
 from pathlib import Path
 
 from .aggregator import DatasetAggregator
-from .schema import get_connection, get_database_stats, DEFAULT_DB_PATH
+from .schema import DEFAULT_DB_PATH, get_connection, get_database_stats
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
@@ -74,7 +73,7 @@ def cmd_stats(args):
     print()
     print(f"Unique Embryo-Sessions: {stats.get('unique_embryo_sessions', 0):,}")
     print()
-    if stats.get('earliest_volume'):
+    if stats.get("earliest_volume"):
         print(f"Date Range: {stats['earliest_volume'][:10]} to {stats['latest_volume'][:10]}")
 
 
@@ -89,6 +88,7 @@ def cmd_serve(args):
 
     try:
         from .explorer_server import DatasetExplorer
+
         explorer = DatasetExplorer(db_path=db_path, port=args.port)
         explorer.run()
     except ImportError as e:
@@ -121,7 +121,7 @@ def cmd_query(args):
         print("-" * 80)
 
         # Print rows
-        for row in rows[:args.limit]:
+        for row in rows[: args.limit]:
             print("\t".join(str(v) if v is not None else "NULL" for v in row))
 
         if len(rows) > args.limit:
@@ -152,22 +152,17 @@ Examples:
 
     # Run a SQL query
     python -m gently.dataset.cli query "SELECT * FROM sessions LIMIT 5"
-        """
+        """,
     )
 
-    parser.add_argument(
-        "--db",
-        help=f"Database path (default: {DEFAULT_DB_PATH})"
-    )
+    parser.add_argument("--db", help=f"Database path (default: {DEFAULT_DB_PATH})")
 
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     # Aggregate command
     agg_parser = subparsers.add_parser("aggregate", help="Aggregate data into database")
     agg_parser.add_argument(
-        "--full",
-        action="store_true",
-        help="Run full aggregation (not incremental)"
+        "--full", action="store_true", help="Run full aggregation (not incremental)"
     )
 
     # Stats command
@@ -176,20 +171,14 @@ Examples:
     # Serve command
     serve_parser = subparsers.add_parser("serve", help="Start web explorer")
     serve_parser.add_argument(
-        "--port",
-        type=int,
-        default=8765,
-        help="Port to serve on (default: 8765)"
+        "--port", type=int, default=8765, help="Port to serve on (default: 8765)"
     )
 
     # Query command
     query_parser = subparsers.add_parser("query", help="Run SQL query")
     query_parser.add_argument("sql", help="SQL query to run")
     query_parser.add_argument(
-        "--limit",
-        type=int,
-        default=100,
-        help="Max rows to display (default: 100)"
+        "--limit", type=int, default=100, help="Max rows to display (default: 100)"
     )
 
     args = parser.parse_args()

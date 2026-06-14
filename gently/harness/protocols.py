@@ -10,7 +10,7 @@ Usage:
     from gently.harness.protocols import MicroscopeClientProtocol
 """
 
-from typing import Protocol, runtime_checkable, Dict, List, Set, Tuple, Optional
+from typing import Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -24,11 +24,11 @@ class OrganismProtocol(Protocol):
 
     ORGANISM_NAME: str
     ORGANISM_DISPLAY_NAME: str
-    SAMPLE_TERM: str              # "embryo", "cell", "organoid"
+    SAMPLE_TERM: str  # "embryo", "cell", "organoid"
     SAMPLE_TERM_PLURAL: str
     STAGES: list
     TERMINAL_STAGES: set
-    BIOLOGY_KNOWLEDGE: str        # Markdown text for LLM context
+    BIOLOGY_KNOWLEDGE: str  # Markdown text for LLM context
     PERCEPTION_SYSTEM_PROMPT: str
 
 
@@ -55,10 +55,10 @@ class HardwareProtocol(Protocol):
 
     HARDWARE_NAME: str
     HARDWARE_DISPLAY_NAME: str
-    HARDWARE_DESCRIPTION: str     # Markdown text for LLM context
-    CAPABILITIES: set             # Set of capability strings
+    HARDWARE_DESCRIPTION: str  # Markdown text for LLM context
+    CAPABILITIES: set  # Set of capability strings
 
 
 # Backward-compat alias — the Microscope base class in harness/microscope.py
 # replaces this Protocol. Import from there for new code.
-from .microscope import Microscope as MicroscopeClientProtocol  # noqa: F401
+from .microscope import Microscope as MicroscopeClientProtocol  # noqa: E402, F401

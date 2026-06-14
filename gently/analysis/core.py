@@ -10,19 +10,20 @@ Designed for easy AI integration and testing.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple, Any, Union
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
 import numpy as np
-from scipy import optimize, stats
+from scipy import optimize
 from scipy.ndimage import gaussian_filter, sobel
-import warnings
 
 from ..exceptions import FocusFitError
 
 
 class FocusAlgorithm(Enum):
     """Focus scoring algorithms available"""
+
     VOLATH = "volath"
     GRADIENT = "gradient"
     VARIANCE = "variance"
@@ -32,11 +33,12 @@ class FocusAlgorithm(Enum):
 # FFT Bandpass parameters (from ASI diSPIM OughtaFocus implementation)
 # These define the spatial frequency band analyzed for focus quality
 FFT_LOWER_CUTOFF = 0.025  # 2.5% of max frequency - filters DC and low spatial frequencies
-FFT_UPPER_CUTOFF = 0.14   # 14% of max frequency - filters high-frequency noise
+FFT_UPPER_CUTOFF = 0.14  # 14% of max frequency - filters high-frequency noise
 
 
 class FitFunction(Enum):
     """Curve fitting functions available"""
+
     GAUSSIAN = "gaussian"
     PARABOLIC = "parabolic"
     NONE = "none"
@@ -45,6 +47,7 @@ class FitFunction(Enum):
 @dataclass
 class FocusAnalysisConfig:
     """Configuration for focus analysis operations"""
+
     algorithm: str = FocusAlgorithm.VOLATH.value
     fit_function: str = FitFunction.GAUSSIAN.value
     minimum_r_squared: float = 0.75
@@ -56,14 +59,15 @@ class FocusAnalysisConfig:
 @dataclass
 class FocusResult:
     """Result of focus analysis"""
+
     success: bool
     best_position: float
     best_score: float
     r_squared: float
-    fit_params: Optional[np.ndarray] = None
-    all_positions: Optional[np.ndarray] = None
-    all_scores: Optional[np.ndarray] = None
-    error_message: Optional[str] = None
+    fit_params: np.ndarray | None = None
+    all_positions: np.ndarray | None = None
+    all_scores: np.ndarray | None = None
+    error_message: str | None = None
 
 
 class AdaptiveSweepState:
@@ -82,15 +86,15 @@ class AdaptiveSweepState:
 
     # Early stopping thresholds
     DECLINE_THRESHOLD: float = 0.70  # Stop if score drops below 70% of max
-    MIN_DECLINE_COUNT: int = 3       # Require N consecutive declines
-    MIN_POINTS_FOR_FIT: int = 5      # Minimum points before attempting fit
-    MIN_POINTS_PAST_PEAK: int = 3    # Need N points past peak for robust fit
+    MIN_DECLINE_COUNT: int = 3  # Require N consecutive declines
+    MIN_POINTS_FOR_FIT: int = 5  # Minimum points before attempting fit
+    MIN_POINTS_PAST_PEAK: int = 3  # Need N points past peak for robust fit
     STABILITY_THRESHOLD_UM: float = 0.5  # Peak position stability threshold
     HIGH_CONFIDENCE_R2: float = 0.90  # R² threshold for early exit
 
     def __init__(self):
-        self.positions: List[float] = []
-        self.scores: List[float] = []
+        self.positions: list[float] = []
+        self.scores: list[float] = []
 
         # Peak detection state
         self.running_max_score: float = 0.0
@@ -103,9 +107,9 @@ class AdaptiveSweepState:
         self.current_r_squared: float = 0.0
         self.fit_stable: bool = False
         self.last_fit_position: float = 0.0
-        self.fit_history: List[Dict[str, float]] = []
+        self.fit_history: list[dict[str, float]] = []
 
-    def add_point(self, position: float, score: float) -> Dict[str, Any]:
+    def add_point(self, position: float, score: float) -> dict[str, Any]:
         """
         Add new measurement and compute early stopping decision.
 
@@ -127,9 +131,9 @@ class AdaptiveSweepState:
         self.scores.append(score)
 
         result = {
-            'should_stop': False,
-            'reason': None,
-            'confidence': 0.0,
+            "should_stop": False,
+            "reason": None,
+            "confidence": 0.0,
         }
 
         # Update running max
@@ -147,44 +151,49 @@ class AdaptiveSweepState:
         points_past_peak = len(self.positions) - self.running_max_idx - 1
         if self.decline_count >= self.MIN_DECLINE_COUNT:
             self.peak_detected = True
-            result['confidence'] = 0.7
+            result["confidence"] = 0.7
 
             # Continue a few more points past detected peak for robust fitting
             if points_past_peak >= self.MIN_POINTS_PAST_PEAK:
-                result['should_stop'] = True
-                result['reason'] = 'peak_passed'
+                result["should_stop"] = True
+                result["reason"] = "peak_passed"
 
         # Confidence-based early exit (if we have enough points)
         if len(self.positions) >= self.MIN_POINTS_FOR_FIT:
             fit_result = self._attempt_fit()
             if fit_result:
-                self.current_r_squared = fit_result['r_squared']
-                new_position = fit_result['peak_position']
+                self.current_r_squared = fit_result["r_squared"]
+                new_position = fit_result["peak_position"]
 
                 # Track fit history for stability check
-                self.fit_history.append({
-                    'position': new_position,
-                    'r_squared': fit_result['r_squared'],
-                })
+                self.fit_history.append(
+                    {
+                        "position": new_position,
+                        "r_squared": fit_result["r_squared"],
+                    }
+                )
 
                 # Check stability (position change across recent fits)
                 if len(self.fit_history) >= 3:
-                    recent_positions = [f['position'] for f in self.fit_history[-3:]]
+                    recent_positions = [f["position"] for f in self.fit_history[-3:]]
                     position_range = max(recent_positions) - min(recent_positions)
                     self.fit_stable = position_range < self.STABILITY_THRESHOLD_UM
 
                 self.last_fit_position = new_position
 
                 # High confidence early exit
-                if (self.current_r_squared >= self.HIGH_CONFIDENCE_R2 and
-                    self.fit_stable and len(self.positions) >= 7):
-                    result['should_stop'] = True
-                    result['reason'] = 'high_confidence_fit'
-                    result['confidence'] = self.current_r_squared
+                if (
+                    self.current_r_squared >= self.HIGH_CONFIDENCE_R2
+                    and self.fit_stable
+                    and len(self.positions) >= 7
+                ):
+                    result["should_stop"] = True
+                    result["reason"] = "high_confidence_fit"
+                    result["confidence"] = self.current_r_squared
 
         return result
 
-    def _attempt_fit(self) -> Optional[Dict[str, Any]]:
+    def _attempt_fit(self) -> dict[str, Any] | None:
         """
         Attempt Gaussian fit on current data.
 
@@ -201,19 +210,17 @@ class AdaptiveSweepState:
             scores = np.array(self.scores)
 
             # Use existing fit_focus_curve
-            _, _, params, r_squared = fit_focus_curve(
-                positions, scores, FitFunction.GAUSSIAN.value
-            )
+            _, _, params, r_squared = fit_focus_curve(positions, scores, FitFunction.GAUSSIAN.value)
 
             return {
-                'peak_position': float(params[1]),  # mu
-                'r_squared': r_squared,
-                'params': params,
+                "peak_position": float(params[1]),  # mu
+                "r_squared": r_squared,
+                "params": params,
             }
         except Exception:
             return None
 
-    def get_best_position(self) -> Tuple[float, float]:
+    def get_best_position(self) -> tuple[float, float]:
         """
         Get best focus position from current data.
 
@@ -227,8 +234,8 @@ class AdaptiveSweepState:
 
         # Try fit first
         fit_result = self._attempt_fit()
-        if fit_result and fit_result['r_squared'] >= 0.5:
-            return (fit_result['peak_position'], fit_result['r_squared'])
+        if fit_result and fit_result["r_squared"] >= 0.5:
+            return (fit_result["peak_position"], fit_result["r_squared"])
 
         # Fall back to max score position
         return (self.running_max_position, 0.0)
@@ -248,9 +255,12 @@ class AdaptiveSweepState:
         self.fit_history = []
 
 
-def calculate_focus_score(image: np.ndarray, algorithm: str = FocusAlgorithm.VOLATH.value,
-                         roi: Optional[Tuple[int, int, int, int]] = None,
-                         config: Optional[FocusAnalysisConfig] = None) -> float:
+def calculate_focus_score(
+    image: np.ndarray,
+    algorithm: str = FocusAlgorithm.VOLATH.value,
+    roi: tuple[int, int, int, int] | None = None,
+    config: FocusAnalysisConfig | None = None,
+) -> float:
     """
     Calculate focus score for an image using specified algorithm
 
@@ -285,12 +295,12 @@ def calculate_focus_score(image: np.ndarray, algorithm: str = FocusAlgorithm.VOL
     # Apply ROI if specified
     if roi is not None:
         x, y, w, h = roi
-        image = image[y:y+h, x:x+w]
+        image = image[y : y + h, x : x + w]
 
     # Crop edges to avoid boundary effects
     if config.edge_crop > 0:
         crop = config.edge_crop
-        if image.shape[0] > 2*crop and image.shape[1] > 2*crop:
+        if image.shape[0] > 2 * crop and image.shape[1] > 2 * crop:
             image = image[crop:-crop, crop:-crop]
 
     # Convert to float for calculations
@@ -324,7 +334,7 @@ def _volath_focus_score(image: np.ndarray) -> float:
         shifted = np.roll(image, 1, axis=1)
         product_sum = np.sum(image * shifted)
 
-        return product_sum - (mean_val ** 2) * image.size
+        return product_sum - (mean_val**2) * image.size
 
     except Exception as e:
         logging.getLogger(__name__).error(f"Volath focus score failed: {e}")
@@ -362,9 +372,11 @@ def _variance_focus_score(image: np.ndarray) -> float:
         return 0.0
 
 
-def _fft_bandpass_focus_score(image: np.ndarray,
-                               lower_cutoff: float = FFT_LOWER_CUTOFF,
-                               upper_cutoff: float = FFT_UPPER_CUTOFF) -> float:
+def _fft_bandpass_focus_score(
+    image: np.ndarray,
+    lower_cutoff: float = FFT_LOWER_CUTOFF,
+    upper_cutoff: float = FFT_UPPER_CUTOFF,
+) -> float:
     """
     FFT bandpass focus measure (ASI diSPIM OughtaFocus algorithm).
 
@@ -408,7 +420,7 @@ def _fft_bandpass_focus_score(image: np.ndarray,
 
         # Create distance map from center (DC component)
         y, x = np.ogrid[:h, :w]
-        distance_from_center = np.sqrt((x - cx)**2 + (y - cy)**2)
+        distance_from_center = np.sqrt((x - cx) ** 2 + (y - cy) ** 2)
 
         # Maximum frequency (corner distance)
         max_freq = np.sqrt(cx**2 + cy**2)
@@ -417,7 +429,9 @@ def _fft_bandpass_focus_score(image: np.ndarray,
         normalized_distance = distance_from_center / max_freq
 
         # Create bandpass mask: keep frequencies in [lower_cutoff, upper_cutoff]
-        bandpass_mask = (normalized_distance >= lower_cutoff) & (normalized_distance <= upper_cutoff)
+        bandpass_mask = (normalized_distance >= lower_cutoff) & (
+            normalized_distance <= upper_cutoff
+        )
 
         # Apply mask and compute mean power in band
         masked_power = power_spectrum * bandpass_mask
@@ -434,8 +448,9 @@ def _fft_bandpass_focus_score(image: np.ndarray,
         return 0.0
 
 
-def analyze_focus_stack(positions: List[float], images: List[np.ndarray],
-                       config: FocusAnalysisConfig) -> FocusResult:
+def analyze_focus_stack(
+    positions: list[float], images: list[np.ndarray], config: FocusAnalysisConfig
+) -> FocusResult:
     """
     Analyze a complete focus stack to find best focus position
 
@@ -459,14 +474,20 @@ def analyze_focus_stack(positions: List[float], images: List[np.ndarray],
     try:
         if len(positions) != len(images):
             return FocusResult(
-                success=False, best_position=0.0, best_score=0.0, r_squared=0.0,
-                error_message="Positions and images length mismatch"
+                success=False,
+                best_position=0.0,
+                best_score=0.0,
+                r_squared=0.0,
+                error_message="Positions and images length mismatch",
             )
 
         if len(positions) < 3:
             return FocusResult(
-                success=False, best_position=0.0, best_score=0.0, r_squared=0.0,
-                error_message="Need at least 3 data points for analysis"
+                success=False,
+                best_position=0.0,
+                best_score=0.0,
+                r_squared=0.0,
+                error_message="Need at least 3 data points for analysis",
             )
 
         # Calculate focus scores for all images
@@ -495,7 +516,7 @@ def analyze_focus_stack(positions: List[float], images: List[np.ndarray],
                 best_position = positions[best_idx]
                 best_score = scores[best_idx]
 
-        except (FocusFitError, Exception) as fit_error:
+        except (FocusFitError, Exception):
             # Fallback to highest measured score
             best_idx = np.argmax(scores)
             best_position = positions[best_idx]
@@ -510,18 +531,24 @@ def analyze_focus_stack(positions: List[float], images: List[np.ndarray],
             r_squared=float(r_squared),
             fit_params=fit_params,
             all_positions=positions,
-            all_scores=scores
+            all_scores=scores,
         )
 
     except Exception as e:
         return FocusResult(
-            success=False, best_position=0.0, best_score=0.0, r_squared=0.0,
-            error_message=str(e)
+            success=False,
+            best_position=0.0,
+            best_score=0.0,
+            r_squared=0.0,
+            error_message=str(e),
         )
 
 
-def fit_focus_curve(positions: np.ndarray, scores: np.ndarray,
-                   fit_function: str = FitFunction.GAUSSIAN.value) -> Tuple[np.ndarray, np.ndarray, np.ndarray, float]:
+def fit_focus_curve(
+    positions: np.ndarray,
+    scores: np.ndarray,
+    fit_function: str = FitFunction.GAUSSIAN.value,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float]:
     """
     Fit a curve to focus score data
 
@@ -545,7 +572,7 @@ def fit_focus_curve(positions: np.ndarray, scores: np.ndarray,
     # Create high-resolution position array for smooth curve
     pos_range = np.max(positions) - np.min(positions)
     pos_center = (np.max(positions) + np.min(positions)) / 2
-    fitted_positions = np.linspace(pos_center - pos_range*0.6, pos_center + pos_range*0.6, 100)
+    fitted_positions = np.linspace(pos_center - pos_range * 0.6, pos_center + pos_range * 0.6, 100)
 
     try:
         if fit_function == FitFunction.GAUSSIAN.value:
@@ -558,7 +585,7 @@ def fit_focus_curve(positions: np.ndarray, scores: np.ndarray,
         # Generate fitted curve
         if fit_function == FitFunction.GAUSSIAN.value:
             a, mu, sigma, c = fit_params
-            fitted_scores = a * np.exp(-((fitted_positions - mu) ** 2) / (2 * sigma ** 2)) + c
+            fitted_scores = a * np.exp(-((fitted_positions - mu) ** 2) / (2 * sigma**2)) + c
         else:  # parabolic
             a, b, c = fit_params
             fitted_scores = a * fitted_positions**2 + b * fitted_positions + c
@@ -572,10 +599,11 @@ def fit_focus_curve(positions: np.ndarray, scores: np.ndarray,
         raise
 
 
-def _fit_gaussian(positions: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarray, float]:
+def _fit_gaussian(positions: np.ndarray, scores: np.ndarray) -> tuple[np.ndarray, float]:
     """Fit Gaussian curve to focus data"""
+
     def gaussian(x, a, mu, sigma, c):
-        return a * np.exp(-((x - mu) ** 2) / (2 * sigma ** 2)) + c
+        return a * np.exp(-((x - mu) ** 2) / (2 * sigma**2)) + c
 
     # Initial parameter estimates
     a_init = np.max(scores) - np.min(scores)
@@ -588,7 +616,7 @@ def _fit_gaussian(positions: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarray
     # Fit with bounds to ensure physical parameters
     bounds = (
         [0, np.min(positions), 0.1, 0],  # Lower bounds
-        [np.inf, np.max(positions), np.inf, np.inf]  # Upper bounds
+        [np.inf, np.max(positions), np.inf, np.inf],  # Upper bounds
     )
 
     popt, pcov = optimize.curve_fit(gaussian, positions, scores, p0=p0, bounds=bounds, maxfev=1000)
@@ -602,7 +630,7 @@ def _fit_gaussian(positions: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarray
     return popt, r_squared
 
 
-def _fit_parabolic(positions: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarray, float]:
+def _fit_parabolic(positions: np.ndarray, scores: np.ndarray) -> tuple[np.ndarray, float]:
     """Fit parabolic curve to focus data"""
     # Fit quadratic polynomial: y = ax^2 + bx + c
     coeffs = np.polyfit(positions, scores, 2)
@@ -617,9 +645,9 @@ def _fit_parabolic(positions: np.ndarray, scores: np.ndarray) -> Tuple[np.ndarra
 
 
 def create_focus_montage(
-    images: List[np.ndarray],
-    labels: Optional[List[str]] = None,
-    offsets: Optional[List[float]] = None,
+    images: list[np.ndarray],
+    labels: list[str] | None = None,
+    offsets: list[float] | None = None,
     normalize: bool = True,
     gap: int = 4,
 ) -> np.ndarray:
@@ -659,7 +687,7 @@ def create_focus_montage(
 
     # Default labels: A, B, C, ...
     if labels is None:
-        labels = [chr(ord('A') + i) for i in range(len(images))]
+        labels = [chr(ord("A") + i) for i in range(len(images))]
 
     # Ensure all images are 2D and same size
     processed = []
@@ -689,19 +717,22 @@ def create_focus_montage(
     # Create montage canvas
     n = len(processed)
     total_width = w * n + gap * (n - 1)
-    montage = np.ones((h + 30, total_width), dtype=np.uint8) * 255  # White background, extra space for labels
+    montage = (
+        np.ones((h + 30, total_width), dtype=np.uint8) * 255
+    )  # White background, extra space for labels
 
     # Place images with gaps
-    for i, (img, label) in enumerate(zip(processed, labels)):
+    for i, (img, label) in enumerate(zip(processed, labels, strict=False)):
         x_start = i * (w + gap)
 
         # Resize if needed to match reference dimensions
         if img.shape != (h, w):
             from scipy.ndimage import zoom
+
             zoom_factors = (h / img.shape[0], w / img.shape[1])
             img = zoom(img, zoom_factors, order=1).astype(np.uint8)
 
-        montage[:h, x_start:x_start + w] = img
+        montage[:h, x_start : x_start + w] = img
 
         # Add label text (simple pixel drawing for letter)
         # Position label at top-left of each image

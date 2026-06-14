@@ -16,9 +16,7 @@ def create_router(server) -> APIRouter:
         chat window's "Sign in" affordance), not a gate on the page itself.
         """
         return server.templates.TemplateResponse(
-            request,
-            "index.html",
-            {"active_section": "embryos", "is_live": True}
+            request, "index.html", {"active_section": "embryos", "is_live": True}
         )
 
     # Standalone URLs redirect to SPA with hash fragment for tab routing

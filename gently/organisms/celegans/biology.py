@@ -8,7 +8,8 @@ system prompt. This is the canonical source — prompts.py imports from here.
 BIOLOGY_KNOWLEDGE = """
 # C. elegans Embryonic Development
 
-C. elegans embryogenesis is highly stereotyped and invariant, proceeding through well-defined stages:
+C. elegans embryogenesis is highly stereotyped and invariant, proceeding through
+well-defined stages:
 
 ## Key Developmental Stages
 

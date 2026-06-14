@@ -9,7 +9,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .model import (
     Campaign,
@@ -47,11 +47,11 @@ class IntentionsMixin:
     def create_campaign(
         self,
         description: str,
-        shorthand: Optional[str] = None,
-        summary: Optional[str] = None,
-        target: Optional[str] = None,
-        parent_id: Optional[str] = None,
-        campaign_id: Optional[str] = None,
+        shorthand: str | None = None,
+        summary: str | None = None,
+        target: str | None = None,
+        parent_id: str | None = None,
+        campaign_id: str | None = None,
     ) -> str:
         """Create a new campaign. Returns campaign ID."""
         cid = campaign_id or self._gen_id()
@@ -59,7 +59,8 @@ class IntentionsMixin:
         with self._tx():
             self._conn.execute(
                 "INSERT INTO campaigns "
-                "(id, description, shorthand, summary, target, parent_id, status, created_at, updated_at) "
+                "(id, description, shorthand, summary, target, parent_id,"
+                " status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?)",
                 (cid, description, shorthand, summary, target, parent_id, now, now),
             )
@@ -67,7 +68,7 @@ class IntentionsMixin:
         logger.info(f"Created campaign {cid} [{label}]")
         return cid
 
-    def get_active_campaigns(self) -> List[Campaign]:
+    def get_active_campaigns(self) -> list[Campaign]:
         """Get all active campaigns."""
         rows = self._conn.execute(
             "SELECT * FROM campaigns WHERE status = 'active' ORDER BY created_at DESC"
@@ -83,12 +84,10 @@ class IntentionsMixin:
 
     def count_session_intents(self) -> int:
         """Count total session intent records."""
-        row = self._conn.execute(
-            "SELECT COUNT(*) as cnt FROM session_intents"
-        ).fetchone()
+        row = self._conn.execute("SELECT COUNT(*) as cnt FROM session_intents").fetchone()
         return row["cnt"] if row else 0
 
-    def get_all_campaigns(self, limit: int = 50) -> List[Campaign]:
+    def get_all_campaigns(self, limit: int = 50) -> list[Campaign]:
         """Get all campaigns regardless of status, ordered by created_at descending."""
         rows = self._conn.execute(
             "SELECT * FROM campaigns ORDER BY created_at DESC LIMIT ?",
@@ -96,7 +95,7 @@ class IntentionsMixin:
         ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
 
-    def get_recent_session_intents(self, limit: int = 50) -> List["SessionIntent"]:
+    def get_recent_session_intents(self, limit: int = 50) -> list["SessionIntent"]:
         """Get recent session intents, ordered by created_at descending."""
         rows = self._conn.execute(
             "SELECT * FROM session_intents ORDER BY created_at DESC LIMIT ?",
@@ -107,24 +106,26 @@ class IntentionsMixin:
             d = dict(row)
             sid = d["session_id"]
             campaign_ids = self.get_campaign_ids_for_session(sid)
-            results.append(SessionIntent(
-                session_id=sid,
-                planned_intent=d.get("planned_intent"),
-                actual_summary=d.get("actual_summary"),
-                campaign_ids=campaign_ids,
-                created_at=datetime.fromisoformat(d["created_at"]),
-                completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
-            ))
+            results.append(
+                SessionIntent(
+                    session_id=sid,
+                    planned_intent=d.get("planned_intent"),
+                    actual_summary=d.get("actual_summary"),
+                    campaign_ids=campaign_ids,
+                    created_at=datetime.fromisoformat(d["created_at"]),
+                    completed_at=datetime.fromisoformat(d["completed_at"])
+                    if d.get("completed_at")
+                    else None,
+                )
+            )
         return results
 
-    def get_campaign(self, campaign_id: str) -> Optional[Campaign]:
+    def get_campaign(self, campaign_id: str) -> Campaign | None:
         """Get a specific campaign by exact ID."""
-        row = self._conn.execute(
-            "SELECT * FROM campaigns WHERE id = ?", (campaign_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM campaigns WHERE id = ?", (campaign_id,)).fetchone()
         return self._row_to_campaign(row) if row else None
 
-    def resolve_campaign(self, ref: str) -> Optional[Campaign]:
+    def resolve_campaign(self, ref: str) -> Campaign | None:
         """Resolve a campaign by UUID, shorthand, UUID prefix, or description.
 
         Tries exact ID first, then falls back to _resolve_campaign_label
@@ -159,7 +160,7 @@ class IntentionsMixin:
                 (status.value, now, campaign_id),
             )
 
-    def delete_campaign(self, campaign_id: str, cascade: bool = True) -> Dict[str, int]:
+    def delete_campaign(self, campaign_id: str, cascade: bool = True) -> dict[str, int]:
         """
         Delete a campaign and optionally its children and plan items.
 
@@ -195,18 +196,21 @@ class IntentionsMixin:
 
             # Delete plan items
             r = self._conn.execute(
-                "DELETE FROM plan_items WHERE campaign_id = ?", (cid,),
+                "DELETE FROM plan_items WHERE campaign_id = ?",
+                (cid,),
             )
             counts["plan_items"] += r.rowcount
 
             # Delete campaign participants
             self._conn.execute(
-                "DELETE FROM campaign_participants WHERE campaign_id = ?", (cid,),
+                "DELETE FROM campaign_participants WHERE campaign_id = ?",
+                (cid,),
             )
 
             # Delete campaign
             r = self._conn.execute(
-                "DELETE FROM campaigns WHERE id = ?", (cid,),
+                "DELETE FROM campaigns WHERE id = ?",
+                (cid,),
             )
             counts["campaigns"] += r.rowcount
 
@@ -215,7 +219,7 @@ class IntentionsMixin:
 
         return counts
 
-    def get_subcampaigns(self, campaign_id: str) -> List[Campaign]:
+    def get_subcampaigns(self, campaign_id: str) -> list[Campaign]:
         """Get direct children of a campaign."""
         rows = self._conn.execute(
             "SELECT * FROM campaigns WHERE parent_id = ? ORDER BY created_at",
@@ -223,14 +227,14 @@ class IntentionsMixin:
         ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
 
-    def get_nth_subcampaign(self, parent_id: str, n: int) -> Optional[Campaign]:
+    def get_nth_subcampaign(self, parent_id: str, n: int) -> Campaign | None:
         """Get the nth child campaign (1-indexed) of a parent, ordered by creation."""
         phases = self.get_subcampaigns(parent_id)
         if 1 <= n <= len(phases):
             return phases[n - 1]
         return None
 
-    def get_campaign_tree(self, campaign_id: str) -> Dict[str, Any]:
+    def get_campaign_tree(self, campaign_id: str) -> dict[str, Any]:
         """Get a campaign and all its descendants as a tree."""
         campaign = self.get_campaign(campaign_id)
         if not campaign:
@@ -241,12 +245,11 @@ class IntentionsMixin:
             "children": [self.get_campaign_tree(c.id) for c in children],
         }
 
-    def get_root_campaigns(self, status: Optional[str] = "active") -> List[Campaign]:
+    def get_root_campaigns(self, status: str | None = "active") -> list[Campaign]:
         """Get top-level campaigns (no parent). If status is None, returns all."""
         if status is None:
             rows = self._conn.execute(
-                "SELECT * FROM campaigns WHERE parent_id IS NULL "
-                "ORDER BY updated_at DESC LIMIT 50"
+                "SELECT * FROM campaigns WHERE parent_id IS NULL ORDER BY updated_at DESC LIMIT 50"
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -259,11 +262,11 @@ class IntentionsMixin:
     def update_campaign(
         self,
         campaign_id: str,
-        description: Optional[str] = None,
-        shorthand: Optional[str] = None,
-        summary: Optional[str] = None,
-        target: Optional[str] = None,
-        parent_id: Optional[str] = None,
+        description: str | None = None,
+        shorthand: str | None = None,
+        summary: str | None = None,
+        target: str | None = None,
+        parent_id: str | None = None,
     ):
         """Update campaign fields. Only non-None values are applied."""
         now = self._now()
@@ -310,7 +313,7 @@ class IntentionsMixin:
                 (self._now(), campaign_id),
             )
 
-    def get_shared_campaigns(self) -> List[Campaign]:
+    def get_shared_campaigns(self) -> list[Campaign]:
         """Get all campaigns marked as shared."""
         rows = self._conn.execute(
             "SELECT * FROM campaigns WHERE is_shared = 1 ORDER BY created_at",
@@ -326,7 +329,7 @@ class IntentionsMixin:
                 (campaign_id, instance_id, hostname, self._now()),
             )
 
-    def get_campaign_participants(self, campaign_id: str) -> List[Dict]:
+    def get_campaign_participants(self, campaign_id: str) -> list[dict]:
         """Get all participants for a campaign."""
         rows = self._conn.execute(
             "SELECT * FROM campaign_participants WHERE campaign_id = ? ORDER BY joined_at",
@@ -380,22 +383,23 @@ class IntentionsMixin:
     def create_project(
         self,
         description: str,
-        campaign_id: Optional[str] = None,
-        project_id: Optional[str] = None,
+        campaign_id: str | None = None,
+        project_id: str | None = None,
     ) -> str:
         """Create a new project. Returns project ID."""
         pid = project_id or self._gen_id()
         now = self._now()
         with self._tx():
             self._conn.execute(
-                "INSERT INTO projects (id, description, campaign_id, status, created_at, updated_at) "
+                "INSERT INTO projects"
+                " (id, description, campaign_id, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, 'active', ?, ?)",
                 (pid, description, campaign_id, now, now),
             )
         logger.info(f"Created project {pid}: {description}")
         return pid
 
-    def get_active_projects(self) -> List[Project]:
+    def get_active_projects(self) -> list[Project]:
         """Get all active projects."""
         rows = self._conn.execute(
             "SELECT * FROM projects WHERE status = 'active' ORDER BY created_at DESC"
@@ -420,8 +424,8 @@ class IntentionsMixin:
     def create_session_intent(
         self,
         session_id: str,
-        planned_intent: Optional[str] = None,
-        campaign_ids: Optional[List[str]] = None,
+        planned_intent: str | None = None,
+        campaign_ids: list[str] | None = None,
     ):
         """Create or update session intent, optionally linking to campaigns."""
         now = self._now()
@@ -436,7 +440,7 @@ class IntentionsMixin:
             for cid in campaign_ids:
                 self.link_session_campaign(session_id, cid)
 
-    def get_current_session_intent(self) -> Optional[SessionIntent]:
+    def get_current_session_intent(self) -> SessionIntent | None:
         """Get the most recent incomplete session intent."""
         row = self._conn.execute(
             "SELECT * FROM session_intents WHERE completed_at IS NULL "
@@ -453,7 +457,9 @@ class IntentionsMixin:
             actual_summary=d.get("actual_summary"),
             campaign_ids=campaign_ids,
             created_at=datetime.fromisoformat(d["created_at"]),
-            completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
+            completed_at=datetime.fromisoformat(d["completed_at"])
+            if d.get("completed_at")
+            else None,
         )
 
     def complete_session_intent(self, session_id: str, actual_summary: str):
@@ -476,8 +482,7 @@ class IntentionsMixin:
         with self._tx():
             # Ensure session_intents row exists (FK target)
             self._conn.execute(
-                "INSERT OR IGNORE INTO session_intents "
-                "(session_id, created_at) VALUES (?, ?)",
+                "INSERT OR IGNORE INTO session_intents (session_id, created_at) VALUES (?, ?)",
                 (session_id, now),
             )
             self._conn.execute(
@@ -494,16 +499,15 @@ class IntentionsMixin:
                 (session_id, campaign_id),
             )
 
-    def get_campaign_ids_for_session(self, session_id: str) -> List[str]:
+    def get_campaign_ids_for_session(self, session_id: str) -> list[str]:
         """Get campaign IDs linked to a session."""
         rows = self._conn.execute(
-            "SELECT campaign_id FROM session_campaigns WHERE session_id = ? "
-            "ORDER BY linked_at",
+            "SELECT campaign_id FROM session_campaigns WHERE session_id = ? ORDER BY linked_at",
             (session_id,),
         ).fetchall()
         return [row["campaign_id"] for row in rows]
 
-    def get_campaigns_for_session(self, session_id: str) -> List[Campaign]:
+    def get_campaigns_for_session(self, session_id: str) -> list[Campaign]:
         """Get campaigns linked to a session."""
         rows = self._conn.execute(
             "SELECT c.* FROM campaigns c "
@@ -513,7 +517,7 @@ class IntentionsMixin:
         ).fetchall()
         return [self._row_to_campaign(row) for row in rows]
 
-    def get_sessions_for_campaign(self, campaign_id: str) -> List[SessionIntent]:
+    def get_sessions_for_campaign(self, campaign_id: str) -> list[SessionIntent]:
         """Get session intents linked to a campaign."""
         rows = self._conn.execute(
             "SELECT si.* FROM session_intents si "
@@ -526,14 +530,18 @@ class IntentionsMixin:
             d = dict(row)
             sid = d["session_id"]
             cids = self.get_campaign_ids_for_session(sid)
-            results.append(SessionIntent(
-                session_id=sid,
-                planned_intent=d.get("planned_intent"),
-                actual_summary=d.get("actual_summary"),
-                campaign_ids=cids,
-                created_at=datetime.fromisoformat(d["created_at"]),
-                completed_at=datetime.fromisoformat(d["completed_at"]) if d.get("completed_at") else None,
-            ))
+            results.append(
+                SessionIntent(
+                    session_id=sid,
+                    planned_intent=d.get("planned_intent"),
+                    actual_summary=d.get("actual_summary"),
+                    campaign_ids=cids,
+                    created_at=datetime.fromisoformat(d["created_at"]),
+                    completed_at=datetime.fromisoformat(d["completed_at"])
+                    if d.get("completed_at")
+                    else None,
+                )
+            )
         return results
 
     # ==================================================================
@@ -543,14 +551,14 @@ class IntentionsMixin:
     def create_planned_session(
         self,
         scheduled_date: str,
-        title: Optional[str] = None,
-        notes: Optional[str] = None,
-        scheduled_time: Optional[str] = None,
-        estimated_duration_minutes: Optional[int] = None,
-        acquisition_params: Optional[Dict] = None,
-        source_session_id: Optional[str] = None,
-        campaign_ids: Optional[List[str]] = None,
-        planned_session_id: Optional[str] = None,
+        title: str | None = None,
+        notes: str | None = None,
+        scheduled_time: str | None = None,
+        estimated_duration_minutes: int | None = None,
+        acquisition_params: dict | None = None,
+        source_session_id: str | None = None,
+        campaign_ids: list[str] | None = None,
+        planned_session_id: str | None = None,
     ) -> str:
         """Create a planned imaging session. Returns its ID."""
         psid = planned_session_id or self._gen_id()
@@ -563,19 +571,27 @@ class IntentionsMixin:
                 " source_session_id, status, created_at, updated_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
-                    psid, title, notes, scheduled_date, scheduled_time,
+                    psid,
+                    title,
+                    notes,
+                    scheduled_date,
+                    scheduled_time,
                     estimated_duration_minutes,
                     json.dumps(acquisition_params) if acquisition_params else None,
-                    source_session_id, now, now,
+                    source_session_id,
+                    now,
+                    now,
                 ),
             )
         if campaign_ids:
             for cid in campaign_ids:
                 self.link_planned_session_campaign(psid, cid)
-        logger.info(f"Created planned session {psid} for {scheduled_date}: {title or notes or '(untitled)'}")
+        logger.info(
+            f"Created planned session {psid} for {scheduled_date}: {title or notes or '(untitled)'}"
+        )
         return psid
 
-    def get_planned_session(self, planned_session_id: str) -> Optional[PlannedSession]:
+    def get_planned_session(self, planned_session_id: str) -> PlannedSession | None:
         """Get a specific planned session."""
         row = self._conn.execute(
             "SELECT * FROM planned_sessions WHERE id = ?",
@@ -585,11 +601,11 @@ class IntentionsMixin:
 
     def get_planned_sessions(
         self,
-        status: Optional[str] = None,
-        campaign_id: Optional[str] = None,
-        from_date: Optional[str] = None,
-        to_date: Optional[str] = None,
-    ) -> List[PlannedSession]:
+        status: str | None = None,
+        campaign_id: str | None = None,
+        from_date: str | None = None,
+        to_date: str | None = None,
+    ) -> list[PlannedSession]:
         """
         Query planned sessions with optional filters.
 
@@ -627,7 +643,7 @@ class IntentionsMixin:
         rows = self._conn.execute(query, params).fetchall()
         return [self._row_to_planned_session(row) for row in rows]
 
-    def get_upcoming_sessions(self, limit: int = 10) -> List[PlannedSession]:
+    def get_upcoming_sessions(self, limit: int = 10) -> list[PlannedSession]:
         """Get upcoming planned sessions (today and future, status=planned)."""
         today = datetime.now().strftime("%Y-%m-%d")
         rows = self._conn.execute(
@@ -638,7 +654,7 @@ class IntentionsMixin:
         ).fetchall()
         return [self._row_to_planned_session(row) for row in rows]
 
-    def get_todays_sessions(self) -> List[PlannedSession]:
+    def get_todays_sessions(self) -> list[PlannedSession]:
         """Get planned sessions for today."""
         today = datetime.now().strftime("%Y-%m-%d")
         rows = self._conn.execute(
@@ -652,15 +668,15 @@ class IntentionsMixin:
     def update_planned_session(
         self,
         planned_session_id: str,
-        title: Optional[str] = None,
-        notes: Optional[str] = None,
-        scheduled_date: Optional[str] = None,
-        scheduled_time: Optional[str] = None,
-        estimated_duration_minutes: Optional[int] = None,
-        acquisition_params: Optional[Dict] = None,
-        source_session_id: Optional[str] = None,
-        status: Optional[PlannedSessionStatus] = None,
-        session_id: Optional[str] = None,
+        title: str | None = None,
+        notes: str | None = None,
+        scheduled_date: str | None = None,
+        scheduled_time: str | None = None,
+        estimated_duration_minutes: int | None = None,
+        acquisition_params: dict | None = None,
+        source_session_id: str | None = None,
+        status: PlannedSessionStatus | None = None,
+        session_id: str | None = None,
     ):
         """Update a planned session. Only non-None values are applied."""
         now = self._now()
@@ -729,7 +745,7 @@ class IntentionsMixin:
                 (planned_session_id, campaign_id),
             )
 
-    def get_campaign_ids_for_planned_session(self, planned_session_id: str) -> List[str]:
+    def get_campaign_ids_for_planned_session(self, planned_session_id: str) -> list[str]:
         """Get campaign IDs linked to a planned session."""
         rows = self._conn.execute(
             "SELECT campaign_id FROM planned_session_campaigns "
@@ -749,7 +765,9 @@ class IntentionsMixin:
             scheduled_date=d.get("scheduled_date"),
             scheduled_time=d.get("scheduled_time"),
             estimated_duration_minutes=d.get("estimated_duration_minutes"),
-            acquisition_params=json.loads(d["acquisition_params"]) if d.get("acquisition_params") else None,
+            acquisition_params=json.loads(d["acquisition_params"])
+            if d.get("acquisition_params")
+            else None,
             source_session_id=d.get("source_session_id"),
             status=PlannedSessionStatus(d.get("status", "planned")),
             session_id=d.get("session_id"),

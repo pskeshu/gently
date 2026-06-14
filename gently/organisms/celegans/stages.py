@@ -5,7 +5,7 @@ Single source of truth for all stage-related constants and utilities.
 """
 
 from enum import Enum
-from typing import List, Dict, Any
+from typing import Any
 
 
 class DevelopmentalStage(str, Enum):
@@ -21,27 +21,34 @@ class DevelopmentalStage(str, Enum):
     Special states:
     - "arrested" is not part of normal progression (dead/arrested embryo)
     """
-    EARLY = "early"           # Gastrulation through early morphogenesis, oval shape
-    BEAN = "bean"             # Elongated oval, "bean-shaped", pre-comma curvature
-    COMMA = "comma"           # Clear C-shape, head/tail distinguishable
-    FOLD_1_5 = "1.5fold"      # Elongation, ~1.5x eggshell length
-    FOLD_2 = "2fold"          # Body folded back twice, between 1.5fold and pretzel
-    PRETZEL = "pretzel"       # Tight coil, 3+ body segments (formerly 3fold)
-    HATCHING = "hatching"     # Active emergence, shell breach visible
-    HATCHED = "hatched"       # Fully emerged L1 larva
-    ARRESTED = "arrested"     # Dead or developmentally arrested embryo (special state)
-    NO_OBJECT = "no_object"   # No embryo visible in field of view (special state)
+
+    EARLY = "early"  # Gastrulation through early morphogenesis, oval shape
+    BEAN = "bean"  # Elongated oval, "bean-shaped", pre-comma curvature
+    COMMA = "comma"  # Clear C-shape, head/tail distinguishable
+    FOLD_1_5 = "1.5fold"  # Elongation, ~1.5x eggshell length
+    FOLD_2 = "2fold"  # Body folded back twice, between 1.5fold and pretzel
+    PRETZEL = "pretzel"  # Tight coil, 3+ body segments (formerly 3fold)
+    HATCHING = "hatching"  # Active emergence, shell breach visible
+    HATCHED = "hatched"  # Fully emerged L1 larva
+    ARRESTED = "arrested"  # Dead or developmentally arrested embryo (special state)
+    NO_OBJECT = "no_object"  # No embryo visible in field of view (special state)
 
     @classmethod
-    def ordered_list(cls) -> List["DevelopmentalStage"]:
+    def ordered_list(cls) -> list["DevelopmentalStage"]:
         """Return stages in developmental order."""
         return [
-            cls.EARLY, cls.BEAN, cls.COMMA, cls.FOLD_1_5,
-            cls.FOLD_2, cls.PRETZEL, cls.HATCHING, cls.HATCHED
+            cls.EARLY,
+            cls.BEAN,
+            cls.COMMA,
+            cls.FOLD_1_5,
+            cls.FOLD_2,
+            cls.PRETZEL,
+            cls.HATCHING,
+            cls.HATCHED,
         ]
 
     @classmethod
-    def ordered_values(cls) -> List[str]:
+    def ordered_values(cls) -> list[str]:
         """Return stage string values in developmental order."""
         return [s.value for s in cls.ordered_list()]
 
@@ -61,7 +68,7 @@ class DevelopmentalStage(str, Enum):
         return stage in cls.all_valid_values()
 
     @classmethod
-    def all_valid_values(cls) -> List[str]:
+    def all_valid_values(cls) -> list[str]:
         """Return all valid stage values including special states like 'arrested'."""
         return cls.ordered_values() + ["arrested", "no_object"]
 
@@ -97,7 +104,7 @@ STAGES = DevelopmentalStage.ordered_values()
 # Each stage has:
 #   - features: what to look for (positive indicators)
 #   - NOT_if: what rules out this stage (negative indicators)
-STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
+STAGE_CRITERIA: dict[str, dict[str, Any]] = {
     "early": {
         "features": [
             "oval/elliptical shape",
@@ -249,7 +256,7 @@ STAGE_CRITERIA: Dict[str, Dict[str, Any]] = {
 
 # Transition zones between stages
 # Used for detecting transitional states and setting expectations for temporal analysis
-TRANSITION_ZONES: Dict[str, Dict[str, Any]] = {
+TRANSITION_ZONES: dict[str, dict[str, Any]] = {
     "early_to_bean": {
         "from_stage": "early",
         "to_stage": "bean",
@@ -325,7 +332,7 @@ TRANSITION_ZONES: Dict[str, Dict[str, Any]] = {
 }
 
 
-def get_transition_zone(from_stage: str, to_stage: str) -> Dict[str, Any]:
+def get_transition_zone(from_stage: str, to_stage: str) -> dict[str, Any]:
     """Get transition zone info between two stages."""
     key = f"{from_stage}_to_{to_stage}"
     return TRANSITION_ZONES.get(key, {})

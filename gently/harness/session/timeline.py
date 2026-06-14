@@ -11,12 +11,12 @@ Provides:
 import json
 import logging
 import threading
-import uuid
 from collections import deque
-from dataclasses import dataclass, field, asdict
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from gently.core.event_bus import Event, EventType, get_event_bus
 
@@ -55,83 +55,84 @@ class TimelineEvent:
     severity : str
         Severity level: info | success | warning | error
     """
+
     event_id: str
     event_type: str
     event_subtype: str
     timestamp: datetime
     source: str
-    session_id: Optional[str] = None  # Session this event belongs to
-    embryo_id: Optional[str] = None
-    detector_name: Optional[str] = None
-    timepoint: Optional[int] = None
-    confidence: Optional[str] = None
-    data: Dict[str, Any] = field(default_factory=dict)
+    session_id: str | None = None  # Session this event belongs to
+    embryo_id: str | None = None
+    detector_name: str | None = None
+    timepoint: int | None = None
+    confidence: str | None = None
+    data: dict[str, Any] = field(default_factory=dict)
     icon: str = ">"
     severity: str = "info"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary"""
         return {
-            'event_id': self.event_id,
-            'event_type': self.event_type,
-            'event_subtype': self.event_subtype,
-            'timestamp': self.timestamp.isoformat(),
-            'source': self.source,
-            'session_id': self.session_id,
-            'embryo_id': self.embryo_id,
-            'detector_name': self.detector_name,
-            'timepoint': self.timepoint,
-            'confidence': self.confidence,
-            'data': self.data,
-            'icon': self.icon,
-            'severity': self.severity,
+            "event_id": self.event_id,
+            "event_type": self.event_type,
+            "event_subtype": self.event_subtype,
+            "timestamp": self.timestamp.isoformat(),
+            "source": self.source,
+            "session_id": self.session_id,
+            "embryo_id": self.embryo_id,
+            "detector_name": self.detector_name,
+            "timepoint": self.timepoint,
+            "confidence": self.confidence,
+            "data": self.data,
+            "icon": self.icon,
+            "severity": self.severity,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> 'TimelineEvent':
+    def from_dict(cls, d: dict[str, Any]) -> "TimelineEvent":
         """Deserialize from dictionary"""
         return cls(
-            event_id=d['event_id'],
-            event_type=d['event_type'],
-            event_subtype=d['event_subtype'],
-            timestamp=datetime.fromisoformat(d['timestamp']),
-            source=d.get('source', 'unknown'),
-            session_id=d.get('session_id'),
-            embryo_id=d.get('embryo_id'),
-            detector_name=d.get('detector_name'),
-            timepoint=d.get('timepoint'),
-            confidence=d.get('confidence'),
-            data=d.get('data', {}),
-            icon=d.get('icon', '>'),
-            severity=d.get('severity', 'info'),
+            event_id=d["event_id"],
+            event_type=d["event_type"],
+            event_subtype=d["event_subtype"],
+            timestamp=datetime.fromisoformat(d["timestamp"]),
+            source=d.get("source", "unknown"),
+            session_id=d.get("session_id"),
+            embryo_id=d.get("embryo_id"),
+            detector_name=d.get("detector_name"),
+            timepoint=d.get("timepoint"),
+            confidence=d.get("confidence"),
+            data=d.get("data", {}),
+            icon=d.get("icon", ">"),
+            severity=d.get("severity", "info"),
         )
 
     @property
     def short_label(self) -> str:
         """Short label for timeline display (e.g., 'TL', 'DET')"""
-        if self.event_type == 'timelapse':
-            return 'TL'
-        elif self.event_type == 'detection':
-            return 'DET'
+        if self.event_type == "timelapse":
+            return "TL"
+        elif self.event_type == "detection":
+            return "DET"
         else:
-            return 'SYS'
+            return "SYS"
 
     @property
     def description(self) -> str:
         """Human-readable description of the event"""
-        if self.event_type == 'timelapse':
-            if self.event_subtype == 'started':
-                embryos = self.data.get('embryo_ids', [])
+        if self.event_type == "timelapse":
+            if self.event_subtype == "started":
+                embryos = self.data.get("embryo_ids", [])
                 return f"Started timelapse with {len(embryos)} embryo(s)"
-            elif self.event_subtype == 'volume_acquired':
+            elif self.event_subtype == "volume_acquired":
                 return f"{self.embryo_id} @ t={self.timepoint}"
-            elif self.event_subtype == 'completed':
-                total = self.data.get('total_timepoints', '?')
+            elif self.event_subtype == "completed":
+                total = self.data.get("total_timepoints", "?")
                 return f"Completed ({total} timepoints)"
-            elif self.event_subtype == 'failed':
+            elif self.event_subtype == "failed":
                 return f"Failed: {self.data.get('error', 'unknown error')}"
-        elif self.event_type == 'detection':
-            detected = self.data.get('detected', False)
+        elif self.event_type == "detection":
+            detected = self.data.get("detected", False)
             status = "Detected" if detected else "Not detected"
             conf = f" ({self.confidence})" if self.confidence else ""
             return f"{self.detector_name} on {self.embryo_id} - {status}{conf}"
@@ -141,91 +142,91 @@ class TimelineEvent:
 # Mapping from EventBus EventType to TimelineEvent properties
 EVENT_MAPPING = {
     EventType.ACQUISITION_STARTED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'started',
-        'icon': '>',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "started",
+        "icon": ">",
+        "severity": "info",
     },
     EventType.VOLUME_ACQUIRED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'volume_acquired',
-        'icon': '+',
-        'severity': 'success',
+        "event_type": "timelapse",
+        "event_subtype": "volume_acquired",
+        "icon": "+",
+        "severity": "success",
     },
     EventType.ACQUISITION_COMPLETED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'completed',
-        'icon': '+',
-        'severity': 'success',
+        "event_type": "timelapse",
+        "event_subtype": "completed",
+        "icon": "+",
+        "severity": "success",
     },
     EventType.ACQUISITION_STOPPED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'stopped',
-        'icon': '-',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "stopped",
+        "icon": "-",
+        "severity": "info",
     },
     EventType.ACQUISITION_FAILED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'failed',
-        'icon': 'x',
-        'severity': 'error',
+        "event_type": "timelapse",
+        "event_subtype": "failed",
+        "icon": "x",
+        "severity": "error",
     },
     EventType.DETECTOR_EVALUATED: {
-        'event_type': 'detection',
-        'event_subtype': 'evaluated',
-        'icon': '?',
-        'severity': 'info',
+        "event_type": "detection",
+        "event_subtype": "evaluated",
+        "icon": "?",
+        "severity": "info",
     },
     EventType.DETECTION_TRIGGERED: {
-        'event_type': 'detection',
-        'event_subtype': 'triggered',
-        'icon': '!',
-        'severity': 'success',
+        "event_type": "detection",
+        "event_subtype": "triggered",
+        "icon": "!",
+        "severity": "success",
     },
     EventType.HATCHING_DETECTED: {
-        'event_type': 'detection',
-        'event_subtype': 'hatching',
-        'icon': '+',
-        'severity': 'success',
+        "event_type": "detection",
+        "event_subtype": "hatching",
+        "icon": "+",
+        "severity": "success",
     },
     # Strategy / experiment view persistence — these were already emitted on
     # the EventBus but weren't being captured to timeline.jsonl, so the
     # swimlane view had no event history to replay.
     EventType.EMBRYO_CADENCE_CHANGED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'cadence_changed',
-        'icon': '~',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "cadence_changed",
+        "icon": "~",
+        "severity": "info",
     },
     EventType.POWER_RAMP_STEP: {
-        'event_type': 'timelapse',
-        'event_subtype': 'power_changed',
-        'icon': '*',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "power_changed",
+        "icon": "*",
+        "severity": "info",
     },
     EventType.TRIGGER_FIRED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'trigger_fired',
-        'icon': '<>',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "trigger_fired",
+        "icon": "<>",
+        "severity": "info",
     },
     EventType.BURST_QUEUED: {
-        'event_type': 'timelapse',
-        'event_subtype': 'burst_queued',
-        'icon': 'q',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "burst_queued",
+        "icon": "q",
+        "severity": "info",
     },
     EventType.BURST_START: {
-        'event_type': 'timelapse',
-        'event_subtype': 'burst_started',
-        'icon': '^',
-        'severity': 'info',
+        "event_type": "timelapse",
+        "event_subtype": "burst_started",
+        "icon": "^",
+        "severity": "info",
     },
     EventType.BURST_COMPLETE: {
-        'event_type': 'timelapse',
-        'event_subtype': 'burst_completed',
-        'icon': 'v',
-        'severity': 'success',
+        "event_type": "timelapse",
+        "event_subtype": "burst_completed",
+        "icon": "v",
+        "severity": "success",
     },
 }
 
@@ -243,9 +244,9 @@ class TimelineManager:
 
     def __init__(
         self,
-        storage_path: Optional[Path] = None,
+        storage_path: Path | None = None,
         max_events: int = 1000,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ):
         """
         Parameters
@@ -262,7 +263,7 @@ class TimelineManager:
         self._session_id = session_id
         self._events: deque[TimelineEvent] = deque(maxlen=max_events)
         self._lock = threading.RLock()
-        self._unsubscribers: List[Callable] = []
+        self._unsubscribers: list[Callable] = []
         self._started = False
 
         # Load existing events from storage
@@ -274,7 +275,7 @@ class TimelineManager:
         self._session_id = session_id
 
     @property
-    def storage_file(self) -> Optional[Path]:
+    def storage_file(self) -> Path | None:
         """Path to the timeline JSONL file"""
         if self._storage_path:
             return self._storage_path / "timeline.jsonl"
@@ -317,18 +318,18 @@ class TimelineManager:
 
         timeline_event = TimelineEvent(
             event_id=event.event_id,
-            event_type=mapping['event_type'],
-            event_subtype=mapping['event_subtype'],
+            event_type=mapping["event_type"],
+            event_subtype=mapping["event_subtype"],
             timestamp=event.timestamp,
             source=event.source,
             session_id=self._session_id,  # Tag with current session
-            embryo_id=data.get('embryo_id'),
-            detector_name=data.get('detector_name'),
-            timepoint=data.get('timepoint'),
-            confidence=data.get('confidence'),
+            embryo_id=data.get("embryo_id"),
+            detector_name=data.get("detector_name"),
+            timepoint=data.get("timepoint"),
+            confidence=data.get("confidence"),
             data=data,
-            icon=mapping['icon'],
-            severity=mapping['severity'],
+            icon=mapping["icon"],
+            severity=mapping["severity"],
         )
 
         self.add_event(timeline_event)
@@ -352,13 +353,13 @@ class TimelineManager:
 
     def get_events(
         self,
-        event_type: Optional[str] = None,
-        embryo_id: Optional[str] = None,
-        since: Optional[datetime] = None,
-        until: Optional[datetime] = None,
-        session_id: Optional[str] = "current",
+        event_type: str | None = None,
+        embryo_id: str | None = None,
+        since: datetime | None = None,
+        until: datetime | None = None,
+        session_id: str | None = "current",
         limit: int = 50,
-    ) -> List[TimelineEvent]:
+    ) -> list[TimelineEvent]:
         """
         Get filtered events from timeline
 
@@ -405,7 +406,7 @@ class TimelineManager:
         # Return limited, oldest first (chronological)
         return events[-limit:] if len(events) > limit else events
 
-    def get_time_range(self) -> tuple[Optional[datetime], Optional[datetime]]:
+    def get_time_range(self) -> tuple[datetime | None, datetime | None]:
         """
         Get the time range of events in the timeline
 
@@ -421,7 +422,7 @@ class TimelineManager:
 
         return events[0].timestamp, events[-1].timestamp
 
-    def clear_events(self, before: Optional[datetime] = None) -> int:
+    def clear_events(self, before: datetime | None = None) -> int:
         """
         Clear events from timeline
 
@@ -443,7 +444,7 @@ class TimelineManager:
                 old_count = len(self._events)
                 self._events = deque(
                     (e for e in self._events if e.timestamp >= before),
-                    maxlen=self._max_events
+                    maxlen=self._max_events,
                 )
                 count = old_count - len(self._events)
 
@@ -460,11 +461,11 @@ class TimelineManager:
             return
 
         try:
-            with open(self.storage_file, 'r', encoding='utf-8') as f:
+            with open(self.storage_file, encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     # Only parse lines that look like JSON objects
-                    if line and line.startswith('{'):
+                    if line and line.startswith("{"):
                         try:
                             data = json.loads(line)
                             event = TimelineEvent.from_dict(data)
@@ -484,8 +485,8 @@ class TimelineManager:
             # Ensure directory exists
             self._storage_path.mkdir(parents=True, exist_ok=True)
 
-            with open(self.storage_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(event.to_dict()) + '\n')
+            with open(self.storage_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(event.to_dict()) + "\n")
         except Exception as e:
             logger.error(f"Error persisting timeline event: {e}")
 
@@ -500,9 +501,9 @@ class TimelineManager:
             with self._lock:
                 events = list(self._events)
 
-            with open(self.storage_file, 'w', encoding='utf-8') as f:
+            with open(self.storage_file, "w", encoding="utf-8") as f:
                 for event in events:
-                    f.write(json.dumps(event.to_dict()) + '\n')
+                    f.write(json.dumps(event.to_dict()) + "\n")
         except Exception as e:
             logger.error(f"Error rewriting timeline storage: {e}")
 
@@ -512,7 +513,7 @@ class TimelineManager:
             return len(self._events)
 
 
-def parse_time_delta(s: str) -> Optional[timedelta]:
+def parse_time_delta(s: str) -> timedelta | None:
     """
     Parse a time delta string like "1h", "30m", "2d"
 
@@ -531,13 +532,13 @@ def parse_time_delta(s: str) -> Optional[timedelta]:
         return None
 
     try:
-        if s.endswith('m'):
+        if s.endswith("m"):
             return timedelta(minutes=int(s[:-1]))
-        elif s.endswith('h'):
+        elif s.endswith("h"):
             return timedelta(hours=int(s[:-1]))
-        elif s.endswith('d'):
+        elif s.endswith("d"):
             return timedelta(days=int(s[:-1]))
-        elif s.endswith('w'):
+        elif s.endswith("w"):
             return timedelta(weeks=int(s[:-1]))
         else:
             # Try parsing as minutes

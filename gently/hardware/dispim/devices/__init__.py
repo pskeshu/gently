@@ -5,20 +5,26 @@ Split by domain for maintainability. Import from here for the public API:
     from gently.devices import DiSPIMCamera, DiSPIMPiezo, ...
 """
 
-from .stage import DiSPIMZstage, DiSPIMXYStage
-from .camera import DiSPIMCamera, DiSPIMDualCamera, DiSPIMBottomCamera
+from .acquisition import DiSPIMLightSheetSnap, DiSPIMVolumeScanner
+from .camera import DiSPIMBottomCamera, DiSPIMCamera, DiSPIMDualCamera
+from .optical import DiSPIMLaserControl, DiSPIMLED, DiSPIMLightSource
 from .piezo import DiSPIMFDrive, DiSPIMPiezo
 from .scanner import DiSPIMScanner
-from .optical import DiSPIMLED, DiSPIMLightSource, DiSPIMLaserControl
-from .acquisition import DiSPIMVolumeScanner, DiSPIMLightSheetSnap
+from .stage import DiSPIMXYStage, DiSPIMZstage
 
 __all__ = [
-    "DiSPIMZstage", "DiSPIMXYStage",
-    "DiSPIMCamera", "DiSPIMDualCamera", "DiSPIMBottomCamera",
-    "DiSPIMFDrive", "DiSPIMPiezo",
+    "DiSPIMZstage",
+    "DiSPIMXYStage",
+    "DiSPIMCamera",
+    "DiSPIMDualCamera",
+    "DiSPIMBottomCamera",
+    "DiSPIMFDrive",
+    "DiSPIMPiezo",
     "DiSPIMScanner",
-    "DiSPIMLED", "DiSPIMLightSource",
+    "DiSPIMLED",
+    "DiSPIMLightSource",
     # Backwards-compatible alias for DiSPIMLightSource:
     "DiSPIMLaserControl",
-    "DiSPIMVolumeScanner", "DiSPIMLightSheetSnap",
+    "DiSPIMVolumeScanner",
+    "DiSPIMLightSheetSnap",
 ]

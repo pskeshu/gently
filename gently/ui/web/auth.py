@@ -36,14 +36,14 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 # Header name used to upgrade a remote session to control role (legacy
 # single-shared-token path, used only when no user accounts are configured).
 _TOKEN_HEADER = "X-Gently-Token"
-_TOKEN_ENV    = "GENTLY_CONTROL_TOKEN"
+_TOKEN_ENV = "GENTLY_CONTROL_TOKEN"
 
 # Browser session cookie set by the login flow (see routes/auth_routes.py).
 SESSION_COOKIE = "gently_session"
 
 
 class Role(str, Enum):
-    VIEW    = "view"
+    VIEW = "view"
     CONTROL = "control"
 
 
@@ -53,6 +53,7 @@ def current_username(request: Request) -> str | None:
     None when no account store is configured or the cookie is missing/invalid.
     """
     from gently.ui.web.accounts import get_account_store
+
     store = get_account_store()
     if store is None:
         return None
@@ -82,7 +83,8 @@ def resolve_role(request: Request) -> Role:
     GENTLY_CONTROL_TOKEN. This keeps existing single-operator rigs working
     until an admin provisions accounts.
     """
-    from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+    from gently.ui.web.accounts import CONTROL_ROLES, get_account_store
+
     store = get_account_store()
     if store is not None and store.has_users():
         username = current_username(request)
@@ -116,11 +118,10 @@ def require_control(request: Request) -> Role:
     if role is Role.CONTROL:
         return role
     host = request.client.host if request.client else "unknown"
-    logger.warning("control-route 403 for %s -> %s %s",
-                   host, request.method, request.url.path)
+    logger.warning("control-route 403 for %s -> %s %s", host, request.method, request.url.path)
     raise HTTPException(
         status_code=403,
         detail="control role required (this endpoint moves hardware or "
-               "mutates persistent state; localhost has it by default, "
-               "remote callers need X-Gently-Token)",
+        "mutates persistent state; localhost has it by default, "
+        "remote callers need X-Gently-Token)",
     )

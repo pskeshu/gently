@@ -15,9 +15,9 @@ Tests cover:
 import pytest
 
 from gently.organisms.celegans.stages import (
-    DevelopmentalStage,
-    STAGES,
     STAGE_CRITERIA,
+    STAGES,
+    DevelopmentalStage,
     get_adjacent_stages,
 )
 
@@ -26,8 +26,14 @@ class TestOrderedValues:
     def test_ordered_values(self):
         vals = DevelopmentalStage.ordered_values()
         assert vals == [
-            "early", "bean", "comma", "1.5fold",
-            "2fold", "pretzel", "hatching", "hatched",
+            "early",
+            "bean",
+            "comma",
+            "1.5fold",
+            "2fold",
+            "pretzel",
+            "hatching",
+            "hatched",
         ]
 
     def test_stages_global_matches(self):

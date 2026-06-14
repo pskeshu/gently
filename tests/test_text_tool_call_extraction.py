@@ -1,6 +1,7 @@
 """Tests for _extract_text_tool_calls fallback parser."""
 
 import json
+
 from gently.harness.conversation import _extract_text_tool_calls
 
 
@@ -12,13 +13,15 @@ class TestExtractTextToolCalls:
         assert calls == []
 
     def test_single_tool_call_with_arguments(self):
-        tc = json.dumps({
-            "name": "ask_user_choice",
-            "arguments": {
-                "question": "What next?",
-                "options": [{"id": "a", "label": "Option A"}],
-            },
-        })
+        tc = json.dumps(
+            {
+                "name": "ask_user_choice",
+                "arguments": {
+                    "question": "What next?",
+                    "options": [{"id": "a", "label": "Option A"}],
+                },
+            }
+        )
         text = f"Hey there!\n\n<tool_call>\n{tc}\n</tool_call>"
         cleaned, calls = _extract_text_tool_calls(text)
         assert "<tool_call>" not in cleaned
@@ -27,10 +30,12 @@ class TestExtractTextToolCalls:
         assert calls[0]["input"]["question"] == "What next?"
 
     def test_single_tool_call_with_input_key(self):
-        tc = json.dumps({
-            "name": "get_status",
-            "input": {"embryo_id": "embryo_1"},
-        })
+        tc = json.dumps(
+            {
+                "name": "get_status",
+                "input": {"embryo_id": "embryo_1"},
+            }
+        )
         text = f"Checking...\n<tool_call>{tc}</tool_call>"
         cleaned, calls = _extract_text_tool_calls(text)
         assert len(calls) == 1

@@ -6,14 +6,23 @@ Computes accuracy metrics, confusion matrices, and calibration statistics.
 
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .runner import BenchmarkReport
 
 
 # Stage order for metrics
-STAGE_ORDER = ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"]
+STAGE_ORDER = [
+    "early",
+    "bean",
+    "comma",
+    "1.5fold",
+    "2fold",
+    "pretzel",
+    "hatching",
+    "hatched",
+]
 
 
 @dataclass
@@ -25,30 +34,30 @@ class PerceptionMetrics:
     adjacent_accuracy: float = 0.0  # Within 1 stage
 
     # Per-stage accuracy
-    stage_accuracy: Dict[str, float] = field(default_factory=dict)
-    stage_counts: Dict[str, int] = field(default_factory=dict)
+    stage_accuracy: dict[str, float] = field(default_factory=dict)
+    stage_counts: dict[str, int] = field(default_factory=dict)
 
     # Confusion matrix: confusion[gt_stage][pred_stage] = count
-    confusion_matrix: Dict[str, Dict[str, int]] = field(default_factory=dict)
+    confusion_matrix: dict[str, dict[str, int]] = field(default_factory=dict)
 
     # Confidence calibration
     mean_confidence: float = 0.0
     confidence_when_correct: float = 0.0
     confidence_when_wrong: float = 0.0
-    calibration_bins: List[Tuple[float, float, int]] = field(default_factory=list)
+    calibration_bins: list[tuple[float, float, int]] = field(default_factory=list)
     # (confidence_bin_center, accuracy_in_bin, count)
 
     expected_calibration_error: float = 0.0  # ECE
 
     # Temporal metrics
     backward_transitions: int = 0  # Errors where stage went backward
-    stage_transition_delay: Dict[str, float] = field(default_factory=dict)
+    stage_transition_delay: dict[str, float] = field(default_factory=dict)
     # How many timepoints after GT transition until prediction caught up
 
     # Tool usage
     total_tool_calls: int = 0
     tool_call_rate: float = 0.0  # Avg tool calls per prediction
-    tool_use_by_stage: Dict[str, float] = field(default_factory=dict)
+    tool_use_by_stage: dict[str, float] = field(default_factory=dict)
 
     # When tools were used vs not
     accuracy_with_tools: float = 0.0
@@ -59,7 +68,7 @@ class PerceptionMetrics:
     transitional_rate: float = 0.0
     transitional_accuracy: float = 0.0  # Accuracy when marked transitional
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "accuracy": self.accuracy,
             "adjacent_accuracy": self.adjacent_accuracy,
@@ -102,8 +111,7 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
 
     # Collect all predictions
     all_preds = [
-        p for r in report.embryo_results for p in r.predictions
-        if p.ground_truth_stage is not None
+        p for r in report.embryo_results for p in r.predictions if p.ground_truth_stage is not None
     ]
 
     if not all_preds:
@@ -134,9 +142,7 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
     for p in all_preds:
         confusion[p.ground_truth_stage][p.predicted_stage] += 1
 
-    metrics.confusion_matrix = {
-        gt: dict(preds) for gt, preds in confusion.items()
-    }
+    metrics.confusion_matrix = {gt: dict(preds) for gt, preds in confusion.items()}
 
     # Confidence statistics
     confidences = [p.confidence for p in all_preds]
@@ -156,10 +162,7 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
         bin_high = (i + 1) / num_bins
         bin_center = (bin_low + bin_high) / 2
 
-        bin_preds = [
-            p for p in all_preds
-            if bin_low <= p.confidence < bin_high
-        ]
+        bin_preds = [p for p in all_preds if bin_low <= p.confidence < bin_high]
 
         if bin_preds:
             bin_accuracy = sum(1 for p in bin_preds if p.is_correct) / len(bin_preds)
@@ -207,7 +210,9 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
     if with_tools:
         metrics.accuracy_with_tools = sum(1 for p in with_tools if p.is_correct) / len(with_tools)
     if without_tools:
-        metrics.accuracy_without_tools = sum(1 for p in without_tools if p.is_correct) / len(without_tools)
+        metrics.accuracy_without_tools = sum(1 for p in without_tools if p.is_correct) / len(
+            without_tools
+        )
 
     # Transitional observations
     transitional_preds = [p for p in all_preds if p.is_transitional]
@@ -215,16 +220,16 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
     metrics.transitional_rate = len(transitional_preds) / len(all_preds)
 
     if transitional_preds:
-        metrics.transitional_accuracy = sum(
-            1 for p in transitional_preds if p.is_correct
-        ) / len(transitional_preds)
+        metrics.transitional_accuracy = sum(1 for p in transitional_preds if p.is_correct) / len(
+            transitional_preds
+        )
 
     return metrics
 
 
 def format_confusion_matrix(
-    confusion: Dict[str, Dict[str, int]],
-    stages: Optional[List[str]] = None,
+    confusion: dict[str, dict[str, int]],
+    stages: list[str] | None = None,
 ) -> str:
     """Format confusion matrix as ASCII table."""
     if stages is None:
@@ -278,34 +283,38 @@ def format_metrics_summary(metrics: PerceptionMetrics) -> str:
             count = metrics.stage_counts[stage]
             lines.append(f"  {stage:>10}: {acc:.1%} (n={count})")
 
-    lines.extend([
-        "",
-        "CONFIDENCE CALIBRATION",
-        f"  Mean confidence:         {metrics.mean_confidence:.2f}",
-        f"  Confidence (correct):    {metrics.confidence_when_correct:.2f}",
-        f"  Confidence (wrong):      {metrics.confidence_when_wrong:.2f}",
-        f"  Expected Cal. Error:     {metrics.expected_calibration_error:.3f}",
-        "",
-        "TOOL USAGE",
-        f"  Total tool calls:        {metrics.total_tool_calls}",
-        f"  Avg calls per pred:      {metrics.tool_call_rate:.2f}",
-        f"  Accuracy with tools:     {metrics.accuracy_with_tools:.1%}",
-        f"  Accuracy without tools:  {metrics.accuracy_without_tools:.1%}",
-        "",
-        "TEMPORAL",
-        f"  Backward transitions:    {metrics.backward_transitions}",
-        "",
-        "TRANSITIONAL OBSERVATIONS",
-        f"  Count:    {metrics.transitional_count}",
-        f"  Rate:     {metrics.transitional_rate:.1%}",
-        f"  Accuracy: {metrics.transitional_accuracy:.1%}",
-    ])
+    lines.extend(
+        [
+            "",
+            "CONFIDENCE CALIBRATION",
+            f"  Mean confidence:         {metrics.mean_confidence:.2f}",
+            f"  Confidence (correct):    {metrics.confidence_when_correct:.2f}",
+            f"  Confidence (wrong):      {metrics.confidence_when_wrong:.2f}",
+            f"  Expected Cal. Error:     {metrics.expected_calibration_error:.3f}",
+            "",
+            "TOOL USAGE",
+            f"  Total tool calls:        {metrics.total_tool_calls}",
+            f"  Avg calls per pred:      {metrics.tool_call_rate:.2f}",
+            f"  Accuracy with tools:     {metrics.accuracy_with_tools:.1%}",
+            f"  Accuracy without tools:  {metrics.accuracy_without_tools:.1%}",
+            "",
+            "TEMPORAL",
+            f"  Backward transitions:    {metrics.backward_transitions}",
+            "",
+            "TRANSITIONAL OBSERVATIONS",
+            f"  Count:    {metrics.transitional_count}",
+            f"  Rate:     {metrics.transitional_rate:.1%}",
+            f"  Accuracy: {metrics.transitional_accuracy:.1%}",
+        ]
+    )
 
     if metrics.confusion_matrix:
-        lines.extend([
-            "",
-            "CONFUSION MATRIX",
-            format_confusion_matrix(metrics.confusion_matrix),
-        ])
+        lines.extend(
+            [
+                "",
+                "CONFUSION MATRIX",
+                format_confusion_matrix(metrics.confusion_matrix),
+            ]
+        )
 
     return "\n".join(lines)

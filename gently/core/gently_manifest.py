@@ -4,9 +4,10 @@ Gently manifest — writes the root gently.yaml to a Gently3 storage root.
 Called once on first initialization of a new storage root.
 """
 
-import yaml
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 MANIFEST_VERSION = 3
 
@@ -47,7 +48,9 @@ MANIFEST = {
         "volumes": "t{NNNN}.tif — zlib-compressed TIFF stacks",
         "projections": "t{NNNN}.jpg — max-intensity JPEG projections",
         "traces": "t{NNNN}.json — complete perception record per timepoint",
-        "predictions.jsonl": "One-line-per-timepoint summary: {timepoint, stage, confidence, timestamp}",
+        "predictions.jsonl": (
+            "One-line-per-timepoint summary: {timepoint, stage, confidence, timestamp}"
+        ),
         "ground_truth.yaml": "Human annotations: [{stage, start_timepoint, end_timepoint}]",
     },
     "agent_memory": {
@@ -70,7 +73,14 @@ def write_manifest(root: Path):
     data["created"] = datetime.now().strftime("%Y-%m-%d")
 
     with open(manifest_path, "w", encoding="utf-8") as f:
-        yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True, width=100)
+        yaml.dump(
+            data,
+            f,
+            default_flow_style=False,
+            sort_keys=False,
+            allow_unicode=True,
+            width=100,
+        )
 
 
 def read_manifest(root: Path) -> dict:
@@ -78,5 +88,5 @@ def read_manifest(root: Path) -> dict:
     manifest_path = root / "gently.yaml"
     if not manifest_path.exists():
         return {}
-    with open(manifest_path, "r", encoding="utf-8") as f:
+    with open(manifest_path, encoding="utf-8") as f:
         return yaml.safe_load(f) or {}

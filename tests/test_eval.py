@@ -11,7 +11,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from gently.core.event_bus import EventBus, EventType, Event
+from gently.core.event_bus import Event, EventBus, EventType
 from gently.eval import (
     Decision,
     DecisionLog,
@@ -23,10 +23,10 @@ from gently.eval import (
     ShadowRunner,
 )
 
-
 # =============================================================================
 # EventCapture
 # =============================================================================
+
 
 def test_capture_writes_meaningful_events_skips_telemetry(tmp_path: Path):
     """Capture skips high-volume telemetry by default but keeps the rest."""
@@ -55,13 +55,17 @@ def test_capture_handles_non_json_native_payloads(tmp_path: Path):
     cap = EventCapture(log)
     cap.start(bus)
 
-    bus.publish(EventType.STAGE_MOVED, {
-        "np_scalar": np.float64(1.5),
-        "np_array": np.array([1, 2, 3]),
-        "path": Path("/tmp/foo.tif"),
-        "now": datetime(2026, 5, 15, 12, 0, 0),
-        "as_set": {"a", "b"},
-    }, source="t")
+    bus.publish(
+        EventType.STAGE_MOVED,
+        {
+            "np_scalar": np.float64(1.5),
+            "np_array": np.array([1, 2, 3]),
+            "path": Path("/tmp/foo.tif"),
+            "now": datetime(2026, 5, 15, 12, 0, 0),
+            "as_set": {"a", "b"},
+        },
+        source="t",
+    )
     cap.stop()
 
     record = json.loads(log.read_text().strip())
@@ -98,8 +102,7 @@ def test_capture_thread_safety(tmp_path: Path):
 
     def worker(idx: int):
         for i in range(N_EVENTS_PER_THREAD):
-            bus.publish(EventType.STAGE_MOVED,
-                        {"t": idx, "i": i}, source=f"thread-{idx}")
+            bus.publish(EventType.STAGE_MOVED, {"t": idx, "i": i}, source=f"thread-{idx}")
 
     threads = [threading.Thread(target=worker, args=(i,)) for i in range(N_THREADS)]
     for t in threads:
@@ -120,17 +123,20 @@ def test_capture_thread_safety(tmp_path: Path):
 # EventReplay
 # =============================================================================
 
+
 def test_replay_preserves_event_fields(tmp_path: Path):
     """Round-trip: capture, then replay, then verify Event field identity."""
     src_bus = EventBus()
     cap = EventCapture(tmp_path / "events.jsonl")
     cap.start(src_bus)
 
-    e1 = src_bus.publish(EventType.EMBRYOS_UPDATE,
-                          {"embryos": [{"id": "e1"}], "count": 1},
-                          source="capture-test", correlation_id="corr-A")
-    e2 = src_bus.publish(EventType.ERROR_OCCURRED,
-                          {"msg": "bang"}, source="capture-test")
+    e1 = src_bus.publish(
+        EventType.EMBRYOS_UPDATE,
+        {"embryos": [{"id": "e1"}], "count": 1},
+        source="capture-test",
+        correlation_id="corr-A",
+    )
+    e2 = src_bus.publish(EventType.ERROR_OCCURRED, {"msg": "bang"}, source="capture-test")
     cap.stop()
 
     rep = EventReplay(tmp_path / "events.jsonl")
@@ -201,7 +207,9 @@ def test_replay_time_scale_speeds_up(tmp_path: Path):
     dest.subscribe("*", lambda ev: None)
     t0 = time.monotonic()
     EventReplay(tmp_path / "events.jsonl").replay(
-        dest, real_time=True, time_scale=4.0,
+        dest,
+        real_time=True,
+        time_scale=4.0,
     )
     elapsed = time.monotonic() - t0
     # 0.4s scaled by 4 -> ~0.1s, with generous slack for scheduling.
@@ -212,17 +220,29 @@ def test_replay_skips_malformed_lines(tmp_path: Path):
     """A garbage line in the log doesn't abort the whole replay."""
     log = tmp_path / "events.jsonl"
     log.write_text(
-        json.dumps({
-            "event_type": "STAGE_MOVED", "data": {}, "source": "t",
-            "timestamp": "2026-01-01T00:00:00", "event_id": "abc",
-            "correlation_id": None,
-        }) + "\n"
+        json.dumps(
+            {
+                "event_type": "STAGE_MOVED",
+                "data": {},
+                "source": "t",
+                "timestamp": "2026-01-01T00:00:00",
+                "event_id": "abc",
+                "correlation_id": None,
+            }
+        )
+        + "\n"
         "not valid json garbage\n"
-        + json.dumps({
-            "event_type": "EMBRYOS_UPDATE", "data": {}, "source": "t",
-            "timestamp": "2026-01-01T00:00:01", "event_id": "def",
-            "correlation_id": None,
-        }) + "\n",
+        + json.dumps(
+            {
+                "event_type": "EMBRYOS_UPDATE",
+                "data": {},
+                "source": "t",
+                "timestamp": "2026-01-01T00:00:01",
+                "event_id": "def",
+                "correlation_id": None,
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
     rep = EventReplay(log)
@@ -238,6 +258,7 @@ def test_replay_missing_file_raises(tmp_path: Path):
 # =============================================================================
 # DecisionLog
 # =============================================================================
+
 
 def test_decision_log_round_trip(tmp_path: Path):
     log_path = tmp_path / "decisions.jsonl"
@@ -257,13 +278,15 @@ def test_decision_log_round_trip(tmp_path: Path):
         duration_ms=820.5,
     )
     dlog.append(d1)
-    dlog.append(Decision(
-        timestamp=datetime(2026, 5, 15, 12, 0, 5),
-        agent="prod",
-        trigger=DecisionTrigger.EVENT,
-        trigger_detail="EMBRYOS_UPDATE",
-        error=None,
-    ))
+    dlog.append(
+        Decision(
+            timestamp=datetime(2026, 5, 15, 12, 0, 5),
+            agent="prod",
+            trigger=DecisionTrigger.EVENT,
+            trigger_detail="EMBRYOS_UPDATE",
+            error=None,
+        )
+    )
     dlog.close()
 
     back = dlog.read()
@@ -279,11 +302,13 @@ def test_decision_log_round_trip(tmp_path: Path):
 def test_decision_log_context_manager(tmp_path: Path):
     log_path = tmp_path / "decisions.jsonl"
     with DecisionLog(log_path) as dlog:
-        dlog.append(Decision(
-            timestamp=datetime.now(),
-            agent="t",
-            trigger=DecisionTrigger.TICK,
-        ))
+        dlog.append(
+            Decision(
+                timestamp=datetime.now(),
+                agent="t",
+                trigger=DecisionTrigger.TICK,
+            )
+        )
     assert log_path.exists()
     assert len(log_path.read_text().splitlines()) == 1
 
@@ -291,6 +316,7 @@ def test_decision_log_context_manager(tmp_path: Path):
 # =============================================================================
 # ShadowRunner + NoOpCandidate
 # =============================================================================
+
 
 def test_shadow_runner_forwards_to_all_candidates(tmp_path: Path):
     bus = EventBus()
@@ -368,9 +394,11 @@ def test_shadow_runner_watch_filter(tmp_path: Path):
 # prompt_hash
 # =============================================================================
 
+
 def test_prompt_hash_stable_and_distinguishing():
     """Identical inputs → identical hash; any change → different hash."""
     from gently.eval import prompt_hash
+
     h1 = prompt_hash("sys-A", [{"role": "user", "content": "hi"}])
     h2 = prompt_hash("sys-A", [{"role": "user", "content": "hi"}])
     h3 = prompt_hash("sys-A", [{"role": "user", "content": "hello"}])
@@ -384,12 +412,13 @@ def test_prompt_hash_stable_and_distinguishing():
 def test_prompt_hash_accepts_list_system_prompt():
     """Cached system prompts use the list-of-blocks shape; hashing must work."""
     from gently.eval import prompt_hash
+
     list_prompt = [{"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}]
     str_prompt = "sys"
     # Different shapes, different hashes — that's fine, the point is just
     # that the list case doesn't raise.
     h_list = prompt_hash(list_prompt, [])
-    h_str  = prompt_hash(str_prompt,  [])
+    h_str = prompt_hash(str_prompt, [])
     assert isinstance(h_list, str) and isinstance(h_str, str)
     assert len(h_list) == 16 and len(h_str) == 16
 
@@ -398,10 +427,12 @@ def test_prompt_hash_accepts_list_system_prompt():
 # ConversationManager production-decision capture (success + error paths)
 # =============================================================================
 
+
 def _make_fake_conversation_manager(claude_client):
     """Build a ConversationManager with a fake Claude client and a no-op
     tool registry — enough to exercise call_claude's decision-write path."""
     import asyncio  # noqa: F401  (used by callers)
+
     from gently.harness.conversation import ConversationManager
 
     class _NoopReg:
@@ -461,6 +492,7 @@ def test_production_decision_capture_success(tmp_path: Path):
     # Bypass actual tool execution
     async def fake_exec(content_blocks, interaction):
         return [{"type": "tool_result", "tool_use_id": "t1", "content": "ok"}]
+
     cm._execute_tools_with_logging = fake_exec
 
     dlog = DecisionLog(tmp_path / "decisions.jsonl")
@@ -486,11 +518,13 @@ def test_production_decision_capture_success(tmp_path: Path):
     assert d.agent == "production"
     assert d.trigger is DecisionTrigger.USER_MESSAGE
     assert d.trigger_detail == "find embryos please"
-    assert d.tool_calls == [{
-        "name": "detect_embryos",
-        "input": {"min_confidence": 0.7},
-        "id": "t1",
-    }]
+    assert d.tool_calls == [
+        {
+            "name": "detect_embryos",
+            "input": {"min_confidence": 0.7},
+            "id": "t1",
+        }
+    ]
     assert d.response_text == "Done."
     assert d.error is None
     assert d.prompt_hash is not None and len(d.prompt_hash) == 16
@@ -566,6 +600,7 @@ def test_production_decision_capture_no_log_is_no_op(tmp_path: Path):
 # ReactiveCandidate
 # =============================================================================
 
+
 def _publish(bus, event_type_name: str, data: dict, source: str = "test"):
     bus.publish(EventType[event_type_name], data, source=source)
 
@@ -584,12 +619,26 @@ def test_reactive_ingests_embryos_update_silently(tmp_path: Path):
     runner.add(cand)
     runner.start()
 
-    _publish(bus, "EMBRYOS_UPDATE", {"embryos": [
-        {"id": "embryo_1", "position_coarse": {"x": 1.0, "y": 2.0},
-         "position_fine": {}, "has_fine_position": False},
-        {"id": "embryo_2", "position_coarse": {"x": 3.0, "y": 4.0},
-         "position_fine": {"x": 3.1, "y": 4.1}, "has_fine_position": True},
-    ]})
+    _publish(
+        bus,
+        "EMBRYOS_UPDATE",
+        {
+            "embryos": [
+                {
+                    "id": "embryo_1",
+                    "position_coarse": {"x": 1.0, "y": 2.0},
+                    "position_fine": {},
+                    "has_fine_position": False,
+                },
+                {
+                    "id": "embryo_2",
+                    "position_coarse": {"x": 3.0, "y": 4.0},
+                    "position_fine": {"x": 3.1, "y": 4.1},
+                    "has_fine_position": True,
+                },
+            ]
+        },
+    )
 
     runner.stop()
     dlog.close()
@@ -607,21 +656,27 @@ def test_reactive_proposes_recalibrate_when_fine_invalidated(tmp_path: Path):
     runner.add(ReactiveCandidate("reactive", dlog))
     runner.start()
 
-    _publish(bus, "OPERATOR_EDITED_EMBRYO", {
-        "embryo_id": "embryo_2",
-        "old_position_coarse": {"x": 3, "y": 4},
-        "new_position_coarse": {"x": 30, "y": 40},
-        "fine_position_invalidated": True,
-    })
+    _publish(
+        bus,
+        "OPERATOR_EDITED_EMBRYO",
+        {
+            "embryo_id": "embryo_2",
+            "old_position_coarse": {"x": 3, "y": 4},
+            "new_position_coarse": {"x": 30, "y": 40},
+            "fine_position_invalidated": True,
+        },
+    )
     runner.stop()
     dlog.close()
     decs = _decisions_for(dlog)
     assert len(decs) == 1
-    assert decs[0].tool_calls == [{
-        "name": "recalibrate_embryo",
-        "input": {"embryo_id": "embryo_2"},
-        "id": None,
-    }]
+    assert decs[0].tool_calls == [
+        {
+            "name": "recalibrate_embryo",
+            "input": {"embryo_id": "embryo_2"},
+            "id": None,
+        }
+    ]
 
 
 def test_reactive_skips_recalibrate_when_no_fine_existed(tmp_path: Path):
@@ -632,12 +687,16 @@ def test_reactive_skips_recalibrate_when_no_fine_existed(tmp_path: Path):
     runner.add(ReactiveCandidate("reactive", dlog))
     runner.start()
 
-    _publish(bus, "OPERATOR_EDITED_EMBRYO", {
-        "embryo_id": "embryo_1",
-        "old_position_coarse": {"x": 1, "y": 2},
-        "new_position_coarse": {"x": 10, "y": 20},
-        "fine_position_invalidated": False,
-    })
+    _publish(
+        bus,
+        "OPERATOR_EDITED_EMBRYO",
+        {
+            "embryo_id": "embryo_1",
+            "old_position_coarse": {"x": 1, "y": 2},
+            "new_position_coarse": {"x": 10, "y": 20},
+            "fine_position_invalidated": False,
+        },
+    )
     runner.stop()
     dlog.close()
     decs = _decisions_for(dlog)
@@ -654,19 +713,25 @@ def test_reactive_proposes_calibrate_all_on_marked(tmp_path: Path):
     runner.add(ReactiveCandidate("reactive", dlog))
     runner.start()
 
-    _publish(bus, "OPERATOR_MARKED_EMBRYOS", {
-        "embryo_ids": ["embryo_001", "embryo_002", "embryo_003"],
-        "count": 3,
-    })
+    _publish(
+        bus,
+        "OPERATOR_MARKED_EMBRYOS",
+        {
+            "embryo_ids": ["embryo_001", "embryo_002", "embryo_003"],
+            "count": 3,
+        },
+    )
     runner.stop()
     dlog.close()
     decs = _decisions_for(dlog)
     assert len(decs) == 1
-    assert decs[0].tool_calls == [{
-        "name": "calibrate_all_embryos",
-        "input": {"embryo_ids": ["embryo_001", "embryo_002", "embryo_003"]},
-        "id": None,
-    }]
+    assert decs[0].tool_calls == [
+        {
+            "name": "calibrate_all_embryos",
+            "input": {"embryo_ids": ["embryo_001", "embryo_002", "embryo_003"]},
+            "id": None,
+        }
+    ]
 
 
 def test_reactive_proposes_forget_on_removal(tmp_path: Path):
@@ -677,19 +742,25 @@ def test_reactive_proposes_forget_on_removal(tmp_path: Path):
     runner.add(ReactiveCandidate("reactive", dlog))
     runner.start()
 
-    _publish(bus, "OPERATOR_REMOVED_EMBRYO", {
-        "embryo_id": "embryo_5",
-        "last_position": {"coarse": {"x": 1, "y": 2}, "fine": None},
-    })
+    _publish(
+        bus,
+        "OPERATOR_REMOVED_EMBRYO",
+        {
+            "embryo_id": "embryo_5",
+            "last_position": {"coarse": {"x": 1, "y": 2}, "fine": None},
+        },
+    )
     runner.stop()
     dlog.close()
     decs = _decisions_for(dlog)
     assert len(decs) == 1
-    assert decs[0].tool_calls == [{
-        "name": "forget_embryo",
-        "input": {"embryo_id": "embryo_5"},
-        "id": None,
-    }]
+    assert decs[0].tool_calls == [
+        {
+            "name": "forget_embryo",
+            "input": {"embryo_id": "embryo_5"},
+            "id": None,
+        }
+    ]
 
 
 def test_reactive_escalates_first_error_then_suppresses_repeat(tmp_path: Path):
@@ -724,21 +795,39 @@ def test_reactive_full_event_stream_through_replay(tmp_path: Path):
     cap = EventCapture(tmp_path / "events.jsonl")
     cap.start(src)
 
-    src.publish(EventType.EMBRYOS_UPDATE, {"embryos": [
-        {"id": "embryo_1", "position_coarse": {"x": 1.0, "y": 2.0},
-         "position_fine": {"x": 1.05, "y": 2.05}, "has_fine_position": True},
-    ]}, source="agent")
-    src.publish(EventType.OPERATOR_EDITED_EMBRYO, {
-        "embryo_id": "embryo_1",
-        "old_position_coarse": {"x": 1.0, "y": 2.0},
-        "new_position_coarse": {"x": 5.0, "y": 6.0},
-        "fine_position_invalidated": True,
-    }, source="web:map-edit")
-    src.publish(EventType.OPERATOR_MARKED_EMBRYOS, {
-        "embryo_ids": ["embryo_2", "embryo_3"], "count": 2,
-    }, source="detect_embryos:web-editor")
-    src.publish(EventType.ERROR_OCCURRED, {"msg": "lost focus"},
-                source="device-layer")
+    src.publish(
+        EventType.EMBRYOS_UPDATE,
+        {
+            "embryos": [
+                {
+                    "id": "embryo_1",
+                    "position_coarse": {"x": 1.0, "y": 2.0},
+                    "position_fine": {"x": 1.05, "y": 2.05},
+                    "has_fine_position": True,
+                },
+            ]
+        },
+        source="agent",
+    )
+    src.publish(
+        EventType.OPERATOR_EDITED_EMBRYO,
+        {
+            "embryo_id": "embryo_1",
+            "old_position_coarse": {"x": 1.0, "y": 2.0},
+            "new_position_coarse": {"x": 5.0, "y": 6.0},
+            "fine_position_invalidated": True,
+        },
+        source="web:map-edit",
+    )
+    src.publish(
+        EventType.OPERATOR_MARKED_EMBRYOS,
+        {
+            "embryo_ids": ["embryo_2", "embryo_3"],
+            "count": 2,
+        },
+        source="detect_embryos:web-editor",
+    )
+    src.publish(EventType.ERROR_OCCURRED, {"msg": "lost focus"}, source="device-layer")
     cap.stop()
 
     dst = EventBus()

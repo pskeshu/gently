@@ -29,13 +29,12 @@ import argparse
 import base64
 import io
 import json
+import socketserver
 import sys
 from datetime import datetime
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Callable
 from urllib.parse import parse_qs, urlparse
-import socketserver
 
 import numpy as np
 from scipy import ndimage
@@ -52,6 +51,7 @@ def ensure_dependencies():
 
     try:
         import tifffile as _tifffile
+
         tifffile = _tifffile
     except ImportError:
         print("ERROR: tifffile required. Install: pip install tifffile")
@@ -59,15 +59,17 @@ def ensure_dependencies():
 
     try:
         from PIL import Image as _Image
+
         PIL_Image = _Image
     except ImportError:
         print("ERROR: Pillow required. Install: pip install Pillow")
         sys.exit(1)
 
     try:
-        import matplotlib.pyplot as _plt
         import matplotlib
-        matplotlib.use('Agg')  # Non-interactive backend
+        import matplotlib.pyplot as _plt
+
+        matplotlib.use("Agg")  # Non-interactive backend
         plt = _plt
     except ImportError:
         print("WARNING: matplotlib not available, some features disabled")
@@ -78,7 +80,8 @@ def ensure_dependencies():
 # Volume Loading
 # =============================================================================
 
-def discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dict[str, List[Path]]:
+
+def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict[str, list[Path]]:
     """Discover volume files in a session directory."""
     if not session_dir.exists():
         return {}
@@ -110,7 +113,7 @@ def discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dict
     return result
 
 
-def load_volume(path: Path, crop_bounds: Optional[Tuple[int, int, int, int]] = None) -> np.ndarray:
+def load_volume(path: Path, crop_bounds: tuple[int, int, int, int] | None = None) -> np.ndarray:
     """Load a volume from TIFF file, extract View A, and optionally apply crop bounds."""
     vol = tifffile.imread(str(path))
     vol = np.squeeze(vol)
@@ -119,7 +122,7 @@ def load_volume(path: Path, crop_bounds: Optional[Tuple[int, int, int, int]] = N
         z_depth, height, width = vol.shape
         # Extract View A (left half) if dual-view format
         if width > height * 2:
-            vol = vol[:, :, :width // 2]
+            vol = vol[:, :, : width // 2]
 
         # Apply crop bounds if provided
         if crop_bounds is not None:
@@ -131,6 +134,7 @@ def load_volume(path: Path, crop_bounds: Optional[Tuple[int, int, int, int]] = N
 # =============================================================================
 # Image Utilities
 # =============================================================================
+
 
 def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np.ndarray:
     """Normalize image to 0-255 uint8 using percentile scaling."""
@@ -147,8 +151,8 @@ def normalize_image(img: np.ndarray, p_low: float = 1, p_high: float = 99) -> np
 def image_to_base64(img: np.ndarray, format: str = "JPEG", quality: int = 90) -> str:
     """Convert numpy array to base64-encoded image."""
     pil_img = PIL_Image.fromarray(img)
-    if pil_img.mode not in ('RGB', 'RGBA'):
-        pil_img = pil_img.convert('RGB')
+    if pil_img.mode not in ("RGB", "RGBA"):
+        pil_img = pil_img.convert("RGB")
 
     buffer = io.BytesIO()
     pil_img.save(buffer, format=format, quality=quality)
@@ -168,7 +172,10 @@ def resize_to_height(img: np.ndarray, target_height: int) -> np.ndarray:
 # Auto-crop utilities
 # =============================================================================
 
-def find_content_bbox(img: np.ndarray, threshold_percentile: float = 10, padding: int = 20) -> Tuple[int, int, int, int]:
+
+def find_content_bbox(
+    img: np.ndarray, threshold_percentile: float = 10, padding: int = 20
+) -> tuple[int, int, int, int]:
     """
     Find bounding box of content (non-background) in image.
 
@@ -209,7 +216,9 @@ def auto_crop(img: np.ndarray, threshold_percentile: float = 10, padding: int = 
     return img[y_min:y_max, x_min:x_max]
 
 
-def compute_crop_bounds(volume: np.ndarray, padding: int = 20, sigma_mult: float = 3.5) -> Tuple[int, int, int, int]:
+def compute_crop_bounds(
+    volume: np.ndarray, padding: int = 20, sigma_mult: float = 3.5
+) -> tuple[int, int, int, int]:
     """
     Compute crop bounds for 3D volume using center-of-mass of bright pixels.
 
@@ -245,7 +254,7 @@ def compute_crop_bounds(volume: np.ndarray, padding: int = 20, sigma_mult: float
     return (y_min, y_max, x_min, x_max)
 
 
-def apply_crop_bounds(volume: np.ndarray, bounds: Tuple[int, int, int, int]) -> np.ndarray:
+def apply_crop_bounds(volume: np.ndarray, bounds: tuple[int, int, int, int]) -> np.ndarray:
     """Apply pre-computed crop bounds to a volume."""
     y_min, y_max, x_min, x_max = bounds
     # Clamp to actual volume dimensions
@@ -260,6 +269,7 @@ def apply_crop_bounds(volume: np.ndarray, bounds: Tuple[int, int, int, int]) -> 
 # Projection Methods
 # =============================================================================
 
+
 def find_outer_boundary(img: np.ndarray, percentile: float = 50) -> np.ndarray:
     """
     Find outer boundary of embryo by thresholding and extracting mask edge.
@@ -271,17 +281,27 @@ def find_outer_boundary(img: np.ndarray, percentile: float = 50) -> np.ndarray:
     mask = img > thresh
 
     # Vectorized erosion: pixel is 1 only if all neighbors are 1
-    padded = np.pad(mask, 1, mode='constant', constant_values=True)
-    eroded = (padded[:-2, :-2] & padded[:-2, 1:-1] & padded[:-2, 2:] &
-              padded[1:-1, :-2] & padded[1:-1, 1:-1] & padded[1:-1, 2:] &
-              padded[2:, :-2] & padded[2:, 1:-1] & padded[2:, 2:])
+    padded = np.pad(mask, 1, mode="constant", constant_values=True)
+    eroded = (
+        padded[:-2, :-2]
+        & padded[:-2, 1:-1]
+        & padded[:-2, 2:]
+        & padded[1:-1, :-2]
+        & padded[1:-1, 1:-1]
+        & padded[1:-1, 2:]
+        & padded[2:, :-2]
+        & padded[2:, 1:-1]
+        & padded[2:, 2:]
+    )
 
     # Boundary = mask AND NOT eroded
     boundary = (mask & ~eroded).astype(np.uint8) * 255
     return boundary
 
 
-def overlay_edges(img: np.ndarray, edges: np.ndarray, color: Tuple[int, int, int] = (255, 200, 0)) -> np.ndarray:
+def overlay_edges(
+    img: np.ndarray, edges: np.ndarray, color: tuple[int, int, int] = (255, 200, 0)
+) -> np.ndarray:
     """Overlay edge contours on image in specified color."""
     if img.ndim == 2:
         rgb = np.stack([img, img, img], axis=-1)
@@ -294,7 +314,7 @@ def overlay_edges(img: np.ndarray, edges: np.ndarray, color: Tuple[int, int, int
     return rgb
 
 
-def projection_dual_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
+def projection_dual_view(volume: np.ndarray) -> tuple[np.ndarray, str]:
     """
     Dual-view projection: TOP above, SIDE below, sharing X axis.
     Includes embryo boundary overlay using Canny edge detection.
@@ -341,7 +361,7 @@ def projection_dual_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     return combined, "Dual-view MIP with boundary: TOP (XY) above, SIDE (XZ) below"
 
 
-def projection_depth_colored(volume: np.ndarray, colormap: str = 'turbo') -> Tuple[np.ndarray, str]:
+def projection_depth_colored(volume: np.ndarray, colormap: str = "turbo") -> tuple[np.ndarray, str]:
     """
     Depth-colored max intensity projection with side view.
 
@@ -407,7 +427,7 @@ def projection_depth_colored(volume: np.ndarray, colormap: str = 'turbo') -> Tup
     return combined, f"Z-depth colored MIP ({colormap}): TOP + SIDE views"
 
 
-def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.ndarray, str]:
+def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> tuple[np.ndarray, str]:
     """
     Montage of N representative z-slices.
 
@@ -439,7 +459,7 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
     # Build montage
     rows = []
     for r in range(n_rows):
-        row_slices = slices[r * n_cols:(r + 1) * n_cols]
+        row_slices = slices[r * n_cols : (r + 1) * n_cols]
         # Add thin separator between slices
         sep = np.ones((height, 2), dtype=np.uint8) * 64
         row_with_sep = []
@@ -458,7 +478,7 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
     return montage, f"Multi-slice montage ({n_slices} slices: {z_labels})"
 
 
-def projection_subvolume(volume: np.ndarray) -> Tuple[np.ndarray, str]:
+def projection_subvolume(volume: np.ndarray) -> tuple[np.ndarray, str]:
     """
     Sub-volume projections: top third, middle third, bottom third.
 
@@ -481,18 +501,33 @@ def projection_subvolume(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     bot_vol = volume[z2:]
 
     # Project each
-    top_proj = normalize_image(np.max(top_vol, axis=0)) if top_vol.size > 0 else np.zeros((height, width), dtype=np.uint8)
-    mid_proj = normalize_image(np.max(mid_vol, axis=0)) if mid_vol.size > 0 else np.zeros((height, width), dtype=np.uint8)
-    bot_proj = normalize_image(np.max(bot_vol, axis=0)) if bot_vol.size > 0 else np.zeros((height, width), dtype=np.uint8)
+    top_proj = (
+        normalize_image(np.max(top_vol, axis=0))
+        if top_vol.size > 0
+        else np.zeros((height, width), dtype=np.uint8)
+    )
+    mid_proj = (
+        normalize_image(np.max(mid_vol, axis=0))
+        if mid_vol.size > 0
+        else np.zeros((height, width), dtype=np.uint8)
+    )
+    bot_proj = (
+        normalize_image(np.max(bot_vol, axis=0))
+        if bot_vol.size > 0
+        else np.zeros((height, width), dtype=np.uint8)
+    )
 
     # Combine horizontally with labels
     sep = np.ones((height, 4), dtype=np.uint8) * 128
     combined = np.concatenate([top_proj, sep, mid_proj, sep, bot_proj], axis=1)
 
-    return combined, f"Sub-volume MIPs: TOP (z=0-{z1}) | MID (z={z1}-{z2}) | BOT (z={z2}-{z_depth})"
+    return (
+        combined,
+        f"Sub-volume MIPs: TOP (z=0-{z1}) | MID (z={z1}-{z2}) | BOT (z={z2}-{z_depth})",
+    )
 
 
-def projection_three_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
+def projection_three_view(volume: np.ndarray) -> tuple[np.ndarray, str]:
     """
     Three orthogonal views with proper axis alignment:
 
@@ -562,8 +597,9 @@ def projection_three_view(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     return combined, "Three-view: [XY|YZ] top, [XZ] bottom - axes aligned"
 
 
-def render_volume_rotated_v2(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
-                              threshold: float = 0.12) -> np.ndarray:
+def render_volume_rotated_v2(
+    volume: np.ndarray, angle_y: float, angle_x: float = -0.5, threshold: float = 0.12
+) -> np.ndarray:
     """
     Render volume by actually rotating it in 3D, then projecting.
     Uses scipy.ndimage.rotate for true 3D rotation.
@@ -581,11 +617,19 @@ def render_volume_rotated_v2(volume: np.ndarray, angle_y: float, angle_x: float 
 
     # Rotate around Y axis (rotation in XZ plane, axis 1 is Y)
     # axes=(2, 0) means rotate in the X-Z plane
-    rotated = rotate(vol, angle_y_deg, axes=(2, 0), reshape=False, order=1, mode='constant', cval=0)
+    rotated = rotate(vol, angle_y_deg, axes=(2, 0), reshape=False, order=1, mode="constant", cval=0)
 
     # Rotate around X axis (rotation in YZ plane)
     # axes=(1, 0) means rotate in the Y-Z plane
-    rotated = rotate(rotated, angle_x_deg, axes=(1, 0), reshape=False, order=1, mode='constant', cval=0)
+    rotated = rotate(
+        rotated,
+        angle_x_deg,
+        axes=(1, 0),
+        reshape=False,
+        order=1,
+        mode="constant",
+        cval=0,
+    )
 
     # Now do alpha-blended projection along Z (front to back would be back to front after rotation)
     z_depth, height, width = rotated.shape
@@ -609,9 +653,14 @@ def render_volume_rotated_v2(volume: np.ndarray, angle_y: float, angle_x: float 
     return result
 
 
-def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
-                           threshold: float = 0.12, num_slices: int = 48,
-                           perspective: float = 0.4) -> np.ndarray:
+def render_volume_rotated(
+    volume: np.ndarray,
+    angle_y: float,
+    angle_x: float = -0.5,
+    threshold: float = 0.12,
+    num_slices: int = 48,
+    perspective: float = 0.4,
+) -> np.ndarray:
     """
     Render volume from a rotated viewpoint with parallax and perspective.
 
@@ -680,23 +729,25 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
         perspective_scale = 1.0 + (depth_after_rotation * perspective * 1.5 / z_scale)
         perspective_scale = np.clip(perspective_scale, 0.5, 1.5)
 
-        slice_data_list.append({
-            'z_idx': z_idx,
-            'shift_x': shift_x,
-            'shift_y': shift_y,
-            'depth': depth_after_rotation,
-            'scale': perspective_scale,
-        })
+        slice_data_list.append(
+            {
+                "z_idx": z_idx,
+                "shift_x": shift_x,
+                "shift_y": shift_y,
+                "depth": depth_after_rotation,
+                "scale": perspective_scale,
+            }
+        )
 
     # Sort by depth (back to front for proper alpha compositing)
-    slice_data_list.sort(key=lambda s: s['depth'])
+    slice_data_list.sort(key=lambda s: s["depth"])
 
     # Composite slices
     for slice_info in slice_data_list:
-        z_idx = slice_info['z_idx']
-        shift_x = slice_info['shift_x']
-        shift_y = slice_info['shift_y']
-        scale = slice_info['scale']
+        z_idx = slice_info["z_idx"]
+        shift_x = slice_info["shift_x"]
+        shift_y = slice_info["shift_y"]
+        scale = slice_info["scale"]
 
         # Get slice
         slice_img = vol[z_idx, :, :]
@@ -746,8 +797,8 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
         # Alpha composite
         for c in range(3):
             result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] = (
-                src_slice * src_alpha +
-                result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] * (1 - src_alpha)
+                src_slice * src_alpha
+                + result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] * (1 - src_alpha)
             )
 
     # Crop to content (remove empty margins)
@@ -771,7 +822,7 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
     return result
 
 
-def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
+def projection_spin_3d(volume: np.ndarray) -> tuple[np.ndarray, str]:
     """
     Multiple 3D perspective views from different angles.
 
@@ -793,7 +844,6 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
     # Different rotation angles around Y axis (horizontal spin)
     # 6 views: front, 60°, 120°, 180° (back), 240°, 300°
     angles_y = [-0.05, 0.5, 1.0, 1.57, 2.1, 2.6]
-    labels = ["front", "60°", "120°", "back", "240°", "300°"]
 
     views = []
     for angle_y in angles_y:
@@ -802,7 +852,7 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
             angle_y=angle_y,
             angle_x=base_tilt,
             threshold=py_threshold,
-            perspective=0.5
+            perspective=0.5,
         )
         views.append(view)
 
@@ -818,10 +868,10 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
         pad_w = (target_w - w) // 2
         if v.ndim == 3:
             p = np.zeros((target_h, target_w, 3), dtype=v.dtype)
-            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+            p[pad_h : pad_h + h, pad_w : pad_w + w] = v
         else:
             p = np.zeros((target_h, target_w), dtype=v.dtype)
-            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+            p[pad_h : pad_h + h, pad_w : pad_w + w] = v
         padded.append(p)
 
     # Create 2x3 grid
@@ -834,18 +884,19 @@ def projection_spin_3d(volume: np.ndarray) -> Tuple[np.ndarray, str]:
 
 # Registry of available projection methods
 PROJECTION_METHODS = {
-    'dual_view': projection_dual_view,
-    'depth_colored': projection_depth_colored,
-    'multi_slice': projection_multi_slice,
-    'subvolume': projection_subvolume,
-    'three_view': projection_three_view,
-    'spin_3d': projection_spin_3d,
+    "dual_view": projection_dual_view,
+    "depth_colored": projection_depth_colored,
+    "multi_slice": projection_multi_slice,
+    "subvolume": projection_subvolume,
+    "three_view": projection_three_view,
+    "spin_3d": projection_spin_3d,
 }
 
 
 # =============================================================================
 # Session Manager
 # =============================================================================
+
 
 class SessionManager:
     """Manages volume data for a session with aggressive caching."""
@@ -864,11 +915,11 @@ class SessionManager:
             self.current_embryo = sorted(self.embryo_volumes.keys())[0]
 
     @property
-    def embryo_list(self) -> List[str]:
+    def embryo_list(self) -> list[str]:
         return sorted(self.embryo_volumes.keys())
 
     @property
-    def current_volumes(self) -> List[Path]:
+    def current_volumes(self) -> list[Path]:
         if self.current_embryo:
             return self.embryo_volumes.get(self.current_embryo, [])
         return []
@@ -882,7 +933,7 @@ class SessionManager:
             self.current_embryo = embryo_id
             self.current_idx = 0
 
-    def _get_crop_bounds(self) -> Optional[Tuple[int, int, int, int]]:
+    def _get_crop_bounds(self) -> tuple[int, int, int, int] | None:
         """Get or compute crop bounds for current embryo (computed from first volume)."""
         if self.current_embryo is None:
             return None
@@ -899,16 +950,19 @@ class SessionManager:
             if vol.ndim == 3:
                 z_depth, height, width = vol.shape
                 if width > height * 2:
-                    vol = vol[:, :, :width // 2]
+                    vol = vol[:, :, : width // 2]
 
             bounds = compute_crop_bounds(vol, padding=20)
             self._crop_bounds[self.current_embryo] = bounds
             print(f"[ROI] Computed crop bounds for {self.current_embryo}: {bounds}")
-            print(f"[ROI] Original volume shape: {vol.shape}, cropped region: {bounds[1]-bounds[0]}x{bounds[3]-bounds[2]}")
+            print(
+                f"[ROI] Original volume shape: {vol.shape}, cropped region:"
+                f" {bounds[1] - bounds[0]}x{bounds[3] - bounds[2]}"
+            )
 
         return self._crop_bounds[self.current_embryo]
 
-    def get_volume(self, idx: int) -> Optional[np.ndarray]:
+    def get_volume(self, idx: int) -> np.ndarray | None:
         """Load volume at index, with caching and stable crop bounds."""
         volumes = self.current_volumes
         if not volumes or idx < 0 or idx >= len(volumes):
@@ -923,7 +977,7 @@ class SessionManager:
                 for k in self._volume_cache:
                     if k[0] != self.current_embryo or abs(k[1] - idx) > 10:
                         keys_to_remove.append(k)
-                for k in keys_to_remove[:len(self._volume_cache) - self._cache_size // 2]:
+                for k in keys_to_remove[: len(self._volume_cache) - self._cache_size // 2]:
                     del self._volume_cache[k]
 
             # Get stable crop bounds for this embryo
@@ -934,7 +988,7 @@ class SessionManager:
 
         return self._volume_cache[cache_key]
 
-    def get_projection(self, idx: int, method: str) -> Optional[Tuple[np.ndarray, str]]:
+    def get_projection(self, idx: int, method: str) -> tuple[np.ndarray, str] | None:
         """Get cached projection or compute it."""
         cache_key = (self.current_embryo, idx, method)
 
@@ -958,10 +1012,10 @@ class SessionManager:
 
         return self._projection_cache[cache_key]
 
-    def get_current_volume(self) -> Optional[np.ndarray]:
+    def get_current_volume(self) -> np.ndarray | None:
         return self.get_volume(self.current_idx)
 
-    def get_current_path(self) -> Optional[Path]:
+    def get_current_path(self) -> Path | None:
         volumes = self.current_volumes
         if volumes and 0 <= self.current_idx < len(volumes):
             return volumes[self.current_idx]
@@ -978,11 +1032,12 @@ class SessionManager:
 # Web UI Server
 # =============================================================================
 
+
 class ExplorerHandler(BaseHTTPRequestHandler):
     """HTTP handler for projection explorer."""
 
     session_manager: SessionManager = None
-    current_methods: List[str] = ['dual_view', 'depth_colored']
+    current_methods: list[str] = ["dual_view", "depth_colored"]
     current_z_slice: int = 0  # For 3D volume viewer
 
     def log_message(self, format, *args):
@@ -1001,7 +1056,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             elif parsed.path.startswith("/api/goto"):
                 params = parse_qs(parsed.query)
                 idx = int(params.get("idx", [0])[0])
-                self.session_manager.current_idx = max(0, min(idx, self.session_manager.total_timepoints - 1))
+                self.session_manager.current_idx = max(
+                    0, min(idx, self.session_manager.total_timepoints - 1)
+                )
                 self.send_projections()
             elif parsed.path.startswith("/api/embryo"):
                 params = parse_qs(parsed.query)
@@ -1013,7 +1070,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
                 methods = params.get("m", [])
                 if methods:
                     # Update class variable, not instance variable
-                    ExplorerHandler.current_methods = [m for m in methods if m in PROJECTION_METHODS]
+                    ExplorerHandler.current_methods = [
+                        m for m in methods if m in PROJECTION_METHODS
+                    ]
                 self.send_projections()
             elif parsed.path.startswith("/api/zslice"):
                 params = parse_qs(parsed.query)
@@ -1041,17 +1100,19 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         volume = sm.get_current_volume()
         z_depth = volume.shape[0] if volume is not None and volume.ndim == 3 else 0
         crop_bounds = sm._crop_bounds.get(sm.current_embryo) if sm.current_embryo else None
-        self.send_json({
-            "session": sm.session_path.name,
-            "embryos": sm.embryo_list,
-            "current_embryo": sm.current_embryo,
-            "total": sm.total_timepoints,
-            "idx": sm.current_idx,
-            "methods": list(PROJECTION_METHODS.keys()),
-            "active_methods": ExplorerHandler.current_methods,
-            "z_depth": z_depth,
-            "crop_bounds": crop_bounds,
-        })
+        self.send_json(
+            {
+                "session": sm.session_path.name,
+                "embryos": sm.embryo_list,
+                "current_embryo": sm.current_embryo,
+                "total": sm.total_timepoints,
+                "idx": sm.current_idx,
+                "methods": list(PROJECTION_METHODS.keys()),
+                "active_methods": ExplorerHandler.current_methods,
+                "z_depth": z_depth,
+                "crop_bounds": crop_bounds,
+            }
+        )
 
     def send_zslice(self, z: int):
         sm = self.session_manager
@@ -1071,11 +1132,13 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         # Convert to RGB
         slice_rgb = np.stack([slice_norm, slice_norm, slice_norm], axis=-1)
 
-        self.send_json({
-            "z": z,
-            "z_depth": z_depth,
-            "data": image_to_base64(slice_rgb),
-        })
+        self.send_json(
+            {
+                "z": z,
+                "z_depth": z_depth,
+                "data": image_to_base64(slice_rgb),
+            }
+        )
 
     def send_volume(self):
         """Send full volume as base64 for 3D rendering."""
@@ -1101,10 +1164,12 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         vol_bytes = vol_uint8.tobytes()
         vol_b64 = base64.b64encode(vol_bytes).decode()
 
-        self.send_json({
-            "shape": [z, h, w],
-            "data": vol_b64,
-        })
+        self.send_json(
+            {
+                "shape": [z, h, w],
+                "data": vol_b64,
+            }
+        )
 
     def send_projections(self):
         sm = self.session_manager
@@ -1119,11 +1184,13 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             result = sm.get_projection(idx, method_name)
             if result:
                 img, desc = result
-                projections.append({
-                    "method": method_name,
-                    "description": desc,
-                    "data": image_to_base64(img),
-                })
+                projections.append(
+                    {
+                        "method": method_name,
+                        "description": desc,
+                        "data": image_to_base64(img),
+                    }
+                )
 
         if not projections:
             self.send_json({"error": "No volume loaded"})
@@ -1133,18 +1200,21 @@ class ExplorerHandler(BaseHTTPRequestHandler):
         volume = sm.get_current_volume()
         volume_shape = list(volume.shape) if volume is not None else []
 
-        self.send_json({
-            "idx": idx,
-            "total": sm.total_timepoints,
-            "filename": path.name if path else "",
-            "embryo": sm.current_embryo,
-            "embryo_list": sm.embryo_list,
-            "projections": projections,
-            "volume_shape": volume_shape,
-        })
+        self.send_json(
+            {
+                "idx": idx,
+                "total": sm.total_timepoints,
+                "filename": path.name if path else "",
+                "embryo": sm.current_embryo,
+                "embryo_list": sm.embryo_list,
+                "projections": projections,
+                "volume_shape": volume_shape,
+            }
+        )
 
         # Preload adjacent volumes in background
         import threading
+
         threading.Thread(target=sm.preload_adjacent, args=(idx,), daemon=True).start()
 
     def send_html(self):
@@ -1316,10 +1386,13 @@ class ExplorerHandler(BaseHTTPRequestHandler):
 
             <div class="nav-controls">
                 <button onclick="prev()">← Prev</button>
-                <input type="range" class="slider" id="slider" min="0" max="100" value="0" oninput="debouncedGoto(this.value)">
+                <input type="range" class="slider" id="slider" min="0" max="100"
+                  value="0" oninput="debouncedGoto(this.value)">
                 <button onclick="next()">Next →</button>
                 <span class="position" id="position">0 / 0</span>
-                <span class="stage-label" id="stage-label" style="margin-left:12px;padding:2px 8px;background:#238636;border-radius:4px;font-weight:bold;"></span>
+                <span class="stage-label" id="stage-label"
+                  style="margin-left:12px;padding:2px 8px;background:#238636;
+                         border-radius:4px;font-weight:bold;"></span>
             </div>
         </div>
 
@@ -1335,10 +1408,17 @@ class ExplorerHandler(BaseHTTPRequestHandler):
                 <div class="projection-title">3D Volume</div>
                 <div class="projection-desc">
                     Drag: X/Y | Shift+Drag: Z | Scroll: zoom |
-                    Threshold: <input type="range" id="thresh3d" min="0" max="100" value="30" style="width:80px;vertical-align:middle;">
-                    <span id="thresh-display" style="font-family:monospace;color:#58a6ff;min-width:35px;display:inline-block;">0.30</span>
-                    | <span id="angle-display" style="font-family:monospace;color:#58a6ff;">angle_y: 0.00, angle_x: 0.00, angle_z: 0.00</span>
-                    <button id="copy-angles-btn" onclick="copyAngles()" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer;background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">Copy</button>
+                    Threshold: <input type="range" id="thresh3d" min="0" max="100"
+                      value="30" style="width:80px;vertical-align:middle;">
+                    <span id="thresh-display"
+                      style="font-family:monospace;color:#58a6ff;min-width:35px;display:inline-block;">0.30</span>
+                    | <span id="angle-display"
+                      style="font-family:monospace;color:#58a6ff;"
+                      >angle_y: 0.00, angle_x: 0.00, angle_z: 0.00</span>
+                    <button id="copy-angles-btn" onclick="copyAngles()"
+                      style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer;
+                             background:#21262d;border:1px solid #30363d;
+                             color:#c9d1d9;border-radius:4px;">Copy</button>
                 </div>
             </div>
             <div id="viewer3d" style="height:400px;background:#000;"></div>
@@ -1358,13 +1438,19 @@ class ExplorerHandler(BaseHTTPRequestHandler):
 
         // Ground truth stage transitions (from biologist annotations)
         const GROUND_TRUTH = {
-            "embryo_1": {"early": 0, "bean": 43, "comma": 49, "1.5fold": 55, "2fold": 70, "pretzel": 90},
-            "embryo_2": {"early": 0, "bean": 33, "comma": 39, "1.5fold": 45, "2fold": 60, "pretzel": 80},
-            "embryo_3": {"early": 0, "bean": 27, "comma": 33, "1.5fold": 39, "2fold": 50, "pretzel": 69},
-            "embryo_4": {"early": 0, "bean": 54, "comma": 60, "1.5fold": 69, "2fold": 77, "pretzel": 97}
+            "embryo_1": {"early": 0, "bean": 43, "comma": 49,
+                         "1.5fold": 55, "2fold": 70, "pretzel": 90},
+            "embryo_2": {"early": 0, "bean": 33, "comma": 39,
+                         "1.5fold": 45, "2fold": 60, "pretzel": 80},
+            "embryo_3": {"early": 0, "bean": 27, "comma": 33,
+                         "1.5fold": 39, "2fold": 50, "pretzel": 69},
+            "embryo_4": {"early": 0, "bean": 54, "comma": 60,
+                         "1.5fold": 69, "2fold": 77, "pretzel": 97}
         };
 
-        const STAGE_ORDER = ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"];
+        const STAGE_ORDER = [
+            "early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"
+        ];
         const STAGE_COLORS = {
             "early": "#6e7681",
             "bean": "#8b5cf6",
@@ -1450,7 +1536,8 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             toggles.innerHTML = '';
             data.methods.forEach((m, i) => {
                 const btn = document.createElement('button');
-                btn.className = 'method-toggle' + (data.active_methods.includes(m) ? ' active' : '');
+                btn.className = 'method-toggle'
+                    + (data.active_methods.includes(m) ? ' active' : '');
                 btn.textContent = (i + 1) + ': ' + m;
                 btn.onclick = () => toggleMethod(m);
                 toggles.appendChild(btn);
@@ -1495,7 +1582,10 @@ class ExplorerHandler(BaseHTTPRequestHandler):
                         <div class="projection-title">${proj.method}</div>
                         <div class="projection-desc">
                             <span id="${descId}">${proj.description}</span>
-                            <button onclick="copyText('${descId}')" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer;background:#21262d;border:1px solid #30363d;color:#c9d1d9;border-radius:4px;">Copy</button>
+                            <button onclick="copyText('${descId}')"
+                              style="margin-left:8px;padding:2px 8px;font-size:11px;
+                                     cursor:pointer;background:#21262d;border:1px solid #30363d;
+                                     color:#c9d1d9;border-radius:4px;">Copy</button>
                         </div>
                     </div>
                     <div class="projection-image">
@@ -1654,7 +1744,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
                 const zIndex = Math.floor(i * zd / numSlices);
                 const zPos = (i / numSlices - 0.5) * zScale;
                 const tex = createSliceTex(zIndex, threshold);
-                const mat = new THREE.MeshBasicMaterial({ map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
+                const mat = new THREE.MeshBasicMaterial({
+                    map: tex, transparent: true, side: THREE.DoubleSide, depthWrite: false
+                });
                 const geo = new THREE.PlaneGeometry(1, 1 / aspect);
                 const mesh = new THREE.Mesh(geo, mat);
                 mesh.position.z = zPos;
@@ -1751,7 +1843,8 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             document.getElementById('thresh3d').addEventListener('input', (e) => {
                 const threshVal = parseInt(e.target.value);
                 buildSlices3d(32, threshVal);
-                document.getElementById('thresh-display').textContent = (threshVal / 100).toFixed(2);
+                document.getElementById('thresh-display').textContent =
+                    (threshVal / 100).toFixed(2);
             });
 
             renderer3d.domElement.addEventListener('mousedown', (e) => {
@@ -1784,7 +1877,8 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             });
             renderer3d.domElement.addEventListener('wheel', (e) => {
                 e.preventDefault();
-                camera3d.position.z = Math.max(0.5, Math.min(5, camera3d.position.z + e.deltaY * 0.002));
+                camera3d.position.z =
+                    Math.max(0.5, Math.min(5, camera3d.position.z + e.deltaY * 0.002));
                 savedZoom = camera3d.position.z;
             });
 
@@ -1978,7 +2072,9 @@ class ExplorerHandler(BaseHTTPRequestHandler):
             const [zd, h, w] = volumeShape;
 
             scene = new THREE.Scene();
-            camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera = new THREE.PerspectiveCamera(
+                50, window.innerWidth / window.innerHeight, 0.1, 100
+            );
             camera.position.z = 2.5;
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -2059,6 +2155,7 @@ class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
 # Main
 # =============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(description="Projection Explorer")
     parser.add_argument("--session", required=True, help="Session ID")
@@ -2117,8 +2214,8 @@ def main():
 
                 # Save image
                 pil_img = PIL_Image.fromarray(img)
-                if pil_img.mode != 'RGB':
-                    pil_img = pil_img.convert('RGB')
+                if pil_img.mode != "RGB":
+                    pil_img = pil_img.convert("RGB")
 
                 filename = f"t{idx:04d}_{method_name}.jpg"
                 pil_img.save(output_dir / filename, quality=90)
@@ -2138,6 +2235,7 @@ def main():
 
     if not args.no_browser:
         import webbrowser
+
         webbrowser.open(url)
 
     try:

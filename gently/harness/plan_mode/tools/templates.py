@@ -5,9 +5,7 @@ Templates capture an entire campaign structure (phases, items, specs,
 dependencies) for re-use with different strains, temperatures, etc.
 """
 
-from typing import Dict, Optional
-
-from ...tools.registry import tool, ToolCategory, ToolExample
+from ...tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
@@ -34,7 +32,7 @@ async def save_plan_template(
     campaign_id: str,
     name: str,
     description: str = None,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Save a campaign as a reusable template."""
     agent = context.get("agent") if context else None
@@ -67,7 +65,7 @@ async def save_plan_template(
     category=ToolCategory.UTILITY,
 )
 async def list_templates(
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """List available plan templates."""
     agent = context.get("agent") if context else None
@@ -112,8 +110,8 @@ async def list_templates(
 )
 async def apply_template(
     template_id: str,
-    overrides: Dict = None,
-    context: Dict = None,
+    overrides: dict = None,
+    context: dict = None,
 ) -> str:
     """Instantiate a template into a new campaign."""
     agent = context.get("agent") if context else None

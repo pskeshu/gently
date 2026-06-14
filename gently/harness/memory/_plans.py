@@ -9,7 +9,7 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .model import (
     BenchSpec,
@@ -34,15 +34,15 @@ class PlansMixin:
         campaign_id: str,
         type: str,
         title: str,
-        description: Optional[str] = None,
-        spec: Optional[Dict] = None,
-        inherit_from: Optional[str] = None,
-        planned_session_id: Optional[str] = None,
+        description: str | None = None,
+        spec: dict | None = None,
+        inherit_from: str | None = None,
+        planned_session_id: str | None = None,
         phase_order: int = -1,
-        depends_on: Optional[List[str]] = None,
-        item_id: Optional[str] = None,
-        references: Optional[List[Dict]] = None,
-        estimated_days: Optional[int] = None,
+        depends_on: list[str] | None = None,
+        item_id: str | None = None,
+        references: list[dict] | None = None,
+        estimated_days: int | None = None,
     ) -> str:
         """Create a plan item. Returns its ID.
 
@@ -55,8 +55,7 @@ class PlansMixin:
         if phase_order < 0:
             # Auto-assign: next number in this campaign
             row = self._conn.execute(
-                "SELECT COALESCE(MAX(phase_order), 0) FROM plan_items "
-                "WHERE campaign_id = ?",
+                "SELECT COALESCE(MAX(phase_order), 0) FROM plan_items WHERE campaign_id = ?",
                 (campaign_id,),
             ).fetchone()
             phase_order = row[0] + 1
@@ -65,14 +64,23 @@ class PlansMixin:
             self._conn.execute(
                 "INSERT INTO plan_items "
                 "(id, campaign_id, type, title, description, spec, inherit_from, "
-                " planned_session_id, estimated_days, phase_order, \"references\", status, created_at, updated_at) "
+                " planned_session_id, estimated_days, phase_order,"
+                ' "references", status, created_at, updated_at) '
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planned', ?, ?)",
                 (
-                    pid, campaign_id, type, title, description,
+                    pid,
+                    campaign_id,
+                    type,
+                    title,
+                    description,
                     json.dumps(spec) if spec else None,
-                    inherit_from, planned_session_id, estimated_days, phase_order,
+                    inherit_from,
+                    planned_session_id,
+                    estimated_days,
+                    phase_order,
                     json.dumps(references) if references else None,
-                    now, now,
+                    now,
+                    now,
                 ),
             )
             if depends_on:
@@ -85,16 +93,16 @@ class PlansMixin:
         logger.info(f"Created plan item {pid} [{type}] #{phase_order}: {title}")
         return pid
 
-    def get_plan_item(self, item_id: str) -> Optional[PlanItem]:
+    def get_plan_item(self, item_id: str) -> PlanItem | None:
         """Get a specific plan item."""
-        row = self._conn.execute(
-            "SELECT * FROM plan_items WHERE id = ?", (item_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM plan_items WHERE id = ?", (item_id,)).fetchone()
         return self._row_to_plan_item(row) if row else None
 
     def resolve_plan_item(
-        self, ref: str, campaign_id: Optional[str] = None,
-    ) -> Optional[PlanItem]:
+        self,
+        ref: str,
+        campaign_id: str | None = None,
+    ) -> PlanItem | None:
         """Resolve a human-friendly plan item reference.
 
         Supported formats:
@@ -114,16 +122,14 @@ class PlansMixin:
         ref = ref.strip().lower()
 
         # --- Direct ID match (UUID prefix) ---
-        row = self._conn.execute(
-            "SELECT * FROM plan_items WHERE id = ?", (ref,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM plan_items WHERE id = ?", (ref,)).fetchone()
         if row:
             return self._row_to_plan_item(row)
 
         # Also try UUID prefix match (e.g. first few chars)
-        if len(ref) >= 4 and re.match(r'^[0-9a-f]+$', ref):
+        if len(ref) >= 4 and re.match(r"^[0-9a-f]+$", ref):
             row = self._conn.execute(
-                "SELECT * FROM plan_items WHERE id LIKE ?", (ref + '%',)
+                "SELECT * FROM plan_items WHERE id LIKE ?", (ref + "%",)
             ).fetchone()
             if row:
                 return self._row_to_plan_item(row)
@@ -133,7 +139,7 @@ class PlansMixin:
         task_num = None
 
         # "campaign.phase.task" — e.g. "nerve-ring.1.3" or "ec11.2.1"
-        m = re.match(r'^([^.\s]+)\.(\d+)\.(\d+)$', ref)
+        m = re.match(r"^([^.\s]+)\.(\d+)\.(\d+)$", ref)
         if m:
             campaign_label = m.group(1)
             phase_num, task_num = int(m.group(2)), int(m.group(3))
@@ -144,25 +150,25 @@ class PlansMixin:
 
         # "1.3" or "2.1"
         if not task_num:
-            m = re.match(r'^(\d+)\.(\d+)$', ref)
+            m = re.match(r"^(\d+)\.(\d+)$", ref)
             if m:
                 phase_num, task_num = int(m.group(1)), int(m.group(2))
 
         # "task 3 of phase 1" / "task 3 phase 1"
         if not task_num:
-            m = re.search(r'task\s+(\d+)\s+(?:of\s+)?phase\s+(\d+)', ref)
+            m = re.search(r"task\s+(\d+)\s+(?:of\s+)?phase\s+(\d+)", ref)
             if m:
                 task_num, phase_num = int(m.group(1)), int(m.group(2))
 
         # "phase 1 task 3"
         if not task_num:
-            m = re.search(r'phase\s+(\d+)\s+task\s+(\d+)', ref)
+            m = re.search(r"phase\s+(\d+)\s+task\s+(\d+)", ref)
             if m:
                 phase_num, task_num = int(m.group(1)), int(m.group(2))
 
         # "task 3" / "#3" / just "3"
         if not task_num:
-            m = re.match(r'^(?:task\s+|#)?(\d+)$', ref)
+            m = re.match(r"^(?:task\s+|#)?(\d+)$", ref)
             if m:
                 task_num = int(m.group(1))
 
@@ -212,7 +218,7 @@ class PlansMixin:
 
         return None
 
-    def _resolve_campaign_label(self, label: str) -> Optional[str]:
+    def _resolve_campaign_label(self, label: str) -> str | None:
         """Resolve a campaign shorthand or UUID prefix to an ID.
 
         Checks shorthand (case-insensitive), then UUID prefix, then
@@ -232,7 +238,7 @@ class PlansMixin:
         if len(label) >= 4:
             row = self._conn.execute(
                 "SELECT id FROM campaigns WHERE id LIKE ? AND parent_id IS NULL",
-                (label_lower + '%',),
+                (label_lower + "%",),
             ).fetchone()
             if row:
                 return row["id"]
@@ -240,7 +246,7 @@ class PlansMixin:
         # Description substring match (first word or hyphenated slug)
         row = self._conn.execute(
             "SELECT id FROM campaigns WHERE LOWER(description) LIKE ? AND parent_id IS NULL",
-            ('%' + label_lower + '%',),
+            ("%" + label_lower + "%",),
         ).fetchone()
         if row:
             return row["id"]
@@ -249,11 +255,11 @@ class PlansMixin:
 
     def get_plan_items(
         self,
-        campaign_id: Optional[str] = None,
-        status: Optional[str] = None,
-        type: Optional[str] = None,
+        campaign_id: str | None = None,
+        status: str | None = None,
+        type: str | None = None,
         include_children: bool = False,
-    ) -> List[PlanItem]:
+    ) -> list[PlanItem]:
         """
         Query plan items with optional filters.
 
@@ -296,17 +302,17 @@ class PlansMixin:
     def update_plan_item(
         self,
         item_id: str,
-        title: Optional[str] = None,
-        description: Optional[str] = None,
-        status: Optional[PlanItemStatus] = None,
-        outcome: Optional[str] = None,
-        spec: Optional[Dict] = None,
-        planned_session_id: Optional[str] = None,
-        session_id: Optional[str] = None,
-        phase_order: Optional[int] = None,
-        campaign_id: Optional[str] = None,
-        references: Optional[List[Dict]] = None,
-        estimated_days: Optional[int] = None,
+        title: str | None = None,
+        description: str | None = None,
+        status: PlanItemStatus | None = None,
+        outcome: str | None = None,
+        spec: dict | None = None,
+        planned_session_id: str | None = None,
+        session_id: str | None = None,
+        phase_order: int | None = None,
+        campaign_id: str | None = None,
+        references: list[dict] | None = None,
+        estimated_days: int | None = None,
     ):
         """Update a plan item. Only non-None values are applied."""
         now = self._now()
@@ -334,7 +340,7 @@ class PlansMixin:
             updates.append("phase_order = ?")
             values.append(phase_order)
         if references is not None:
-            updates.append("\"references\" = ?")
+            updates.append('"references" = ?')
             values.append(json.dumps(references))
         if not updates:
             return
@@ -350,10 +356,12 @@ class PlansMixin:
     def complete_plan_item(self, item_id: str, outcome: str):
         """Mark a plan item as completed with an outcome description."""
         self.update_plan_item(
-            item_id, status=PlanItemStatus.COMPLETED, outcome=outcome,
+            item_id,
+            status=PlanItemStatus.COMPLETED,
+            outcome=outcome,
         )
 
-    def skip_plan_item(self, item_id: str, reason: Optional[str] = None):
+    def skip_plan_item(self, item_id: str, reason: str | None = None):
         """Mark a plan item as skipped."""
         self.update_plan_item(
             item_id,
@@ -369,12 +377,12 @@ class PlansMixin:
         with self._tx():
             # Remove dependency links (both directions)
             self._conn.execute(
-                "DELETE FROM plan_item_dependencies "
-                "WHERE item_id = ? OR depends_on_id = ?",
+                "DELETE FROM plan_item_dependencies WHERE item_id = ? OR depends_on_id = ?",
                 (item_id, item_id),
             )
             r = self._conn.execute(
-                "DELETE FROM plan_items WHERE id = ?", (item_id,),
+                "DELETE FROM plan_items WHERE id = ?",
+                (item_id,),
             )
             deleted = r.rowcount > 0
         if deleted:
@@ -394,12 +402,11 @@ class PlansMixin:
         """Remove a dependency between plan items."""
         with self._tx():
             self._conn.execute(
-                "DELETE FROM plan_item_dependencies "
-                "WHERE item_id = ? AND depends_on_id = ?",
+                "DELETE FROM plan_item_dependencies WHERE item_id = ? AND depends_on_id = ?",
                 (item_id, depends_on_id),
             )
 
-    def get_plan_item_dependencies(self, item_id: str) -> List[str]:
+    def get_plan_item_dependencies(self, item_id: str) -> list[str]:
         """Get IDs of items this item depends on."""
         rows = self._conn.execute(
             "SELECT depends_on_id FROM plan_item_dependencies WHERE item_id = ?",
@@ -407,7 +414,7 @@ class PlansMixin:
         ).fetchall()
         return [row["depends_on_id"] for row in rows]
 
-    def get_plan_item_dependents(self, item_id: str) -> List[str]:
+    def get_plan_item_dependents(self, item_id: str) -> list[str]:
         """Get IDs of items that depend on this item."""
         rows = self._conn.execute(
             "SELECT item_id FROM plan_item_dependencies WHERE depends_on_id = ?",
@@ -415,13 +422,15 @@ class PlansMixin:
         ).fetchall()
         return [row["item_id"] for row in rows]
 
-    def get_unblocked_plan_items(self, campaign_id: str) -> List[PlanItem]:
+    def get_unblocked_plan_items(self, campaign_id: str) -> list[PlanItem]:
         """
         Get plan items that are planned and have all dependencies completed.
         These are the items that can be started next.
         """
         items = self.get_plan_items(
-            campaign_id=campaign_id, status="planned", include_children=True,
+            campaign_id=campaign_id,
+            status="planned",
+            include_children=True,
         )
         unblocked = []
         for item in items:
@@ -433,7 +442,8 @@ class PlansMixin:
             for dep_id in item.depends_on:
                 dep = self.get_plan_item(dep_id)
                 if dep and dep.status not in (
-                    PlanItemStatus.COMPLETED, PlanItemStatus.SKIPPED,
+                    PlanItemStatus.COMPLETED,
+                    PlanItemStatus.SKIPPED,
                 ):
                     all_resolved = False
                     break
@@ -441,7 +451,7 @@ class PlansMixin:
                 unblocked.append(item)
         return unblocked
 
-    def get_plan_status(self, campaign_id: str) -> Dict[str, Any]:
+    def get_plan_status(self, campaign_id: str) -> dict[str, Any]:
         """
         Get a summary of plan progress for a campaign and its children.
 
@@ -461,7 +471,8 @@ class PlansMixin:
             }
         """
         items = self.get_plan_items(
-            campaign_id=campaign_id, include_children=True,
+            campaign_id=campaign_id,
+            include_children=True,
         )
         result = {
             "total": len(items),
@@ -488,10 +499,7 @@ class PlansMixin:
                 result["by_type"][type_key]["completed"] += 1
 
             # Pending decisions
-            if (
-                item.type == PlanItemType.DECISION_POINT
-                and item.status == PlanItemStatus.PLANNED
-            ):
+            if item.type == PlanItemType.DECISION_POINT and item.status == PlanItemStatus.PLANNED:
                 result["pending_decisions"].append(item)
 
         # Next actions = unblocked items
@@ -499,7 +507,7 @@ class PlansMixin:
 
         return result
 
-    def resolve_imaging_spec(self, item: PlanItem) -> Optional[ImagingSpec]:
+    def resolve_imaging_spec(self, item: PlanItem) -> ImagingSpec | None:
         """
         Resolve the full ImagingSpec for an item, following inheritance.
 
@@ -542,7 +550,7 @@ class PlansMixin:
     def save_plan_template(
         self,
         name: str,
-        description: Optional[str],
+        description: str | None,
         campaign_id: str,
     ) -> str:
         """
@@ -568,7 +576,7 @@ class PlansMixin:
         logger.info(f"Saved plan template '{name}' ({tid})")
         return tid
 
-    def _serialize_campaign_tree(self, campaign_id: str) -> Dict:
+    def _serialize_campaign_tree(self, campaign_id: str) -> dict:
         """Recursively serialize a campaign and its children/items."""
         campaign = self.get_campaign(campaign_id)
         if not campaign:
@@ -590,6 +598,7 @@ class PlansMixin:
             # Serialize spec
             if item.imaging_spec:
                 import dataclasses as _dc
+
                 spec_dict = {}
                 for f in _dc.fields(item.imaging_spec):
                     val = getattr(item.imaging_spec, f.name)
@@ -598,6 +607,7 @@ class PlansMixin:
                 item_data["spec"] = spec_dict
             elif item.bench_spec:
                 import dataclasses as _dc
+
                 spec_dict = {}
                 for f in _dc.fields(item.bench_spec):
                     val = getattr(item.bench_spec, f.name)
@@ -633,7 +643,7 @@ class PlansMixin:
             "children": serialized_children,
         }
 
-    def list_plan_templates(self) -> List[Dict]:
+    def list_plan_templates(self) -> list[dict]:
         """List all plan templates (id, name, description, dates)."""
         rows = self._conn.execute(
             "SELECT id, name, description, created_at, updated_at "
@@ -641,7 +651,7 @@ class PlansMixin:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_plan_template(self, id_or_name: str) -> Optional[Dict]:
+    def get_plan_template(self, id_or_name: str) -> dict | None:
         """Get a plan template by ID or name."""
         row = self._conn.execute(
             "SELECT * FROM plan_templates WHERE id = ? OR name = ?",
@@ -656,7 +666,7 @@ class PlansMixin:
     def apply_plan_template(
         self,
         template_id: str,
-        overrides: Optional[Dict] = None,
+        overrides: dict | None = None,
     ) -> str:
         """
         Instantiate a template into a new campaign with plan items.
@@ -673,9 +683,9 @@ class PlansMixin:
 
     def _instantiate_template_tree(
         self,
-        data: Dict,
-        parent_id: Optional[str],
-        overrides: Dict,
+        data: dict,
+        parent_id: str | None,
+        overrides: dict,
     ) -> str:
         """Recursively create campaigns and items from template data."""
         cid = self.create_campaign(
@@ -687,7 +697,7 @@ class PlansMixin:
 
         # Create items, track new IDs for dependency wiring
         items_data = data.get("items", [])
-        new_item_ids: List[str] = []
+        new_item_ids: list[str] = []
 
         for item_data in items_data:
             spec = item_data.get("spec")
@@ -697,9 +707,15 @@ class PlansMixin:
                 spec = dict(spec)  # copy
                 for k, v in overrides.items():
                     if k in spec or k in (
-                        "strain", "genotype", "reporter", "temperature_c",
-                        "num_slices", "exposure_ms", "interval_s",
-                        "num_embryos", "stop_condition",
+                        "strain",
+                        "genotype",
+                        "reporter",
+                        "temperature_c",
+                        "num_slices",
+                        "exposure_ms",
+                        "interval_s",
+                        "num_embryos",
+                        "stop_condition",
                     ):
                         spec[k] = v
 
@@ -720,7 +736,8 @@ class PlansMixin:
             for dep_idx in dep_indices:
                 if 0 <= dep_idx < len(new_item_ids):
                     self.add_plan_item_dependency(
-                        new_item_ids[idx], new_item_ids[dep_idx],
+                        new_item_ids[idx],
+                        new_item_ids[dep_idx],
                     )
 
         # Recurse into children
@@ -745,8 +762,8 @@ class PlansMixin:
     def create_plan_snapshot(
         self,
         campaign_id: str,
-        label: Optional[str] = None,
-        summary: Optional[str] = None,
+        label: str | None = None,
+        summary: str | None = None,
     ) -> str:
         """Create a snapshot of the current plan state.
 
@@ -770,8 +787,7 @@ class PlansMixin:
 
         # Auto-increment version number for this campaign
         row = self._conn.execute(
-            "SELECT COALESCE(MAX(version_number), 0) FROM plan_snapshots "
-            "WHERE campaign_id = ?",
+            "SELECT COALESCE(MAX(version_number), 0) FROM plan_snapshots WHERE campaign_id = ?",
             (campaign_id,),
         ).fetchone()
         version_number = row[0] + 1
@@ -793,12 +809,19 @@ class PlansMixin:
                 " summary, label, parent_version_id, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
-                    version_id, campaign_id, version_number,
-                    json.dumps(snapshot_data), summary, label,
-                    parent_version_id, now,
+                    version_id,
+                    campaign_id,
+                    version_number,
+                    json.dumps(snapshot_data),
+                    summary,
+                    label,
+                    parent_version_id,
+                    now,
                 ),
             )
-        logger.info(f"Created plan snapshot v{version_number} ({version_id}) for campaign {campaign_id}")
+        logger.info(
+            f"Created plan snapshot v{version_number} ({version_id}) for campaign {campaign_id}"
+        )
         return version_id
 
     def _generate_snapshot_summary(self, campaign_id: str) -> str:
@@ -811,7 +834,7 @@ class PlansMixin:
         items = self.get_plan_items(campaign_id=campaign_id, include_children=True)
 
         # Count items by status
-        status_counts: Dict[str, int] = {}
+        status_counts: dict[str, int] = {}
         for item in items:
             key = item.status.value
             status_counts[key] = status_counts.get(key, 0) + 1
@@ -827,8 +850,10 @@ class PlansMixin:
         return "\n".join(parts)
 
     def list_plan_snapshots(
-        self, campaign_id: str, limit: int = 50,
-    ) -> List[Dict]:
+        self,
+        campaign_id: str,
+        limit: int = 50,
+    ) -> list[dict]:
         """List snapshots for a campaign (metadata only, no blob).
 
         Returns list of dicts with version_id, version_number, label,
@@ -843,7 +868,7 @@ class PlansMixin:
         ).fetchall()
         return [dict(row) for row in rows]
 
-    def get_plan_snapshot(self, version_id: str) -> Optional[Dict]:
+    def get_plan_snapshot(self, version_id: str) -> dict | None:
         """Get a full snapshot including the parsed JSON blob."""
         row = self._conn.execute(
             "SELECT * FROM plan_snapshots WHERE version_id = ?",
@@ -901,7 +926,7 @@ class PlansMixin:
         )
         return new_campaign_id
 
-    def _get_campaign_tree_ids(self, campaign_id: str) -> List[str]:
+    def _get_campaign_tree_ids(self, campaign_id: str) -> list[str]:
         """Get all campaign IDs in a tree (recursive)."""
         ids = [campaign_id]
         children = self._conn.execute(
@@ -932,16 +957,14 @@ class PlansMixin:
         if spec_data:
             if item_type == PlanItemType.IMAGING:
                 import dataclasses as _dc
+
                 valid = {f.name for f in _dc.fields(ImagingSpec)}
-                imaging_spec = ImagingSpec(**{
-                    k: v for k, v in spec_data.items() if k in valid
-                })
+                imaging_spec = ImagingSpec(**{k: v for k, v in spec_data.items() if k in valid})
             else:
                 import dataclasses as _dc
+
                 valid = {f.name for f in _dc.fields(BenchSpec)}
-                bench_spec = BenchSpec(**{
-                    k: v for k, v in spec_data.items() if k in valid
-                })
+                bench_spec = BenchSpec(**{k: v for k, v in spec_data.items() if k in valid})
 
         references = json.loads(d["references"]) if d.get("references") else []
 

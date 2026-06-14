@@ -19,11 +19,11 @@ import hashlib
 import json
 import logging
 import threading
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .event_capture import _json_default
 
@@ -54,12 +54,13 @@ def prompt_hash(system_prompt: Any, messages: Any) -> str:
 
 class DecisionTrigger(str, Enum):
     """What woke the agent up for this decision moment."""
+
     USER_MESSAGE = "user_message"
-    EVENT         = "event"           # event-driven (perception, error, etc.)
-    TICK          = "tick"            # scheduled / periodic checkpoint
-    PHASE         = "phase"           # plan phase boundary (between embryos / timepoints)
-    STARTUP       = "startup"         # initial session bring-up
-    UNKNOWN       = "unknown"
+    EVENT = "event"  # event-driven (perception, error, etc.)
+    TICK = "tick"  # scheduled / periodic checkpoint
+    PHASE = "phase"  # plan phase boundary (between embryos / timepoints)
+    STARTUP = "startup"  # initial session bring-up
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -75,22 +76,23 @@ class Decision:
     sent to Claude so two candidates with byte-identical input but
     different decisions can be told apart by a single field.
     """
+
     timestamp: datetime
-    agent: str                              # "production" or candidate name
+    agent: str  # "production" or candidate name
     trigger: DecisionTrigger
-    trigger_detail: Optional[str] = None    # event_id, user message excerpt, tick name
+    trigger_detail: str | None = None  # event_id, user message excerpt, tick name
 
-    tool_calls: List[Dict[str, Any]] = field(default_factory=list)
-    response_text: Optional[str] = None
-    prompt_hash: Optional[str] = None
+    tool_calls: list[dict[str, Any]] = field(default_factory=list)
+    response_text: str | None = None
+    prompt_hash: str | None = None
 
-    context_summary: Optional[str] = None   # one-line description of state
-    recent_event_ids: List[str] = field(default_factory=list)
+    context_summary: str | None = None  # one-line description of state
+    recent_event_ids: list[str] = field(default_factory=list)
 
-    duration_ms: Optional[float] = None     # how long the decision took
-    error: Optional[str] = None             # if the decision moment errored
+    duration_ms: float | None = None  # how long the decision took
+    error: str | None = None  # if the decision moment errored
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "timestamp": self.timestamp.isoformat(),
             "agent": self.agent,
@@ -106,7 +108,7 @@ class Decision:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "Decision":
+    def from_dict(cls, d: dict[str, Any]) -> Decision:
         return cls(
             timestamp=datetime.fromisoformat(d["timestamp"]),
             agent=d.get("agent", "unknown"),
@@ -176,11 +178,11 @@ class DecisionLog:
         self.close()
         return False
 
-    def read(self) -> List[Decision]:
+    def read(self) -> list[Decision]:
         """Read every decision back from disk. Quick + dirty diff substrate."""
         if not self.path.exists():
             return []
-        out: List[Decision] = []
+        out: list[Decision] = []
         with self.path.open("r", encoding="utf-8") as f:
             for line_no, raw in enumerate(f, start=1):
                 raw = raw.strip()

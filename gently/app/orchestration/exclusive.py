@@ -16,11 +16,10 @@ exclusive op completes.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -30,14 +29,15 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExclusiveResult:
     """Outcome of an ExclusiveAcquisition.run()."""
+
     success: bool
     target_embryo_id: str
     request_id: str
     frames_captured: int = 0
     duration_s: float = 0.0
-    output_path: Optional[str] = None
-    extra: Dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    output_path: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
 
 
 class ExclusiveAcquisition(ABC):
@@ -51,17 +51,17 @@ class ExclusiveAcquisition(ABC):
     #: Human-readable kind name, for events / UI / persistence.
     kind: str = "exclusive"
 
-    def __init__(self, target_embryo_id: str, request_id: Optional[str] = None):
+    def __init__(self, target_embryo_id: str, request_id: str | None = None):
         self.target_embryo_id = target_embryo_id
         self.request_id = request_id or _make_request_id(self.kind, target_embryo_id)
 
     @abstractmethod
-    async def run(self, orchestrator) -> ExclusiveResult:
-        ...
+    async def run(self, orchestrator) -> ExclusiveResult: ...
 
 
 def _make_request_id(kind: str, embryo_id: str) -> str:
     import uuid
+
     return f"{kind}_{embryo_id}_{uuid.uuid4().hex[:8]}"
 
 
@@ -97,7 +97,7 @@ class BurstAcquisition(ExclusiveAcquisition):
         frames: int = 60,
         mode: str = "1hz",
         num_slices: int = 1,
-        request_id: Optional[str] = None,
+        request_id: str | None = None,
     ):
         super().__init__(target_embryo_id=target_embryo_id, request_id=request_id)
         self.frames = frames
@@ -118,12 +118,15 @@ class BurstAcquisition(ExclusiveAcquisition):
 
         # Phase 10 dedicated burst events (Phase 7 originally rode
         # STATUS_CHANGED; now we have first-class types).
-        orchestrator._emit_event(EventType.BURST_START, {
-            "embryo_id": self.target_embryo_id,
-            "request_id": self.request_id,
-            "frames": self.frames,
-            "mode": self.mode,
-        })
+        orchestrator._emit_event(
+            EventType.BURST_START,
+            {
+                "embryo_id": self.target_embryo_id,
+                "request_id": self.request_id,
+                "frames": self.frames,
+                "mode": self.mode,
+            },
+        )
 
         # Hardware kwargs from the embryo's calibration (mirrors _acquire_embryo)
         cal = embryo.calibration or {}
@@ -171,7 +174,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 pass
 
         frames_data = result.get("frames") or []
-        frames_captured: List[np.ndarray] = [
+        frames_captured: list[np.ndarray] = [
             np.asarray(f["volume"]) for f in frames_data if f.get("volume") is not None
         ]
 
@@ -213,14 +216,17 @@ class BurstAcquisition(ExclusiveAcquisition):
 
         success = bool(result.get("success")) and len(frames_captured) > 0
 
-        orchestrator._emit_event(EventType.BURST_COMPLETE, {
-            "embryo_id": self.target_embryo_id,
-            "request_id": self.request_id,
-            "frames_captured": len(frames_captured),
-            "duration_s": duration_s,
-            "sustained_hz": sustained_hz,
-            "mp4_path": mp4_path,
-        })
+        orchestrator._emit_event(
+            EventType.BURST_COMPLETE,
+            {
+                "embryo_id": self.target_embryo_id,
+                "request_id": self.request_id,
+                "frames_captured": len(frames_captured),
+                "duration_s": duration_s,
+                "sustained_hz": sustained_hz,
+                "mp4_path": mp4_path,
+            },
+        )
 
         return ExclusiveResult(
             success=success,
@@ -248,16 +254,19 @@ class BurstAcquisition(ExclusiveAcquisition):
             await asyncio.sleep(tick_interval)
             elapsed = (datetime.now() - start).total_seconds()
             approx_idx = min(self.frames - 1, int(elapsed / target_dt))
-            orchestrator._emit_event(frame_event_type, {
-                "embryo_id": self.target_embryo_id,
-                "request_id": self.request_id,
-                "frame_idx": approx_idx,
-                "total_frames": self.frames,
-                "approximate": True,
-            })
+            orchestrator._emit_event(
+                frame_event_type,
+                {
+                    "embryo_id": self.target_embryo_id,
+                    "request_id": self.request_id,
+                    "frame_idx": approx_idx,
+                    "total_frames": self.frames,
+                    "approximate": True,
+                },
+            )
 
 
-def _resolve_burst_dir(orchestrator, embryo_id: str, request_id: str) -> Optional[Path]:
+def _resolve_burst_dir(orchestrator, embryo_id: str, request_id: str) -> Path | None:
     """Return ``bursts/{request_id}/`` under the embryo's session folder.
 
     Uses ``FileStore._session_dir`` so the short session_id resolves to the full
@@ -269,7 +278,7 @@ def _resolve_burst_dir(orchestrator, embryo_id: str, request_id: str) -> Optiona
     sid = getattr(orchestrator, "_session_id", None)
     if store is None or sid is None:
         return None
-    session_dir: Optional[Path] = None
+    session_dir: Path | None = None
     for attr in ("_session_dir", "session_dir"):
         fn = getattr(store, attr, None)
         if callable(fn):
@@ -281,7 +290,10 @@ def _resolve_burst_dir(orchestrator, embryo_id: str, request_id: str) -> Optiona
                 break
     if session_dir is None:
         # Last-resort fallback: previous behaviour (will write to the shadow folder).
-        logger.warning("FileStore has no session_dir resolver; falling back to root/sessions/%s", sid)
+        logger.warning(
+            "FileStore has no session_dir resolver; falling back to root/sessions/%s",
+            sid,
+        )
         session_dir = store.root / "sessions" / sid
 
     burst_dir = session_dir / "embryos" / embryo_id / "bursts" / request_id
@@ -297,7 +309,7 @@ def _persist_burst_to_disk(
     request_id: str,
     mode: str,
     frames_requested: int,
-    frames_data: List[Dict[str, Any]],
+    frames_data: list[dict[str, Any]],
     loop_start: datetime,
     duration_s: float,
     sustained_hz: float,
@@ -305,8 +317,8 @@ def _persist_burst_to_disk(
     galvo_center: float,
     piezo_amplitude: float,
     piezo_center: float,
-    laser_power_488_pct: Optional[float],
-) -> Optional[Path]:
+    laser_power_488_pct: float | None,
+) -> Path | None:
     """Save per-frame TIFFs + meta + projections + a burst.yaml manifest.
 
     Best-effort: any per-frame failure is logged and skipped, the rest still
@@ -336,7 +348,7 @@ def _persist_burst_to_disk(
     pos = getattr(embryo, "stage_position", {}) or {}
     sid = getattr(orchestrator, "_session_id", None)
 
-    saved_frames: List[Dict[str, Any]] = []
+    saved_frames: list[dict[str, Any]] = []
     for i, fr in enumerate(frames_data, start=1):
         vol = fr.get("volume")
         if vol is None:
@@ -367,6 +379,7 @@ def _persist_burst_to_disk(
         # Projection via the same helper used for regular volumes.
         try:
             from gently.core.imaging import generate_jpeg_projection
+
             generate_jpeg_projection(arr, proj_path)
         except Exception as exc:
             logger.debug("[%s] burst frame %d projection failed: %s", embryo_id, i, exc)
@@ -380,8 +393,12 @@ def _persist_burst_to_disk(
             "dtype": str(arr.dtype),
             "acquired_at": acquired_at,
             "metadata": {
-                "num_slices": int(getattr(embryo, "num_slices", 1)) if hasattr(embryo, "num_slices") else None,
-                "exposure_ms": float(getattr(embryo, "exposure_ms", 0.0)) if hasattr(embryo, "exposure_ms") else None,
+                "num_slices": int(getattr(embryo, "num_slices", 1))
+                if hasattr(embryo, "num_slices")
+                else None,
+                "exposure_ms": float(getattr(embryo, "exposure_ms", 0.0))
+                if hasattr(embryo, "exposure_ms")
+                else None,
                 "acquisition_mode": "burst",
                 "burst_mode": mode,
                 "laser_power_488_pct": laser_power_488_pct,
@@ -394,12 +411,14 @@ def _persist_burst_to_disk(
                     _yaml.safe_dump(meta, f, sort_keys=False)
             except Exception as exc:
                 logger.debug("[%s] burst frame %d meta write failed: %s", embryo_id, i, exc)
-        saved_frames.append({
-            "frame_index": i,
-            "tif": tif_path.name,
-            "projection": f"projections/{proj_path.name}",
-            "acquired_at": acquired_at,
-        })
+        saved_frames.append(
+            {
+                "frame_index": i,
+                "tif": tif_path.name,
+                "projection": f"projections/{proj_path.name}",
+                "acquired_at": acquired_at,
+            }
+        )
 
     manifest = {
         "request_id": request_id,
@@ -428,18 +447,23 @@ def _persist_burst_to_disk(
         except Exception as exc:
             logger.warning("[%s] burst manifest write failed: %s", embryo_id, exc)
 
-    logger.info("[%s] persisted %d/%d burst frames -> %s",
-                embryo_id, len(saved_frames), frames_requested, burst_dir)
+    logger.info(
+        "[%s] persisted %d/%d burst frames -> %s",
+        embryo_id,
+        len(saved_frames),
+        frames_requested,
+        burst_dir,
+    )
     return burst_dir
 
 
 async def _maybe_generate_mp4(
     *,
-    burst_dir: Optional[Path],
+    burst_dir: Path | None,
     embryo_id: str,
     request_id: str,
-    frames: List[np.ndarray],
-) -> Optional[str]:
+    frames: list[np.ndarray],
+) -> str | None:
     """Best-effort MP4 generation using OpenCV's VideoWriter.
 
     Mirrors the codec-fallback pattern in :mod:`gently.app.video_maker`
@@ -461,7 +485,7 @@ async def _maybe_generate_mp4(
 
         # Reduce 3D frames to 2D max-projections, normalize to uint8, and
         # convert to 3-channel BGR for VideoWriter.
-        proj_frames: List[np.ndarray] = []
+        proj_frames: list[np.ndarray] = []
         for f in frames:
             v = np.squeeze(f)
             if v.ndim == 4:
@@ -483,10 +507,10 @@ async def _maybe_generate_mp4(
 
         height, width = proj_frames[0].shape[:2]
         codecs = (
-            ('mp4v', '.mp4'),
-            ('avc1', '.mp4'),
-            ('XVID', '.avi'),
-            ('MJPG', '.avi'),
+            ("mp4v", ".mp4"),
+            ("avc1", ".mp4"),
+            ("XVID", ".avi"),
+            ("MJPG", ".avi"),
         )
         writer = None
         chosen_codec = None
@@ -511,7 +535,9 @@ async def _maybe_generate_mp4(
         writer.release()
         logger.info(
             "Wrote burst movie: %s (%d frames, codec=%s)",
-            chosen_path, len(proj_frames), chosen_codec,
+            chosen_path,
+            len(proj_frames),
+            chosen_codec,
         )
         return str(chosen_path)
     except Exception as e:

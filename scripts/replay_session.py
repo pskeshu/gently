@@ -76,7 +76,9 @@ def main(argv=None) -> int:
         help="Print event-type histogram, don't replay",
     )
     parser.add_argument(
-        "-v", "--verbose", action="store_true",
+        "-v",
+        "--verbose",
+        action="store_true",
         help="Verbose logging",
     )
     args = parser.parse_args(argv)
@@ -88,7 +90,7 @@ def main(argv=None) -> int:
 
     from gently.core.event_bus import EventBus
     from gently.core.file_store import FileStore
-    from gently.eval import EventReplay, DecisionLog, ShadowRunner, NoOpCandidate
+    from gently.eval import DecisionLog, EventReplay, NoOpCandidate, ShadowRunner
 
     root = args.root or os.environ.get("GENTLY_STORAGE_PATH", "D:/Gently3")
     store = FileStore(root=Path(root))
@@ -135,7 +137,9 @@ def main(argv=None) -> int:
 
     try:
         emitted = rep.replay(
-            bus, real_time=args.real_time, time_scale=args.time_scale,
+            bus,
+            real_time=args.real_time,
+            time_scale=args.time_scale,
         )
         print(f"Replayed {emitted} events from session {session['session_id']}")
     finally:

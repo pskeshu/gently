@@ -9,8 +9,8 @@ choice pickers, command results, and notifications.
 import asyncio
 import json
 import logging
+from collections.abc import Callable
 from datetime import datetime
-from typing import Callable, Dict, Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -29,7 +29,7 @@ def create_router(server) -> APIRouter:
     router = APIRouter()
 
     # Pending choice futures keyed by request_id
-    _choice_futures: Dict[str, asyncio.Future] = {}
+    _choice_futures: dict[str, asyncio.Future] = {}
 
     # ── Single-driver control arbitration ─────────────────────
     # Shared across all /ws/agent clients (the router is created once).
@@ -37,11 +37,11 @@ def create_router(server) -> APIRouter:
     # everyone else is an observer until they take control. This is the
     # seed of the multi-user control lock and also prevents the shared
     # agent conversation from being corrupted when >1 client connects.
-    _control: Dict[str, Optional[str]] = {"holder": None}
-    _clients: Dict[str, Callable] = {}
-    _client_labels: Dict[str, str] = {}
+    _control: dict[str, str | None] = {"holder": None}
+    _clients: dict[str, Callable] = {}
+    _client_labels: dict[str, str] = {}
     _client_counter = {"n": 0}
-    _raw_clients: Dict[str, WebSocket] = {}  # client_id -> websocket (broadcast)
+    _raw_clients: dict[str, WebSocket] = {}  # client_id -> websocket (broadcast)
 
     # ── Uniform display transcript ────────────────────────────
     # A single conversation history shared by every client of this session.
@@ -56,12 +56,14 @@ def create_router(server) -> APIRouter:
         holder_label = _client_labels.get(holder) if holder else None
         for cid, fn in list(_clients.items()):
             try:
-                await fn({
-                    "type": "control_status",
-                    "holder": holder,
-                    "holder_label": holder_label,
-                    "you_have_control": (cid == holder),
-                })
+                await fn(
+                    {
+                        "type": "control_status",
+                        "holder": holder,
+                        "holder_label": holder_label,
+                        "you_have_control": (cid == holder),
+                    }
+                )
             except Exception:
                 pass
 
@@ -101,12 +103,13 @@ def create_router(server) -> APIRouter:
         if not _history and store and sid:
             try:
                 snap = store.load_session_snapshot(sid) or {}
-                for m in (snap.get("conversation_history") or []):
+                for m in snap.get("conversation_history") or []:
                     role = m.get("role")
                     content = m.get("content")
                     if isinstance(content, list):
                         text = "".join(
-                            b.get("text", "") for b in content
+                            b.get("text", "")
+                            for b in content
                             if isinstance(b, dict) and b.get("type") == "text"
                         )
                     else:
@@ -153,8 +156,13 @@ def create_router(server) -> APIRouter:
         if t == "user_message":
             _flush_agent_buf()
             _history_state["autonomous"] = False
-            _record({"role": "user", "text": msg.get("text", ""),
-                     "author": msg.get("author")})
+            _record(
+                {
+                    "role": "user",
+                    "text": msg.get("text", ""),
+                    "author": msg.get("author"),
+                }
+            )
         elif t == "autonomous_start":
             # An autonomous wake turn is beginning — record the trigger banner
             # and mark following text as autonomous until stream_end.
@@ -165,9 +173,14 @@ def create_router(server) -> APIRouter:
             _history_state["agent_buf"] = (_history_state["agent_buf"] or "") + msg.get("text", "")
         elif t == "tool_call":
             _flush_agent_buf()
-            _record({"role": "tool", "name": msg.get("tool_name"),
-                     "duration": msg.get("duration"),
-                     "summary": msg.get("result_summary")})
+            _record(
+                {
+                    "role": "tool",
+                    "name": msg.get("tool_name"),
+                    "duration": msg.get("duration"),
+                    "summary": msg.get("result_summary"),
+                }
+            )
         elif t == "stream_end":
             _flush_agent_buf()
             _history_state["autonomous"] = False
@@ -175,19 +188,21 @@ def create_router(server) -> APIRouter:
     async def _broadcast(msg):
         """Record to history + send a display message to ALL clients."""
         _record_display(msg)
-        for cid, ws in list(_raw_clients.items()):
+        for _cid, ws in list(_raw_clients.items()):
             try:
                 await ws.send_json(msg)
             except Exception:
                 pass
 
-    async def _run_wizard(wizard, websocket, send_fn, _choice_futures, bridge=None, log_transcript=None):
+    async def _run_wizard(
+        wizard, websocket, send_fn, _choice_futures, bridge=None, log_transcript=None
+    ):
         """Run the wizard's interactive loop.
 
         Returns the wizard task so callers can check for exceptions.
         Used both at startup and for the /wizard command.
         """
-        _wizard_input_future: Optional[asyncio.Future] = None
+        _wizard_input_future: asyncio.Future | None = None
 
         async def _wizard_wait_for_input() -> str:
             nonlocal _wizard_input_future
@@ -198,11 +213,13 @@ def create_router(server) -> APIRouter:
         async def _wizard_wait_for_choice(choice_data: dict) -> str:
             request_id = _make_request_id()
             choice_data["request_id"] = request_id
-            await send_fn({
-                "type": "choice_request",
-                "choice_data": choice_data,
-                "request_id": request_id,
-            })
+            await send_fn(
+                {
+                    "type": "choice_request",
+                    "choice_data": choice_data,
+                    "request_id": request_id,
+                }
+            )
             loop = asyncio.get_event_loop()
             future = loop.create_future()
             _choice_futures[request_id] = future
@@ -215,7 +232,8 @@ def create_router(server) -> APIRouter:
         while not wizard_task.done():
             try:
                 raw = await asyncio.wait_for(
-                    websocket.receive_text(), timeout=60.0,
+                    websocket.receive_text(),
+                    timeout=60.0,
                 )
             except asyncio.TimeoutError:
                 await websocket.send_json({"type": "ping"})
@@ -251,12 +269,18 @@ def create_router(server) -> APIRouter:
                     # /reset-context kills the wizard — context is gone
                     if command.strip().lower() == "/reset-context":
                         wizard_task.cancel()
-                        await send_fn({
-                            "type": "stream_end",
-                            "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                       "total_tokens": 0, "api_calls": 0},
-                            "wizard_complete": True,
-                        })
+                        await send_fn(
+                            {
+                                "type": "stream_end",
+                                "tokens": {
+                                    "input_tokens": 0,
+                                    "output_tokens": 0,
+                                    "total_tokens": 0,
+                                    "api_calls": 0,
+                                },
+                                "wizard_complete": True,
+                            }
+                        )
                         return wizard_task
 
             elif msg_type == "ping":
@@ -279,10 +303,12 @@ def create_router(server) -> APIRouter:
 
         bridge = getattr(server, "agent_bridge", None)
         if bridge is None:
-            await websocket.send_json({
-                "type": "error",
-                "error": "Agent bridge not initialized",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "error": "Agent bridge not initialized",
+                }
+            )
             await websocket.close()
             return
 
@@ -296,8 +322,9 @@ def create_router(server) -> APIRouter:
         # session cookie (set at login). Viewers may watch but not drive;
         # operators/admins may take the control lock. With no accounts
         # configured we fall back to the legacy "anyone connected can drive".
-        from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+        from gently.ui.web.accounts import CONTROL_ROLES, get_account_store
         from gently.ui.web.auth import SESSION_COOKIE
+
         _acct = get_account_store()
         username = None
         can_control = True  # legacy default when no accounts are configured
@@ -369,10 +396,16 @@ def create_router(server) -> APIRouter:
                                 "_type": "single",
                                 "question": f"New peer discovered: {hostname}",
                                 "options": [
-                                    {"id": "pair", "label": "Pair",
-                                     "description": f"Start pairing with {hostname}"},
-                                    {"id": "ignore", "label": "Ignore",
-                                     "description": "Dismiss (you can pair later via /pair)"},
+                                    {
+                                        "id": "pair",
+                                        "label": "Pair",
+                                        "description": f"Start pairing with {hostname}",
+                                    },
+                                    {
+                                        "id": "ignore",
+                                        "label": "Ignore",
+                                        "description": "Dismiss (you can pair later via /pair)",
+                                    },
                                 ],
                                 "allow_multiple": False,
                             },
@@ -421,12 +454,20 @@ def create_router(server) -> APIRouter:
                         "type": "choice_request",
                         "choice_data": {
                             "_type": "single",
-                            "question": f"{hostname} wants to pair\nVerify this code matches: {pin}",
+                            "question": (
+                                f"{hostname} wants to pair\nVerify this code matches: {pin}"
+                            ),
                             "options": [
-                                {"id": "accept", "label": "Accept pairing",
-                                 "description": f"Trust {hostname} and allow mesh communication"},
-                                {"id": "reject", "label": "Reject",
-                                 "description": "Decline this pairing request"},
+                                {
+                                    "id": "accept",
+                                    "label": "Accept pairing",
+                                    "description": f"Trust {hostname} and allow mesh communication",
+                                },
+                                {
+                                    "id": "reject",
+                                    "label": "Reject",
+                                    "description": "Decline this pairing request",
+                                },
                             ],
                             "allow_multiple": False,
                         },
@@ -507,7 +548,9 @@ def create_router(server) -> APIRouter:
                     pass
 
             # Peer discovery
-            unsub = server.event_bus.subscribe_async(_ET.MESH_PEER_DISCOVERED, _push_peer_discovered)
+            unsub = server.event_bus.subscribe_async(
+                _ET.MESH_PEER_DISCOVERED, _push_peer_discovered
+            )
             _mesh_unsubs.append(unsub)
             unsub = server.event_bus.subscribe_async(_ET.MESH_PEER_LOST, _push_peer_lost)
             _mesh_unsubs.append(unsub)
@@ -515,23 +558,29 @@ def create_router(server) -> APIRouter:
             _mesh_unsubs.append(unsub)
 
             # Pairing events
-            unsub = server.event_bus.subscribe_async(_ET.MESH_PAIRING_REQUESTED, _push_pairing_requested)
+            unsub = server.event_bus.subscribe_async(
+                _ET.MESH_PAIRING_REQUESTED, _push_pairing_requested
+            )
             _mesh_unsubs.append(unsub)
-            unsub = server.event_bus.subscribe_async(_ET.MESH_PAIRING_COMPLETED, _push_pairing_completed)
+            unsub = server.event_bus.subscribe_async(
+                _ET.MESH_PAIRING_COMPLETED, _push_pairing_completed
+            )
             _mesh_unsubs.append(unsub)
 
             # Security events
             unsub = server.event_bus.subscribe_async(_ET.MESH_AUTH_FAILURE, _push_auth_failure)
             _mesh_unsubs.append(unsub)
-            unsub = server.event_bus.subscribe_async(_ET.MESH_CERT_PIN_FAILURE, _push_cert_pin_failure)
+            unsub = server.event_bus.subscribe_async(
+                _ET.MESH_CERT_PIN_FAILURE, _push_cert_pin_failure
+            )
             _mesh_unsubs.append(unsub)
             unsub = server.event_bus.subscribe_async(_ET.MESH_SCOPE_DENIED, _push_scope_denied)
             _mesh_unsubs.append(unsub)
 
         # Active streaming task (so we can cancel on disconnect)
-        active_task: Optional[asyncio.Task] = None
+        active_task: asyncio.Task | None = None
         wizard_task = None
-        bootstrap_task: Optional[asyncio.Task] = None
+        bootstrap_task: asyncio.Task | None = None
 
         # ── Session transcript ────────────────────────────────
         # Log every WebSocket message (both directions) to a JSONL
@@ -547,7 +596,9 @@ def create_router(server) -> APIRouter:
                 sdir = store._session_dir(sid)
                 if sdir and sdir.exists():
                     _transcript_file = open(
-                        sdir / "transcript.jsonl", "a", encoding="utf-8",
+                        sdir / "transcript.jsonl",
+                        "a",
+                        encoding="utf-8",
                     )
                     logger.info("Transcript logging to %s", sdir / "transcript.jsonl")
         except Exception as e:
@@ -626,18 +677,28 @@ def create_router(server) -> APIRouter:
             wizard = getattr(bridge, "_wizard", None)
             if wizard is not None and wizard.needed and getattr(server, "wizard_autorun", False):
                 wizard_task = await _run_wizard(
-                    wizard, websocket, send_fn, _choice_futures, bridge,
+                    wizard,
+                    websocket,
+                    send_fn,
+                    _choice_futures,
+                    bridge,
                     log_transcript=_log_transcript,
                 )
                 exc = _handle_wizard_result(wizard_task)
                 if exc:
                     logger.error(f"Wizard error: {exc}", exc_info=exc)
-                    await send_fn({
-                        "type": "stream_end",
-                        "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                   "total_tokens": 0, "api_calls": 0},
-                        "wizard_complete": True,
-                    })
+                    await send_fn(
+                        {
+                            "type": "stream_end",
+                            "tokens": {
+                                "input_tokens": 0,
+                                "output_tokens": 0,
+                                "total_tokens": 0,
+                                "api_calls": 0,
+                            },
+                            "wizard_complete": True,
+                        }
+                    )
 
             # ── Auto-briefing or resolution picker ────────────────
             # New sessions with multiple unblocked imaging candidates
@@ -652,26 +713,33 @@ def create_router(server) -> APIRouter:
             async def _run_resolution_bootstrap():
                 try:
                     await bridge.bootstrap_resolution_picker(
-                        send_fn, choice_future_factory,
+                        send_fn,
+                        choice_future_factory,
                     )
                 except asyncio.CancelledError:
                     raise
                 except Exception as exc:
                     logger.error(
-                        "Resolution picker failed; falling back to "
-                        "static briefing: %s",
-                        exc, exc_info=exc,
+                        "Resolution picker failed; falling back to static briefing: %s",
+                        exc,
+                        exc_info=exc,
                     )
                     try:
                         briefing = bridge.get_session_briefing()
                         if briefing:
                             await send_fn({"type": "stream_start"})
                             await send_fn({"type": "text", "text": briefing})
-                            await send_fn({
-                                "type": "stream_end",
-                                "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                           "total_tokens": 0, "api_calls": 0},
-                            })
+                            await send_fn(
+                                {
+                                    "type": "stream_end",
+                                    "tokens": {
+                                        "input_tokens": 0,
+                                        "output_tokens": 0,
+                                        "total_tokens": 0,
+                                        "api_calls": 0,
+                                    },
+                                }
+                            )
                     except Exception:
                         pass
 
@@ -683,17 +751,24 @@ def create_router(server) -> APIRouter:
                     if briefing:
                         await send_fn({"type": "stream_start"})
                         await send_fn({"type": "text", "text": briefing})
-                        await send_fn({
-                            "type": "stream_end",
-                            "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                       "total_tokens": 0, "api_calls": 0},
-                        })
+                        await send_fn(
+                            {
+                                "type": "stream_end",
+                                "tokens": {
+                                    "input_tokens": 0,
+                                    "output_tokens": 0,
+                                    "total_tokens": 0,
+                                    "api_calls": 0,
+                                },
+                            }
+                        )
 
             # ── Main REPL loop ────────────────────────────────────
             while True:
                 try:
                     raw = await asyncio.wait_for(
-                        websocket.receive_text(), timeout=60.0,
+                        websocket.receive_text(),
+                        timeout=60.0,
                     )
                 except asyncio.TimeoutError:
                     await websocket.send_json({"type": "ping"})
@@ -712,24 +787,28 @@ def create_router(server) -> APIRouter:
                 # A client requesting the wheel.
                 if msg_type == "take_control":
                     if not can_control:
-                        await send_fn({
-                            "type": "notification",
-                            "level": "warning",
-                            "title": "View-only role",
-                            "body": "Your account can watch but not control the microscope.",
-                        })
+                        await send_fn(
+                            {
+                                "type": "notification",
+                                "level": "warning",
+                                "title": "View-only role",
+                                "body": "Your account can watch but not control the microscope.",
+                            }
+                        )
                         await _broadcast_control_status()
                         continue
                     prev = _control["holder"]
                     _control["holder"] = client_id
                     if prev and prev != client_id and prev in _clients:
                         try:
-                            await _clients[prev]({
-                                "type": "notification",
-                                "level": "warning",
-                                "title": f"Control taken by {client_label}",
-                                "body": "You are now viewing.",
-                            })
+                            await _clients[prev](
+                                {
+                                    "type": "notification",
+                                    "level": "warning",
+                                    "title": f"Control taken by {client_label}",
+                                    "body": "You are now viewing.",
+                                }
+                            )
                         except Exception:
                             pass
                     await _broadcast_control_status()
@@ -740,12 +819,14 @@ def create_router(server) -> APIRouter:
                 # single shared conversation.
                 if msg_type in ("chat", "command", "cancel") and client_id != _control["holder"]:
                     holder_label = _client_labels.get(_control["holder"]) or "another client"
-                    await send_fn({
-                        "type": "notification",
-                        "level": "info",
-                        "title": f"Viewing only — control is held by {holder_label}",
-                        "body": "Take control to drive the microscope.",
-                    })
+                    await send_fn(
+                        {
+                            "type": "notification",
+                            "level": "info",
+                            "title": f"Viewing only — control is held by {holder_label}",
+                            "body": "Take control to drive the microscope.",
+                        }
+                    )
                     await _broadcast_control_status()
                     continue
 
@@ -760,8 +841,7 @@ def create_router(server) -> APIRouter:
 
                     # Echo the user's message to ALL clients (so observers see
                     # what was asked), then stream the reply to everyone.
-                    await _broadcast({"type": "user_message", "text": text,
-                                      "author": client_label})
+                    await _broadcast({"type": "user_message", "text": text, "author": client_label})
                     active_task = asyncio.create_task(
                         bridge.stream_response(text, _broadcast, choice_future_factory)
                     )
@@ -795,11 +875,13 @@ def create_router(server) -> APIRouter:
                     if command.lower() in ("/wizard",):
                         w = getattr(bridge, "_wizard", None)
                         if w is None:
-                            await send_fn({
-                                "type": "command_result",
-                                "command": "/wizard",
-                                "error": "Wizard not available",
-                            })
+                            await send_fn(
+                                {
+                                    "type": "command_result",
+                                    "command": "/wizard",
+                                    "error": "Wizard not available",
+                                }
+                            )
                         else:
                             # Re-create wizard so it re-assesses gaps
                             cs = getattr(bridge, "_context_store", None)
@@ -808,40 +890,60 @@ def create_router(server) -> APIRouter:
                             w = bridge._wizard
 
                             # Tell TUI we're entering wizard mode
-                            await send_fn({
-                                "type": "command_result",
-                                "command": "/wizard",
-                                "content": {"wizard_active": True},
-                            })
+                            await send_fn(
+                                {
+                                    "type": "command_result",
+                                    "command": "/wizard",
+                                    "content": {"wizard_active": True},
+                                }
+                            )
 
                             wizard_task = await _run_wizard(
-                                w, websocket, send_fn, _choice_futures, bridge,
+                                w,
+                                websocket,
+                                send_fn,
+                                _choice_futures,
+                                bridge,
                                 log_transcript=_log_transcript,
                             )
                             exc = _handle_wizard_result(wizard_task)
                             if exc:
                                 logger.error(f"Wizard error: {exc}", exc_info=exc)
-                                await send_fn({
-                                    "type": "stream_end",
-                                    "tokens": {"input_tokens": 0, "output_tokens": 0,
-                                               "total_tokens": 0, "api_calls": 0},
-                                    "wizard_complete": True,
-                                })
+                                await send_fn(
+                                    {
+                                        "type": "stream_end",
+                                        "tokens": {
+                                            "input_tokens": 0,
+                                            "output_tokens": 0,
+                                            "total_tokens": 0,
+                                            "api_calls": 0,
+                                        },
+                                        "wizard_complete": True,
+                                    }
+                                )
                     else:
                         try:
-                            await bridge.handle_command(command, send_fn, choice_futures=_choice_futures)
+                            await bridge.handle_command(
+                                command, send_fn, choice_futures=_choice_futures
+                            )
                         except Exception as e:
                             logger.error("Command '%s' failed: %s", command, e, exc_info=True)
-                            await send_fn({
-                                "type": "command_result",
-                                "command": command,
-                                "error": str(e),
-                            })
+                            await send_fn(
+                                {
+                                    "type": "command_result",
+                                    "command": command,
+                                    "error": str(e),
+                                }
+                            )
 
                 elif msg_type == "browse":
                     target = data.get("target", "")
                     await _handle_browse(
-                        target, data, server, bridge, send_fn,
+                        target,
+                        data,
+                        server,
+                        bridge,
+                        send_fn,
                     )
 
                 elif msg_type == "ping":
@@ -916,13 +1018,20 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                 else:
                     children = []
                     items_raw = cs.get_plan_items(campaign_id=c.id)
-                    items = [{
-                        "id": item.id,
-                        "title": item.title,
-                        "status": item.status.value if hasattr(item.status, "value") else str(item.status),
-                        "type": item.type.value if hasattr(item.type, "value") else str(item.type),
-                        "claimed_by_hostname": getattr(item, "claimed_by_hostname", None),
-                    } for item in items_raw]
+                    items = [
+                        {
+                            "id": item.id,
+                            "title": item.title,
+                            "status": item.status.value
+                            if hasattr(item.status, "value")
+                            else str(item.status),
+                            "type": item.type.value
+                            if hasattr(item.type, "value")
+                            else str(item.type),
+                            "claimed_by_hostname": getattr(item, "claimed_by_hostname", None),
+                        }
+                        for item in items_raw
+                    ]
                 return {
                     "id": c.id,
                     "shorthand": c.shorthand or "",
@@ -949,17 +1058,19 @@ async def _handle_browse(target, data, server, bridge, send_fn):
             peers = mesh_svc.get_peers()
             result = []
             for p in peers:
-                result.append({
-                    "instance_id": p.instance_id,
-                    "hostname": p.hostname,
-                    "ip_address": p.ip_address,
-                    "viz_port": p.viz_port,
-                    "mode": p.status.agent_mode if p.status else "unknown",
-                    "embryo_count": p.status.embryo_count if p.status else 0,
-                    "is_trusted": p.is_trusted,
-                    "tls_enabled": p.tls_enabled,
-                    "shared_campaigns": [],
-                })
+                result.append(
+                    {
+                        "instance_id": p.instance_id,
+                        "hostname": p.hostname,
+                        "ip_address": p.ip_address,
+                        "viz_port": p.viz_port,
+                        "mode": p.status.agent_mode if p.status else "unknown",
+                        "embryo_count": p.status.embryo_count if p.status else 0,
+                        "is_trusted": p.is_trusted,
+                        "tls_enabled": p.tls_enabled,
+                        "shared_campaigns": [],
+                    }
+                )
             await send_fn({"type": "browse_result", "target": "peers", "data": result})
 
         elif target == "peer_campaigns":
@@ -981,25 +1092,29 @@ async def _handle_browse(target, data, server, bridge, send_fn):
                 campaigns = []
                 if p.instance_id == peer.instance_id:
                     for c in shared:
-                        campaigns.append({
-                            "id": c.get("id", ""),
-                            "shorthand": c.get("shorthand", ""),
-                            "description": c.get("description", ""),
-                            "total": c.get("item_count", 0),
-                            "completed": c.get("completed_count", 0),
-                            "items": [],
-                        })
-                result.append({
-                    "instance_id": p.instance_id,
-                    "hostname": p.hostname,
-                    "ip_address": p.ip_address,
-                    "viz_port": p.viz_port,
-                    "mode": p.status.agent_mode if p.status else "unknown",
-                    "embryo_count": p.status.embryo_count if p.status else 0,
-                    "is_trusted": p.is_trusted,
-                    "tls_enabled": p.tls_enabled,
-                    "shared_campaigns": campaigns,
-                })
+                        campaigns.append(
+                            {
+                                "id": c.get("id", ""),
+                                "shorthand": c.get("shorthand", ""),
+                                "description": c.get("description", ""),
+                                "total": c.get("item_count", 0),
+                                "completed": c.get("completed_count", 0),
+                                "items": [],
+                            }
+                        )
+                result.append(
+                    {
+                        "instance_id": p.instance_id,
+                        "hostname": p.hostname,
+                        "ip_address": p.ip_address,
+                        "viz_port": p.viz_port,
+                        "mode": p.status.agent_mode if p.status else "unknown",
+                        "embryo_count": p.status.embryo_count if p.status else 0,
+                        "is_trusted": p.is_trusted,
+                        "tls_enabled": p.tls_enabled,
+                        "shared_campaigns": campaigns,
+                    }
+                )
             await send_fn({"type": "browse_result", "target": "peer_campaigns", "data": result})
 
         elif target == "peer_campaign_items":
@@ -1007,31 +1122,53 @@ async def _handle_browse(target, data, server, bridge, send_fn):
             campaign_id = data.get("campaign_id", "")
             mesh_svc = getattr(server, "mesh_service", None)
             if not mesh_svc or not hostname or not campaign_id:
-                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                await send_fn(
+                    {
+                        "type": "browse_result",
+                        "target": "peer_campaign_items",
+                        "data": [],
+                    }
+                )
                 return
             peer = mesh_svc.find_peer_by_hostname(hostname)
             if not peer or not mesh_svc.peer_client:
-                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                await send_fn(
+                    {
+                        "type": "browse_result",
+                        "target": "peer_campaign_items",
+                        "data": [],
+                    }
+                )
                 return
             export = await mesh_svc.peer_client.fetch_campaign_export(peer, campaign_id)
             if not export:
-                await send_fn({"type": "browse_result", "target": "peer_campaign_items", "data": []})
+                await send_fn(
+                    {
+                        "type": "browse_result",
+                        "target": "peer_campaign_items",
+                        "data": [],
+                    }
+                )
                 return
             items = []
             for item in export.get("items", []):
-                items.append({
-                    "id": item.get("id", ""),
-                    "title": item.get("title", ""),
-                    "status": item.get("status", "planned"),
-                    "claimed_by_hostname": item.get("claimed_by_hostname"),
-                })
-            await send_fn({
-                "type": "browse_result",
-                "target": "peer_campaign_items",
-                "data": items,
-                "campaign_id": campaign_id,
-                "hostname": hostname,
-            })
+                items.append(
+                    {
+                        "id": item.get("id", ""),
+                        "title": item.get("title", ""),
+                        "status": item.get("status", "planned"),
+                        "claimed_by_hostname": item.get("claimed_by_hostname"),
+                    }
+                )
+            await send_fn(
+                {
+                    "type": "browse_result",
+                    "target": "peer_campaign_items",
+                    "data": items,
+                    "campaign_id": campaign_id,
+                    "hostname": hostname,
+                }
+            )
 
     except Exception as e:
         logger.debug(f"Browse error ({target}): {e}")

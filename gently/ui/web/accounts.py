@@ -27,7 +27,6 @@ import secrets
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
 
 import yaml
 
@@ -72,8 +71,7 @@ class AccountStore:
 
     def _save_users(self) -> None:
         tmp = self.users_path.with_suffix(".yaml.tmp")
-        tmp.write_text(yaml.safe_dump({"users": self._users}, sort_keys=True),
-                       encoding="utf-8")
+        tmp.write_text(yaml.safe_dump({"users": self._users}, sort_keys=True), encoding="utf-8")
         tmp.replace(self.users_path)  # atomic
 
     def _load_or_create_secret(self) -> bytes:
@@ -92,10 +90,11 @@ class AccountStore:
         return bool(self._users)
 
     def list_users(self) -> list:
-        return [{"username": u, "role": r.get("role", "viewer")}
-                for u, r in sorted(self._users.items())]
+        return [
+            {"username": u, "role": r.get("role", "viewer")} for u, r in sorted(self._users.items())
+        ]
 
-    def get_role(self, username: str) -> Optional[str]:
+    def get_role(self, username: str) -> str | None:
         rec = self._users.get(username)
         return rec.get("role") if rec else None
 
@@ -118,7 +117,7 @@ class AccountStore:
         }
         self._save_users()
 
-    def verify_password(self, username: str, password: str) -> Optional[str]:
+    def verify_password(self, username: str, password: str) -> str | None:
         """Return the user's role if the password matches, else None."""
         rec = self._users.get((username or "").strip())
         if not rec:
@@ -134,7 +133,7 @@ class AccountStore:
             return rec.get("role", "viewer")
         return None
 
-    def bootstrap_admin_if_empty(self) -> Optional[Tuple[str, str]]:
+    def bootstrap_admin_if_empty(self) -> tuple[str, str] | None:
         """If no users exist, create an admin with a random password.
 
         Returns (username, password) so the launcher can print it once, or
@@ -150,11 +149,11 @@ class AccountStore:
     # ── Sessions (stateless signed cookie) ────────────────────
     def issue_session(self, username: str, ttl: int = _SESSION_TTL_SECONDS) -> str:
         expiry = int(time.time()) + ttl
-        payload = f"{username}|{expiry}".encode("utf-8")
+        payload = f"{username}|{expiry}".encode()
         sig = hmac.new(self._secret, payload, hashlib.sha256).digest()
         return f"{_b64(payload)}.{_b64(sig)}"
 
-    def verify_session(self, token: str) -> Optional[str]:
+    def verify_session(self, token: str) -> str | None:
         """Return the username for a valid, unexpired token, else None."""
         if not token or "." not in token:
             return None
@@ -178,13 +177,13 @@ class AccountStore:
 
 
 # ── Module-level singleton (set during server init) ───────────
-_store: Optional[AccountStore] = None
+_store: AccountStore | None = None
 
 
-def set_account_store(store: Optional[AccountStore]) -> None:
+def set_account_store(store: AccountStore | None) -> None:
     global _store
     _store = store
 
 
-def get_account_store() -> Optional[AccountStore]:
+def get_account_store() -> AccountStore | None:
     return _store

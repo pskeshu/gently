@@ -7,7 +7,6 @@ Aggregates into NetworkDataInventory.
 """
 
 import logging
-from typing import Optional
 
 from .models import NetworkDataInventory, SessionSummary
 
@@ -66,16 +65,18 @@ class DataAssessmentEngine:
                     except Exception:
                         pass
 
-                sessions.append(SessionSummary(
-                    session_id=sid,
-                    session_name=sname,
-                    embryo_count=embryo_count,
-                    volume_count=vol_count,
-                    annotated_embryos=annotated,
-                    ground_truth_count=gt_count,
-                    stages_covered=sorted(stages),
-                    is_remote=False,
-                ))
+                sessions.append(
+                    SessionSummary(
+                        session_id=sid,
+                        session_name=sname,
+                        embryo_count=embryo_count,
+                        volume_count=vol_count,
+                        annotated_embryos=annotated,
+                        ground_truth_count=gt_count,
+                        stages_covered=sorted(stages),
+                        is_remote=False,
+                    )
+                )
         except Exception as e:
             logger.error(f"Local inventory failed: {e}")
 
@@ -98,6 +99,7 @@ class DataAssessmentEngine:
             try:
                 # Build a PeerInfo-like object for PeerClient
                 from ..mesh.models import PeerInfo
+
                 peer = PeerInfo(
                     instance_id=peer_entry.instance_id,
                     hostname=peer_entry.hostname,
@@ -111,14 +113,16 @@ class DataAssessmentEngine:
                     peers_failed += 1
                     continue
                 for s in peer_sessions:
-                    sessions.append(SessionSummary(
-                        session_id=s.get("session_id", ""),
-                        session_name=s.get("name", ""),
-                        source_peer=peer_entry.instance_id,
-                        embryo_count=s.get("embryo_count", 0),
-                        volume_count=s.get("volume_count", 0),
-                        is_remote=True,
-                    ))
+                    sessions.append(
+                        SessionSummary(
+                            session_id=s.get("session_id", ""),
+                            session_name=s.get("name", ""),
+                            source_peer=peer_entry.instance_id,
+                            embryo_count=s.get("embryo_count", 0),
+                            volume_count=s.get("volume_count", 0),
+                            is_remote=True,
+                        )
+                    )
             except Exception as e:
                 logger.debug(f"Remote inventory failed for {peer_entry.hostname}: {e}")
                 peers_failed += 1

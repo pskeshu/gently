@@ -3,7 +3,6 @@ Tests for DynamicCapabilityProvider.
 """
 
 from unittest.mock import MagicMock, patch
-import pytest
 
 from gently.mesh.capability_provider import DynamicCapabilityProvider
 from gently.mesh.models import PeerRole
@@ -32,6 +31,7 @@ class TestDynamicCapabilities:
     @patch("gently.mesh.capability_provider._detect_gpus")
     def test_gpu_detected(self, mock_detect):
         from gently.mesh.models import GpuInfo
+
         mock_detect.return_value = [
             GpuInfo(device_index=0, name="A5000", vram_gb=24.0),
         ]
@@ -53,6 +53,7 @@ class TestRoleLogic:
     @patch("gently.mesh.capability_provider._detect_gpus")
     def test_ml_trainer_role_with_gpu(self, mock_detect):
         from gently.mesh.models import GpuInfo
+
         mock_detect.return_value = [GpuInfo(name="A5000")]
         provider = DynamicCapabilityProvider()
         provider._gpus = mock_detect()

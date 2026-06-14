@@ -11,20 +11,19 @@ Subclasses the existing Service base class, managing:
 import asyncio
 import logging
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
 
 from gently.core.event_bus import EventType
 from gently.core.service import Service
 
+from ..settings import settings
 from .discovery import MeshDiscovery
 from .models import PeerCapability, PeerInfo, PeerStatus
 from .peer_client import PeerClient
 from .verse_map import VerseMap
 
 logger = logging.getLogger(__name__)
-
-from ..settings import settings
 
 REAPER_INTERVAL = settings.mesh.reaper_interval_s
 STATUS_REFRESH_INTERVAL = settings.mesh.status_refresh_s
@@ -59,7 +58,7 @@ class MeshService(Service):
         mesh_port: int = settings.network.mesh_port,
         pairing_manager=None,
         audit_log=None,
-        config_dir: Optional[Path] = None,
+        config_dir: Path | None = None,
     ):
         import socket as _socket
 
@@ -78,12 +77,12 @@ class MeshService(Service):
         self._audit_log = audit_log
 
         self._hostname = _socket.gethostname()
-        self._peers: Dict[str, PeerInfo] = {}
-        self._discovery: Optional[MeshDiscovery] = None
-        self._peer_client: Optional[PeerClient] = None
-        self._reaper_task: Optional[asyncio.Task] = None
-        self._refresh_task: Optional[asyncio.Task] = None
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._peers: dict[str, PeerInfo] = {}
+        self._discovery: MeshDiscovery | None = None
+        self._peer_client: PeerClient | None = None
+        self._reaper_task: asyncio.Task | None = None
+        self._refresh_task: asyncio.Task | None = None
+        self._cleanup_task: asyncio.Task | None = None
 
         # Persistent verse map
         if config_dir is None:
@@ -121,7 +120,8 @@ class MeshService(Service):
 
         # When our own status changes, broadcast a nudge to all peers
         self._status_unsub = self._event_bus.subscribe(
-            EventType.STATUS_CHANGED, self._on_local_status_changed,
+            EventType.STATUS_CHANGED,
+            self._on_local_status_changed,
         )
 
     async def on_stop(self):
@@ -156,7 +156,8 @@ class MeshService(Service):
         # Check if this peer is already trusted
         trusted = (
             self._pairing_manager.is_trusted(peer_id)
-            if self._pairing_manager else True  # no manager = trust all (backward compat)
+            if self._pairing_manager
+            else True  # no manager = trust all (backward compat)
         )
 
         # Determine TLS status — trusted peers with a cert fingerprint use TLS
@@ -187,24 +188,28 @@ class MeshService(Service):
         if was_offline:
             # Previously offline peer returned
             self._verse_map.on_peer_returned(peer_id)
-            self._emit_event(EventType.MESH_PEER_RETURNED, {
-                "instance_id": peer_id,
-                "hostname": peer.hostname,
-                "ip_address": sender_ip,
-                "is_trusted": trusted,
-            })
-            logger.info(
-                f"Mesh: peer returned {peer.hostname} ({peer_id[:8]}) at {sender_ip}"
+            self._emit_event(
+                EventType.MESH_PEER_RETURNED,
+                {
+                    "instance_id": peer_id,
+                    "hostname": peer.hostname,
+                    "ip_address": sender_ip,
+                    "is_trusted": trusted,
+                },
             )
+            logger.info(f"Mesh: peer returned {peer.hostname} ({peer_id[:8]}) at {sender_ip}")
         else:
-            self._emit_event(EventType.MESH_PEER_DISCOVERED, {
-                "instance_id": peer_id,
-                "hostname": peer.hostname,
-                "ip_address": sender_ip,
-                "is_trusted": trusted,
-                "udp_verified": verified,
-                "tls_enabled": tls_enabled,
-            })
+            self._emit_event(
+                EventType.MESH_PEER_DISCOVERED,
+                {
+                    "instance_id": peer_id,
+                    "hostname": peer.hostname,
+                    "ip_address": sender_ip,
+                    "is_trusted": trusted,
+                    "udp_verified": verified,
+                    "tls_enabled": tls_enabled,
+                },
+            )
             logger.info(
                 f"Mesh: discovered peer {peer.hostname} ({peer_id[:8]}) at {sender_ip} "
                 f"[trusted={trusted}, udp_verified={verified}, tls={tls_enabled}]"
@@ -257,20 +262,28 @@ class MeshService(Service):
                     self._verse_map.on_peer_offline(pid)
                     if self._discovery:
                         self._discovery.forget_peer(pid)
-                    self._emit_event(EventType.MESH_PEER_OFFLINE, {
-                        "instance_id": pid,
-                        "hostname": peer.hostname,
-                    })
-                    logger.info(f"Mesh: peer offline {peer.hostname} ({pid[:8]}) — kept in verse map")
+                    self._emit_event(
+                        EventType.MESH_PEER_OFFLINE,
+                        {
+                            "instance_id": pid,
+                            "hostname": peer.hostname,
+                        },
+                    )
+                    logger.info(
+                        f"Mesh: peer offline {peer.hostname} ({pid[:8]}) — kept in verse map"
+                    )
                 else:
                     # Untrusted peer: fully remove
                     self._peers.pop(pid, None)
                     if self._discovery:
                         self._discovery.forget_peer(pid)
-                    self._emit_event(EventType.MESH_PEER_LOST, {
-                        "instance_id": pid,
-                        "hostname": peer.hostname,
-                    })
+                    self._emit_event(
+                        EventType.MESH_PEER_LOST,
+                        {
+                            "instance_id": pid,
+                            "hostname": peer.hostname,
+                        },
+                    )
                     logger.info(f"Mesh: lost peer {peer.hostname} ({pid[:8]})")
 
     async def _refresh_loop(self):
@@ -306,10 +319,13 @@ class MeshService(Service):
         # Update verse map with latest capabilities
         self._verse_map.on_peer_updated(peer)
 
-        self._emit_event(EventType.MESH_PEER_UPDATED, {
-            "instance_id": peer.instance_id,
-            "hostname": peer.hostname,
-        })
+        self._emit_event(
+            EventType.MESH_PEER_UPDATED,
+            {
+                "instance_id": peer.instance_id,
+                "hostname": peer.hostname,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Pairing integration
@@ -343,19 +359,19 @@ class MeshService(Service):
     # Public query API
     # ------------------------------------------------------------------
 
-    def get_peers(self) -> List[PeerInfo]:
+    def get_peers(self) -> list[PeerInfo]:
         """Return all live (non-dead) peers."""
         return [p for p in self._peers.values() if not p.is_dead]
 
-    def get_all_peers(self) -> List[PeerInfo]:
+    def get_all_peers(self) -> list[PeerInfo]:
         """Return all tracked peers including stale/dead ones."""
         return list(self._peers.values())
 
-    def get_peer(self, instance_id: str) -> Optional[PeerInfo]:
+    def get_peer(self, instance_id: str) -> PeerInfo | None:
         """Get a specific peer by instance_id."""
         return self._peers.get(instance_id)
 
-    def find_peers_with(self, capability: str) -> List[PeerInfo]:
+    def find_peers_with(self, capability: str) -> list[PeerInfo]:
         """
         Find live peers that have a given capability flag.
 
@@ -386,11 +402,11 @@ class MeshService(Service):
         }
 
     @property
-    def peer_client(self) -> Optional[PeerClient]:
+    def peer_client(self) -> PeerClient | None:
         """Expose the peer client for direct campaign operations."""
         return self._peer_client
 
-    def find_peer_by_hostname(self, hostname: str) -> Optional[PeerInfo]:
+    def find_peer_by_hostname(self, hostname: str) -> PeerInfo | None:
         """Find a live peer by hostname (case-insensitive)."""
         hostname_lower = hostname.lower()
         for p in self.get_peers():

@@ -3,7 +3,6 @@ Shared fixtures for gently tests.
 """
 
 import pytest
-from pathlib import Path
 
 from gently.core.event_bus import EventBus
 
@@ -20,6 +19,7 @@ def config_dir(tmp_path):
 def store(tmp_path):
     """Fresh GentlyStore for tests."""
     from gently.core.store import GentlyStore
+
     s = GentlyStore(tmp_path / "gently_test")
     yield s
     s.close()
@@ -29,6 +29,7 @@ def store(tmp_path):
 def context_store(tmp_path):
     """Fresh ContextStore for tests."""
     from gently.harness.memory.store import ContextStore
+
     cs = ContextStore(tmp_path / "context_test.db")
     yield cs
     cs.close()
@@ -38,6 +39,7 @@ def context_store(tmp_path):
 def file_store(tmp_path):
     """Fresh FileStore for tests."""
     from gently.core.file_store import FileStore
+
     s = FileStore(tmp_path / "gently3_test")
     yield s
     s.close()
@@ -47,6 +49,7 @@ def file_store(tmp_path):
 def file_context_store(tmp_path):
     """Fresh FileContextStore for tests."""
     from gently.harness.memory.file_store import FileContextStore
+
     cs = FileContextStore(tmp_path / "agent_test")
     yield cs
     cs.close()

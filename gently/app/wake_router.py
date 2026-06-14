@@ -20,6 +20,7 @@ Design (opt-in, default OFF):
 
 Nothing fires until ``set_enabled(True)`` (e.g. via the set_autonomy tool).
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -30,18 +31,20 @@ from gently.core.event_bus import EventType
 logger = logging.getLogger(__name__)
 
 # Tunables (seconds).
-COALESCE_WINDOW = 20.0     # collapse a burst of events into one wake
+COALESCE_WINDOW = 20.0  # collapse a burst of events into one wake
 MIN_WAKE_INTERVAL = 120.0  # throttle non-critical wakes
-ASK_TIMEOUT_SEC = 300.0    # ASK mode: how long to wait for operator approval -> Skip
+ASK_TIMEOUT_SEC = 300.0  # ASK mode: how long to wait for operator approval -> Skip
 
 # Events that always wake immediately (bypass MIN_WAKE_INTERVAL).
-CRITICAL_EVENTS = frozenset({
-    EventType.HATCHING_DETECTED,
-    EventType.EMBRYO_TERMINATED,
-    EventType.ERROR_OCCURRED,
-    EventType.ACQUISITION_FAILED,
-    EventType.ANOMALY_DETECTED,
-})
+CRITICAL_EVENTS = frozenset(
+    {
+        EventType.HATCHING_DETECTED,
+        EventType.EMBRYO_TERMINATED,
+        EventType.ERROR_OCCURRED,
+        EventType.ACQUISITION_FAILED,
+        EventType.ANOMALY_DETECTED,
+    }
+)
 # Non-critical events we also inspect (filtered for real transitions / arrest).
 WATCH_EVENTS = frozenset({EventType.DETECTOR_EVALUATED})
 
@@ -52,12 +55,12 @@ class WakeRouter:
     def __init__(self, agent, bus):
         self.agent = agent
         self.bus = bus
-        self.mode = "off"          # 'off' | 'ask' | 'auto'
+        self.mode = "off"  # 'off' | 'ask' | 'auto'
         self._loop = None
-        self._pending = []          # list[(EventType, dict)]
-        self._flush_handle = None   # TimerHandle for the coalesce window
-        self._last_wake = 0.0       # loop.time() of the last fired wake
-        self._last_stage = {}       # embryo_id -> last stage seen (transition detection)
+        self._pending = []  # list[(EventType, dict)]
+        self._flush_handle = None  # TimerHandle for the coalesce window
+        self._last_wake = 0.0  # loop.time() of the last fired wake
+        self._last_stage = {}  # embryo_id -> last stage seen (transition detection)
         self._in_flight = False
         self._unsubs = []
         self._subscribe()
@@ -97,7 +100,7 @@ class WakeRouter:
 
     # -- subscription ---------------------------------------------------
     def _subscribe(self):
-        for et in (CRITICAL_EVENTS | WATCH_EVENTS):
+        for et in CRITICAL_EVENTS | WATCH_EVENTS:
             try:
                 self._unsubs.append(
                     self.bus.subscribe(et, lambda e, _et=et: self._on_event(_et, e))
@@ -195,10 +198,14 @@ class WakeRouter:
         self._in_flight = True
         self._last_wake = now
         try:
-            ask = (self.mode == "ask")
+            ask = self.mode == "ask"
             note, trigger = self._build_wake_note(events, ask=ask)
-            logger.info("Wake-router firing %s turn (%d event(s)): %s",
-                        self.mode.upper(), len(events), trigger)
+            logger.info(
+                "Wake-router firing %s turn (%d event(s)): %s",
+                self.mode.upper(),
+                len(events),
+                trigger,
+            )
             await self.agent.run_wake_turn(note, trigger=trigger, interactive=ask)
         except Exception:
             logger.exception("wake turn failed")
@@ -209,8 +216,7 @@ class WakeRouter:
             # out another coalesce window. _in_flight is now False so this flush
             # will proceed instead of deferring (no busy-spin).
             if self._pending and self.enabled:
-                self._schedule_flush(
-                    critical=any(et in CRITICAL_EVENTS for et, _ in self._pending))
+                self._schedule_flush(critical=any(et in CRITICAL_EVENTS for et, _ in self._pending))
 
     # -- wake package ---------------------------------------------------
     def _build_wake_note(self, events, ask=False):
@@ -218,6 +224,7 @@ class WakeRouter:
         trigger_str is the short human-readable reason shown in the chat banner.
         When ask=True the note instructs propose-then-confirm instead of acting."""
         from gently.harness.prompts.templates import build_perception_snapshot
+
         triggers = []
         for et, data in events:
             name = getattr(et, "name", str(et))
@@ -227,8 +234,11 @@ class WakeRouter:
                 triggers.append(f"{eid}: hatching detected")
             elif et == EventType.EMBRYO_TERMINATED:
                 triggers.append(f"{eid}: terminated ({data.get('completion_reason', '?')})")
-            elif et in (EventType.ERROR_OCCURRED, EventType.ACQUISITION_FAILED,
-                        EventType.ANOMALY_DETECTED):
+            elif et in (
+                EventType.ERROR_OCCURRED,
+                EventType.ACQUISITION_FAILED,
+                EventType.ANOMALY_DETECTED,
+            ):
                 triggers.append(f"{eid}: {name.lower().replace('_', ' ')}")
             elif et == EventType.DETECTOR_EVALUATED:
                 ta = data.get("temporal_analysis") or {}

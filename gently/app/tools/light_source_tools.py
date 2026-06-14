@@ -14,21 +14,25 @@ For experiment-scoped power changes that should ride with the embryo
 ``modify_parameters(embryo_id, {"laser_power_488_pct": ...}, ...)``.
 """
 
-from typing import Dict
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import require_agent
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
     name="set_laser_power",
-    description="""Set per-line laser power % directly (not tied to any embryo). Submits a Bluesky plan via the queue server so the change is traceable.
+    description="""Set per-line laser power % directly (not tied to any embryo). Submits a
+Bluesky plan via the queue server so the change is traceable.
 
-Hard-limited at the device layer (DiSPIMLightSource.POWER_LIMITS_PCT). 488 is constrained to 2-6% by default. Out-of-range values are rejected at the device layer (ValueError); the tool returns the error.
+Hard-limited at the device layer (DiSPIMLightSource.POWER_LIMITS_PCT). 488 is constrained
+to 2-6% by default. Out-of-range values are rejected at the device layer (ValueError); the
+tool returns the error.
 
-After setting, the tool reads back the actual setpoint and includes it in the response so the agent can verify.
+After setting, the tool reads back the actual setpoint and includes it in the response so
+the agent can verify.
 
-Use for: pre-experiment setup, ad-hoc inspection, calibration. For experiment-scoped per-embryo changes during a timelapse, use modify_parameters with laser_power_488_pct instead.""",
+Use for: pre-experiment setup, ad-hoc inspection, calibration. For experiment-scoped
+per-embryo changes during a timelapse, use modify_parameters with laser_power_488_pct
+instead.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
@@ -39,7 +43,7 @@ Use for: pre-experiment setup, ad-hoc inspection, calibration. For experiment-sc
 async def set_laser_power(
     wavelength: int,
     pct: float,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Set laser power and read back the actual setpoint."""
     agent, err = require_agent(context)
@@ -66,16 +70,14 @@ async def set_laser_power(
         actual = None
 
     if actual is not None:
-        return (
-            f"{wavelength}nm power set to {pct}% "
-            f"(readback: {actual:.4f}%)"
-        )
+        return f"{wavelength}nm power set to {pct}% (readback: {actual:.4f}%)"
     return f"{wavelength}nm power set to {pct}% (readback unavailable)"
 
 
 @tool(
     name="get_laser_power",
-    description="""Read the current per-line laser power % from the device. Useful to verify state before/after a change, or to spot-check the current illumination during a long run.""",
+    description="""Read the current per-line laser power % from the device. Useful to verify
+state before/after a change, or to spot-check the current illumination during a long run.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
@@ -85,7 +87,7 @@ async def set_laser_power(
 )
 async def get_laser_power(
     wavelength: int,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Read current laser power %."""
     agent, err = require_agent(context)

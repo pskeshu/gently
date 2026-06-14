@@ -1,4 +1,5 @@
 """Shared helpers for hardware tools."""
+
 import numpy as np
 
 

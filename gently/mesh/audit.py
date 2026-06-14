@@ -53,7 +53,7 @@ class MeshAuditLog:
         """Count existing lines for rotation tracking."""
         if self._log_file.exists():
             try:
-                with open(self._log_file, "r") as f:
+                with open(self._log_file) as f:
                     self._line_count = sum(1 for _ in f)
             except OSError:
                 self._line_count = 0
@@ -88,7 +88,7 @@ class MeshAuditLog:
     def _rotate(self):
         """Keep last KEEP_LINES, discard the rest."""
         try:
-            with open(self._log_file, "r") as f:
+            with open(self._log_file) as f:
                 lines = f.readlines()
             keep = lines[-KEEP_LINES:]
             with open(self._log_file, "w") as f:

@@ -20,10 +20,9 @@ Three groups:
 """
 
 import logging
-from typing import Dict, List, Optional
 
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import require_agent
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +42,7 @@ def _exit_resolution_if_active(agent, outcome: str) -> None:
         logger.warning(f"exit_resolution_mode failed: {e}")
 
 
-def _set_active_plan_item(agent, plan_item_id: Optional[str]) -> None:
+def _set_active_plan_item(agent, plan_item_id: str | None) -> None:
     """Update both copies of the active plan item — ExperimentState
     (persisted) and AgentMemory (in-memory awareness)."""
     try:
@@ -58,7 +57,7 @@ def _set_active_plan_item(agent, plan_item_id: Optional[str]) -> None:
         pass
 
 
-def _short(text: Optional[str], n: int = 80) -> str:
+def _short(text: str | None, n: int = 80) -> str:
     if not text:
         return ""
     return text if len(text) <= n else text[: n - 1] + "…"
@@ -93,7 +92,7 @@ def _short(text: Optional[str], n: int = 80) -> str:
 async def attach_session_to_plan(
     plan_item_id: str,
     rationale: str = "",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Attach the current session to a plan item."""
     agent, err = require_agent(context)
@@ -161,7 +160,7 @@ async def attach_session_to_plan(
 )
 async def mark_session_standalone(
     description: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Mark the session as a standalone (non-plan) run."""
     agent, err = require_agent(context)
@@ -213,7 +212,7 @@ async def mark_session_standalone(
 )
 async def detach_session_from_plan(
     reason: str = "",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Detach the current session from its plan item."""
     agent, err = require_agent(context)
@@ -277,7 +276,7 @@ async def mark_plan_item_status(
     plan_item_id: str,
     status: str,
     notes: str = "",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Update a plan item's status."""
     agent, err = require_agent(context)
@@ -303,10 +302,7 @@ async def mark_plan_item_status(
     }
     key = status.strip().lower()
     if key not in status_map:
-        return (
-            f"Unknown status '{status}'. Valid: "
-            f"{', '.join(status_map.keys())}."
-        )
+        return f"Unknown status '{status}'. Valid: {', '.join(status_map.keys())}."
 
     target = status_map[key]
     try:
@@ -327,7 +323,7 @@ async def mark_plan_item_status(
 # ---------------------------------------------------------------------------
 
 
-def _apply_spec_to_embryo(embryo, spec) -> List[str]:
+def _apply_spec_to_embryo(embryo, spec) -> list[str]:
     """Write per-embryo acquisition fields from an ImagingSpec.
     Returns a list of human-readable changes made."""
     applied = []
@@ -363,8 +359,8 @@ def _apply_spec_to_embryo(embryo, spec) -> List[str]:
 )
 async def apply_plan_acquisition_spec(
     plan_item_id: str,
-    overrides: Dict = None,
-    context: Dict = None,
+    overrides: dict = None,
+    context: dict = None,
 ) -> str:
     """Apply a plan's ImagingSpec to the experiment."""
     agent, err = require_agent(context)
@@ -386,7 +382,7 @@ async def apply_plan_acquisition_spec(
     overrides = overrides or {}
 
     # Apply per-embryo to anything we already have
-    applied_per_embryo: List[str] = []
+    applied_per_embryo: list[str] = []
     embryo_count = 0
     experiment = getattr(agent, "experiment", None)
     if experiment and experiment.embryos:
@@ -395,17 +391,23 @@ async def apply_plan_acquisition_spec(
             # zero out any field the caller asked us to skip.
             class _Filtered:
                 pass
+
             eff = _Filtered()
             eff.num_slices = (
-                None if "num_slices" in overrides and overrides["num_slices"] is None
+                None
+                if "num_slices" in overrides and overrides["num_slices"] is None
                 else (overrides.get("num_slices") if "num_slices" in overrides else spec.num_slices)
             )
             eff.exposure_ms = (
-                None if "exposure_ms" in overrides and overrides["exposure_ms"] is None
-                else (overrides.get("exposure_ms") if "exposure_ms" in overrides else spec.exposure_ms)
+                None
+                if "exposure_ms" in overrides and overrides["exposure_ms"] is None
+                else (
+                    overrides.get("exposure_ms") if "exposure_ms" in overrides else spec.exposure_ms
+                )
             )
             eff.interval_s = (
-                None if "interval_s" in overrides and overrides["interval_s"] is None
+                None
+                if "interval_s" in overrides and overrides["interval_s"] is None
                 else (overrides.get("interval_s") if "interval_s" in overrides else spec.interval_s)
             )
             changes = _apply_spec_to_embryo(embryo, eff)
@@ -428,13 +430,15 @@ async def apply_plan_acquisition_spec(
                 "stop_condition": spec.stop_condition,
                 "detectors": list(spec.detectors) if spec.detectors else None,
                 "success_criteria": spec.success_criteria,
-                "adaptive_intervals": dict(spec.adaptive_intervals) if spec.adaptive_intervals else None,
+                "adaptive_intervals": dict(spec.adaptive_intervals)
+                if spec.adaptive_intervals
+                else None,
             }
         except Exception:
             pass
 
     # Build a narratable summary for the agent to quote
-    parts: List[str] = []
+    parts: list[str] = []
     if spec.strain:
         parts.append(f"strain={spec.strain}")
     if spec.temperature_c is not None:
@@ -508,7 +512,7 @@ async def apply_plan_acquisition_spec(
 async def recall_sibling_sessions(
     identifier: str,
     limit: int = 10,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Return sessions sharing the given plan item's campaign or the campaign itself."""
     agent, err = require_agent(context)
@@ -520,7 +524,7 @@ async def recall_sibling_sessions(
         return "Error: context store unavailable."
 
     # Try plan-item-first; fall back to treating identifier as campaign id
-    campaign_id: Optional[str] = None
+    campaign_id: str | None = None
     plan_item = cs.resolve_plan_item(identifier) if hasattr(cs, "resolve_plan_item") else None
     if plan_item:
         campaign_id = plan_item.campaign_id
@@ -536,10 +540,11 @@ async def recall_sibling_sessions(
         return f"Could not resolve '{identifier}' to a plan item or campaign."
 
     # Get the campaign tree and walk plan items, collecting session ids
-    sessions: List[Dict] = []
+    sessions: list[dict] = []
     try:
         items = cs.get_plan_items(
-            campaign_id=campaign_id, include_children=True,
+            campaign_id=campaign_id,
+            include_children=True,
         )
     except Exception as e:
         return f"Could not list plan items: {e}"
@@ -555,13 +560,17 @@ async def recall_sibling_sessions(
                 meta = file_store.get_session(sid) or {}
             except Exception:
                 meta = {}
-        sessions.append({
-            "plan_item_title": item.title,
-            "plan_item_status": item.status.value if hasattr(item.status, "value") else str(item.status),
-            "session_id": sid,
-            "last_active": meta.get("last_active"),
-            "name": meta.get("name"),
-        })
+        sessions.append(
+            {
+                "plan_item_title": item.title,
+                "plan_item_status": item.status.value
+                if hasattr(item.status, "value")
+                else str(item.status),
+                "session_id": sid,
+                "last_active": meta.get("last_active"),
+                "name": meta.get("name"),
+            }
+        )
 
     if not sessions:
         return f"No sessions yet for campaign {campaign_id[:8]}."
@@ -596,7 +605,7 @@ async def recall_sibling_sessions(
 )
 async def summarize_campaign_history(
     campaign_id: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Compact campaign-progress summary for resolution-mode reasoning."""
     agent, err = require_agent(context)
@@ -625,8 +634,8 @@ async def summarize_campaign_history(
         status = cs.get_plan_status(campaign.id)
         lines.append(
             f"Plan items: {status['completed']}/{status['total']} done"
-            f"{', ' + str(status['in_progress']) + ' in progress' if status.get('in_progress') else ''}"
-            f"{', ' + str(status['blocked']) + ' blocked' if status.get('blocked') else ''}"
+            + (f", {status['in_progress']} in progress" if status.get("in_progress") else "")
+            + (f", {status['blocked']} blocked" if status.get("blocked") else "")
         )
         next_actions = status.get("next_actions") or []
         if next_actions:
@@ -656,7 +665,7 @@ async def summarize_campaign_history(
     ],
 )
 async def list_imaging_candidates(
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Full deterministic listing of unblocked imaging plan items."""
     agent, err = require_agent(context)

@@ -20,6 +20,7 @@ Robust by construction, because the device layer runs on Windows consoles:
 * ``out()`` is defensive: any residual ``UnicodeEncodeError`` is caught and the
   line re-emitted with ``errors="replace"`` rather than crashing startup.
 """
+
 from __future__ import annotations
 
 import os
@@ -112,7 +113,7 @@ def out(text: str = "") -> None:
     try:
         print(text, flush=True)
     except UnicodeEncodeError:
-        enc = (getattr(sys.stdout, "encoding", None) or "ascii")
+        enc = getattr(sys.stdout, "encoding", None) or "ascii"
         sys.stdout.write(text.encode(enc, "replace").decode(enc, "replace") + "\n")
         sys.stdout.flush()
 
@@ -162,8 +163,9 @@ def bullet(text: str) -> None:
     out(f"    {c(_BULLET, 'cyan')} {text}")
 
 
-def error_panel(title: str, summary: str, details: str | None = None,
-                hints=None, log_file=None) -> None:
+def error_panel(
+    title: str, summary: str, details: str | None = None, hints=None, log_file=None
+) -> None:
     """A red FAILED panel: one-line summary, optional detail, fix hints, log path.
 
     Used at the top-level startup catch so an operator sees a plain-language

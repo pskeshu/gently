@@ -29,9 +29,8 @@ from dataclasses import asdict, is_dataclass
 from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Set
 
-from gently.core.event_bus import Event, EventBus, EventType, _NO_HISTORY_TYPES
+from gently.core.event_bus import _NO_HISTORY_TYPES, Event, EventBus, EventType
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +52,9 @@ class EventCapture:
     # itself skips for its history deque. The rationale carries over: at
     # 5 Hz over hours these would dominate the log without adding signal
     # that replay / diff can use.
-    DEFAULT_SKIP: Set[EventType] = frozenset(_NO_HISTORY_TYPES)
+    DEFAULT_SKIP: set[EventType] = frozenset(_NO_HISTORY_TYPES)
 
-    def __init__(self, path: Path, *,
-                 skip: Optional[Set[EventType]] = None):
+    def __init__(self, path: Path, *, skip: set[EventType] | None = None):
         self.path = Path(path)
         self._skip = self.DEFAULT_SKIP if skip is None else frozenset(skip)
         self._fp = None
@@ -92,8 +90,7 @@ class EventCapture:
                 except Exception:
                     logger.exception("EventCapture: file close failed")
                 self._fp = None
-        logger.info("EventCapture: closed (%d captured, %d skipped)",
-                    self._count, self._skipped)
+        logger.info("EventCapture: closed (%d captured, %d skipped)", self._count, self._skipped)
 
     def __del__(self):
         # Best-effort safety net for cases where the owner forgets to call
@@ -149,6 +146,7 @@ def _json_default(obj):
             pass
     try:
         import numpy as np
+
         if isinstance(obj, np.generic):
             return obj.item()
         if isinstance(obj, np.ndarray):

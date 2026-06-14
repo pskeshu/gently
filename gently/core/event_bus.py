@@ -10,14 +10,14 @@ Provides a publish/subscribe pattern for decoupled communication:
 
 import asyncio
 import logging
-import time
+import threading
+import uuid
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Set, Union
-from collections import deque
-import threading
-import uuid
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -44,20 +44,22 @@ class EventType(Enum):
     EMBRYO_CENTERED = auto()
     EMBRYO_CALIBRATED = auto()
     EMBRYO_SKIPPED = auto()
-    EMBRYO_TERMINATED = auto()  # {embryo_id, completion_reason} - emitted when an embryo's imaging stops (any reason: no_object terminal, stop condition met, errors, user removal)
+    # {embryo_id, completion_reason} - emitted when an embryo's imaging stops
+    # (any reason: no_object terminal, stop condition met, errors, user removal)
+    EMBRYO_TERMINATED = auto()
 
     # Analysis events
     ANALYSIS_STARTED = auto()
     ANALYSIS_COMPLETED = auto()
-    DETECTOR_EVALUATED = auto()   # Emitted for every detector run (all evaluations)
+    DETECTOR_EVALUATED = auto()  # Emitted for every detector run (all evaluations)
     DETECTION_TRIGGERED = auto()  # Emitted only when detected=True (positive detection)
     HATCHING_DETECTED = auto()
 
     # Verification events (multi-strategy verification for detections)
-    VERIFICATION_STARTED = auto()       # Verification round begins for embryo
-    VERIFICATION_STRATEGY = auto()      # Individual strategy result (adversarial, temporal, etc.)
-    VERIFICATION_PROGRESS = auto()      # Progress update (e.g., "3/5 strategies complete")
-    VERIFICATION_COMPLETED = auto()     # Final verification result with consensus
+    VERIFICATION_STARTED = auto()  # Verification round begins for embryo
+    VERIFICATION_STRATEGY = auto()  # Individual strategy result (adversarial, temporal, etc.)
+    VERIFICATION_PROGRESS = auto()  # Progress update (e.g., "3/5 strategies complete")
+    VERIFICATION_COMPLETED = auto()  # Final verification result with consensus
 
     # CV Subagent events
     SEGMENTATION_COMPLETED = auto()
@@ -81,9 +83,9 @@ class EventType(Enum):
     STAGE_MOVED = auto()
     FOCUS_CHANGED = auto()
     LASER_CHANGED = auto()
-    DEVICE_STATE_UPDATE = auto()   # Periodic device-state snapshot from device layer
-    BOTTOM_CAMERA_FRAME = auto()   # Live JPEG frame from the bottom camera stream
-    EMBRYOS_UPDATE = auto()        # Full embryo list snapshot from agent.experiment
+    DEVICE_STATE_UPDATE = auto()  # Periodic device-state snapshot from device layer
+    BOTTOM_CAMERA_FRAME = auto()  # Live JPEG frame from the bottom camera stream
+    EMBRYOS_UPDATE = auto()  # Full embryo list snapshot from agent.experiment
 
     # Python logging.LogRecord republished onto the bus so the Events page
     # surfaces what would otherwise only land in the terminal. See
@@ -94,9 +96,9 @@ class EventType(Enum):
     # carry intent ("a human did this") rather than just state delta.
     # Candidate orchestrators can subscribe and reason about what the
     # operator just did without having to type it in chat.
-    OPERATOR_EDITED_EMBRYO    = auto()   # Map drag/drop -> PUT /api/embryos/{id}/position
-    OPERATOR_REMOVED_EMBRYO   = auto()   # Map delete  -> DELETE /api/embryos/{id}
-    OPERATOR_MARKED_EMBRYOS   = auto()   # Marking canvas "Done" — operator confirmed N positions
+    OPERATOR_EDITED_EMBRYO = auto()  # Map drag/drop -> PUT /api/embryos/{id}/position
+    OPERATOR_REMOVED_EMBRYO = auto()  # Map delete  -> DELETE /api/embryos/{id}
+    OPERATOR_MARKED_EMBRYOS = auto()  # Marking canvas "Done" — operator confirmed N positions
 
     # System events
     ERROR_OCCURRED = auto()
@@ -104,12 +106,14 @@ class EventType(Enum):
     STATUS_CHANGED = auto()
 
     # Async timelapse — per-embryo cadence transitions (Phase 4)
-    EMBRYO_CADENCE_CHANGED = auto()  # {embryo_id, old_phase, new_phase, old_interval_s, new_interval_s, next_due_at}
+    EMBRYO_CADENCE_CHANGED = (
+        auto()
+    )  # {embryo_id, old_phase, new_phase, old_interval_s, new_interval_s, next_due_at}
 
     # Burst lifecycle (Phase 7 / 10)
-    BURST_QUEUED = auto()    # {embryo_id, request_id, position_in_queue}
-    BURST_START = auto()     # {embryo_id, request_id, frames, mode}
-    BURST_FRAME = auto()     # {embryo_id, request_id, frame_idx, total_frames}
+    BURST_QUEUED = auto()  # {embryo_id, request_id, position_in_queue}
+    BURST_START = auto()  # {embryo_id, request_id, frames, mode}
+    BURST_FRAME = auto()  # {embryo_id, request_id, frame_idx, total_frames}
     BURST_COMPLETE = auto()  # {embryo_id, request_id, mp4_path, sustained_hz, frames_captured}
 
     # Reactive control telemetry (Phase 5 / 10)
@@ -147,17 +151,17 @@ class EventType(Enum):
     MESH_SCOPE_DENIED = auto()
 
     # Mesh topology events
-    MESH_PEER_OFFLINE = auto()      # peer marked offline in verse map (kept in map)
-    MESH_PEER_RETURNED = auto()     # previously offline peer came back online
+    MESH_PEER_OFFLINE = auto()  # peer marked offline in verse map (kept in map)
+    MESH_PEER_RETURNED = auto()  # previously offline peer came back online
 
     # ML pipeline events
     ML_PIPELINE_CREATED = auto()
     ML_TRAINING_STARTED = auto()
-    ML_TRAINING_PROGRESS = auto()   # per-epoch updates
+    ML_TRAINING_PROGRESS = auto()  # per-epoch updates
     ML_TRAINING_COMPLETED = auto()
     ML_TRAINING_FAILED = auto()
     ML_EVALUATION_COMPLETED = auto()
-    ML_SUBAGENT_STATUS = auto()     # subagent thinking/planning updates
+    ML_SUBAGENT_STATUS = auto()  # subagent thinking/planning updates
 
     # Bulk transfer events
     TRANSFER_STARTED = auto()
@@ -169,13 +173,15 @@ class EventType(Enum):
 # High-volume telemetry events that skip the bounded history deque. These
 # fire many times per second and would push out events that humans actually
 # want to inspect later (acquisitions, perceptions, errors).
-_NO_HISTORY_TYPES = frozenset({
-    EventType.DEVICE_STATE_UPDATE,
-    EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
-    EventType.LOG_RECORD,           # log lines can hit hundreds/min during
-                                    # calibration; durable copy is in the
-                                    # gently_*.log file already
-})
+_NO_HISTORY_TYPES = frozenset(
+    {
+        EventType.DEVICE_STATE_UPDATE,
+        EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
+        EventType.LOG_RECORD,  # log lines can hit hundreds/min during
+        # calibration; durable copy is in the
+        # gently_*.log file already
+    }
+)
 
 
 @dataclass
@@ -198,37 +204,40 @@ class Event:
     correlation_id : str, optional
         ID to correlate related events (e.g., request/response)
     """
+
     event_type: EventType
-    data: Dict[str, Any] = field(default_factory=dict)
+    data: dict[str, Any] = field(default_factory=dict)
     source: str = "unknown"
     timestamp: datetime = field(default_factory=datetime.now)
     event_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
-    correlation_id: Optional[str] = None
+    correlation_id: str | None = None
 
     def __str__(self) -> str:
         return f"Event({self.event_type.name}, source={self.source}, id={self.event_id})"
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize for storage/transmission"""
         return {
-            'event_type': self.event_type.name,
-            'data': self.data,
-            'source': self.source,
-            'timestamp': self.timestamp.isoformat(),
-            'event_id': self.event_id,
-            'correlation_id': self.correlation_id,
+            "event_type": self.event_type.name,
+            "data": self.data,
+            "source": self.source,
+            "timestamp": self.timestamp.isoformat(),
+            "event_id": self.event_id,
+            "correlation_id": self.correlation_id,
         }
 
     @classmethod
-    def from_dict(cls, d: Dict) -> 'Event':
+    def from_dict(cls, d: dict) -> "Event":
         """Deserialize from dict"""
         return cls(
-            event_type=EventType[d['event_type']],
-            data=d.get('data', {}),
-            source=d.get('source', 'unknown'),
-            timestamp=datetime.fromisoformat(d['timestamp']) if 'timestamp' in d else datetime.now(),
-            event_id=d.get('event_id', str(uuid.uuid4())[:8]),
-            correlation_id=d.get('correlation_id'),
+            event_type=EventType[d["event_type"]],
+            data=d.get("data", {}),
+            source=d.get("source", "unknown"),
+            timestamp=datetime.fromisoformat(d["timestamp"])
+            if "timestamp" in d
+            else datetime.now(),
+            event_id=d.get("event_id", str(uuid.uuid4())[:8]),
+            correlation_id=d.get("correlation_id"),
         )
 
 
@@ -255,17 +264,17 @@ class EventBus:
         history_size : int
             Number of recent events to keep in history
         """
-        self._handlers: Dict[EventType, List[EventHandler]] = {}
-        self._async_handlers: Dict[EventType, List[AsyncEventHandler]] = {}
-        self._wildcard_handlers: List[EventHandler] = []
-        self._async_wildcard_handlers: List[AsyncEventHandler] = []
+        self._handlers: dict[EventType, list[EventHandler]] = {}
+        self._async_handlers: dict[EventType, list[AsyncEventHandler]] = {}
+        self._wildcard_handlers: list[EventHandler] = []
+        self._async_wildcard_handlers: list[AsyncEventHandler] = []
         self._history: deque = deque(maxlen=history_size)
         self._lock = threading.RLock()
-        self._event_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._event_loop: asyncio.AbstractEventLoop | None = None
 
     def subscribe(
         self,
-        event_type: Union[EventType, str],
+        event_type: EventType | str,
         handler: EventHandler,
     ) -> Callable[[], None]:
         """
@@ -305,7 +314,7 @@ class EventBus:
 
     def subscribe_async(
         self,
-        event_type: Union[EventType, str],
+        event_type: EventType | str,
         handler: AsyncEventHandler,
     ) -> Callable[[], None]:
         """
@@ -346,9 +355,9 @@ class EventBus:
     def publish(
         self,
         event_type: EventType,
-        data: Optional[Dict] = None,
+        data: dict | None = None,
         source: str = "unknown",
-        correlation_id: Optional[str] = None,
+        correlation_id: str | None = None,
     ) -> Event:
         """
         Publish an event to all subscribers
@@ -477,10 +486,10 @@ class EventBus:
 
     def get_history(
         self,
-        event_type: Optional[EventType] = None,
-        source: Optional[str] = None,
+        event_type: EventType | None = None,
+        source: str | None = None,
         limit: int = 50,
-    ) -> List[Event]:
+    ) -> list[Event]:
         """
         Get recent event history
 
@@ -515,7 +524,7 @@ class EventBus:
         with self._lock:
             self._history.clear()
 
-    def get_handler_count(self, event_type: Optional[EventType] = None) -> int:
+    def get_handler_count(self, event_type: EventType | None = None) -> int:
         """Get count of registered handlers"""
         with self._lock:
             if event_type:
@@ -531,7 +540,7 @@ class EventBus:
 
 
 # Global event bus instance
-_global_bus: Optional[EventBus] = None
+_global_bus: EventBus | None = None
 
 
 def get_event_bus() -> EventBus:
@@ -551,20 +560,20 @@ def set_event_bus(bus: EventBus):
 # Convenience functions for common operations
 def emit(
     event_type: EventType,
-    data: Optional[Dict] = None,
+    data: dict | None = None,
     source: str = "unknown",
 ) -> Event:
     """Emit an event on the global bus"""
     return get_event_bus().publish(event_type, data, source)
 
 
-def on(event_type: Union[EventType, str], handler: EventHandler) -> Callable[[], None]:
+def on(event_type: EventType | str, handler: EventHandler) -> Callable[[], None]:
     """Subscribe to events on the global bus"""
     return get_event_bus().subscribe(event_type, handler)
 
 
 # Decorator for event handlers
-def handles(event_type: Union[EventType, str]):
+def handles(event_type: EventType | str):
     """
     Decorator to register a function as an event handler
 
@@ -573,7 +582,9 @@ def handles(event_type: Union[EventType, str]):
         def on_volume(event):
             print(f"Got volume: {event.data}")
     """
+
     def decorator(func: EventHandler) -> EventHandler:
         get_event_bus().subscribe(event_type, func)
         return func
+
     return decorator

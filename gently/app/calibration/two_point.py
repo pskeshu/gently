@@ -12,7 +12,7 @@ geometry the dopaminergic detector uses. Aggregation across multiple
 calibration embryos uses pixel-wise **median** for robustness.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 import numpy as np
 
@@ -44,8 +44,8 @@ class TwoPointCalibration(CalibrationPipeline):
 
     def capture(
         self,
-        source_volumes: Dict[str, Any],
-        context: Dict[str, Any],
+        source_volumes: dict[str, Any],
+        context: dict[str, Any],
     ) -> CalibrationData:
         darks = source_volumes.get(self.dark_source, {}) or {}
         flats = source_volumes.get(self.flat_source, {}) or {}
@@ -53,7 +53,7 @@ class TwoPointCalibration(CalibrationPipeline):
         dark_proj = _aggregate_projections(list(darks.values()))
         flat_proj = _aggregate_projections(list(flats.values()))
 
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         if dark_proj is not None:
             payload["dark"] = dark_proj
         if flat_proj is not None:
@@ -72,7 +72,7 @@ class TwoPointCalibration(CalibrationPipeline):
         )
 
 
-def _aggregate_projections(volumes: List[np.ndarray]):
+def _aggregate_projections(volumes: list[np.ndarray]):
     """Max-project each volume to 2D, then median across embryos."""
     if not volumes:
         return None

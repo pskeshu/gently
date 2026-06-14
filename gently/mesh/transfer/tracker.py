@@ -5,7 +5,6 @@ TransferTracker — Persists transfer state for resume on restart.
 import json
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from .models import TransferJob, TransferStatus
 
@@ -24,7 +23,7 @@ class TransferTracker:
     def __init__(self, config_dir: Path):
         self._config_dir = config_dir
         self._state_file = config_dir / "mesh_transfers.json"
-        self._jobs: Dict[str, TransferJob] = {}
+        self._jobs: dict[str, TransferJob] = {}
         self._load()
 
     def _load(self):
@@ -65,20 +64,21 @@ class TransferTracker:
                 setattr(job, k, v)
         self._save()
 
-    def get_job(self, job_id: str) -> Optional[TransferJob]:
+    def get_job(self, job_id: str) -> TransferJob | None:
         """Get a transfer job by ID."""
         return self._jobs.get(job_id)
 
-    def list_jobs(self, status: Optional[str] = None) -> List[TransferJob]:
+    def list_jobs(self, status: str | None = None) -> list[TransferJob]:
         """List all jobs, optionally filtered by status."""
         if status:
             return [j for j in self._jobs.values() if j.status == status]
         return list(self._jobs.values())
 
-    def get_resumable(self) -> List[TransferJob]:
+    def get_resumable(self) -> list[TransferJob]:
         """Get transfers that were interrupted and can be resumed."""
         return [
-            j for j in self._jobs.values()
+            j
+            for j in self._jobs.values()
             if j.status == TransferStatus.TRANSFERRING.value
             and j.bytes_transferred > 0
             and j.bytes_transferred < j.total_bytes
@@ -87,9 +87,11 @@ class TransferTracker:
     def cleanup_completed(self, max_age_hours: float = 24.0):
         """Remove old completed/failed transfers."""
         import time
+
         cutoff = time.time() - (max_age_hours * 3600)
         to_remove = [
-            jid for jid, j in self._jobs.items()
+            jid
+            for jid, j in self._jobs.items()
             if j.status in (TransferStatus.COMPLETED.value, TransferStatus.FAILED.value)
             and j.completed_at > 0
             and j.completed_at < cutoff

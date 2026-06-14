@@ -4,7 +4,6 @@ Tests for data catalog API routes.
 
 from unittest.mock import MagicMock
 
-import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -35,10 +34,12 @@ def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None
             e.nickname = eid
             result.append(e)
         return result
+
     store.list_embryos.side_effect = list_embryos
 
     def list_volumes(sid, eid):
         return [MagicMock(timepoint=i) for i in range(3)]
+
     store.list_volumes.side_effect = list_volumes
 
     def get_ground_truth(sid, eid):
@@ -51,6 +52,7 @@ def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None
             gt.end_tp = 10
             result.append(gt)
         return result
+
     store.get_ground_truth.side_effect = get_ground_truth
 
     def get_session(sid):
@@ -58,6 +60,7 @@ def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None
             if s.session_id == sid:
                 return s
         return None
+
     store.get_session.side_effect = get_session
 
     return store

@@ -19,7 +19,6 @@ all execution to the device layer — no hardware-specific code needed.
 
 import logging
 from pathlib import Path
-from typing import Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +50,7 @@ class Microscope:
     DESCRIPTION: str = ""
 
     @property
-    def plans(self) -> Set[str]:
+    def plans(self) -> set[str]:
         """Discover available plans by inspecting _plan_* methods."""
         return {
             name[6:]  # strip "_plan_" prefix
@@ -154,11 +153,11 @@ class HTTPMicroscope(Microscope):
         self.http_url = http_url
         self._session = None
         self._connected = False
-        self._available_plans: Set[str] = set()
+        self._available_plans: set[str] = set()
         self._plan_schemas: list = []  # Anthropic tool-format schemas
 
     @property
-    def plans(self) -> Set[str]:
+    def plans(self) -> set[str]:
         return self._available_plans
 
     @property
@@ -185,7 +184,8 @@ class HTTPMicroscope(Microscope):
                     return False
                 info = await resp.json()
 
-            # Plans come as Anthropic tool schemas (list of dicts with name, description, input_schema)
+            # Plans come as Anthropic tool schemas
+            # (list of dicts with name, description, input_schema)
             plans_data = info.get("plans", [])
             if plans_data and isinstance(plans_data[0], dict):
                 # New format: list of tool schemas
@@ -194,7 +194,14 @@ class HTTPMicroscope(Microscope):
             else:
                 # Legacy format: list of plan name strings
                 self._available_plans = set(plans_data)
-                self._plan_schemas = [{"name": p, "description": p, "input_schema": {"type": "object", "properties": {}}} for p in plans_data]
+                self._plan_schemas = [
+                    {
+                        "name": p,
+                        "description": p,
+                        "input_schema": {"type": "object", "properties": {}},
+                    }
+                    for p in plans_data
+                ]
 
             self.DESCRIPTION = info.get("description", "")
             self._connected = True
@@ -256,6 +263,7 @@ class HTTPMicroscope(Microscope):
         for key, val in list(data.items()):
             if self._is_file_ref(val):
                 import tifffile
+
                 path = Path(val["path"])
                 data[key] = tifffile.imread(str(path))
                 data[f"{key}_path"] = str(path)
@@ -293,24 +301,31 @@ def register_microscope_tools(microscope: Microscope, registry=None) -> int:
     """
     if registry is None:
         from gently.harness.tools.registry import get_tool_registry
+
         registry = get_tool_registry()
 
-    from gently.harness.tools.registry import ToolDefinition, ToolParameter, ToolCategory
+    from gently.harness.tools.registry import (
+        ToolCategory,
+        ToolDefinition,
+        ToolParameter,
+    )
 
-    schemas = getattr(microscope, 'plan_schemas', [])
+    schemas = getattr(microscope, "plan_schemas", [])
     if not schemas:
         return 0
 
     def _make_handler(pname):
         """Create an async handler that delegates to microscope.execute()."""
+
         async def handler(context: dict = None, **params):
-            ms = context.get('client') if context else microscope
+            ms = context.get("client") if context else microscope
             if ms is None:
                 return "Error: microscope not connected"
             result = await ms.execute(pname, **params)
-            if not result.get('success', False):
+            if not result.get("success", False):
                 return f"Error: {result.get('error', 'unknown')}"
             return result
+
         handler.__name__ = f"microscope_{pname}"
         return handler
 

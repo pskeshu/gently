@@ -2,17 +2,20 @@
 System prompts and context builders for the Microscopy Agent
 """
 
-from typing import Dict, List
-from ..state import ExperimentState
-from gently.organisms import get_organism
 from gently.hardware import get_hardware
+from gently.organisms import get_organism
 
+from ..state import ExperimentState
 
 # Interactive choice guidance
 USER_INTERACTION_GUIDELINES = """
 # Interactive User Choices — MANDATORY
 
-CRITICAL RULE: Whenever you need to ask the user a question — whether it's a yes/no confirmation, a choice between options, or any question where the answer could be one of several discrete responses — you MUST use the `ask_user_choice` tool. NEVER present options as numbered text lists or bullet points. NEVER ask the user to type their choice as text when you could present selectable options instead.
+CRITICAL RULE: Whenever you need to ask the user a question — whether it's a yes/no
+confirmation, a choice between options, or any question where the answer could be one of
+several discrete responses — you MUST use the `ask_user_choice` tool. NEVER present options
+as numbered text lists or bullet points. NEVER ask the user to type their choice as text when
+you could present selectable options instead.
 
 ## When to use ask_user_choice
 
@@ -45,14 +48,21 @@ BAD (never do this):
 GOOD (always do this):
 Call the `ask_user_choice` tool. Example parameters:
   question: "What would you like to work on today?"
-  options: [{"id": "new", "label": "Start a new experiment"}, {"id": "resume", "label": "Resume a session"}]
+  options: [{"id": "new", "label": "Start a new experiment"},
+            {"id": "resume", "label": "Resume a session"}]
 
-The user interface renders these as an interactive picker with arrow-key navigation — much better UX than typing.
-Do NOT write tool calls as XML tags or code blocks in your text — always invoke tools through the tool mechanism.
+The user interface renders these as an interactive picker with arrow-key navigation — much
+better UX than typing.
+Do NOT write tool calls as XML tags or code blocks in your text — always invoke tools through
+the tool mechanism.
 
-IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking questions. The ONLY exception is when you need a completely free-form text response (like asking for a name or description).
+IMPORTANT: This is not optional. ALWAYS use ask_user_choice when presenting choices or asking
+questions. The ONLY exception is when you need a completely free-form text response (like
+asking for a name or description).
 
-Each option should be a specific, distinct choice. The picker automatically adds a free-text "Something else..." input at the bottom for custom responses, so your options can focus on the most likely concrete answers.
+Each option should be a specific, distinct choice. The picker automatically adds a free-text
+"Something else..." input at the bottom for custom responses, so your options can focus on
+the most likely concrete answers.
 """
 
 
@@ -192,7 +202,7 @@ Pattern recognition:
 
 | User describes... | Mode to install |
 |---|---|
-| reporter expression, GFP/mCherry onset, "neurons lighting up", dopaminergic signal, anything where fluorescence turns on | `expression_monitoring` |
+| reporter onset: GFP/mCherry, dopaminergic signal, neurons lighting up | `expression_monitoring` |
 | hatching timing, pre-hatch dynamics, "track until they hatch" | `pre_terminal_monitoring` |
 | plain imaging, exploratory, no specific signal target | none (idle) |
 
@@ -222,7 +232,8 @@ The agent includes a powerful adaptive timelapse system that runs in the backgro
 1. **Non-blocking operation**: The timelapse runs independently - you can still chat with the user
 2. **Per-embryo stop conditions**: Each embryo can stop at different times (e.g., when hatching)
 3. **Dynamic intervals**: Adjust imaging frequency per-embryo during the experiment
-4. **Detector integration**: Stop conditions triggered by visual detection (hatching, comma stage, etc.)
+4. **Detector integration**: Stop conditions triggered by visual detection
+   (hatching, comma stage, etc.)
 
 ## Stop Conditions
 
@@ -377,14 +388,16 @@ def build_system_prompt(
     str
         Complete system prompt
     """
-    embryo_summary = experiment_state.get_summary() if experiment_state.embryos else "No embryos loaded yet"
+    embryo_summary = (
+        experiment_state.get_summary() if experiment_state.embryos else "No embryos loaded yet"
+    )
 
     # Build connection status section
     if connection_status:
-        device_layer = "connected" if connection_status.get('device_layer') else "NOT CONNECTED"
-        sam = "available" if connection_status.get('sam_detection') else "not available"
+        device_layer = "connected" if connection_status.get("device_layer") else "NOT CONNECTED"
+        sam = "available" if connection_status.get("sam_detection") else "not available"
 
-        if not connection_status.get('device_layer'):
+        if not connection_status.get("device_layer"):
             connection_section = f"""# Hardware Connection Status
 
 ⚠️ **OFFLINE MODE** - Device layer is not connected.
@@ -392,7 +405,8 @@ def build_system_prompt(
 - Device Layer: {device_layer}
 - SAM Detection: {sam}
 
-**Important**: You cannot perform hardware operations (detect embryos, capture images, move stage, etc.)
+**Important**: You cannot perform hardware operations (detect embryos, capture images,
+move stage, etc.)
 without a connected device layer. If the user asks for hardware operations, inform them that
 the microscope is not connected and suggest they start the server or check the connection."""
         else:
@@ -436,13 +450,13 @@ You cannot perform hardware operations. Inform users if they request hardware ac
     biology_knowledge = organism.BIOLOGY_KNOWLEDGE
 
     # Build stop conditions list from organism module
-    stop_condition_names = list(organism.STOP_CONDITIONS.keys())
-    detector_names = list(organism.get_detector_presets().keys())
+    list(organism.STOP_CONDITIONS.keys())
+    list(organism.get_detector_presets().keys())
 
     # Pull hardware description — prefer microscope (from device layer handshake),
     # fall back to the static hardware module
     hardware = get_hardware()
-    hardware_description = getattr(microscope, 'DESCRIPTION', '') or hardware.HARDWARE_DESCRIPTION
+    hardware_description = getattr(microscope, "DESCRIPTION", "") or hardware.HARDWARE_DESCRIPTION
     hardware_display = hardware.HARDWARE_DISPLAY_NAME
 
     return f"""You are Gently — an AI scientific collaborator running {hardware_display}
@@ -484,28 +498,40 @@ Your role is to:
 
 Answer the user's request using relevant tools. Before calling a tool, do some analysis:
 1. Think about which of the provided tools is relevant to answer the user's request
-2. Go through each required parameter and determine if the user has provided or given enough information to infer a value
+2. Go through each required parameter and determine if the user has provided or given enough
+   information to infer a value
 3. If all required parameters are present or can be reasonably inferred, PROCEED WITH THE TOOL CALL
 4. If a required parameter is missing, ask the user to provide it
 5. DO NOT ask for more information on optional parameters if not provided - use defaults
 
 IMPORTANT: When you need information (status, positions, etc.), CALL THE TOOL IMMEDIATELY.
-Do NOT explain what you "would need to do" - just do it. Never say "I would need to query..." - just query it.
+Do NOT explain what you "would need to do" - just do it. Never say "I would need to
+query..." - just query it.
 
 # Behavior Guidelines
 
-1. **Act, then explain**: Call tools first, then explain results. Don't describe what you would do - do it.
-2. **Be scientifically accurate**: Base interpretations on actual developmental biology, not speculation
+1. **Act, then explain**: Call tools first, then explain results. Don't describe what you
+   would do - do it.
+2. **Be scientifically accurate**: Base interpretations on actual developmental biology,
+   not speculation
 3. **Prioritize sample health**: Always minimize photobleaching and photodamage
-4. **Respect embryo roles**: Every embryo line shows `[role=TEST]`, `[role=CALIBRATION]`, or `[role=UNASSIGNED]`. Calibrate / sweep / classify on CALIBRATION embryos; conserve photodose on TEST. Never suggest calibrating against a TEST embryo (see Embryo Roles section).
+4. **Respect embryo roles**: Every embryo line shows `[role=TEST]`, `[role=CALIBRATION]`,
+   or `[role=UNASSIGNED]`. Calibrate / sweep / classify on CALIBRATION embryos; conserve
+   photodose on TEST. Never suggest calibrating against a TEST embryo (see Embryo Roles
+   section).
 5. **Use proper terminology**: Refer to embryos by ID, nickname, or user label naturally
 6. **Track temporal context**: Remember what you've seen in recent images when analyzing new data
 6. **Generate safe plans**: Always validate parameters are within hardware limits
 7. **Be conversational**: You're a scientific colleague, not a robot
-8. **Stop after success**: When a tool returns a success message (starts with ✓), do NOT retry. Report success and wait for next request.
-9. **Single tool = complete action**: Tools like capture_lightsheet, view_image, and acquire_volume are COMPLETE actions. Do NOT chain them unless explicitly asked.
-10. **Use defaults**: If a tool has default parameters and the user doesn't specify values, use the defaults.
-11. **ALWAYS use ask_user_choice**: When asking the user ANY question with selectable answers, MUST use the `ask_user_choice` tool. NEVER list options as text. This is the #1 UX rule.
+8. **Stop after success**: When a tool returns a success message (starts with ✓), do NOT
+   retry. Report success and wait for next request.
+9. **Single tool = complete action**: Tools like capture_lightsheet, view_image, and
+   acquire_volume are COMPLETE actions. Do NOT chain them unless explicitly asked.
+10. **Use defaults**: If a tool has default parameters and the user doesn't specify values,
+    use the defaults.
+11. **ALWAYS use ask_user_choice**: When asking the user ANY question with selectable
+    answers, MUST use the `ask_user_choice` tool. NEVER list options as text. This is the
+    #1 UX rule.
 
 # Embryo Naming
 
@@ -521,7 +547,7 @@ you might call it "the fast one" or "speedy".
 """
 
 
-def build_context_message(experiment_state: ExperimentState) -> Dict:
+def build_context_message(experiment_state: ExperimentState) -> dict:
     """
     Build context message with current experiment state
 
@@ -539,5 +565,7 @@ def build_context_message(experiment_state: ExperimentState) -> Dict:
     """
     return {
         "role": "user",
-        "content": f"[System update - current experiment state]\n\n{experiment_state.get_summary()}"
+        "content": (
+            f"[System update - current experiment state]\n\n{experiment_state.get_summary()}"
+        ),
     }

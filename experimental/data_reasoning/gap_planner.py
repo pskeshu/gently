@@ -3,7 +3,6 @@ GapPlanner — Creates PlanItems in ContextStore to fill annotation gaps.
 """
 
 import logging
-from typing import Optional
 
 from .models import CoverageReport
 
@@ -70,6 +69,7 @@ class GapPlanner:
 
         # Create items for completely missing stages
         from .coverage import KNOWN_STAGES
+
         present_stages = set(coverage_report.stage_counts.keys())
         for stage in KNOWN_STAGES:
             if stage not in present_stages:

@@ -3,15 +3,12 @@ TransferClient — Initiates outbound bulk transfers.
 """
 
 import asyncio
-import hashlib
 import logging
 import time
 import uuid
 from pathlib import Path
-from typing import List, Optional
 
 from ...core.event_bus import EventType, get_event_bus
-from ...settings import settings
 from .models import TransferJob, TransferStatus, TransferType
 from .protocol import send_file
 
@@ -42,7 +39,7 @@ class TransferClient:
         peer_ip: str,
         peer_port: int,
         peer_instance_id: str,
-        file_paths: List[Path],
+        file_paths: list[Path],
         session_id: str = "",
     ) -> TransferJob:
         """Send dataset files to a peer.
@@ -87,7 +84,10 @@ class TransferClient:
                 reader, writer = await asyncio.open_connection(peer_ip, peer_port)
                 try:
                     success, sha256 = await send_file(
-                        writer, file_path, job.id, auth_token=token,
+                        writer,
+                        file_path,
+                        job.id,
+                        auth_token=token,
                     )
                     if success:
                         job.bytes_transferred += file_path.stat().st_size

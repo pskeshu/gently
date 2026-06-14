@@ -13,43 +13,50 @@ its finite context window.
 """
 
 from .model import (
+    Attention,
+    BenchSpec,
     Campaign,
-    Project,
-    SessionIntent,
-    PlannedSession,
+    Confidence,
+    Context,
+    ContextUpdates,
+    EmbryoUnderstanding,
+    Expectation,
+    ExpectationStatus,
+    ImagingSpec,
+    Intentions,
+    Learning,
+    Observation,
     PlanItem,
     PlanItemStatus,
     PlanItemType,
-    ImagingSpec,
-    BenchSpec,
-    Learning,
-    Observation,
-    Expectation,
-    Watchpoint,
+    PlannedSession,
+    PlannedSessionStatus,
+    Project,
     Question,
-    EmbryoUnderstanding,
-    Intentions,
-    Understanding,
-    Attention,
-    Context,
-    ContextUpdates,
+    QuestionStatus,
+    SessionIntent,
     # Enums
     Significance,
-    Confidence,
     Status,
-    PlannedSessionStatus,
-    ExpectationStatus,
+    Understanding,
+    Watchpoint,
     WatchpointStatus,
-    QuestionStatus,
 )
-from .store import ContextStore  # legacy SQLite store (read-only, replaced by FileContextStore)
+from .store import (
+    ContextStore,
+)
+
 try:
     from .file_store import FileContextStore
 except ImportError:
     FileContextStore = None
-from .serialization import context_to_dict, context_to_json, context_summary
-from .gap_assessment import assess_gaps, ContextGapReport, Gap, GapLayer, GapSeverity
-from .onboarding import generate_onboarding_messages, process_onboarding_response, OnboardingMessage
+from .gap_assessment import ContextGapReport, Gap, GapLayer, GapSeverity, assess_gaps
+from .onboarding import (
+    OnboardingMessage,
+    generate_onboarding_messages,
+    process_onboarding_response,
+)
+from .serialization import context_summary, context_to_dict, context_to_json
 from .startup_wizard import StartupWizard
 
 __all__ = [

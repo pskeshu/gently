@@ -24,7 +24,6 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +70,7 @@ class TrustedPeer:
     paired_at: str = ""  # ISO timestamp
     cert_fingerprint: str = ""  # SHA256 of peer's TLS cert (DER)
     udp_signing_key: str = ""  # hex-encoded key for UDP HMAC verification
-    scopes: List[str] = field(default_factory=lambda: list(ALL_SCOPES))
+    scopes: list[str] = field(default_factory=lambda: list(ALL_SCOPES))
 
 
 class PairingManager:
@@ -94,8 +93,8 @@ class PairingManager:
         self._config_dir = config_dir
         self._audit_log = audit_log
 
-        self._sessions: Dict[str, PairingSession] = {}
-        self._trusted: Dict[str, TrustedPeer] = {}  # keyed by instance_id
+        self._sessions: dict[str, PairingSession] = {}
+        self._trusted: dict[str, TrustedPeer] = {}  # keyed by instance_id
         self._trust_file = config_dir / "mesh_trusted_peers.json"
 
         # Phase 2: TLS cert fingerprint (set by launch_gently after cert gen)
@@ -109,7 +108,7 @@ class PairingManager:
         ).hexdigest()
 
         # Phase 2: rate limiting state
-        self._pair_attempts: Dict[str, List[float]] = {}  # IP -> timestamps
+        self._pair_attempts: dict[str, list[float]] = {}  # IP -> timestamps
 
         self._load_trusted()
 
@@ -163,7 +162,7 @@ class PairingManager:
         """Check if a peer is trusted."""
         return instance_id in self._trusted
 
-    def get_token_for_peer(self, instance_id: str) -> Optional[str]:
+    def get_token_for_peer(self, instance_id: str) -> str | None:
         """Get the current daily auth token for a trusted peer."""
         tp = self._trusted.get(instance_id)
         if tp is None:
@@ -171,7 +170,7 @@ class PairingManager:
         epoch_day = self._current_epoch_day()
         return self._derive_daily_token(tp.base_token, epoch_day)
 
-    def verify_token(self, token: str) -> Optional[str]:
+    def verify_token(self, token: str) -> str | None:
         """
         Check if a token matches any trusted peer (timing-safe).
 
@@ -186,26 +185,26 @@ class PairingManager:
                 return tp.instance_id
         return None
 
-    def get_all_trusted(self) -> List[TrustedPeer]:
+    def get_all_trusted(self) -> list[TrustedPeer]:
         """Return all trusted peers."""
         return list(self._trusted.values())
 
-    def get_udp_key_for_peer(self, instance_id: str) -> Optional[str]:
+    def get_udp_key_for_peer(self, instance_id: str) -> str | None:
         """Get the UDP signing key for a trusted peer."""
         tp = self._trusted.get(instance_id)
         return tp.udp_signing_key if tp else None
 
-    def get_cert_fingerprint_for_peer(self, instance_id: str) -> Optional[str]:
+    def get_cert_fingerprint_for_peer(self, instance_id: str) -> str | None:
         """Get the TLS cert fingerprint for a trusted peer."""
         tp = self._trusted.get(instance_id)
         return tp.cert_fingerprint if tp else None
 
-    def get_scopes_for_peer(self, instance_id: str) -> List[str]:
+    def get_scopes_for_peer(self, instance_id: str) -> list[str]:
         """Get the permission scopes for a trusted peer."""
         tp = self._trusted.get(instance_id)
         return list(tp.scopes) if tp else []
 
-    def set_scopes(self, identifier: str, scopes: List[str]) -> bool:
+    def set_scopes(self, identifier: str, scopes: list[str]) -> bool:
         """
         Set permission scopes for a peer (by instance_id, prefix, or hostname).
 
@@ -269,8 +268,10 @@ class PairingManager:
             self._save_trusted()
             if self._audit_log:
                 from .audit import AuditEvent
+
                 self._audit_log.log(
-                    AuditEvent.PEER_UNPAIRED, outcome="info",
+                    AuditEvent.PEER_UNPAIRED,
+                    outcome="info",
                     peer_id=removed_id,
                 )
             return True
@@ -281,7 +282,7 @@ class PairingManager:
     # Rate limiting
     # ------------------------------------------------------------------
 
-    def check_rate_limit(self, ip: str) -> Tuple[bool, float]:
+    def check_rate_limit(self, ip: str) -> tuple[bool, float]:
         """
         Check if a pairing attempt from this IP is allowed.
 
@@ -298,9 +299,12 @@ class PairingManager:
             retry_after = RATE_LIMIT_WINDOW - (now - attempts[0])
             if self._audit_log:
                 from .audit import AuditEvent
+
                 self._audit_log.log(
-                    AuditEvent.RATE_LIMITED, outcome="deny",
-                    ip=ip, detail=f"max_attempts={RATE_LIMIT_MAX}",
+                    AuditEvent.RATE_LIMITED,
+                    outcome="deny",
+                    ip=ip,
+                    detail=f"max_attempts={RATE_LIMIT_MAX}",
                 )
             return False, max(retry_after, 1.0)
 
@@ -312,9 +316,12 @@ class PairingManager:
             if elapsed < backoff:
                 if self._audit_log:
                     from .audit import AuditEvent
+
                     self._audit_log.log(
-                        AuditEvent.RATE_LIMITED, outcome="deny",
-                        ip=ip, detail=f"backoff={backoff:.1f}s",
+                        AuditEvent.RATE_LIMITED,
+                        outcome="deny",
+                        ip=ip,
+                        detail=f"backoff={backoff:.1f}s",
                     )
                 return False, backoff - elapsed
 
@@ -405,7 +412,7 @@ class PairingManager:
     # Confirmation
     # ------------------------------------------------------------------
 
-    def confirm_pairing(self, pairing_id: str, confirmer_id: str) -> Optional[PairingSession]:
+    def confirm_pairing(self, pairing_id: str, confirmer_id: str) -> PairingSession | None:
         """
         Mark one side as confirmed.
 
@@ -428,36 +435,39 @@ class PairingManager:
 
         return session
 
-    def reject_pairing(self, pairing_id: str) -> Optional[PairingSession]:
+    def reject_pairing(self, pairing_id: str) -> PairingSession | None:
         """Reject a pending pairing session."""
         session = self._sessions.get(pairing_id)
         if session and session.status == "pending":
             session.status = "rejected"
             if self._audit_log:
                 from .audit import AuditEvent
+
                 self._audit_log.log(
-                    AuditEvent.PAIR_REJECTED, outcome="deny",
+                    AuditEvent.PAIR_REJECTED,
+                    outcome="deny",
                     peer_id=session.initiator_id,
                 )
         return session
 
-    def get_session(self, pairing_id: str) -> Optional[PairingSession]:
+    def get_session(self, pairing_id: str) -> PairingSession | None:
         """Get a pairing session by ID."""
         return self._sessions.get(pairing_id)
 
-    def get_pending_sessions(self) -> List[PairingSession]:
+    def get_pending_sessions(self) -> list[PairingSession]:
         """Get all pending pairing sessions (for /pair accept)."""
         return [
-            s for s in self._sessions.values()
-            if s.status == "pending"
-            and s.responder_id == self.instance_id
+            s
+            for s in self._sessions.values()
+            if s.status == "pending" and s.responder_id == self.instance_id
         ]
 
     def cleanup_expired(self):
         """Remove expired pending sessions."""
         now = time.time()
         expired = [
-            pid for pid, s in self._sessions.items()
+            pid
+            for pid, s in self._sessions.items()
             if s.status == "pending" and (now - s.created_at) > PAIRING_EXPIRY
         ]
         for pid in expired:
@@ -497,9 +507,12 @@ class PairingManager:
         logger.info(f"Paired with {peer_hostname} ({peer_id[:8]})")
         if self._audit_log:
             from .audit import AuditEvent
+
             self._audit_log.log(
-                AuditEvent.PAIR_COMPLETED, outcome="info",
-                peer_id=peer_id, detail=f"hostname={peer_hostname}",
+                AuditEvent.PAIR_COMPLETED,
+                outcome="info",
+                peer_id=peer_id,
+                detail=f"hostname={peer_hostname}",
             )
 
     def _load_trusted(self):

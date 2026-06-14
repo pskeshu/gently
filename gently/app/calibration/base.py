@@ -5,7 +5,7 @@ CalibrationPipeline base + CalibrationData container.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
@@ -19,11 +19,12 @@ class CalibrationData:
     ``edge_bbox`` for edge ROI). Merged ``CalibrationData`` from multiple
     pipelines is what gets passed to detector context as ``calibration``.
     """
+
     pipeline_name: str
     captured_at: datetime = field(default_factory=datetime.now)
-    source_embryo_ids: List[str] = field(default_factory=list)
-    payload: Dict[str, Any] = field(default_factory=dict)
-    notes: Optional[str] = None
+    source_embryo_ids: list[str] = field(default_factory=list)
+    payload: dict[str, Any] = field(default_factory=dict)
+    notes: str | None = None
 
 
 class CalibrationPipeline(ABC):
@@ -41,8 +42,8 @@ class CalibrationPipeline(ABC):
     @abstractmethod
     def capture(
         self,
-        source_volumes: Dict[str, np.ndarray],
-        context: Dict[str, Any],
+        source_volumes: dict[str, np.ndarray],
+        context: dict[str, Any],
     ) -> CalibrationData:
         """Compute calibration data from one or more source embryo volumes."""
         ...
@@ -57,8 +58,8 @@ class CalibrationPipeline(ABC):
 
 
 def aggregate_calibrations(
-    pipelines_data: List[CalibrationData],
-) -> Dict[str, Any]:
+    pipelines_data: list[CalibrationData],
+) -> dict[str, Any]:
     """Merge multiple CalibrationData payloads into the single dict the
     detector context expects.
 
@@ -67,7 +68,7 @@ def aggregate_calibrations(
     single pipeline is the pipeline's responsibility (typically via
     pixel-wise median, see TwoPointCalibration).
     """
-    merged: Dict[str, Any] = {}
+    merged: dict[str, Any] = {}
     for cal in pipelines_data:
         merged.update(cal.payload)
     return merged

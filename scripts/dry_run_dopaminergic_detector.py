@@ -24,20 +24,28 @@ import tifffile
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from gently.app.detectors.dopaminergic_signal import DopaminergicSignalDetector
+from gently.app.detectors.dopaminergic_signal import DopaminergicSignalDetector  # noqa: E402
 
 SESSION = Path(r"D:/Gently3/sessions/20260522_1801_unnamed_ec5ea7ba")
 
 # (embryo, timepoint, expected behaviour from human annotation)
 CASES = [
-    ("embryo_004", 1,  "FALSE POSITIVE: blank embryo, no puncta. Expect NONE / NONE."),
+    ("embryo_004", 1, "FALSE POSITIVE: blank embryo, no puncta. Expect NONE / NONE."),
     ("embryo_003", 20, "Just before onset. Expect NONE or WEAK / NONE."),
     ("embryo_003", 21, "Onset starting. Expect WEAK / NONE or PARTIAL."),
     ("embryo_003", 25, "Two bulbs visible. Expect MEDIUM / PARTIAL."),
     ("embryo_003", 26, "Three bulbs. Expect MEDIUM / PARTIAL."),
     ("embryo_003", 28, "Neurite extension starting. Expect MEDIUM / PARTIAL or GOOD."),
-    ("embryo_003", 29, "Neurite extending further. Expect MEDIUM-STRONG / PARTIAL or GOOD."),
-    ("embryo_003", 40, "Mature pattern, multiple bright bodies + neurites. Expect STRONG / GOOD."),
+    (
+        "embryo_003",
+        29,
+        "Neurite extending further. Expect MEDIUM-STRONG / PARTIAL or GOOD.",
+    ),
+    (
+        "embryo_003",
+        40,
+        "Mature pattern, multiple bright bodies + neurites. Expect STRONG / GOOD.",
+    ),
 ]
 
 
@@ -70,22 +78,27 @@ async def _run_one(detector, claude, embryo: str, timepoint: int, expected: str)
     raw = result.raw_response or {}
     if isinstance(raw, dict):
         description = raw.get("description", "(no description)")
-        classifier_raw = raw.get("classifier_raw", "")
+        raw.get("classifier_raw", "")
     else:
         # legacy single-call shape
         description = "(no description — legacy single-call detector)"
-        classifier_raw = raw if isinstance(raw, str) else ""
+        raw if isinstance(raw, str) else ""
 
     print("PERCEIVER (Stage 1):")
     print(description.strip())
-    print(f"\nCLASSIFIER (Stage 2):")
+    print("\nCLASSIFIER (Stage 2):")
     findings = result.findings or {}
-    print(json.dumps({
-        "intensity_level": findings.get("intensity_level"),
-        "structure_quality": findings.get("structure_quality"),
-        "has_hatched": findings.get("has_hatched"),
-        "reasoning": result.reasoning,
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "intensity_level": findings.get("intensity_level"),
+                "structure_quality": findings.get("structure_quality"),
+                "has_hatched": findings.get("has_hatched"),
+                "reasoning": result.reasoning,
+            },
+            indent=2,
+        )
+    )
     if result.error:
         print(f"ERROR: {result.error}")
     print(f"elapsed: {result.elapsed_ms:.0f}ms")

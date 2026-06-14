@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from gently.core.event_bus import EventType, get_event_bus
 from gently.core.service import Service
@@ -35,15 +35,15 @@ class BottomCameraStreamMonitor(Service):
 
     def __init__(
         self,
-        microscope: "DiSPIMMicroscope",
+        microscope: DiSPIMMicroscope,
         reconnect_delay_sec: float = 2.0,
     ):
         super().__init__(name="bottom-camera-monitor", service_type="bridge")
         self.microscope = microscope
         self.reconnect_delay_sec = reconnect_delay_sec
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._stop_requested = False
-        self._last_frame_ts: Optional[float] = None
+        self._last_frame_ts: float | None = None
 
     @property
     def running(self) -> bool:
@@ -89,7 +89,8 @@ class BottomCameraStreamMonitor(Service):
             except Exception as exc:
                 logger.warning(
                     "BottomCameraStreamMonitor: stream ended (%s) — reconnecting in %.1fs",
-                    exc, self.reconnect_delay_sec,
+                    exc,
+                    self.reconnect_delay_sec,
                 )
             if self._stop_requested:
                 break

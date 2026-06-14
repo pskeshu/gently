@@ -5,11 +5,11 @@ This module provides common validation and extraction patterns
 used across multiple tools to reduce code duplication.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime
+from typing import Any
 
 
-def require_agent(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
+def require_agent(context: dict) -> tuple[Any | None, str | None]:
     """
     Extract agent from context or return error message
 
@@ -23,13 +23,13 @@ def require_agent(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
     tuple
         (agent, None) if found, (None, error_message) if not
     """
-    agent = context.get('agent')
+    agent = context.get("agent")
     if not agent:
         return None, "Error: No agent context"
     return agent, None
 
 
-def get_embryo_or_error(agent, embryo_id: str) -> Tuple[Optional[Any], Optional[str]]:
+def get_embryo_or_error(agent, embryo_id: str) -> tuple[Any | None, str | None]:
     """
     Get embryo by any name or return error message
 
@@ -51,7 +51,7 @@ def get_embryo_or_error(agent, embryo_id: str) -> Tuple[Optional[Any], Optional[
     return embryo, None
 
 
-def require_microscope(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
+def require_microscope(context: dict) -> tuple[Any | None, str | None]:
     """
     Get microscope client from context or return error message
 
@@ -65,13 +65,13 @@ def require_microscope(context: Dict) -> Tuple[Optional[Any], Optional[str]]:
     tuple
         (client, None) if connected, (None, error_message) if not
     """
-    client = context.get('client')
+    client = context.get("client")
     if not client:
         return None, "Not connected to microscope. Use connect_microscope first."
     return client, None
 
 
-def require_interaction_logger(agent) -> Tuple[Optional[Any], Optional[str]]:
+def require_interaction_logger(agent) -> tuple[Any | None, str | None]:
     """
     Get interaction logger or return error message
 
@@ -85,12 +85,12 @@ def require_interaction_logger(agent) -> Tuple[Optional[Any], Optional[str]]:
     tuple
         (logger, None) if available, (None, error_message) if not
     """
-    if not hasattr(agent, 'interaction_logger') or not agent.interaction_logger:
+    if not hasattr(agent, "interaction_logger") or not agent.interaction_logger:
         return None, "Interaction logging not enabled."
     return agent.interaction_logger, None
 
 
-def require_developmental_tracker(agent) -> Tuple[Optional[Any], Optional[str]]:
+def require_developmental_tracker(agent) -> tuple[Any | None, str | None]:
     """
     Get developmental tracker or return error message
 
@@ -104,12 +104,15 @@ def require_developmental_tracker(agent) -> Tuple[Optional[Any], Optional[str]]:
     tuple
         (tracker, None) if available, (None, error_message) if not
     """
-    if not hasattr(agent, 'developmental_tracker') or not agent.developmental_tracker:
-        return None, "No stage classifications recorded yet. Use classify_embryo_stage first."
+    if not hasattr(agent, "developmental_tracker") or not agent.developmental_tracker:
+        return (
+            None,
+            "No stage classifications recorded yet. Use classify_embryo_stage first.",
+        )
     return agent.developmental_tracker, None
 
 
-def require_timelapse_orchestrator(agent) -> Tuple[Optional[Any], Optional[str]]:
+def require_timelapse_orchestrator(agent) -> tuple[Any | None, str | None]:
     """
     Get timelapse orchestrator or return error message
 
@@ -123,12 +126,12 @@ def require_timelapse_orchestrator(agent) -> Tuple[Optional[Any], Optional[str]]
     tuple
         (orchestrator, None) if available, (None, error_message) if not
     """
-    if not hasattr(agent, 'timelapse_orchestrator') or agent.timelapse_orchestrator is None:
+    if not hasattr(agent, "timelapse_orchestrator") or agent.timelapse_orchestrator is None:
         return None, "Timelapse orchestrator not initialized."
     return agent.timelapse_orchestrator, None
 
 
-def require_databroker(agent) -> Tuple[Optional[Any], Optional[str]]:
+def require_databroker(agent) -> tuple[Any | None, str | None]:
     """
     Get databroker connection or return error message
 
@@ -142,7 +145,7 @@ def require_databroker(agent) -> Tuple[Optional[Any], Optional[str]]:
     tuple
         (databroker, None) if available, (None, error_message) if not
     """
-    if not hasattr(agent, 'databroker') or agent.databroker is None:
+    if not hasattr(agent, "databroker") or agent.databroker is None:
         return None, "No databroker connection. Data persistence not available."
     return agent.databroker, None
 
@@ -184,13 +187,13 @@ def format_duration(seconds: float) -> str:
 
 
 def build_snapshot_metadata(
-    stage_position: Tuple[float, float],
-    image_shape: Tuple[int, ...],
+    stage_position: tuple[float, float],
+    image_shape: tuple[int, ...],
     experiment=None,
     pixel_size_um: float = 6.5,
     objective_mag: float = 10.0,
-    safety_limits: Optional[Dict] = None,
-) -> Dict:
+    safety_limits: dict | None = None,
+) -> dict:
     """Build metadata dict for a bottom camera snapshot.
 
     Captures everything needed to reconstruct embryo positions
@@ -226,7 +229,7 @@ def build_snapshot_metadata(
         # gently/hardware/dispim/devices/stage.py::DiSPIMXYStage.__init__.
         safety_limits = {"x": (2000.0, 4000.0), "y": (-1000.0, 1000.0)}
 
-    meta: Dict[str, Any] = {
+    meta: dict[str, Any] = {
         "stage_x": stage_position[0],
         "stage_y": stage_position[1],
         "image_width": w,
@@ -242,15 +245,17 @@ def build_snapshot_metadata(
     }
 
     if experiment and experiment.embryos:
-        embryos: List[Dict] = []
+        embryos: list[dict] = []
         for eid, emb in experiment.embryos.items():
             pos = emb.stage_position or {}
-            embryos.append({
-                "embryo_id": eid,
-                "stage_x": pos.get("x"),
-                "stage_y": pos.get("y"),
-                "nickname": getattr(emb, "nickname", None),
-            })
+            embryos.append(
+                {
+                    "embryo_id": eid,
+                    "stage_x": pos.get("x"),
+                    "stage_y": pos.get("y"),
+                    "nickname": getattr(emb, "nickname", None),
+                }
+            )
         meta["embryos"] = embryos
 
     return meta

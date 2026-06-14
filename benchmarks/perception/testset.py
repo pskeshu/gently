@@ -6,10 +6,10 @@ Loads session data and pairs with ground truth for sequential testing.
 
 import base64
 import io
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, List, Optional, Tuple, Dict
 
 import numpy as np
 
@@ -26,10 +26,12 @@ def _ensure_dependencies():
 
     if tifffile is None:
         import tifffile as _tifffile
+
         tifffile = _tifffile
 
     if PIL_Image is None:
         from PIL import Image as _Image
+
         PIL_Image = _Image
 
 
@@ -40,23 +42,25 @@ class TestCase:
     embryo_id: str
     timepoint: int
     image_b64: str  # Combined view (for backward compatibility)
-    top_image_b64: Optional[str]  # TOP view only
-    side_image_b64: Optional[str]  # SIDE view only
-    volume: Optional[np.ndarray]
-    ground_truth_stage: Optional[str]
-    acquired_at: Optional[datetime] = None
+    top_image_b64: str | None  # TOP view only
+    side_image_b64: str | None  # SIDE view only
+    volume: np.ndarray | None
+    ground_truth_stage: str | None
+    acquired_at: datetime | None = None
 
 
 def _discover_volumes(
-    session_dir: Path, embryo_id: Optional[str] = None
-) -> Dict[str, List[Tuple[datetime, Path]]]:
+    session_dir: Path, embryo_id: str | None = None
+) -> dict[str, list[tuple[datetime, Path]]]:
     """Discover volume files (with parsed acquisition timestamps) in a session directory."""
     if not session_dir.exists():
         return {}
 
     tif_files = (
-        list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
-        + list(session_dir.glob("**/*.tif")) + list(session_dir.glob("**/*.tiff"))
+        list(session_dir.glob("*.tif"))
+        + list(session_dir.glob("*.tiff"))
+        + list(session_dir.glob("**/*.tif"))
+        + list(session_dir.glob("**/*.tiff"))
     )
     # Deduplicate (flat + recursive may overlap)
     tif_files = list({f.resolve(): f for f in tif_files}.values())
@@ -89,6 +93,7 @@ def _discover_volumes(
 def _load_volume(path: Path) -> np.ndarray:
     """Load a volume from TIFF file."""
     from gently.core.imaging import load_volume
+
     return load_volume(path)
 
 
@@ -122,9 +127,9 @@ def _create_three_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
     _ensure_dependencies()
 
     from gently.core.imaging import (
-        projection_three_view,
-        compute_crop_bounds,
         apply_crop_bounds,
+        compute_crop_bounds,
+        projection_three_view,
     )
 
     # Auto-crop to embryo region
@@ -150,7 +155,7 @@ def _create_three_view_image(volume: np.ndarray, max_dim: int = 1500) -> str:
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def _create_separate_view_images(volume: np.ndarray, max_dim: int = 1000) -> Tuple[str, str]:
+def _create_separate_view_images(volume: np.ndarray, max_dim: int = 1000) -> tuple[str, str]:
     """Create separate TOP and SIDE view images from volume, return base64 tuple.
 
     Parameters
@@ -244,7 +249,7 @@ class OfflineTestset:
         self._embryo_volumes = _discover_volumes(self.session_path)
 
     @property
-    def embryo_ids(self) -> List[str]:
+    def embryo_ids(self) -> list[str]:
         """Get list of embryo IDs with both volumes and ground truth."""
         gt_embryos = set(self.ground_truth.embryo_ids)
         vol_embryos = set(self._embryo_volumes.keys())
@@ -258,7 +263,7 @@ class OfflineTestset:
         self,
         embryo_id: str,
         start_timepoint: int = 0,
-        end_timepoint: Optional[int] = None,
+        end_timepoint: int | None = None,
     ) -> Iterator[TestCase]:
         """
         Iterate through timepoints for an embryo sequentially.
@@ -318,7 +323,7 @@ class OfflineTestset:
                 acquired_at=acquired_at,
             )
 
-    def iter_all(self) -> Iterator[Tuple[str, Iterator[TestCase]]]:
+    def iter_all(self) -> Iterator[tuple[str, Iterator[TestCase]]]:
         """
         Iterate through all embryos in the testset.
 

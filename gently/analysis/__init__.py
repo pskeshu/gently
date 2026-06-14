@@ -11,8 +11,8 @@ Pipelines are composable, configurable, and track data lineage via UIDs.
 """
 
 from .pipeline import (
-    AnalysisStep,
     AnalysisResult,
+    AnalysisStep,
     Pipeline,
     PipelineBuilder,
     StepType,
@@ -20,14 +20,13 @@ from .pipeline import (
     create_hatching_detection_pipeline,
     create_morphology_analysis_pipeline,
 )
-
 from .steps import (
-    VLMStep,
-    SAMStep,
-    MaxProjectionStep,
-    ThresholdStep,
-    MorphologyStep,
     BlobDetectionStep,
+    MaxProjectionStep,
+    MorphologyStep,
+    SAMStep,
+    ThresholdStep,
+    VLMStep,
 )
 
 __all__ = [

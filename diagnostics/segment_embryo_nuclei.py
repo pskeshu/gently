@@ -3,11 +3,12 @@ Cellpose nuclei segmentation script for embryo data.
 Run with venv_cv: venv_cv/Scripts/python segment_embryo_nuclei.py
 """
 
+from pathlib import Path
+
+import napari
 import numpy as np
 import tifffile
-from pathlib import Path
 from cellpose import models
-import napari
 
 
 def load_volume(tiff_path: Path) -> np.ndarray:
@@ -39,10 +40,10 @@ def segment_nuclei_3d(volume: np.ndarray, diameter: float = 30.0) -> np.ndarray:
     masks, flows, styles = model.eval(
         vol_norm,
         diameter=diameter,
-        do_3D=False,           # 2D per slice (fast!)
+        do_3D=False,  # 2D per slice (fast!)
         z_axis=0,
         stitch_threshold=0.5,  # stitch 2D masks into 3D
-        batch_size=64,         # larger batch for speed
+        batch_size=64,  # larger batch for speed
     )
 
     n_nuclei = len(np.unique(masks)) - 1
@@ -76,6 +77,7 @@ def main():
 
     # Downsample by factor of 2
     from scipy.ndimage import zoom
+
     volume = zoom(volume, (1, 0.5, 0.5), order=1)
     print(f"  Downsampled 2x: {volume.shape}")
 
@@ -85,7 +87,7 @@ def main():
     # Visualize in Napari
     print("Opening Napari viewer...")
     viewer = napari.Viewer()
-    viewer.add_image(volume, name="Volume", colormap='gray')
+    viewer.add_image(volume, name="Volume", colormap="gray")
     viewer.add_labels(masks, name="Nuclei segmentation")
     napari.run()
 

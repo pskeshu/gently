@@ -14,9 +14,14 @@ logger = logging.getLogger(__name__)
 # /ws message types that mutate experiment state (define what gets imaged).
 # These are control actions and are gated by role; pure read/presence
 # messages stay open so anyone can watch.
-_MARKING_TYPES = frozenset({
-    "embryo_marked", "marking_update", "marking_done", "marking_redetect",
-})
+_MARKING_TYPES = frozenset(
+    {
+        "embryo_marked",
+        "marking_update",
+        "marking_done",
+        "marking_redetect",
+    }
+)
 
 
 def _ws_can_control(websocket: WebSocket) -> bool:
@@ -25,8 +30,9 @@ def _ws_can_control(websocket: WebSocket) -> bool:
     Account mode: operators/admins (by session cookie) only. Legacy mode
     (no accounts configured): open, preserving prior behavior.
     """
-    from gently.ui.web.accounts import get_account_store, CONTROL_ROLES
+    from gently.ui.web.accounts import CONTROL_ROLES, get_account_store
     from gently.ui.web.auth import SESSION_COOKIE
+
     store = get_account_store()
     if store is None or not store.has_users():
         return True
@@ -47,11 +53,9 @@ def create_router(server) -> APIRouter:
         try:
             # Send current status on connect
             stats = server.store.get_stats()
-            await websocket.send_json({
-                "type": "connected",
-                **stats,
-                "timestamp": datetime.now().isoformat()
-            })
+            await websocket.send_json(
+                {"type": "connected", **stats, "timestamp": datetime.now().isoformat()}
+            )
 
             # Always send timelapse state on connect so client can reconcile
             # (if IDLE with no session_id, client will clear stale cached state)
@@ -67,18 +71,12 @@ def create_router(server) -> APIRouter:
                         timelapse_state["session_id"] = live_sid
             except Exception:
                 pass
-            await websocket.send_json({
-                "type": "timelapse_state",
-                "data": timelapse_state
-            })
+            await websocket.send_json({"type": "timelapse_state", "data": timelapse_state})
 
             # Keep connection alive and handle incoming messages
             while True:
                 try:
-                    data = await asyncio.wait_for(
-                        websocket.receive_text(),
-                        timeout=30.0
-                    )
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                     # Handle client messages (e.g., requests)
                     await _handle_ws_message(server, websocket, data)
                 except asyncio.TimeoutError:
@@ -119,39 +117,30 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
 
         if msg_type == "get_calibration":
             images = server.store.get_all_calibration(embryo_id)
-            await websocket.send_json({
-                "type": "calibration",
-                "data": [img.to_dict() for img in images]
-            })
+            await websocket.send_json(
+                {"type": "calibration", "data": [img.to_dict() for img in images]}
+            )
 
         elif msg_type == "get_volumes":
             images = server.store.get_all_volumes(embryo_id)
-            await websocket.send_json({
-                "type": "volumes",
-                "data": [img.to_dict() for img in images]
-            })
+            await websocket.send_json(
+                {"type": "volumes", "data": [img.to_dict() for img in images]}
+            )
 
         elif msg_type == "get_snapshots":
             images = server.store.get_all_snapshots(embryo_id)
-            await websocket.send_json({
-                "type": "snapshots",
-                "data": [img.to_dict() for img in images]
-            })
+            await websocket.send_json(
+                {"type": "snapshots", "data": [img.to_dict() for img in images]}
+            )
 
         elif msg_type == "get_embryos":
-            await websocket.send_json({
-                "type": "embryos",
-                "data": server.store.get_embryo_ids()
-            })
+            await websocket.send_json({"type": "embryos", "data": server.store.get_embryo_ids()})
 
         elif msg_type == "get_image":
             uid = data.get("uid")
             image = server.store.get_image_by_uid(uid)
             if image:
-                await websocket.send_json({
-                    "type": "image",
-                    "data": image.to_dict()
-                })
+                await websocket.send_json({"type": "image", "data": image.to_dict()})
 
         elif msg_type == "pong":
             pass  # Client responding to ping
@@ -165,7 +154,8 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                 # Sanitize name: strip HTML tags, limit length
                 if name:
                     import re
-                    name = re.sub(r'<[^>]+>', '', name)[:50]
+
+                    name = re.sub(r"<[^>]+>", "", name)[:50]
                 # Update the client's info
                 async with server.manager._lock:
                     if websocket in server.manager.active_connections:
@@ -174,7 +164,7 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                             client_id=client_id,
                             name=name or old_info.name,
                             color=server.manager._generate_color(client_id),
-                            connected_at=old_info.connected_at
+                            connected_at=old_info.connected_at,
                         )
                 await server.manager.broadcast_presence()
 
@@ -184,7 +174,8 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
             if name:
                 # Sanitize name: strip HTML tags, limit length
                 import re
-                name = re.sub(r'<[^>]+>', '', name)[:50]
+
+                name = re.sub(r"<[^>]+>", "", name)[:50]
                 await server.manager.update_client_name(websocket, name)
 
         elif msg_type == "get_presence":
@@ -195,16 +186,19 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
         elif msg_type == "embryo_marked":
             session_id = data.get("session_id")
             marker = data.get("marker")
-            if session_id and marker and hasattr(server, '_marking_sessions'):
+            if session_id and marker and hasattr(server, "_marking_sessions"):
                 session = server._marking_sessions.get(session_id)
                 if session:
                     session["markers"].append(marker)
-                    logger.info(f"Embryo marked: #{marker['number']} at ({marker['pixelX']}, {marker['pixelY']})")
+                    logger.info(
+                        f"Embryo marked: #{marker['number']}"
+                        f" at ({marker['pixelX']}, {marker['pixelY']})"
+                    )
 
         elif msg_type == "marking_update":
             session_id = data.get("session_id")
             markers = data.get("markers", [])
-            if session_id and hasattr(server, '_marking_sessions'):
+            if session_id and hasattr(server, "_marking_sessions"):
                 session = server._marking_sessions.get(session_id)
                 if session:
                     session["markers"] = markers
@@ -213,7 +207,7 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
         elif msg_type == "marking_done":
             session_id = data.get("session_id")
             markers = data.get("markers", [])
-            if session_id and hasattr(server, '_marking_sessions'):
+            if session_id and hasattr(server, "_marking_sessions"):
                 session = server._marking_sessions.get(session_id)
                 if session:
                     session["markers"] = markers
@@ -223,8 +217,7 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                         r = m.get("role", "test")
                         role_summary[r] = role_summary.get(r, 0) + 1
                     logger.info(
-                        f"Marking complete: {len(markers)} embryo(s) "
-                        f"(roles: {role_summary})"
+                        f"Marking complete: {len(markers)} embryo(s) (roles: {role_summary})"
                     )
 
         elif msg_type == "marking_redetect":
@@ -234,13 +227,14 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
             # listen for. Once recapture lands, the agent calls
             # start_marking_session again with the new image + markers.
             session_id = data.get("session_id")
-            if session_id and hasattr(server, '_marking_sessions'):
+            if session_id and hasattr(server, "_marking_sessions"):
                 session = server._marking_sessions.get(session_id)
                 if session is not None:
                     session["redetect_requested"] = True
                     logger.info(f"Marking redetect requested for session {session_id}")
                     try:
                         from gently.core import EventType, get_event_bus
+
                         get_event_bus().publish(
                             event_type=EventType.STATUS_CHANGED,
                             data={

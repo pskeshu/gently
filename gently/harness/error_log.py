@@ -6,9 +6,8 @@ and debugging system-level issues.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -16,13 +15,14 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ErrorEntry:
     """Single error entry in the global log"""
+
     timestamp: datetime
     round_number: int
     embryo_id: str
     timepoint: int
     error_type: str
     message: str
-    exception: Optional[Exception] = None
+    exception: Exception | None = None
 
 
 class GlobalErrorLog:
@@ -40,7 +40,7 @@ class GlobalErrorLog:
         max_entries : int
             Maximum number of entries to keep (oldest are dropped)
         """
-        self._entries: List[ErrorEntry] = []
+        self._entries: list[ErrorEntry] = []
         self._max_entries = max_entries
 
     def log_error(
@@ -50,7 +50,7 @@ class GlobalErrorLog:
         timepoint: int,
         error_type: str,
         message: str,
-        exception: Optional[Exception] = None,
+        exception: Exception | None = None,
     ):
         """
         Log an error during timelapse acquisition.
@@ -84,22 +84,20 @@ class GlobalErrorLog:
 
         # Trim old entries
         if len(self._entries) > self._max_entries:
-            self._entries = self._entries[-self._max_entries:]
+            self._entries = self._entries[-self._max_entries :]
 
         # Also log to standard logger
-        logger.warning(
-            f"[{error_type}] Round {round_number}, {embryo_id} t{timepoint}: {message}"
-        )
+        logger.warning(f"[{error_type}] Round {round_number}, {embryo_id} t{timepoint}: {message}")
 
-    def get_recent_errors(self, limit: int = 10) -> List[ErrorEntry]:
+    def get_recent_errors(self, limit: int = 10) -> list[ErrorEntry]:
         """Get most recent errors"""
         return self._entries[-limit:]
 
-    def get_errors_for_embryo(self, embryo_id: str) -> List[ErrorEntry]:
+    def get_errors_for_embryo(self, embryo_id: str) -> list[ErrorEntry]:
         """Get all errors for a specific embryo"""
         return [e for e in self._entries if e.embryo_id == embryo_id]
 
-    def get_errors_in_round(self, round_number: int) -> List[ErrorEntry]:
+    def get_errors_in_round(self, round_number: int) -> list[ErrorEntry]:
         """Get all errors from a specific round"""
         return [e for e in self._entries if e.round_number == round_number]
 

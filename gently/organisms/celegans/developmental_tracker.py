@@ -11,8 +11,8 @@ timing tables, and classification prompt are all C. elegans-specific.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
 from enum import Enum
+from typing import Any
 
 import anthropic
 
@@ -29,6 +29,7 @@ class DevelopmentalStage(str, Enum):
     distinguish.  The perception enum (in stages.py) maps "early" to
     everything before comma.
     """
+
     ONE_CELL = "1-cell"
     TWO_CELL = "2-cell"
     FOUR_CELL = "4-cell"
@@ -97,12 +98,13 @@ TIMING_VARIABILITY = {
 @dataclass
 class HatchingPrediction:
     """Prediction of time to hatching with confidence interval"""
+
     embryo_id: str
     current_stage: DevelopmentalStage
     predicted_minutes: int
     min_minutes: int  # Lower bound (optimistic)
     max_minutes: int  # Upper bound (conservative)
-    confidence: str   # Based on stage classification confidence
+    confidence: str  # Based on stage classification confidence
     timestamp: datetime = field(default_factory=datetime.now)
 
     @property
@@ -110,20 +112,20 @@ class HatchingPrediction:
         return self.predicted_minutes / 60
 
     @property
-    def range_hours(self) -> Tuple[float, float]:
+    def range_hours(self) -> tuple[float, float]:
         return (self.min_minutes / 60, self.max_minutes / 60)
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
-            'embryo_id': self.embryo_id,
-            'current_stage': self.current_stage.value,
-            'predicted_minutes': self.predicted_minutes,
-            'predicted_hours': self.predicted_hours,
-            'min_minutes': self.min_minutes,
-            'max_minutes': self.max_minutes,
-            'range_hours': self.range_hours,
-            'confidence': self.confidence,
-            'timestamp': self.timestamp.isoformat(),
+            "embryo_id": self.embryo_id,
+            "current_stage": self.current_stage.value,
+            "predicted_minutes": self.predicted_minutes,
+            "predicted_hours": self.predicted_hours,
+            "min_minutes": self.min_minutes,
+            "max_minutes": self.max_minutes,
+            "range_hours": self.range_hours,
+            "confidence": self.confidence,
+            "timestamp": self.timestamp.isoformat(),
         }
 
     def __str__(self) -> str:
@@ -137,25 +139,27 @@ class HatchingPrediction:
 @dataclass
 class StageClassification:
     """Result of a stage classification"""
+
     stage: DevelopmentalStage
     confidence: str  # HIGH, MEDIUM, LOW
     reasoning: str
     timestamp: datetime = field(default_factory=datetime.now)
     timepoint: int = 0
-    predicted_minutes_to_hatching: Optional[int] = None
+    predicted_minutes_to_hatching: int | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
-            'stage': self.stage.value,
-            'confidence': self.confidence,
-            'reasoning': self.reasoning,
-            'timestamp': self.timestamp.isoformat(),
-            'timepoint': self.timepoint,
-            'predicted_minutes_to_hatching': self.predicted_minutes_to_hatching,
+            "stage": self.stage.value,
+            "confidence": self.confidence,
+            "reasoning": self.reasoning,
+            "timestamp": self.timestamp.isoformat(),
+            "timepoint": self.timepoint,
+            "predicted_minutes_to_hatching": self.predicted_minutes_to_hatching,
         }
 
 
-STAGE_CLASSIFICATION_PROMPT = """Analyze this C. elegans embryo image and determine its DEVELOPMENTAL STAGE.
+STAGE_CLASSIFICATION_PROMPT = """Analyze this C. elegans embryo image and determine its
+DEVELOPMENTAL STAGE.
 
 Stages in order (earliest to latest):
 - 1-cell: Single cell, spherical, no division
@@ -194,7 +198,7 @@ class DevelopmentalTracker:
 
     def __init__(
         self,
-        claude_client: Optional[anthropic.Anthropic] = None,
+        claude_client: anthropic.Anthropic | None = None,
         model: str = settings.models.perception,
     ):
         """
@@ -209,14 +213,14 @@ class DevelopmentalTracker:
         self.model = model
 
         # Stage history per embryo
-        self._stage_history: Dict[str, List[StageClassification]] = {}
+        self._stage_history: dict[str, list[StageClassification]] = {}
 
     def classify_stage(
         self,
         image_b64: str,
         embryo_id: str,
         timepoint: int = 0,
-        recent_images: Optional[List[Dict]] = None,
+        recent_images: list[dict] | None = None,
     ) -> StageClassification:
         """
         Classify the developmental stage of an embryo
@@ -242,49 +246,51 @@ class DevelopmentalTracker:
 
         # Add temporal context if available
         if recent_images and len(recent_images) > 1:
-            content.append({
-                "type": "text",
-                "text": f"Recent images from {embryo_id} (for temporal context):"
-            })
-            for img in recent_images[:-1]:  # All but last
-                content.append({
+            content.append(
+                {
                     "type": "text",
-                    "text": f"Timepoint {img.get('timepoint', '?')}"
-                })
-                content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": img['b64_image']
+                    "text": f"Recent images from {embryo_id} (for temporal context):",
+                }
+            )
+            for img in recent_images[:-1]:  # All but last
+                content.append({"type": "text", "text": f"Timepoint {img.get('timepoint', '?')}"})
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img["b64_image"],
+                        },
                     }
-                })
+                )
 
         # Add current image
-        content.append({
-            "type": "text",
-            "text": f"CURRENT image (timepoint {timepoint}) - classify this one:"
-        })
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": image_b64
+        content.append(
+            {
+                "type": "text",
+                "text": f"CURRENT image (timepoint {timepoint}) - classify this one:",
             }
-        })
+        )
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": image_b64,
+                },
+            }
+        )
 
         # Add prompt
-        content.append({
-            "type": "text",
-            "text": STAGE_CLASSIFICATION_PROMPT
-        })
+        content.append({"type": "text", "text": STAGE_CLASSIFICATION_PROMPT})
 
         try:
             response = self.claude.messages.create(
                 model=self.model,
                 max_tokens=500,
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             result = self._parse_classification(response.content[0].text)
@@ -321,31 +327,31 @@ class DevelopmentalTracker:
         confidence = "LOW"
         reasoning = ""
 
-        lines = response_text.strip().split('\n')
+        lines = response_text.strip().split("\n")
 
         for line in lines:
             line = line.strip()
-            if line.startswith('STAGE:'):
-                stage_str = line.split(':', 1)[1].strip().lower()
+            if line.startswith("STAGE:"):
+                stage_str = line.split(":", 1)[1].strip().lower()
                 # Map to enum
                 stage = self._parse_stage_name(stage_str)
-            elif line.startswith('CONFIDENCE:'):
-                confidence = line.split(':', 1)[1].strip().upper()
-            elif line.startswith('REASONING:'):
-                reasoning = line.split(':', 1)[1].strip()
+            elif line.startswith("CONFIDENCE:"):
+                confidence = line.split(":", 1)[1].strip().upper()
+            elif line.startswith("REASONING:"):
+                reasoning = line.split(":", 1)[1].strip()
 
         # Capture multi-line reasoning
         if not reasoning:
             in_reasoning = False
             reasoning_lines = []
             for line in lines:
-                if line.startswith('REASONING:'):
+                if line.startswith("REASONING:"):
                     in_reasoning = True
-                    reasoning_lines.append(line.split(':', 1)[1].strip())
+                    reasoning_lines.append(line.split(":", 1)[1].strip())
                 elif in_reasoning and line:
                     reasoning_lines.append(line)
             if reasoning_lines:
-                reasoning = ' '.join(reasoning_lines)
+                reasoning = " ".join(reasoning_lines)
 
         return StageClassification(
             stage=stage,
@@ -359,43 +365,43 @@ class DevelopmentalTracker:
 
         # Direct matches
         mappings = {
-            '1-cell': DevelopmentalStage.ONE_CELL,
-            'one-cell': DevelopmentalStage.ONE_CELL,
-            '2-cell': DevelopmentalStage.TWO_CELL,
-            'two-cell': DevelopmentalStage.TWO_CELL,
-            '4-cell': DevelopmentalStage.FOUR_CELL,
-            'four-cell': DevelopmentalStage.FOUR_CELL,
-            '8-cell': DevelopmentalStage.EIGHT_CELL,
-            'eight-cell': DevelopmentalStage.EIGHT_CELL,
-            'gastrulation': DevelopmentalStage.GASTRULATION,
-            'comma': DevelopmentalStage.COMMA,
-            '1.5-fold': DevelopmentalStage.ONE_POINT_FIVE_FOLD,
-            '1.5 fold': DevelopmentalStage.ONE_POINT_FIVE_FOLD,
-            '2-fold': DevelopmentalStage.TWO_FOLD,
-            '2 fold': DevelopmentalStage.TWO_FOLD,
-            'pretzel': DevelopmentalStage.PRETZEL,
-            '3-fold': DevelopmentalStage.PRETZEL,
-            '3 fold': DevelopmentalStage.PRETZEL,
-            'pre-hatching': DevelopmentalStage.PRE_HATCHING,
-            'prehatching': DevelopmentalStage.PRE_HATCHING,
-            'hatching': DevelopmentalStage.HATCHING,
-            'hatched': DevelopmentalStage.HATCHED,
-            'dead': DevelopmentalStage.DEAD,
-            'unknown': DevelopmentalStage.UNKNOWN,
+            "1-cell": DevelopmentalStage.ONE_CELL,
+            "one-cell": DevelopmentalStage.ONE_CELL,
+            "2-cell": DevelopmentalStage.TWO_CELL,
+            "two-cell": DevelopmentalStage.TWO_CELL,
+            "4-cell": DevelopmentalStage.FOUR_CELL,
+            "four-cell": DevelopmentalStage.FOUR_CELL,
+            "8-cell": DevelopmentalStage.EIGHT_CELL,
+            "eight-cell": DevelopmentalStage.EIGHT_CELL,
+            "gastrulation": DevelopmentalStage.GASTRULATION,
+            "comma": DevelopmentalStage.COMMA,
+            "1.5-fold": DevelopmentalStage.ONE_POINT_FIVE_FOLD,
+            "1.5 fold": DevelopmentalStage.ONE_POINT_FIVE_FOLD,
+            "2-fold": DevelopmentalStage.TWO_FOLD,
+            "2 fold": DevelopmentalStage.TWO_FOLD,
+            "pretzel": DevelopmentalStage.PRETZEL,
+            "3-fold": DevelopmentalStage.PRETZEL,
+            "3 fold": DevelopmentalStage.PRETZEL,
+            "pre-hatching": DevelopmentalStage.PRE_HATCHING,
+            "prehatching": DevelopmentalStage.PRE_HATCHING,
+            "hatching": DevelopmentalStage.HATCHING,
+            "hatched": DevelopmentalStage.HATCHED,
+            "dead": DevelopmentalStage.DEAD,
+            "unknown": DevelopmentalStage.UNKNOWN,
         }
 
         return mappings.get(name, DevelopmentalStage.UNKNOWN)
 
-    def get_stage_history(self, embryo_id: str) -> List[StageClassification]:
+    def get_stage_history(self, embryo_id: str) -> list[StageClassification]:
         """Get stage classification history for an embryo"""
         return self._stage_history.get(embryo_id, [])
 
-    def get_current_stage(self, embryo_id: str) -> Optional[StageClassification]:
+    def get_current_stage(self, embryo_id: str) -> StageClassification | None:
         """Get the most recent stage classification"""
         history = self._stage_history.get(embryo_id, [])
         return history[-1] if history else None
 
-    def predict_time_to_hatching(self, embryo_id: str) -> Optional[timedelta]:
+    def predict_time_to_hatching(self, embryo_id: str) -> timedelta | None:
         """
         Predict time to hatching based on current stage
 
@@ -422,7 +428,7 @@ class DevelopmentalTracker:
         self,
         embryo_id: str,
         target_stage: DevelopmentalStage,
-    ) -> Optional[timedelta]:
+    ) -> timedelta | None:
         """
         Predict time until embryo reaches target stage
 
@@ -457,7 +463,7 @@ class DevelopmentalTracker:
         minutes = target_timing - current_timing
         return timedelta(minutes=minutes)
 
-    def get_progression_summary(self, embryo_id: str) -> Dict[str, Any]:
+    def get_progression_summary(self, embryo_id: str) -> dict[str, Any]:
         """
         Get a summary of stage progression for an embryo
 
@@ -475,28 +481,28 @@ class DevelopmentalTracker:
 
         if not history:
             return {
-                'embryo_id': embryo_id,
-                'observations': 0,
-                'current_stage': None,
-                'stages_observed': [],
-                'predicted_hatching': None,
+                "embryo_id": embryo_id,
+                "observations": 0,
+                "current_stage": None,
+                "stages_observed": [],
+                "predicted_hatching": None,
             }
 
         current = history[-1]
         stages_observed = list(set(h.stage.value for h in history))
 
         return {
-            'embryo_id': embryo_id,
-            'observations': len(history),
-            'current_stage': current.stage.value,
-            'current_confidence': current.confidence,
-            'stages_observed': stages_observed,
-            'first_observation': history[0].timestamp.isoformat(),
-            'last_observation': current.timestamp.isoformat(),
-            'predicted_minutes_to_hatching': current.predicted_minutes_to_hatching,
+            "embryo_id": embryo_id,
+            "observations": len(history),
+            "current_stage": current.stage.value,
+            "current_confidence": current.confidence,
+            "stages_observed": stages_observed,
+            "first_observation": history[0].timestamp.isoformat(),
+            "last_observation": current.timestamp.isoformat(),
+            "predicted_minutes_to_hatching": current.predicted_minutes_to_hatching,
         }
 
-    def get_hatching_prediction(self, embryo_id: str) -> Optional[HatchingPrediction]:
+    def get_hatching_prediction(self, embryo_id: str) -> HatchingPrediction | None:
         """
         Get detailed hatching prediction with confidence interval
 
@@ -525,9 +531,9 @@ class DevelopmentalTracker:
 
         # Adjust confidence interval based on classification confidence
         confidence_multiplier = {
-            'HIGH': 1.0,
-            'MEDIUM': 1.5,
-            'LOW': 2.0,
+            "HIGH": 1.0,
+            "MEDIUM": 1.5,
+            "LOW": 2.0,
         }.get(current.confidence, 2.0)
 
         adjusted_variability = int(variability * confidence_multiplier)
@@ -541,7 +547,7 @@ class DevelopmentalTracker:
             confidence=current.confidence,
         )
 
-    def get_all_predictions(self, embryo_ids: List[str]) -> Dict[str, HatchingPrediction]:
+    def get_all_predictions(self, embryo_ids: list[str]) -> dict[str, HatchingPrediction]:
         """
         Get predictions for multiple embryos
 
@@ -562,7 +568,7 @@ class DevelopmentalTracker:
                 predictions[embryo_id] = pred
         return predictions
 
-    def estimate_development_rate(self, embryo_id: str) -> Optional[float]:
+    def estimate_development_rate(self, embryo_id: str) -> float | None:
         """
         Estimate relative development rate compared to standard
 
@@ -584,7 +590,9 @@ class DevelopmentalTracker:
             return None
 
         # Need at least two different stages
-        stages_seen = [(h.stage, h.timestamp) for h in history if h.stage != DevelopmentalStage.UNKNOWN]
+        stages_seen = [
+            (h.stage, h.timestamp) for h in history if h.stage != DevelopmentalStage.UNKNOWN
+        ]
         if len(stages_seen) < 2:
             return None
 

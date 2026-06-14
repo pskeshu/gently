@@ -9,6 +9,7 @@ Env vars:
     GENTLY_LOG_FORMAT  — console format string
     GENTLY_LOG_DATEFMT — timestamp format (default: %H:%M:%S)
 """
+
 import logging
 import os
 import sys
@@ -54,9 +55,18 @@ def configure_logging(
         lgr.addHandler(console)
 
     # Suppress noisy third-party loggers on console
-    for name in ("uvicorn", "uvicorn.error", "uvicorn.access",
-                  "httpx", "httpcore", "anthropic", "aiohttp",
-                  "aiohttp.access", "bluesky", "bluesky.RE.state"):
+    for name in (
+        "uvicorn",
+        "uvicorn.error",
+        "uvicorn.access",
+        "httpx",
+        "httpcore",
+        "anthropic",
+        "aiohttp",
+        "aiohttp.access",
+        "bluesky",
+        "bluesky.RE.state",
+    ):
         logging.getLogger(name).setLevel(logging.WARNING)
 
     # File handler — always INFO+ regardless of console level

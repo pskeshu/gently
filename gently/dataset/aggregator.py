@@ -13,9 +13,9 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Iterator, Dict, Any, List
+from typing import Any
 
-from .schema import init_database, get_connection, transaction
+from .schema import init_database
 
 logger = logging.getLogger(__name__)
 
@@ -40,18 +40,21 @@ class DatasetAggregator:
 
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path: Path | None = None,
         sessions_dir: Path = Path("D:/gently/sessions"),
         data_dir: Path = Path("D:/gently/data"),
         images_dir: Path = Path("D:/gently/images"),
-        ground_truth_dir: Optional[Path] = None,
+        ground_truth_dir: Path | None = None,
     ):
         self.db_path = db_path or Path("D:/gently/dataset.db")
         self.sessions_dir = sessions_dir
         self.data_dir = data_dir
         self.images_dir = images_dir
-        self.ground_truth_dir = ground_truth_dir or Path(__file__).parent.parent.parent / "benchmarks" / "data" / "ground_truth"
-        self.conn: Optional[sqlite3.Connection] = None
+        self.ground_truth_dir = (
+            ground_truth_dir
+            or Path(__file__).parent.parent.parent / "benchmarks" / "data" / "ground_truth"
+        )
+        self.conn: sqlite3.Connection | None = None
 
     def connect(self) -> sqlite3.Connection:
         """Initialize and connect to the database."""
@@ -64,7 +67,7 @@ class DatasetAggregator:
             self.conn.close()
             self.conn = None
 
-    def aggregate_all(self, incremental: bool = True) -> Dict[str, int]:
+    def aggregate_all(self, incremental: bool = True) -> dict[str, int]:
         """
         Run full aggregation from all sources.
 
@@ -119,7 +122,7 @@ class DatasetAggregator:
         logger.info(f"Aggregation complete: {stats}")
         return stats
 
-    def aggregate_sessions(self, since: Optional[datetime] = None) -> Dict[str, int]:
+    def aggregate_sessions(self, since: datetime | None = None) -> dict[str, int]:
         """
         Aggregate session data from JSON files.
 
@@ -149,7 +152,7 @@ class DatasetAggregator:
                         continue
 
                 try:
-                    with open(session_file, 'r', encoding='utf-8') as f:
+                    with open(session_file, encoding="utf-8") as f:
                         data = json.load(f)
 
                     result = self._process_session(data)
@@ -159,7 +162,9 @@ class DatasetAggregator:
                         stats["updated"] += 1
 
                     # Count embryos
-                    embryos = data.get("embryo_states", {}) or data.get("experiment_data", {}).get("embryos", {})
+                    embryos = data.get("embryo_states", {}) or data.get("experiment_data", {}).get(
+                        "embryos", {}
+                    )
                     stats["embryos"] += len(embryos)
 
                 except Exception as e:
@@ -169,7 +174,7 @@ class DatasetAggregator:
                 log_id,
                 stats["added"] + stats["updated"],
                 stats["added"],
-                stats["updated"]
+                stats["updated"],
             )
 
         except Exception as e:
@@ -178,7 +183,7 @@ class DatasetAggregator:
 
         return stats
 
-    def _process_session(self, data: Dict[str, Any]) -> str:
+    def _process_session(self, data: dict[str, Any]) -> str:
         """
         Insert or update a session record.
 
@@ -193,54 +198,72 @@ class DatasetAggregator:
 
         # Check if exists
         existing = self.conn.execute(
-            "SELECT session_id FROM sessions WHERE session_id = ?",
-            (session_id,)
+            "SELECT session_id FROM sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
 
         # Extract metadata
         metadata = {
-            k: v for k, v in data.items()
-            if k not in ("session_id", "name", "description", "created_at",
-                         "last_active", "conversation", "system_prompt",
-                         "experiment_data", "embryo_states")
+            k: v
+            for k, v in data.items()
+            if k
+            not in (
+                "session_id",
+                "name",
+                "description",
+                "created_at",
+                "last_active",
+                "conversation",
+                "system_prompt",
+                "experiment_data",
+                "embryo_states",
+            )
         }
 
         if existing:
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 UPDATE sessions SET
                     name = ?, description = ?, last_active = ?, metadata_json = ?
                 WHERE session_id = ?
-            """, (
-                data.get("name"),
-                data.get("description"),
-                data.get("last_active"),
-                json.dumps(metadata) if metadata else None,
-                session_id,
-            ))
+            """,
+                (
+                    data.get("name"),
+                    data.get("description"),
+                    data.get("last_active"),
+                    json.dumps(metadata) if metadata else None,
+                    session_id,
+                ),
+            )
             result = "updated"
         else:
-            self.conn.execute("""
-                INSERT INTO sessions (session_id, name, description, created_at, last_active, metadata_json)
+            self.conn.execute(
+                """
+                INSERT INTO sessions
+                (session_id, name, description, created_at, last_active, metadata_json)
                 VALUES (?, ?, ?, ?, ?, ?)
-            """, (
-                session_id,
-                data.get("name"),
-                data.get("description"),
-                data.get("created_at"),
-                data.get("last_active"),
-                json.dumps(metadata) if metadata else None,
-            ))
+            """,
+                (
+                    session_id,
+                    data.get("name"),
+                    data.get("description"),
+                    data.get("created_at"),
+                    data.get("last_active"),
+                    json.dumps(metadata) if metadata else None,
+                ),
+            )
             result = "added"
 
         # Process embryos
-        embryos = data.get("embryo_states", {}) or data.get("experiment_data", {}).get("embryos", {})
+        embryos = data.get("embryo_states", {}) or data.get("experiment_data", {}).get(
+            "embryos", {}
+        )
         for embryo_id, embryo_data in embryos.items():
             self._process_embryo(session_id, embryo_id, embryo_data)
 
         self.conn.commit()
         return result
 
-    def _process_embryo(self, session_id: str, embryo_id: str, data: Dict[str, Any]):
+    def _process_embryo(self, session_id: str, embryo_id: str, data: dict[str, Any]):
         """Insert or update an embryo record."""
         stage_pos = data.get("stage_position", {})
         calibration = data.get("calibration", {})
@@ -248,23 +271,26 @@ class DatasetAggregator:
         # Get UID from data, or generate backward-compatible UID
         embryo_uid = data.get("uid") or f"{session_id}_{embryo_id}"
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT OR REPLACE INTO embryos
             (embryo_id, session_id, nickname, user_label,
              stage_position_x, stage_position_y, calibration_json, embryo_uid)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            embryo_id,
-            session_id,
-            data.get("nickname"),
-            data.get("user_label"),
-            stage_pos.get("x"),
-            stage_pos.get("y"),
-            json.dumps(calibration) if calibration else None,
-            embryo_uid,
-        ))
+        """,
+            (
+                embryo_id,
+                session_id,
+                data.get("nickname"),
+                data.get("user_label"),
+                stage_pos.get("x"),
+                stage_pos.get("y"),
+                json.dumps(calibration) if calibration else None,
+                embryo_uid,
+            ),
+        )
 
-    def aggregate_volumes(self, since: Optional[datetime] = None) -> Dict[str, int]:
+    def aggregate_volumes(self, since: datetime | None = None) -> dict[str, int]:
         """
         Aggregate volume data from data directory.
 
@@ -293,7 +319,7 @@ class DatasetAggregator:
                                 continue
 
                         try:
-                            with open(meta_file, 'r', encoding='utf-8') as f:
+                            with open(meta_file, encoding="utf-8") as f:
                                 data = json.load(f)
 
                             if self._process_volume(data, meta_file):
@@ -306,7 +332,9 @@ class DatasetAggregator:
                             stats["skipped"] += 1
 
                 self.conn.commit()
-                self._complete_aggregation_log(log_id, stats["added"] + stats["skipped"], stats["added"], 0)
+                self._complete_aggregation_log(
+                    log_id, stats["added"] + stats["skipped"], stats["added"], 0
+                )
 
             except Exception as e:
                 self._fail_aggregation_log(log_id, str(e))
@@ -339,7 +367,7 @@ class DatasetAggregator:
 
         return stats
 
-    def _process_volume(self, data: Dict[str, Any], meta_file: Path) -> bool:
+    def _process_volume(self, data: dict[str, Any], meta_file: Path) -> bool:
         """
         Process a volume from its metadata JSON.
 
@@ -350,9 +378,7 @@ class DatasetAggregator:
             return False
 
         # Check if exists
-        existing = self.conn.execute(
-            "SELECT uid FROM volumes WHERE uid = ?", (uid,)
-        ).fetchone()
+        existing = self.conn.execute("SELECT uid FROM volumes WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
 
@@ -370,26 +396,30 @@ class DatasetAggregator:
         if session_id and embryo_id:
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
-                (session_id, embryo_id)
+                (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO volumes
-            (uid, session_id, embryo_id, timepoint, file_path, shape_json, dtype, timestamp, metadata_json, embryo_uid)
+            (uid, session_id, embryo_id, timepoint, file_path, shape_json, dtype,
+             timestamp, metadata_json, embryo_uid)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            uid,
-            session_id,
-            embryo_id,
-            metadata.get("timepoint"),
-            str(tiff_path) if tiff_path.exists() else None,
-            json.dumps(data.get("shape")),
-            data.get("dtype"),
-            data.get("timestamp"),
-            json.dumps(metadata) if metadata else None,
-            embryo_uid,
-        ))
+        """,
+            (
+                uid,
+                session_id,
+                embryo_id,
+                metadata.get("timepoint"),
+                str(tiff_path) if tiff_path.exists() else None,
+                json.dumps(data.get("shape")),
+                data.get("dtype"),
+                data.get("timestamp"),
+                json.dumps(metadata) if metadata else None,
+                embryo_uid,
+            ),
+        )
 
         return True
 
@@ -403,9 +433,7 @@ class DatasetAggregator:
         uid = f"tiff_{tif_path.stem}"
 
         # Check if exists
-        existing = self.conn.execute(
-            "SELECT uid FROM volumes WHERE uid = ?", (uid,)
-        ).fetchone()
+        existing = self.conn.execute("SELECT uid FROM volumes WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
 
@@ -422,7 +450,10 @@ class DatasetAggregator:
             try:
                 date_str = parts[2]
                 time_str = parts[3]
-                timestamp_str = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}T{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+                timestamp_str = (
+                    f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                    f"T{time_str[:2]}:{time_str[2:4]}:{time_str[4:6]}"
+                )
             except Exception:
                 timestamp_str = datetime.fromtimestamp(tif_path.stat().st_mtime).isoformat()
 
@@ -434,27 +465,30 @@ class DatasetAggregator:
         if session_id and embryo_id:
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
-                (session_id, embryo_id)
+                (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO volumes
             (uid, session_id, embryo_id, file_path, timestamp, metadata_json, embryo_uid)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (
-            uid,
-            session_id,
-            embryo_id,
-            str(tif_path),
-            timestamp_str,
-            json.dumps({"source": "images_dir"}),
-            embryo_uid,
-        ))
+        """,
+            (
+                uid,
+                session_id,
+                embryo_id,
+                str(tif_path),
+                timestamp_str,
+                json.dumps({"source": "images_dir"}),
+                embryo_uid,
+            ),
+        )
 
         return True
 
-    def aggregate_images(self, since: Optional[datetime] = None) -> Dict[str, int]:
+    def aggregate_images(self, since: datetime | None = None) -> dict[str, int]:
         """
         Aggregate image projection data.
 
@@ -484,7 +518,7 @@ class DatasetAggregator:
                             continue
 
                     try:
-                        with open(meta_file, 'r', encoding='utf-8') as f:
+                        with open(meta_file, encoding="utf-8") as f:
                             data = json.load(f)
 
                         if self._process_image(data):
@@ -497,7 +531,9 @@ class DatasetAggregator:
                         stats["skipped"] += 1
 
             self.conn.commit()
-            self._complete_aggregation_log(log_id, stats["added"] + stats["skipped"], stats["added"], 0)
+            self._complete_aggregation_log(
+                log_id, stats["added"] + stats["skipped"], stats["added"], 0
+            )
 
         except Exception as e:
             self._fail_aggregation_log(log_id, str(e))
@@ -505,7 +541,7 @@ class DatasetAggregator:
 
         return stats
 
-    def _process_image(self, data: Dict[str, Any]) -> bool:
+    def _process_image(self, data: dict[str, Any]) -> bool:
         """
         Process an image from its metadata JSON.
 
@@ -516,9 +552,7 @@ class DatasetAggregator:
             return False
 
         # Check if exists
-        existing = self.conn.execute(
-            "SELECT uid FROM images WHERE uid = ?", (uid,)
-        ).fetchone()
+        existing = self.conn.execute("SELECT uid FROM images WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
 
@@ -531,33 +565,36 @@ class DatasetAggregator:
         if session_id and embryo_id:
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
-                (session_id, embryo_id)
+                (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT INTO images
             (uid, parent_uid, session_id, embryo_id, timepoint, projection_type,
              shape_json, dtype, b64_size_kb, timestamp, metadata_json, embryo_uid)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            uid,
-            metadata.get("parent_uid"),
-            session_id,
-            embryo_id,
-            metadata.get("timepoint"),
-            metadata.get("projection_type"),
-            json.dumps(data.get("shape")),
-            data.get("dtype"),
-            metadata.get("b64_size_kb"),
-            data.get("timestamp"),
-            json.dumps(metadata) if metadata else None,
-            embryo_uid,
-        ))
+        """,
+            (
+                uid,
+                metadata.get("parent_uid"),
+                session_id,
+                embryo_id,
+                metadata.get("timepoint"),
+                metadata.get("projection_type"),
+                json.dumps(data.get("shape")),
+                data.get("dtype"),
+                metadata.get("b64_size_kb"),
+                data.get("timestamp"),
+                json.dumps(metadata) if metadata else None,
+                embryo_uid,
+            ),
+        )
 
         return True
 
-    def aggregate_ground_truth(self) -> Dict[str, int]:
+    def aggregate_ground_truth(self) -> dict[str, int]:
         """
         Import ground truth annotations from benchmark data.
 
@@ -586,7 +623,7 @@ class DatasetAggregator:
         try:
             for gt_file in self.ground_truth_dir.glob("*.json"):
                 try:
-                    with open(gt_file, 'r', encoding='utf-8') as f:
+                    with open(gt_file, encoding="utf-8") as f:
                         data = json.load(f)
 
                     session_id = data.get("session_id")
@@ -597,31 +634,53 @@ class DatasetAggregator:
                     for embryo_id, stages in transitions.items():
                         for stage, start_timepoint in stages.items():
                             # Check if exists
-                            existing = self.conn.execute("""
+                            existing = self.conn.execute(
+                                """
                                 SELECT id FROM ground_truth
                                 WHERE session_id = ? AND embryo_id = ? AND stage = ?
-                            """, (session_id, embryo_id, stage)).fetchone()
+                            """,
+                                (session_id, embryo_id, stage),
+                            ).fetchone()
 
                             if existing:
-                                self.conn.execute("""
+                                self.conn.execute(
+                                    """
                                     UPDATE ground_truth SET
                                         start_timepoint = ?, annotator = ?, notes = ?
                                     WHERE id = ?
-                                """, (start_timepoint, annotator, notes, existing[0]))
+                                """,
+                                    (start_timepoint, annotator, notes, existing[0]),
+                                )
                                 stats["updated"] += 1
                             else:
-                                self.conn.execute("""
+                                self.conn.execute(
+                                    """
                                     INSERT INTO ground_truth
-                                    (session_id, embryo_id, stage, start_timepoint, annotator, notes)
+                                    (session_id, embryo_id, stage, start_timepoint,
+                                     annotator, notes)
                                     VALUES (?, ?, ?, ?, ?, ?)
-                                """, (session_id, embryo_id, stage, start_timepoint, annotator, notes))
+                                """,
+                                    (
+                                        session_id,
+                                        embryo_id,
+                                        stage,
+                                        start_timepoint,
+                                        annotator,
+                                        notes,
+                                    ),
+                                )
                                 stats["added"] += 1
 
                 except Exception as e:
                     logger.error(f"Error processing ground truth {gt_file}: {e}")
 
             self.conn.commit()
-            self._complete_aggregation_log(log_id, stats["added"] + stats["updated"], stats["added"], stats["updated"])
+            self._complete_aggregation_log(
+                log_id,
+                stats["added"] + stats["updated"],
+                stats["added"],
+                stats["updated"],
+            )
 
         except Exception as e:
             self._fail_aggregation_log(log_id, str(e))
@@ -629,7 +688,7 @@ class DatasetAggregator:
 
         return stats
 
-    def _get_last_run_time(self) -> Optional[datetime]:
+    def _get_last_run_time(self) -> datetime | None:
         """Get the timestamp of the last successful aggregation."""
         result = self.conn.execute("""
             SELECT MAX(completed_at) FROM aggregation_log
@@ -642,47 +701,56 @@ class DatasetAggregator:
 
     def _set_last_run_time(self, timestamp: datetime):
         """Record the current aggregation time."""
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT OR REPLACE INTO metadata (key, value, updated_at)
             VALUES ('last_aggregation', ?, ?)
-        """, (timestamp.isoformat(), timestamp.isoformat()))
+        """,
+            (timestamp.isoformat(), timestamp.isoformat()),
+        )
         self.conn.commit()
 
     def _start_aggregation_log(self, source_type: str, source_path: str) -> int:
         """Start a new aggregation log entry."""
-        cursor = self.conn.execute("""
+        cursor = self.conn.execute(
+            """
             INSERT INTO aggregation_log (source_type, source_path, started_at, status)
             VALUES (?, ?, ?, 'running')
-        """, (source_type, source_path, datetime.now().isoformat()))
+        """,
+            (source_type, source_path, datetime.now().isoformat()),
+        )
         self.conn.commit()
         return cursor.lastrowid
 
     def _complete_aggregation_log(self, log_id: int, processed: int, added: int, updated: int):
         """Mark an aggregation log as completed."""
-        self.conn.execute("""
+        self.conn.execute(
+            """
             UPDATE aggregation_log SET
                 items_processed = ?, items_added = ?, items_updated = ?,
                 completed_at = ?, status = 'completed'
             WHERE id = ?
-        """, (processed, added, updated, datetime.now().isoformat(), log_id))
+        """,
+            (processed, added, updated, datetime.now().isoformat(), log_id),
+        )
         self.conn.commit()
 
     def _fail_aggregation_log(self, log_id: int, error_message: str):
         """Mark an aggregation log as failed."""
-        self.conn.execute("""
+        self.conn.execute(
+            """
             UPDATE aggregation_log SET
                 completed_at = ?, status = 'failed', error_message = ?
             WHERE id = ?
-        """, (datetime.now().isoformat(), error_message, log_id))
+        """,
+            (datetime.now().isoformat(), error_message, log_id),
+        )
         self.conn.commit()
 
 
 def get_stage_at_timepoint(
-    conn: sqlite3.Connection,
-    session_id: str,
-    embryo_id: str,
-    timepoint: int
-) -> Optional[str]:
+    conn: sqlite3.Connection, session_id: str, embryo_id: str, timepoint: int
+) -> str | None:
     """
     Get the ground truth stage at a specific timepoint.
 
@@ -705,11 +773,14 @@ def get_stage_at_timepoint(
     str or None
         Stage name or None if not found
     """
-    result = conn.execute("""
+    result = conn.execute(
+        """
         SELECT stage FROM ground_truth
         WHERE session_id = ? AND embryo_id = ? AND start_timepoint <= ?
         ORDER BY start_timepoint DESC
         LIMIT 1
-    """, (session_id, embryo_id, timepoint)).fetchone()
+    """,
+        (session_id, embryo_id, timepoint),
+    ).fetchone()
 
     return result[0] if result else None

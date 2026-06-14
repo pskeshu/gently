@@ -15,20 +15,21 @@ Usage:
 """
 
 import os
+import statistics
 import sys
 import time
-import statistics
-from pathlib import Path
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 from datetime import datetime
+from pathlib import Path
 
-import yaml
 import numpy as np
 import pymmcore
+import yaml
 
 # Add dispim-control to path for ophyd device imports
-DISPIM_CONTROL_DIR = Path(__file__).resolve().parent.parent / "UsersdispimDocumentsGitHubdispim-control"
+DISPIM_CONTROL_DIR = (
+    Path(__file__).resolve().parent.parent / "UsersdispimDocumentsGitHubdispim-control"
+)
 if str(DISPIM_CONTROL_DIR) not in sys.path:
     sys.path.insert(0, str(DISPIM_CONTROL_DIR))
 
@@ -41,10 +42,10 @@ GALVO_DEVICE = "Scanner:AB:33"
 PIEZO_DEVICE = "PiezoStage:P:34"
 
 # Default scan parameters (same as run_multi_embryo_volumes.py)
-DEFAULT_GALVO_AMPLITUDE = 0.5    # degrees
-DEFAULT_GALVO_CENTER = 0.0       # degrees
-DEFAULT_PIEZO_AMPLITUDE = 25.0   # um
-DEFAULT_PIEZO_CENTER = 50.0      # um
+DEFAULT_GALVO_AMPLITUDE = 0.5  # degrees
+DEFAULT_GALVO_CENTER = 0.0  # degrees
+DEFAULT_PIEZO_AMPLITUDE = 25.0  # um
+DEFAULT_PIEZO_CENTER = 50.0  # um
 DEFAULT_LASER_CONFIG = "488 and 561"
 DEFAULT_CAMERA_ROI = (128, 896, 2048, 512)  # (x, y, width, height)
 
@@ -69,10 +70,30 @@ NUM_WARMUP = 2
 # Simulated embryo calibration profiles for round-robin reconfig test.
 # Each entry represents a different embryo with distinct galvo/piezo settings.
 EMBRYO_PROFILES = [
-    {"galvo_amplitude": 0.50, "galvo_center":  0.00, "piezo_amplitude": 25.0, "piezo_center": 50.0},
-    {"galvo_amplitude": 0.45, "galvo_center":  0.12, "piezo_amplitude": 22.5, "piezo_center": 55.0},
-    {"galvo_amplitude": 0.55, "galvo_center": -0.08, "piezo_amplitude": 27.5, "piezo_center": 45.0},
-    {"galvo_amplitude": 0.48, "galvo_center":  0.05, "piezo_amplitude": 24.0, "piezo_center": 52.0},
+    {
+        "galvo_amplitude": 0.50,
+        "galvo_center": 0.00,
+        "piezo_amplitude": 25.0,
+        "piezo_center": 50.0,
+    },
+    {
+        "galvo_amplitude": 0.45,
+        "galvo_center": 0.12,
+        "piezo_amplitude": 22.5,
+        "piezo_center": 55.0,
+    },
+    {
+        "galvo_amplitude": 0.55,
+        "galvo_center": -0.08,
+        "piezo_amplitude": 27.5,
+        "piezo_center": 45.0,
+    },
+    {
+        "galvo_amplitude": 0.48,
+        "galvo_center": 0.05,
+        "piezo_amplitude": 24.0,
+        "piezo_center": 52.0,
+    },
 ]
 
 
@@ -84,9 +105,9 @@ class BenchmarkResult:
     approach: str
     num_slices: int
     exposure_ms: float
-    timings: List[float] = field(default_factory=list)
-    image_counts: List[int] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    timings: list[float] = field(default_factory=list)
+    image_counts: list[int] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def mean(self) -> float:
@@ -116,13 +137,13 @@ class BenchmarkResult:
 # ---------------------------------------------------------------------------
 # Config loading
 # ---------------------------------------------------------------------------
-def load_config(path: str) -> Tuple[str, str]:
+def load_config(path: str) -> tuple[str, str]:
     """Read config.yml and return (mm_dir, config_file)."""
     cfg_path = Path(path)
     if not cfg_path.exists():
         raise FileNotFoundError(f"Config file not found: {cfg_path}")
 
-    with open(cfg_path, "r") as f:
+    with open(cfg_path) as f:
         cfg = yaml.safe_load(f)
 
     mm_dir = cfg["mmdirectory"]
@@ -236,8 +257,8 @@ def configure_hardware_raw(core: pymmcore.CMMCore, num_slices: int, exposure_ms:
 def acquire_volume_raw(
     core: pymmcore.CMMCore,
     num_slices: int,
-    save_dir: Optional[Path] = None,
-) -> Tuple[int, float]:
+    save_dir: Path | None = None,
+) -> tuple[int, float]:
     """
     Trigger SPIM and collect images from the circular buffer.
 
@@ -329,10 +350,10 @@ def create_ophyd_devices(core: pymmcore.CMMCore):
     which imports a theme module that may not be available).
     """
     from dispim_control.devices import (
-        DiSPIMScanner,
         DiSPIMCamera,
-        DiSPIMPiezo,
         DiSPIMLaserControl,
+        DiSPIMPiezo,
+        DiSPIMScanner,
         DiSPIMVolumeScanner,
     )
 
@@ -356,8 +377,8 @@ def acquire_volume_ophyd(
     volume_scanner,
     num_slices: int,
     exposure_ms: float,
-    save_dir: Optional[Path] = None,
-) -> Tuple[int, float]:
+    save_dir: Path | None = None,
+) -> tuple[int, float]:
     """
     Configure + trigger via ophyd VolumeScanner.
 
@@ -392,8 +413,9 @@ def acquire_volume_ophyd(
 # ---------------------------------------------------------------------------
 # Ophyd burst approach -- configure once, skip per-volume reset
 # ---------------------------------------------------------------------------
-def configure_ophyd_burst(volume_scanner, num_slices: int, exposure_ms: float,
-                          core: pymmcore.CMMCore):
+def configure_ophyd_burst(
+    volume_scanner, num_slices: int, exposure_ms: float, core: pymmcore.CMMCore
+):
     """
     Configure ophyd devices once for a burst of volumes.
 
@@ -417,8 +439,9 @@ def configure_ophyd_burst(volume_scanner, num_slices: int, exposure_ms: float,
     time.sleep(0.1)
 
 
-def acquire_volume_ophyd_burst(volume_scanner, num_slices: int,
-                               core: pymmcore.CMMCore) -> Tuple[int, float]:
+def acquire_volume_ophyd_burst(
+    volume_scanner, num_slices: int, core: pymmcore.CMMCore
+) -> tuple[int, float]:
     """
     Acquire one volume using ophyd devices but without per-volume reset.
 
@@ -494,8 +517,9 @@ def cleanup_ophyd_burst(volume_scanner, core: pymmcore.CMMCore):
 # ---------------------------------------------------------------------------
 # Burst reconfig approach -- reconfigure galvo/piezo per volume (round-robin)
 # ---------------------------------------------------------------------------
-def configure_burst_reconfig(volume_scanner, num_slices: int, exposure_ms: float,
-                             core: pymmcore.CMMCore):
+def configure_burst_reconfig(
+    volume_scanner, num_slices: int, exposure_ms: float, core: pymmcore.CMMCore
+):
     """
     One-time setup for burst_reconfig: camera, scanner X-axis & timing, lasers.
 
@@ -519,9 +543,11 @@ def configure_burst_reconfig(volume_scanner, num_slices: int, exposure_ms: float
 
 
 def acquire_volume_burst_reconfig(
-    volume_scanner, num_slices: int, profile_idx: int,
+    volume_scanner,
+    num_slices: int,
+    profile_idx: int,
     core: pymmcore.CMMCore,
-) -> Tuple[int, float]:
+) -> tuple[int, float]:
     """
     Acquire one volume after reconfiguring galvo/piezo for a specific embryo.
 
@@ -535,7 +561,6 @@ def acquire_volume_burst_reconfig(
     profile = EMBRYO_PROFILES[profile_idx % len(EMBRYO_PROFILES)]
     camera_name = volume_scanner.camera.name
     scanner = volume_scanner.scanner
-    piezo = volume_scanner.piezo
 
     core.clearCircularBuffer()
 
@@ -548,16 +573,12 @@ def acquire_volume_burst_reconfig(
     t0 = time.perf_counter()
 
     # Reconfigure galvo Y-axis for this embryo
-    core.setProperty(GALVO_DEVICE, "SingleAxisYAmplitude(deg)",
-                     float(profile["galvo_amplitude"]))
-    core.setProperty(GALVO_DEVICE, "SingleAxisYOffset(deg)",
-                     float(profile["galvo_center"]))
+    core.setProperty(GALVO_DEVICE, "SingleAxisYAmplitude(deg)", float(profile["galvo_amplitude"]))
+    core.setProperty(GALVO_DEVICE, "SingleAxisYOffset(deg)", float(profile["galvo_center"]))
 
     # Reconfigure piezo for this embryo
-    core.setProperty(PIEZO_DEVICE, "SingleAxisAmplitude(um)",
-                     float(profile["piezo_amplitude"]))
-    core.setProperty(PIEZO_DEVICE, "SingleAxisOffset(um)",
-                     float(profile["piezo_center"]))
+    core.setProperty(PIEZO_DEVICE, "SingleAxisAmplitude(um)", float(profile["piezo_amplitude"]))
+    core.setProperty(PIEZO_DEVICE, "SingleAxisOffset(um)", float(profile["piezo_center"]))
     core.setProperty(PIEZO_DEVICE, "SPIMState", "Armed")
     time.sleep(0.3)
 
@@ -595,9 +616,11 @@ def acquire_volume_burst_reconfig(
 # Burst reconfig with waitForDevice -- replaces time.sleep() with MMCore API
 # ---------------------------------------------------------------------------
 def acquire_volume_burst_reconfig_wfd(
-    volume_scanner, num_slices: int, profile_idx: int,
+    volume_scanner,
+    num_slices: int,
+    profile_idx: int,
     core: pymmcore.CMMCore,
-) -> Tuple[int, float]:
+) -> tuple[int, float]:
     """
     Same as burst_reconfig but uses core.waitForDevice() instead of
     time.sleep() to wait for hardware readiness.
@@ -608,7 +631,6 @@ def acquire_volume_burst_reconfig_wfd(
     """
     profile = EMBRYO_PROFILES[profile_idx % len(EMBRYO_PROFILES)]
     camera_name = volume_scanner.camera.name
-    scanner = volume_scanner.scanner
 
     core.clearCircularBuffer()
 
@@ -621,17 +643,13 @@ def acquire_volume_burst_reconfig_wfd(
     t0 = time.perf_counter()
 
     # Reconfigure galvo Y-axis for this embryo
-    core.setProperty(GALVO_DEVICE, "SingleAxisYAmplitude(deg)",
-                     float(profile["galvo_amplitude"]))
-    core.setProperty(GALVO_DEVICE, "SingleAxisYOffset(deg)",
-                     float(profile["galvo_center"]))
+    core.setProperty(GALVO_DEVICE, "SingleAxisYAmplitude(deg)", float(profile["galvo_amplitude"]))
+    core.setProperty(GALVO_DEVICE, "SingleAxisYOffset(deg)", float(profile["galvo_center"]))
     core.waitForDevice(GALVO_DEVICE)
 
     # Reconfigure piezo for this embryo
-    core.setProperty(PIEZO_DEVICE, "SingleAxisAmplitude(um)",
-                     float(profile["piezo_amplitude"]))
-    core.setProperty(PIEZO_DEVICE, "SingleAxisOffset(um)",
-                     float(profile["piezo_center"]))
+    core.setProperty(PIEZO_DEVICE, "SingleAxisAmplitude(um)", float(profile["piezo_amplitude"]))
+    core.setProperty(PIEZO_DEVICE, "SingleAxisOffset(um)", float(profile["piezo_center"]))
     core.setProperty(PIEZO_DEVICE, "SPIMState", "Armed")
     core.waitForDevice(PIEZO_DEVICE)
 
@@ -686,16 +704,16 @@ def _save_volume(volume: np.ndarray, save_dir: Path, approach: str, num_slices: 
 # ---------------------------------------------------------------------------
 def run_benchmark_sweep(
     core: pymmcore.CMMCore,
-    slices_list: List[int],
-    exposures_list: List[float],
+    slices_list: list[int],
+    exposures_list: list[float],
     num_repeats: int,
     num_warmup: int,
     run_raw: bool,
     run_ophyd: bool,
-    save_dir: Optional[Path] = None,
-) -> List[BenchmarkResult]:
+    save_dir: Path | None = None,
+) -> list[BenchmarkResult]:
     """Run the full parameter sweep and return results."""
-    results: List[BenchmarkResult] = []
+    results: list[BenchmarkResult] = []
 
     volume_scanner = None
     if run_ophyd:
@@ -709,15 +727,17 @@ def run_benchmark_sweep(
     for num_slices in slices_list:
         for exposure_ms in exposures_list:
             config_idx += 1
-            print(f"\n{'='*60}")
-            print(f"Config {config_idx}/{total_configs}: "
-                  f"slices={num_slices}, exposure={exposure_ms}ms")
-            print(f"{'='*60}")
+            print(f"\n{'=' * 60}")
+            print(
+                f"Config {config_idx}/{total_configs}: "
+                f"slices={num_slices}, exposure={exposure_ms}ms"
+            )
+            print(f"{'=' * 60}")
 
             # --- Raw MMCore ---
             if run_raw:
                 res_raw = BenchmarkResult("raw", num_slices, exposure_ms)
-                print(f"\n[Raw MMCore] Configuring hardware...")
+                print("\n[Raw MMCore] Configuring hardware...")
                 try:
                     configure_hardware_raw(core, num_slices, exposure_ms)
                 except Exception as e:
@@ -728,7 +748,7 @@ def run_benchmark_sweep(
 
                 # Warm-up
                 for w in range(num_warmup):
-                    print(f"  Warm-up {w+1}/{num_warmup}...", end=" ", flush=True)
+                    print(f"  Warm-up {w + 1}/{num_warmup}...", end=" ", flush=True)
                     try:
                         cnt, dur = acquire_volume_raw(core, num_slices)
                         print(f"{cnt} imgs, {dur:.3f}s")
@@ -737,15 +757,15 @@ def run_benchmark_sweep(
 
                 # Timed repeats
                 for r in range(num_repeats):
-                    print(f"  Repeat {r+1}/{num_repeats}...", end=" ", flush=True)
+                    print(f"  Repeat {r + 1}/{num_repeats}...", end=" ", flush=True)
                     try:
                         cnt, dur = acquire_volume_raw(core, num_slices, save_dir=save_dir)
                         res_raw.timings.append(dur)
                         res_raw.image_counts.append(cnt)
-                        print(f"{cnt} imgs, {dur:.3f}s ({1.0/dur:.1f} vol/s)")
+                        print(f"{cnt} imgs, {dur:.3f}s ({1.0 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        res_raw.errors.append(f"repeat {r+1}: {e}")
+                        res_raw.errors.append(f"repeat {r + 1}: {e}")
 
                 # Cleanup after raw batch (lasers off)
                 cleanup_raw(core)
@@ -758,27 +778,34 @@ def run_benchmark_sweep(
 
                 # Warm-up
                 for w in range(num_warmup):
-                    print(f"  [Ophyd] Warm-up {w+1}/{num_warmup}...", end=" ", flush=True)
+                    print(
+                        f"  [Ophyd] Warm-up {w + 1}/{num_warmup}...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
-                        cnt, dur = acquire_volume_ophyd(
-                            volume_scanner, num_slices, exposure_ms)
+                        cnt, dur = acquire_volume_ophyd(volume_scanner, num_slices, exposure_ms)
                         print(f"{cnt} imgs, {dur:.3f}s")
                     except Exception as e:
                         print(f"ERROR: {e}")
 
                 # Timed repeats
                 for r in range(num_repeats):
-                    print(f"  [Ophyd] Repeat {r+1}/{num_repeats}...", end=" ", flush=True)
+                    print(
+                        f"  [Ophyd] Repeat {r + 1}/{num_repeats}...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
                         cnt, dur = acquire_volume_ophyd(
-                            volume_scanner, num_slices, exposure_ms,
-                            save_dir=save_dir)
+                            volume_scanner, num_slices, exposure_ms, save_dir=save_dir
+                        )
                         res_ophyd.timings.append(dur)
                         res_ophyd.image_counts.append(cnt)
-                        print(f"{cnt} imgs, {dur:.3f}s ({1.0/dur:.1f} vol/s)")
+                        print(f"{cnt} imgs, {dur:.3f}s ({1.0 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        res_ophyd.errors.append(f"repeat {r+1}: {e}")
+                        res_ophyd.errors.append(f"repeat {r + 1}: {e}")
 
                 results.append(res_ophyd)
                 _print_single_result(res_ophyd)
@@ -786,10 +813,9 @@ def run_benchmark_sweep(
             # --- Ophyd burst (configure once, no per-volume reset) ---
             if run_ophyd and volume_scanner is not None:
                 res_burst = BenchmarkResult("ophyd_burst", num_slices, exposure_ms)
-                print(f"\n[Ophyd Burst] Configuring once...")
+                print("\n[Ophyd Burst] Configuring once...")
                 try:
-                    configure_ophyd_burst(volume_scanner, num_slices,
-                                          exposure_ms, core)
+                    configure_ophyd_burst(volume_scanner, num_slices, exposure_ms, core)
                 except Exception as e:
                     print(f"  ERROR configuring ophyd burst: {e}")
                     res_burst.errors.append(f"configure: {e}")
@@ -798,26 +824,24 @@ def run_benchmark_sweep(
 
                 # Warm-up
                 for w in range(num_warmup):
-                    print(f"  Warm-up {w+1}/{num_warmup}...", end=" ", flush=True)
+                    print(f"  Warm-up {w + 1}/{num_warmup}...", end=" ", flush=True)
                     try:
-                        cnt, dur = acquire_volume_ophyd_burst(
-                            volume_scanner, num_slices, core)
+                        cnt, dur = acquire_volume_ophyd_burst(volume_scanner, num_slices, core)
                         print(f"{cnt} imgs, {dur:.3f}s")
                     except Exception as e:
                         print(f"ERROR: {e}")
 
                 # Timed repeats
                 for r in range(num_repeats):
-                    print(f"  Repeat {r+1}/{num_repeats}...", end=" ", flush=True)
+                    print(f"  Repeat {r + 1}/{num_repeats}...", end=" ", flush=True)
                     try:
-                        cnt, dur = acquire_volume_ophyd_burst(
-                            volume_scanner, num_slices, core)
+                        cnt, dur = acquire_volume_ophyd_burst(volume_scanner, num_slices, core)
                         res_burst.timings.append(dur)
                         res_burst.image_counts.append(cnt)
-                        print(f"{cnt} imgs, {dur:.3f}s ({1.0/dur:.1f} vol/s)")
+                        print(f"{cnt} imgs, {dur:.3f}s ({1.0 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        res_burst.errors.append(f"repeat {r+1}: {e}")
+                        res_burst.errors.append(f"repeat {r + 1}: {e}")
 
                 cleanup_ophyd_burst(volume_scanner, core)
                 results.append(res_burst)
@@ -826,11 +850,12 @@ def run_benchmark_sweep(
             # --- Burst reconfig (round-robin galvo/piezo per volume) ---
             if run_ophyd and volume_scanner is not None:
                 res_reconfig = BenchmarkResult("burst_reconfig", num_slices, exposure_ms)
-                print(f"\n[Burst Reconfig] Configuring once, "
-                      f"cycling {len(EMBRYO_PROFILES)} embryo profiles...")
+                print(
+                    f"\n[Burst Reconfig] Configuring once, "
+                    f"cycling {len(EMBRYO_PROFILES)} embryo profiles..."
+                )
                 try:
-                    configure_burst_reconfig(volume_scanner, num_slices,
-                                             exposure_ms, core)
+                    configure_burst_reconfig(volume_scanner, num_slices, exposure_ms, core)
                 except Exception as e:
                     print(f"  ERROR configuring burst reconfig: {e}")
                     res_reconfig.errors.append(f"configure: {e}")
@@ -839,12 +864,15 @@ def run_benchmark_sweep(
 
                 # Warm-up (cycle through profiles)
                 for w in range(num_warmup):
-                    print(f"  Warm-up {w+1}/{num_warmup} "
-                          f"(profile {w % len(EMBRYO_PROFILES)})...",
-                          end=" ", flush=True)
+                    print(
+                        f"  Warm-up {w + 1}/{num_warmup} (profile {w % len(EMBRYO_PROFILES)})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
                         cnt, dur = acquire_volume_burst_reconfig(
-                            volume_scanner, num_slices, w, core)
+                            volume_scanner, num_slices, w, core
+                        )
                         print(f"{cnt} imgs, {dur:.3f}s")
                     except Exception as e:
                         print(f"ERROR: {e}")
@@ -852,17 +880,21 @@ def run_benchmark_sweep(
                 # Timed repeats (cycle through profiles)
                 for r in range(num_repeats):
                     pidx = r % len(EMBRYO_PROFILES)
-                    print(f"  Repeat {r+1}/{num_repeats} "
-                          f"(profile {pidx})...", end=" ", flush=True)
+                    print(
+                        f"  Repeat {r + 1}/{num_repeats} (profile {pidx})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
                         cnt, dur = acquire_volume_burst_reconfig(
-                            volume_scanner, num_slices, r, core)
+                            volume_scanner, num_slices, r, core
+                        )
                         res_reconfig.timings.append(dur)
                         res_reconfig.image_counts.append(cnt)
-                        print(f"{cnt} imgs, {dur:.3f}s ({1.0/dur:.1f} vol/s)")
+                        print(f"{cnt} imgs, {dur:.3f}s ({1.0 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        res_reconfig.errors.append(f"repeat {r+1}: {e}")
+                        res_reconfig.errors.append(f"repeat {r + 1}: {e}")
 
                 cleanup_ophyd_burst(volume_scanner, core)
                 results.append(res_reconfig)
@@ -871,11 +903,12 @@ def run_benchmark_sweep(
             # --- Burst reconfig with waitForDevice (no time.sleep) ---
             if run_ophyd and volume_scanner is not None:
                 res_wfd = BenchmarkResult("reconfig_wfd", num_slices, exposure_ms)
-                print(f"\n[Reconfig WFD] Configuring once, "
-                      f"using waitForDevice() instead of time.sleep()...")
+                print(
+                    "\n[Reconfig WFD] Configuring once, "
+                    "using waitForDevice() instead of time.sleep()..."
+                )
                 try:
-                    configure_burst_reconfig(volume_scanner, num_slices,
-                                             exposure_ms, core)
+                    configure_burst_reconfig(volume_scanner, num_slices, exposure_ms, core)
                 except Exception as e:
                     print(f"  ERROR configuring reconfig_wfd: {e}")
                     res_wfd.errors.append(f"configure: {e}")
@@ -884,12 +917,15 @@ def run_benchmark_sweep(
 
                 # Warm-up (cycle through profiles)
                 for w in range(num_warmup):
-                    print(f"  Warm-up {w+1}/{num_warmup} "
-                          f"(profile {w % len(EMBRYO_PROFILES)})...",
-                          end=" ", flush=True)
+                    print(
+                        f"  Warm-up {w + 1}/{num_warmup} (profile {w % len(EMBRYO_PROFILES)})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
                         cnt, dur = acquire_volume_burst_reconfig_wfd(
-                            volume_scanner, num_slices, w, core)
+                            volume_scanner, num_slices, w, core
+                        )
                         print(f"{cnt} imgs, {dur:.3f}s")
                     except Exception as e:
                         print(f"ERROR: {e}")
@@ -897,17 +933,21 @@ def run_benchmark_sweep(
                 # Timed repeats (cycle through profiles)
                 for r in range(num_repeats):
                     pidx = r % len(EMBRYO_PROFILES)
-                    print(f"  Repeat {r+1}/{num_repeats} "
-                          f"(profile {pidx})...", end=" ", flush=True)
+                    print(
+                        f"  Repeat {r + 1}/{num_repeats} (profile {pidx})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
                         cnt, dur = acquire_volume_burst_reconfig_wfd(
-                            volume_scanner, num_slices, r, core)
+                            volume_scanner, num_slices, r, core
+                        )
                         res_wfd.timings.append(dur)
                         res_wfd.image_counts.append(cnt)
-                        print(f"{cnt} imgs, {dur:.3f}s ({1.0/dur:.1f} vol/s)")
+                        print(f"{cnt} imgs, {dur:.3f}s ({1.0 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
-                        res_wfd.errors.append(f"repeat {r+1}: {e}")
+                        res_wfd.errors.append(f"repeat {r + 1}: {e}")
 
                 cleanup_ophyd_burst(volume_scanner, core)
                 results.append(res_wfd)
@@ -922,22 +962,25 @@ def run_benchmark_sweep(
 def _print_single_result(res: BenchmarkResult):
     """Print a single intermediate result."""
     if not res.timings:
-        print(f"  -> {res.approach}: NO SUCCESSFUL RUNS "
-              f"({len(res.errors)} errors)")
+        print(f"  -> {res.approach}: NO SUCCESSFUL RUNS ({len(res.errors)} errors)")
         return
-    print(f"  -> {res.approach}: {res.vol_per_sec:.2f} vol/s, "
-          f"mean={res.mean:.3f}s, std={res.std:.3f}s")
+    print(
+        f"  -> {res.approach}: {res.vol_per_sec:.2f} vol/s, "
+        f"mean={res.mean:.3f}s, std={res.std:.3f}s"
+    )
 
 
-def print_results_table(results: List[BenchmarkResult]):
+def print_results_table(results: list[BenchmarkResult]):
     """Print formatted ASCII results table."""
     if not results:
         print("No results to display.")
         return
 
-    header = (f"{'Slices':>6} | {'Exp(ms)':>7} | {'Approach':>14} | "
-              f"{'Vol/s':>7} | {'Mean(s)':>7} | {'Std(s)':>7} | "
-              f"{'Min(s)':>7} | {'Max(s)':>7} | {'Images':>6}")
+    header = (
+        f"{'Slices':>6} | {'Exp(ms)':>7} | {'Approach':>14} | "
+        f"{'Vol/s':>7} | {'Mean(s)':>7} | {'Std(s)':>7} | "
+        f"{'Min(s)':>7} | {'Max(s)':>7} | {'Images':>6}"
+    )
     sep = "-" * len(header)
 
     print(f"\n{sep}")
@@ -948,35 +991,43 @@ def print_results_table(results: List[BenchmarkResult]):
 
     for r in results:
         if r.timings:
-            print(f"{r.num_slices:>6} | {r.exposure_ms:>7.1f} | {r.approach:>14} | "
-                  f"{r.vol_per_sec:>7.2f} | {r.mean:>7.3f} | {r.std:>7.3f} | "
-                  f"{r.min_t:>7.3f} | {r.max_t:>7.3f} | {r.total_images:>6}")
+            print(
+                f"{r.num_slices:>6} | {r.exposure_ms:>7.1f} | {r.approach:>14} | "
+                f"{r.vol_per_sec:>7.2f} | {r.mean:>7.3f} | {r.std:>7.3f} | "
+                f"{r.min_t:>7.3f} | {r.max_t:>7.3f} | {r.total_images:>6}"
+            )
         else:
-            print(f"{r.num_slices:>6} | {r.exposure_ms:>7.1f} | {r.approach:>14} | "
-                  f"{'FAIL':>7} | {'---':>7} | {'---':>7} | "
-                  f"{'---':>7} | {'---':>7} | {'---':>6}")
+            print(
+                f"{r.num_slices:>6} | {r.exposure_ms:>7.1f} | {r.approach:>14} | "
+                f"{'FAIL':>7} | {'---':>7} | {'---':>7} | "
+                f"{'---':>7} | {'---':>7} | {'---':>6}"
+            )
 
     print(sep)
 
 
-def print_summary(results: List[BenchmarkResult]):
+def print_summary(results: list[BenchmarkResult]):
     """Print overhead analysis comparing ophyd and ophyd_burst vs raw."""
     from collections import defaultdict
+
     groups = defaultdict(dict)
     for r in results:
         groups[(r.num_slices, r.exposure_ms)][r.approach] = r
 
     # Need at least raw + one ophyd variant
-    has_data = [(k, v) for k, v in groups.items()
-                if "raw" in v and ("ophyd" in v or "ophyd_burst" in v
-                                   or "burst_reconfig" in v
-                                   or "reconfig_wfd" in v)]
+    has_data = [
+        (k, v)
+        for k, v in groups.items()
+        if "raw" in v
+        and ("ophyd" in v or "ophyd_burst" in v or "burst_reconfig" in v or "reconfig_wfd" in v)
+    ]
     if not has_data:
         return
 
     print()
-    header = (f"{'Slices':>6} | {'Exp(ms)':>7} | "
-              f"{'Approach':>14} | {'vs Raw(ms)':>10} | {'vs Raw(%)':>9}")
+    header = (
+        f"{'Slices':>6} | {'Exp(ms)':>7} | {'Approach':>14} | {'vs Raw(ms)':>10} | {'vs Raw(%)':>9}"
+    )
     sep = "-" * len(header)
 
     print(sep)
@@ -995,14 +1046,15 @@ def print_summary(results: List[BenchmarkResult]):
             other_mean = approaches[label].mean
             overhead_ms = (other_mean - raw_mean) * 1000.0
             overhead_pct = ((other_mean - raw_mean) / raw_mean) * 100.0
-            print(f"{ns:>6} | {exp:>7.1f} | {label:>14} | "
-                  f"{overhead_ms:>+10.1f} | {overhead_pct:>+8.1f}%")
+            print(
+                f"{ns:>6} | {exp:>7.1f} | {label:>14} | "
+                f"{overhead_ms:>+10.1f} | {overhead_pct:>+8.1f}%"
+            )
 
     print(sep)
 
 
-def save_results_csv(results: List[BenchmarkResult], path: Path,
-                     run_params: dict):
+def save_results_csv(results: list[BenchmarkResult], path: Path, run_params: dict):
     """Write benchmark results to a CSV file with full metadata."""
     import csv
     import json
@@ -1031,37 +1083,63 @@ def save_results_csv(results: List[BenchmarkResult], path: Path,
         writer.writerow([])
 
         # --- Summary table ---
-        writer.writerow([
-            "slices", "exposure_ms", "approach",
-            "vol_per_sec", "mean_s", "std_s", "min_s", "max_s",
-            "total_images", "num_repeats", "errors",
-        ])
+        writer.writerow(
+            [
+                "slices",
+                "exposure_ms",
+                "approach",
+                "vol_per_sec",
+                "mean_s",
+                "std_s",
+                "min_s",
+                "max_s",
+                "total_images",
+                "num_repeats",
+                "errors",
+            ]
+        )
         for r in results:
-            writer.writerow([
-                r.num_slices, r.exposure_ms, r.approach,
-                f"{r.vol_per_sec:.4f}" if r.timings else "",
-                f"{r.mean:.6f}" if r.timings else "",
-                f"{r.std:.6f}" if r.timings else "",
-                f"{r.min_t:.6f}" if r.timings else "",
-                f"{r.max_t:.6f}" if r.timings else "",
-                r.total_images,
-                len(r.timings),
-                "; ".join(r.errors) if r.errors else "",
-            ])
+            writer.writerow(
+                [
+                    r.num_slices,
+                    r.exposure_ms,
+                    r.approach,
+                    f"{r.vol_per_sec:.4f}" if r.timings else "",
+                    f"{r.mean:.6f}" if r.timings else "",
+                    f"{r.std:.6f}" if r.timings else "",
+                    f"{r.min_t:.6f}" if r.timings else "",
+                    f"{r.max_t:.6f}" if r.timings else "",
+                    r.total_images,
+                    len(r.timings),
+                    "; ".join(r.errors) if r.errors else "",
+                ]
+            )
 
         # --- Per-volume raw timings ---
         writer.writerow([])
         writer.writerow(["# Per-volume timings (seconds)"])
-        writer.writerow([
-            "slices", "exposure_ms", "approach",
-            "repeat", "elapsed_s", "image_count",
-        ])
+        writer.writerow(
+            [
+                "slices",
+                "exposure_ms",
+                "approach",
+                "repeat",
+                "elapsed_s",
+                "image_count",
+            ]
+        )
         for r in results:
-            for i, (t, cnt) in enumerate(zip(r.timings, r.image_counts)):
-                writer.writerow([
-                    r.num_slices, r.exposure_ms, r.approach,
-                    i + 1, f"{t:.6f}", cnt,
-                ])
+            for i, (t, cnt) in enumerate(zip(r.timings, r.image_counts, strict=False)):
+                writer.writerow(
+                    [
+                        r.num_slices,
+                        r.exposure_ms,
+                        r.approach,
+                        i + 1,
+                        f"{t:.6f}",
+                        cnt,
+                    ]
+                )
 
     print(f"\nResults saved to: {path}")
 
@@ -1076,8 +1154,10 @@ def main():
     print(f"  Slices series: {SLICES_SERIES}")
     print(f"  Exposure:      {EXPOSURE_MS} ms")
     print(f"  Repeats:       {NUM_REPEATS} (+ {NUM_WARMUP} warmup)")
-    print(f"  Approaches:    raw / ophyd / ophyd_burst / burst_reconfig / reconfig_wfd")
-    print(f"  Embryo profiles: {len(EMBRYO_PROFILES)} (for burst_reconfig & reconfig_wfd round-robin)")
+    print("  Approaches:    raw / ophyd / ophyd_burst / burst_reconfig / reconfig_wfd")
+    print(
+        f"  Embryo profiles: {len(EMBRYO_PROFILES)} (for burst_reconfig & reconfig_wfd round-robin)"
+    )
 
     # Load config and initialize
     mm_dir, config_file = load_config(config_path)
@@ -1099,7 +1179,9 @@ def main():
         print_summary(results)
 
         # Save CSV
-        csv_path = Path("results") / f"benchmark_volume_fps_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = (
+            Path("results") / f"benchmark_volume_fps_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
         run_params = {
             "slices": SLICES_SERIES,
             "exposure_ms": EXPOSURE_MS,

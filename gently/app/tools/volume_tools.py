@@ -5,21 +5,21 @@ Tools for viewing and listing acquired lightsheet volumes.
 """
 
 import logging
-from typing import Dict, Optional
-from datetime import datetime
+
+from gently.core.coordinates import get_um_per_pixel, stage_to_pixel_position
+from gently.harness.tools.helpers import require_agent
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_agent, get_embryo_or_error
-from gently.core.coordinates import stage_to_pixel_position, get_um_per_pixel
 
 
 @tool(
     name="view_image",
-    description="""Capture and display the current bottom camera widefield image. Shows what's visible at the current stage position.
-Use when user says "show me the view", "take a picture", "what does it look like?", or to check sample positioning.
-This is the widefield/brightfield camera looking up at the sample - good for seeing embryo outlines and overall positioning.
+    description="""Capture and display the current bottom camera widefield image. Shows what's
+visible at the current stage position.
+Use when user says "show me the view", "take a picture", "what does it look like?", or to
+check sample positioning. This is the widefield/brightfield camera looking up at the sample
+- good for seeing embryo outlines and overall positioning.
 Image is automatically saved to camera_captures/ folder.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
@@ -33,15 +33,15 @@ async def view_image(
     exposure_ms: float = None,
     show: bool = True,
     show_embryos: bool = True,
-    context: Dict = None
+    context: dict = None,
 ) -> str:
     """Capture and display bottom camera image with embryo annotations"""
-    client = context.get('client')
-    agent = context.get('agent')
+    client = context.get("client")
+    agent = context.get("agent")
 
     try:
         snap = await client.capture_bottom_image(exposure_ms=exposure_ms)
-        image = snap['image']
+        image = snap["image"]
 
         if image is None or image.shape == (100, 100):
             return "Failed to capture image from bottom camera"
@@ -50,15 +50,16 @@ async def view_image(
         stage_pos = await client.get_stage_position()
 
         # Archive the bottom camera image with metadata
-        if snap.get('image_path') and agent and agent.store and agent.session_id:
+        if snap.get("image_path") and agent and agent.store and agent.session_id:
             try:
                 from gently.harness.tools.helpers import build_snapshot_metadata
+
                 meta = build_snapshot_metadata(
-                    stage_pos, image.shape,
-                    agent.experiment if agent else None)
+                    stage_pos, image.shape, agent.experiment if agent else None
+                )
                 agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'],
-                    metadata=meta)
+                    agent.session_id, "bottom_camera", snap["image_path"], metadata=meta
+                )
             except Exception:
                 pass
 
@@ -72,8 +73,8 @@ async def view_image(
             for embryo_id, embryo in agent.experiment.embryos.items():
                 if embryo.stage_position:
                     # Convert stage position to pixel position using centralized function
-                    emb_x = embryo.stage_position.get('x', 0)
-                    emb_y = embryo.stage_position.get('y', 0)
+                    emb_x = embryo.stage_position.get("x", 0)
+                    emb_y = embryo.stage_position.get("y", 0)
                     pixel_x, pixel_y = stage_to_pixel_position(
                         stage_x=emb_x,
                         stage_y=emb_y,
@@ -81,34 +82,47 @@ async def view_image(
                         current_stage_y=stage_pos[1],
                         image_center_x=image_center_x,
                         image_center_y=image_center_y,
-                        um_per_pixel=um_per_pixel
+                        um_per_pixel=um_per_pixel,
                     )
 
-                    embryo_annotations.append({
-                        'embryo_id': embryo_id,
-                        'pixel_x': pixel_x,
-                        'pixel_y': pixel_y,
-                        'label': embryo.user_label or embryo_id
-                    })
+                    embryo_annotations.append(
+                        {
+                            "embryo_id": embryo_id,
+                            "pixel_x": pixel_x,
+                            "pixel_y": pixel_y,
+                            "label": embryo.user_label or embryo_id,
+                        }
+                    )
 
         if show:
             from datetime import datetime
             from pathlib import Path
+
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             save_path = f"camera_captures/bottom_camera_{timestamp}.jpg"
             Path("camera_captures").mkdir(exist_ok=True)
 
-            view_result = await client.view_image(
+            await client.view_image(
                 image=image,
                 title=title,
                 save_path=save_path,
                 show=True,
-                embryo_annotations=embryo_annotations if embryo_annotations else None
+                embryo_annotations=embryo_annotations if embryo_annotations else None,
             )
-            num_visible = len([a for a in embryo_annotations
-                              if 0 <= a['pixel_x'] < image.shape[1] and 0 <= a['pixel_y'] < image.shape[0]])
-            annotation_msg = f"\nShowing {num_visible} embryo(s) in view" if embryo_annotations else ""
-            return f"Captured bottom camera image ({image.shape[0]}x{image.shape[1]})\nSaved to: {save_path}{annotation_msg}"
+            num_visible = len(
+                [
+                    a
+                    for a in embryo_annotations
+                    if 0 <= a["pixel_x"] < image.shape[1] and 0 <= a["pixel_y"] < image.shape[0]
+                ]
+            )
+            annotation_msg = (
+                f"\nShowing {num_visible} embryo(s) in view" if embryo_annotations else ""
+            )
+            return (
+                f"Captured bottom camera image ({image.shape[0]}x{image.shape[1]})"
+                f"\nSaved to: {save_path}{annotation_msg}"
+            )
         else:
             return f"Captured bottom camera image ({image.shape[0]}x{image.shape[1]})"
 
@@ -135,7 +149,7 @@ async def view_volume(
     embryo_id: str = None,
     timepoint: int = None,
     file_path: str = None,
-    context: Dict = None
+    context: dict = None,
 ) -> str:
     """Open a volume in the browser-based viewer (no blocking desktop window)."""
     from pathlib import Path
@@ -162,9 +176,11 @@ async def view_volume(
         except (ValueError, IndexError):
             pass
         if not embryo_id or timepoint is None:
-            return ("Volume viewing is now in-browser and addressed by embryo + "
-                    "timepoint. Please specify embryo_id (and optionally timepoint) "
-                    "rather than a raw file path.")
+            return (
+                "Volume viewing is now in-browser and addressed by embryo + "
+                "timepoint. Please specify embryo_id (and optionally timepoint) "
+                "rather than a raw file path."
+            )
 
     if not embryo_id:
         return "Error: Specify embryo_id (and optionally timepoint)."
@@ -174,7 +190,7 @@ async def view_volume(
         volume_path = agent.store.get_volume_path(session_id, embryo_id, timepoint)
         if not volume_path or not Path(volume_path).exists():
             volumes = agent.store.list_volumes(session_id, embryo_id)
-            available = sorted(v['timepoint'] for v in volumes)
+            available = sorted(v["timepoint"] for v in volumes)
             if not available:
                 return f"No volumes found for {embryo_id} in session {session_id}"
             return f"Timepoint {timepoint} not found for {embryo_id}. Available: {available}"
@@ -182,13 +198,15 @@ async def view_volume(
         volumes = agent.store.list_volumes(session_id, embryo_id)
         if not volumes:
             return f"No volumes found for {embryo_id} in session {session_id}"
-        timepoint = max(v['timepoint'] for v in volumes)
+        timepoint = max(v["timepoint"] for v in volumes)
 
     # Drive the in-browser viewer \u2014 no blocking Qt/desktop window.
     viz = getattr(agent, "viz_server", None)
     if viz is None:
-        return (f"Resolved {embryo_id} t{timepoint:04d}, but the web UI isn't running, "
-                f"so there's nowhere to display it. Start the web UI and try again.")
+        return (
+            f"Resolved {embryo_id} t{timepoint:04d}, but the web UI isn't running, "
+            f"so there's nowhere to display it. Start the web UI and try again."
+        )
 
     try:
         n_clients = await viz.open_volume_in_browser(embryo_id, timepoint)
@@ -198,16 +216,21 @@ async def view_volume(
 
     url = f"http://localhost:{getattr(viz, 'port', 8080)}/"
     if n_clients <= 0:
-        return (f"Resolved {embryo_id} t{timepoint:04d}, but no browser is connected. "
-                f"Open {url} and select that embryo/timepoint to view it.")
-    return (f"\u2713 Opening {embryo_id} t{timepoint:04d} in the web volume viewer "
-            f"({n_clients} view(s) connected) \u2014 {url}")
+        return (
+            f"Resolved {embryo_id} t{timepoint:04d}, but no browser is connected. "
+            f"Open {url} and select that embryo/timepoint to view it."
+        )
+    return (
+        f"\u2713 Opening {embryo_id} t{timepoint:04d} in the web volume viewer "
+        f"({n_clients} view(s) connected) \u2014 {url}"
+    )
 
 
 @tool(
     name="list_volumes",
     description="""List available volumes for an embryo or all embryos.
-Shows volume files with timepoints and file sizes. Scans the storage directory for all volumes (not just recent ones in memory).
+Shows volume files with timepoints and file sizes. Scans the storage directory for all
+volumes (not just recent ones in memory).
 Use to see what data is available before viewing.""",
     category=ToolCategory.ANALYSIS,
     requires_microscope=False,
@@ -216,10 +239,7 @@ Use to see what data is available before viewing.""",
         ToolExample("List all volumes", {}),
     ],
 )
-async def list_volumes(
-    embryo_id: str = None,
-    context: Dict = None
-) -> str:
+async def list_volumes(embryo_id: str = None, context: dict = None) -> str:
     """List available volumes"""
     agent, err = require_agent(context)
     if err:
@@ -234,14 +254,14 @@ async def list_volumes(
     # Group by embryo_id
     all_volumes = {}  # embryo_id -> list of volume records
     for vol in all_volumes_list:
-        eid = vol['embryo_id']
+        eid = vol["embryo_id"]
         if eid not in all_volumes:
             all_volumes[eid] = []
         all_volumes[eid].append(vol)
 
     # Sort by timepoint
     for eid in all_volumes:
-        all_volumes[eid].sort(key=lambda x: x['timepoint'])
+        all_volumes[eid].sort(key=lambda x: x["timepoint"])
 
     if embryo_id:
         # List volumes for specific embryo
@@ -254,7 +274,7 @@ async def list_volumes(
         lines.append("")
 
         for vol in volumes:
-            tp = vol['timepoint']
+            tp = vol["timepoint"]
             path = agent.store.get_volume_path(session_id, embryo_id, tp)
             if path and path.exists():
                 size_mb = path.stat().st_size / (1024 * 1024)
@@ -268,25 +288,33 @@ async def list_volumes(
             return f"No volumes found in session {session_id}"
 
         total_files = sum(len(v) for v in all_volumes.values())
-        lines.append(f"Available volumes: {total_files} file(s) across {len(all_volumes)} embryo(s)")
+        lines.append(
+            f"Available volumes: {total_files} file(s) across {len(all_volumes)} embryo(s)"
+        )
         lines.append(f"Session: {session_id}")
 
         for eid in sorted(all_volumes.keys()):
             volumes = all_volumes[eid]
-            timepoints = [v['timepoint'] for v in volumes]
-            tp_range = f"t{min(timepoints):04d}-t{max(timepoints):04d}" if len(timepoints) > 1 else f"t{timepoints[0]:04d}"
+            timepoints = [v["timepoint"] for v in volumes]
+            tp_range = (
+                f"t{min(timepoints):04d}-t{max(timepoints):04d}"
+                if len(timepoints) > 1
+                else f"t{timepoints[0]:04d}"
+            )
 
             # Calculate total size
             total_size = 0
             for vol in volumes:
-                path = agent.store.get_volume_path(session_id, eid, vol['timepoint'])
+                path = agent.store.get_volume_path(session_id, eid, vol["timepoint"])
                 if path and path.exists():
                     total_size += path.stat().st_size / (1024 * 1024)
-            lines.append(f"\n{eid}: {len(volumes)} volume(s) [{tp_range}] ({total_size:.1f} MB total)")
+            lines.append(
+                f"\n{eid}: {len(volumes)} volume(s) [{tp_range}] ({total_size:.1f} MB total)"
+            )
 
             # Show last few timepoints
             for vol in volumes[-3:]:
-                tp = vol['timepoint']
+                tp = vol["timepoint"]
                 path = agent.store.get_volume_path(session_id, eid, tp)
                 if path and path.exists():
                     size_mb = path.stat().st_size / (1024 * 1024)

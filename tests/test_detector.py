@@ -2,19 +2,21 @@
 Tests for the generic detector system: conditions, scheduling, response parsing.
 """
 
-import pytest
 from datetime import datetime
 
 from gently.harness.detection.detector import (
-    DetectionMode, ConfidenceLevel,
-    DetectorConditions, DetectorActions, DetectionResult,
+    ConfidenceLevel,
+    DetectionMode,
+    DetectionResult,
     Detector,
+    DetectorActions,
+    DetectorConditions,
 )
-
 
 # ===========================================================================
 # DetectorConditions
 # ===========================================================================
+
 
 class TestDetectorConditions:
     """DetectorConditions controls when detectors run."""
@@ -57,8 +59,10 @@ class TestDetectorConditions:
 
     def test_combined_conditions(self):
         cond = DetectorConditions(
-            min_timepoint=10, max_timepoint=100,
-            embryo_ids=["e1"], min_interval_timepoints=3,
+            min_timepoint=10,
+            max_timepoint=100,
+            embryo_ids=["e1"],
+            min_interval_timepoints=3,
         )
         # Too early
         assert not cond.should_run("e1", 5, None, False)
@@ -73,6 +77,7 @@ class TestDetectorConditions:
 # ===========================================================================
 # Detector
 # ===========================================================================
+
 
 class TestDetector:
     """Detector scheduling and state tracking."""
@@ -95,18 +100,14 @@ class TestDetector:
         assert not d.should_run("e1", 10)
 
     def test_mark_run_tracks_timepoint(self):
-        d = self._make_detector(
-            conditions=DetectorConditions(min_interval_timepoints=5)
-        )
+        d = self._make_detector(conditions=DetectorConditions(min_interval_timepoints=5))
         d.mark_run("e1", 10)
         assert d.run_count == 1
         assert not d.should_run("e1", 12)  # Too soon
         assert d.should_run("e1", 15)
 
     def test_mark_detected(self):
-        d = self._make_detector(
-            conditions=DetectorConditions(run_if_detected=False)
-        )
+        d = self._make_detector(conditions=DetectorConditions(run_if_detected=False))
         assert not d.was_detected("e1")
         d.mark_detected("e1")
         assert d.was_detected("e1")
@@ -115,9 +116,7 @@ class TestDetector:
 
     def test_per_embryo_tracking(self):
         """Detection state is tracked per-embryo."""
-        d = self._make_detector(
-            conditions=DetectorConditions(run_if_detected=False)
-        )
+        d = self._make_detector(conditions=DetectorConditions(run_if_detected=False))
         d.mark_detected("e1")
         assert d.was_detected("e1")
         assert not d.was_detected("e2")
@@ -128,42 +127,40 @@ class TestDetector:
 # Response Parsing
 # ===========================================================================
 
+
 class TestDetectorResponseParsing:
     """Detector parses Claude Vision API responses."""
 
     def _make_detector(self):
-        return Detector(
-            name="test", description="test",
-            detection_prompt="detect something"
-        )
+        return Detector(name="test", description="test", detection_prompt="detect something")
 
     def test_parse_yes_high(self):
         d = self._make_detector()
         result = d.parse_detection_response(
             "DETECTED: YES\nCONFIDENCE: HIGH\nREASONING: Clear comma shape visible"
         )
-        assert result['detected'] is True
-        assert result['confidence'] == ConfidenceLevel.HIGH
-        assert "comma" in result['reasoning']
+        assert result["detected"] is True
+        assert result["confidence"] == ConfidenceLevel.HIGH
+        assert "comma" in result["reasoning"]
 
     def test_parse_no_low(self):
         d = self._make_detector()
         result = d.parse_detection_response(
             "DETECTED: NO\nCONFIDENCE: LOW\nREASONING: No visible features"
         )
-        assert result['detected'] is False
-        assert result['confidence'] == ConfidenceLevel.LOW
+        assert result["detected"] is False
+        assert result["confidence"] == ConfidenceLevel.LOW
 
     def test_parse_true_as_detected(self):
         d = self._make_detector()
         result = d.parse_detection_response("DETECTED: TRUE\nCONFIDENCE: MEDIUM")
-        assert result['detected'] is True
+        assert result["detected"] is True
 
     def test_parse_missing_fields(self):
         d = self._make_detector()
         result = d.parse_detection_response("Some random response")
-        assert result['detected'] is False
-        assert result['confidence'] is None
+        assert result["detected"] is False
+        assert result["confidence"] is None
 
     def test_parse_multiline_reasoning(self):
         """Multiline reasoning is captured when it spans multiple lines."""
@@ -174,12 +171,13 @@ class TestDetectorResponseParsing:
         result = d.parse_detection_response(
             "DETECTED: YES\nCONFIDENCE: HIGH\nREASONING: The embryo shows clear elongation"
         )
-        assert "elongation" in result['reasoning']
+        assert "elongation" in result["reasoning"]
 
 
 # ===========================================================================
 # Serialization
 # ===========================================================================
+
 
 class TestDetectorSerialization:
     """Detector serialization roundtrip."""
@@ -192,8 +190,8 @@ class TestDetectorSerialization:
             confidence_threshold=ConfidenceLevel.HIGH,
         )
         data = d.to_dict()
-        assert data['name'] == 'comma_stage'
-        assert data['confidence_threshold'] == 'HIGH'
+        assert data["name"] == "comma_stage"
+        assert data["confidence_threshold"] == "HIGH"
 
     def test_roundtrip(self):
         original = Detector(
@@ -230,9 +228,9 @@ class TestDetectionResult:
             reasoning="Clear comma shape",
         )
         d = r.to_dict()
-        assert d['detected'] is True
-        assert d['confidence'] == 'HIGH'
-        assert isinstance(d['timestamp'], str)
+        assert d["detected"] is True
+        assert d["confidence"] == "HIGH"
+        assert isinstance(d["timestamp"], str)
 
 
 class TestDetectorActions:

@@ -4,7 +4,7 @@ import json
 import logging
 from dataclasses import asdict
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -121,13 +121,13 @@ def create_router(server) -> APIRouter:
         # Pre-index every item in the tree once. The naive enrichment used to call
         # cs.get_plan_item(...) per dep + per dependent, each one walking the on-disk
         # campaign index — O(items × deps × campaigns) YAML reads per request.
-        items_by_id: Dict[str, Dict] = {}
-        dependents_map: Dict[str, List[str]] = {}
+        items_by_id: dict[str, dict] = {}
+        dependents_map: dict[str, list[str]] = {}
 
         def _index(node):
             for it in node.get("items", []):
                 items_by_id[it["id"]] = it
-                for dep_id in (it.get("depends_on") or []):
+                for dep_id in it.get("depends_on") or []:
                     dependents_map.setdefault(dep_id, []).append(it["id"])
             for child in node.get("children", []):
                 _index(child)
@@ -147,16 +147,12 @@ def create_router(server) -> APIRouter:
             for item in node.get("items", []):
                 item_id = item["id"]
                 dep_ids = list(item.get("depends_on") or [])
-                item["dependencies"] = [
-                    {"id": d, "title": _resolve_title(d)} for d in dep_ids
-                ]
+                item["dependencies"] = [{"id": d, "title": _resolve_title(d)} for d in dep_ids]
                 dnt_ids = dependents_map.get(item_id, [])
-                item["dependents"] = [
-                    {"id": d, "title": _resolve_title(d)} for d in dnt_ids
-                ]
+                item["dependents"] = [{"id": d, "title": _resolve_title(d)} for d in dnt_ids]
 
                 # Collect references into bibliography
-                for ref in (item.get("references") or []):
+                for ref in item.get("references") or []:
                     source = ref.get("source", "")
                     key = ref.get("key", ref.get("id", ref.get("title", "")))
                     dedup_key = (source, key)
@@ -227,16 +223,26 @@ def create_router(server) -> APIRouter:
         dependencies = []
         for did in dep_ids:
             dep = cs.get_plan_item(did)
-            dependencies.append({"id": did, "title": dep.title if dep else did[:8],
-                                 "status": dep.status.value if dep else None})
+            dependencies.append(
+                {
+                    "id": did,
+                    "title": dep.title if dep else did[:8],
+                    "status": dep.status.value if dep else None,
+                }
+            )
 
         # Dependents with titles
         dnt_ids = cs.get_plan_item_dependents(item_id)
         dependents = []
         for did in dnt_ids:
             dnt = cs.get_plan_item(did)
-            dependents.append({"id": did, "title": dnt.title if dnt else did[:8],
-                               "status": dnt.status.value if dnt else None})
+            dependents.append(
+                {
+                    "id": did,
+                    "title": dnt.title if dnt else did[:8],
+                    "status": dnt.status.value if dnt else None,
+                }
+            )
 
         # Sessions linked to this campaign
         sessions = cs.get_sessions_for_campaign(item.campaign_id)
@@ -280,9 +286,12 @@ def create_router(server) -> APIRouter:
                     if required_scope not in scopes:
                         if _audit:
                             from gently.mesh.audit import AuditEvent
+
                             _audit.log(
-                                AuditEvent.SCOPE_DENIED, outcome="deny",
-                                peer_id=peer_id, ip=host,
+                                AuditEvent.SCOPE_DENIED,
+                                outcome="deny",
+                                peer_id=peer_id,
+                                ip=host,
                                 detail=f"scope={required_scope} path={request.url.path}",
                             )
                         raise HTTPException(
@@ -291,36 +300,51 @@ def create_router(server) -> APIRouter:
                         )
                     if _audit:
                         from gently.mesh.audit import AuditEvent
+
                         _audit.log(
-                            AuditEvent.AUTH_SUCCESS, outcome="allow",
-                            peer_id=peer_id, ip=host,
+                            AuditEvent.AUTH_SUCCESS,
+                            outcome="allow",
+                            peer_id=peer_id,
+                            ip=host,
                         )
                     return
             if _audit:
                 from gently.mesh.audit import AuditEvent
+
                 _audit.log(
-                    AuditEvent.AUTH_FAILURE, outcome="deny",
-                    ip=host, detail=f"path={request.url.path}",
+                    AuditEvent.AUTH_FAILURE,
+                    outcome="deny",
+                    ip=host,
+                    detail=f"path={request.url.path}",
                 )
             raise HTTPException(status_code=403, detail="Mesh authentication required")
 
         return _require
 
-    @router.post("/api/campaigns/{campaign_id}/share", dependencies=[Depends(_make_campaign_auth("campaigns:admin"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/share",
+        dependencies=[Depends(_make_campaign_auth("campaigns:admin"))],
+    )
     async def share_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         cs.share_campaign(campaign.id)
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/unshare", dependencies=[Depends(_make_campaign_auth("campaigns:admin"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/unshare",
+        dependencies=[Depends(_make_campaign_auth("campaigns:admin"))],
+    )
     async def unshare_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         cs.unshare_campaign(campaign.id)
         return {"ok": True}
 
-    @router.get("/api/campaigns/{campaign_id}/export", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.get(
+        "/api/campaigns/{campaign_id}/export",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def export_campaign(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
@@ -328,7 +352,10 @@ def create_router(server) -> APIRouter:
         _enrich_export_with_claims(tree, cs, campaign.id)
         return tree
 
-    @router.post("/api/campaigns/{campaign_id}/join", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/join",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def join_campaign(campaign_id: str, request: Request):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
@@ -340,14 +367,20 @@ def create_router(server) -> APIRouter:
         cs.add_campaign_participant(campaign.id, instance_id, hostname)
         return {"ok": True}
 
-    @router.get("/api/campaigns/{campaign_id}/participants", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.get(
+        "/api/campaigns/{campaign_id}/participants",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def get_participants(campaign_id: str):
         cs = _get_store()
         campaign = _resolve(cs, campaign_id)
         participants = cs.get_campaign_participants(campaign.id)
         return {"participants": participants}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/claim", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/claim",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def claim_item(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)
@@ -361,14 +394,20 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=409, detail="Item already claimed by another node")
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/unclaim", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/unclaim",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def unclaim_item(campaign_id: str, item_id: str):
         cs = _get_store()
         _resolve(cs, campaign_id)
         cs.unclaim_plan_item(item_id)
         return {"ok": True}
 
-    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/status", dependencies=[Depends(_make_campaign_auth("campaigns"))])
+    @router.post(
+        "/api/campaigns/{campaign_id}/items/{item_id}/status",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
     async def update_item_status(campaign_id: str, item_id: str, request: Request):
         cs = _get_store()
         _resolve(cs, campaign_id)
@@ -380,7 +419,7 @@ def create_router(server) -> APIRouter:
         try:
             item_status = PlanItemStatus(status_str)
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid status: {status_str}")
+            raise HTTPException(status_code=400, detail=f"Invalid status: {status_str}") from None
         cs.update_plan_item(item_id, status=item_status, outcome=outcome)
         return {"ok": True}
 
@@ -388,7 +427,7 @@ def create_router(server) -> APIRouter:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _build_campaign_tree(cs, campaign_id: str) -> Optional[Dict]:
+    def _build_campaign_tree(cs, campaign_id: str) -> dict | None:
         """Recursively build campaign tree with plan items and status."""
         campaign = cs.get_campaign(campaign_id)
         if not campaign:
@@ -410,13 +449,10 @@ def create_router(server) -> APIRouter:
                 "in_progress": status["in_progress"],
                 "planned": status["planned"],
             },
-            "children": [
-                _build_campaign_tree(cs, child.id)
-                for child in children
-            ],
+            "children": [_build_campaign_tree(cs, child.id) for child in children],
         }
 
-    def _enrich_export_with_claims(tree: Dict, cs, campaign_id: str):
+    def _enrich_export_with_claims(tree: dict, cs, campaign_id: str):
         """Walk a serialized campaign tree and annotate items with IDs and claim info."""
         items = cs.get_plan_items(campaign_id=campaign_id)
         items.sort(key=lambda x: x.phase_order)

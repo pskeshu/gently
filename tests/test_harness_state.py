@@ -2,54 +2,67 @@
 Tests for harness state management: FocusDataPoint, EmbryoState, ExperimentState.
 """
 
-import pytest
-import numpy as np
 from datetime import datetime, timedelta
 
-from gently.harness.state import FocusDataPoint, EmbryoState, ExperimentState
-
+from gently.harness.state import EmbryoState, ExperimentState, FocusDataPoint
 
 # ===========================================================================
 # FocusDataPoint
 # ===========================================================================
+
 
 class TestFocusDataPoint:
     """FocusDataPoint serialization and backward compatibility."""
 
     def test_creation(self):
         fp = FocusDataPoint(
-            z=50.0, secondary_axis=1.5, score=0.9, r_squared=0.95,
-            timestamp=datetime.now(), method='calibration'
+            z=50.0,
+            secondary_axis=1.5,
+            score=0.9,
+            r_squared=0.95,
+            timestamp=datetime.now(),
+            method="calibration",
         )
         assert fp.z == 50.0
         assert fp.secondary_axis == 1.5
 
     def test_backward_compat_properties(self):
         fp = FocusDataPoint(
-            z=50.0, secondary_axis=1.5, score=0.9, r_squared=0.95,
-            timestamp=datetime.now(), method='fine_focus'
+            z=50.0,
+            secondary_axis=1.5,
+            score=0.9,
+            r_squared=0.95,
+            timestamp=datetime.now(),
+            method="fine_focus",
         )
         assert fp.piezo == 50.0
         assert fp.galvo == 1.5
 
     def test_to_dict_has_both_keys(self):
         fp = FocusDataPoint(
-            z=50.0, secondary_axis=1.5, score=0.9, r_squared=0.95,
-            timestamp=datetime.now(), method='manual'
+            z=50.0,
+            secondary_axis=1.5,
+            score=0.9,
+            r_squared=0.95,
+            timestamp=datetime.now(),
+            method="manual",
         )
         d = fp.to_dict()
         # New keys
-        assert d['z'] == 50.0
-        assert d['secondary_axis'] == 1.5
+        assert d["z"] == 50.0
+        assert d["secondary_axis"] == 1.5
         # Backward-compat keys
-        assert d['piezo'] == 50.0
-        assert d['galvo'] == 1.5
+        assert d["piezo"] == 50.0
+        assert d["galvo"] == 1.5
 
     def test_from_dict_new_keys(self):
         d = {
-            'z': 60.0, 'secondary_axis': 2.0, 'score': 0.8,
-            'r_squared': 0.9, 'timestamp': datetime.now().isoformat(),
-            'method': 'calibration'
+            "z": 60.0,
+            "secondary_axis": 2.0,
+            "score": 0.8,
+            "r_squared": 0.9,
+            "timestamp": datetime.now().isoformat(),
+            "method": "calibration",
         }
         fp = FocusDataPoint.from_dict(d)
         assert fp.z == 60.0
@@ -58,9 +71,12 @@ class TestFocusDataPoint:
     def test_from_dict_old_keys(self):
         """Deserializing data with old key names (piezo/galvo) must work."""
         d = {
-            'piezo': 70.0, 'galvo': 3.0, 'score': 0.85,
-            'r_squared': 0.92, 'timestamp': datetime.now().isoformat(),
-            'method': 'fine_focus'
+            "piezo": 70.0,
+            "galvo": 3.0,
+            "score": 0.85,
+            "r_squared": 0.92,
+            "timestamp": datetime.now().isoformat(),
+            "method": "fine_focus",
         }
         fp = FocusDataPoint.from_dict(d)
         assert fp.z == 70.0
@@ -68,8 +84,13 @@ class TestFocusDataPoint:
 
     def test_roundtrip(self):
         original = FocusDataPoint(
-            z=42.0, secondary_axis=1.1, score=0.7, r_squared=0.88,
-            timestamp=datetime.now(), method='calibration', algorithm='gradient'
+            z=42.0,
+            secondary_axis=1.1,
+            score=0.7,
+            r_squared=0.88,
+            timestamp=datetime.now(),
+            method="calibration",
+            algorithm="gradient",
         )
         restored = FocusDataPoint.from_dict(original.to_dict())
         assert restored.z == original.z
@@ -81,6 +102,7 @@ class TestFocusDataPoint:
 # EmbryoState — Focus Methods
 # ===========================================================================
 
+
 class TestEmbryoFocus:
     """EmbryoState focus tracking and analysis."""
 
@@ -88,12 +110,16 @@ class TestEmbryoFocus:
         e = EmbryoState(id="embryo_1")
         now = datetime.now()
         for i in range(5):
-            e.focus_history.append(FocusDataPoint(
-                z=50.0 + i * 2, secondary_axis=1.0 + i * 0.1,
-                score=0.9, r_squared=0.95,
-                timestamp=now - timedelta(hours=4 - i),
-                method='calibration',
-            ))
+            e.focus_history.append(
+                FocusDataPoint(
+                    z=50.0 + i * 2,
+                    secondary_axis=1.0 + i * 0.1,
+                    score=0.9,
+                    r_squared=0.95,
+                    timestamp=now - timedelta(hours=4 - i),
+                    method="calibration",
+                )
+            )
         return e
 
     def test_add_focus_datapoint_new_args(self):
@@ -127,10 +153,16 @@ class TestEmbryoFocus:
 
     def test_get_focus_min_r_squared_filter(self):
         e = EmbryoState(id="e1")
-        e.focus_history.append(FocusDataPoint(
-            z=50.0, secondary_axis=0.0, score=0.5, r_squared=0.3,
-            timestamp=datetime.now(), method='manual'
-        ))
+        e.focus_history.append(
+            FocusDataPoint(
+                z=50.0,
+                secondary_axis=0.0,
+                score=0.5,
+                r_squared=0.3,
+                timestamp=datetime.now(),
+                method="manual",
+            )
+        )
         # With default min_r_squared=0.5, this low-quality point is filtered
         assert e.get_focus_at_secondary(0.0) is None
 
@@ -163,10 +195,16 @@ class TestEmbryoFocus:
 
     def test_needs_refocus_old_data(self):
         e = EmbryoState(id="e1")
-        e.focus_history.append(FocusDataPoint(
-            z=50.0, secondary_axis=0.0, score=0.9, r_squared=0.95,
-            timestamp=datetime.now() - timedelta(hours=2), method='manual'
-        ))
+        e.focus_history.append(
+            FocusDataPoint(
+                z=50.0,
+                secondary_axis=0.0,
+                score=0.9,
+                r_squared=0.95,
+                timestamp=datetime.now() - timedelta(hours=2),
+                method="manual",
+            )
+        )
         assert e.needs_refocus(max_age_minutes=60) is True
 
     def test_needs_refocus_galvo_kwarg(self):
@@ -178,6 +216,7 @@ class TestEmbryoFocus:
 # ===========================================================================
 # EmbryoState — Detection Methods
 # ===========================================================================
+
 
 class TestEmbryoDetection:
     """EmbryoState detection result tracking."""
@@ -231,6 +270,7 @@ class TestEmbryoDetection:
 # EmbryoState — CV Results
 # ===========================================================================
 
+
 class TestEmbryoCVResults:
     """EmbryoState CV analysis result tracking."""
 
@@ -260,6 +300,7 @@ class TestEmbryoCVResults:
 # EmbryoState — Exposure Tracking
 # ===========================================================================
 
+
 class TestEmbryoExposure:
     """EmbryoState light exposure tracking."""
 
@@ -288,27 +329,29 @@ class TestEmbryoExposure:
 # EmbryoState — Serialization
 # ===========================================================================
 
+
 class TestEmbryoSerialization:
     """EmbryoState to_dict serialization."""
 
     def test_to_dict_basic(self):
         e = EmbryoState(id="e1", nickname="the fast one")
         d = e.to_dict()
-        assert d['id'] == 'e1'
-        assert d['nickname'] == 'the fast one'
-        assert d['timepoints_acquired'] == 0
+        assert d["id"] == "e1"
+        assert d["nickname"] == "the fast one"
+        assert d["timepoints_acquired"] == 0
 
     def test_to_dict_with_focus_history(self):
         e = EmbryoState(id="e1")
         e.add_focus_datapoint(z=50.0, score=0.9, r_squared=0.95)
         d = e.to_dict()
-        assert len(d['focus_history']) == 1
-        assert d['focus_history'][0]['z'] == 50.0
+        assert len(d["focus_history"]) == 1
+        assert d["focus_history"][0]["z"] == 50.0
 
 
 # ===========================================================================
 # ExperimentState
 # ===========================================================================
+
 
 class TestExperimentState:
     """ExperimentState management."""
@@ -362,9 +405,9 @@ class TestExperimentState:
         exp = ExperimentState()
         exp.add_embryo("e1")
         d = exp.to_dict()
-        assert d['embryo_count'] == 1
-        assert 'e1' in d['embryos']
-        assert 'calibration_prior' in d
+        assert d["embryo_count"] == 1
+        assert "e1" in d["embryos"]
+        assert "calibration_prior" in d
 
     def test_summary_no_experiment(self):
         exp = ExperimentState()

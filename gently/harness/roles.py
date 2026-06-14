@@ -20,7 +20,6 @@ Built-in roles:
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 
 @dataclass(frozen=True)
@@ -29,10 +28,11 @@ class EmbryoRole:
 
     Frozen so role definitions are immutable references after registry build.
     """
+
     name: str
     description: str
     default_cadence_seconds: float = 300.0
-    detector_name: Optional[str] = None
+    detector_name: str | None = None
     photodose_budget_multiplier: float = 1.0
     ui_color: str = "#888888"
     ui_icon: str = "circle"
@@ -43,10 +43,10 @@ class EmbryoRole:
     # drift back; once they're out of view they stay out, so they get
     # a short threshold. Test embryos can occasionally pop out and
     # back, so they get a longer one.
-    no_object_consecutive_terminal: Optional[int] = None
+    no_object_consecutive_terminal: int | None = None
 
 
-REGISTRY: Dict[str, EmbryoRole] = {
+REGISTRY: dict[str, EmbryoRole] = {
     "unassigned": EmbryoRole(
         name="unassigned",
         description="No role assigned yet — treated like 'test' for safety.",
@@ -94,10 +94,7 @@ DEFAULT_ROLE: str = "test"
 def get_role(name: str) -> EmbryoRole:
     """Look up a role by name. Raises KeyError with helpful message."""
     if name not in REGISTRY:
-        raise KeyError(
-            f"Unknown embryo role: {name!r}. "
-            f"Available: {sorted(REGISTRY.keys())}"
-        )
+        raise KeyError(f"Unknown embryo role: {name!r}. Available: {sorted(REGISTRY.keys())}")
     return REGISTRY[name]
 
 
@@ -105,6 +102,6 @@ def is_valid_role(name: str) -> bool:
     return name in REGISTRY
 
 
-def list_roles() -> List[str]:
+def list_roles() -> list[str]:
     """All registered role names, sorted."""
     return sorted(REGISTRY.keys())
