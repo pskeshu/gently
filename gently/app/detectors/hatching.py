@@ -14,7 +14,7 @@ to ``record_hatching``), so the structured fields arrive already parsed as
 import asyncio
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
@@ -24,7 +24,9 @@ from .dopaminergic_signal import _volume_to_b64
 logger = logging.getLogger(__name__)
 
 
-_HATCHING_PROMPT = """You are observing a C. elegans embryo on a microscope. Decide whether the embryo has HATCHED, then record your decision with the record_hatching tool.
+_HATCHING_PROMPT = """\
+You are observing a C. elegans embryo on a microscope. Decide whether the embryo has HATCHED,
+then record your decision with the record_hatching tool.
 
 A HATCHED embryo:
 - Has visibly broken out of the eggshell
@@ -69,18 +71,20 @@ class HatchingDetector(Detector):
 
     name = "hatching"
 
-    def __init__(self, claude_client=None, model: Optional[str] = None):
+    def __init__(self, claude_client=None, model: str | None = None):
         self._claude = claude_client
         self._model = model
 
     async def run(
         self,
         volume: np.ndarray,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> DetectorResult:
-        from gently.settings import settings
         import json
+
         import anthropic
+
+        from gently.settings import settings
 
         embryo_id = context.get("embryo_id", "?")
         timepoint = int(context.get("timepoint", 0))
@@ -113,24 +117,28 @@ class HatchingDetector(Detector):
                 max_tokens=256,
                 tools=[_HATCHING_TOOL],
                 tool_choice={"type": "tool", "name": _HATCHING_TOOL["name"]},
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": _HATCHING_PROMPT},
-                        {"type": "image", "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64_image,
-                        }},
-                    ],
-                }],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": _HATCHING_PROMPT},
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/png",
+                                    "data": b64_image,
+                                },
+                            },
+                        ],
+                    }
+                ],
             )
 
             # Forced tool_choice guarantees a tool_use block; read its parsed
             # input directly. No regex, no JSON-from-prose fallback.
             tool_input = next(
-                (b.input for b in response.content
-                 if getattr(b, "type", None) == "tool_use"),
+                (b.input for b in response.content if getattr(b, "type", None) == "tool_use"),
                 None,
             )
 
@@ -156,7 +164,11 @@ class HatchingDetector(Detector):
                 error=err,
             )
 
-        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
+        except (
+            anthropic.APIConnectionError,
+            anthropic.RateLimitError,
+            anthropic.APIStatusError,
+        ) as e:
             logger.error("[%s] Claude API error for %s: %s", self.name, embryo_id, e)
             return DetectorResult(
                 detector_name=self.name,

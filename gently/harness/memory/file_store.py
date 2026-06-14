@@ -1912,7 +1912,8 @@ class FileContextStore:
         """Emit CONTEXT_UPDATED on the global bus so the shared-visibility
         surface refreshes live. Best-effort — a bus failure never breaks a write."""
         try:
-            from gently.core.event_bus import emit, EventType
+            from gently.core.event_bus import EventType, emit
+
             emit(EventType.CONTEXT_UPDATED, {"kind": kind}, source="context_store")
         except Exception:
             pass

@@ -10,6 +10,7 @@ broadcasts to /ws; the client just re-fetches /api/context on it (no polling).
 from fastapi import APIRouter, Body, Depends
 
 from gently.ui.web.auth import require_control
+
 from .campaigns import _serialize
 
 
@@ -36,8 +37,7 @@ def create_router(server) -> APIRouter:
         except Exception:
             return empty
 
-    @router.post("/api/context/questions/{q_id}/resolve",
-                 dependencies=[Depends(require_control)])
+    @router.post("/api/context/questions/{q_id}/resolve", dependencies=[Depends(require_control)])
     async def resolve_question(q_id: str, resolution: str = Body("", embed=True)):
         cs = _store()
         if cs is None:
@@ -45,8 +45,9 @@ def create_router(server) -> APIRouter:
         cs.resolve_question(q_id, resolution or "")
         return {"ok": True}
 
-    @router.post("/api/context/watchpoints/{wp_id}/resolve",
-                 dependencies=[Depends(require_control)])
+    @router.post(
+        "/api/context/watchpoints/{wp_id}/resolve", dependencies=[Depends(require_control)]
+    )
     async def resolve_watchpoint(wp_id: str):
         cs = _store()
         if cs is None:
@@ -54,13 +55,15 @@ def create_router(server) -> APIRouter:
         cs.resolve_watchpoint(wp_id)
         return {"ok": True}
 
-    @router.post("/api/context/expectations/{exp_id}/resolve",
-                 dependencies=[Depends(require_control)])
+    @router.post(
+        "/api/context/expectations/{exp_id}/resolve", dependencies=[Depends(require_control)]
+    )
     async def resolve_expectation(exp_id: str, status: str = Body("confirmed", embed=True)):
         cs = _store()
         if cs is None:
             return {"ok": False, "error": "context store unavailable"}
         from gently.harness.memory.model import ExpectationStatus
+
         try:
             st = ExpectationStatus(status)
         except ValueError:

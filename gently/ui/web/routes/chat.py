@@ -19,8 +19,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from gently.ui.web.auth import require_control
 from gently.settings import settings
+from gently.ui.web.auth import require_control
 
 logger = logging.getLogger(__name__)
 

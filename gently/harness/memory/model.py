@@ -243,7 +243,7 @@ class ImagingSpec:
     # Per-field provenance for INFERRED values — field name -> {source, confidence}.
     # e.g. {"laser_wavelength_nm": {"source": "inferred:genotype", "confidence": "medium"}}
     # Lets the UI tag each value with where it came from and what to confirm.
-    provenance: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    provenance: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 @dataclass

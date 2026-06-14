@@ -5,30 +5,28 @@ Extracts detection logic from test_sam_claude_hybrid_detection.py into reusable 
 Returns embryo positions (pixel + stage coordinates) for calibration workflow.
 """
 
-import logging
-import time
-import json
-import uuid
-import numpy as np
-from pathlib import Path
-import cv2
 import base64
-from io import BytesIO
-from PIL import Image
-import anthropic
-from typing import Dict, List, Tuple, Optional
+import json
+import logging
 import os
+import uuid
+from io import BytesIO
+from pathlib import Path
 
+import anthropic
+import cv2
+import numpy as np
+from PIL import Image
+
+from gently.core.coordinates import (
+    DEFAULT_OBJECTIVE_MAG,
+    DEFAULT_PIXEL_SIZE_UM,
+    get_um_per_pixel,
+    pixel_to_stage_position,
+)
 from gently.settings import settings
 
 logger = logging.getLogger(__name__)
-
-from gently.core.coordinates import (
-    pixel_to_stage_position,
-    get_um_per_pixel,
-    DEFAULT_PIXEL_SIZE_UM,
-    DEFAULT_OBJECTIVE_MAG,
-)
 
 
 class SAMEmbryoDetector:
@@ -42,11 +40,13 @@ class SAMEmbryoDetector:
     - Returns embryo positions as simple list of coordinates
     """
 
-    def __init__(self,
-                 sam_checkpoint: str = "sam_vit_b_01ec64.pth",
-                 sam_model_type: str = "vit_b",
-                 device: str = "cpu",
-                 anthropic_api_key: Optional[str] = None):
+    def __init__(
+        self,
+        sam_checkpoint: str = "sam_vit_b_01ec64.pth",
+        sam_model_type: str = "vit_b",
+        device: str = "cpu",
+        anthropic_api_key: str | None = None,
+    ):
         """
         Initialize SAM detector
 
@@ -85,7 +85,7 @@ class SAMEmbryoDetector:
         if self._mask_generator is not None:
             return
 
-        from segment_anything import sam_model_registry, SamAutomaticMaskGenerator, SamPredictor
+        from segment_anything import SamAutomaticMaskGenerator, SamPredictor, sam_model_registry
 
         if not Path(self.sam_checkpoint).exists():
             raise FileNotFoundError(f"SAM checkpoint not found: {self.sam_checkpoint}")
@@ -108,13 +108,15 @@ class SAMEmbryoDetector:
         self._predictor = SamPredictor(sam)
         logger.info("SAM model loaded")
 
-    def preprocess_image(self,
-                         image: np.ndarray,
-                         bg_kernel_size: int = 150,
-                         use_clahe: bool = True,
-                         clahe_clip_limit: float = 3.0,
-                         clahe_tile_size: int = 16,
-                         gaussian_sigma: float = 2.0) -> np.ndarray:
+    def preprocess_image(
+        self,
+        image: np.ndarray,
+        bg_kernel_size: int = 150,
+        use_clahe: bool = True,
+        clahe_clip_limit: float = 3.0,
+        clahe_tile_size: int = 16,
+        gaussian_sigma: float = 2.0,
+    ) -> np.ndarray:
         """
         Preprocess image for better SAM detection.
 
@@ -151,14 +153,18 @@ class SAMEmbryoDetector:
         # This stretches the narrow range (e.g., 84-354) to full 0-255
         logger.debug("Percentile normalization (2-98%%)...")
         p2, p98 = np.percentile(image, (2, 98))
-        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
+        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(
+            np.uint8
+        )
         logger.debug("Normalized to 0-255")
 
         # Step 2: Background subtraction with large morphological opening
         # Removes large-scale illumination variations
         if bg_kernel_size > 0:
             logger.debug("Background subtraction (kernel=%d)...", bg_kernel_size)
-            kernel_bg = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (bg_kernel_size, bg_kernel_size))
+            kernel_bg = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (bg_kernel_size, bg_kernel_size)
+            )
             background = cv2.morphologyEx(img_norm, cv2.MORPH_OPEN, kernel_bg)
             img_no_bg = cv2.subtract(img_norm, background)
             img_no_bg = cv2.normalize(img_no_bg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
@@ -171,8 +177,7 @@ class SAMEmbryoDetector:
         if use_clahe:
             logger.debug("CLAHE (clip=%.1f, tile=%d)...", clahe_clip_limit, clahe_tile_size)
             clahe = cv2.createCLAHE(
-                clipLimit=clahe_clip_limit,
-                tileGridSize=(clahe_tile_size, clahe_tile_size)
+                clipLimit=clahe_clip_limit, tileGridSize=(clahe_tile_size, clahe_tile_size)
             )
             img_enhanced = clahe.apply(img_no_bg)
             logger.debug("CLAHE applied")
@@ -187,16 +192,20 @@ class SAMEmbryoDetector:
         else:
             img_smooth = img_enhanced
 
-        logger.debug("Preprocessing complete (output range: %s - %s)", img_smooth.min(), img_smooth.max())
+        logger.debug(
+            "Preprocessing complete (output range: %s - %s)", img_smooth.min(), img_smooth.max()
+        )
         return img_smooth
 
-    def find_embryo_candidates(self,
-                               image: np.ndarray,
-                               brightness_percentile: float = 99.0,
-                               min_area: int = 5000,
-                               max_area: int = 150000,
-                               clahe_clip: float = 3.0,
-                               clahe_tile: int = 16) -> Tuple[List[Dict], np.ndarray]:
+    def find_embryo_candidates(
+        self,
+        image: np.ndarray,
+        brightness_percentile: float = 99.0,
+        min_area: int = 5000,
+        max_area: int = 150000,
+        clahe_clip: float = 3.0,
+        clahe_tile: int = 16,
+    ) -> tuple[list[dict], np.ndarray]:
         """
         Find embryo candidates using brightness-based detection.
 
@@ -229,12 +238,16 @@ class SAMEmbryoDetector:
         enhanced_image : np.ndarray
             Contrast-enhanced 8-bit image for SAM
         """
-        logger.info("Finding embryo candidates (brightness percentile=%.1f)...", brightness_percentile)
+        logger.info(
+            "Finding embryo candidates (brightness percentile=%.1f)...", brightness_percentile
+        )
         logger.debug("Input range: %s - %s", image.min(), image.max())
 
         # Step 1: Percentile normalization (handles low dynamic range)
         p2, p98 = np.percentile(image, (2, 98))
-        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(np.uint8)
+        img_norm = np.clip((image.astype(np.float32) - p2) / (p98 - p2) * 255, 0, 255).astype(
+            np.uint8
+        )
         logger.debug("Normalized to 0-255")
 
         # Step 2: CLAHE for local contrast enhancement
@@ -261,7 +274,9 @@ class SAMEmbryoDetector:
         logger.debug("Morphological cleanup complete")
 
         # Step 7: Find connected components and filter by area
-        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+            mask, connectivity=8
+        )
 
         candidates = []
         for i in range(1, num_labels):  # Skip background (label 0)
@@ -273,19 +288,14 @@ class SAMEmbryoDetector:
                 h = stats[i, cv2.CC_STAT_HEIGHT]
                 cx, cy = centroids[i]
 
-                candidates.append({
-                    'bbox': (x, y, w, h),
-                    'centroid': (cx, cy),
-                    'area': area
-                })
+                candidates.append({"bbox": (x, y, w, h), "centroid": (cx, cy), "area": area})
 
         logger.info("Found %d embryo candidates", len(candidates))
         return candidates, img_smooth
 
-    def refine_with_sam(self,
-                        image: np.ndarray,
-                        candidates: List[Dict],
-                        padding: int = 20) -> List[Dict]:
+    def refine_with_sam(
+        self, image: np.ndarray, candidates: list[dict], padding: int = 20
+    ) -> list[dict]:
         """
         Refine embryo candidates using SAM with bounding box prompts.
 
@@ -322,7 +332,7 @@ class SAMEmbryoDetector:
         h, w = image.shape[:2]
 
         for i, candidate in enumerate(candidates):
-            x, y, bw, bh = candidate['bbox']
+            x, y, bw, bh = candidate["bbox"]
 
             # Add padding and clip to image bounds
             x1 = max(0, x - padding)
@@ -335,10 +345,7 @@ class SAMEmbryoDetector:
 
             # Get SAM prediction with box prompt
             masks, scores, _ = self._predictor.predict(
-                point_coords=None,
-                point_labels=None,
-                box=input_box,
-                multimask_output=True
+                point_coords=None, point_labels=None, box=input_box, multimask_output=True
             )
 
             # Take best mask (highest score)
@@ -348,9 +355,7 @@ class SAMEmbryoDetector:
 
             # Calculate properties from SAM mask
             contours, _ = cv2.findContours(
-                mask.astype(np.uint8),
-                cv2.RETR_EXTERNAL,
-                cv2.CHAIN_APPROX_SIMPLE
+                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
             )
 
             if contours:
@@ -364,41 +369,47 @@ class SAMEmbryoDetector:
                     cx = M["m10"] / M["m00"]
                     cy = M["m01"] / M["m00"]
                 else:
-                    cx, cy = candidate['centroid']
+                    cx, cy = candidate["centroid"]
 
                 # Calculate circularity
                 perimeter = cv2.arcLength(contour, True)
-                circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+                circularity = 4 * np.pi * area / (perimeter**2) if perimeter > 0 else 0
 
                 # Get bounding box from contour
                 bx, by, bw, bh = cv2.boundingRect(contour)
 
-                embryos.append({
-                    'embryo_id': f'embryo_{i + 1}',
-                    'uid': str(uuid.uuid4()),  # Global unique identifier for cross-session tracking
-                    'pixel_x': float(cx),
-                    'pixel_y': float(cy),
-                    'bbox': (bx, by, bw, bh),  # Used by visualization functions
-                    'area_pixels': int(area),
-                    'circularity': float(circularity),
-                    'confidence': float(score),
-                    'mask': mask
-                })
+                embryos.append(
+                    {
+                        "embryo_id": f"embryo_{i + 1}",
+                        "uid": str(
+                            uuid.uuid4()
+                        ),  # Global unique identifier for cross-session tracking
+                        "pixel_x": float(cx),
+                        "pixel_y": float(cy),
+                        "bbox": (bx, by, bw, bh),  # Used by visualization functions
+                        "area_pixels": int(area),
+                        "circularity": float(circularity),
+                        "confidence": float(score),
+                        "mask": mask,
+                    }
+                )
 
         logger.info("SAM refined %d embryos", len(embryos))
         return embryos
 
-    async def detect_embryos(self,
-                            image: np.ndarray,
-                            stage_position: Tuple[float, float],
-                            pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-                            objective_mag: float = DEFAULT_OBJECTIVE_MAG,
-                            use_claude_review: bool = True,
-                            save_visualizations: bool = True,
-                            output_dir: Optional[Path] = None,
-                            brightness_percentile: float = 99.0,
-                            min_area: int = 5000,
-                            max_area: int = 150000) -> Dict:
+    async def detect_embryos(
+        self,
+        image: np.ndarray,
+        stage_position: tuple[float, float],
+        pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
+        objective_mag: float = DEFAULT_OBJECTIVE_MAG,
+        use_claude_review: bool = True,
+        save_visualizations: bool = True,
+        output_dir: Path | None = None,
+        brightness_percentile: float = 99.0,
+        min_area: int = 5000,
+        max_area: int = 150000,
+    ) -> dict:
         """
         Detect embryos using brightness-based detection + SAM refinement.
 
@@ -462,20 +473,17 @@ class SAMEmbryoDetector:
         # Step 1: Find candidates using brightness detection
         logger.info("[1/4] Finding embryo candidates (brightness-based)...")
         candidates, image_enhanced = self.find_embryo_candidates(
-            image,
-            brightness_percentile=brightness_percentile,
-            min_area=min_area,
-            max_area=max_area
+            image, brightness_percentile=brightness_percentile, min_area=min_area, max_area=max_area
         )
 
         if len(candidates) == 0:
             logger.warning("No embryo candidates found!")
             return {
-                'embryos': [],
-                'initial_detections': 0,
-                'final_detections': 0,
-                'verification': {'verified': False},
-                'images': {}
+                "embryos": [],
+                "initial_detections": 0,
+                "final_detections": 0,
+                "verification": {"verified": False},
+                "images": {},
             }
 
         # Step 2: Refine with SAM
@@ -489,11 +497,11 @@ class SAMEmbryoDetector:
         if len(embryos_sam) == 0:
             logger.warning("No embryos detected by SAM!")
             return {
-                'embryos': [],
-                'initial_detections': 0,
-                'final_detections': 0,
-                'verification': {'verified': False},
-                'images': {}
+                "embryos": [],
+                "initial_detections": 0,
+                "final_detections": 0,
+                "verification": {"verified": False},
+                "images": {},
             }
 
         # Save initial detection
@@ -503,8 +511,8 @@ class SAMEmbryoDetector:
 
         # Claude review (if enabled)
         embryos_final = embryos_sam
-        verification = {'verified': True, 'skipped': not use_claude_review}
-        changes = {'round1': {'removed': [], 'added': []}}
+        verification = {"verified": True, "skipped": not use_claude_review}
+        changes = {"round1": {"removed": [], "added": []}}
 
         if use_claude_review and self.claude_client:
             logger.info("[2/4] Claude Vision review (Round 1)...")
@@ -512,7 +520,7 @@ class SAMEmbryoDetector:
             review_r1 = await self._review_with_claude(image_8bit, annotated, embryos_sam)
 
             logger.info("[3/4] Applying corrections...")
-            embryos_r1, changes['round1'] = self._apply_corrections(
+            embryos_r1, changes["round1"] = self._apply_corrections(
                 embryos_sam, review_r1, image, self._predictor
             )
 
@@ -524,22 +532,22 @@ class SAMEmbryoDetector:
             logger.info("[4/4] Claude verification (Round 2)...")
             r1_viz = self._create_annotated_image(image_8bit, embryos_r1)
             verification = await self._verify_with_claude(
-                image_8bit, r1_viz, embryos_r1, changes['round1']
+                image_8bit, r1_viz, embryos_r1, changes["round1"]
             )
 
             # Apply round 2 corrections if needed
             has_r2_changes = (
-                len(verification.get('additional_false_positives', [])) > 0 or
-                len(verification.get('additional_false_negatives', [])) > 0
+                len(verification.get("additional_false_positives", [])) > 0
+                or len(verification.get("additional_false_negatives", [])) > 0
             )
 
             if has_r2_changes:
                 logger.info("Applying Round 2 corrections...")
                 review_r2 = {
-                    'false_positives': verification.get('additional_false_positives', []),
-                    'false_negatives': verification.get('additional_false_negatives', [])
+                    "false_positives": verification.get("additional_false_positives", []),
+                    "false_negatives": verification.get("additional_false_negatives", []),
                 }
-                embryos_final, changes['round2'] = self._apply_corrections(
+                embryos_final, changes["round2"] = self._apply_corrections(
                     embryos_r1, review_r2, image, self._predictor
                 )
             else:
@@ -553,7 +561,7 @@ class SAMEmbryoDetector:
             stage_position,
             pixel_size_um,
             objective_mag,
-            image_shape=image.shape[:2]  # (height, width)
+            image_shape=image.shape[:2],  # (height, width)
         )
 
         # Save final visualization
@@ -563,19 +571,19 @@ class SAMEmbryoDetector:
 
         # Package results
         results = {
-            'embryos': embryo_positions,
-            'initial_detections': len(embryos_sam),
-            'final_detections': len(embryos_final),
-            'verification': verification,
-            'changes': changes,
-            'images': {
-                'initial': str(output_dir / "detection_initial.png"),
-                'final': str(output_dir / "detection_final.png")
-            }
+            "embryos": embryo_positions,
+            "initial_detections": len(embryos_sam),
+            "final_detections": len(embryos_final),
+            "verification": verification,
+            "changes": changes,
+            "images": {
+                "initial": str(output_dir / "detection_initial.png"),
+                "final": str(output_dir / "detection_final.png"),
+            },
         }
 
         if use_claude_review and save_visualizations:
-            results['images']['round1'] = str(output_dir / "detection_round1.png")
+            results["images"]["round1"] = str(output_dir / "detection_round1.png")
 
         logger.info("=" * 70)
         logger.info("DETECTION COMPLETE: %d embryos", len(embryo_positions))
@@ -594,7 +602,7 @@ class SAMEmbryoDetector:
             return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
         return image
 
-    def _detect_with_sam(self, image: np.ndarray) -> Tuple[List[Dict], np.ndarray]:
+    def _detect_with_sam(self, image: np.ndarray) -> tuple[list[dict], np.ndarray]:
         """Run SAM automatic segmentation (extracted from test script)"""
         image_rgb = self._to_rgb8(image)
 
@@ -604,14 +612,16 @@ class SAMEmbryoDetector:
         # Filter candidates
         embryo_candidates = []
         for mask_data in masks:
-            area = mask_data['area']
+            area = mask_data["area"]
 
             if not (self.min_area <= area <= self.max_area):
                 continue
 
-            bbox = mask_data['bbox']
-            mask = mask_data['segmentation']
-            contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            bbox = mask_data["bbox"]
+            mask = mask_data["segmentation"]
+            contours, _ = cv2.findContours(
+                mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+            )
 
             if len(contours) == 0:
                 continue
@@ -620,40 +630,44 @@ class SAMEmbryoDetector:
             if perimeter == 0:
                 continue
 
-            circularity = 4 * np.pi * area / (perimeter ** 2)
+            circularity = 4 * np.pi * area / (perimeter**2)
 
             if circularity < self.min_circularity:
                 continue
 
-            embryo_candidates.append({
-                'mask': mask,
-                'bbox': bbox,
-                'area': area,
-                'circularity': circularity,
-                'stability_score': mask_data['stability_score'],
-                'predicted_iou': mask_data['predicted_iou']
-            })
+            embryo_candidates.append(
+                {
+                    "mask": mask,
+                    "bbox": bbox,
+                    "area": area,
+                    "circularity": circularity,
+                    "stability_score": mask_data["stability_score"],
+                    "predicted_iou": mask_data["predicted_iou"],
+                }
+            )
 
         # Sort by quality and apply spatial separation
-        embryo_candidates.sort(key=lambda x: (x['area'] * x['stability_score']), reverse=True)
+        embryo_candidates.sort(key=lambda x: x["area"] * x["stability_score"], reverse=True)
 
         selected_embryos = []
         for candidate in embryo_candidates:
             if len(selected_embryos) >= self.max_embryos:
                 break
 
-            bbox = candidate['bbox']
+            bbox = candidate["bbox"]
             candidate_center_x = bbox[0] + bbox[2] / 2
             candidate_center_y = bbox[1] + bbox[3] / 2
 
             too_close = False
             for selected in selected_embryos:
-                sel_bbox = selected['bbox']
+                sel_bbox = selected["bbox"]
                 sel_center_x = sel_bbox[0] + sel_bbox[2] / 2
                 sel_center_y = sel_bbox[1] + sel_bbox[3] / 2
 
-                distance = np.sqrt((candidate_center_x - sel_center_x)**2 +
-                                 (candidate_center_y - sel_center_y)**2)
+                distance = np.sqrt(
+                    (candidate_center_x - sel_center_x) ** 2
+                    + (candidate_center_y - sel_center_y) ** 2
+                )
 
                 if distance < self.min_separation_pixels:
                     too_close = True
@@ -662,19 +676,27 @@ class SAMEmbryoDetector:
             if not too_close:
                 selected_embryos.append(candidate)
 
-        return selected_embryos, image_8bit
+        return selected_embryos, image_rgb
 
-    def _create_annotated_image(self, image: np.ndarray, embryos: List[Dict]) -> np.ndarray:
+    def _create_annotated_image(self, image: np.ndarray, embryos: list[dict]) -> np.ndarray:
         """Create annotated image with numbered boxes"""
         viz = image.copy()
         if len(viz.shape) == 2:
             viz = cv2.cvtColor(viz, cv2.COLOR_GRAY2RGB)
 
-        colors = [(255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
-                  (255, 0, 255), (0, 255, 255), (128, 128, 0), (128, 0, 128)]
+        colors = [
+            (255, 0, 0),
+            (0, 255, 0),
+            (0, 0, 255),
+            (255, 255, 0),
+            (255, 0, 255),
+            (0, 255, 255),
+            (128, 128, 0),
+            (128, 0, 128),
+        ]
 
         for i, embryo in enumerate(embryos):
-            bbox = embryo['bbox']
+            bbox = embryo["bbox"]
             x, y, w, h = bbox
             color = colors[i % len(colors)]
 
@@ -713,7 +735,7 @@ class SAMEmbryoDetector:
             buffered = BytesIO()
             pil_image.save(buffered, format="JPEG", quality=quality, optimize=True)
             if buffered.tell() <= max_bytes:
-                return base64.b64encode(buffered.getvalue()).decode('utf-8')
+                return base64.b64encode(buffered.getvalue()).decode("utf-8")
             quality -= 5
 
         # Last resort
@@ -722,18 +744,21 @@ class SAMEmbryoDetector:
         pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
         buffered = BytesIO()
         pil_image.save(buffered, format="JPEG", quality=85, optimize=True)
-        return base64.b64encode(buffered.getvalue()).decode('utf-8')
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    async def _review_with_claude(self, image: np.ndarray, annotated: np.ndarray, embryos: List[Dict]) -> Dict:
+    async def _review_with_claude(
+        self, image: np.ndarray, annotated: np.ndarray, embryos: list[dict]
+    ) -> dict:
         """Round 1: Claude reviews detections (from test script)"""
         if not self.claude_client:
-            return {'false_positives': [], 'false_negatives': []}
+            return {"false_positives": [], "false_negatives": []}
 
         image_base64 = self._encode_image_base64(annotated)
 
-        prompt = f"""You are a microscopy expert analyzing embryo detections from a bottom camera view.
+        prompt = f"""\
+You are a microscopy expert analyzing embryo detections from a bottom camera view.
 
-CURRENT DETECTIONS: {len(embryos)} embryos labeled 0-{len(embryos)-1} with colored bounding boxes.
+CURRENT DETECTIONS: {len(embryos)} embryos labeled 0-{len(embryos) - 1} with colored bounding boxes.
 
 EMBRYO CHARACTERISTICS:
 - Small, BRIGHT white/light gray oval or rice grain shapes
@@ -763,14 +788,25 @@ Respond in JSON:
             message = self.claude_client.messages.create(
                 model=settings.models.perception,
                 max_tokens=8000,
-                output_config={"effort": "high"},  # was thinking budget_tokens (Opus 4.8 rejects it)
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
-                        {"type": "text", "text": prompt}
-                    ]
-                }]
+                output_config={
+                    "effort": "high"
+                },  # was thinking budget_tokens (Opus 4.8 rejects it)
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": image_base64,
+                                },
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
             )
 
             response_text = next((b.text for b in message.content if b.type == "text"), "")
@@ -787,18 +823,19 @@ Respond in JSON:
 
         except Exception as e:
             logger.warning("Claude review failed: %s", e)
-            return {'false_positives': [], 'false_negatives': []}
+            return {"false_positives": [], "false_negatives": []}
 
-    async def _verify_with_claude(self, image: np.ndarray, annotated: np.ndarray,
-                                  embryos: List[Dict], previous_changes: Dict) -> Dict:
+    async def _verify_with_claude(
+        self, image: np.ndarray, annotated: np.ndarray, embryos: list[dict], previous_changes: dict
+    ) -> dict:
         """Round 2: Claude verifies corrections (from test script)"""
         if not self.claude_client:
-            return {'verified': True, 'skipped': True}
+            return {"verified": True, "skipped": True}
 
         image_base64 = self._encode_image_base64(annotated)
 
-        removed = previous_changes.get('removed', [])
-        added = previous_changes.get('added', [])
+        removed = previous_changes.get("removed", [])
+        added = previous_changes.get("added", [])
 
         prompt = f"""VERIFICATION ROUND - You previously reviewed this image.
 
@@ -806,7 +843,7 @@ PREVIOUS CHANGES:
 - Removed: {removed if removed else "none"}
 - Added: {added if added else "none"}
 
-CURRENT: {len(embryos)} detections (numbered 0-{len(embryos)-1})
+CURRENT: {len(embryos)} detections (numbered 0-{len(embryos) - 1})
 
 TASK: Verify corrections and catch any remaining issues.
 Only report CLEAR remaining problems.
@@ -823,14 +860,25 @@ Respond in JSON:
             message = self.claude_client.messages.create(
                 model=settings.models.perception,
                 max_tokens=6000,
-                output_config={"effort": "high"},  # was thinking budget_tokens (Opus 4.8 rejects it)
-                messages=[{
-                    "role": "user",
-                    "content": [
-                        {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": image_base64}},
-                        {"type": "text", "text": prompt}
-                    ]
-                }]
+                output_config={
+                    "effort": "high"
+                },  # was thinking budget_tokens (Opus 4.8 rejects it)
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": image_base64,
+                                },
+                            },
+                            {"type": "text", "text": prompt},
+                        ],
+                    }
+                ],
             )
 
             response_text = next((b.text for b in message.content if b.type == "text"), "")
@@ -846,38 +894,41 @@ Respond in JSON:
 
         except Exception as e:
             logger.warning("Verification failed: %s", e)
-            return {'verified': False}
+            return {"verified": False}
 
-    def _apply_corrections(self, embryos: List[Dict], review: Dict,
-                          image: np.ndarray, predictor) -> Tuple[List[Dict], Dict]:
+    def _apply_corrections(
+        self, embryos: list[dict], review: dict, image: np.ndarray, predictor
+    ) -> tuple[list[dict], dict]:
         """Apply Claude's corrections (from test script)"""
         corrected = []
-        changes = {'removed': [], 'added': []}
+        changes = {"removed": [], "added": []}
 
         # Remove false positives
-        false_positives = set(review.get('false_positives', []))
+        false_positives = set(review.get("false_positives", []))
         if false_positives:
-            changes['removed'] = list(false_positives)
+            changes["removed"] = list(false_positives)
 
         for i, embryo in enumerate(embryos):
             if i not in false_positives:
                 corrected.append(embryo)
 
         # Add false negatives
-        false_negatives = review.get('false_negatives', [])
+        false_negatives = review.get("false_negatives", [])
         if false_negatives:
             for fn in false_negatives:
-                point = (fn['x'], fn['y'])
+                point = (fn["x"], fn["y"])
                 new_embryo = self._segment_with_sam(image, predictor, point)
 
-                if new_embryo and (self.min_area <= new_embryo['area'] <= self.max_area and
-                                   new_embryo['circularity'] >= self.min_circularity):
+                if new_embryo and (
+                    self.min_area <= new_embryo["area"] <= self.max_area
+                    and new_embryo["circularity"] >= self.min_circularity
+                ):
                     corrected.append(new_embryo)
-                    changes['added'].append(point)
+                    changes["added"].append(point)
 
         return corrected, changes
 
-    def _segment_with_sam(self, image: np.ndarray, predictor, point: Tuple) -> Optional[Dict]:
+    def _segment_with_sam(self, image: np.ndarray, predictor, point: tuple) -> dict | None:
         """Use SAM predictor to segment region (from test script)"""
         image_rgb = self._to_rgb8(image)
         predictor.set_image(image_rgb)
@@ -886,9 +937,7 @@ Respond in JSON:
         point_labels = np.array([1])
 
         masks, scores, _ = predictor.predict(
-            point_coords=point_coords,
-            point_labels=point_labels,
-            multimask_output=True
+            point_coords=point_coords, point_labels=point_labels, multimask_output=True
         )
 
         best_idx = np.argmax(scores)
@@ -903,26 +952,33 @@ Respond in JSON:
         bbox = [x_min, y_min, x_max - x_min, y_max - y_min]
 
         area = mask.sum()
-        contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        contours, _ = cv2.findContours(
+            mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
 
         if len(contours) > 0:
             perimeter = cv2.arcLength(contours[0], True)
-            circularity = 4 * np.pi * area / (perimeter ** 2) if perimeter > 0 else 0
+            circularity = 4 * np.pi * area / (perimeter**2) if perimeter > 0 else 0
         else:
             circularity = 0
 
         return {
-            'mask': mask,
-            'bbox': bbox,
-            'area': int(area),
-            'circularity': float(circularity),
-            'stability_score': float(scores[best_idx]),
-            'predicted_iou': float(scores[best_idx])
+            "mask": mask,
+            "bbox": bbox,
+            "area": int(area),
+            "circularity": float(circularity),
+            "stability_score": float(scores[best_idx]),
+            "predicted_iou": float(scores[best_idx]),
         }
 
-    def _pixel_to_stage_coordinates(self, embryos: List[Dict], stage_pos: Tuple[float, float],
-                                    pixel_size_um: float, objective_mag: float,
-                                    image_shape: Tuple[int, int] = (2048, 2048)) -> List[Dict]:
+    def _pixel_to_stage_coordinates(
+        self,
+        embryos: list[dict],
+        stage_pos: tuple[float, float],
+        pixel_size_um: float,
+        objective_mag: float,
+        image_shape: tuple[int, int] = (2048, 2048),
+    ) -> list[dict]:
         """
         Convert pixel coordinates to stage coordinates.
 
@@ -938,7 +994,7 @@ Respond in JSON:
 
         embryo_positions = []
         for i, embryo in enumerate(embryos):
-            bbox = embryo['bbox']
+            bbox = embryo["bbox"]
             x, y, w, h = bbox
 
             center_x_px = x + w / 2
@@ -953,24 +1009,26 @@ Respond in JSON:
                 image_center_y=image_center_y,
                 stage_x=stage_x,
                 stage_y=stage_y,
-                um_per_pixel=effective_pixel_um
+                um_per_pixel=effective_pixel_um,
             )
 
-            embryo_positions.append({
-                'embryo_id': f'embryo_{i + 1}',
-                'pixel_x': float(center_x_px),
-                'pixel_y': float(center_y_px),
-                'stage_x_um': float(embryo_stage_x),
-                'stage_y_um': float(embryo_stage_y),
-                'bbox_pixel': tuple(bbox),
-                'area_pixels': embryo.get('area_pixels', embryo.get('area', 0)),
-                'circularity': embryo.get('circularity', 0),
-                'confidence': embryo.get('confidence', embryo.get('stability_score', 0))
-            })
+            embryo_positions.append(
+                {
+                    "embryo_id": f"embryo_{i + 1}",
+                    "pixel_x": float(center_x_px),
+                    "pixel_y": float(center_y_px),
+                    "stage_x_um": float(embryo_stage_x),
+                    "stage_y_um": float(embryo_stage_y),
+                    "bbox_pixel": tuple(bbox),
+                    "area_pixels": embryo.get("area_pixels", embryo.get("area", 0)),
+                    "circularity": embryo.get("circularity", 0),
+                    "confidence": embryo.get("confidence", embryo.get("stability_score", 0)),
+                }
+            )
 
         return embryo_positions
 
-    def show_in_napari(self, image: np.ndarray, embryos: List[Dict], block: bool = False):
+    def show_in_napari(self, image: np.ndarray, embryos: list[dict], block: bool = False):
         """Deprecated: napari display was retired in Phase 1.
 
         SAM detection results are now reviewed via the web map view —

@@ -14,14 +14,15 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import anthropic
 
-from gently.settings import settings
-from .detector import Detector, DetectionResult, ConfidenceLevel
-from ..state import EmbryoState
 from gently.core import EventType, get_event_bus
+from gently.settings import settings
+
+from ..state import EmbryoState
+from .detector import ConfidenceLevel, DetectionResult, Detector
 
 logger = logging.getLogger(__name__)
 
@@ -38,12 +39,22 @@ logger = logging.getLogger(__name__)
 # many independent votes rather than introspected by one call.
 _ADVERSARIAL_TOOL = {
     "name": "record_adversarial_review",
-    "description": "Record the critical review verdict: whether counter-evidence against the detection was found.",
+    "description": (
+        "Record the critical review verdict: whether counter-evidence "
+        "against the detection was found."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "found_counter_evidence": {"type": "boolean", "description": "True only if there is real evidence the detection is wrong."},
-            "concerns": {"type": "array", "items": {"type": "string"}, "description": "Specific doubts or alternative explanations; empty list if none."},
+            "found_counter_evidence": {
+                "type": "boolean",
+                "description": "True only if there is real evidence the detection is wrong.",
+            },
+            "concerns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific doubts or alternative explanations; empty list if none.",
+            },
         },
         "required": ["found_counter_evidence", "concerns"],
     },
@@ -51,12 +62,20 @@ _ADVERSARIAL_TOOL = {
 
 _INDEPENDENT_TOOL = {
     "name": "record_independent_assessment",
-    "description": "Record an unbiased fresh assessment of whether the event occurred in this image.",
+    "description": (
+        "Record an unbiased fresh assessment of whether the event occurred in this image."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "detected": {"type": "boolean", "description": "True if the event is observed in this image."},
-            "key_evidence": {"type": "string", "description": "What specifically supports the conclusion."},
+            "detected": {
+                "type": "boolean",
+                "description": "True if the event is observed in this image.",
+            },
+            "key_evidence": {
+                "type": "string",
+                "description": "What specifically supports the conclusion.",
+            },
         },
         "required": ["detected", "key_evidence"],
     },
@@ -64,12 +83,23 @@ _INDEPENDENT_TOOL = {
 
 _TEMPORAL_TOOL = {
     "name": "record_temporal_comparison",
-    "description": "Record whether a real change consistent with the event occurred between the previous and current frames.",
+    "description": (
+        "Record whether a real change consistent with the event occurred "
+        "between the previous and current frames."
+    ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "change_detected": {"type": "boolean", "description": "True if a clear change consistent with the event is visible across frames."},
-            "description": {"type": "string", "description": "The specific change observed between previous and current frames."},
+            "change_detected": {
+                "type": "boolean",
+                "description": (
+                    "True if a clear change consistent with the event is visible across frames."
+                ),
+            },
+            "description": {
+                "type": "string",
+                "description": "The specific change observed between previous and current frames.",
+            },
         },
         "required": ["change_detected", "description"],
     },
@@ -81,8 +111,18 @@ _HARDWARE_CONTEXT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "suspicious": {"type": "boolean", "description": "True if hardware errors could have affected image quality or positioning for this embryo."},
-            "concerns": {"type": "array", "items": {"type": "string"}, "description": "Specific hardware concerns; empty list if none."},
+            "suspicious": {
+                "type": "boolean",
+                "description": (
+                    "True if hardware errors could have affected image quality "
+                    "or positioning for this embryo."
+                ),
+            },
+            "concerns": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Specific hardware concerns; empty list if none.",
+            },
             "reasoning": {"type": "string", "description": "Brief explanation of the analysis."},
         },
         "required": ["suspicious", "concerns", "reasoning"],
@@ -90,7 +130,7 @@ _HARDWARE_CONTEXT_TOOL = {
 }
 
 
-def _tool_input(response) -> Optional[Dict[str, Any]]:
+def _tool_input(response) -> dict[str, Any] | None:
     """Return the parsed input of the first tool_use block, or None."""
     for block in getattr(response, "content", None) or []:
         if getattr(block, "type", None) == "tool_use":
@@ -101,14 +141,16 @@ def _tool_input(response) -> Optional[Dict[str, Any]]:
 @dataclass
 class AdversarialResult:
     """Result of adversarial verification strategy"""
+
     found_counter_evidence: bool
-    concerns: List[str]
+    concerns: list[str]
     raw_response: str
 
 
 @dataclass
 class IndependentResult:
     """Result of independent verification strategy"""
+
     detected: bool
     key_evidence: str
     raw_response: str
@@ -117,6 +159,7 @@ class IndependentResult:
 @dataclass
 class TemporalResult:
     """Result of temporal comparison strategy"""
+
     change_detected: bool
     description: str
     raw_response: str
@@ -125,19 +168,21 @@ class TemporalResult:
 @dataclass
 class EnsembleResult:
     """Result of ensemble voting strategy"""
+
     votes_yes: int
     votes_no: int
     total_votes: int
     agreement_ratio: float  # votes_yes / total_votes if detected, votes_no / total_votes if not
     consensus_detected: bool  # True if >70% agree on YES
-    raw_responses: List[str] = field(default_factory=list)
+    raw_responses: list[str] = field(default_factory=list)
 
 
 @dataclass
 class HardwareContextResult:
     """Result of hardware context analysis strategy"""
+
     suspicious: bool  # True if hardware errors could have caused false positive
-    concerns: List[str]  # Specific concerns identified
+    concerns: list[str]  # Specific concerns identified
     reasoning: str
     raw_response: str
 
@@ -145,15 +190,16 @@ class HardwareContextResult:
 @dataclass
 class VerificationResult:
     """Combined result of all verification strategies"""
+
     original_detected: bool
-    original_confidence: Optional[ConfidenceLevel]
+    original_confidence: ConfidenceLevel | None
 
     # Strategy results
     adversarial: AdversarialResult
     independent: IndependentResult
     temporal: TemporalResult
-    ensemble: Optional[EnsembleResult] = None  # Only for hatching detection
-    hardware_context: Optional[HardwareContextResult] = None  # Only when errors present
+    ensemble: EnsembleResult | None = None  # Only for hatching detection
+    hardware_context: HardwareContextResult | None = None  # Only when errors present
 
     # Consensus
     consensus: bool = False
@@ -163,41 +209,43 @@ class VerificationResult:
     timestamp: datetime = field(default_factory=datetime.now)
     verification_duration_seconds: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary"""
         result = {
-            'original_detected': self.original_detected,
-            'original_confidence': self.original_confidence.value if self.original_confidence else None,
-            'adversarial': {
-                'found_counter_evidence': self.adversarial.found_counter_evidence,
-                'concerns': self.adversarial.concerns,
+            "original_detected": self.original_detected,
+            "original_confidence": self.original_confidence.value
+            if self.original_confidence
+            else None,
+            "adversarial": {
+                "found_counter_evidence": self.adversarial.found_counter_evidence,
+                "concerns": self.adversarial.concerns,
             },
-            'independent': {
-                'detected': self.independent.detected,
-                'key_evidence': self.independent.key_evidence,
+            "independent": {
+                "detected": self.independent.detected,
+                "key_evidence": self.independent.key_evidence,
             },
-            'temporal': {
-                'change_detected': self.temporal.change_detected,
-                'description': self.temporal.description,
+            "temporal": {
+                "change_detected": self.temporal.change_detected,
+                "description": self.temporal.description,
             },
-            'consensus': self.consensus,
-            'consensus_reasoning': self.consensus_reasoning,
-            'timestamp': self.timestamp.isoformat(),
-            'verification_duration_seconds': self.verification_duration_seconds,
+            "consensus": self.consensus,
+            "consensus_reasoning": self.consensus_reasoning,
+            "timestamp": self.timestamp.isoformat(),
+            "verification_duration_seconds": self.verification_duration_seconds,
         }
         if self.ensemble:
-            result['ensemble'] = {
-                'votes_yes': self.ensemble.votes_yes,
-                'votes_no': self.ensemble.votes_no,
-                'total_votes': self.ensemble.total_votes,
-                'agreement_ratio': self.ensemble.agreement_ratio,
-                'consensus_detected': self.ensemble.consensus_detected,
+            result["ensemble"] = {
+                "votes_yes": self.ensemble.votes_yes,
+                "votes_no": self.ensemble.votes_no,
+                "total_votes": self.ensemble.total_votes,
+                "agreement_ratio": self.ensemble.agreement_ratio,
+                "consensus_detected": self.ensemble.consensus_detected,
             }
         if self.hardware_context:
-            result['hardware_context'] = {
-                'suspicious': self.hardware_context.suspicious,
-                'concerns': self.hardware_context.concerns,
-                'reasoning': self.hardware_context.reasoning,
+            result["hardware_context"] = {
+                "suspicious": self.hardware_context.suspicious,
+                "concerns": self.hardware_context.concerns,
+                "reasoning": self.hardware_context.reasoning,
             }
         return result
 
@@ -242,7 +290,7 @@ class DetectionVerifier:
         self.ensemble_threshold = ensemble_threshold
         self._event_bus = event_bus or get_event_bus()
 
-    def _emit_event(self, event_type: EventType, data: Dict):
+    def _emit_event(self, event_type: EventType, data: dict):
         """Emit event to viz server"""
         if self._event_bus:
             self._event_bus.publish(event_type, data)
@@ -276,19 +324,13 @@ class DetectionVerifier:
         start_time = datetime.now()
 
         # Run all strategies in parallel for speed
-        adversarial_task = self._run_adversarial(
-            detector, embryo_state, original_result, timepoint
-        )
-        independent_task = self._run_independent(
-            detector, embryo_state, timepoint
-        )
-        temporal_task = self._run_temporal_check(
-            detector, embryo_state, timepoint
-        )
+        adversarial_task = self._run_adversarial(detector, embryo_state, original_result, timepoint)
+        independent_task = self._run_independent(detector, embryo_state, timepoint)
+        temporal_task = self._run_temporal_check(detector, embryo_state, timepoint)
 
         # For hatching detection, also run ensemble voting
         ensemble_result = None
-        if detector.name == 'hatching':
+        if detector.name == "hatching":
             ensemble_task = self._run_ensemble_hatching(embryo_state)
             adversarial, independent, temporal, ensemble_result = await asyncio.gather(
                 adversarial_task, independent_task, temporal_task, ensemble_task
@@ -320,7 +362,11 @@ class DetectionVerifier:
         logger.info(
             f"Verification complete for {detector.name}: "
             f"consensus={consensus}, duration={duration:.2f}s"
-            + (f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES" if ensemble_result else "")
+            + (
+                f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES"
+                if ensemble_result
+                else ""
+            )
         )
 
         return result
@@ -359,21 +405,15 @@ class DetectionVerifier:
         start_time = datetime.now()
 
         # Run all strategies in parallel for speed
-        adversarial_task = self._run_adversarial(
-            detector, embryo_state, original_result, timepoint
-        )
-        independent_task = self._run_independent(
-            detector, embryo_state, timepoint
-        )
-        temporal_task = self._run_temporal_check(
-            detector, embryo_state, timepoint
-        )
+        adversarial_task = self._run_adversarial(detector, embryo_state, original_result, timepoint)
+        independent_task = self._run_independent(detector, embryo_state, timepoint)
+        temporal_task = self._run_temporal_check(detector, embryo_state, timepoint)
 
         # For hatching detection, also run ensemble voting
         ensemble_result = None
         hardware_result = None
 
-        if detector.name == 'hatching':
+        if detector.name == "hatching":
             ensemble_task = self._run_ensemble_hatching(embryo_state)
 
             # Run hardware context analysis if there are errors
@@ -381,7 +421,13 @@ class DetectionVerifier:
                 hardware_task = self._run_hardware_context_analysis(
                     global_error_context, embryo_state.id
                 )
-                adversarial, independent, temporal, ensemble_result, hardware_result = await asyncio.gather(
+                (
+                    adversarial,
+                    independent,
+                    temporal,
+                    ensemble_result,
+                    hardware_result,
+                ) = await asyncio.gather(
                     adversarial_task, independent_task, temporal_task, ensemble_task, hardware_task
                 )
             else:
@@ -400,84 +446,133 @@ class DetectionVerifier:
 
         # Adversarial result
         strategies_complete += 1
-        self._emit_event(EventType.VERIFICATION_STRATEGY, {
-            'embryo_id': embryo_id,
-            'detector_name': detector.name,
-            'strategy': 'adversarial',
-            'passed': not adversarial.found_counter_evidence,
-            'summary': f"Counter-evidence: {'YES - ' + ', '.join(adversarial.concerns) if adversarial.found_counter_evidence else 'None found'}",
-        })
-        self._emit_event(EventType.VERIFICATION_PROGRESS, {
-            'embryo_id': embryo_id,
-            'strategies_complete': strategies_complete,
-            'total_strategies': total_strategies,
-        })
+        adversarial_summary = (
+            "YES - " + ", ".join(adversarial.concerns)
+            if adversarial.found_counter_evidence
+            else "None found"
+        )
+        self._emit_event(
+            EventType.VERIFICATION_STRATEGY,
+            {
+                "embryo_id": embryo_id,
+                "detector_name": detector.name,
+                "strategy": "adversarial",
+                "passed": not adversarial.found_counter_evidence,
+                "summary": f"Counter-evidence: {adversarial_summary}",
+            },
+        )
+        self._emit_event(
+            EventType.VERIFICATION_PROGRESS,
+            {
+                "embryo_id": embryo_id,
+                "strategies_complete": strategies_complete,
+                "total_strategies": total_strategies,
+            },
+        )
 
         # Independent result
         strategies_complete += 1
-        self._emit_event(EventType.VERIFICATION_STRATEGY, {
-            'embryo_id': embryo_id,
-            'detector_name': detector.name,
-            'strategy': 'independent',
-            'passed': independent.detected,
-            'summary': f"Independent detection: {'YES' if independent.detected else 'NO'} - {independent.key_evidence}",
-        })
-        self._emit_event(EventType.VERIFICATION_PROGRESS, {
-            'embryo_id': embryo_id,
-            'strategies_complete': strategies_complete,
-            'total_strategies': total_strategies,
-        })
+        self._emit_event(
+            EventType.VERIFICATION_STRATEGY,
+            {
+                "embryo_id": embryo_id,
+                "detector_name": detector.name,
+                "strategy": "independent",
+                "passed": independent.detected,
+                "summary": (
+                    f"Independent detection: {'YES' if independent.detected else 'NO'}"
+                    f" - {independent.key_evidence}"
+                ),
+            },
+        )
+        self._emit_event(
+            EventType.VERIFICATION_PROGRESS,
+            {
+                "embryo_id": embryo_id,
+                "strategies_complete": strategies_complete,
+                "total_strategies": total_strategies,
+            },
+        )
 
         # Temporal result
         strategies_complete += 1
-        self._emit_event(EventType.VERIFICATION_STRATEGY, {
-            'embryo_id': embryo_id,
-            'detector_name': detector.name,
-            'strategy': 'temporal',
-            'passed': temporal.change_detected,
-            'summary': f"Change detected: {'YES' if temporal.change_detected else 'NO'} - {temporal.description}",
-        })
-        self._emit_event(EventType.VERIFICATION_PROGRESS, {
-            'embryo_id': embryo_id,
-            'strategies_complete': strategies_complete,
-            'total_strategies': total_strategies,
-        })
+        self._emit_event(
+            EventType.VERIFICATION_STRATEGY,
+            {
+                "embryo_id": embryo_id,
+                "detector_name": detector.name,
+                "strategy": "temporal",
+                "passed": temporal.change_detected,
+                "summary": (
+                    f"Change detected: {'YES' if temporal.change_detected else 'NO'}"
+                    f" - {temporal.description}"
+                ),
+            },
+        )
+        self._emit_event(
+            EventType.VERIFICATION_PROGRESS,
+            {
+                "embryo_id": embryo_id,
+                "strategies_complete": strategies_complete,
+                "total_strategies": total_strategies,
+            },
+        )
 
         # Ensemble result (if applicable)
         if ensemble_result:
             strategies_complete += 1
-            self._emit_event(EventType.VERIFICATION_STRATEGY, {
-                'embryo_id': embryo_id,
-                'detector_name': detector.name,
-                'strategy': 'ensemble',
-                'passed': ensemble_result.consensus_detected,
-                'summary': f"Ensemble vote: {ensemble_result.votes_yes}/{ensemble_result.total_votes} YES ({ensemble_result.agreement_ratio*100:.0f}%)",
-                'votes_yes': ensemble_result.votes_yes,
-                'votes_no': ensemble_result.votes_no,
-                'total_votes': ensemble_result.total_votes,
-            })
-            self._emit_event(EventType.VERIFICATION_PROGRESS, {
-                'embryo_id': embryo_id,
-                'strategies_complete': strategies_complete,
-                'total_strategies': total_strategies,
-            })
+            self._emit_event(
+                EventType.VERIFICATION_STRATEGY,
+                {
+                    "embryo_id": embryo_id,
+                    "detector_name": detector.name,
+                    "strategy": "ensemble",
+                    "passed": ensemble_result.consensus_detected,
+                    "summary": (
+                        f"Ensemble vote: {ensemble_result.votes_yes}/{ensemble_result.total_votes}"
+                        f" YES ({ensemble_result.agreement_ratio * 100:.0f}%)"
+                    ),
+                    "votes_yes": ensemble_result.votes_yes,
+                    "votes_no": ensemble_result.votes_no,
+                    "total_votes": ensemble_result.total_votes,
+                },
+            )
+            self._emit_event(
+                EventType.VERIFICATION_PROGRESS,
+                {
+                    "embryo_id": embryo_id,
+                    "strategies_complete": strategies_complete,
+                    "total_strategies": total_strategies,
+                },
+            )
 
         # Hardware context result (if applicable)
         if hardware_result:
             strategies_complete += 1
-            self._emit_event(EventType.VERIFICATION_STRATEGY, {
-                'embryo_id': embryo_id,
-                'detector_name': detector.name,
-                'strategy': 'hardware_context',
-                'passed': not hardware_result.suspicious,
-                'summary': f"Hardware errors suspicious: {'YES - ' + ', '.join(hardware_result.concerns) if hardware_result.suspicious else 'No'}",
-                'reasoning': hardware_result.reasoning,
-            })
-            self._emit_event(EventType.VERIFICATION_PROGRESS, {
-                'embryo_id': embryo_id,
-                'strategies_complete': strategies_complete,
-                'total_strategies': total_strategies,
-            })
+            hardware_summary = (
+                "YES - " + ", ".join(hardware_result.concerns)
+                if hardware_result.suspicious
+                else "No"
+            )
+            self._emit_event(
+                EventType.VERIFICATION_STRATEGY,
+                {
+                    "embryo_id": embryo_id,
+                    "detector_name": detector.name,
+                    "strategy": "hardware_context",
+                    "passed": not hardware_result.suspicious,
+                    "summary": f"Hardware errors suspicious: {hardware_summary}",
+                    "reasoning": hardware_result.reasoning,
+                },
+            )
+            self._emit_event(
+                EventType.VERIFICATION_PROGRESS,
+                {
+                    "embryo_id": embryo_id,
+                    "strategies_complete": strategies_complete,
+                    "total_strategies": total_strategies,
+                },
+            )
 
         # Determine consensus (with hardware context)
         consensus, reasoning = self._evaluate_consensus_with_hardware(
@@ -502,26 +597,37 @@ class DetectionVerifier:
         logger.info(
             f"Verification (with context) complete for {detector.name}: "
             f"consensus={consensus}, duration={duration:.2f}s"
-            + (f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES" if ensemble_result else "")
+            + (
+                f", ensemble={ensemble_result.votes_yes}/{ensemble_result.total_votes} YES"
+                if ensemble_result
+                else ""
+            )
             + (f", hardware_suspicious={hardware_result.suspicious}" if hardware_result else "")
         )
 
         # Emit VERIFICATION_COMPLETED event with full summary
-        self._emit_event(EventType.VERIFICATION_COMPLETED, {
-            'embryo_id': embryo_id,
-            'detector_name': detector.name,
-            'consensus': consensus,
-            'reasoning': reasoning,
-            'duration_seconds': duration,
-            'strategies': {
-                'adversarial': not adversarial.found_counter_evidence,
-                'independent': independent.detected,
-                'temporal': temporal.change_detected,
-                'ensemble': ensemble_result.consensus_detected if ensemble_result else None,
-                'hardware_context': (not hardware_result.suspicious) if hardware_result else None,
+        self._emit_event(
+            EventType.VERIFICATION_COMPLETED,
+            {
+                "embryo_id": embryo_id,
+                "detector_name": detector.name,
+                "consensus": consensus,
+                "reasoning": reasoning,
+                "duration_seconds": duration,
+                "strategies": {
+                    "adversarial": not adversarial.found_counter_evidence,
+                    "independent": independent.detected,
+                    "temporal": temporal.change_detected,
+                    "ensemble": ensemble_result.consensus_detected if ensemble_result else None,
+                    "hardware_context": (not hardware_result.suspicious)
+                    if hardware_result
+                    else None,
+                },
+                "ensemble_votes": f"{ensemble_result.votes_yes}/{ensemble_result.total_votes}"
+                if ensemble_result
+                else None,
             },
-            'ensemble_votes': f"{ensemble_result.votes_yes}/{ensemble_result.total_votes}" if ensemble_result else None,
-        })
+        )
 
         return result
 
@@ -549,7 +655,8 @@ class DetectionVerifier:
             Analysis result
         """
         try:
-            prompt = f"""You are analyzing hardware error context for a microscopy detection verification.
+            prompt = f"""\
+You are analyzing hardware error context for a microscopy detection verification.
 
 GLOBAL ERROR LOG:
 {global_error_context}
@@ -562,10 +669,12 @@ Consider these correlations:
 - Stage positioning errors could cause wrong embryo to be imaged
 - Acquisition timeouts could cause partial/blank images (blank images look like empty FOV = hatched)
 - Camera errors could produce corrupted data
-- Errors on OTHER embryos in the same round could indicate systemic issues (stage drift, hardware instability)
+- Errors on OTHER embryos in the same round could indicate systemic issues
+  (stage drift, hardware instability)
 - Multiple errors in quick succession suggests hardware problems
 
-If ANY errors occurred that could have affected the image quality or positioning for {embryo_id}, mark it suspicious.
+If ANY errors occurred that could have affected the image quality or positioning
+for {embryo_id}, mark it suspicious.
 
 Record your analysis with the record_hardware_context tool.
 """
@@ -576,7 +685,7 @@ Record your analysis with the record_hardware_context tool.
                 max_tokens=300,
                 tools=[_HARDWARE_CONTEXT_TOOL],
                 tool_choice={"type": "tool", "name": _HARDWARE_CONTEXT_TOOL["name"]},
-                messages=[{"role": "user", "content": prompt}]
+                messages=[{"role": "user", "content": prompt}],
             )
 
             data = _tool_input(response)
@@ -605,8 +714,8 @@ Record your analysis with the record_hardware_context tool.
         adversarial: AdversarialResult,
         independent: IndependentResult,
         temporal: TemporalResult,
-        ensemble: Optional[EnsembleResult] = None,
-        hardware_context: Optional[HardwareContextResult] = None,
+        ensemble: EnsembleResult | None = None,
+        hardware_context: HardwareContextResult | None = None,
     ) -> tuple[bool, str]:
         """
         Evaluate consensus across all verification strategies including hardware context.
@@ -622,7 +731,9 @@ Record your analysis with the record_hardware_context tool.
         if not adversarial.found_counter_evidence:
             agreements += 1
         else:
-            disagreements.append(f"Adversarial found counter-evidence: {', '.join(adversarial.concerns[:2])}")
+            disagreements.append(
+                f"Adversarial found counter-evidence: {', '.join(adversarial.concerns[:2])}"
+            )
 
         # Check independent: should also detect
         if independent.detected:
@@ -662,12 +773,19 @@ Record your analysis with the record_hardware_context tool.
         consensus = agreements == total_strategies
 
         if consensus:
-            parts = ["no counter-evidence found", "independent analysis confirms", "temporal change observed"]
+            parts = [
+                "no counter-evidence found",
+                "independent analysis confirms",
+                "temporal change observed",
+            ]
             if ensemble:
                 parts.append(f"ensemble confirms ({ensemble.votes_yes}/{ensemble.total_votes} YES)")
             if hardware_context:
                 parts.append("no hardware error concerns")
-            reasoning = f"All verification strategies agree ({total_strategies}/{total_strategies}): " + ", ".join(parts)
+            reasoning = (
+                f"All verification strategies agree ({total_strategies}/{total_strategies}): "
+                + ", ".join(parts)
+            )
         else:
             reasoning = (
                 f"Verification disagreement ({agreements}/{total_strategies} agree): "
@@ -700,7 +818,7 @@ Record your analysis with the record_hardware_context tool.
                 )
 
             # Build detector-specific critical review guidance
-            if detector.name == 'hatching':
+            if detector.name == "hatching":
                 specific_guidance = """
 For HATCHING specifically, look for these common FALSE POSITIVE patterns:
 - Is the worm still COILED/PRETZEL-SHAPED inside the eggshell?
@@ -713,10 +831,11 @@ TRUE hatching requires the worm to be OUTSIDE the shell (free-floating, elongate
             else:
                 specific_guidance = ""
 
-            prompt = f"""You are reviewing a detection result for a C. elegans embryo (diSPIM max projection).
+            prompt = f"""\
+You are reviewing a detection result for a C. elegans embryo (diSPIM max projection).
 
 The system detected: {detector.name}
-Original reasoning: {original_result.reasoning or 'not provided'}
+Original reasoning: {original_result.reasoning or "not provided"}
 
 NOW ACT AS A CRITICAL REVIEWER. Your job is to find reasons why this detection might be INCORRECT:
 - Could this be a false positive?
@@ -735,7 +854,7 @@ Analyze the image(s) carefully and record your review with the record_adversaria
                 max_tokens=500,
                 tools=[_ADVERSARIAL_TOOL],
                 tool_choice={"type": "tool", "name": _ADVERSARIAL_TOOL["name"]},
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             data = _tool_input(response)
@@ -779,7 +898,7 @@ Analyze the image(s) carefully and record your review with the record_adversaria
                 )
 
             # Build detector-specific criteria
-            if detector.name == 'hatching':
+            if detector.name == "hatching":
                 criteria = """
 TRUE HATCHING criteria (must meet at least one):
 - Worm body is OUTSIDE the eggshell boundary (free-floating, elongated)
@@ -793,7 +912,8 @@ NOT HATCHING indicators:
                 criteria = detector.description
 
             # Use a neutral prompt that doesn't reveal the previous detection
-            prompt = f"""Analyze this C. elegans embryo image (diSPIM max projection) at timepoint {timepoint}.
+            prompt = f"""\
+Analyze this C. elegans embryo image (diSPIM max projection) at timepoint {timepoint}.
 
 Question: Has '{detector.name}' occurred in this embryo?
 
@@ -813,7 +933,7 @@ Record your assessment with the record_independent_assessment tool.
                 max_tokens=400,
                 tools=[_INDEPENDENT_TOOL],
                 tool_choice={"type": "tool", "name": _INDEPENDENT_TOOL["name"]},
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             data = _tool_input(response)
@@ -861,14 +981,16 @@ Record your assessment with the record_independent_assessment tool.
             prev_images = []
             for img in embryo_state.recent_images[-3:-1]:
                 if img.max_projection_b64:
-                    prev_images.append({
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": img.max_projection_b64,
+                    prev_images.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": img.max_projection_b64,
+                            },
                         }
-                    })
+                    )
 
             if not prev_images:
                 return TemporalResult(
@@ -878,7 +1000,7 @@ Record your assessment with the record_independent_assessment tool.
                 )
 
             # Build detector-specific temporal criteria
-            if detector.name == 'hatching':
+            if detector.name == "hatching":
                 temporal_criteria = """For HATCHING, look for:
 - A visible BREACH appearing in the eggshell boundary (not just expansion)
 - The worm physically EXITING the shell (part of body moves outside)
@@ -890,10 +1012,11 @@ Record your assessment with the record_independent_assessment tool.
 - Not just a static state that could have existed before
 - Clear evidence of progression or event occurrence"""
 
-            prompt = f"""Compare these sequential timepoints of a C. elegans embryo (diSPIM max projection).
+            prompt = f"""\
+Compare these sequential timepoints of a C. elegans embryo (diSPIM max projection).
 
 PREVIOUS TIMEPOINTS (shown first):
-These are from t={timepoint-2} to t={timepoint-1}
+These are from t={timepoint - 2} to t={timepoint - 1}
 
 CURRENT TIMEPOINT (shown last):
 This is t={timepoint}
@@ -914,7 +1037,7 @@ Record your comparison with the record_temporal_comparison tool.
                 max_tokens=400,
                 tools=[_TEMPORAL_TOOL],
                 tool_choice={"type": "tool", "name": _TEMPORAL_TOOL["name"]},
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             data = _tool_input(response)
@@ -934,25 +1057,23 @@ Record your comparison with the record_temporal_comparison tool.
                 raw_response="",
             )
 
-    def _get_image_content(
-        self,
-        embryo_state: EmbryoState,
-        num_images: int = 1
-    ) -> List[Dict]:
+    def _get_image_content(self, embryo_state: EmbryoState, num_images: int = 1) -> list[dict]:
         """Get image content blocks for Claude API"""
         images = []
         recent = embryo_state.recent_images[-num_images:] if embryo_state.recent_images else []
 
         for img in recent:
             if img.max_projection_b64:
-                images.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/png",
-                        "data": img.max_projection_b64,
+                images.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/png",
+                            "data": img.max_projection_b64,
+                        },
                     }
-                })
+                )
 
         return images
 
@@ -986,8 +1107,10 @@ Record your comparison with the record_temporal_comparison tool.
 
 Answer ONE question: Has the embryo HATCHED?
 
-HATCHED means: The worm body is OUTSIDE the eggshell (free-floating, elongated, or field is empty because worm left).
-NOT HATCHED means: The worm is still INSIDE the eggshell (coiled/pretzel-shaped, even if shell looks expanded).
+HATCHED means: The worm body is OUTSIDE the eggshell (free-floating, elongated,
+or field is empty because worm left).
+NOT HATCHED means: The worm is still INSIDE the eggshell (coiled/pretzel-shaped,
+even if shell looks expanded).
 
 Respond with ONLY: YES or NO"""
 
@@ -999,7 +1122,7 @@ Respond with ONLY: YES or NO"""
                         self.claude.messages.create,
                         model=self.ensemble_model,
                         max_tokens=10,  # Very short response expected
-                        messages=[{"role": "user", "content": content}]
+                        messages=[{"role": "user", "content": content}],
                     )
                     return response.content[0].text.strip().upper()
                 except Exception as e:
@@ -1007,7 +1130,10 @@ Respond with ONLY: YES or NO"""
                     return "ERROR"
 
             # Run all votes in parallel
-            logger.info(f"[ENSEMBLE] Running {self.ensemble_size} parallel Haiku calls for hatching verification")
+            logger.info(
+                f"[ENSEMBLE] Running {self.ensemble_size} parallel Haiku calls "
+                "for hatching verification"
+            )
             tasks = [single_vote() for _ in range(self.ensemble_size)]
             responses = await asyncio.gather(*tasks)
 
@@ -1062,7 +1188,7 @@ Respond with ONLY: YES or NO"""
         adversarial: AdversarialResult,
         independent: IndependentResult,
         temporal: TemporalResult,
-        ensemble: Optional[EnsembleResult] = None,
+        ensemble: EnsembleResult | None = None,
     ) -> tuple[bool, str]:
         """
         Evaluate consensus across all verification strategies.
@@ -1078,7 +1204,9 @@ Respond with ONLY: YES or NO"""
         if not adversarial.found_counter_evidence:
             agreements += 1
         else:
-            disagreements.append(f"Adversarial found counter-evidence: {', '.join(adversarial.concerns[:2])}")
+            disagreements.append(
+                f"Adversarial found counter-evidence: {', '.join(adversarial.concerns[:2])}"
+            )
 
         # Check independent: should also detect
         if independent.detected:
@@ -1112,13 +1240,14 @@ Respond with ONLY: YES or NO"""
                     f"All verification strategies agree ({total_strategies}/{total_strategies}): "
                     f"no counter-evidence found, independent analysis confirms detection, "
                     f"temporal change observed, ensemble voting confirms "
-                    f"({ensemble.votes_yes}/{ensemble.total_votes} = {ensemble.agreement_ratio:.0%} YES)."
+                    f"({ensemble.votes_yes}/{ensemble.total_votes} = "
+                    f"{ensemble.agreement_ratio:.0%} YES)."
                 )
             else:
                 reasoning = (
-                    f"All verification strategies agree: "
-                    f"no counter-evidence found, independent analysis confirms detection, "
-                    f"temporal change observed."
+                    "All verification strategies agree: "
+                    "no counter-evidence found, independent analysis confirms detection, "
+                    "temporal change observed."
                 )
         else:
             reasoning = (
