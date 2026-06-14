@@ -59,12 +59,11 @@ class ModelSettings:
     """Claude model identifiers — the single source of truth for every tier.
 
     Tiers are split by role; capability-first per the latest models:
-      - main:       Claude Fable 5 ($10/$50 per MTok). Per-user-turn reasoning +
-                    tool orchestration (plan mode) and the dopaminergic classifier
-                    stage. Always-on thinking (no thinking budget — control depth
-                    via output_config.effort), ~30%-heavier tokenizer, may refuse
-                    (stop_reason="refusal", empty content); needs ≥30-day org
-                    data retention.
+      - main:       Opus 4.8 ($5/$25). Per-user-turn reasoning + tool
+                    orchestration (plan mode) and the dopaminergic classifier
+                    stage. (Fable 5 was tried here but declined benign planning
+                    turns — stop_reason="refusal" — forcing a fallback on every
+                    turn; set MODEL_MAIN=claude-fable-5 to retry it.)
       - perception: Opus 4.8 (high-res vision, $5/$25). Highest-frequency tier
                     (per timepoint); Opus-tier vision for perception accuracy.
       - medium:     Opus 4.8. Onboarding / wizard summaries.
@@ -72,19 +71,20 @@ class ModelSettings:
                     verifier's parallel ensemble (ensemble_size calls per
                     verification) and blank-image / summary checks.
 
-    API note: Fable 5 and Opus 4.8 reject thinking budget_tokens and sampling
-    params (temperature/top_p/top_k) — adaptive thinking only, depth via effort.
-    Sonnet 4.6 supports adaptive thinking. No assistant prefills anywhere (4.6+
-    family rejects them).
+    API note: Opus 4.8 rejects thinking budget_tokens and sampling params
+    (temperature/top_p/top_k) — adaptive thinking only, depth via effort.
+    Sonnet 4.6 supports adaptive thinking. No assistant prefills anywhere
+    (4.6+ family rejects them).
     """
 
-    main: str = field(default_factory=lambda: _env("MODEL_MAIN", "claude-fable-5"))
+    main: str = field(default_factory=lambda: _env("MODEL_MAIN", "claude-opus-4-8"))
     perception: str = field(default_factory=lambda: _env("MODEL_PERCEPTION", "claude-opus-4-8"))
     fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-sonnet-4-6"))
     medium: str = field(default_factory=lambda: _env("MODEL_MEDIUM", "claude-opus-4-8"))
-    # When the main tier (Fable 5) declines a turn (stop_reason="refusal"), the
-    # main-tier calls transparently retry it on this model instead of surfacing
-    # the refusal. Empty disables the fallback.
+    # If the main tier declines a turn (stop_reason="refusal"), retry it on this
+    # model instead of surfacing the refusal. Inert while main is Opus 4.8 (the
+    # guard skips it when fallback == main); relevant if main is set to Fable 5.
+    # Empty disables the fallback.
     refusal_fallback: str = field(
         default_factory=lambda: _env("MODEL_REFUSAL_FALLBACK", "claude-opus-4-8")
     )
