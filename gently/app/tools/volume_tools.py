@@ -7,7 +7,7 @@ Tools for viewing and listing acquired lightsheet volumes.
 import logging
 
 from gently.core.coordinates import get_um_per_pixel, stage_to_pixel_position
-from gently.harness.tools.helpers import require_agent
+from gently.harness.tools.helpers import ctx_get, require_agent
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
@@ -36,8 +36,8 @@ async def view_image(
     context: dict | None = None,
 ) -> str:
     """Capture and display bottom camera image with embryo annotations"""
-    client = context.get("client")
-    agent = context.get("agent")
+    client = ctx_get(context, "client")
+    agent = ctx_get(context, "agent")
 
     try:
         snap = await client.capture_bottom_image(exposure_ms=exposure_ms)
@@ -252,7 +252,7 @@ async def list_volumes(embryo_id: str | None = None, context: dict | None = None
     all_volumes_list = agent.store.list_volumes(session_id, embryo_id)
 
     # Group by embryo_id
-    all_volumes = {}  # embryo_id -> list of volume records
+    all_volumes: dict[str, list[dict]] = {}  # embryo_id -> list of volume records
     for vol in all_volumes_list:
         eid = vol["embryo_id"]
         if eid not in all_volumes:

@@ -14,7 +14,7 @@ import numpy as np  # noqa: E402
 
 from gently.analysis.core import AdaptiveSweepState, FitFunction, fit_focus_curve  # noqa: E402
 from gently.harness.state import CalibrationPrior  # noqa: E402
-from gently.harness.tools.helpers import get_embryo_or_error  # noqa: E402
+from gently.harness.tools.helpers import ctx_get, get_embryo_or_error  # noqa: E402
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool  # noqa: E402
 from gently.ui.web.plots import (  # noqa: E402
     generate_calibration_summary_plot,
@@ -462,7 +462,7 @@ async def hybrid_focus_selection(
     agent,
     embryo_id: str,
     fft_confidence_threshold: float = 0.85,
-) -> tuple[int, str, float]:
+) -> tuple[int, str, float | None]:
     """
     Two-stage focus selection: FFT first, Vision if ambiguous.
 
@@ -696,8 +696,8 @@ async def fast_calibrate_embryo(
     """
     from gently.hardware.dispim.claude_client import AsyncClaudeClient
 
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return False, "Error: No agent context", 0
@@ -999,8 +999,8 @@ async def calibrate_embryo(
     from gently.analysis.core import calculate_focus_score
     from gently.hardware.dispim.claude_client import AsyncClaudeClient
 
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -1402,7 +1402,7 @@ async def calibrate_all_embryos(
     context: dict | None = None,
 ) -> str:
     """Calibrate all embryos sequentially with Claude vision"""
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
 
     if not agent:
         return "Error: No agent context"

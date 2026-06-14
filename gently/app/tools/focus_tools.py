@@ -22,6 +22,7 @@ from gently.analysis.core import (
     calculate_focus_score,
     fit_focus_curve,
 )
+from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -82,8 +83,8 @@ async def fine_focus(
     context : dict
         Execution context with client and agent
     """
-    client = context.get("client")
-    agent = context.get("agent")
+    client = ctx_get(context, "client")
+    agent = ctx_get(context, "agent")
 
     if not client:
         return "Error: No microscope client connected"
@@ -253,7 +254,7 @@ async def get_focus_score(
     context : dict
         Execution context
     """
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     if not client:
         return "Error: No microscope client connected"
@@ -315,7 +316,7 @@ async def get_focus_history(embryo_id: str, context: dict | None = None) -> str:
     context : dict
         Execution context with agent
     """
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
 
     if not agent:
         return "Error: No agent context available"

@@ -262,8 +262,8 @@ def analyze_corrections(limit: int = 50, context: dict | None = None) -> str:
         "",
     ]
 
-    indicator_counts = {}
-    tool_corrections = {}
+    indicator_counts: dict[str, int] = {}
+    tool_corrections: dict[str, int] = {}
 
     for corr in corrections[:limit]:
         for indicator in corr.correction_indicators:

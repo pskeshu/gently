@@ -9,7 +9,7 @@ import logging
 
 import numpy as np
 
-from gently.harness.tools.helpers import get_embryo_or_error
+from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
@@ -48,8 +48,8 @@ async def acquire_volume(
     context: dict | None = None,
 ) -> str:
     """Acquire single volume - moves to embryo first, uses calibration"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -244,8 +244,8 @@ async def capture_lightsheet(
     context: dict | None = None,
 ) -> str:
     """Capture and optionally display a single lightsheet image"""
-    client = context.get("client")
-    agent = context.get("agent")
+    client = ctx_get(context, "client")
+    agent = ctx_get(context, "agent")
 
     try:
         embryo = None
@@ -357,8 +357,8 @@ capturing one at a time.""",
 )
 async def batch_lightsheet(galvo_position: float = 0.0, context: dict | None = None) -> str:
     """Capture lightsheet images from all embryos and show them in the web UI"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent or not client:
         return "Error: Agent or microscope not available"

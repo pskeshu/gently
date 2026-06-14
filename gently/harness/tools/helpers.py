@@ -9,13 +9,35 @@ from datetime import datetime
 from typing import Any
 
 
-def require_agent(context: dict) -> tuple[Any | None, str | None]:
+def ctx_get(context: dict | None, key: str) -> Any:
+    """
+    Look up a key in a (possibly missing) tool execution context
+
+    Parameters
+    ----------
+    context : dict | None
+        Tool execution context
+    key : str
+        Key to look up
+
+    Returns
+    -------
+    Any
+        The value for ``key``, or ``None`` if ``context`` is ``None`` or
+        the key is absent.
+    """
+    if context is None:
+        return None
+    return context.get(key)
+
+
+def require_agent(context: dict | None) -> tuple[Any, str | None]:
     """
     Extract agent from context or return error message
 
     Parameters
     ----------
-    context : dict
+    context : dict | None
         Tool execution context
 
     Returns
@@ -23,13 +45,13 @@ def require_agent(context: dict) -> tuple[Any | None, str | None]:
     tuple
         (agent, None) if found, (None, error_message) if not
     """
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
     if not agent:
         return None, "Error: No agent context"
     return agent, None
 
 
-def get_embryo_or_error(agent, embryo_id: str) -> tuple[Any | None, str | None]:
+def get_embryo_or_error(agent, embryo_id: str) -> tuple[Any, str | None]:
     """
     Get embryo by any name or return error message
 
@@ -51,13 +73,13 @@ def get_embryo_or_error(agent, embryo_id: str) -> tuple[Any | None, str | None]:
     return embryo, None
 
 
-def require_microscope(context: dict) -> tuple[Any | None, str | None]:
+def require_microscope(context: dict | None) -> tuple[Any, str | None]:
     """
     Get microscope client from context or return error message
 
     Parameters
     ----------
-    context : dict
+    context : dict | None
         Tool execution context
 
     Returns
@@ -65,13 +87,13 @@ def require_microscope(context: dict) -> tuple[Any | None, str | None]:
     tuple
         (client, None) if connected, (None, error_message) if not
     """
-    client = context.get("client")
+    client = ctx_get(context, "client")
     if not client:
         return None, "Not connected to microscope. Use connect_microscope first."
     return client, None
 
 
-def require_interaction_logger(agent) -> tuple[Any | None, str | None]:
+def require_interaction_logger(agent) -> tuple[Any, str | None]:
     """
     Get interaction logger or return error message
 
@@ -90,7 +112,7 @@ def require_interaction_logger(agent) -> tuple[Any | None, str | None]:
     return agent.interaction_logger, None
 
 
-def require_developmental_tracker(agent) -> tuple[Any | None, str | None]:
+def require_developmental_tracker(agent) -> tuple[Any, str | None]:
     """
     Get developmental tracker or return error message
 
@@ -112,7 +134,7 @@ def require_developmental_tracker(agent) -> tuple[Any | None, str | None]:
     return agent.developmental_tracker, None
 
 
-def require_timelapse_orchestrator(agent) -> tuple[Any | None, str | None]:
+def require_timelapse_orchestrator(agent) -> tuple[Any, str | None]:
     """
     Get timelapse orchestrator or return error message
 
@@ -131,7 +153,7 @@ def require_timelapse_orchestrator(agent) -> tuple[Any | None, str | None]:
     return agent.timelapse_orchestrator, None
 
 
-def require_databroker(agent) -> tuple[Any | None, str | None]:
+def require_databroker(agent) -> tuple[Any, str | None]:
     """
     Get databroker connection or return error message
 

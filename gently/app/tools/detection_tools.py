@@ -21,6 +21,7 @@ from gently.core.coordinates import (
     pixel_to_stage_position,
     stage_to_pixel_position,
 )
+from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -48,7 +49,7 @@ async def _route_to_map_view(
     marked = await mark_embryos_web(
         viz_server=agent.viz_server,
         image=image,
-        initial_stage_position=tuple(stage_position),
+        initial_stage_position=stage_position,
         pixel_size_um=pixel_size_um,
         initial_markers=initial_markers,
         default_role=default_role,
@@ -121,8 +122,8 @@ async def detect_embryos(
     context: dict | None = None,
 ) -> str:
     """Detect embryos via SAM + edit/assign roles in the web map view."""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -240,7 +241,7 @@ async def detect_embryos(
                 except Exception:
                     pass
 
-        role_counts = {}
+        role_counts: dict[str, int] = {}
         for _, r in added:
             role_counts[r] = role_counts.get(r, 0) + 1
         role_summary = ", ".join(f"{n} {r}" for r, n in sorted(role_counts.items()))
@@ -281,8 +282,8 @@ async def manual_mark_embryos(
     context: dict | None = None,
 ) -> str:
     """Manual marking via the web map view."""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -420,7 +421,7 @@ async def edit_embryos(
     context: dict | None = None,
 ) -> str:
     """Edit existing embryos via the web map view."""
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
     if not agent:
         return "Error: No agent context"
     if not agent.experiment.embryos:
@@ -452,8 +453,8 @@ Use when user wants to see where embryos are visually (e.g., "show me the embryo
 )
 async def show_detected_embryos(save_to_file: bool = True, context: dict | None = None) -> str:
     """Show detected embryos visualization using experiment.embryos as source of truth"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"

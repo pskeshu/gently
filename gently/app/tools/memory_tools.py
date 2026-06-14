@@ -7,7 +7,7 @@ Thin wrappers around AgentMemory. Available in both run and plan modes.
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
-def _get_memory(context: dict):
+def _get_memory(context: dict | None):
     """Extract AgentMemory from tool context."""
     agent = context.get("agent") if context else None
     if not agent or not hasattr(agent, "memory") or not agent.memory:

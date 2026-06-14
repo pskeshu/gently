@@ -5,6 +5,7 @@ Tools for managing adaptive timelapse acquisitions.
 """
 
 from gently.harness.tools.helpers import (
+    ctx_get,
     get_embryo_or_error,
     require_agent,
     require_developmental_tracker,
@@ -26,7 +27,7 @@ async def generate_bluesky_plan(
     context: dict | None = None,
 ) -> str:
     """Generate Bluesky plan"""
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
 
     if not agent:
         return "Error: No agent context"
@@ -966,7 +967,7 @@ def get_photodose_status(context: dict | None = None) -> str:
     if err:
         return err
     base = getattr(orchestrator, "_dose_budget_base_ms", None)
-    exceeded = getattr(orchestrator, "_dose_budget_exceeded", set()) or set()
+    exceeded: set[str] = getattr(orchestrator, "_dose_budget_exceeded", set()) or set()
     states = getattr(orchestrator, "_embryo_states", {}) or {}
     if base is None:
         lines = ["Photodose budget: DISABLED (no cap).", ""]

@@ -20,6 +20,8 @@ Three groups:
 """
 
 import logging
+from types import SimpleNamespace
+from typing import Any
 
 from gently.harness.tools.helpers import require_agent
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
@@ -389,10 +391,7 @@ async def apply_plan_acquisition_spec(
         for embryo in experiment.embryos.values():
             # Build an "effective" spec respecting overrides — copy then
             # zero out any field the caller asked us to skip.
-            class _Filtered:
-                pass
-
-            eff = _Filtered()
+            eff = SimpleNamespace()
             eff.num_slices = (
                 None
                 if "num_slices" in overrides and overrides["num_slices"] is None
@@ -554,10 +553,10 @@ async def recall_sibling_sessions(
         sid = getattr(item, "session_id", None)
         if not sid:
             continue
-        meta = {}
+        meta: dict[str, Any] = {}
         if file_store is not None:
             try:
-                meta = file_store.get_session(sid) or {}
+                meta = dict(file_store.get_session(sid) or {})
             except Exception:
                 meta = {}
         sessions.append(
