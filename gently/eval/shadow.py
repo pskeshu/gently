@@ -25,13 +25,11 @@ writeable? shutdown clean?).
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from datetime import datetime
-from pathlib import Path
-from typing import Awaitable, Callable, Dict, List, Optional
 
 from gently.core.event_bus import Event, EventBus
 
@@ -65,10 +63,10 @@ class OrchestratorCandidate(ABC):
     def on_event(self, event: Event) -> None:
         """Handle one event from the bus. Synchronous, must not block long."""
 
-    def on_start(self) -> None:
+    def on_start(self) -> None:  # noqa: B027
         """Called once when the shadow runner attaches this candidate."""
 
-    def on_stop(self) -> None:
+    def on_stop(self) -> None:  # noqa: B027
         """Called once when the shadow runner detaches this candidate."""
 
     # ---- helpers candidates can use ---------------------------------------
@@ -77,28 +75,30 @@ class OrchestratorCandidate(ABC):
         self,
         *,
         trigger: DecisionTrigger,
-        trigger_detail: Optional[str] = None,
-        tool_calls: Optional[List[Dict]] = None,
-        response_text: Optional[str] = None,
-        context_summary: Optional[str] = None,
-        recent_event_ids: Optional[List[str]] = None,
-        prompt_hash: Optional[str] = None,
-        duration_ms: Optional[float] = None,
-        error: Optional[str] = None,
+        trigger_detail: str | None = None,
+        tool_calls: list[dict] | None = None,
+        response_text: str | None = None,
+        context_summary: str | None = None,
+        recent_event_ids: list[str] | None = None,
+        prompt_hash: str | None = None,
+        duration_ms: float | None = None,
+        error: str | None = None,
     ) -> None:
-        self.decisions.append(Decision(
-            timestamp=datetime.now(),
-            agent=self.name,
-            trigger=trigger,
-            trigger_detail=trigger_detail,
-            tool_calls=tool_calls or [],
-            response_text=response_text,
-            context_summary=context_summary,
-            recent_event_ids=recent_event_ids or [],
-            prompt_hash=prompt_hash,
-            duration_ms=duration_ms,
-            error=error,
-        ))
+        self.decisions.append(
+            Decision(
+                timestamp=datetime.now(),
+                agent=self.name,
+                trigger=trigger,
+                trigger_detail=trigger_detail,
+                tool_calls=tool_calls or [],
+                response_text=response_text,
+                context_summary=context_summary,
+                recent_event_ids=recent_event_ids or [],
+                prompt_hash=prompt_hash,
+                duration_ms=duration_ms,
+                error=error,
+            )
+        )
 
 
 class NoOpCandidate(OrchestratorCandidate):
@@ -109,8 +109,7 @@ class NoOpCandidate(OrchestratorCandidate):
     candidate evolves from.
     """
 
-    def __init__(self, name: str, decisions: DecisionLog,
-                 *, watch: Optional[List[str]] = None):
+    def __init__(self, name: str, decisions: DecisionLog, *, watch: list[str] | None = None):
         super().__init__(name, decisions)
         # Optional whitelist of event_type names to react to. None = all.
         self._watch = set(watch) if watch else None
@@ -142,8 +141,8 @@ class ShadowRunner:
 
     def __init__(self, bus: EventBus):
         self.bus = bus
-        self._candidates: List[OrchestratorCandidate] = []
-        self._unsub: Optional[Callable[[], None]] = None
+        self._candidates: list[OrchestratorCandidate] = []
+        self._unsub: Callable[[], None] | None = None
         self._lock = threading.RLock()
         self._running = False
 
@@ -154,9 +153,7 @@ class ShadowRunner:
                 try:
                     candidate.on_start()
                 except Exception:
-                    logger.exception(
-                        "ShadowRunner: on_start failed for %s", candidate.name
-                    )
+                    logger.exception("ShadowRunner: on_start failed for %s", candidate.name)
 
     def remove(self, candidate: OrchestratorCandidate) -> None:
         with self._lock:
@@ -167,9 +164,7 @@ class ShadowRunner:
             try:
                 candidate.on_stop()
             except Exception:
-                logger.exception(
-                    "ShadowRunner: on_stop failed for %s", candidate.name
-                )
+                logger.exception("ShadowRunner: on_stop failed for %s", candidate.name)
 
     def start(self) -> None:
         """Subscribe to the bus and notify every candidate. Idempotent."""
@@ -181,13 +176,9 @@ class ShadowRunner:
                 try:
                     c.on_start()
                 except Exception:
-                    logger.exception(
-                        "ShadowRunner: on_start failed for %s", c.name
-                    )
+                    logger.exception("ShadowRunner: on_start failed for %s", c.name)
             self._running = True
-        logger.info(
-            "ShadowRunner: started with %d candidate(s)", len(self._candidates)
-        )
+        logger.info("ShadowRunner: started with %d candidate(s)", len(self._candidates))
 
     def stop(self) -> None:
         """Unsubscribe from the bus and notify every candidate. Idempotent."""
@@ -204,14 +195,12 @@ class ShadowRunner:
                 try:
                     c.on_stop()
                 except Exception:
-                    logger.exception(
-                        "ShadowRunner: on_stop failed for %s", c.name
-                    )
+                    logger.exception("ShadowRunner: on_stop failed for %s", c.name)
             self._running = False
         logger.info("ShadowRunner: stopped")
 
     @property
-    def candidates(self) -> List[OrchestratorCandidate]:
+    def candidates(self) -> list[OrchestratorCandidate]:
         with self._lock:
             return list(self._candidates)
 
@@ -225,5 +214,6 @@ class ShadowRunner:
             except Exception:
                 logger.exception(
                     "ShadowRunner: candidate %s raised on %s",
-                    c.name, event,
+                    c.name,
+                    event,
                 )

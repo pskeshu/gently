@@ -22,16 +22,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from benchmarks.perception.ground_truth import GroundTruth
+from benchmarks.perception.testset import _discover_volumes
 from gently.core.event_bus import EventBus, EventType
 from gently.core.imaging import (
+    apply_crop_bounds,
+    compute_crop_bounds,
     load_volume,
     projection_three_view,
-    compute_crop_bounds,
-    apply_crop_bounds,
 )
 from gently.settings import settings
-from benchmarks.perception.testset import _discover_volumes
-from benchmarks.perception.ground_truth import GroundTruth
 
 # Benchmark data paths
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -44,7 +44,9 @@ def _find_main_worktree() -> Path:
     try:
         out = subprocess.check_output(
             ["git", "worktree", "list", "--porcelain"],
-            cwd=str(REPO_ROOT), text=True, stderr=subprocess.DEVNULL,
+            cwd=str(REPO_ROOT),
+            text=True,
+            stderr=subprocess.DEVNULL,
         )
         for line in out.splitlines():
             if line.startswith("worktree "):
@@ -134,7 +136,11 @@ async def run(
 
     event_bus.publish(
         EventType.ACQUISITION_STARTED,
-        {"session_id": session_id, "embryo_ids": sorted(all_vols.keys()), "total_timepoints": max_tp},
+        {
+            "session_id": session_id,
+            "embryo_ids": sorted(all_vols.keys()),
+            "total_timepoints": max_tp,
+        },
         source="demo",
     )
 
@@ -176,7 +182,11 @@ async def run(
             )
 
             pushed += 1
-            print(f"\r  [{pushed}/{total}] {eid} t={t} [{stage or '?'}]", end="", flush=True)
+            print(
+                f"\r  [{pushed}/{total}] {eid} t={t} [{stage or '?'}]",
+                end="",
+                flush=True,
+            )
 
             if actual_delay:
                 await asyncio.sleep(actual_delay)
@@ -197,9 +207,13 @@ async def run(
 def main():
     parser = argparse.ArgumentParser(description="Launch viz server with benchmark data")
     parser.add_argument("--port", type=int, default=settings.network.viz_port)
-    parser.add_argument("--delay", type=float, default=1.0, help="Seconds between pushes (default 1)")
+    parser.add_argument(
+        "--delay", type=float, default=1.0, help="Seconds between pushes (default 1)"
+    )
     parser.add_argument("--fast", action="store_true", help="Push all data immediately, then serve")
-    parser.add_argument("--timepoints", type=int, default=0, help="Max timepoints per embryo (0=all)")
+    parser.add_argument(
+        "--timepoints", type=int, default=0, help="Max timepoints per embryo (0=all)"
+    )
     parser.add_argument("--embryos", nargs="+", default=None, help="Specific embryo IDs")
     parser.add_argument("--volumes", type=str, default=None, help="Path to volumes dir")
     parser.add_argument("--ground-truth", type=str, default=None, help="Path to ground truth JSON")
@@ -218,15 +232,17 @@ def main():
     gt_path = Path(args.ground_truth) if args.ground_truth else _resolve_data_path(_GT_REL)
 
     try:
-        asyncio.run(run(
-            port=args.port,
-            delay=args.delay,
-            max_timepoints=args.timepoints,
-            embryo_ids=args.embryos,
-            fast=args.fast,
-            volumes_dir=volumes_dir,
-            gt_path=gt_path,
-        ))
+        asyncio.run(
+            run(
+                port=args.port,
+                delay=args.delay,
+                max_timepoints=args.timepoints,
+                embryo_ids=args.embryos,
+                fast=args.fast,
+                volumes_dir=volumes_dir,
+                gt_path=gt_path,
+            )
+        )
     except KeyboardInterrupt:
         pass
 

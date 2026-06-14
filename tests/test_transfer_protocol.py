@@ -4,13 +4,10 @@ Tests for bulk transfer wire protocol — send_file / receive_file.
 
 import asyncio
 import hashlib
-from pathlib import Path
 
 import pytest
 
 from gently.mesh.transfer.protocol import (
-    HEADER_LENGTH_FORMAT,
-    HEADER_LENGTH_SIZE,
     receive_file,
     send_file,
 )
@@ -53,7 +50,8 @@ class TestSendReceiveRoundTrip:
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             success, sha256_sent = await send_file(
-                writer, sample_file,
+                writer,
+                sample_file,
                 transfer_id="test-001",
                 auth_token="tok123",
                 chunk_size=1024,
@@ -104,7 +102,10 @@ class TestSendReceiveRoundTrip:
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             ok, sha = await send_file(
-                writer, small_file, transfer_id="tiny-01", chunk_size=4096,
+                writer,
+                small_file,
+                transfer_id="tiny-01",
+                chunk_size=4096,
             )
             writer.close()
             await writer.wait_closed()
@@ -137,7 +138,10 @@ class TestSendReceiveRoundTrip:
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             ok, _ = await send_file(
-                writer, large_file, transfer_id="large-01", chunk_size=4096,
+                writer,
+                large_file,
+                transfer_id="large-01",
+                chunk_size=4096,
             )
             writer.close()
             await writer.wait_closed()
@@ -178,8 +182,11 @@ class TestProtocolEdgeCases:
         try:
             reader, writer = await asyncio.open_connection("127.0.0.1", port)
             await send_file(
-                writer, sample_file, transfer_id="hdr-test",
-                auth_token="mytoken", chunk_size=4096,
+                writer,
+                sample_file,
+                transfer_id="hdr-test",
+                auth_token="mytoken",
+                chunk_size=4096,
             )
             writer.close()
             await writer.wait_closed()

@@ -9,14 +9,12 @@ A monitoring coroutine tails the file and emits events.
 import asyncio
 import json
 import logging
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 from ..core.event_bus import EventType, get_event_bus
-from .models import ModelConfig, TrainingConfig, TrainingRun, TrainingStatus
+from .models import TrainingRun, TrainingStatus
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +31,8 @@ class LocalTrainer:
     def __init__(self, run_dir: Path):
         self._run_dir = run_dir
         self._run_dir.mkdir(parents=True, exist_ok=True)
-        self._process: Optional[asyncio.subprocess.Process] = None
-        self._monitor_task: Optional[asyncio.Task] = None
+        self._process: asyncio.subprocess.Process | None = None
+        self._monitor_task: asyncio.Task | None = None
 
     @property
     def progress_file(self) -> Path:
@@ -95,16 +93,16 @@ class LocalTrainer:
         # Launch subprocess
         train_script = Path(__file__).parent / "_train_worker.py"
         self._process = await asyncio.create_subprocess_exec(
-            sys.executable, str(train_script), str(config_file),
+            sys.executable,
+            str(train_script),
+            str(config_file),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(self._run_dir),
         )
 
         # Start progress monitor
-        self._monitor_task = asyncio.create_task(
-            self._monitor_progress(run.id, run.pipeline_id)
-        )
+        self._monitor_task = asyncio.create_task(self._monitor_progress(run.id, run.pipeline_id))
 
         logger.info(f"Training started: run={run.id}, pid={self._process.pid}")
         return run
@@ -175,7 +173,7 @@ class LocalTrainer:
         if self._monitor_task and not self._monitor_task.done():
             self._monitor_task.cancel()
 
-    def get_latest_progress(self) -> Optional[dict]:
+    def get_latest_progress(self) -> dict | None:
         """Read the last line from progress.jsonl."""
         if not self.progress_file.exists():
             return None

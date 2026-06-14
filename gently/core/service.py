@@ -10,22 +10,22 @@ Provides a unified framework for service management:
 
 import asyncio
 import logging
-import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any
 
 import aiohttp
 
-from .event_bus import EventType, get_event_bus, Event
+from .event_bus import EventType, get_event_bus
 
 logger = logging.getLogger(__name__)
 
 
 class ServiceState(Enum):
     """Service lifecycle states"""
+
     CREATED = auto()
     STARTING = auto()
     RUNNING = auto()
@@ -37,25 +37,26 @@ class ServiceState(Enum):
 @dataclass
 class ServiceInfo:
     """Information about a registered service"""
+
     name: str
     service_type: str
     host: str = "localhost"
-    port: Optional[int] = None
+    port: int | None = None
     state: ServiceState = ServiceState.CREATED
-    started_at: Optional[datetime] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
-    health_check_url: Optional[str] = None
+    started_at: datetime | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+    health_check_url: str | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         return {
-            'name': self.name,
-            'service_type': self.service_type,
-            'host': self.host,
-            'port': self.port,
-            'state': self.state.name,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'metadata': self.metadata,
-            'health_check_url': self.health_check_url,
+            "name": self.name,
+            "service_type": self.service_type,
+            "host": self.host,
+            "port": self.port,
+            "state": self.state.name,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "metadata": self.metadata,
+            "health_check_url": self.health_check_url,
         }
 
 
@@ -74,16 +75,16 @@ class Service(ABC):
         name: str,
         service_type: str = "generic",
         host: str = "localhost",
-        port: Optional[int] = None,
+        port: int | None = None,
     ):
         self.name = name
         self.service_type = service_type
         self.host = host
         self.port = port
         self._state = ServiceState.CREATED
-        self._started_at: Optional[datetime] = None
+        self._started_at: datetime | None = None
         self._event_bus = get_event_bus()
-        self._metadata: Dict[str, Any] = {}
+        self._metadata: dict[str, Any] = {}
 
     @property
     def state(self) -> ServiceState:
@@ -108,18 +109,18 @@ class Service(ABC):
             return
 
         self._state = ServiceState.STARTING
-        self._emit_event(EventType.STATUS_CHANGED, {'state': 'starting'})
+        self._emit_event(EventType.STATUS_CHANGED, {"state": "starting"})
 
         try:
             await self.on_start()
             self._state = ServiceState.RUNNING
             self._started_at = datetime.now()
-            self._emit_event(EventType.STATUS_CHANGED, {'state': 'running'})
+            self._emit_event(EventType.STATUS_CHANGED, {"state": "running"})
             logger.info(f"Service {self.name} started")
 
         except Exception as e:
             self._state = ServiceState.ERROR
-            self._emit_event(EventType.ERROR_OCCURRED, {'error': str(e)})
+            self._emit_event(EventType.ERROR_OCCURRED, {"error": str(e)})
             logger.error(f"Service {self.name} failed to start: {e}")
             raise
 
@@ -129,27 +130,26 @@ class Service(ABC):
             return
 
         self._state = ServiceState.STOPPING
-        self._emit_event(EventType.STATUS_CHANGED, {'state': 'stopping'})
+        self._emit_event(EventType.STATUS_CHANGED, {"state": "stopping"})
 
         try:
             await self.on_stop()
             self._state = ServiceState.STOPPED
-            self._emit_event(EventType.STATUS_CHANGED, {'state': 'stopped'})
+            self._emit_event(EventType.STATUS_CHANGED, {"state": "stopped"})
             logger.info(f"Service {self.name} stopped")
 
         except Exception as e:
             self._state = ServiceState.ERROR
             logger.error(f"Service {self.name} failed to stop cleanly: {e}")
 
-    async def health_check(self) -> Dict:
+    async def health_check(self) -> dict:
         """Check service health"""
         return {
-            'name': self.name,
-            'state': self._state.name,
-            'healthy': self._state == ServiceState.RUNNING,
-            'uptime_seconds': (
-                (datetime.now() - self._started_at).total_seconds()
-                if self._started_at else 0
+            "name": self.name,
+            "state": self._state.name,
+            "healthy": self._state == ServiceState.RUNNING,
+            "uptime_seconds": (
+                (datetime.now() - self._started_at).total_seconds() if self._started_at else 0
             ),
         }
 
@@ -163,11 +163,11 @@ class Service(ABC):
         """Called when service stops - implement in subclass"""
         pass
 
-    def _emit_event(self, event_type: EventType, data: Dict):
+    def _emit_event(self, event_type: EventType, data: dict):
         """Emit event on the bus"""
         self._event_bus.publish(
             event_type=event_type,
-            data={'service': self.name, **data},
+            data={"service": self.name, **data},
             source=f"service:{self.name}",
         )
 
@@ -183,8 +183,8 @@ class ServiceRegistry:
     """
 
     def __init__(self):
-        self._services: Dict[str, Service] = {}
-        self._service_info: Dict[str, ServiceInfo] = {}
+        self._services: dict[str, Service] = {}
+        self._service_info: dict[str, ServiceInfo] = {}
 
     def register(self, service: Service):
         """Register a service"""
@@ -205,20 +205,20 @@ class ServiceRegistry:
             del self._service_info[name]
         logger.info(f"Unregistered service: {name}")
 
-    def get(self, name: str) -> Optional[Service]:
+    def get(self, name: str) -> Service | None:
         """Get service by name"""
         return self._services.get(name)
 
-    def get_info(self, name: str) -> Optional[ServiceInfo]:
+    def get_info(self, name: str) -> ServiceInfo | None:
         """Get service info by name"""
         if name in self._services:
             return self._services[name].info
         return self._service_info.get(name)
 
-    def find_by_type(self, service_type: str) -> List[ServiceInfo]:
+    def find_by_type(self, service_type: str) -> list[ServiceInfo]:
         """Find all services of a given type"""
         results = []
-        for name, service in self._services.items():
+        for _name, service in self._services.items():
             if service.service_type == service_type:
                 results.append(service.info)
         for name, info in self._service_info.items():
@@ -226,7 +226,7 @@ class ServiceRegistry:
                 results.append(info)
         return results
 
-    def list_all(self) -> List[ServiceInfo]:
+    def list_all(self) -> list[ServiceInfo]:
         """List all registered services"""
         seen = set()
         results = []
@@ -238,7 +238,7 @@ class ServiceRegistry:
                 results.append(info)
         return results
 
-    async def health_check_all(self) -> Dict[str, Dict]:
+    async def health_check_all(self) -> dict[str, dict]:
         """Check health of all services"""
         results = {}
         for name, service in self._services.items():
@@ -246,28 +246,28 @@ class ServiceRegistry:
                 results[name] = await service.health_check()
             except Exception as e:
                 results[name] = {
-                    'name': name,
-                    'state': 'ERROR',
-                    'healthy': False,
-                    'error': str(e),
+                    "name": name,
+                    "state": "ERROR",
+                    "healthy": False,
+                    "error": str(e),
                 }
         return results
 
     async def start_all(self):
         """Start all registered services"""
-        for name, service in self._services.items():
+        for _name, service in self._services.items():
             if service.state == ServiceState.CREATED:
                 await service.start()
 
     async def stop_all(self):
         """Stop all registered services"""
-        for name, service in self._services.items():
+        for _name, service in self._services.items():
             if service.state == ServiceState.RUNNING:
                 await service.stop()
 
 
 # Global registry
-_global_registry: Optional[ServiceRegistry] = None
+_global_registry: ServiceRegistry | None = None
 
 
 def get_service_registry() -> ServiceRegistry:
@@ -288,6 +288,7 @@ def set_service_registry(registry: ServiceRegistry):
 # Service Client for Communication
 # =============================================================================
 
+
 class ServiceClient:
     """
     Unified client for communicating with services
@@ -298,9 +299,9 @@ class ServiceClient:
     - Protocol abstraction (HTTP)
     """
 
-    def __init__(self, registry: Optional[ServiceRegistry] = None):
+    def __init__(self, registry: ServiceRegistry | None = None):
         self._registry = registry or get_service_registry()
-        self._connections: Dict[str, Any] = {}
+        self._connections: dict[str, Any] = {}
 
     async def connect(self, service_name: str) -> Any:
         """
@@ -336,7 +337,7 @@ class ServiceClient:
             conn = self._connections.pop(service_name)
             if isinstance(conn, dict) and "session" in conn:
                 await conn["session"].close()
-            elif hasattr(conn, 'close'):
+            elif hasattr(conn, "close"):
                 if asyncio.iscoroutinefunction(conn.close):
                     await conn.close()
                 else:
@@ -347,13 +348,7 @@ class ServiceClient:
         for name in list(self._connections.keys()):
             await self.disconnect(name)
 
-    async def call(
-        self,
-        service_name: str,
-        method: str,
-        *args,
-        **kwargs
-    ) -> Any:
+    async def call(self, service_name: str, method: str, *args, **kwargs) -> Any:
         """
         Call a method on a service
 

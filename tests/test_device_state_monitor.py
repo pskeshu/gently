@@ -11,17 +11,15 @@ from __future__ import annotations
 
 import asyncio
 
-import pytest
-
 from gently.app.device_state_monitor import DeviceStateMonitor
 from gently.core.event_bus import EventBus, EventType
-
 
 # ---------------------------------------------------------------------------
 # Fake microscope: yields events from an async generator that the test
 # can advance, pause, or replace. Mirrors the shape DiSPIMMicroscope's
 # stream_device_states() exposes (async iterator of payload dicts).
 # ---------------------------------------------------------------------------
+
 
 class _FakeMicroscope:
     """Replaceable stream source. ``connect_count`` tracks reconnects."""
@@ -53,6 +51,7 @@ class _FakeMicroscope:
             # is the only way out.
             while True:
                 await asyncio.sleep(60)
+
         return _gen()
 
 
@@ -64,17 +63,20 @@ def _run(coro):
 def _patch_bus(local_bus):
     """Context-manager style: swap module-level get_event_bus for a local one."""
     from gently.app import device_state_monitor as mod
+
     original = mod.get_event_bus
     mod.get_event_bus = lambda: local_bus
 
     def restore():
         mod.get_event_bus = original
+
     return restore
 
 
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 def test_monitor_publishes_each_event():
     """Every payload from the stream becomes a DEVICE_STATE_UPDATE."""
@@ -87,10 +89,12 @@ def test_monitor_publishes_each_event():
     fake.script = [(0.0, {"i": 0}), (0.05, {"i": 1}), (0.05, {"i": 2})]
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.1,
-                                 stale_timeout_sec=10.0,
-                                 watchdog_interval_sec=10.0)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.1,
+            stale_timeout_sec=10.0,
+            watchdog_interval_sec=10.0,
+        )
         await mon.on_start()
         await asyncio.sleep(0.3)
         await mon.on_stop()
@@ -115,10 +119,12 @@ def test_watchdog_does_not_trip_while_events_flowing():
     result = {}
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.1,
-                                 stale_timeout_sec=1.0,
-                                 watchdog_interval_sec=0.1)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.1,
+            stale_timeout_sec=1.0,
+            watchdog_interval_sec=0.1,
+        )
         await mon.on_start()
         await asyncio.sleep(1.0)
         result["kicks"] = mon._watchdog_kicks
@@ -133,9 +139,7 @@ def test_watchdog_does_not_trip_while_events_flowing():
     assert result["kicks"] == 0, (
         f"watchdog should not trip with healthy stream (kicks={result['kicks']})"
     )
-    assert result["connects"] == 1, (
-        f"no spurious reconnects (connects={result['connects']})"
-    )
+    assert result["connects"] == 1, f"no spurious reconnects (connects={result['connects']})"
 
 
 def test_watchdog_kicks_stalled_stream():
@@ -150,10 +154,12 @@ def test_watchdog_kicks_stalled_stream():
     result = {}
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.05,
-                                 stale_timeout_sec=0.4,
-                                 watchdog_interval_sec=0.05)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.05,
+            stale_timeout_sec=0.4,
+            watchdog_interval_sec=0.05,
+        )
         await mon.on_start()
         await asyncio.sleep(1.5)
         result["kicks"] = mon._watchdog_kicks
@@ -184,8 +190,6 @@ def test_watchdog_recovers_after_kick():
     # First generator stalls. Second generator yields a real event.
     state = {"swap_done": False}
 
-    real_stream = fake.stream_device_states
-
     def patched_stream():
         if fake.connect_count == 0 and not state["swap_done"]:
             # First connect: hang forever
@@ -194,6 +198,7 @@ def test_watchdog_recovers_after_kick():
             async def _gen():
                 while True:
                     await asyncio.sleep(60)
+
             return _gen()
         # Subsequent connects: yield a marker event then hang
         fake.connect_count += 1
@@ -203,15 +208,18 @@ def test_watchdog_recovers_after_kick():
             yield {"i": "post-kick"}
             while True:
                 await asyncio.sleep(60)
+
         return _gen2()
 
     fake.stream_device_states = patched_stream
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.05,
-                                 stale_timeout_sec=0.3,
-                                 watchdog_interval_sec=0.05)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.05,
+            stale_timeout_sec=0.3,
+            watchdog_interval_sec=0.05,
+        )
         await mon.on_start()
         await asyncio.sleep(1.5)
         await mon.on_stop()
@@ -246,10 +254,12 @@ def test_external_cancel_does_not_resurrect_reader():
     result = {}
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.05,
-                                 stale_timeout_sec=10.0,
-                                 watchdog_interval_sec=10.0)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.05,
+            stale_timeout_sec=10.0,
+            watchdog_interval_sec=10.0,
+        )
         await mon.on_start()
         await asyncio.sleep(0.1)
         # External cancel (mimics event-loop teardown / Ctrl+C path):
@@ -285,10 +295,12 @@ def test_stop_cancels_both_tasks_cleanly():
     result = {}
 
     async def go():
-        mon = DeviceStateMonitor(microscope=fake,
-                                 reconnect_delay_sec=0.05,
-                                 stale_timeout_sec=10.0,
-                                 watchdog_interval_sec=0.05)
+        mon = DeviceStateMonitor(
+            microscope=fake,
+            reconnect_delay_sec=0.05,
+            stale_timeout_sec=10.0,
+            watchdog_interval_sec=0.05,
+        )
         await mon.on_start()
         await asyncio.sleep(0.1)
         await mon.on_stop()

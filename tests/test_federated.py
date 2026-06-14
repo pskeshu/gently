@@ -2,14 +2,13 @@
 Tests for federated averaging — weighted state dict averaging + orchestrator.
 """
 
-import asyncio
-import copy
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
 try:
     import torch
+
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
@@ -125,11 +124,13 @@ class TestFederatedOrchestrator:
         # Mock _train_workers to return results with state_dict and same accuracy
         # (convergence threshold will trigger after round 2)
         async def fake_train(*args, **kwargs):
-            return [{
-                "val_accuracy": 0.90,
-                "dataset_size": 100,
-                "state_dict": {"w": torch.tensor([1.0])},
-            }]
+            return [
+                {
+                    "val_accuracy": 0.90,
+                    "dataset_size": 100,
+                    "state_dict": {"w": torch.tensor([1.0])},
+                }
+            ]
 
         orch._train_workers = fake_train
 
@@ -152,13 +153,16 @@ class TestFederatedOrchestrator:
         orch = FederatedOrchestrator(verse_map=vm, peer_client=MagicMock())
 
         call_count = [0]
+
         async def fake_train(*args, **kwargs):
             call_count[0] += 1
-            return [{
-                "val_accuracy": 0.5 + call_count[0] * 0.1,
-                "dataset_size": 100,
-                "state_dict": {"w": torch.tensor([float(call_count[0])])},
-            }]
+            return [
+                {
+                    "val_accuracy": 0.5 + call_count[0] * 0.1,
+                    "dataset_size": 100,
+                    "state_dict": {"w": torch.tensor([float(call_count[0])])},
+                }
+            ]
 
         orch._train_workers = fake_train
 

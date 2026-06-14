@@ -7,12 +7,9 @@ Generates HTML reports showing prediction details and reasoning traces.
 import argparse
 import json
 import sys
-from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
 
-from .metrics import format_metrics_summary, PerceptionMetrics
-
+from .metrics import PerceptionMetrics, format_metrics_summary
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -293,16 +290,16 @@ HTML_TEMPLATE = """
 """
 
 
-def generate_embryo_section(embryo_id: str, predictions: List[Dict]) -> str:
+def generate_embryo_section(embryo_id: str, predictions: list[dict]) -> str:
     """Generate HTML for one embryo's predictions."""
     rows = [
         '<div class="prediction-row header">',
-        '<div>Timepoint</div>',
-        '<div>Predicted</div>',
-        '<div>Ground Truth</div>',
-        '<div>Confidence</div>',
-        '<div>Details</div>',
-        '</div>',
+        "<div>Timepoint</div>",
+        "<div>Predicted</div>",
+        "<div>Ground Truth</div>",
+        "<div>Confidence</div>",
+        "<div>Details</div>",
+        "</div>",
     ]
 
     for i, pred in enumerate(predictions):
@@ -320,15 +317,15 @@ def generate_embryo_section(embryo_id: str, predictions: List[Dict]) -> str:
         row_id = f"{embryo_id}-{timepoint}"
 
         rows.append(f'<div class="prediction-row {row_class}">')
-        rows.append(f'<div>T{timepoint}</div>')
+        rows.append(f"<div>T{timepoint}</div>")
         rows.append(f'<div><span class="stage-badge stage-{pred_stage}">{pred_stage}</span></div>')
         rows.append(f'<div><span class="stage-badge stage-{gt_stage}">{gt_stage}</span></div>')
-        rows.append(f'''<div>
+        rows.append(f"""<div>
             <div class="confidence-bar">
                 <div class="confidence-fill" style="width: {confidence * 100}%"></div>
             </div>
             <small>{confidence:.0%}</small>
-        </div>''')
+        </div>""")
 
         # Details column with expand button
         tool_calls = pred.get("tool_calls", 0)
@@ -351,31 +348,31 @@ def generate_embryo_section(embryo_id: str, predictions: List[Dict]) -> str:
         if phase_count > 1:
             badges += f'<span class="phase-indicator">{phase_count}-phase</span>'
 
-        rows.append(f'''<div>
+        rows.append(f"""<div>
             {details_str}
             {badges}
             <span class="expand-btn" onclick="toggleTrace('{row_id}')">
                 [show trace]
             </span>
-        </div>''')
-        rows.append('</div>')
+        </div>""")
+        rows.append("</div>")
 
         # Reasoning trace (hidden by default)
         trace_html = format_reasoning_trace(pred.get("reasoning_trace"))
-        rows.append(f'''<div id="trace-{row_id}" class="reasoning-trace">
+        rows.append(f"""<div id="trace-{row_id}" class="reasoning-trace">
             <strong>Reasoning:</strong> {reasoning}
             {trace_html}
-        </div>''')
+        </div>""")
 
-    return f'''
+    return f"""
     <div class="embryo-section">
         <h2>{embryo_id}</h2>
         {"".join(rows)}
     </div>
-    '''
+    """
 
 
-def format_reasoning_trace(trace: Optional[Dict]) -> str:
+def format_reasoning_trace(trace: dict | None) -> str:
     """Format reasoning trace as HTML."""
     if not trace:
         return ""
@@ -393,56 +390,66 @@ def format_reasoning_trace(trace: Optional[Dict]) -> str:
         if step_type == "tool_call":
             tool_name = step.get("tool_name", "")
             tool_input = step.get("tool_input", {})
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step tool_call">
                     <strong>Tool Call:</strong> {tool_name}<br>
                     Input: {json.dumps(tool_input, indent=2)}
                 </div>
-            ''')
+            """)
         elif step_type == "tool_result":
             summary = step.get("tool_result_summary", content)
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step tool_result">
                     <strong>Tool Result:</strong> {summary}
                 </div>
-            ''')
+            """)
         elif step_type == "final_decision":
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step final_decision">
                     <strong>Final Decision:</strong><br>
                     {content[:500]}...
                 </div>
-            ''')
+            """)
         elif step_type == "verification_requested":
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step verification_requested">
                     <strong>Verification Requested:</strong><br>
                     {content}
                 </div>
-            ''')
+            """)
         elif step_type == "verification_subagent":
             tool_input = step.get("tool_input", {})
             summary = step.get("tool_result_summary", content)
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step verification_subagent">
-                    <strong>Subagent:</strong> {tool_input.get("stage_a", "?")} vs {tool_input.get("stage_b", "?")}<br>
+                    <strong>Subagent:</strong> {tool_input.get("stage_a", "?")} vs
+                    {tool_input.get("stage_b", "?")}<br>
                     Result: {summary}
                 </div>
-            ''')
+            """)
         elif step_type == "verification_result":
-            html_parts.append(f'''
+            html_parts.append(f"""
                 <div class="trace-step verification_result">
                     <strong>Verification Result:</strong><br>
                     {content}
                 </div>
-            ''')
+            """)
 
     return "".join(html_parts)
 
 
-def generate_confusion_matrix_html(confusion: Dict[str, Dict[str, int]]) -> str:
+def generate_confusion_matrix_html(confusion: dict[str, dict[str, int]]) -> str:
     """Generate HTML table for confusion matrix."""
-    stages = ["early", "bean", "comma", "1.5fold", "2fold", "pretzel", "hatching", "hatched"]
+    stages = [
+        "early",
+        "bean",
+        "comma",
+        "1.5fold",
+        "2fold",
+        "pretzel",
+        "hatching",
+        "hatched",
+    ]
 
     # Filter to stages present in data
     present = set()
@@ -478,7 +485,7 @@ def generate_confusion_matrix_html(confusion: Dict[str, Dict[str, int]]) -> str:
     return "".join(rows)
 
 
-def generate_html_report(report_data: Dict) -> str:
+def generate_html_report(report_data: dict) -> str:
     """Generate complete HTML report from benchmark data."""
     # Extract summary metrics
     metrics = report_data.get("metrics", {})
@@ -493,9 +500,7 @@ def generate_html_report(report_data: Dict) -> str:
     # Generate embryo sections
     embryo_sections = []
     for er in embryo_results:
-        embryo_sections.append(
-            generate_embryo_section(er["embryo_id"], er["predictions"])
-        )
+        embryo_sections.append(generate_embryo_section(er["embryo_id"], er["predictions"]))
 
     # Generate confusion matrix
     confusion = metrics.get("confusion_matrix", {})
@@ -569,8 +574,7 @@ def main():
     # Filter embryo if specified
     if args.embryo:
         report_data["embryo_results"] = [
-            er for er in report_data.get("embryo_results", [])
-            if er["embryo_id"] == args.embryo
+            er for er in report_data.get("embryo_results", []) if er["embryo_id"] == args.embryo
         ]
 
     # Generate HTML

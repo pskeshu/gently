@@ -10,11 +10,10 @@ import logging
 import re
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
 
 import numpy as np
 
-from gently.core.imaging import normalize_to_uint8, image_to_base64
+from gently.core.imaging import image_to_base64, normalize_to_uint8
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 VOLUME_UID_PATTERN = re.compile(r"volume_(.+)_t(\d+)$")
 
 
-def parse_volume_uid(uid: str) -> Optional[tuple]:
+def parse_volume_uid(uid: str) -> tuple | None:
     """Parse a volume UID into (embryo_id, timepoint) or return None."""
     if not uid.startswith("volume_"):
         return None
@@ -42,9 +41,9 @@ def load_volume_from_disk(volume_path: str) -> np.ndarray:
         Cropped 3D numpy array (Z, H, W)
     """
     from gently.core.imaging import (
-        load_volume,
-        compute_crop_bounds,
         apply_crop_bounds,
+        compute_crop_bounds,
+        load_volume,
     )
 
     path = Path(volume_path)
@@ -67,7 +66,7 @@ def array_to_png_bytes(img_array: np.ndarray) -> bytes:
     img_array = normalize_to_uint8(img_array, method="simple")
     img = Image.fromarray(img_array)
     buf = BytesIO()
-    img.save(buf, format='PNG')
+    img.save(buf, format="PNG")
     return buf.getvalue()
 
 

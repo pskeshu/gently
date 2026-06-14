@@ -4,15 +4,12 @@ TransferService — TCP server for receiving bulk transfers.
 
 import asyncio
 import logging
-import time
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from ...core.event_bus import EventType, get_event_bus
 from ...core.service import Service
 from ...settings import settings
-from .models import TransferJob, TransferStatus
 from .protocol import receive_file
 
 logger = logging.getLogger(__name__)
@@ -46,7 +43,7 @@ class TransferService(Service):
         self._dest_dir = dest_dir
         self._pairing_manager = pairing_manager
         self._port = port
-        self._server: Optional[asyncio.AbstractServer] = None
+        self._server: asyncio.AbstractServer | None = None
         self._active_transfers: dict = {}
 
     async def on_start(self):

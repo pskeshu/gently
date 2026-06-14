@@ -2,16 +2,16 @@
 DiSPIM camera detector devices (single, dual, and bottom camera).
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
-from typing import Tuple
 
 import numpy as np
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
-from gently.exceptions import HardwareError, AcquisitionError
+from gently.exceptions import AcquisitionError, HardwareError
+
 from ._common import _safe_obtain
 
 logger = logging.getLogger(__name__)
@@ -68,10 +68,10 @@ class DiSPIMCamera:
             else:
                 status.set_finished()
 
-
         status = Status(obj=self, timeout=30)
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -81,8 +81,8 @@ class DiSPIMCamera:
         if self._last_image is not None:
             data = OrderedDict()
             data[self.name] = {
-                'value': self._last_image,
-                'timestamp': self._last_image_time or time.time()
+                "value": self._last_image,
+                "timestamp": self._last_image_time or time.time(),
             }
             return data
         else:
@@ -92,9 +92,9 @@ class DiSPIMCamera:
         """Describe detector data format"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'array',
-            'shape': getattr(self._last_image, 'shape', [])
+            "source": self.name,
+            "dtype": "array",
+            "shape": getattr(self._last_image, "shape", []),
         }
         return data
 
@@ -191,8 +191,9 @@ class DiSPIMCamera:
         """
         self.core.setProperty(self.name, "TRIGGER ACTIVE", mode)
 
-    def configure_for_calibration(self, exposure_ms: float,
-                                   roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)):
+    def configure_for_calibration(
+        self, exposure_ms: float, roi: tuple[int, int, int, int] = (128, 896, 2048, 512)
+    ):
         """
         Configure camera for calibration imaging (single light sheet snapshots).
 
@@ -212,8 +213,9 @@ class DiSPIMCamera:
         self.core.setExposure(self.name, exposure_ms)
         self.core.waitForDevice(self.name)
 
-    def configure_for_volume_acquisition(self, exposure_ms: float,
-                                          roi: Tuple[int, int, int, int] = (128, 896, 2048, 512)):
+    def configure_for_volume_acquisition(
+        self, exposure_ms: float, roi: tuple[int, int, int, int] = (128, 896, 2048, 512)
+    ):
         """
         Configure camera for hardware-triggered volume acquisition.
 
@@ -280,8 +282,8 @@ class DiSPIMDualCamera:
         camera_data = self.camera.read()
 
         if self.camera.name in camera_data:
-            stitched_image = camera_data[self.camera.name]['value']
-            timestamp = camera_data[self.camera.name]['timestamp']
+            stitched_image = camera_data[self.camera.name]["value"]
+            timestamp = camera_data[self.camera.name]["timestamp"]
 
             # Split image in the middle (width dimension)
             height, width = stitched_image.shape[:2]
@@ -292,14 +294,8 @@ class DiSPIMDualCamera:
 
             # Return as separate data entries
             data = OrderedDict()
-            data[f'{self.name}_image_a'] = {
-                'value': image_a,
-                'timestamp': timestamp
-            }
-            data[f'{self.name}_image_b'] = {
-                'value': image_b,
-                'timestamp': timestamp
-            }
+            data[f"{self.name}_image_a"] = {"value": image_a, "timestamp": timestamp}
+            data[f"{self.name}_image_b"] = {"value": image_b, "timestamp": timestamp}
             return data
         else:
             return OrderedDict()
@@ -314,7 +310,7 @@ class DiSPIMDualCamera:
         # Describe image_a and image_b outputs
         # Shape will be half width of original stitched image
         if self.camera.name in camera_desc:
-            original_shape = camera_desc[self.camera.name].get('shape', [])
+            original_shape = camera_desc[self.camera.name].get("shape", [])
             if len(original_shape) >= 2:
                 # Split width dimension in half
                 split_shape = [original_shape[0], original_shape[1] // 2]
@@ -323,15 +319,15 @@ class DiSPIMDualCamera:
             else:
                 split_shape = original_shape
 
-            data[f'{self.name}_image_a'] = {
-                'source': f'{self.name}_image_a',
-                'dtype': 'array',
-                'shape': split_shape
+            data[f"{self.name}_image_a"] = {
+                "source": f"{self.name}_image_a",
+                "dtype": "array",
+                "shape": split_shape,
             }
-            data[f'{self.name}_image_b'] = {
-                'source': f'{self.name}_image_b',
-                'dtype': 'array',
-                'shape': split_shape
+            data[f"{self.name}_image_b"] = {
+                "source": f"{self.name}_image_b",
+                "dtype": "array",
+                "shape": split_shape,
             }
 
         return data
@@ -362,12 +358,14 @@ class DiSPIMBottomCamera(DiSPIMCamera):
     Used for finding and centering embryos in the sample chamber.
     """
 
-    def __init__(self,
-                 device_name: str,
-                 core: pymmcore.CMMCore,
-                 led_control: 'DiSPIMLED',
-                 pixel_size_um: float = 6.5,
-                 magnification: float = 10.0):
+    def __init__(
+        self,
+        device_name: str,
+        core: pymmcore.CMMCore,
+        led_control: "DiSPIMLED",  # noqa: F821
+        pixel_size_um: float = 6.5,
+        magnification: float = 10.0,
+    ):
         """
         Initialize bottom camera with LED control and calibrated pixel size.
 
@@ -455,6 +453,7 @@ class DiSPIMBottomCamera(DiSPIMCamera):
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status

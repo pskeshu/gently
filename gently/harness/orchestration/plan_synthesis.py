@@ -2,11 +2,11 @@
 Bluesky plan synthesis from natural language goals
 """
 
-import logging
-from typing import Dict, List, Optional
-from jinja2 import Template
 import ast
+import logging
 import re
+
+from jinja2 import Template
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class PlanValidator:
     """Validates generated Bluesky plans for safety and correctness"""
 
-    def __init__(self, devices: Optional[Dict] = None):
+    def __init__(self, devices: dict | None = None):
         """
         Parameters
         ----------
@@ -22,7 +22,7 @@ class PlanValidator:
             Available Ophyd devices with their limits
         """
         self.devices = devices or {}
-        self.errors: List[str] = []
+        self.errors: list[str] = []
 
     def is_valid(self, plan_code: str) -> bool:
         """
@@ -55,11 +55,11 @@ class PlanValidator:
 
         # Check for dangerous operations
         dangerous_patterns = [
-            r'import\s+os',
-            r'import\s+subprocess',
-            r'eval\(',
-            r'exec\(',
-            r'__import__',
+            r"import\s+os",
+            r"import\s+subprocess",
+            r"eval\(",
+            r"exec\(",
+            r"__import__",
         ]
 
         for pattern in dangerous_patterns:
@@ -68,19 +68,19 @@ class PlanValidator:
                 return False
 
         # Check for proper yield from usage
-        if 'def ' in plan_code and 'yield from' not in plan_code:
+        if "def " in plan_code and "yield from" not in plan_code:
             self.errors.append("Plan function must use 'yield from' for Bluesky operations")
             return False
 
         # Warnings (not errors, but noted)
-        if 'metadata=' not in plan_code:
+        if "metadata=" not in plan_code:
             self.errors.append("Warning: Plan should include metadata for provenance")
 
         # If we have errors (not just warnings), fail
         actual_errors = [e for e in self.errors if not e.startswith("Warning:")]
         return len(actual_errors) == 0
 
-    def check_parameters(self, params: Dict) -> bool:
+    def check_parameters(self, params: dict) -> bool:
         """
         Validate acquisition parameters
 
@@ -97,19 +97,22 @@ class PlanValidator:
         self.errors = []
 
         # num_slices
-        if 'num_slices' in params:
-            if not (10 <= params['num_slices'] <= 200):
+        if "num_slices" in params:
+            if not (10 <= params["num_slices"] <= 200):
                 self.errors.append(f"num_slices {params['num_slices']} outside range [10, 200]")
 
         # exposure_ms
-        if 'exposure_ms' in params:
-            if not (5 <= params['exposure_ms'] <= 100):
+        if "exposure_ms" in params:
+            if not (5 <= params["exposure_ms"] <= 100):
                 self.errors.append(f"exposure_ms {params['exposure_ms']} outside range [5, 100]")
 
         # interval_seconds
-        if 'interval_seconds' in params:
-            if params['interval_seconds'] < 10:
-                self.errors.append(f"interval_seconds {params['interval_seconds']} too short (min 10s for hardware settle)")
+        if "interval_seconds" in params:
+            if params["interval_seconds"] < 10:
+                self.errors.append(
+                    f"interval_seconds {params['interval_seconds']} too short"
+                    " (min 10s for hardware settle)"
+                )
 
         return len(self.errors) == 0
 
@@ -131,16 +134,16 @@ class PlanLibrary:
     """Collection of plan templates"""
 
     def __init__(self):
-        self.templates: Dict[str, PlanTemplate] = {}
+        self.templates: dict[str, PlanTemplate] = {}
         self._load_default_templates()
 
     def _load_default_templates(self):
         """Load built-in plan templates"""
 
         # Multi-embryo adaptive timelapse
-        self.templates['adaptive_timelapse'] = PlanTemplate(
-            name='adaptive_timelapse',
-            description='Multi-embryo timelapse with adaptive parameters',
+        self.templates["adaptive_timelapse"] = PlanTemplate(
+            name="adaptive_timelapse",
+            description="Multi-embryo timelapse with adaptive parameters",
             template_str='''
 def adaptive_timelapse_plan(
     volume_scanner,
@@ -233,12 +236,13 @@ def adaptive_timelapse_plan(
         # Wait for interval
         if timepoint < num_timepoints - 1:
             yield from bps.sleep(next_interval)
-''')
+''',
+        )
 
         # Single embryo high-resolution scan
-        self.templates['single_highres'] = PlanTemplate(
-            name='single_highres',
-            description='Single embryo high-resolution volume',
+        self.templates["single_highres"] = PlanTemplate(
+            name="single_highres",
+            description="Single embryo high-resolution volume",
             template_str='''
 def single_highres_scan_plan(
     volume_scanner,
@@ -284,15 +288,18 @@ def single_highres_scan_plan(
 
     # Notify agent
     agent.on_volume_acquired(embryo_id, 0, volume_scanner)
-''')
+''',
+        )
 
     def get_template(self, plan_type: str) -> PlanTemplate:
         """Get template by name"""
         if plan_type not in self.templates:
-            raise ValueError(f"Unknown plan type: {plan_type}. Available: {list(self.templates.keys())}")
+            raise ValueError(
+                f"Unknown plan type: {plan_type}. Available: {list(self.templates.keys())}"
+            )
         return self.templates[plan_type]
 
-    def list_templates(self) -> List[str]:
+    def list_templates(self) -> list[str]:
         """List available template names"""
         return list(self.templates.keys())
 
@@ -300,13 +307,21 @@ def single_highres_scan_plan(
 class PlanSynthesizer:
     """Converts scientific goals into executable Bluesky plans"""
 
-    def __init__(self, plan_library: Optional[PlanLibrary] = None,
-                 validator: Optional[PlanValidator] = None):
+    def __init__(
+        self,
+        plan_library: PlanLibrary | None = None,
+        validator: PlanValidator | None = None,
+    ):
         self.library = plan_library or PlanLibrary()
         self.validator = validator or PlanValidator()
 
-    def synthesize(self, goal: str, embryo_ids: List[str],
-                   params: Dict, plan_type: str = 'adaptive_timelapse') -> str:
+    def synthesize(
+        self,
+        goal: str,
+        embryo_ids: list[str],
+        params: dict,
+        plan_type: str = "adaptive_timelapse",
+    ) -> str:
         """
         Generate Bluesky plan from goal
 
@@ -337,10 +352,10 @@ class PlanSynthesizer:
         plan_code = template.render(
             goal=goal,
             embryo_ids=embryo_ids,
-            num_slices=params.get('num_slices', 50),
-            exposure_ms=params.get('exposure_ms', 10.0),
-            interval_seconds=params.get('interval_seconds', 120),
-            num_timepoints=params.get('num_timepoints', 500),
+            num_slices=params.get("num_slices", 50),
+            exposure_ms=params.get("exposure_ms", 10.0),
+            interval_seconds=params.get("interval_seconds", 120),
+            num_timepoints=params.get("num_timepoints", 500),
         )
 
         # Validate generated code
@@ -366,10 +381,15 @@ class PlanSynthesizer:
         goal_lower = goal.lower()
 
         # Pattern matching for plan types
-        if any(word in goal_lower for word in ['timelapse', 'time-lapse', 'monitor', 'track', 'all embryos']):
-            return 'adaptive_timelapse'
-        elif any(word in goal_lower for word in ['high-res', 'high resolution', 'detailed', 'single']):
-            return 'single_highres'
+        if any(
+            word in goal_lower
+            for word in ["timelapse", "time-lapse", "monitor", "track", "all embryos"]
+        ):
+            return "adaptive_timelapse"
+        elif any(
+            word in goal_lower for word in ["high-res", "high resolution", "detailed", "single"]
+        ):
+            return "single_highres"
         else:
             # Default to timelapse
-            return 'adaptive_timelapse'
+            return "adaptive_timelapse"

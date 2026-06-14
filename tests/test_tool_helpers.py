@@ -4,25 +4,25 @@ import types
 from unittest.mock import MagicMock
 
 from gently.harness.tools.helpers import (
-    require_agent,
-    require_microscope,
-    require_interaction_logger,
-    require_developmental_tracker,
-    require_timelapse_orchestrator,
-    require_databroker,
+    build_snapshot_metadata,
+    format_duration,
     get_embryo_or_error,
     get_timestamp_string,
-    format_duration,
-    build_snapshot_metadata,
+    require_agent,
+    require_databroker,
+    require_developmental_tracker,
+    require_interaction_logger,
+    require_microscope,
+    require_timelapse_orchestrator,
 )
 
-
 # ── Context extractors ──────────────────────────────────────────────
+
 
 class TestRequireAgent:
     def test_returns_agent_when_present(self):
         agent = MagicMock()
-        result, err = require_agent({'agent': agent})
+        result, err = require_agent({"agent": agent})
         assert result is agent
         assert err is None
 
@@ -32,7 +32,7 @@ class TestRequireAgent:
         assert "No agent" in err
 
     def test_returns_error_when_none(self):
-        result, err = require_agent({'agent': None})
+        result, err = require_agent({"agent": None})
         assert result is None
         assert err is not None
 
@@ -40,7 +40,7 @@ class TestRequireAgent:
 class TestRequireMicroscope:
     def test_returns_client_when_present(self):
         client = MagicMock()
-        result, err = require_microscope({'client': client})
+        result, err = require_microscope({"client": client})
         assert result is client
         assert err is None
 
@@ -136,11 +136,12 @@ class TestGetEmbryoOrError:
 
 # ── Utility functions ────────────────────────────────────────────────
 
+
 class TestGetTimestampString:
     def test_format(self):
         ts = get_timestamp_string()
         assert len(ts) == 15  # YYYYMMDD_HHMMSS
-        assert ts[8] == '_'
+        assert ts[8] == "_"
 
 
 class TestFormatDuration:
@@ -164,6 +165,7 @@ class TestFormatDuration:
 
 
 # ── build_snapshot_metadata ──────────────────────────────────────────
+
 
 class TestBuildSnapshotMetadata:
     def test_basic_fields(self):
@@ -289,6 +291,7 @@ class TestBuildSnapshotMetadata:
     def test_metadata_is_json_serializable(self):
         """Metadata must round-trip through JSON for DB storage."""
         import json
+
         emb = MagicMock()
         emb.stage_position = {"x": 1000.0, "y": 500.0}
         emb.nickname = "test"

@@ -3,7 +3,6 @@
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
 
 import yaml
 from fastapi import APIRouter, Body, Depends, HTTPException
@@ -28,7 +27,7 @@ def create_router(server) -> APIRouter:
             "status": "running",
             "connections": len(server.manager.active_connections),
             **stats,
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now().isoformat(),
         }
 
     @router.get("/api/device-status")
@@ -77,11 +76,10 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=503, detail="Agent not ready")
         return agent
 
-    @router.put("/api/embryos/{embryo_id}/position",
-                dependencies=[Depends(require_control)])
+    @router.put("/api/embryos/{embryo_id}/position", dependencies=[Depends(require_control)])
     async def update_embryo_position(
         embryo_id: str,
-        body: dict = Body(...),
+        body: dict = Body(...),  # noqa: B008
     ):
         """Update an embryo's coarse XY position.
 
@@ -102,9 +100,9 @@ def create_router(server) -> APIRouter:
             x = float(body.get("x"))
             y = float(body.get("y"))
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="Body needs numeric x and y")
+            raise HTTPException(status_code=400, detail="Body needs numeric x and y") from None
         old_coarse = dict(emb.position_coarse) if emb.position_coarse else None
-        had_fine   = bool(emb.position_fine)
+        had_fine = bool(emb.position_fine)
         emb.position_coarse = {"x": x, "y": y}
         emb.position_fine = {}
         agent.experiment.notify_embryos_changed()
@@ -112,6 +110,7 @@ def create_router(server) -> APIRouter:
         bus = getattr(agent, "_event_bus", None)
         if bus is not None:
             from gently.core.event_bus import EventType
+
             try:
                 bus.publish(
                     event_type=EventType.OPERATOR_EDITED_EMBRYO,
@@ -127,8 +126,7 @@ def create_router(server) -> APIRouter:
                 logger.exception("Failed to publish OPERATOR_EDITED_EMBRYO")
         return emb.to_dict()
 
-    @router.delete("/api/embryos/{embryo_id}",
-                   dependencies=[Depends(require_control)])
+    @router.delete("/api/embryos/{embryo_id}", dependencies=[Depends(require_control)])
     async def delete_embryo(embryo_id: str):
         """Remove an embryo from the experiment.
 
@@ -144,7 +142,7 @@ def create_router(server) -> APIRouter:
         if emb is not None:
             last_position = {
                 "coarse": dict(emb.position_coarse) if emb.position_coarse else None,
-                "fine":   dict(emb.position_fine) if emb.position_fine else None,
+                "fine": dict(emb.position_fine) if emb.position_fine else None,
             }
         if not agent.experiment.remove_embryo(embryo_id):
             raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
@@ -152,6 +150,7 @@ def create_router(server) -> APIRouter:
         bus = getattr(agent, "_event_bus", None)
         if bus is not None:
             from gently.core.event_bus import EventType
+
             try:
                 bus.publish(
                     event_type=EventType.OPERATOR_REMOVED_EMBRYO,
@@ -201,17 +200,19 @@ def create_router(server) -> APIRouter:
         block in this config and no zone endpoint here.
         """
         try:
-            with open(_HARDWARE_CONFIG_PATH, "r") as f:
+            with open(_HARDWARE_CONFIG_PATH) as f:
                 cfg = yaml.safe_load(f) or {}
         except FileNotFoundError:
             return {"coverslip": None}
         cs = cfg.get("coverslip")
         if not isinstance(cs, dict):
             return {"coverslip": None}
-        return {"coverslip": {
-            "center_um": list(cs.get("center_um") or [0.0, 0.0]),
-            "size_mm":   list(cs.get("size_mm")   or [50.0, 24.0]),
-        }}
+        return {
+            "coverslip": {
+                "center_um": list(cs.get("center_um") or [0.0, 0.0]),
+                "size_mm": list(cs.get("size_mm") or [50.0, 24.0]),
+            }
+        }
 
     @router.get("/api/devices/bottom_camera/status")
     async def get_bottom_camera_status():
@@ -225,8 +226,10 @@ def create_router(server) -> APIRouter:
             "last_frame_ts": getattr(monitor, "_last_frame_ts", None) if monitor else None,
         }
 
-    @router.post("/api/devices/bottom_camera/stream/start",
-                 dependencies=[Depends(require_control)])
+    @router.post(
+        "/api/devices/bottom_camera/stream/start",
+        dependencies=[Depends(require_control)],
+    )
     async def start_bottom_camera_stream():
         """Start the bottom-camera stream bridge.
 
@@ -244,11 +247,13 @@ def create_router(server) -> APIRouter:
             await monitor.start()
         except Exception as exc:
             logger.exception("Failed to start bottom-camera monitor")
-            raise HTTPException(status_code=500, detail=f"start failed: {exc}")
+            raise HTTPException(status_code=500, detail=f"start failed: {exc}") from exc
         return {"streaming": monitor.running}
 
-    @router.post("/api/devices/bottom_camera/stream/stop",
-                 dependencies=[Depends(require_control)])
+    @router.post(
+        "/api/devices/bottom_camera/stream/stop",
+        dependencies=[Depends(require_control)],
+    )
     async def stop_bottom_camera_stream():
         """Stop the bottom-camera stream bridge. Idempotent."""
         bridge = getattr(server, "agent_bridge", None)
@@ -260,7 +265,7 @@ def create_router(server) -> APIRouter:
             await monitor.stop()
         except Exception as exc:
             logger.exception("Failed to stop bottom-camera monitor")
-            raise HTTPException(status_code=500, detail=f"stop failed: {exc}")
+            raise HTTPException(status_code=500, detail=f"stop failed: {exc}") from exc
         return {"streaming": False}
 
     def _resolve_client():
@@ -285,9 +290,8 @@ def create_router(server) -> APIRouter:
             "state": res.get("state", "unknown"),
         }
 
-    @router.post("/api/devices/room_light/set",
-                 dependencies=[Depends(require_control)])
-    async def set_room_light(payload: dict = Body(...)):
+    @router.post("/api/devices/room_light/set", dependencies=[Depends(require_control)])
+    async def set_room_light(payload: dict = Body(...)):  # noqa: B008
         """Switch the room light on/off. Body: {"state": "on"|"off"|"press"}."""
         state = str(payload.get("state", "")).lower()
         if state not in ("on", "off", "press"):
@@ -299,9 +303,13 @@ def create_router(server) -> APIRouter:
             res = await client.set_room_light(state)
         except Exception as exc:
             logger.exception("Room light command failed")
-            raise HTTPException(status_code=502, detail=f"room light command failed: {exc}")
+            raise HTTPException(
+                status_code=502, detail=f"room light command failed: {exc}"
+            ) from exc
         if not res.get("success"):
-            raise HTTPException(status_code=502, detail=res.get("error", "room light command failed"))
+            raise HTTPException(
+                status_code=502, detail=res.get("error", "room light command failed")
+            )
         return {"state": res.get("state", state)}
 
     @router.get("/api/devices/temperature/status")
@@ -328,9 +336,8 @@ def create_router(server) -> APIRouter:
             "peltier_c": res.get("peltier_c"),
         }
 
-    @router.post("/api/devices/temperature/set",
-                 dependencies=[Depends(require_control)])
-    async def set_temperature(payload: dict = Body(...)):
+    @router.post("/api/devices/temperature/set", dependencies=[Depends(require_control)])
+    async def set_temperature(payload: dict = Body(...)):  # noqa: B008
         """Command the temperature setpoint. Body: {"target_c": float}.
 
         Non-blocking: the controller ramps and the status poll reflects progress
@@ -339,7 +346,7 @@ def create_router(server) -> APIRouter:
         try:
             target = float(payload.get("target_c"))
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="target_c must be a number")
+            raise HTTPException(status_code=400, detail="target_c must be a number") from None
         if not (0.0 <= target <= 99.9):
             raise HTTPException(status_code=400, detail="target_c must be between 0.0 and 99.9 C")
         client = _resolve_client()
@@ -349,9 +356,13 @@ def create_router(server) -> APIRouter:
             res = await client.set_temperature(target)
         except Exception as exc:
             logger.exception("Temperature command failed")
-            raise HTTPException(status_code=502, detail=f"temperature command failed: {exc}")
+            raise HTTPException(
+                status_code=502, detail=f"temperature command failed: {exc}"
+            ) from exc
         if not res.get("success"):
-            raise HTTPException(status_code=502, detail=res.get("error", "temperature command failed"))
+            raise HTTPException(
+                status_code=502, detail=res.get("error", "temperature command failed")
+            )
         return {
             "target_c": res.get("target_c", target),
             "temperature_c": res.get("temperature_c"),
@@ -360,38 +371,27 @@ def create_router(server) -> APIRouter:
         }
 
     @router.get("/api/calibration")
-    async def list_calibration(embryo_id: Optional[str] = None):
+    async def list_calibration(embryo_id: str | None = None):
         """Get calibration images"""
         images = server.store.get_all_calibration(embryo_id)
-        return {
-            "calibration": [img.to_dict() for img in images],
-            "count": len(images)
-        }
+        return {"calibration": [img.to_dict() for img in images], "count": len(images)}
 
     @router.get("/api/volumes")
-    async def list_volumes(embryo_id: Optional[str] = None):
+    async def list_volumes(embryo_id: str | None = None):
         """Get volume images"""
         images = server.store.get_all_volumes(embryo_id)
-        return {
-            "volumes": [img.to_dict() for img in images],
-            "count": len(images)
-        }
+        return {"volumes": [img.to_dict() for img in images], "count": len(images)}
 
     @router.get("/api/snapshots")
-    async def list_snapshots(embryo_id: Optional[str] = None):
+    async def list_snapshots(embryo_id: str | None = None):
         """Get snapshot images"""
         images = server.store.get_all_snapshots(embryo_id)
-        return {
-            "snapshots": [img.to_dict() for img in images],
-            "count": len(images)
-        }
+        return {"snapshots": [img.to_dict() for img in images], "count": len(images)}
 
     @router.get("/api/embryos")
     async def list_embryos():
         """Get list of embryos with images"""
-        return {
-            "embryos": server.store.get_embryo_ids()
-        }
+        return {"embryos": server.store.get_embryo_ids()}
 
     @router.get("/api/embryos/positions")
     async def embryo_positions():
@@ -415,26 +415,28 @@ def create_router(server) -> APIRouter:
                     # Embryo registered but no position yet (e.g. only the
                     # ID arrived from another path). Skip — nothing to render.
                     continue
-                points.append({
-                    "embryo_id": eid,
-                    "uid": emb.get("uid"),
-                    "x": float(x),
-                    "y": float(y),
-                    "role": emb.get("role", "test"),
-                    "user_label": emb.get("user_label"),
-                    "confidence": emb.get("confidence"),
-                    "cadence_phase": emb.get("cadence_phase"),
-                    "is_complete": bool(emb.get("is_complete")),
-                })
+                points.append(
+                    {
+                        "embryo_id": eid,
+                        "uid": emb.get("uid"),
+                        "x": float(x),
+                        "y": float(y),
+                        "role": emb.get("role", "test"),
+                        "user_label": emb.get("user_label"),
+                        "confidence": emb.get("confidence"),
+                        "cadence_phase": emb.get("cadence_phase"),
+                        "is_complete": bool(emb.get("is_complete")),
+                    }
+                )
         return {"embryos": points}
 
     @router.get("/api/sequence/{embryo_id}")
     async def get_image_sequence(
         embryo_id: str,
         start: int = 0,
-        end: Optional[int] = None,
+        end: int | None = None,
         data_type: str = "volume_projection",
-        buffer_percent: float = 0.15
+        buffer_percent: float = 0.15,
     ):
         """Get ordered sequence of images for timepoint range.
 
@@ -455,7 +457,7 @@ def create_router(server) -> APIRouter:
             embryo_id=embryo_id,
             start=buffered_start,
             end=buffered_end,
-            data_type=data_type
+            data_type=data_type,
         )
 
         # Return lightweight metadata (no base64 data)
@@ -463,26 +465,25 @@ def create_router(server) -> APIRouter:
         seen_uids = set()
         for img in images:
             seen_uids.add(img.uid)
-            sequence.append({
-                "uid": img.uid,
-                "timepoint": img.metadata.get("timepoint"),
-                "timestamp": img.timestamp,
-                "data_type": img.data_type,
-                "shape": img.shape,
-                "embryo_id": img.metadata.get("embryo_id")
-            })
+            sequence.append(
+                {
+                    "uid": img.uid,
+                    "timepoint": img.metadata.get("timepoint"),
+                    "timestamp": img.timestamp,
+                    "data_type": img.data_type,
+                    "shape": img.shape,
+                    "embryo_id": img.metadata.get("embryo_id"),
+                }
+            )
 
         # Fallback to persistent DataStore for missing timepoints
         if server.data_store and (len(sequence) == 0 or buffered_end is not None):
             try:
-                refs = server.data_store.query(
-                    data_type=data_type,
-                    embryo_id=embryo_id
-                )
+                refs = server.data_store.query(data_type=data_type, embryo_id=embryo_id)
                 for ref in refs:
                     if ref.uid in seen_uids:
                         continue
-                    tp = ref.metadata.get('timepoint')
+                    tp = ref.metadata.get("timepoint")
                     if tp is None:
                         continue
                     tp = int(tp)
@@ -491,16 +492,18 @@ def create_router(server) -> APIRouter:
                     if buffered_end is not None and tp > buffered_end:
                         continue
                     seen_uids.add(ref.uid)
-                    sequence.append({
-                        "uid": ref.uid,
-                        "timepoint": tp,
-                        "timestamp": ref.metadata.get('timestamp', ''),
-                        "data_type": ref.data_type,
-                        "shape": ref.metadata.get('shape'),
-                        "embryo_id": embryo_id
-                    })
+                    sequence.append(
+                        {
+                            "uid": ref.uid,
+                            "timepoint": tp,
+                            "timestamp": ref.metadata.get("timestamp", ""),
+                            "data_type": ref.data_type,
+                            "shape": ref.metadata.get("shape"),
+                            "embryo_id": embryo_id,
+                        }
+                    )
                 # Re-sort by timepoint
-                sequence.sort(key=lambda x: x.get('timepoint') or 0)
+                sequence.sort(key=lambda x: x.get("timepoint") or 0)
             except Exception as e:
                 logger.warning(f"DataStore fallback failed: {e}")
 
@@ -509,14 +512,12 @@ def create_router(server) -> APIRouter:
             "requested_range": {"start": start, "end": end},
             "buffered_range": {"start": buffered_start, "end": buffered_end},
             "sequence": sequence,
-            "count": len(sequence)
+            "count": len(sequence),
         }
 
     @router.get("/api/events")
     async def list_events(
-        event_type: Optional[str] = None,
-        source: Optional[str] = None,
-        limit: int = 100
+        event_type: str | None = None, source: str | None = None, limit: int = 100
     ):
         """Get event history from EventBus"""
         if not server.event_bus:
@@ -524,6 +525,7 @@ def create_router(server) -> APIRouter:
 
         # Get history from event bus
         from gently.core import EventType
+
         et = None
         if event_type:
             try:
@@ -531,24 +533,22 @@ def create_router(server) -> APIRouter:
             except KeyError:
                 pass
 
-        events = server.event_bus.get_history(
-            event_type=et,
-            source=source,
-            limit=limit
-        )
+        events = server.event_bus.get_history(event_type=et, source=source, limit=limit)
 
         return {
             "events": [
                 {
-                    "event_type": e.event_type.name if hasattr(e.event_type, 'name') else str(e.event_type),
+                    "event_type": e.event_type.name
+                    if hasattr(e.event_type, "name")
+                    else str(e.event_type),
                     "data": e.data,
                     "source": e.source,
                     "timestamp": e.timestamp.isoformat(),
-                    "event_id": e.event_id
+                    "event_id": e.event_id,
                 }
                 for e in events
             ],
-            "total": len(events)
+            "total": len(events),
         }
 
     return router

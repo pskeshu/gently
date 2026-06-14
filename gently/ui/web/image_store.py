@@ -5,11 +5,13 @@ Image Store for the Visualization Server
 Organized storage for images by type and embryo.
 """
 
-from typing import Dict, List, Optional
-
 from .models import (
-    ImageData, EmbryoImageCache, Volume3DData,
-    CALIBRATION_TYPES, VOLUME_TYPES, ANALYSIS_TYPES,
+    ANALYSIS_TYPES,
+    CALIBRATION_TYPES,
+    VOLUME_TYPES,
+    EmbryoImageCache,
+    ImageData,
+    Volume3DData,
 )
 
 
@@ -17,11 +19,11 @@ class ImageStore:
     """Organized storage for images by type and embryo (unlimited)"""
 
     def __init__(self):
-        self._embryo_caches: Dict[str, EmbryoImageCache] = {}
-        self._global_images: List[ImageData] = []  # Images without embryo_id
-        self._calibration_images: List[ImageData] = []  # Global calibration
-        self._volume_images: List[ImageData] = []  # Global volumes
-        self._volumes_3d: Dict[str, Volume3DData] = {}  # 3D volumes by UID
+        self._embryo_caches: dict[str, EmbryoImageCache] = {}
+        self._global_images: list[ImageData] = []  # Images without embryo_id
+        self._calibration_images: list[ImageData] = []  # Global calibration
+        self._volume_images: list[ImageData] = []  # Global volumes
+        self._volumes_3d: dict[str, Volume3DData] = {}  # 3D volumes by UID
 
     def _get_embryo_cache(self, embryo_id: str) -> EmbryoImageCache:
         if embryo_id not in self._embryo_caches:
@@ -30,7 +32,7 @@ class ImageStore:
 
     def add_image(self, image: ImageData):
         """Add image to appropriate storage based on type and embryo"""
-        embryo_id = image.metadata.get('embryo_id')
+        embryo_id = image.metadata.get("embryo_id")
         data_type = image.data_type
 
         if data_type in CALIBRATION_TYPES or data_type in ANALYSIS_TYPES:
@@ -55,7 +57,7 @@ class ImageStore:
             else:
                 self._global_images.append(image)
 
-    def get_all_calibration(self, embryo_id: Optional[str] = None) -> List[ImageData]:
+    def get_all_calibration(self, embryo_id: str | None = None) -> list[ImageData]:
         """Get calibration images, optionally filtered by embryo"""
         if embryo_id:
             cache = self._embryo_caches.get(embryo_id)
@@ -66,7 +68,7 @@ class ImageStore:
             all_cal.extend(cache.calibration)
         return sorted(all_cal, key=lambda x: x.timestamp)
 
-    def get_all_volumes(self, embryo_id: Optional[str] = None) -> List[ImageData]:
+    def get_all_volumes(self, embryo_id: str | None = None) -> list[ImageData]:
         """Get volume images, optionally filtered by embryo"""
         if embryo_id:
             cache = self._embryo_caches.get(embryo_id)
@@ -76,7 +78,7 @@ class ImageStore:
             all_vol.extend(cache.volumes)
         return sorted(all_vol, key=lambda x: x.timestamp)
 
-    def get_all_snapshots(self, embryo_id: Optional[str] = None) -> List[ImageData]:
+    def get_all_snapshots(self, embryo_id: str | None = None) -> list[ImageData]:
         """Get snapshot images (including volume projections), optionally filtered by embryo"""
         if embryo_id:
             cache = self._embryo_caches.get(embryo_id)
@@ -91,11 +93,11 @@ class ImageStore:
             all_snap.extend(cache.volumes)
         return sorted(all_snap, key=lambda x: x.timestamp)
 
-    def get_embryo_ids(self) -> List[str]:
+    def get_embryo_ids(self) -> list[str]:
         """Get list of all embryo IDs with images"""
         return list(self._embryo_caches.keys())
 
-    def get_image_by_uid(self, uid: str) -> Optional[ImageData]:
+    def get_image_by_uid(self, uid: str) -> ImageData | None:
         """Find image by UID across all storage"""
         for img in self._global_images:
             if img.uid == uid:
@@ -120,11 +122,11 @@ class ImageStore:
             oldest_uid = next(iter(self._volumes_3d))
             del self._volumes_3d[oldest_uid]
 
-    def get_volume_3d(self, uid: str) -> Optional[Volume3DData]:
+    def get_volume_3d(self, uid: str) -> Volume3DData | None:
         """Get a 3D volume by UID"""
         return self._volumes_3d.get(uid)
 
-    def get_all_volumes_3d(self) -> List[Dict]:
+    def get_all_volumes_3d(self) -> list[dict]:
         """Get info for all 3D volumes (without heavy data)"""
         return [v.to_info_dict() for v in self._volumes_3d.values()]
 
@@ -132,9 +134,9 @@ class ImageStore:
         self,
         embryo_id: str,
         start: int = 0,
-        end: Optional[int] = None,
-        data_type: Optional[str] = None
-    ) -> List[ImageData]:
+        end: int | None = None,
+        data_type: str | None = None,
+    ) -> list[ImageData]:
         """Get ordered sequence of images for an embryo within a timepoint range.
 
         Args:
@@ -158,8 +160,8 @@ class ImageStore:
             all_images = [img for img in all_images if img.data_type == data_type]
 
         # Filter by timepoint range
-        def get_timepoint(img: ImageData) -> Optional[int]:
-            tp = img.metadata.get('timepoint')
+        def get_timepoint(img: ImageData) -> int | None:
+            tp = img.metadata.get("timepoint")
             if tp is not None:
                 return int(tp)
             return None
@@ -179,7 +181,7 @@ class ImageStore:
         filtered.sort(key=lambda x: get_timepoint(x) or 0)
         return filtered
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """Get storage statistics"""
         total_cal = len(self._calibration_images)
         total_vol = len(self._volume_images)
@@ -191,10 +193,10 @@ class ImageStore:
             total_snap += len(cache.snapshots)
 
         return {
-            'embryo_count': len(self._embryo_caches),
-            'calibration_count': total_cal,
-            'volume_count': total_vol,
-            'snapshot_count': total_snap,
-            'volumes_3d_count': len(self._volumes_3d),
-            'embryo_ids': list(self._embryo_caches.keys()),
+            "embryo_count": len(self._embryo_caches),
+            "calibration_count": total_cal,
+            "volume_count": total_vol,
+            "snapshot_count": total_snap,
+            "volumes_3d_count": len(self._volumes_3d),
+            "embryo_ids": list(self._embryo_caches.keys()),
         }

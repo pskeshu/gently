@@ -40,15 +40,15 @@ warnings.warn(
     stacklevel=2,
 )
 
-from .schema import (
-    init_database,
+from .aggregator import DatasetAggregator  # noqa: E402
+from .embryo_dataset import DatasetEmbryoEntry, EmbryoDataset, ImageData  # noqa: E402
+from .schema import (  # noqa: E402
+    DATABASE_VERSION,
     get_connection,
+    init_database,
     migrate_to_v2,
     migrate_to_v3,
-    DATABASE_VERSION,
 )
-from .aggregator import DatasetAggregator
-from .embryo_dataset import EmbryoDataset, DatasetEmbryoEntry, ImageData
 
 __all__ = [
     "init_database",

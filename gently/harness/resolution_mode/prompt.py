@@ -13,11 +13,8 @@ The agent's job in this mode is to interpret that free-text intent
 and call one of the resolution lifecycle tools to record it.
 """
 
-from typing import Optional
-
-from gently.organisms import get_organism
 from gently.hardware import get_hardware
-
+from gently.organisms import get_organism
 
 RESOLUTION_MODE_IDENTITY = """\
 You're in **session resolution** — figure out what the researcher
@@ -110,8 +107,8 @@ RESOLUTION_MODE_GUIDELINES = """\
 
 
 def build_resolution_prompt(
-    context_summary: Optional[str] = None,
-    memory_awareness: Optional[str] = None,
+    context_summary: str | None = None,
+    memory_awareness: str | None = None,
 ) -> str:
     """
     Build the system prompt for resolution mode.

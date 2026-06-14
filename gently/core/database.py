@@ -11,17 +11,18 @@ utilities enable exporting to JSON format for compatibility with existing
 analysis tools and workflows.
 """
 
-import logging
 import json
+import logging
 from datetime import datetime
-
-logger = logging.getLogger(__name__)
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Any
+
 import numpy as np
 
+logger = logging.getLogger(__name__)
 
-def format_timestamp(dt: Optional[datetime] = None) -> str:
+
+def format_timestamp(dt: datetime | None = None) -> str:
     """
     Format datetime as ISO 8601 string for JSON storage.
 
@@ -68,7 +69,7 @@ def numpy_to_python(obj: Any) -> Any:
         return obj
 
 
-def format_embryo_calibration_for_json(calibration_data: Dict) -> Dict:
+def format_embryo_calibration_for_json(calibration_data: dict) -> dict:
     """
     Format embryo calibration data from databroker for JSON export.
 
@@ -90,34 +91,34 @@ def format_embryo_calibration_for_json(calibration_data: Dict) -> Dict:
 
     # Ensure required fields exist
     required_fields = [
-        'slope_um_per_deg',
-        'offset_um',
-        'galvo_top_deg',
-        'galvo_bottom_deg',
-        'piezo_top_um',
-        'piezo_bottom_um',
-        'sample_type',
-        'timestamp',
-        'device_piezo',
-        'device_galvo'
+        "slope_um_per_deg",
+        "offset_um",
+        "galvo_top_deg",
+        "galvo_bottom_deg",
+        "piezo_top_um",
+        "piezo_bottom_um",
+        "sample_type",
+        "timestamp",
+        "device_piezo",
+        "device_galvo",
     ]
 
     for field in required_fields:
         if field not in calibration_json:
             # Provide sensible defaults for missing fields
-            if field == 'sample_type':
-                calibration_json[field] = 'embryo'
-            elif field == 'timestamp':
+            if field == "sample_type":
+                calibration_json[field] = "embryo"
+            elif field == "timestamp":
                 calibration_json[field] = format_timestamp()
-            elif 'device' in field:
-                calibration_json[field] = 'unknown'
+            elif "device" in field:
+                calibration_json[field] = "unknown"
             else:
                 calibration_json[field] = None
 
     return calibration_json
 
 
-def format_embryo_entry_for_json(embryo_data: Dict) -> Dict:
+def format_embryo_entry_for_json(embryo_data: dict) -> dict:
     """
     Format single embryo entry from databroker for JSON export.
 
@@ -132,34 +133,31 @@ def format_embryo_entry_for_json(embryo_data: Dict) -> Dict:
         JSON-compatible embryo entry
     """
     entry = {
-        'embryo_number': int(embryo_data.get('embryo_number', 0)),
-        'marking_timestamp': embryo_data.get('marking_timestamp', format_timestamp()),
-        'bottom_camera_position_pixel': {
-            'x': float(embryo_data.get('pixel_x', 0.0)),
-            'y': float(embryo_data.get('pixel_y', 0.0))
+        "embryo_number": int(embryo_data.get("embryo_number", 0)),
+        "marking_timestamp": embryo_data.get("marking_timestamp", format_timestamp()),
+        "bottom_camera_position_pixel": {
+            "x": float(embryo_data.get("pixel_x", 0.0)),
+            "y": float(embryo_data.get("pixel_y", 0.0)),
         },
-        'initial_stage_position_um': {
-            'x': float(embryo_data.get('initial_stage_x', 0.0)),
-            'y': float(embryo_data.get('initial_stage_y', 0.0))
+        "initial_stage_position_um": {
+            "x": float(embryo_data.get("initial_stage_x", 0.0)),
+            "y": float(embryo_data.get("initial_stage_y", 0.0)),
         },
-        'stage_position_after_centering_um': {
-            'x': float(embryo_data.get('centered_stage_x', 0.0)),
-            'y': float(embryo_data.get('centered_stage_y', 0.0))
-        }
+        "stage_position_after_centering_um": {
+            "x": float(embryo_data.get("centered_stage_x", 0.0)),
+            "y": float(embryo_data.get("centered_stage_y", 0.0)),
+        },
     }
 
     # Add calibration data if present
-    if 'calibration' in embryo_data:
-        entry['calibration'] = format_embryo_calibration_for_json(embryo_data['calibration'])
+    if "calibration" in embryo_data:
+        entry["calibration"] = format_embryo_calibration_for_json(embryo_data["calibration"])
 
     return entry
 
 
 def export_multi_embryo_database(
-    databroker_catalog,
-    session_uid: str,
-    output_path: Path,
-    pretty_print: bool = True
+    databroker_catalog, session_uid: str, output_path: Path, pretty_print: bool = True
 ) -> Path:
     """
     Export multi-embryo calibration data from databroker to JSON database file.
@@ -194,25 +192,25 @@ def export_multi_embryo_database(
     try:
         session_run = databroker_catalog[session_uid]
     except KeyError:
-        raise KeyError(f"Session UID {session_uid} not found in databroker")
+        raise KeyError(f"Session UID {session_uid} not found in databroker") from None
 
     # Handle different databroker API versions
     try:
         # v2 API
-        session_metadata = session_run.metadata['start']
+        session_metadata = session_run.metadata["start"]
     except (AttributeError, KeyError):
         # v1 API
-        session_metadata = session_run['start']
+        session_metadata = session_run["start"]
 
     # Initialize database structure
     database = {
-        'created': session_metadata.get('time', format_timestamp()),
-        'embryos': {},
-        'last_updated': format_timestamp()
+        "created": session_metadata.get("time", format_timestamp()),
+        "embryos": {},
+        "last_updated": format_timestamp(),
     }
 
     # Get list of embryo run UIDs from session metadata
-    embryo_uids = session_metadata.get('embryo_runs', [])
+    embryo_uids = session_metadata.get("embryo_runs", [])
 
     if not embryo_uids:
         logger.warning("No embryo runs found in session %s...", session_uid[:8])
@@ -225,17 +223,19 @@ def export_multi_embryo_database(
 
             # Get embryo metadata
             try:
-                embryo_metadata = embryo_run.metadata['start']
+                embryo_metadata = embryo_run.metadata["start"]
             except (AttributeError, KeyError):
-                embryo_metadata = embryo_run['start']
+                embryo_metadata = embryo_run["start"]
 
-            embryo_id = embryo_metadata.get('embryo_id', f"embryo_{len(database['embryos'])+1:03d}")
+            embryo_id = embryo_metadata.get(
+                "embryo_id", f"embryo_{len(database['embryos']) + 1:03d}"
+            )
 
             # Format embryo entry
             embryo_entry = format_embryo_entry_for_json(embryo_metadata)
 
             # Add to database
-            database['embryos'][embryo_id] = embryo_entry
+            database["embryos"][embryo_id] = embryo_entry
 
         except Exception as e:
             logger.warning("Could not export embryo %s...: %s", embryo_uid[:8], e)
@@ -243,19 +243,23 @@ def export_multi_embryo_database(
 
     # Write to JSON file
     output_path = Path(output_path)
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         if pretty_print:
             json.dump(database, f, indent=2)
         else:
             json.dump(database, f)
 
-    logger.info("Exported multi-embryo database: File=%s, Embryos=%d, Session=%s...",
-                 output_path, len(database['embryos']), session_uid[:8])
+    logger.info(
+        "Exported multi-embryo database: File=%s, Embryos=%d, Session=%s...",
+        output_path,
+        len(database["embryos"]),
+        session_uid[:8],
+    )
 
     return output_path
 
 
-def load_multi_embryo_database(database_path: Path) -> Dict:
+def load_multi_embryo_database(database_path: Path) -> dict:
     """
     Load existing multi-embryo database from JSON file.
 
@@ -274,18 +278,18 @@ def load_multi_embryo_database(database_path: Path) -> Dict:
     if not database_path.exists():
         # Return empty database structure
         return {
-            'created': format_timestamp(),
-            'embryos': {},
-            'last_updated': format_timestamp()
+            "created": format_timestamp(),
+            "embryos": {},
+            "last_updated": format_timestamp(),
         }
 
-    with open(database_path, 'r') as f:
+    with open(database_path) as f:
         database = json.load(f)
 
     return database
 
 
-def save_multi_embryo_database(database: Dict, database_path: Path):
+def save_multi_embryo_database(database: dict, database_path: Path):
     """
     Save multi-embryo database to JSON file.
 
@@ -299,17 +303,13 @@ def save_multi_embryo_database(database: Dict, database_path: Path):
     database_path = Path(database_path)
 
     # Update last_updated timestamp
-    database['last_updated'] = format_timestamp()
+    database["last_updated"] = format_timestamp()
 
-    with open(database_path, 'w') as f:
+    with open(database_path, "w") as f:
         json.dump(database, f, indent=2)
 
 
-def add_embryo_to_database(
-    database: Dict,
-    embryo_id: str,
-    embryo_data: Dict
-) -> Dict:
+def add_embryo_to_database(database: dict, embryo_id: str, embryo_data: dict) -> dict:
     """
     Add or update embryo entry in database.
 
@@ -331,13 +331,13 @@ def add_embryo_to_database(
     embryo_entry = format_embryo_entry_for_json(embryo_data)
 
     # Add to database
-    database['embryos'][embryo_id] = embryo_entry
-    database['last_updated'] = format_timestamp()
+    database["embryos"][embryo_id] = embryo_entry
+    database["last_updated"] = format_timestamp()
 
     return database
 
 
-def get_embryo_calibration(database: Dict, embryo_id: str) -> Optional[Dict]:
+def get_embryo_calibration(database: dict, embryo_id: str) -> dict | None:
     """
     Get calibration data for specific embryo from database.
 
@@ -353,15 +353,15 @@ def get_embryo_calibration(database: Dict, embryo_id: str) -> Optional[Dict]:
     dict or None
         Calibration dictionary, or None if not found
     """
-    embryo_entry = database.get('embryos', {}).get(embryo_id)
+    embryo_entry = database.get("embryos", {}).get(embryo_id)
 
     if embryo_entry is None:
         return None
 
-    return embryo_entry.get('calibration')
+    return embryo_entry.get("calibration")
 
 
-def list_embryos(database: Dict) -> List[str]:
+def list_embryos(database: dict) -> list[str]:
     """
     List all embryo IDs in database.
 
@@ -375,12 +375,9 @@ def list_embryos(database: Dict) -> List[str]:
     list of str
         Embryo IDs sorted by embryo number
     """
-    embryos = database.get('embryos', {})
+    embryos = database.get("embryos", {})
 
     # Sort by embryo_number
-    sorted_embryos = sorted(
-        embryos.items(),
-        key=lambda x: x[1].get('embryo_number', 0)
-    )
+    sorted_embryos = sorted(embryos.items(), key=lambda x: x[1].get("embryo_number", 0))
 
     return [embryo_id for embryo_id, _ in sorted_embryos]

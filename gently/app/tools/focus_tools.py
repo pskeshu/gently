@@ -11,34 +11,35 @@ a sample-aware focus map over time. This enables:
 - Predicting optimal focus for future acquisitions
 """
 
-from typing import Dict, List, Optional
 from datetime import datetime
-import numpy as np
 
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import get_embryo_or_error
+import numpy as np
 
 # Import focus analysis functions from core
 from gently.analysis.core import (
+    FitFunction,
+    FocusAnalysisConfig,
     calculate_focus_score,
     fit_focus_curve,
-    FocusAlgorithm,
-    FocusAnalysisConfig,
-    FitFunction,
 )
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
     name="fine_focus",
-    description="""Perform fine focus adjustment by scanning piezo positions and finding optimal focus using image analysis.
-Sweeps the piezo through a range of positions, captures lightsheet images at each position, calculates focus scores
-using FFT bandpass or gradient algorithm, fits a Gaussian curve, and optionally moves to the best focus position.
+    description="""Perform fine focus adjustment by scanning piezo positions and finding
+optimal focus using image analysis.
+Sweeps the piezo through a range of positions, captures lightsheet images at each position,
+calculates focus scores using FFT bandpass or gradient algorithm, fits a Gaussian curve,
+and optionally moves to the best focus position.
 
-Use when user says "focus", "fine focus", "adjust focus", "find best focus", or after moving to an embryo position.
-Default sweep is ±3μm around 4μm with 1μm steps (7 positions). Algorithm options: 'fft_bandpass' (default, best for lightsheet) or 'gradient'.
+Use when user says "focus", "fine focus", "adjust focus", "find best focus", or after
+moving to an embryo position. Default sweep is ±3μm around 4μm with 1μm steps (7
+positions). Algorithm options: 'fft_bandpass' (default, best for lightsheet) or 'gradient'.
 
-If embryo_id is provided, logs the focus measurement to the embryo's focus_history for drift tracking and future reference.
-Returns the optimal piezo position and fit quality (R²). Higher R² indicates more reliable focus detection.""",
+If embryo_id is provided, logs the focus measurement to the embryo's focus_history for
+drift tracking and future reference. Returns the optimal piezo position and fit quality (R²).
+Higher R² indicates more reliable focus detection.""",
     category=ToolCategory.CALIBRATION,
     requires_microscope=True,
     examples=[
@@ -51,12 +52,12 @@ Returns the optimal piezo position and fit quality (R²). Higher R² indicates m
 async def fine_focus(
     range_um: float = 3.0,
     step_um: float = 1.0,
-    center_um: Optional[float] = 4.0,
+    center_um: float | None = 4.0,
     algorithm: str = "fft_bandpass",
     move_to_best: bool = True,
     galvo_position: float = 0.0,
-    embryo_id: Optional[str] = None,
-    context: Dict = None
+    embryo_id: str | None = None,
+    context: dict = None,
 ) -> str:
     """
     Perform fine focus sweep to find optimal piezo position.
@@ -76,18 +77,19 @@ async def fine_focus(
     galvo_position : float
         Galvo position to use during sweep (default: 0.0)
     embryo_id : str, optional
-        Embryo to associate this focus measurement with. If provided, logs to embryo's focus_history.
+        Embryo to associate this focus measurement with. If provided, logs to embryo's
+        focus_history.
     context : dict
         Execution context with client and agent
     """
-    client = context.get('client')
-    agent = context.get('agent')
+    client = context.get("client")
+    agent = context.get("agent")
 
     if not client:
         return "Error: No microscope client connected"
 
     # Validate algorithm
-    valid_algorithms = ['fft_bandpass', 'gradient', 'volath', 'variance']
+    valid_algorithms = ["fft_bandpass", "gradient", "volath", "variance"]
     if algorithm not in valid_algorithms:
         return f"Error: Unknown algorithm '{algorithm}'. Valid options: {valid_algorithms}"
 
@@ -104,14 +106,13 @@ async def fine_focus(
         images = []
         captured_positions = []
 
-        for i, pos in enumerate(positions):
+        for _i, pos in enumerate(positions):
             result = await client.capture_lightsheet_image(
-                piezo_position=float(pos),
-                galvo_position=float(galvo_position)
+                piezo_position=float(pos), galvo_position=float(galvo_position)
             )
 
-            if result.get('success') and result.get('image') is not None:
-                images.append(result['image'])
+            if result.get("success") and result.get("image") is not None:
+                images.append(result["image"])
                 captured_positions.append(pos)
 
         if len(images) < 3:
@@ -121,7 +122,7 @@ async def fine_focus(
         scores = []
         config = FocusAnalysisConfig(algorithm=algorithm)
 
-        for i, img in enumerate(images):
+        for _i, img in enumerate(images):
             score = calculate_focus_score(img, algorithm=algorithm, config=config)
             scores.append(score)
 
@@ -146,14 +147,17 @@ async def fine_focus(
                 fit_quality = "good" if r_squared >= 0.75 else "moderate"
 
                 # Check if fitted peak is within sweep range
-                if best_position < captured_positions.min() or best_position > captured_positions.max():
+                if (
+                    best_position < captured_positions.min()
+                    or best_position > captured_positions.max()
+                ):
                     best_position = best_measured_position
                     fit_quality = "fallback (peak outside range)"
             else:
                 best_position = best_measured_position
                 fit_quality = "poor"
 
-        except Exception as e:
+        except Exception:
             best_position = best_measured_position
             r_squared = 0.0
             fit_quality = "failed"
@@ -162,7 +166,7 @@ async def fine_focus(
         if move_to_best:
             await client.capture_lightsheet_image(
                 piezo_position=float(best_position),
-                galvo_position=float(galvo_position)
+                galvo_position=float(galvo_position),
             )
 
         # Log focus datapoint to embryo's focus_history if embryo_id provided
@@ -175,7 +179,7 @@ async def fine_focus(
                     piezo=best_position,
                     score=float(best_measured_score),
                     r_squared=float(r_squared),
-                    method='fine_focus',
+                    method="fine_focus",
                     algorithm=algorithm,
                 )
                 logged_to_embryo = True
@@ -185,11 +189,12 @@ async def fine_focus(
 
         # Build result message
         result_lines = [
-            f"✓ Fine focus complete",
+            "✓ Fine focus complete",
             f"  Optimal position: {best_position:.2f} μm",
             f"  Fit quality: {fit_quality} (R²={r_squared:.3f})",
             f"  Algorithm: {algorithm}",
-            f"  Sweep: {captured_positions.min():.1f} to {captured_positions.max():.1f} μm ({len(captured_positions)} positions)",
+            f"  Sweep: {captured_positions.min():.1f} to {captured_positions.max():.1f} μm"
+            f" ({len(captured_positions)} positions)",
         ]
 
         if move_to_best:
@@ -199,21 +204,25 @@ async def fine_focus(
             result_lines.append(f"  Logged to: {embryo_id} focus history")
 
         # Add score statistics
-        score_range = scores.max() - scores.min()
+        scores.max() - scores.min()
         score_cv = np.std(scores) / np.mean(scores) if np.mean(scores) > 0 else 0
-        result_lines.append(f"  Score variation: {score_cv:.1%} (higher is better for focus detection)")
+        result_lines.append(
+            f"  Score variation: {score_cv:.1%} (higher is better for focus detection)"
+        )
 
         return "\n".join(result_lines)
 
     except Exception as e:
         import traceback
+
         return f"Error during fine focus: {str(e)}\n{traceback.format_exc()}"
 
 
 @tool(
     name="get_focus_score",
     description="""Calculate focus score for the current lightsheet image without moving the piezo.
-Captures a single lightsheet image and returns its focus quality score using the specified algorithm.
+Captures a single lightsheet image and returns its focus quality score using the specified
+algorithm.
 Use to check focus quality at current position or compare different positions manually.
 If piezo_position is not specified, uses CURRENT position (preserves focus after fine_focus).
 Algorithm options: 'fft_bandpass' (default), 'gradient', 'volath', 'variance'.""",
@@ -228,7 +237,7 @@ async def get_focus_score(
     piezo_position: float = None,
     galvo_position: float = 0.0,
     algorithm: str = "fft_bandpass",
-    context: Dict = None
+    context: dict = None,
 ) -> str:
     """
     Get focus score for current or specified position.
@@ -244,12 +253,12 @@ async def get_focus_score(
     context : dict
         Execution context
     """
-    client = context.get('client')
+    client = context.get("client")
 
     if not client:
         return "Error: No microscope client connected"
 
-    valid_algorithms = ['fft_bandpass', 'gradient', 'volath', 'variance']
+    valid_algorithms = ["fft_bandpass", "gradient", "volath", "variance"]
     if algorithm not in valid_algorithms:
         return f"Error: Unknown algorithm '{algorithm}'. Valid options: {valid_algorithms}"
 
@@ -260,14 +269,13 @@ async def get_focus_score(
 
         # Capture image
         result = await client.capture_lightsheet_image(
-            piezo_position=float(piezo_position),
-            galvo_position=float(galvo_position)
+            piezo_position=float(piezo_position), galvo_position=float(galvo_position)
         )
 
-        if not result.get('success') or result.get('image') is None:
+        if not result.get("success") or result.get("image") is None:
             return f"Error: Failed to capture image at piezo={piezo_position}μm"
 
-        image = result['image']
+        image = result["image"]
 
         # Calculate focus score
         config = FocusAnalysisConfig(algorithm=algorithm)
@@ -286,7 +294,8 @@ async def get_focus_score(
 
 @tool(
     name="get_focus_history",
-    description="""Get the focus history for an embryo showing all piezo-galvo measurements over time.
+    description="""Get the focus history for an embryo showing all piezo-galvo measurements
+over time.
 Shows drift rate, piezo-galvo fit, and individual measurements. Use to understand how focus
 has changed during a timelapse and whether recalibration is needed.""",
     category=ToolCategory.ANALYSIS,
@@ -295,10 +304,7 @@ has changed during a timelapse and whether recalibration is needed.""",
         ToolExample("Check focus history for embryo 2", {"embryo_id": "embryo_2"}),
     ],
 )
-async def get_focus_history(
-    embryo_id: str,
-    context: Dict = None
-) -> str:
+async def get_focus_history(embryo_id: str, context: dict = None) -> str:
     """
     Get focus measurement history for an embryo.
 
@@ -309,7 +315,7 @@ async def get_focus_history(
     context : dict
         Execution context with agent
     """
-    agent = context.get('agent')
+    agent = context.get("agent")
 
     if not agent:
         return "Error: No agent context available"

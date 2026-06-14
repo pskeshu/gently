@@ -9,17 +9,18 @@ This script:
 
 Usage:
     python scripts/gemini_stage_test.py --session 3fb70aca --embryo embryo_1
-    python scripts/gemini_stage_test.py --session 3fb70aca --embryo embryo_1 --model gemini-3-pro-preview
+    python scripts/gemini_stage_test.py --session 3fb70aca --embryo embryo_1 \
+        --model gemini-3-pro-preview
 """
 
-import os
-import sys
 import argparse
 import json
-import time
+import os
 import re
-from pathlib import Path
+import sys
+import time
 from datetime import datetime
+from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -38,6 +39,7 @@ def ensure_dependencies():
 
     try:
         import cv2 as _cv2
+
         cv2 = _cv2
     except ImportError:
         print("ERROR: opencv-python is required. Install with: pip install opencv-python")
@@ -45,6 +47,7 @@ def ensure_dependencies():
 
     try:
         import tifffile as _tifffile
+
         tifffile = _tifffile
     except ImportError:
         print("ERROR: tifffile is required. Install with: pip install tifffile")
@@ -52,6 +55,7 @@ def ensure_dependencies():
 
     try:
         from google import genai as _genai
+
         genai = _genai
     except ImportError:
         print("ERROR: google-genai is required. Install with: pip install google-genai")
@@ -61,6 +65,7 @@ def ensure_dependencies():
 # ============================================================================
 # Video Creation (adapted from video_maker.py)
 # ============================================================================
+
 
 def discover_volumes(session_dir: Path, embryo_id: str = None) -> dict:
     """Discover volume files in a session directory."""
@@ -156,7 +161,7 @@ def create_dual_view_projection(volume: np.ndarray) -> np.ndarray:
         # diSPIM format has width roughly 4x height when dual-view
         if width > height * 2:
             # Extract View A (left half)
-            view_a = view_a[:, :, :width // 2]
+            view_a = view_a[:, :, : width // 2]
 
         # TOP projection: max along Z axis (looking down at embryo)
         top_proj = np.max(view_a, axis=0)  # Shape: (Y, X)
@@ -191,7 +196,9 @@ def create_dual_view_projection(volume: np.ndarray) -> np.ndarray:
     return normalize(view_a)
 
 
-def normalize_for_video(image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99.5) -> np.ndarray:
+def normalize_for_video(
+    image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99.5
+) -> np.ndarray:
     """Normalize image to 8-bit for video encoding."""
     p_low = np.percentile(image, percentile_low)
     p_high = np.percentile(image, percentile_high)
@@ -206,8 +213,13 @@ def normalize_for_video(image: np.ndarray, percentile_low: float = 1, percentile
     return image
 
 
-def add_text_overlay(image: np.ndarray, text: str, position: str = "top-left",
-                     font_scale: float = 0.6, color=(255, 255, 255)) -> np.ndarray:
+def add_text_overlay(
+    image: np.ndarray,
+    text: str,
+    position: str = "top-left",
+    font_scale: float = 0.6,
+    color=(255, 255, 255),
+) -> np.ndarray:
     """Add text overlay to image."""
     if image.ndim == 2:
         image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
@@ -233,7 +245,7 @@ def add_text_overlay(image: np.ndarray, text: str, position: str = "top-left",
         (x - 2, y - text_height - 2),
         (x + text_width + 2, y + baseline + 2),
         (0, 0, 0),
-        -1
+        -1,
     )
 
     cv2.putText(image, text, (x, y), font, font_scale, color, thickness)
@@ -241,8 +253,13 @@ def add_text_overlay(image: np.ndarray, text: str, position: str = "top-left",
     return image
 
 
-def create_embryo_video(session_id: str, embryo_id: str, storage_path: Path,
-                        fps: int = 10, output_path: Path = None) -> dict:
+def create_embryo_video(
+    session_id: str,
+    embryo_id: str,
+    storage_path: Path,
+    fps: int = 10,
+    output_path: Path = None,
+) -> dict:
     """
     Create timelapse video from embryo images.
 
@@ -306,19 +323,29 @@ def create_embryo_video(session_id: str, embryo_id: str, storage_path: Path,
                 cv2.putText(frame, "TOP", (10, height - 10), font, 0.5, (200, 200, 200), 1)
                 # SIDE label - estimate separator position based on aspect ratio
                 side_start = int(width * 0.75)  # Approximate
-                cv2.putText(frame, "SIDE", (side_start, height - 10), font, 0.5, (200, 200, 200), 1)
+                cv2.putText(
+                    frame,
+                    "SIDE",
+                    (side_start, height - 10),
+                    font,
+                    0.5,
+                    (200, 200, 200),
+                    1,
+                )
 
                 # Initialize writer
                 if writer is None:
                     first_shape = frame.shape
                     height, width = frame.shape[:2]
 
-                    codecs = [('mp4v', '.mp4'), ('avc1', '.mp4'), ('XVID', '.avi')]
+                    codecs = [("mp4v", ".mp4"), ("avc1", ".mp4"), ("XVID", ".avi")]
 
                     for codec, ext in codecs:
                         fourcc = cv2.VideoWriter_fourcc(*codec)
                         test_path = output_path.with_suffix(ext)
-                        writer = cv2.VideoWriter(str(test_path), fourcc, fps, (width, height), isColor=True)
+                        writer = cv2.VideoWriter(
+                            str(test_path), fourcc, fps, (width, height), isColor=True
+                        )
                         if writer.isOpened():
                             output_path = test_path
                             print(f"  Using codec: {codec}")
@@ -352,7 +379,7 @@ def create_embryo_video(session_id: str, embryo_id: str, storage_path: Path,
             "output_path": str(output_path),
             "frame_count": frame_count,
             "duration_seconds": duration,
-            "fps": fps
+            "fps": fps,
         }
 
     except Exception as e:
@@ -364,6 +391,7 @@ def create_embryo_video(session_id: str, embryo_id: str, storage_path: Path,
 # ============================================================================
 # Gemini API Integration
 # ============================================================================
+
 
 def build_stage_classification_prompt(frame_count: int, fps: int, duration_seconds: float) -> str:
     """Build the classification prompt with video-specific information."""
@@ -434,7 +462,8 @@ TASK:
 Watch the ENTIRE video and identify each developmental stage. For each stage you observe:
 
 1. Report the FRAME NUMBER (0 to {frame_count - 1}) when that stage BEGINS
-2. Identify the stage name (use lowercase: early, bean, comma, 1.5fold, 2fold, 3fold, hatching, hatched)
+2. Identify the stage name (use lowercase: early, bean, comma, 1.5fold, 2fold, 3fold,
+   hatching, hatched)
 3. Describe the specific morphological features you observe that indicate this stage
 4. Provide your confidence level (HIGH, MEDIUM, or LOW)
 
@@ -464,8 +493,14 @@ IMPORTANT: Use FRAME NUMBERS (0 to {frame_count - 1}), not timestamps!
 Be precise with frame numbers. Watch the ENTIRE video to capture all stage transitions."""
 
 
-def analyze_with_gemini(video_path: str, model: str = "gemini-3-pro-preview", api_key: str = None,
-                        frame_count: int = 100, fps: int = 10, duration_seconds: float = 10.0) -> dict:
+def analyze_with_gemini(
+    video_path: str,
+    model: str = "gemini-3-pro-preview",
+    api_key: str = None,
+    frame_count: int = 100,
+    fps: int = 10,
+    duration_seconds: float = 10.0,
+) -> dict:
     """
     Upload video to Gemini and analyze for developmental stages.
 
@@ -479,7 +514,9 @@ def analyze_with_gemini(video_path: str, model: str = "gemini-3-pro-preview", ap
     if not api_key:
         api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        return {"error": "No API key found. Set GEMINI_API_KEY environment variable or pass --api-key"}
+        return {
+            "error": "No API key found. Set GEMINI_API_KEY environment variable or pass --api-key"
+        }
 
     print(f"\nInitializing Gemini client with model: {model}")
 
@@ -521,7 +558,7 @@ def analyze_with_gemini(video_path: str, model: str = "gemini-3-pro-preview", ap
     if video_file.state.name != "ACTIVE":
         return {"error": f"Video processing failed. State: {video_file.state.name}"}
 
-    print(f"  Video ready for analysis")
+    print("  Video ready for analysis")
 
     # Analyze with Gemini
     print(f"\nSending to Gemini {model} for analysis...")
@@ -530,7 +567,10 @@ def analyze_with_gemini(video_path: str, model: str = "gemini-3-pro-preview", ap
     try:
         response = client.models.generate_content(
             model=model,
-            contents=[video_file, build_stage_classification_prompt(frame_count, fps, duration_seconds)]
+            contents=[
+                video_file,
+                build_stage_classification_prompt(frame_count, fps, duration_seconds),
+            ],
         )
 
         elapsed = time.time() - start_time
@@ -540,7 +580,7 @@ def analyze_with_gemini(video_path: str, model: str = "gemini-3-pro-preview", ap
             "success": True,
             "response_text": response.text,
             "model": model,
-            "elapsed_seconds": elapsed
+            "elapsed_seconds": elapsed,
         }
 
     except Exception as e:
@@ -555,17 +595,20 @@ def parse_stage_response(response_text: str) -> dict:
     """
     # Try to extract JSON from response
     # Handle cases where response has markdown code blocks
-    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
+    json_match = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", response_text)
 
     if json_match:
         json_str = json_match.group(1)
     else:
         # Try to find raw JSON
-        json_match = re.search(r'\{[\s\S]*\}', response_text)
+        json_match = re.search(r"\{[\s\S]*\}", response_text)
         if json_match:
             json_str = json_match.group(0)
         else:
-            return {"error": "Could not find JSON in response", "raw_response": response_text}
+            return {
+                "error": "Could not find JSON in response",
+                "raw_response": response_text,
+            }
 
     try:
         data = json.loads(json_str)
@@ -588,7 +631,10 @@ def timestamp_to_seconds(timestamp: str) -> float:
 # Annotated Video Creation
 # ============================================================================
 
-def create_annotated_video(source_video: str, stage_data: dict, output_path: str, fps: int = 10) -> dict:
+
+def create_annotated_video(
+    source_video: str, stage_data: dict, output_path: str, fps: int = 10
+) -> dict:
     """
     Create annotated video with stage labels overlaid.
 
@@ -626,19 +672,21 @@ def create_annotated_video(source_video: str, stage_data: dict, output_path: str
                 end_seconds = timestamp_to_seconds(next_stage["timestamp"])
                 end_frame = int(end_seconds * fps)
             else:
-                end_frame = float('inf')
+                end_frame = float("inf")
         else:
-            end_frame = float('inf')
+            end_frame = float("inf")
 
-        stage_timeline.append({
-            "start_frame": start_frame,
-            "end_frame": end_frame,
-            "stage": stage_info["stage"],
-            "confidence": stage_info.get("confidence", "?"),
-            "features": stage_info.get("features", "")
-        })
+        stage_timeline.append(
+            {
+                "start_frame": start_frame,
+                "end_frame": end_frame,
+                "stage": stage_info["stage"],
+                "confidence": stage_info.get("confidence", "?"),
+                "features": stage_info.get("features", ""),
+            }
+        )
 
-    print(f"\nCreating annotated video...")
+    print("\nCreating annotated video...")
     print(f"  Source: {source_video}")
     print(f"  Output: {output_path}")
     print(f"  Stages: {len(stage_timeline)}")
@@ -667,7 +715,7 @@ def create_annotated_video(source_video: str, stage_data: dict, output_path: str
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
     writer = cv2.VideoWriter(str(output_path), fourcc, source_fps, (width, height), isColor=True)
 
     if not writer.isOpened():
@@ -720,7 +768,7 @@ def create_annotated_video(source_video: str, stage_data: dict, output_path: str
         "success": True,
         "output_path": str(output_path),
         "frame_count": frame_idx,
-        "stages_annotated": len(stage_timeline)
+        "stages_annotated": len(stage_timeline),
     }
 
 
@@ -728,23 +776,44 @@ def create_annotated_video(source_video: str, stage_data: dict, output_path: str
 # Main
 # ============================================================================
 
+
 def main():
     parser = argparse.ArgumentParser(
-        description="Test Gemini video understanding for C. elegans developmental stage classification"
+        description=(
+            "Test Gemini video understanding for C. elegans developmental stage classification"
+        )
     )
     parser.add_argument("--session", default="3fb70aca", help="Session ID")
     parser.add_argument("--embryo", default="embryo_1", help="Embryo ID")
-    parser.add_argument("--model", default="gemini-2.5-flash",
-                        choices=["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-pro-preview", "gemini-3-flash-preview"],
-                        help="Gemini model to use")
+    parser.add_argument(
+        "--model",
+        default="gemini-2.5-flash",
+        choices=[
+            "gemini-2.5-pro",
+            "gemini-2.5-flash",
+            "gemini-3-pro-preview",
+            "gemini-3-flash-preview",
+        ],
+        help="Gemini model to use",
+    )
     parser.add_argument("--storage", default="D:/Gently", help="Storage path")
     parser.add_argument("--fps", type=int, default=10, help="Video frames per second")
-    parser.add_argument("--skip-video-creation", action="store_true",
-                        help="Skip video creation if video already exists")
-    parser.add_argument("--video-only", action="store_true",
-                        help="Only create video, skip Gemini analysis")
-    parser.add_argument("--api-key", type=str, default=None,
-                        help="Gemini API key (or set GEMINI_API_KEY env var)")
+    parser.add_argument(
+        "--skip-video-creation",
+        action="store_true",
+        help="Skip video creation if video already exists",
+    )
+    parser.add_argument(
+        "--video-only",
+        action="store_true",
+        help="Only create video, skip Gemini analysis",
+    )
+    parser.add_argument(
+        "--api-key",
+        type=str,
+        default=None,
+        help="Gemini API key (or set GEMINI_API_KEY env var)",
+    )
 
     args = parser.parse_args()
 
@@ -768,7 +837,7 @@ def main():
 
     # Video info for Gemini prompt
     video_frame_count = 100  # default
-    video_duration = 10.0    # default
+    video_duration = 10.0  # default
 
     if args.skip_video_creation and video_path.exists():
         print(f"\nUsing existing video: {video_path}")
@@ -779,7 +848,7 @@ def main():
         cap.release()
         print(f"  Frames: {video_frame_count}, Duration: {video_duration:.1f}s")
     else:
-        print(f"\n[Step 1] Creating timelapse video...")
+        print("\n[Step 1] Creating timelapse video...")
         video_result = create_embryo_video(args.session, args.embryo, storage_path, args.fps)
 
         if "error" in video_result:
@@ -789,7 +858,7 @@ def main():
         video_path = Path(video_result["output_path"])
         video_frame_count = video_result["frame_count"]
         video_duration = video_result["duration_seconds"]
-        print(f"\nVideo created successfully!")
+        print("\nVideo created successfully!")
         print(f"  Path: {video_path}")
         print(f"  Frames: {video_frame_count}")
         print(f"  Duration: {video_duration:.1f}s")
@@ -799,10 +868,14 @@ def main():
         return 0
 
     # Step 2: Analyze with Gemini
-    print(f"\n[Step 2] Analyzing with Gemini...")
+    print("\n[Step 2] Analyzing with Gemini...")
     result = analyze_with_gemini(
-        str(video_path), args.model, args.api_key,
-        frame_count=video_frame_count, fps=args.fps, duration_seconds=video_duration
+        str(video_path),
+        args.model,
+        args.api_key,
+        frame_count=video_frame_count,
+        fps=args.fps,
+        duration_seconds=video_duration,
     )
 
     if "error" in result:
@@ -818,18 +891,22 @@ def main():
     # Save raw response
     response_file = video_dir / f"{args.embryo}_gemini_response.json"
     with open(response_file, "w") as f:
-        json.dump({
-            "model": args.model,
-            "session": args.session,
-            "embryo": args.embryo,
-            "response": result["response_text"],
-            "elapsed_seconds": result["elapsed_seconds"],
-            "timestamp": datetime.now().isoformat()
-        }, f, indent=2)
+        json.dump(
+            {
+                "model": args.model,
+                "session": args.session,
+                "embryo": args.embryo,
+                "response": result["response_text"],
+                "elapsed_seconds": result["elapsed_seconds"],
+                "timestamp": datetime.now().isoformat(),
+            },
+            f,
+            indent=2,
+        )
     print(f"\nResponse saved to: {response_file}")
 
     # Step 3: Parse response
-    print(f"\n[Step 3] Parsing response...")
+    print("\n[Step 3] Parsing response...")
     parsed = parse_stage_response(result["response_text"])
 
     if "error" in parsed:
@@ -846,7 +923,7 @@ def main():
         if "frame" in stage:
             loc = f"Frame {stage['frame']}"
         else:
-            loc = stage.get('timestamp', '?')
+            loc = stage.get("timestamp", "?")
         print(f"  {loc} - {stage['stage']} ({stage.get('confidence', '?')})")
 
     print(f"\nFinal stage: {stage_data.get('final_stage', 'unknown')}")
@@ -859,15 +936,10 @@ def main():
     print(f"\nParsed stages saved to: {parsed_file}")
 
     # Step 4: Create annotated video
-    print(f"\n[Step 4] Creating annotated video...")
+    print("\n[Step 4] Creating annotated video...")
     annotated_path = video_dir / f"{args.embryo}_timelapse_gemini_annotated.mp4"
 
-    result = create_annotated_video(
-        str(video_path),
-        stage_data,
-        str(annotated_path),
-        args.fps
-    )
+    result = create_annotated_video(str(video_path), stage_data, str(annotated_path), args.fps)
 
     if "error" in result:
         print(f"ERROR: {result['error']}")

@@ -3,15 +3,12 @@ Tests for PairingManager — pairing flow, trust persistence, HMAC auth.
 """
 
 import time
-from pathlib import Path
 
 import pytest
 
 from gently.mesh.pairing import (
-    ALL_SCOPES,
     PAIRING_EXPIRY,
     PairingManager,
-    PairingSession,
     TrustedPeer,
 )
 
@@ -96,7 +93,8 @@ class TestPairingFlow:
 
         # Responder confirms
         remote_manager.confirm_pairing(
-            session_resp.pairing_id, remote_manager.instance_id,
+            session_resp.pairing_id,
+            remote_manager.instance_id,
         )
 
         # Initiator confirms (initiator already auto-confirms, but let's also
@@ -105,14 +103,16 @@ class TestPairingFlow:
         # the confirm on the responder's session from the initiator side.
         # In the real flow, the initiator calls POST /confirm on the responder.
         # The confirm_pairing on remote_manager with initiator_id completes it.
-        result = remote_manager.confirm_pairing(
-            session_resp.pairing_id, pairing_manager.instance_id,
+        remote_manager.confirm_pairing(
+            session_resp.pairing_id,
+            pairing_manager.instance_id,
         )
 
         # Both sides confirmed → session should be confirmed
         # But we need to confirm on initiator side too
         pairing_manager.confirm_pairing(
-            session_resp.pairing_id, remote_manager.instance_id,
+            session_resp.pairing_id,
+            remote_manager.instance_id,
         )
 
         # Check trust established on remote
@@ -121,7 +121,9 @@ class TestPairingFlow:
     def test_reject_pairing(self, pairing_manager, remote_manager):
         nonce = pairing_manager.create_initiation()
         session = remote_manager.handle_pair_request(
-            pairing_manager.instance_id, pairing_manager.hostname, nonce,
+            pairing_manager.instance_id,
+            pairing_manager.hostname,
+            nonce,
         )
         rejected = remote_manager.reject_pairing(session.pairing_id)
         assert rejected.status == "rejected"
@@ -129,7 +131,9 @@ class TestPairingFlow:
     def test_get_pending_sessions(self, pairing_manager, remote_manager):
         nonce = pairing_manager.create_initiation()
         remote_manager.handle_pair_request(
-            pairing_manager.instance_id, pairing_manager.hostname, nonce,
+            pairing_manager.instance_id,
+            pairing_manager.hostname,
+            nonce,
         )
         pending = remote_manager.get_pending_sessions()
         assert len(pending) == 1
@@ -137,7 +141,9 @@ class TestPairingFlow:
     def test_cleanup_expired(self, pairing_manager, remote_manager):
         nonce = pairing_manager.create_initiation()
         session = remote_manager.handle_pair_request(
-            pairing_manager.instance_id, pairing_manager.hostname, nonce,
+            pairing_manager.instance_id,
+            pairing_manager.hostname,
+            nonce,
         )
         # Force expiry
         session.created_at = time.time() - PAIRING_EXPIRY - 10
@@ -163,14 +169,18 @@ class TestTrustPersistence:
 
     def test_unpair_by_instance_id(self, pairing_manager):
         pairing_manager._trusted["peer-z"] = TrustedPeer(
-            instance_id="peer-z", hostname="host-z", base_token="abc",
+            instance_id="peer-z",
+            hostname="host-z",
+            base_token="abc",
         )
         assert pairing_manager.unpair("peer-z") is True
         assert not pairing_manager.is_trusted("peer-z")
 
     def test_unpair_by_hostname(self, pairing_manager):
         pairing_manager._trusted["peer-w"] = TrustedPeer(
-            instance_id="peer-w", hostname="Host-W", base_token="abc",
+            instance_id="peer-w",
+            hostname="Host-W",
+            base_token="abc",
         )
         assert pairing_manager.unpair("host-w") is True
 
@@ -181,7 +191,9 @@ class TestTrustPersistence:
 class TestTokenAuth:
     def test_verify_valid_token(self, pairing_manager):
         pairing_manager._trusted["peer-auth"] = TrustedPeer(
-            instance_id="peer-auth", hostname="host", base_token="secret123",
+            instance_id="peer-auth",
+            hostname="host",
+            base_token="secret123",
         )
         token = pairing_manager.get_token_for_peer("peer-auth")
         result = pairing_manager.verify_token(token)
@@ -189,7 +201,9 @@ class TestTokenAuth:
 
     def test_verify_invalid_token(self, pairing_manager):
         pairing_manager._trusted["peer-auth"] = TrustedPeer(
-            instance_id="peer-auth", hostname="host", base_token="secret123",
+            instance_id="peer-auth",
+            hostname="host",
+            base_token="secret123",
         )
         result = pairing_manager.verify_token("invalid-token")
         assert result is None
@@ -201,7 +215,9 @@ class TestTokenAuth:
 class TestScopes:
     def test_default_scopes(self, pairing_manager):
         pairing_manager._trusted["peer-s"] = TrustedPeer(
-            instance_id="peer-s", hostname="host", base_token="abc",
+            instance_id="peer-s",
+            hostname="host",
+            base_token="abc",
         )
         scopes = pairing_manager.get_scopes_for_peer("peer-s")
         assert "status" in scopes
@@ -210,7 +226,9 @@ class TestScopes:
 
     def test_set_scopes(self, pairing_manager):
         pairing_manager._trusted["peer-s2"] = TrustedPeer(
-            instance_id="peer-s2", hostname="host2", base_token="abc",
+            instance_id="peer-s2",
+            hostname="host2",
+            base_token="abc",
         )
         success = pairing_manager.set_scopes("peer-s2", ["status"])
         assert success is True
@@ -219,7 +237,9 @@ class TestScopes:
 
     def test_set_invalid_scope(self, pairing_manager):
         pairing_manager._trusted["peer-s3"] = TrustedPeer(
-            instance_id="peer-s3", hostname="host3", base_token="abc",
+            instance_id="peer-s3",
+            hostname="host3",
+            base_token="abc",
         )
         success = pairing_manager.set_scopes("peer-s3", ["invalid_scope"])
         assert success is False

@@ -22,7 +22,6 @@ import json
 import logging
 import struct
 from pathlib import Path
-from typing import Optional, Tuple
 
 from ...settings import settings
 
@@ -39,7 +38,7 @@ async def send_file(
     auth_token: str = "",
     offset: int = 0,
     chunk_size: int = 0,
-) -> Tuple[bool, str]:
+) -> tuple[bool, str]:
     """Send a file over a TCP connection.
 
     Parameters
@@ -108,7 +107,7 @@ async def send_file(
 async def receive_file(
     reader: asyncio.StreamReader,
     dest_dir: Path,
-) -> Tuple[Optional[dict], Optional[Path], str]:
+) -> tuple[dict | None, Path | None, str]:
     """Receive a file over a TCP connection.
 
     Parameters

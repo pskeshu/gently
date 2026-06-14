@@ -21,6 +21,7 @@ Self-test (drives a real Bot)::
 
     python gently/hardware/switchbot.py EC:6F:04:06:5B:23 on off
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -32,12 +33,12 @@ from collections import OrderedDict
 logger = logging.getLogger(__name__)
 
 # SwitchBot Bot GATT. Note the UUID group is 9fb8 — the widely-copied 9fb9 is wrong.
-_CTRL_CHAR = "cba20002-224d-11e6-9fb8-0002a5d5c51b"    # write / write-without-response
+_CTRL_CHAR = "cba20002-224d-11e6-9fb8-0002a5d5c51b"  # write / write-without-response
 _NOTIFY_CHAR = "cba20003-224d-11e6-9fb8-0002a5d5c51b"  # notify (command response)
 
 _COMMANDS = {
-    "on":    bytes([0x57, 0x01, 0x01]),
-    "off":   bytes([0x57, 0x01, 0x02]),
+    "on": bytes([0x57, 0x01, 0x01]),
+    "off": bytes([0x57, 0x01, 0x02]),
     "press": bytes([0x57, 0x01, 0x00]),
 }
 # Dedicated status query: returns battery %, firmware version, mode flags.
@@ -115,15 +116,15 @@ class SwitchBot:
         self.address = address
         self.name = name
         self.timeout = timeout
-        self.parent = None              # required for Bluesky bps.mv()
-        self._state = "unknown"         # last commanded on/off state
+        self.parent = None  # required for Bluesky bps.mv()
+        self._state = "unknown"  # last commanded on/off state
         # Status fields populated only by read_status(). Left as None until
         # first contact — action commands deliberately don't update these,
         # see note on _STATUS_BATTERY_IDX above.
         self._battery_pct: int | None = None
         self._firmware: int | None = None
         self._status_ts: float | None = None
-        self._lock = threading.Lock()   # serialize BLE access (one radio, one bot)
+        self._lock = threading.Lock()  # serialize BLE access (one radio, one bot)
 
     # -- Bluesky settable protocol -------------------------------------------
     def set(self, state: str):
@@ -139,9 +140,7 @@ class SwitchBot:
         def worker():
             with self._lock:
                 try:
-                    data = asyncio.run(
-                        _send_command(self.address, _COMMANDS[state], self.timeout)
-                    )
+                    data = asyncio.run(_send_command(self.address, _COMMANDS[state], self.timeout))
                 except Exception as exc:
                     logger.warning("SwitchBot %s set(%s) failed: %s", self.name, state, exc)
                     status.set_exception(exc)
@@ -167,9 +166,7 @@ class SwitchBot:
         SwitchBotError on BLE / protocol failure.
         """
         with self._lock:
-            data = asyncio.run(
-                _send_command(self.address, _QUERY_STATUS, self.timeout)
-            )
+            data = asyncio.run(_send_command(self.address, _QUERY_STATUS, self.timeout))
         info = {
             "raw_hex": data.hex(),
             "battery_pct": data[_STATUS_BATTERY_IDX] if len(data) > _STATUS_BATTERY_IDX else None,
@@ -186,9 +183,7 @@ class SwitchBot:
     # -- Bluesky readable protocol -------------------------------------------
     def read(self):
         ts = time.time()
-        out = OrderedDict({
-            self.name: {"value": self._state, "timestamp": ts}
-        })
+        out = OrderedDict({self.name: {"value": self._state, "timestamp": ts}})
         if self._battery_pct is not None:
             out[f"{self.name}_battery_pct"] = {
                 "value": self._battery_pct,
@@ -202,11 +197,25 @@ class SwitchBot:
         return out
 
     def describe(self):
-        return OrderedDict({
-            self.name: {"source": f"switchbot:{self.address}", "dtype": "string", "shape": []},
-            f"{self.name}_battery_pct": {"source": f"switchbot:{self.address}", "dtype": "integer", "shape": []},
-            f"{self.name}_firmware":    {"source": f"switchbot:{self.address}", "dtype": "integer", "shape": []},
-        })
+        return OrderedDict(
+            {
+                self.name: {
+                    "source": f"switchbot:{self.address}",
+                    "dtype": "string",
+                    "shape": [],
+                },
+                f"{self.name}_battery_pct": {
+                    "source": f"switchbot:{self.address}",
+                    "dtype": "integer",
+                    "shape": [],
+                },
+                f"{self.name}_firmware": {
+                    "source": f"switchbot:{self.address}",
+                    "dtype": "integer",
+                    "shape": [],
+                },
+            }
+        )
 
     def read_configuration(self):
         return OrderedDict()

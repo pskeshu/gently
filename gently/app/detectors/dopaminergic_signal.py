@@ -23,7 +23,7 @@ import json
 import logging
 import re
 import time
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -32,58 +32,81 @@ from .base import Detector, DetectorResult
 logger = logging.getLogger(__name__)
 
 
-_PERCEIVER_PROMPT = """You are looking at the max projection of a volume of C. elegans imaged with a 488 nm light-sheet microscope. The embryo is expressing a fluorophore that lights up when certain neurons are born.
+_PERCEIVER_PROMPT = """You are looking at the max projection of a volume of C. elegans imaged
+with a 488 nm light-sheet microscope. The embryo is expressing a fluorophore that lights up
+when certain neurons are born.
 
-We are trying to image the birth of these neurons and their continued existence. Your description will be read by a classifier that decides how to guide the imaging: it will speed up imaging once the neuronal structures appear, and trigger a 1-minute burst of fast acquisitions once they look stably bright. Be specific so the classifier has something concrete to act on.
+We are trying to image the birth of these neurons and their continued existence. Your
+description will be read by a classifier that decides how to guide the imaging: it will speed
+up imaging once the neuronal structures appear, and trigger a 1-minute burst of fast
+acquisitions once they look stably bright. Be specific so the classifier has something
+concrete to act on.
 
 You may initially see a faint outline of the embryo — autofluorescence from the body.
 
-Eventually, you may see puncta-like structures in the embryo region of the image. If there are any puncta outside the embryo region, ignore them — those are likely gut granules.
+Eventually, you may see puncta-like structures in the embryo region of the image. If there
+are any puncta outside the embryo region, ignore them — those are likely gut granules.
 
-The nerve cells, as they begin to express, will first appear as a faint blob, then a brighter blob, then a further-brighter blob, and will start to emit thread-like structures from them — the nerve body. These are what we want to image.
+The nerve cells, as they begin to express, will first appear as a faint blob, then a brighter
+blob, then a further-brighter blob, and will start to emit thread-like structures from them —
+the nerve body. These are what we want to image.
 
-The embryo may also eventually hatch. This can look like the embryo structure disappearing entirely from the field of view. Mention it if you see this.
+The embryo may also eventually hatch. This can look like the embryo structure disappearing
+entirely from the field of view. Mention it if you see this.
 
 Describe what you see in a few sentences of plain prose.
 """
 
 
-_CLASSIFIER_PROMPT = """You are reading a microscopist's description of an image of a C. elegans embryo expressing a dopaminergic-neuron reporter (dat-1::mNeonGreen).
+_CLASSIFIER_PROMPT = """You are reading a microscopist's description of an image of a C. elegans
+embryo expressing a dopaminergic-neuron reporter (dat-1::mNeonGreen).
 
-Classify the description against the rubric below. Output ONLY a JSON object — no prose, no markdown fences. Your output drives the timelapse orchestrator's next imaging decision.
+Classify the description against the rubric below. Output ONLY a JSON object — no prose, no
+markdown fences. Your output drives the timelapse orchestrator's next imaging decision.
 
 The orchestrator can take these actions based on your output:
 - speed_up — accelerate imaging cadence to 1-minute intervals (when neurons begin to appear).
-- burst — fire a 1-minute burst of fast acquisitions (when neurons are stably bright and well-resolved).
+- burst — fire a 1-minute burst of fast acquisitions (when neurons are stably bright and
+  well-resolved).
 - ramp_down_power — step the 488 nm laser down (when signal saturates the camera).
 - stop — stop imaging this embryo (when it has hatched / left the field).
-- none — keep the base cadence, take no action (when the description is uncertain or shows only background).
+- none — keep the base cadence, take no action (when the description is uncertain or shows
+  only background).
 
 Schema:
 {
-  "intensity_level": "NONE" | "WEAK" | "MEDIUM" | "STRONG" | "SATURATING" | "UNCERTAIN",  # signal strength — is the signal absent, faint, average, or stronger?
-  "structure_quality": "NONE" | "PARTIAL" | "GOOD" | "UNCERTAIN",  # are the neuronal structures absent, emerging, fully emerged with good signal, or can't tell?
-  "has_hatched": true | false,  # has the embryo hatched or left the field of view? — drives the stop action
+  "intensity_level": "NONE" | "WEAK" | "MEDIUM" | "STRONG" | "SATURATING" | "UNCERTAIN",
+  # signal strength — is the signal absent, faint, average, or stronger?
+  "structure_quality": "NONE" | "PARTIAL" | "GOOD" | "UNCERTAIN",
+  # are the neuronal structures absent, emerging, fully emerged with good signal, or can't tell?
+  "has_hatched": true | false,
+  # has the embryo hatched or left the field of view? — drives the stop action
   "reasoning": "one short sentence quoting which words drove your choice"
 }
 
 intensity_level rubric (drives speed_up / ramp_down_power):
 - NONE: description says no puncta in the embryo / blank / nothing above background. → none
-- WEAK: description mentions 1 dim spot, OR signal explicitly described as "barely visible" / "could be noise" / "very faint". → none (could be noise)
+- WEAK: description mentions 1 dim spot, OR signal explicitly described as "barely visible" /
+  "could be noise" / "very faint". → none (could be noise)
 - MEDIUM: description mentions 2+ clearly discrete bright spots above background. → speed_up
 - STRONG: description mentions multiple bright, well-resolved spots. → speed_up
 - SATURATING: description explicitly says the signal saturates the camera. → ramp_down_power
-- UNCERTAIN: description hedges, doesn't address signal, or you cannot tell from the prose alone. → none
+- UNCERTAIN: description hedges, doesn't address signal, or you cannot tell from the prose
+  alone. → none
 
 structure_quality rubric (drives burst):
 - NONE: no puncta described. → none
 - PARTIAL: puncta present but no neurites / no curved connecting traces. → none (not yet stable)
-- GOOD: description mentions curved/elongated traces between puncta or recognizable neurite structure. → burst
+- GOOD: description mentions curved/elongated traces between puncta or recognizable neurite
+  structure. → burst
 - UNCERTAIN: description is silent on structure or ambiguous. → none
 
-has_hatched: true ONLY if the description explicitly says the embryo has hatched, OR the embryo structure has disappeared from the field of view. Default false. → stop
+has_hatched: true ONLY if the description explicitly says the embryo has hatched, OR the
+embryo structure has disappeared from the field of view. Default false. → stop
 
-When the description is ambiguous, choose UNCERTAIN over guessing. When between two adjacent levels, choose the more conservative (lower) one — false negatives (missing onset by a timepoint) are cheap, false positives (burning photodose on noise) are expensive.
+When the description is ambiguous, choose UNCERTAIN over guessing. When between two adjacent
+levels, choose the more conservative (lower) one — false negatives (missing onset by a
+timepoint) are cheap, false positives (burning photodose on noise) are expensive.
 
 Description to classify:
 ---
@@ -100,10 +123,10 @@ class DopaminergicSignalDetector(Detector):
     def __init__(
         self,
         claude_client=None,
-        perceiver_model: Optional[str] = None,
-        classifier_model: Optional[str] = None,
+        perceiver_model: str | None = None,
+        classifier_model: str | None = None,
         # Back-compat: callers passing the old single-model kwarg.
-        model: Optional[str] = None,
+        model: str | None = None,
     ):
         self._claude = claude_client
         self._perceiver_model = perceiver_model or model
@@ -113,10 +136,11 @@ class DopaminergicSignalDetector(Detector):
     async def run(
         self,
         volume: np.ndarray,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> DetectorResult:
-        from gently.settings import settings
         import anthropic
+
+        from gently.settings import settings
 
         embryo_id = context.get("embryo_id", "?")
         timepoint = int(context.get("timepoint", 0))
@@ -155,8 +179,11 @@ class DopaminergicSignalDetector(Detector):
                     detector_name=self.name,
                     embryo_id=embryo_id,
                     timepoint=timepoint,
-                    findings={"intensity_level": "NONE", "structure_quality": "NONE",
-                              "has_hatched": False},
+                    findings={
+                        "intensity_level": "NONE",
+                        "structure_quality": "NONE",
+                        "has_hatched": False,
+                    },
                     reasoning="Empty / unreadable volume",
                     elapsed_ms=(time.time() - start) * 1000,
                 )
@@ -164,13 +191,17 @@ class DopaminergicSignalDetector(Detector):
             # Stage 1: Perceiver (image → prose)
             perceiver_model = self._perceiver_model or settings.models.perception
             description, perceiver_raw = await self._call_perceiver(
-                claude, perceiver_model, b64_image,
+                claude,
+                perceiver_model,
+                b64_image,
             )
 
             # Stage 2: Classifier (prose → findings)
             classifier_model = self._classifier_model or settings.models.main
             findings, classifier_raw, parse_err = await self._call_classifier(
-                claude, classifier_model, description,
+                claude,
+                classifier_model,
+                description,
             )
 
             return DetectorResult(
@@ -190,7 +221,11 @@ class DopaminergicSignalDetector(Detector):
                 error=parse_err,
             )
 
-        except (anthropic.APIConnectionError, anthropic.RateLimitError, anthropic.APIStatusError) as e:
+        except (
+            anthropic.APIConnectionError,
+            anthropic.RateLimitError,
+            anthropic.APIStatusError,
+        ) as e:
             logger.error("[%s] Claude API error for %s: %s", self.name, embryo_id, e)
             return DetectorResult(
                 detector_name=self.name,
@@ -210,35 +245,43 @@ class DopaminergicSignalDetector(Detector):
             )
 
     async def _call_perceiver(
-        self, claude, model: str, b64_image: str,
-    ) -> Tuple[str, str]:
+        self,
+        claude,
+        model: str,
+        b64_image: str,
+    ) -> tuple[str, str]:
         """Stage 1: image → free prose description. Stateless — each
         timepoint is evaluated independently."""
         response = await asyncio.to_thread(
             claude.messages.create,
             model=model,
             max_tokens=400,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _PERCEIVER_PROMPT},
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64_image,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": _PERCEIVER_PROMPT},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64_image,
+                            },
                         },
-                    },
-                ],
-            }],
+                    ],
+                }
+            ],
         )
         raw = response.content[0].text if response.content else ""
         return raw.strip(), raw
 
     async def _call_classifier(
-        self, claude, model: str, description: str,
-    ) -> Tuple[Dict[str, Any], str, Optional[str]]:
+        self,
+        claude,
+        model: str,
+        description: str,
+    ) -> tuple[dict[str, Any], str, str | None]:
         """Stage 2: description prose → structured findings."""
         prompt = _CLASSIFIER_PROMPT.replace("{DESCRIPTION}", description or "(no description)")
         response = await asyncio.to_thread(
@@ -252,7 +295,7 @@ class DopaminergicSignalDetector(Detector):
         return findings, raw, parse_err
 
 
-def _volume_to_b64(volume: np.ndarray, calibration: Optional[Dict] = None) -> Optional[str]:
+def _volume_to_b64(volume: np.ndarray, calibration: dict | None = None) -> str | None:
     """Max-project a volume (with optional dark/flat correction + edge ROI)
     and return a base64-encoded PNG.
 
@@ -298,9 +341,9 @@ def _volume_to_b64(volume: np.ndarray, calibration: Optional[Dict] = None) -> Op
         dark = calibration.get("dark")
         flat = calibration.get("flat")
         if dark is not None and flat is not None and dark.shape == proj.shape:
-            denom = (flat.astype(np.float32) - dark.astype(np.float32))
+            denom = flat.astype(np.float32) - dark.astype(np.float32)
             denom[denom <= 0] = 1.0
-            proj = ((proj.astype(np.float32) - dark.astype(np.float32)) / denom * 255.0)
+            proj = (proj.astype(np.float32) - dark.astype(np.float32)) / denom * 255.0
             proj = np.clip(proj, 0, 255).astype(np.uint8)
             calibrated = True
 
@@ -389,7 +432,7 @@ def _parse_response(raw: str) -> tuple:
     return dict(_DEFAULT_FINDINGS), f"could not parse response: {raw[:120]!r}"
 
 
-def _normalize_findings(d: Dict[str, Any]) -> Dict[str, Any]:
+def _normalize_findings(d: dict[str, Any]) -> dict[str, Any]:
     """Coerce a parsed JSON dict to the expected schema, filling defaults
     for missing keys and validating enum values. UNCERTAIN is a valid
     value for both intensity_level and structure_quality and downstream

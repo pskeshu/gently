@@ -2,13 +2,12 @@
 DiSPIM piezo and F-drive positioner devices.
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
-from typing import Tuple
 
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
 from gently.exceptions import HardwareError, StageMovementError
 
@@ -58,8 +57,7 @@ class DiSPIMFDrive:
     above — see the safety-limit note above this class.
     """
 
-    def __init__(self, name: str, core: pymmcore.CMMCore,
-                 move_timeout_s: float = 120.0):
+    def __init__(self, name: str, core: pymmcore.CMMCore, move_timeout_s: float = 120.0):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
@@ -71,7 +69,7 @@ class DiSPIMFDrive:
         self.tolerance = 0.1  # µm
 
     @property
-    def limits(self) -> Tuple[float, float]:
+    def limits(self) -> tuple[float, float]:
         """Read-only view of the hardware safety limits (module constants)."""
         return (F_DRIVE_MIN_UM, F_DRIVE_MAX_UM)
 
@@ -100,6 +98,7 @@ class DiSPIMFDrive:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -113,9 +112,9 @@ class DiSPIMFDrive:
 
         data = OrderedDict()
         data[self.name] = {
-            'value': float(value),
-            'timestamp': time.time(),
-            'units': 'micrometers'
+            "value": float(value),
+            "timestamp": time.time(),
+            "units": "micrometers",
         }
         return data
 
@@ -123,10 +122,10 @@ class DiSPIMFDrive:
         """Describe F-drive device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'number',
-            'shape': [],
-            'units': 'micrometers'
+            "source": self.name,
+            "dtype": "number",
+            "shape": [],
+            "units": "micrometers",
         }
         return data
 
@@ -147,8 +146,12 @@ class DiSPIMPiezo:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
-    def __init__(self, name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (-200, 200.0)):
+    def __init__(
+        self,
+        name: str,
+        core: pymmcore.CMMCore,
+        limits: tuple[float, float] = (-200, 200.0),
+    ):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
@@ -180,6 +183,7 @@ class DiSPIMPiezo:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -194,9 +198,9 @@ class DiSPIMPiezo:
 
         data = OrderedDict()
         data[self.name] = {
-            'value': float(value),
-            'timestamp': time.time(),
-            'units': 'micrometers'
+            "value": float(value),
+            "timestamp": time.time(),
+            "units": "micrometers",
         }
         return data
 
@@ -204,10 +208,10 @@ class DiSPIMPiezo:
         """Describe piezo device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'number',
-            'shape': [],
-            'units': 'micrometers'
+            "source": self.name,
+            "dtype": "number",
+            "shape": [],
+            "units": "micrometers",
         }
         return data
 
@@ -236,10 +240,9 @@ class DiSPIMPiezo:
         """Set this piezo as the Micro-Manager focus device."""
         self.core.setFocusDevice(self.name)
 
-    def configure_amplitude_offset(self,
-                                    amplitude_um: float,
-                                    offset_um: float,
-                                    pattern: str = "1 - Triangle"):
+    def configure_amplitude_offset(
+        self, amplitude_um: float, offset_um: float, pattern: str = "1 - Triangle"
+    ):
         """
         Configure piezo amplitude and offset for scanning.
 
@@ -280,10 +283,9 @@ class DiSPIMPiezo:
         """
         self.core.setProperty(self.name, "SPIMNumSlices", num_slices)
 
-    def configure_for_volume_acquisition(self,
-                                          amplitude_um: float,
-                                          offset_um: float,
-                                          num_slices: int):
+    def configure_for_volume_acquisition(
+        self, amplitude_um: float, offset_um: float, num_slices: int
+    ):
         """
         Configure piezo for hardware-triggered volume acquisition.
 

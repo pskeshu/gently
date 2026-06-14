@@ -2,21 +2,23 @@
 Generic detector system for runtime-configurable event detection
 """
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional, Any
 from enum import Enum
+from typing import Any
 
 
 class DetectionMode(str, Enum):
     """Action mode when detector fires"""
-    PASSIVE = "passive"              # Just flag, no action
-    RECOMMEND = "recommend"          # Suggest actions to user
-    AUTO = "auto"                    # Execute actions automatically
+
+    PASSIVE = "passive"  # Just flag, no action
+    RECOMMEND = "recommend"  # Suggest actions to user
+    AUTO = "auto"  # Execute actions automatically
 
 
 class ConfidenceLevel(str, Enum):
     """Confidence levels for detections"""
+
     LOW = "LOW"
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
@@ -25,15 +27,20 @@ class ConfidenceLevel(str, Enum):
 @dataclass
 class DetectorConditions:
     """Conditions for when to run a detector"""
-    min_timepoint: Optional[int] = None      # Don't run before this timepoint
-    max_timepoint: Optional[int] = None      # Don't run after this timepoint
-    embryo_ids: Optional[List[str]] = None   # Only run on these embryos (None = all)
-    run_if_detected: bool = True              # Continue running after first detection?
-    min_interval_timepoints: int = 1          # Minimum timepoints between runs
 
-    def should_run(self, embryo_id: str, timepoint: int,
-                   last_run_timepoint: Optional[int],
-                   already_detected: bool) -> bool:
+    min_timepoint: int | None = None  # Don't run before this timepoint
+    max_timepoint: int | None = None  # Don't run after this timepoint
+    embryo_ids: list[str] | None = None  # Only run on these embryos (None = all)
+    run_if_detected: bool = True  # Continue running after first detection?
+    min_interval_timepoints: int = 1  # Minimum timepoints between runs
+
+    def should_run(
+        self,
+        embryo_id: str,
+        timepoint: int,
+        last_run_timepoint: int | None,
+        already_detected: bool,
+    ) -> bool:
         """
         Check if detector should run
 
@@ -78,11 +85,12 @@ class DetectorConditions:
 @dataclass
 class DetectorActions:
     """Actions to take when detector fires"""
+
     mode: DetectionMode = DetectionMode.RECOMMEND
-    parameter_changes: Optional[Dict[str, Any]] = None  # e.g., {"interval_seconds": 60}
-    stop_timelapse: bool = False                        # Stop timelapse when detected
-    custom_message: Optional[str] = None                # Custom notification
-    webhook_url: Optional[str] = None                   # External notification
+    parameter_changes: dict[str, Any] | None = None  # e.g., {"interval_seconds": 60}
+    stop_timelapse: bool = False  # Stop timelapse when detected
+    custom_message: str | None = None  # Custom notification
+    webhook_url: str | None = None  # External notification
 
     def get_recommendation_message(self, detector_name: str, embryo_id: str) -> str:
         """Generate recommendation message for user"""
@@ -103,25 +111,26 @@ class DetectorActions:
 @dataclass
 class DetectionResult:
     """Result of a single detection attempt"""
+
     detector_name: str
     embryo_id: str
     timepoint: int
     timestamp: datetime
     detected: bool
-    confidence: Optional[ConfidenceLevel] = None
-    reasoning: Optional[str] = None
+    confidence: ConfidenceLevel | None = None
+    reasoning: str | None = None
     error: bool = False
-    error_message: Optional[str] = None
-    api_duration: Optional[float] = None     # seconds
+    error_message: str | None = None
+    api_duration: float | None = None  # seconds
     num_images: int = 1
-    full_response: Optional[str] = None
+    full_response: str | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary"""
         d = asdict(self)
-        d['timestamp'] = self.timestamp.isoformat()
+        d["timestamp"] = self.timestamp.isoformat()
         if self.confidence:
-            d['confidence'] = self.confidence.value
+            d["confidence"] = self.confidence.value
         return d
 
 
@@ -133,22 +142,23 @@ class Detector:
     A detector analyzes volumes using Claude Vision API to detect specific
     events or states (e.g., "comma stage", "hatching", "neural activity").
     """
-    name: str                                    # Unique identifier (e.g., "comma_stage")
-    description: str                             # Human-readable description
-    detection_prompt: str                        # Claude Vision API prompt
-    enabled: bool = True                         # Can be toggled on/off
+
+    name: str  # Unique identifier (e.g., "comma_stage")
+    description: str  # Human-readable description
+    detection_prompt: str  # Claude Vision API prompt
+    enabled: bool = True  # Can be toggled on/off
     conditions: DetectorConditions = field(default_factory=DetectorConditions)
     actions: DetectorActions = field(default_factory=DetectorActions)
     confidence_threshold: ConfidenceLevel = ConfidenceLevel.MEDIUM
-    use_temporal_context: bool = True            # Include recent images?
-    temporal_context_size: int = 5               # How many recent images
+    use_temporal_context: bool = True  # Include recent images?
+    temporal_context_size: int = 5  # How many recent images
     created_at: datetime = field(default_factory=datetime.now)
     modified_at: datetime = field(default_factory=datetime.now)
-    detection_count: int = 0                     # Total detections fired
-    run_count: int = 0                           # Total times run
+    detection_count: int = 0  # Total detections fired
+    run_count: int = 0  # Total times run
 
     # Tracking per-embryo state
-    _last_run_timepoint: Dict[str, int] = field(default_factory=dict, repr=False)
+    _last_run_timepoint: dict[str, int] = field(default_factory=dict, repr=False)
     _detected_embryos: set = field(default_factory=set, repr=False)
 
     def should_run(self, embryo_id: str, timepoint: int) -> bool:
@@ -173,9 +183,7 @@ class Detector:
         last_run = self._last_run_timepoint.get(embryo_id)
         already_detected = embryo_id in self._detected_embryos
 
-        return self.conditions.should_run(
-            embryo_id, timepoint, last_run, already_detected
-        )
+        return self.conditions.should_run(embryo_id, timepoint, last_run, already_detected)
 
     def mark_run(self, embryo_id: str, timepoint: int):
         """Mark that detector ran for this embryo/timepoint"""
@@ -191,8 +199,9 @@ class Detector:
         """Check if detector already fired for this embryo"""
         return embryo_id in self._detected_embryos
 
-    def build_detection_content(self, images: List[Dict],
-                                embryo_id: str, timepoint: int) -> List[Dict]:
+    def build_detection_content(
+        self, images: list[dict], embryo_id: str, timepoint: int
+    ) -> list[dict]:
         """
         Build Claude Vision API content array
 
@@ -213,57 +222,59 @@ class Detector:
         content = []
 
         # Add instruction
-        content.append({
-            "type": "text",
-            "text": f"Analyzing {embryo_id} at timepoint {timepoint}"
-        })
+        content.append({"type": "text", "text": f"Analyzing {embryo_id} at timepoint {timepoint}"})
 
         # Add temporal context if enabled
         if self.use_temporal_context and len(images) > 1:
-            content.append({
-                "type": "text",
-                "text": f"Recent images (for temporal context, {len(images)} timepoints):"
-            })
+            content.append(
+                {
+                    "type": "text",
+                    "text": f"Recent images (for temporal context, {len(images)} timepoints):",
+                }
+            )
 
             # Add older images first
             for img_data in images[:-1]:
-                content.append({
-                    "type": "text",
-                    "text": f"Timepoint {img_data['timepoint']:04d}"
-                })
-                content.append({
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": img_data['b64_image']
+                content.append({"type": "text", "text": f"Timepoint {img_data['timepoint']:04d}"})
+                content.append(
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": img_data["b64_image"],
+                        },
                     }
-                })
+                )
 
         # Add current/latest image
         latest = images[-1]
-        content.append({
-            "type": "text",
-            "text": f"Current image (timepoint {latest['timepoint']:04d}) - FOCUS YOUR ANALYSIS HERE:"
-        })
-        content.append({
-            "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/jpeg",
-                "data": latest['b64_image']
+        content.append(
+            {
+                "type": "text",
+                "text": (
+                    f"Current image (timepoint {latest['timepoint']:04d})"
+                    " - FOCUS YOUR ANALYSIS HERE:"
+                ),
             }
-        })
+        )
+        content.append(
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/jpeg",
+                    "data": latest["b64_image"],
+                },
+            }
+        )
 
         # Add detection prompt
-        content.append({
-            "type": "text",
-            "text": self.detection_prompt
-        })
+        content.append({"type": "text", "text": self.detection_prompt})
 
         return content
 
-    def parse_detection_response(self, response_text: str) -> Dict:
+    def parse_detection_response(self, response_text: str) -> dict:
         """
         Parse Claude's detection response
 
@@ -286,98 +297,102 @@ class Detector:
         confidence = None
         reasoning = None
 
-        lines = response_text.strip().split('\n')
+        lines = response_text.strip().split("\n")
 
         for line in lines:
             line = line.strip()
-            if line.startswith('DETECTED:'):
-                value = line.split(':', 1)[1].strip().upper()
-                detected = value in ['YES', 'TRUE', '1']
-            elif line.startswith('CONFIDENCE:'):
-                conf_str = line.split(':', 1)[1].strip().upper()
+            if line.startswith("DETECTED:"):
+                value = line.split(":", 1)[1].strip().upper()
+                detected = value in ["YES", "TRUE", "1"]
+            elif line.startswith("CONFIDENCE:"):
+                conf_str = line.split(":", 1)[1].strip().upper()
                 try:
                     confidence = ConfidenceLevel(conf_str)
                 except ValueError:
                     confidence = None
-            elif line.startswith('REASONING:'):
-                reasoning = line.split(':', 1)[1].strip()
+            elif line.startswith("REASONING:"):
+                reasoning = line.split(":", 1)[1].strip()
 
         # If multiline reasoning, capture it
         if reasoning is None:
             reasoning_start = False
             reasoning_lines = []
             for line in lines:
-                if line.startswith('REASONING:'):
+                if line.startswith("REASONING:"):
                     reasoning_start = True
-                    reasoning_lines.append(line.split(':', 1)[1].strip())
+                    reasoning_lines.append(line.split(":", 1)[1].strip())
                 elif reasoning_start and line:
                     reasoning_lines.append(line)
             if reasoning_lines:
-                reasoning = ' '.join(reasoning_lines)
+                reasoning = " ".join(reasoning_lines)
 
         return {
-            'detected': detected if detected is not None else False,
-            'confidence': confidence,
-            'reasoning': reasoning or "No reasoning provided"
+            "detected": detected if detected is not None else False,
+            "confidence": confidence,
+            "reasoning": reasoning or "No reasoning provided",
         }
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Convert to dictionary for serialization"""
         return {
-            'name': self.name,
-            'description': self.description,
-            'detection_prompt': self.detection_prompt,
-            'enabled': self.enabled,
-            'conditions': asdict(self.conditions),
-            'actions': {
-                'mode': self.actions.mode.value,
-                'parameter_changes': self.actions.parameter_changes,
-                'custom_message': self.actions.custom_message,
-                'webhook_url': self.actions.webhook_url,
+            "name": self.name,
+            "description": self.description,
+            "detection_prompt": self.detection_prompt,
+            "enabled": self.enabled,
+            "conditions": asdict(self.conditions),
+            "actions": {
+                "mode": self.actions.mode.value,
+                "parameter_changes": self.actions.parameter_changes,
+                "custom_message": self.actions.custom_message,
+                "webhook_url": self.actions.webhook_url,
             },
-            'confidence_threshold': self.confidence_threshold.value,
-            'use_temporal_context': self.use_temporal_context,
-            'temporal_context_size': self.temporal_context_size,
-            'created_at': self.created_at.isoformat(),
-            'modified_at': self.modified_at.isoformat(),
-            'detection_count': self.detection_count,
-            'run_count': self.run_count,
+            "confidence_threshold": self.confidence_threshold.value,
+            "use_temporal_context": self.use_temporal_context,
+            "temporal_context_size": self.temporal_context_size,
+            "created_at": self.created_at.isoformat(),
+            "modified_at": self.modified_at.isoformat(),
+            "detection_count": self.detection_count,
+            "run_count": self.run_count,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'Detector':
+    def from_dict(cls, data: dict) -> "Detector":
         """Create detector from dictionary"""
         # Parse dates
-        created_at = datetime.fromisoformat(data['created_at']) if 'created_at' in data else datetime.now()
-        modified_at = datetime.fromisoformat(data['modified_at']) if 'modified_at' in data else datetime.now()
+        created_at = (
+            datetime.fromisoformat(data["created_at"]) if "created_at" in data else datetime.now()
+        )
+        modified_at = (
+            datetime.fromisoformat(data["modified_at"]) if "modified_at" in data else datetime.now()
+        )
 
         # Parse conditions
-        conditions = DetectorConditions(**data.get('conditions', {}))
+        conditions = DetectorConditions(**data.get("conditions", {}))
 
         # Parse actions
-        actions_data = data.get('actions', {})
+        actions_data = data.get("actions", {})
         actions = DetectorActions(
-            mode=DetectionMode(actions_data.get('mode', 'recommend')),
-            parameter_changes=actions_data.get('parameter_changes'),
-            custom_message=actions_data.get('custom_message'),
-            webhook_url=actions_data.get('webhook_url'),
+            mode=DetectionMode(actions_data.get("mode", "recommend")),
+            parameter_changes=actions_data.get("parameter_changes"),
+            custom_message=actions_data.get("custom_message"),
+            webhook_url=actions_data.get("webhook_url"),
         )
 
         # Parse confidence threshold
-        confidence_threshold = ConfidenceLevel(data.get('confidence_threshold', 'MEDIUM'))
+        confidence_threshold = ConfidenceLevel(data.get("confidence_threshold", "MEDIUM"))
 
         return cls(
-            name=data['name'],
-            description=data['description'],
-            detection_prompt=data['detection_prompt'],
-            enabled=data.get('enabled', True),
+            name=data["name"],
+            description=data["description"],
+            detection_prompt=data["detection_prompt"],
+            enabled=data.get("enabled", True),
             conditions=conditions,
             actions=actions,
             confidence_threshold=confidence_threshold,
-            use_temporal_context=data.get('use_temporal_context', True),
-            temporal_context_size=data.get('temporal_context_size', 5),
+            use_temporal_context=data.get("use_temporal_context", True),
+            temporal_context_size=data.get("temporal_context_size", 5),
             created_at=created_at,
             modified_at=modified_at,
-            detection_count=data.get('detection_count', 0),
-            run_count=data.get('run_count', 0),
+            detection_count=data.get("detection_count", 0),
+            run_count=data.get("run_count", 0),
         )

@@ -13,13 +13,16 @@ Usage:
     python scripts/extract_stage_examples.py --session 3fb70aca --embryo embryo_1
 
     # Using session ID with custom storage path
-    python scripts/extract_stage_examples.py --session exp_20251219_185542_f7df153a --storage D:/Gently --embryo embryo_1
+    python scripts/extract_stage_examples.py \
+        --session exp_20251219_185542_f7df153a --storage D:/Gently --embryo embryo_1
 
     # Using direct source path
-    python scripts/extract_stage_examples.py --source multi_embryo_volumes/20251122_141240 --embryo embryo_001
+    python scripts/extract_stage_examples.py \
+        --source multi_embryo_volumes/20251122_141240 --embryo embryo_001
 
     # Extract specific timepoint range
-    python scripts/extract_stage_examples.py --session 3fb70aca --embryo embryo_1 --start 50 --end 100
+    python scripts/extract_stage_examples.py \
+        --session 3fb70aca --embryo embryo_1 --start 50 --end 100
 """
 
 import argparse
@@ -29,14 +32,13 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from gently.harness.perception.stages import STAGES, DevelopmentalStage
+from gently.harness.perception.stages import STAGES
 
 # Lazy imports
 tifffile = None
@@ -49,6 +51,7 @@ def ensure_dependencies():
 
     try:
         import tifffile as _tifffile
+
         tifffile = _tifffile
     except ImportError:
         print("ERROR: tifffile is required. Install with: pip install tifffile")
@@ -56,13 +59,14 @@ def ensure_dependencies():
 
     try:
         from PIL import Image as _Image
+
         PIL_Image = _Image
     except ImportError:
         print("ERROR: Pillow is required. Install with: pip install Pillow")
         sys.exit(1)
 
 
-def discover_volumes(session_dir: Path, embryo_id: Optional[str] = None) -> Dict[str, List[Path]]:
+def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict[str, list[Path]]:
     """
     Discover volume files in a session directory.
 
@@ -145,7 +149,7 @@ def create_dual_view_projection(volume: np.ndarray) -> np.ndarray:
         # Check if width contains dual-view data (views side-by-side in X)
         if width > height * 2:
             # Extract View A (left half)
-            view_a = view_a[:, :, :width // 2]
+            view_a = view_a[:, :, : width // 2]
 
         # TOP projection: max along Z axis (looking down at embryo)
         top_proj = np.max(view_a, axis=0)  # Shape: (Y, X)
@@ -227,16 +231,16 @@ def save_example(image: np.ndarray, stage: str, output_dir: Path) -> Path:
     return filepath
 
 
-def load_hatching_log(session_dir: Path) -> Optional[Dict]:
+def load_hatching_log(session_dir: Path) -> dict | None:
     """Load hatching_detection_log.json if it exists."""
     log_path = session_dir / "hatching_detection_log.json"
     if log_path.exists():
-        with open(log_path, "r") as f:
+        with open(log_path) as f:
             return json.load(f)
     return None
 
 
-def get_stage_from_log(log: Dict, embryo_id: str, timepoint: int) -> Optional[str]:
+def get_stage_from_log(log: dict, embryo_id: str, timepoint: int) -> str | None:
     """
     Extract stage from hatching detection log for a specific timepoint.
 
@@ -263,8 +267,12 @@ def get_stage_from_log(log: Dict, embryo_id: str, timepoint: int) -> Optional[st
     return None
 
 
-def save_preview_image(image: np.ndarray, timepoint: int, preview_dir: Path,
-                       suggested_stage: Optional[str] = None) -> Path:
+def save_preview_image(
+    image: np.ndarray,
+    timepoint: int,
+    preview_dir: Path,
+    suggested_stage: str | None = None,
+) -> Path:
     """Save image to preview folder for manual review."""
     preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -280,7 +288,9 @@ def save_preview_image(image: np.ndarray, timepoint: int, preview_dir: Path,
     return filepath
 
 
-def interactive_classify(image: np.ndarray, timepoint: int, suggested_stage: Optional[str] = None) -> Optional[str]:
+def interactive_classify(
+    image: np.ndarray, timepoint: int, suggested_stage: str | None = None
+) -> str | None:
     """
     Display image and let user classify interactively.
 
@@ -301,29 +311,40 @@ def interactive_classify(image: np.ndarray, timepoint: int, suggested_stage: Opt
         cv2.putText(display, info, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
         # Add stage key legend
-        legend = "Keys: (e)arly (b)ean (c)omma (1).5fold (2)fold (3)fold (h)atching (d)one(hatched) (s)kip (q)uit"
-        cv2.putText(display, legend, (10, display.shape[0] - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+        legend = (
+            "Keys: (e)arly (b)ean (c)omma (1).5fold (2)fold (3)fold"
+            " (h)atching (d)one(hatched) (s)kip (q)uit"
+        )
+        cv2.putText(
+            display,
+            legend,
+            (10, display.shape[0] - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.4,
+            (200, 200, 200),
+            1,
+        )
 
         cv2.imshow("Classify Stage", display)
 
         key = cv2.waitKey(0) & 0xFF
 
         key_map = {
-            ord('e'): 'early',
-            ord('b'): 'bean',
-            ord('c'): 'comma',
-            ord('1'): '1.5fold',
-            ord('2'): '2fold',
-            ord('3'): '3fold',
-            ord('h'): 'hatching',
-            ord('d'): 'hatched',
-            ord('s'): None,  # Skip
-            ord('q'): 'QUIT',
+            ord("e"): "early",
+            ord("b"): "bean",
+            ord("c"): "comma",
+            ord("1"): "1.5fold",
+            ord("2"): "2fold",
+            ord("3"): "3fold",
+            ord("h"): "hatching",
+            ord("d"): "hatched",
+            ord("s"): None,  # Skip
+            ord("q"): "QUIT",
         }
 
         return key_map.get(key, None)
 
-    except Exception as e:
+    except Exception:
         # GUI not available, return None to trigger preview mode
         return "NO_GUI"
 
@@ -333,31 +354,60 @@ def main():
 
     # Source specification (either --session or --source)
     source_group = parser.add_mutually_exclusive_group(required=True)
-    source_group.add_argument("--session", type=str,
-                              help="Session ID (e.g., 3fb70aca or exp_20251219_185542_f7df153a)")
-    source_group.add_argument("--source", type=str,
-                              help="Direct source path (multi_embryo_volumes/SESSION or lightsheet_captures/batch)")
+    source_group.add_argument(
+        "--session",
+        type=str,
+        help="Session ID (e.g., 3fb70aca or exp_20251219_185542_f7df153a)",
+    )
+    source_group.add_argument(
+        "--source",
+        type=str,
+        help="Direct source path (multi_embryo_volumes/SESSION or lightsheet_captures/batch)",
+    )
 
-    parser.add_argument("--storage", type=str, default="D:/Gently",
-                        help="Storage path for session data (default: D:/Gently)")
-    parser.add_argument("--embryo", type=str, default=None,
-                        help="Specific embryo ID to process (default: all)")
-    parser.add_argument("--output", type=str, default=None,
-                        help="Output directory (default: gently/examples/stages)")
-    parser.add_argument("--use-log", action="store_true",
-                        help="Use hatching_detection_log.json for auto-labeling")
-    parser.add_argument("--start", type=int, default=0,
-                        help="Start timepoint")
-    parser.add_argument("--end", type=int, default=None,
-                        help="End timepoint")
-    parser.add_argument("--step", type=int, default=10,
-                        help="Sample every N timepoints (default: 10)")
-    parser.add_argument("--auto", action="store_true",
-                        help="Auto-save without interactive review (requires --use-log)")
-    parser.add_argument("--preview", action="store_true",
-                        help="Save images to preview folder instead of interactive classification")
-    parser.add_argument("--list-embryos", action="store_true",
-                        help="Just list available embryos and exit")
+    parser.add_argument(
+        "--storage",
+        type=str,
+        default="D:/Gently",
+        help="Storage path for session data (default: D:/Gently)",
+    )
+    parser.add_argument(
+        "--embryo",
+        type=str,
+        default=None,
+        help="Specific embryo ID to process (default: all)",
+    )
+    parser.add_argument(
+        "--output",
+        type=str,
+        default=None,
+        help="Output directory (default: gently/examples/stages)",
+    )
+    parser.add_argument(
+        "--use-log",
+        action="store_true",
+        help="Use hatching_detection_log.json for auto-labeling",
+    )
+    parser.add_argument("--start", type=int, default=0, help="Start timepoint")
+    parser.add_argument("--end", type=int, default=None, help="End timepoint")
+    parser.add_argument(
+        "--step", type=int, default=10, help="Sample every N timepoints (default: 10)"
+    )
+    parser.add_argument(
+        "--auto",
+        action="store_true",
+        help="Auto-save without interactive review (requires --use-log)",
+    )
+    parser.add_argument(
+        "--preview",
+        action="store_true",
+        help="Save images to preview folder instead of interactive classification",
+    )
+    parser.add_argument(
+        "--list-embryos",
+        action="store_true",
+        help="Just list available embryos and exit",
+    )
 
     args = parser.parse_args()
 
@@ -405,15 +455,15 @@ def main():
     if args.use_log:
         hatching_log = load_hatching_log(source_dir)
         if hatching_log:
-            print(f"\nLoaded hatching detection log")
+            print("\nLoaded hatching detection log")
         else:
-            print(f"\nWARNING: No hatching_detection_log.json found")
+            print("\nWARNING: No hatching_detection_log.json found")
 
     # Process each embryo
     for embryo_id, volume_paths in embryo_volumes.items():
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"Processing {embryo_id}: {len(volume_paths)} timepoints")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         # Filter timepoints
         end_tp = args.end if args.end else len(volume_paths)
@@ -450,7 +500,7 @@ def main():
                 # Interactive classification
                 stage = interactive_classify(projection, timepoint, suggested_stage)
 
-            if stage == 'QUIT':
+            if stage == "QUIT":
                 print("\nQuitting...")
                 break
 
@@ -472,8 +522,9 @@ def main():
     # Final cleanup
     try:
         import cv2
+
         cv2.destroyAllWindows()
-    except:
+    except Exception:
         pass
 
     print("\nDone!")

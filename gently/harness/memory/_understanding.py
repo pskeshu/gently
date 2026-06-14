@@ -10,7 +10,6 @@ import json
 import logging
 import sqlite3
 from datetime import datetime
-from typing import Dict, List, Optional
 
 from .model import (
     Attention,
@@ -46,7 +45,7 @@ class UnderstandingMixin:
             learnings=self.get_learnings(),
         )
 
-    def _load_embryo_states(self) -> Dict[str, EmbryoUnderstanding]:
+    def _load_embryo_states(self) -> dict[str, EmbryoUnderstanding]:
         rows = self._conn.execute(
             "SELECT * FROM embryo_understanding WHERE is_tracked = 1"
         ).fetchall()
@@ -56,10 +55,14 @@ class UnderstandingMixin:
             result[d["embryo_id"]] = EmbryoUnderstanding(
                 embryo_id=d["embryo_id"],
                 current_stage=d.get("current_stage"),
-                stage_confidence=Confidence(d["stage_confidence"]) if d.get("stage_confidence") else None,
+                stage_confidence=Confidence(d["stage_confidence"])
+                if d.get("stage_confidence")
+                else None,
                 health_assessment=d.get("health_assessment"),
                 notes=json.loads(d["notes"]) if d.get("notes") else [],
-                last_observed=datetime.fromisoformat(d["last_observed"]) if d.get("last_observed") else None,
+                last_observed=datetime.fromisoformat(d["last_observed"])
+                if d.get("last_observed")
+                else None,
                 is_tracked=bool(d.get("is_tracked", True)),
                 is_hatched=bool(d.get("is_hatched", False)),
                 needs_attention=bool(d.get("needs_attention", False)),
@@ -98,7 +101,7 @@ class UnderstandingMixin:
                 ),
             )
 
-    def get_recent_observations(self, limit: int = 50) -> List[Observation]:
+    def get_recent_observations(self, limit: int = 50) -> list[Observation]:
         """Get recent observations."""
         rows = self._conn.execute(
             "SELECT * FROM observations ORDER BY timestamp DESC LIMIT ?",
@@ -106,11 +109,10 @@ class UnderstandingMixin:
         ).fetchall()
         return [self._row_to_observation(row) for row in reversed(rows)]
 
-    def get_observations_for_embryo(self, embryo_id: str, limit: int = 20) -> List[Observation]:
+    def get_observations_for_embryo(self, embryo_id: str, limit: int = 20) -> list[Observation]:
         """Get observations for a specific embryo."""
         rows = self._conn.execute(
-            "SELECT * FROM observations WHERE embryo_id = ? "
-            "ORDER BY timestamp DESC LIMIT ?",
+            "SELECT * FROM observations WHERE embryo_id = ? ORDER BY timestamp DESC LIMIT ?",
             (embryo_id, limit),
         ).fetchall()
         return [self._row_to_observation(row) for row in reversed(rows)]
@@ -152,14 +154,14 @@ class UnderstandingMixin:
                 ),
             )
 
-    def get_pending_expectations(self) -> List[Expectation]:
+    def get_pending_expectations(self) -> list[Expectation]:
         """Get all pending expectations."""
         rows = self._conn.execute(
             "SELECT * FROM expectations WHERE status = 'pending' ORDER BY expected_time"
         ).fetchall()
         return [self._row_to_expectation(row) for row in rows]
 
-    def get_expectation_for(self, target: str) -> Optional[Expectation]:
+    def get_expectation_for(self, target: str) -> Expectation | None:
         """Get the pending expectation for a specific target."""
         row = self._conn.execute(
             "SELECT * FROM expectations WHERE target = ? AND status = 'pending' "
@@ -211,7 +213,7 @@ class UnderstandingMixin:
                 ),
             )
 
-    def get_active_watchpoints(self) -> List[Watchpoint]:
+    def get_active_watchpoints(self) -> list[Watchpoint]:
         """Get all active watchpoints."""
         rows = self._conn.execute(
             "SELECT * FROM watchpoints WHERE status = 'active' ORDER BY priority DESC, created_at"
@@ -253,16 +255,14 @@ class UnderstandingMixin:
         """Add a question."""
         with self._tx():
             self._conn.execute(
-                "INSERT INTO questions (id, content, status, created_at) "
-                "VALUES (?, ?, ?, ?)",
+                "INSERT INTO questions (id, content, status, created_at) VALUES (?, ?, ?, ?)",
                 (q.id, q.content, q.status.value, q.created_at.isoformat()),
             )
 
-    def get_open_questions(self) -> List[Question]:
+    def get_open_questions(self) -> list[Question]:
         """Get all open questions."""
         rows = self._conn.execute(
-            "SELECT * FROM questions WHERE status IN ('open', 'investigating') "
-            "ORDER BY created_at"
+            "SELECT * FROM questions WHERE status IN ('open', 'investigating') ORDER BY created_at"
         ).fetchall()
         return [self._row_to_question(row) for row in rows]
 
@@ -306,7 +306,7 @@ class UnderstandingMixin:
                 ),
             )
 
-    def get_learnings(self, limit: int = 50) -> List[Learning]:
+    def get_learnings(self, limit: int = 50) -> list[Learning]:
         """Get learnings."""
         rows = self._conn.execute(
             "SELECT * FROM learnings ORDER BY created_at DESC LIMIT ?",
@@ -331,13 +331,13 @@ class UnderstandingMixin:
     def update_embryo_understanding(
         self,
         embryo_id: str,
-        current_stage: Optional[str] = None,
-        stage_confidence: Optional[Confidence] = None,
-        health_assessment: Optional[str] = None,
-        note: Optional[str] = None,
-        is_hatched: Optional[bool] = None,
-        needs_attention: Optional[bool] = None,
-        attention_reason: Optional[str] = None,
+        current_stage: str | None = None,
+        stage_confidence: Confidence | None = None,
+        health_assessment: str | None = None,
+        note: str | None = None,
+        is_hatched: bool | None = None,
+        needs_attention: bool | None = None,
+        attention_reason: str | None = None,
     ):
         """Update understanding of an embryo."""
         now = self._now()
@@ -403,11 +403,9 @@ class UnderstandingMixin:
     # Agent State
     # ==================================================================
 
-    def get_state(self, key: str) -> Optional[str]:
+    def get_state(self, key: str) -> str | None:
         """Get a state value."""
-        row = self._conn.execute(
-            "SELECT value FROM agent_state WHERE key = ?", (key,)
-        ).fetchone()
+        row = self._conn.execute("SELECT value FROM agent_state WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
     def set_state(self, key: str, value: str):
@@ -415,8 +413,7 @@ class UnderstandingMixin:
         now = self._now()
         with self._tx():
             self._conn.execute(
-                "INSERT OR REPLACE INTO agent_state (key, value, updated_at) "
-                "VALUES (?, ?, ?)",
+                "INSERT OR REPLACE INTO agent_state (key, value, updated_at) VALUES (?, ?, ?)",
                 (key, value, now),
             )
 

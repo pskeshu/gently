@@ -2,15 +2,13 @@
 DiSPIM stage positioner devices (Z-stage and XY-stage).
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
-from typing import Tuple
 
 import numpy as np
-
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
 from gently.exceptions import HardwareError, StageMovementError
 
@@ -39,9 +37,9 @@ logger = logging.getLogger(__name__)
 # inset, even a fast-joystick overshoot still lands inside the true safe
 # travel envelope the operator measured by hand.
 XY_STAGE_X_MIN_UM: float = -2252.1
-XY_STAGE_X_MAX_UM: float =   983.0
+XY_STAGE_X_MAX_UM: float = 983.0
 XY_STAGE_Y_MIN_UM: float = -1677.0
-XY_STAGE_Y_MAX_UM: float =   586.6
+XY_STAGE_Y_MAX_UM: float = 586.6
 
 
 class DiSPIMZstage:
@@ -51,8 +49,12 @@ class DiSPIMZstage:
     Device-agnostic: any plan that moves a positioner will work with this device
     """
 
-    def __init__(self, name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (50.0, 250.0)):
+    def __init__(
+        self,
+        name: str,
+        core: pymmcore.CMMCore,
+        limits: tuple[float, float] = (50.0, 250.0),
+    ):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
@@ -87,6 +89,7 @@ class DiSPIMZstage:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -101,9 +104,9 @@ class DiSPIMZstage:
 
         data = OrderedDict()
         data[self.name] = {
-            'value': float(value),
-            'timestamp': time.time(),
-            'units': 'micrometers'
+            "value": float(value),
+            "timestamp": time.time(),
+            "units": "micrometers",
         }
         return data
 
@@ -111,10 +114,10 @@ class DiSPIMZstage:
         """Describe Z stage device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'number',
-            'shape': [],
-            'units': 'micrometers'
+            "source": self.name,
+            "dtype": "number",
+            "shape": [],
+            "units": "micrometers",
         }
         return data
 
@@ -141,12 +144,12 @@ class DiSPIMXYStage:
         self.parent = None  # Required for Bluesky
 
     @property
-    def x_limits(self) -> Tuple[float, float]:
+    def x_limits(self) -> tuple[float, float]:
         """Read-only view of the hardware safety limits (module constants)."""
         return (XY_STAGE_X_MIN_UM, XY_STAGE_X_MAX_UM)
 
     @property
-    def y_limits(self) -> Tuple[float, float]:
+    def y_limits(self) -> tuple[float, float]:
         """Read-only view of the hardware safety limits (module constants)."""
         return (XY_STAGE_Y_MIN_UM, XY_STAGE_Y_MAX_UM)
 
@@ -183,6 +186,7 @@ class DiSPIMXYStage:
                     status.set_finished()
 
             import threading
+
             threading.Thread(target=wait).start()
 
             return status
@@ -198,9 +202,9 @@ class DiSPIMXYStage:
 
         data = OrderedDict()
         data[self.name] = {
-            'value': xy_pos,
-            'timestamp': time.time(),
-            'units': 'micrometers'
+            "value": xy_pos,
+            "timestamp": time.time(),
+            "units": "micrometers",
         }
         return data
 
@@ -208,10 +212,10 @@ class DiSPIMXYStage:
         """Describe XY stage device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'array',
-            'shape': [2],
-            'units': 'micrometers'
+            "source": self.name,
+            "dtype": "array",
+            "shape": [2],
+            "units": "micrometers",
         }
         return data
 
@@ -237,8 +241,10 @@ class DiSPIMXYStage:
 
     def set_firmware_limits(
         self,
-        x_min_mm: float, x_max_mm: float,
-        y_min_mm: float, y_max_mm: float,
+        x_min_mm: float,
+        x_max_mm: float,
+        y_min_mm: float,
+        y_max_mm: float,
         *,
         readback_tolerance_mm: float = 0.001,
     ) -> None:
@@ -289,13 +295,15 @@ class DiSPIMXYStage:
         # overshoot we're trying to absorb anyway.
         POS_SLOP_MM = 0.001  # 1 µm
         try:
-            cur = self.read()[self.name]['value']
+            cur = self.read()[self.name]["value"]
             cur_x_mm = float(cur[0]) / 1000.0
             cur_y_mm = float(cur[1]) / 1000.0
         except Exception as exc:
-            raise HardwareError(f"Could not read current XY to validate limits: {exc}")
-        if not (x_min_mm - POS_SLOP_MM <= cur_x_mm <= x_max_mm + POS_SLOP_MM and
-                y_min_mm - POS_SLOP_MM <= cur_y_mm <= y_max_mm + POS_SLOP_MM):
+            raise HardwareError(f"Could not read current XY to validate limits: {exc}") from exc
+        if not (
+            x_min_mm - POS_SLOP_MM <= cur_x_mm <= x_max_mm + POS_SLOP_MM
+            and y_min_mm - POS_SLOP_MM <= cur_y_mm <= y_max_mm + POS_SLOP_MM
+        ):
             raise ValueError(
                 f"Current stage position ({cur_x_mm * 1000:.2f}, {cur_y_mm * 1000:.2f}) µm "
                 f"is outside the requested firmware envelope "
@@ -318,11 +326,11 @@ class DiSPIMXYStage:
                 raise HardwareError(
                     f"setProperty {prop}={value_mm} failed: {exc}. The ASI adapter "
                     f"may require EnableAdvancedProperties=Yes for this write."
-                )
+                ) from exc
             try:
                 got = float(self.core.getProperty(self.name, prop))
             except RuntimeError as exc:
-                raise HardwareError(f"getProperty {prop} read-back failed: {exc}")
+                raise HardwareError(f"getProperty {prop} read-back failed: {exc}") from exc
             if abs(got - value_mm) > readback_tolerance_mm:
                 raise HardwareError(
                     f"Firmware limit read-back mismatch for {prop}: "
@@ -352,13 +360,13 @@ class DiSPIMXYStage:
         except RuntimeError as exc:
             raise HardwareError(
                 f"setProperty {prop}={target} failed on {self.name}: {exc}"
-            )
+            ) from exc
         try:
             got = self.core.getProperty(self.name, prop)
         except RuntimeError as exc:
             raise HardwareError(
                 f"getProperty {prop} read-back failed on {self.name}: {exc}"
-            )
+            ) from exc
         if str(got).strip() != target:
             raise HardwareError(
                 f"{prop} read-back mismatch on {self.name}: "
@@ -382,7 +390,7 @@ class DiSPIMXYStage:
         the RunEngine for interactive use, setup, and debugging. For use
         within plans, prefer yield from bps.rd(xy_stage).
         """
-        return self.read()[self.name]['value']
+        return self.read()[self.name]["value"]
 
     def get_x(self) -> float:
         """
@@ -408,9 +416,9 @@ class DiSPIMXYStage:
 
     # Coordinate conversion utilities for embryo centering
     @staticmethod
-    def pixel_to_stage_offset(pixel_offset_x: float,
-                               pixel_offset_y: float,
-                               pixel_size_um: float) -> Tuple[float, float]:
+    def pixel_to_stage_offset(
+        pixel_offset_x: float, pixel_offset_y: float, pixel_size_um: float
+    ) -> tuple[float, float]:
         """
         Convert pixel offsets to stage movement in micrometers.
 
@@ -436,4 +444,5 @@ class DiSPIMXYStage:
         This method delegates to gently.coordinates for the actual calculation.
         """
         from gently.core.coordinates import pixel_displacement_to_stage_movement
+
         return pixel_displacement_to_stage_movement(pixel_offset_x, pixel_offset_y, pixel_size_um)

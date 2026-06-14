@@ -13,14 +13,17 @@ and ``wait_for_choice`` to present pickers.
 
 import logging
 import uuid
-from typing import Any, Callable, Coroutine, Optional
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from gently.settings import settings
-from .gap_assessment import assess_gaps, ContextGapReport
+
+from .gap_assessment import ContextGapReport, assess_gaps
 from .model import Confidence, Learning
 from .onboarding import (
     process_onboarding_response,
 )
+
 try:
     from .file_store import FileContextStore as ContextStore
 except ImportError:
@@ -50,12 +53,12 @@ class StartupWizard:
         self,
         context_store: ContextStore,
         session_id: str,
-        claude_client: Optional[Any] = None,
+        claude_client: Any | None = None,
     ):
         self.context_store = context_store
         self.session_id = session_id
         self.claude_client = claude_client
-        self._gap_report: Optional[ContextGapReport] = None
+        self._gap_report: ContextGapReport | None = None
 
     # ------------------------------------------------------------------
     # Public properties
@@ -181,14 +184,15 @@ class StartupWizard:
         """Show active campaigns in a picker."""
         campaigns = self.context_store.get_active_campaigns()
         options = [
-            {"id": c.id, "label": c.display_name, "description": c.target or ""}
-            for c in campaigns
+            {"id": c.id, "label": c.display_name, "description": c.target or ""} for c in campaigns
         ]
-        options.append({
-            "id": "__new__",
-            "label": "Start something new",
-            "description": "Describe a new research direction",
-        })
+        options.append(
+            {
+                "id": "__new__",
+                "label": "Start something new",
+                "description": "Describe a new research direction",
+            }
+        )
 
         await self._say(send_fn, "Welcome back.")
 
@@ -233,11 +237,13 @@ class StartupWizard:
             }
             for ps in planned_sessions
         ]
-        options.append({
-            "id": "__other__",
-            "label": "Something else",
-            "description": "Not one of these",
-        })
+        options.append(
+            {
+                "id": "__other__",
+                "label": "Something else",
+                "description": "Not one of these",
+            }
+        )
 
         count = len(planned_sessions)
         await self._say(
@@ -272,7 +278,7 @@ class StartupWizard:
 
         if campaigns:
             label = campaigns[0].display_name
-            await self._say(send_fn, f"Continuing \"{label}\" — what's the plan?")
+            await self._say(send_fn, f'Continuing "{label}" — what\'s the plan?')
         else:
             await self._say(send_fn, "What's the plan for this session?")
 
@@ -338,12 +344,14 @@ class StartupWizard:
 
     def _store_learning(self, content: str, basis: str = "onboarding:identity"):
         """Write a learning directly — no LLM round-trip."""
-        self.context_store.add_learning(Learning(
-            id=str(uuid.uuid4())[:8],
-            content=content,
-            confidence=Confidence.HIGH,
-            basis=basis,
-        ))
+        self.context_store.add_learning(
+            Learning(
+                id=str(uuid.uuid4())[:8],
+                content=content,
+                confidence=Confidence.HIGH,
+                basis=basis,
+            )
+        )
 
     async def _extract(self, send_fn, response: str, topic: str):
         """Run LLM extraction silently — no acknowledgment message.
@@ -388,9 +396,9 @@ class StartupWizard:
         campaign_name = campaigns[0].display_name if campaigns else None
         plan = intent.planned_intent if intent else None
         organism = None
-        for l in learnings:
-            if l.content.startswith("Lab organism:"):
-                organism = l.content.split(":", 1)[1].strip()
+        for learning in learnings:
+            if learning.content.startswith("Lab organism:"):
+                organism = learning.content.split(":", 1)[1].strip()
                 break
 
         # Try LLM-generated summary
@@ -425,21 +433,27 @@ class StartupWizard:
 
         if not summary:
             if organism:
-                summary = f"Got it — {organism}. I'm ready to help with your imaging session. What would you like to do?"
+                summary = (
+                    f"Got it — {organism}. I'm ready to help with your imaging session."
+                    " What would you like to do?"
+                )
             else:
                 summary = "All set. What can I help with?"
 
         await send_fn({"type": "text", "text": summary})
-        await send_fn({
-            "type": "stream_end",
-            "tokens": _empty_tokens(),
-            "wizard_complete": True,
-        })
+        await send_fn(
+            {
+                "type": "stream_end",
+                "tokens": _empty_tokens(),
+                "wizard_complete": True,
+            }
+        )
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _is_skip(text: str) -> bool:
     return text.strip().lower() in SKIP_PHRASES

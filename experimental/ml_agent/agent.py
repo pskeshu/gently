@@ -5,14 +5,12 @@ Spawned by the agent via asyncio.create_task(). Runs its own tool
 execution loop, communicating back via the event bus.
 """
 
-import asyncio
 import json
 import logging
-from typing import Any, Dict, List, Optional
 
 from gently.core.event_bus import EventType, get_event_bus
 from gently.harness.tools.registry import ToolRegistry
-from .prompt import build_ml_system_prompt
+
 from .tools import register_ml_tools
 
 logger = logging.getLogger(__name__)
@@ -42,8 +40,8 @@ class MLSubagent:
         self._peer_client = peer_client
         self._registry = ToolRegistry()
         self._running = False
-        self._task: Optional[str] = None
-        self._campaign_id: Optional[str] = None
+        self._task: str | None = None
+        self._campaign_id: str | None = None
 
         # Register ML tools on our private registry
         register_ml_tools(
@@ -96,15 +94,16 @@ class MLSubagent:
             # Step 2: Check coverage
             bus.publish(
                 EventType.ML_SUBAGENT_STATUS,
-                {"status": "checking_coverage", "detail": "Analyzing annotation coverage..."},
+                {
+                    "status": "checking_coverage",
+                    "detail": "Analyzing annotation coverage...",
+                },
                 source="ml_subagent",
             )
-            coverage_result = await self._registry.execute(
-                "check_annotation_coverage", {}
-            )
+            coverage_result = await self._registry.execute("check_annotation_coverage", {})
             coverage = json.loads(coverage_result)
 
-            total_annotated = inventory.get("total_annotated", 0)
+            inventory.get("total_annotated", 0)
             total_gt = inventory.get("total_ground_truth", 0)
 
             # Step 3: Check if we have enough data
@@ -134,7 +133,7 @@ class MLSubagent:
 
             # Determine VRAM
             vram = 24.0  # default A5000
-            local_sessions = inventory.get("local_sessions", [])
+            inventory.get("local_sessions", [])
 
             arch_result = await self._registry.execute(
                 "select_architecture",

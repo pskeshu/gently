@@ -18,9 +18,9 @@ Built-in detectors:
 """
 
 from .base import Detector, DetectorResult
+from .blank_image import BlankImageDetector
 from .dopaminergic_signal import DopaminergicSignalDetector
 from .hatching import HatchingDetector
-from .blank_image import BlankImageDetector
 from .perception_proxy import PerceptionProxy
 from .registry import DETECTOR_REGISTRY, get_detector
 

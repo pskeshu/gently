@@ -22,8 +22,8 @@ _ROOT = Path(__file__).resolve().parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
-from gently.settings import settings
-from gently.core.imaging import load_volume, generate_jpeg_projection
+from gently.core.imaging import generate_jpeg_projection, load_volume  # noqa: E402
+from gently.settings import settings  # noqa: E402
 
 
 def _regen_folder(folder: Path, only_embryo: str | None = None) -> int:
@@ -83,7 +83,8 @@ def regenerate_all() -> int:
         print(f"No sessions dir at {sessions}")
         return 0
     folders = sorted(
-        p for p in sessions.iterdir()
+        p
+        for p in sessions.iterdir()
         if p.is_dir() and any((p / "embryos").glob("*/volumes/t*.tif"))
     )
     print(f"Regenerating projections for {len(folders)} session(s) with volumes...")

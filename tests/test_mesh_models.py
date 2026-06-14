@@ -4,7 +4,6 @@ GpuInfo, DatasetAdvertisement, PersistedPeer.
 """
 
 import time
-import pytest
 
 from gently.mesh.models import (
     DatasetAdvertisement,
@@ -19,8 +18,14 @@ from gently.mesh.models import (
 
 class TestGpuInfo:
     def test_round_trip(self):
-        gpu = GpuInfo(device_index=0, name="A5000", vram_gb=24.0,
-                       compute_capability="8.6", utilization_pct=45.0, memory_used_gb=8.2)
+        gpu = GpuInfo(
+            device_index=0,
+            name="A5000",
+            vram_gb=24.0,
+            compute_capability="8.6",
+            utilization_pct=45.0,
+            memory_used_gb=8.2,
+        )
         d = gpu.to_dict()
         gpu2 = GpuInfo.from_dict(d)
         assert gpu2.name == "A5000"
@@ -37,9 +42,14 @@ class TestGpuInfo:
 class TestDatasetAdvertisement:
     def test_round_trip(self):
         ds = DatasetAdvertisement(
-            session_id="s1", session_name="Run 1", embryo_count=12,
-            volume_count=120, has_ground_truth=True, ground_truth_count=50,
-            stages_covered=["early", "comma"], total_size_gb=2.5,
+            session_id="s1",
+            session_name="Run 1",
+            embryo_count=12,
+            volume_count=120,
+            has_ground_truth=True,
+            ground_truth_count=50,
+            stages_covered=["early", "comma"],
+            total_size_gb=2.5,
         )
         d = ds.to_dict()
         ds2 = DatasetAdvertisement.from_dict(d)
@@ -50,8 +60,7 @@ class TestDatasetAdvertisement:
 
 class TestPeerCapability:
     def test_round_trip_legacy_fields(self):
-        cap = PeerCapability(has_microscope=True, has_gpu=True,
-                              gpu_name="A5000", gpu_vram_gb=24.0)
+        cap = PeerCapability(has_microscope=True, has_gpu=True, gpu_name="A5000", gpu_vram_gb=24.0)
         d = cap.to_dict()
         cap2 = PeerCapability.from_dict(d)
         assert cap2.has_microscope is True
@@ -89,8 +98,12 @@ class TestPeerCapability:
 
 class TestPeerStatus:
     def test_round_trip(self):
-        status = PeerStatus(session_id="s1", acquisition_status="running",
-                             embryo_count=5, version="0.9.2")
+        status = PeerStatus(
+            session_id="s1",
+            acquisition_status="running",
+            embryo_count=5,
+            version="0.9.2",
+        )
         d = status.to_dict()
         status2 = PeerStatus.from_dict(d)
         assert status2.session_id == "s1"
@@ -104,8 +117,12 @@ class TestPeerStatus:
 
 class TestPeerInfo:
     def test_round_trip(self):
-        peer = PeerInfo(instance_id="abc123", hostname="lab-pc",
-                         ip_address="192.168.1.10", viz_port=8080)
+        peer = PeerInfo(
+            instance_id="abc123",
+            hostname="lab-pc",
+            ip_address="192.168.1.10",
+            viz_port=8080,
+        )
         d = peer.to_dict()
         peer2 = PeerInfo.from_dict(d)
         assert peer2.instance_id == "abc123"
@@ -136,8 +153,10 @@ class TestPeerRole:
 class TestPersistedPeer:
     def test_round_trip(self):
         peer = PersistedPeer(
-            instance_id="abc123", hostname="lab-pc",
-            ip_address="192.168.1.10", online=True,
+            instance_id="abc123",
+            hostname="lab-pc",
+            ip_address="192.168.1.10",
+            online=True,
             roles=["ml_trainer"],
             datasets=[DatasetAdvertisement(session_id="s1")],
         )
@@ -150,8 +169,10 @@ class TestPersistedPeer:
 
     def test_from_peer_info(self):
         info = PeerInfo(
-            instance_id="abc123", hostname="lab-pc",
-            ip_address="192.168.1.10", is_trusted=True,
+            instance_id="abc123",
+            hostname="lab-pc",
+            ip_address="192.168.1.10",
+            is_trusted=True,
             capabilities=PeerCapability(
                 has_gpu=True,
                 roles=["ml_trainer"],

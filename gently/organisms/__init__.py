@@ -16,18 +16,19 @@ import importlib
 import logging
 import pkgutil
 from types import ModuleType
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-_active_organism: Optional[ModuleType] = None
+_active_organism: ModuleType | None = None
 
 
-def available_organisms() -> List[str]:
+def available_organisms() -> list[str]:
     """Names of the organism plugins shipped under gently.organisms."""
     import gently.organisms as _pkg
+
     return sorted(
-        m.name for m in pkgutil.iter_modules(_pkg.__path__)
+        m.name
+        for m in pkgutil.iter_modules(_pkg.__path__)
         if m.ispkg and not m.name.startswith("_")
     )
 
@@ -82,7 +83,6 @@ def get_organism() -> ModuleType:
     """
     if _active_organism is None:
         raise RuntimeError(
-            "No organism loaded. Call load_organism() at startup, "
-            "or set 'organism' in config.yml."
+            "No organism loaded. Call load_organism() at startup, or set 'organism' in config.yml."
         )
     return _active_organism

@@ -4,17 +4,17 @@ Stage Movement Tools
 Tools for controlling microscope XY stage movement.
 """
 
-from typing import Dict
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import get_embryo_or_error
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
     name="move_to_embryo",
-    description="""Move the XY stage to a specific embryo's stored position. The embryo must have been detected and have a valid stage_position.
+    description="""Move the XY stage to a specific embryo's stored position. The embryo must
+have been detected and have a valid stage_position.
 Use when user says "go to embryo X", "move to embryo X", or before imaging a specific embryo.
-This only moves XY - piezo/galvo are controlled separately during acquisition. Movement takes ~0.5 seconds.""",
+This only moves XY - piezo/galvo are controlled separately during acquisition. Movement
+takes ~0.5 seconds.""",
     category=ToolCategory.MOVEMENT,
     requires_microscope=True,
     examples=[
@@ -22,10 +22,10 @@ This only moves XY - piezo/galvo are controlled separately during acquisition. M
         ToolExample("Move to embryo 3", {"embryo_id": "embryo_3"}),
     ],
 )
-async def move_to_embryo(embryo_id: str, context: Dict) -> str:
+async def move_to_embryo(embryo_id: str, context: dict) -> str:
     """Move stage to embryo position"""
-    agent = context.get('agent')
-    client = context.get('client')
+    agent = context.get("agent")
+    client = context.get("client")
 
     if not agent:
         return "Error: No agent context"
@@ -38,22 +38,25 @@ async def move_to_embryo(embryo_id: str, context: Dict) -> str:
         return f"Embryo '{embryo_id}' has no stored position. Run calibration first."
 
     try:
-        x = embryo.stage_position.get('x', 0)
-        y = embryo.stage_position.get('y', 0)
+        x = embryo.stage_position.get("x", 0)
+        y = embryo.stage_position.get("y", 0)
         await client.move_to_position(x, y)
 
         return f"Moved to {embryo_id}\nPosition: ({x:.2f}, {y:.2f}) um"
 
     except Exception as e:
         import traceback
+
         return f"Error moving to embryo: {str(e)}\n{traceback.format_exc()}"
 
 
 @tool(
     name="get_stage_position",
-    description="""Get the current XY stage position in micrometers. Returns the real-time position from the hardware.
-Use when user asks "where is the stage?", "current position?", or when you need to know the microscope's current location.
-This reads from hardware - different from embryo stored positions which are in the experiment data.""",
+    description="""Get the current XY stage position in micrometers. Returns the real-time
+position from the hardware.
+Use when user asks "where is the stage?", "current position?", or when you need to know
+the microscope's current location. This reads from hardware - different from embryo stored
+positions which are in the experiment data.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
     examples=[
@@ -61,9 +64,9 @@ This reads from hardware - different from embryo stored positions which are in t
         ToolExample("Current XY position?", {}),
     ],
 )
-async def get_stage_position(context: Dict) -> str:
+async def get_stage_position(context: dict) -> str:
     """Get current stage position"""
-    client = context.get('client')
+    client = context.get("client")
 
     if not client:
         return "Error: No microscope client connected"
@@ -79,7 +82,8 @@ async def get_stage_position(context: Dict) -> str:
 @tool(
     name="move_stage",
     description="""Move the XY stage to specific coordinates in micrometers.
-Use when user wants to move to arbitrary coordinates (e.g., "move to x=1000, y=500", "move stage to 1200, -600").
+Use when user wants to move to arbitrary coordinates (e.g., "move to x=1000, y=500",
+"move stage to 1200, -600").
 For moving to a specific embryo, use move_to_embryo instead.""",
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
@@ -88,13 +92,9 @@ For moving to a specific embryo, use move_to_embryo instead.""",
         ToolExample("Move stage to coordinates 1200, -600", {"x": 1200, "y": -600}),
     ],
 )
-async def move_stage(
-    x: float,
-    y: float,
-    context: Dict = None
-) -> str:
+async def move_stage(x: float, y: float, context: dict = None) -> str:
     """Move stage to arbitrary XY coordinates"""
-    client = context.get('client')
+    client = context.get("client")
 
     if not client:
         return "Error: No microscope client connected"

@@ -10,43 +10,46 @@ No device dependencies, no Bluesky plan integration here.
 """
 
 import logging
-import numpy as np
-from typing import List, Tuple, Optional, Dict, Any
 from dataclasses import dataclass
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 # Import from core analysis module
-from .core import (
-    calculate_focus_score, analyze_focus_stack, fit_focus_curve,
-    FocusAnalysisConfig, FocusResult
+from ..detection import get_embryo_focus_roi  # noqa: E402
+from .core import (  # noqa: E402
+    FocusAnalysisConfig,
+    analyze_focus_stack,
+    calculate_focus_score,
 )
-from ..detection import get_embryo_focus_roi
 
 
 @dataclass
 class FocusDataPoint:
     """Single focus measurement data point"""
+
     position: float
     score: float
     image: np.ndarray
-    roi: Optional[Tuple[int, int, int, int]] = None
+    roi: tuple[int, int, int, int] | None = None
 
 
 @dataclass
 class FocusSweepResult:
     """Result of a focus sweep with analysis"""
+
     success: bool
     best_position: float
     best_score: float
-    all_data: List[FocusDataPoint]
+    all_data: list[FocusDataPoint]
     r_squared: float = 0.0
-    error_message: Optional[str] = None
+    error_message: str | None = None
 
 
-def score_single_image(image: np.ndarray,
-                      config: FocusAnalysisConfig,
-                      detect_roi: bool = True) -> Tuple[float, Optional[Tuple[int, int, int, int]]]:
+def score_single_image(
+    image: np.ndarray, config: FocusAnalysisConfig, detect_roi: bool = True
+) -> tuple[float, tuple[int, int, int, int] | None]:
     """
     Score a single image for focus quality
 
@@ -74,10 +77,12 @@ def score_single_image(image: np.ndarray,
     return score, roi
 
 
-def find_best_focus_position(positions: List[float],
-                           scores: List[float],
-                           images: List[np.ndarray],
-                           config: FocusAnalysisConfig) -> float:
+def find_best_focus_position(
+    positions: list[float],
+    scores: list[float],
+    images: list[np.ndarray],
+    config: FocusAnalysisConfig,
+) -> float:
     """
     Find the best focus position from sweep data
 
@@ -122,8 +127,9 @@ def find_best_focus_position(positions: List[float],
         return positions[np.argmax(scores)]
 
 
-def analyze_focus_sweep(sweep_data: List[FocusDataPoint],
-                       config: FocusAnalysisConfig) -> FocusSweepResult:
+def analyze_focus_sweep(
+    sweep_data: list[FocusDataPoint], config: FocusAnalysisConfig
+) -> FocusSweepResult:
     """
     Analyze a complete focus sweep
 
@@ -147,7 +153,7 @@ def analyze_focus_sweep(sweep_data: List[FocusDataPoint],
             best_position=0.0,
             best_score=0.0,
             all_data=sweep_data,
-            error_message="Insufficient data points for analysis"
+            error_message="Insufficient data points for analysis",
         )
 
     try:
@@ -176,7 +182,7 @@ def analyze_focus_sweep(sweep_data: List[FocusDataPoint],
             best_position=best_position,
             best_score=best_score,
             all_data=sweep_data,
-            r_squared=r_squared
+            r_squared=r_squared,
         )
 
     except Exception as e:
@@ -185,14 +191,13 @@ def analyze_focus_sweep(sweep_data: List[FocusDataPoint],
             best_position=0.0,
             best_score=0.0,
             all_data=sweep_data,
-            error_message=str(e)
+            error_message=str(e),
         )
 
 
-def create_focus_positions(center: float,
-                          range_um: float,
-                          num_steps: int,
-                          limits: Tuple[float, float]) -> List[float]:
+def create_focus_positions(
+    center: float, range_um: float, num_steps: int, limits: tuple[float, float]
+) -> list[float]:
     """
     Create focus sweep positions with limit checking
 
@@ -215,11 +220,7 @@ def create_focus_positions(center: float,
         List of valid positions within limits
     """
     # Generate positions
-    positions = np.linspace(
-        center - range_um/2,
-        center + range_um/2,
-        num_steps
-    )
+    positions = np.linspace(center - range_um / 2, center + range_um / 2, num_steps)
 
     # Filter to limits
     min_pos, max_pos = limits
@@ -240,22 +241,24 @@ def print_focus_summary(result: FocusSweepResult, scan_type: str = "focus") -> N
         Type of scan ("coarse", "fine", etc.)
     """
     if result.success:
-        logger.info(f"{scan_type.capitalize()} analysis: "
-              f"best position {result.best_position:.2f} um "
-              f"(score: {result.best_score:.1f}, R2: {result.r_squared:.3f})")
+        logger.info(
+            f"{scan_type.capitalize()} analysis: "
+            f"best position {result.best_position:.2f} um "
+            f"(score: {result.best_score:.1f}, R2: {result.r_squared:.3f})"
+        )
     else:
         logger.warning(f"{scan_type.capitalize()} analysis failed: {result.error_message}")
 
 
 # Convenience functions for common operations
-def quick_focus_score(image: np.ndarray, algorithm: str = 'gradient') -> float:
+def quick_focus_score(image: np.ndarray, algorithm: str = "gradient") -> float:
     """Quick focus scoring with default parameters"""
     config = FocusAnalysisConfig(algorithm=algorithm)
     score, _ = score_single_image(image, config, detect_roi=True)
     return score
 
 
-def is_good_focus_curve(scores: List[float], threshold: float = 0.1) -> bool:
+def is_good_focus_curve(scores: list[float], threshold: float = 0.1) -> bool:
     """
     Check if focus curve has sufficient variation for analysis
 

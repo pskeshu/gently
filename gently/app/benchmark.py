@@ -15,7 +15,6 @@ Usage from agent CLI:
     /benchmark --volumes 10 --slices 50
 """
 
-import asyncio
 import csv
 import logging
 import shutil
@@ -25,7 +24,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .agent import MicroscopyAgent
@@ -36,6 +35,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class VolumeTiming:
     """Timing breakdown for a single volume acquisition."""
+
     volume_idx: int
     embryo_id: str
     timepoint: int
@@ -51,13 +51,14 @@ class VolumeTiming:
     volume_shape: tuple = ()
     file_size_mb: float = 0.0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 @dataclass
 class BenchmarkResults:
     """Aggregate benchmark results."""
-    timings: List[VolumeTiming] = field(default_factory=list)
+
+    timings: list[VolumeTiming] = field(default_factory=list)
     num_embryos: int = 1
     num_slices: int = 50
     exposure_ms: float = 10.0
@@ -65,14 +66,14 @@ class BenchmarkResults:
     completed_at: str = ""
 
     @property
-    def successful(self) -> List[VolumeTiming]:
+    def successful(self) -> list[VolumeTiming]:
         return [t for t in self.timings if t.success]
 
     @property
-    def failed(self) -> List[VolumeTiming]:
+    def failed(self) -> list[VolumeTiming]:
         return [t for t in self.timings if not t.success]
 
-    def _stat(self, values: List[float]) -> Dict[str, float]:
+    def _stat(self, values: list[float]) -> dict[str, float]:
         if not values:
             return {"mean": 0, "std": 0, "min": 0, "max": 0}
         return {
@@ -83,19 +84,19 @@ class BenchmarkResults:
         }
 
     @property
-    def acquisition_stats(self) -> Dict[str, float]:
+    def acquisition_stats(self) -> dict[str, float]:
         return self._stat([t.acquisition_time for t in self.successful])
 
     @property
-    def storage_stats(self) -> Dict[str, float]:
+    def storage_stats(self) -> dict[str, float]:
         return self._stat([t.storage_time for t in self.successful])
 
     @property
-    def viz_push_stats(self) -> Dict[str, float]:
+    def viz_push_stats(self) -> dict[str, float]:
         return self._stat([t.viz_push_time for t in self.successful])
 
     @property
-    def total_stats(self) -> Dict[str, float]:
+    def total_stats(self) -> dict[str, float]:
         return self._stat([t.total_time for t in self.successful])
 
     @property
@@ -140,7 +141,7 @@ async def run_benchmark(
     n_volumes: int = None,
     n_slices: int = None,
     n_warmup: int = None,
-    progress_fn: Optional[callable] = None,
+    progress_fn: callable | None = None,
 ) -> BenchmarkResults:
     """
     Run end-to-end volume acquisition benchmark.
@@ -172,7 +173,7 @@ async def run_benchmark(
         started_at=datetime.now().isoformat(),
     )
 
-    viz_server = getattr(agent, 'viz_server', None)
+    viz_server = getattr(agent, "viz_server", None)
     has_viz = viz_server is not None
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gently_benchmark_"))
@@ -187,10 +188,13 @@ async def run_benchmark(
 
         logger.info(
             "Benchmark: %d volumes + %d warmup, %d slices, %.0f ms exposure",
-            num_volumes, warmup, num_slices, exposure_ms,
+            num_volumes,
+            warmup,
+            num_slices,
+            exposure_ms,
         )
 
-        timepoints: Dict[str, int] = {eid: 0 for eid in embryo_ids}
+        timepoints: dict[str, int] = {eid: 0 for eid in embryo_ids}
         total_iterations = warmup + num_volumes
 
         for i in range(total_iterations):
@@ -221,18 +225,16 @@ async def run_benchmark(
             try:
                 if embryo and embryo.calibration:
                     cal = embryo.calibration
-                    galvo_amp = cal.get('galvo_amplitude', 0.5)
-                    galvo_center = cal.get('galvo_center', 0.0)
-                    piezo_amp = cal.get('piezo_amplitude', 25.0)
-                    piezo_center = cal.get('piezo_center', 50.0)
+                    galvo_amp = cal.get("galvo_amplitude", 0.5)
+                    galvo_center = cal.get("galvo_center", 0.0)
+                    piezo_amp = cal.get("piezo_amplitude", 25.0)
+                    piezo_center = cal.get("piezo_center", 50.0)
                 else:
                     galvo_amp, galvo_center = 0.5, 0.0
                     piezo_amp, piezo_center = 25.0, 50.0
 
                 if embryo and embryo.position:
-                    await agent.client.move_stage(
-                        embryo.position['x'], embryo.position['y']
-                    )
+                    await agent.client.move_stage(embryo.position["x"], embryo.position["y"])
 
                 # Stage 1: Acquisition
                 t0 = time.perf_counter()
@@ -247,28 +249,34 @@ async def run_benchmark(
                 t1 = time.perf_counter()
                 timing.acquisition_time = t1 - t0
 
-                if not result.get('success'):
+                if not result.get("success"):
                     timing.success = False
-                    timing.error = result.get('error', 'Acquisition failed')
+                    timing.error = result.get("error", "Acquisition failed")
                     if not is_warmup:
                         results.timings.append(timing)
                     continue
 
-                volume = result.get('volume')
-                volume_path = result.get('volume_path')
+                volume = result.get("volume")
+                volume_path = result.get("volume_path")
                 timing.volume_shape = volume.shape if volume is not None else ()
 
                 # Stage 2: Storage
                 t2 = time.perf_counter()
                 if volume_path:
                     canonical_path = temp_store.register_volume(
-                        benchmark_session, embryo_id, tp, Path(volume_path),
+                        benchmark_session,
+                        embryo_id,
+                        tp,
+                        Path(volume_path),
                         volume_data=volume,
                     )
                     timing.file_size_mb = canonical_path.stat().st_size / (1024 * 1024)
                 elif volume is not None:
                     canonical_path = temp_store.put_volume(
-                        benchmark_session, embryo_id, tp, volume,
+                        benchmark_session,
+                        embryo_id,
+                        tp,
+                        volume,
                     )
                     timing.file_size_mb = canonical_path.stat().st_size / (1024 * 1024)
                 t3 = time.perf_counter()
@@ -282,7 +290,11 @@ async def run_benchmark(
                         proj,
                         uid=f"benchmark_{embryo_id}_t{tp:04d}",
                         data_type="benchmark",
-                        metadata={"embryo_id": embryo_id, "timepoint": tp, "benchmark": True},
+                        metadata={
+                            "embryo_id": embryo_id,
+                            "timepoint": tp,
+                            "benchmark": True,
+                        },
                     )
                 t5 = time.perf_counter()
                 timing.viz_push_time = t5 - t4
@@ -355,21 +367,34 @@ def save_benchmark_csv(results: BenchmarkResults, path: Path):
         writer.writerow(["# std_total_s", f"{total['std']:.6f}"])
         writer.writerow([])
 
-        writer.writerow([
-            "volume_idx", "embryo_id", "timepoint",
-            "acquisition_s", "storage_s", "viz_push_s", "total_s",
-            "file_size_mb", "success", "error"
-        ])
+        writer.writerow(
+            [
+                "volume_idx",
+                "embryo_id",
+                "timepoint",
+                "acquisition_s",
+                "storage_s",
+                "viz_push_s",
+                "total_s",
+                "file_size_mb",
+                "success",
+                "error",
+            ]
+        )
         for t in results.timings:
-            writer.writerow([
-                t.volume_idx, t.embryo_id, t.timepoint,
-                f"{t.acquisition_time:.6f}",
-                f"{t.storage_time:.6f}",
-                f"{t.viz_push_time:.6f}",
-                f"{t.total_time:.6f}",
-                f"{t.file_size_mb:.2f}",
-                t.success,
-                t.error or "",
-            ])
+            writer.writerow(
+                [
+                    t.volume_idx,
+                    t.embryo_id,
+                    t.timepoint,
+                    f"{t.acquisition_time:.6f}",
+                    f"{t.storage_time:.6f}",
+                    f"{t.viz_push_time:.6f}",
+                    f"{t.total_time:.6f}",
+                    f"{t.file_size_mb:.2f}",
+                    t.success,
+                    t.error or "",
+                ]
+            )
 
     return path

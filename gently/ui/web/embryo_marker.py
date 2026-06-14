@@ -13,9 +13,7 @@ monitoring.
 """
 
 import logging
-from typing import List, Dict, Tuple, Optional
 from pathlib import Path
-from datetime import datetime
 
 import numpy as np
 
@@ -25,13 +23,13 @@ logger = logging.getLogger(__name__)
 async def mark_embryos_web(
     viz_server,
     image: np.ndarray,
-    initial_stage_position: Tuple[float, float],
+    initial_stage_position: tuple[float, float],
     pixel_size_um: float = 0.65,
-    timeout: Optional[float] = None,
-    save_image_path: Optional[Path] = None,
-    initial_markers: Optional[List[Dict]] = None,
+    timeout: float | None = None,
+    save_image_path: Path | None = None,
+    initial_markers: list[dict] | None = None,
     default_role: str = "test",
-) -> List[Dict]:
+) -> list[dict]:
     """
     Interactive embryo marking via the web map view.
 
@@ -86,43 +84,52 @@ async def mark_embryos_web(
     return embryos
 
 
-def _save_marked_image(image: np.ndarray, embryos: List[Dict], output_path: Path):
+def _save_marked_image(image: np.ndarray, embryos: list[dict], output_path: Path):
     """Save image with embryo markers drawn on it."""
-    from PIL import Image as PILImage, ImageDraw, ImageFont
+    from PIL import Image as PILImage
+    from PIL import ImageDraw, ImageFont
 
     output_path = Path(output_path)
 
     if image.dtype != np.uint8:
-        img_normalized = ((image - image.min()) /
-                         max(image.max() - image.min(), 1) * 255).astype(np.uint8)
+        img_normalized = ((image - image.min()) / max(image.max() - image.min(), 1) * 255).astype(
+            np.uint8
+        )
     else:
         img_normalized = image
 
     pil_image = PILImage.fromarray(img_normalized)
-    if pil_image.mode != 'RGB':
-        pil_image = pil_image.convert('RGB')
+    if pil_image.mode != "RGB":
+        pil_image = pil_image.convert("RGB")
 
     draw = ImageDraw.Draw(pil_image)
 
     for embryo in embryos:
-        pixel_x, pixel_y = embryo['pixel_position']
-        embryo_num = embryo.get('embryo_number') or embryo.get('embryo_id') or '?'
+        pixel_x, pixel_y = embryo["pixel_position"]
+        embryo_num = embryo.get("embryo_number") or embryo.get("embryo_id") or "?"
 
         marker_size = 20
         draw.line(
             [(pixel_x - marker_size, pixel_y), (pixel_x + marker_size, pixel_y)],
-            fill=(0, 255, 255), width=3
+            fill=(0, 255, 255),
+            width=3,
         )
         draw.line(
             [(pixel_x, pixel_y - marker_size), (pixel_x, pixel_y + marker_size)],
-            fill=(0, 255, 255), width=3
+            fill=(0, 255, 255),
+            width=3,
         )
 
         circle_radius = 40
         draw.ellipse(
-            [pixel_x - circle_radius, pixel_y - circle_radius,
-             pixel_x + circle_radius, pixel_y + circle_radius],
-            outline=(0, 255, 255), width=2
+            [
+                pixel_x - circle_radius,
+                pixel_y - circle_radius,
+                pixel_x + circle_radius,
+                pixel_y + circle_radius,
+            ],
+            outline=(0, 255, 255),
+            width=2,
         )
 
         try:
@@ -130,8 +137,12 @@ def _save_marked_image(image: np.ndarray, embryos: List[Dict], output_path: Path
         except Exception:
             font = ImageFont.load_default()
 
-        draw.text((pixel_x - 10, pixel_y + circle_radius + 5),
-                  str(embryo_num), fill=(0, 255, 255), font=font)
+        draw.text(
+            (pixel_x - 10, pixel_y + circle_radius + 5),
+            str(embryo_num),
+            fill=(0, 255, 255),
+            font=font,
+        )
 
     pil_image.save(output_path)
     logger.info("Saved marked image: %s", output_path)

@@ -10,7 +10,6 @@ accumulated knowledge across sessions.
 """
 
 import logging
-from typing import Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -40,13 +39,13 @@ class AgentMemory:
         self.store = context_store
         self.session_id = session_id
         # Set by startup flow after resolve_plan_context()
-        self.active_plan_item_id: Optional[str] = None
+        self.active_plan_item_id: str | None = None
 
     # ------------------------------------------------------------------
     # Plan context resolution — called at startup
     # ------------------------------------------------------------------
 
-    def resolve_plan_context(self) -> Tuple[Optional[str], List]:
+    def resolve_plan_context(self) -> tuple[str | None, list]:
         """Determine which plan item to activate for this session.
 
         Scans all active campaigns for unblocked imaging items.
@@ -61,6 +60,7 @@ class AgentMemory:
         """
         try:
             from .model import PlanItemType
+
             root_campaigns = self.store.get_root_campaigns(status="active")
             imaging_candidates = []
             for campaign in root_campaigns:
@@ -186,13 +186,11 @@ class AgentMemory:
             # Session-campaign link
             if self.session_id:
                 try:
-                    session_campaigns = self.store.get_campaigns_for_session(
-                        self.session_id
-                    )
+                    session_campaigns = self.store.get_campaigns_for_session(self.session_id)
                     if session_campaigns:
                         names = [_short_name(c) for c in session_campaigns[:2]]
                         lines.append(
-                            f'- This session: linked to {", ".join(f"{n!r}" for n in names)}'
+                            f"- This session: linked to {', '.join(f'{n!r}' for n in names)}"
                         )
                 except Exception:
                     pass
@@ -291,7 +289,9 @@ class AgentMemory:
                 for p in phases:
                     try:
                         ps = self.store.get_plan_status(p.id)
-                        items_str = f" ({ps['completed']}/{ps['total']} items)" if ps["total"] > 0 else ""
+                        items_str = (
+                            f" ({ps['completed']}/{ps['total']} items)" if ps["total"] > 0 else ""
+                        )
                     except Exception:
                         items_str = ""
                     lines.append(f"  - {_friendly_name(p)}{items_str}")
@@ -301,6 +301,7 @@ class AgentMemory:
         # Plan status (root campaign)
         try:
             from .model import PlanItemType
+
             status = self.store.get_plan_status(campaign.id)
             if status["total"] > 0:
                 lines.append(
@@ -328,9 +329,9 @@ class AgentMemory:
         learnings = self.store.get_learnings(limit=50)
         if learnings:
             lines.append("\n**Recent learnings**:")
-            for l in learnings[:5]:
-                conf = l.confidence.value if l.confidence else "?"
-                lines.append(f"  - [{conf}] {l.content[:150]}")
+            for learning in learnings[:5]:
+                conf = learning.confidence.value if learning.confidence else "?"
+                lines.append(f"  - [{conf}] {learning.content[:150]}")
 
         # Other active root campaigns (brief mention)
         root_campaigns = self.store.get_root_campaigns()
@@ -379,9 +380,7 @@ class AgentMemory:
                 )
             else:
                 lines.append("## Ready to image")
-                lines.append(
-                    f"{len(candidates)} imaging tasks are unblocked:"
-                )
+                lines.append(f"{len(candidates)} imaging tasks are unblocked:")
                 lines.append("")
                 for item, spec, campaign in candidates:
                     spec_summary = self.format_imaging_spec_summary(spec) if spec else "no spec"
@@ -441,7 +440,11 @@ class AgentMemory:
                     for p in phases:
                         try:
                             ps = self.store.get_plan_status(p.id)
-                            items_str = f" ({ps['completed']}/{ps['total']} items)" if ps["total"] > 0 else ""
+                            items_str = (
+                                f" ({ps['completed']}/{ps['total']} items)"
+                                if ps["total"] > 0
+                                else ""
+                            )
                         except Exception:
                             items_str = ""
                         lines.append(f"    - {_friendly_name(p)}{items_str}")
@@ -460,10 +463,11 @@ class AgentMemory:
             query_lower = query.lower()
             terms = query_lower.split()
             learnings = [
-                l
-                for l in learnings
+                learning
+                for learning in learnings
                 if any(
-                    term in l.content.lower() or (l.basis and term in l.basis.lower())
+                    term in learning.content.lower()
+                    or (learning.basis and term in learning.basis.lower())
                     for term in terms
                 )
             ]
@@ -471,23 +475,23 @@ class AgentMemory:
         learnings = learnings[:limit]
 
         if not learnings:
-            msg = f"No learnings found matching '{query}'." if query else "No learnings recorded yet."
+            msg = (
+                f"No learnings found matching '{query}'." if query else "No learnings recorded yet."
+            )
             return msg
 
         header = f"## Learnings matching '{query}'" if query else "## Recent Learnings"
         lines = [header]
-        for l in learnings:
-            conf = l.confidence.value if l.confidence else "?"
-            lines.append(f"\n- [{conf}] {l.content}")
-            if l.basis:
-                lines.append(f"  _Basis_: {l.basis[:200]}")
-            lines.append(f"  _{l.created_at.strftime('%Y-%m-%d %H:%M')}_")
+        for learning in learnings:
+            conf = learning.confidence.value if learning.confidence else "?"
+            lines.append(f"\n- [{conf}] {learning.content}")
+            if learning.basis:
+                lines.append(f"  _Basis_: {learning.basis[:200]}")
+            lines.append(f"  _{learning.created_at.strftime('%Y-%m-%d %H:%M')}_")
 
         return "\n".join(lines)
 
-    def recall_observations(
-        self, query: str = None, embryo_id: str = None, limit: int = 20
-    ) -> str:
+    def recall_observations(self, query: str = None, embryo_id: str = None, limit: int = 20) -> str:
         """Search or list observations."""
         if embryo_id:
             observations = self.store.get_observations_for_embryo(embryo_id)
@@ -498,15 +502,17 @@ class AgentMemory:
             query_lower = query.lower()
             terms = query_lower.split()
             observations = [
-                o
-                for o in observations
-                if any(term in o.content.lower() for term in terms)
+                o for o in observations if any(term in o.content.lower() for term in terms)
             ]
 
         observations = observations[:limit]
 
         if not observations:
-            msg = f"No observations found matching '{query}'." if query else "No observations recorded yet."
+            msg = (
+                f"No observations found matching '{query}'."
+                if query
+                else "No observations recorded yet."
+            )
             return msg
 
         header = "## Observations"
@@ -559,7 +565,9 @@ class AgentMemory:
             lines.append("\n### Active Campaigns")
             for c in root_campaigns:
                 name = _friendly_name(c)
-                is_focus = " ← this session" if (focus_campaign and c.id == focus_campaign.id) else ""
+                is_focus = (
+                    " ← this session" if (focus_campaign and c.id == focus_campaign.id) else ""
+                )
                 progress = f" — {c.progress}" if c.progress else ""
                 try:
                     status = self.store.get_plan_status(c.id)
@@ -580,7 +588,9 @@ class AgentMemory:
                         for p in phases:
                             try:
                                 ps = self.store.get_plan_status(p.id)
-                                items_str = f" ({ps['completed']}/{ps['total']})" if ps["total"] > 0 else ""
+                                items_str = (
+                                    f" ({ps['completed']}/{ps['total']})" if ps["total"] > 0 else ""
+                                )
                             except Exception:
                                 items_str = ""
                             lines.append(f"  - {_short_name(p)}{items_str}")
@@ -606,9 +616,9 @@ class AgentMemory:
         learnings = self.store.get_learnings(limit=10)
         if learnings:
             lines.append("\n### Recent Learnings")
-            for l in learnings[:10]:
-                conf = l.confidence.value if l.confidence else "?"
-                lines.append(f"- [{conf}] {l.content[:150]}")
+            for learning in learnings[:10]:
+                conf = learning.confidence.value if learning.confidence else "?"
+                lines.append(f"- [{conf}] {learning.content[:150]}")
 
         # Expectations
         expectations = self.store.get_pending_expectations()

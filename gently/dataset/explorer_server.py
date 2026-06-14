@@ -12,32 +12,34 @@ Usage:
 """
 
 import asyncio
-import logging
+import base64
 import json
+import logging
 from dataclasses import dataclass
-
-logger = logging.getLogger(__name__)
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, Tuple, Dict
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from .schema import get_connection, get_database_stats, DEFAULT_DB_PATH
-from .embryo_dataset import EmbryoDataset
 from gently.core.imaging import (
-    normalize_to_uint8,
-    image_to_base64 as _image_to_base64,
-    load_volume,
-    compute_crop_bounds,
     apply_crop_bounds,
+    compute_crop_bounds,
+    load_volume,
+    normalize_to_uint8,
     projection_three_view,
 )
+from gently.core.imaging import (
+    image_to_base64 as _image_to_base64,
+)
 
+from .embryo_dataset import EmbryoDataset
+from .schema import DEFAULT_DB_PATH, get_connection, get_database_stats
+
+logger = logging.getLogger(__name__)
 # Lazy imports for explorer-specific projection functions
 tifffile = None
 PIL_Image = None
@@ -48,9 +50,11 @@ def ensure_projection_deps():
     global tifffile, PIL_Image
     if tifffile is None:
         import tifffile as _tifffile
+
         tifffile = _tifffile
     if PIL_Image is None:
         from PIL import Image as _Image
+
         PIL_Image = _Image
 
 
@@ -68,15 +72,25 @@ def find_outer_boundary(img: np.ndarray, percentile: float = 50) -> np.ndarray:
     """Find outer boundary of embryo by thresholding and extracting mask edge."""
     thresh = np.percentile(img, percentile)
     mask = img > thresh
-    padded = np.pad(mask, 1, mode='constant', constant_values=True)
-    eroded = (padded[:-2, :-2] & padded[:-2, 1:-1] & padded[:-2, 2:] &
-              padded[1:-1, :-2] & padded[1:-1, 1:-1] & padded[1:-1, 2:] &
-              padded[2:, :-2] & padded[2:, 1:-1] & padded[2:, 2:])
+    padded = np.pad(mask, 1, mode="constant", constant_values=True)
+    eroded = (
+        padded[:-2, :-2]
+        & padded[:-2, 1:-1]
+        & padded[:-2, 2:]
+        & padded[1:-1, :-2]
+        & padded[1:-1, 1:-1]
+        & padded[1:-1, 2:]
+        & padded[2:, :-2]
+        & padded[2:, 1:-1]
+        & padded[2:, 2:]
+    )
     boundary = (mask & ~eroded).astype(np.uint8) * 255
     return boundary
 
 
-def overlay_edges(img: np.ndarray, edges: np.ndarray, color: Tuple[int, int, int] = (255, 200, 0)) -> np.ndarray:
+def overlay_edges(
+    img: np.ndarray, edges: np.ndarray, color: tuple[int, int, int] = (255, 200, 0)
+) -> np.ndarray:
     """Overlay edge contours on image in specified color."""
     if img.ndim == 2:
         rgb = np.stack([img, img, img], axis=-1)
@@ -89,8 +103,8 @@ def overlay_edges(img: np.ndarray, edges: np.ndarray, color: Tuple[int, int, int
 
 def projection_dual_view(
     volume: np.ndarray,
-    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
-) -> Tuple[np.ndarray, str]:
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> tuple[np.ndarray, str]:
     """Dual-view projection: TOP above, SIDE below with boundary overlay.
 
     voxel_size: (dz, dy, dx) in microns. Used to compute the physically
@@ -126,9 +140,9 @@ def projection_dual_view(
 
 def projection_depth_colored(
     volume: np.ndarray,
-    colormap: str = 'turbo',
-    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
-) -> Tuple[np.ndarray, str]:
+    colormap: str = "turbo",
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> tuple[np.ndarray, str]:
     """Depth-colored max intensity projection.
 
     voxel_size: (dz, dy, dx) in microns. The side view is rescaled so the
@@ -142,8 +156,9 @@ def projection_depth_colored(
     dz, dy, dx = voxel_size
     try:
         import matplotlib.pyplot as plt
+
         cmap = plt.get_cmap(colormap)
-    except:
+    except Exception:
         cmap = None
     colored_volume = np.zeros((z_depth, height, width, 3), dtype=np.float32)
     for z in range(z_depth):
@@ -168,7 +183,7 @@ def projection_depth_colored(
     return combined, f"Z-depth colored MIP ({colormap}): TOP + SIDE"
 
 
-def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.ndarray, str]:
+def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> tuple[np.ndarray, str]:
     """Montage of N representative z-slices."""
     if volume.ndim != 3:
         return normalize_image(volume), "2D input"
@@ -184,7 +199,7 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
         slices.append(np.zeros_like(slices[0]))
     rows = []
     for r in range(n_rows):
-        row_slices = slices[r * n_cols:(r + 1) * n_cols]
+        row_slices = slices[r * n_cols : (r + 1) * n_cols]
         sep = np.ones((height, 2), dtype=np.uint8) * 64
         row_with_sep = []
         for i, s in enumerate(row_slices):
@@ -198,10 +213,15 @@ def projection_multi_slice(volume: np.ndarray, n_slices: int = 6) -> Tuple[np.nd
     return montage, f"Multi-slice montage ({n_slices} slices)"
 
 
-def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -0.5,
-                          threshold: float = 0.12, num_slices: int = 48,
-                          perspective: float = 0.4,
-                          voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625)) -> np.ndarray:
+def render_volume_rotated(
+    volume: np.ndarray,
+    angle_y: float,
+    angle_x: float = -0.5,
+    threshold: float = 0.12,
+    num_slices: int = 48,
+    perspective: float = 0.4,
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> np.ndarray:
     """
     Render volume from a rotated viewpoint with parallax and perspective.
 
@@ -281,23 +301,25 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
         perspective_scale = 1.0 + (depth_after_rotation * perspective * 1.5 / z_scale)
         perspective_scale = np.clip(perspective_scale, 0.5, 1.5)
 
-        slice_data_list.append({
-            'z_idx': z_idx,
-            'shift_x': shift_x,
-            'shift_y': shift_y,
-            'depth': depth_after_rotation,
-            'scale': perspective_scale,
-        })
+        slice_data_list.append(
+            {
+                "z_idx": z_idx,
+                "shift_x": shift_x,
+                "shift_y": shift_y,
+                "depth": depth_after_rotation,
+                "scale": perspective_scale,
+            }
+        )
 
     # Sort by depth (back to front for proper alpha compositing)
-    slice_data_list.sort(key=lambda s: s['depth'])
+    slice_data_list.sort(key=lambda s: s["depth"])
 
     # Composite slices
     for slice_info in slice_data_list:
-        z_idx = slice_info['z_idx']
-        shift_x = slice_info['shift_x']
-        shift_y = slice_info['shift_y']
-        scale = slice_info['scale']
+        z_idx = slice_info["z_idx"]
+        shift_x = slice_info["shift_x"]
+        shift_y = slice_info["shift_y"]
+        scale = slice_info["scale"]
 
         # Get slice
         slice_img = vol[z_idx, :, :]
@@ -347,8 +369,8 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
         # Alpha composite
         for c in range(3):
             result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] = (
-                src_slice * src_alpha +
-                result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] * (1 - src_alpha)
+                src_slice * src_alpha
+                + result[dst_y_start:dst_y_end, dst_x_start:dst_x_end, c] * (1 - src_alpha)
             )
 
     # Crop to content (remove empty margins)
@@ -374,8 +396,8 @@ def render_volume_rotated(volume: np.ndarray, angle_y: float, angle_x: float = -
 
 def projection_spin_3d(
     volume: np.ndarray,
-    voxel_size: Tuple[float, float, float] = (1.0, 0.1625, 0.1625),
-) -> Tuple[np.ndarray, str]:
+    voxel_size: tuple[float, float, float] = (1.0, 0.1625, 0.1625),
+) -> tuple[np.ndarray, str]:
     """Multiple 3D perspective views from different angles (2x3 grid).
 
     voxel_size: (dz, dy, dx) in microns. Forwarded to render_volume_rotated
@@ -392,8 +414,11 @@ def projection_spin_3d(
     views = []
     for angle_y in angles_y:
         view = render_volume_rotated(
-            volume, angle_y=angle_y, angle_x=base_tilt,
-            threshold=py_threshold, perspective=0.5,
+            volume,
+            angle_y=angle_y,
+            angle_x=base_tilt,
+            threshold=py_threshold,
+            perspective=0.5,
             voxel_size=voxel_size,
         )
         views.append(view)
@@ -409,10 +434,10 @@ def projection_spin_3d(
         pad_w = (target_w - w) // 2
         if v.ndim == 3:
             p = np.zeros((target_h, target_w, 3), dtype=v.dtype)
-            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+            p[pad_h : pad_h + h, pad_w : pad_w + w] = v
         else:
             p = np.zeros((target_h, target_w), dtype=v.dtype)
-            p[pad_h:pad_h+h, pad_w:pad_w+w] = v
+            p[pad_h : pad_h + h, pad_w : pad_w + w] = v
         padded.append(p)
 
     row1 = np.hstack(padded[0:3])
@@ -423,11 +448,11 @@ def projection_spin_3d(
 
 
 PROJECTION_METHODS = {
-    'dual_view': projection_dual_view,
-    'depth_colored': projection_depth_colored,
-    'multi_slice': projection_multi_slice,
-    'three_view': projection_three_view,
-    'spin_3d': projection_spin_3d,
+    "dual_view": projection_dual_view,
+    "depth_colored": projection_depth_colored,
+    "multi_slice": projection_multi_slice,
+    "three_view": projection_three_view,
+    "spin_3d": projection_spin_3d,
 }
 
 
@@ -438,9 +463,11 @@ logger = logging.getLogger(__name__)
 # Presence Tracking (Collaborative Feature)
 # =============================================================================
 
+
 @dataclass
 class ClientInfo:
     """Information about a connected WebSocket client for presence tracking"""
+
     client_id: str
     name: str
     color: str  # Hex color for avatar background
@@ -452,13 +479,25 @@ class ConnectionManager:
 
     # Colors for avatar backgrounds (pleasant, distinct colors)
     AVATAR_COLORS = [
-        '#4a9eff', '#ff6b6b', '#51cf66', '#ffd43b', '#cc5de8',
-        '#ff922b', '#20c997', '#748ffc', '#f06595', '#69db7c',
-        '#ffa94d', '#9775fa', '#38d9a9', '#e599f7', '#74c0fc'
+        "#4a9eff",
+        "#ff6b6b",
+        "#51cf66",
+        "#ffd43b",
+        "#cc5de8",
+        "#ff922b",
+        "#20c997",
+        "#748ffc",
+        "#f06595",
+        "#69db7c",
+        "#ffa94d",
+        "#9775fa",
+        "#38d9a9",
+        "#e599f7",
+        "#74c0fc",
     ]
 
     def __init__(self):
-        self.active_connections: Dict[WebSocket, ClientInfo] = {}
+        self.active_connections: dict[WebSocket, ClientInfo] = {}
         self._lock = asyncio.Lock()
 
     def _generate_color(self, client_id: str) -> str:
@@ -472,6 +511,7 @@ class ConnectionManager:
         # Generate defaults if not provided
         if not client_id:
             import uuid
+
             client_id = str(uuid.uuid4())[:8]
         if not name:
             name = f"Anonymous {client_id[:4]}"
@@ -480,12 +520,14 @@ class ConnectionManager:
             client_id=client_id,
             name=name,
             color=self._generate_color(client_id),
-            connected_at=datetime.now().isoformat()
+            connected_at=datetime.now().isoformat(),
         )
 
         async with self._lock:
             self.active_connections[websocket] = client_info
-        logger.info(f"WebSocket connected: {name} ({client_id}). Total: {len(self.active_connections)}")
+        logger.info(
+            f"WebSocket connected: {name} ({client_id}). Total: {len(self.active_connections)}"
+        )
 
         # Broadcast updated presence to all clients
         await self.broadcast_presence()
@@ -494,7 +536,9 @@ class ConnectionManager:
         async with self._lock:
             client_info = self.active_connections.pop(websocket, None)
         if client_info:
-            logger.info(f"WebSocket disconnected: {client_info.name}. Total: {len(self.active_connections)}")
+            logger.info(
+                f"WebSocket disconnected: {client_info.name}. Total: {len(self.active_connections)}"
+            )
         else:
             logger.info(f"WebSocket disconnected. Total: {len(self.active_connections)}")
 
@@ -510,11 +554,11 @@ class ConnectionManager:
                     client_id=old_info.client_id,
                     name=name,
                     color=old_info.color,
-                    connected_at=old_info.connected_at
+                    connected_at=old_info.connected_at,
                 )
         await self.broadcast_presence()
 
-    def get_client_info(self, websocket: WebSocket) -> Optional[ClientInfo]:
+    def get_client_info(self, websocket: WebSocket) -> ClientInfo | None:
         """Get client info for a websocket"""
         return self.active_connections.get(websocket)
 
@@ -526,12 +570,12 @@ class ConnectionManager:
         # Deduplicate by client_id (same user in multiple tabs = one avatar)
         async with self._lock:
             seen_clients = {}
-            for ws, info in self.active_connections.items():
+            for _ws, info in self.active_connections.items():
                 # Keep the most recent entry for each client_id
                 seen_clients[info.client_id] = {
-                    'client_id': info.client_id,
-                    'name': info.name,
-                    'color': info.color
+                    "client_id": info.client_id,
+                    "name": info.name,
+                    "color": info.color,
                 }
             clients_list = list(seen_clients.values())
 
@@ -541,14 +585,8 @@ class ConnectionManager:
             try:
                 personalized = []
                 for client in clients_list:
-                    personalized.append({
-                        **client,
-                        'is_you': client['client_id'] == info.client_id
-                    })
-                await ws.send_json({
-                    'type': 'presence',
-                    'clients': personalized
-                })
+                    personalized.append({**client, "is_you": client["client_id"] == info.client_id})
+                await ws.send_json({"type": "presence", "clients": personalized})
             except Exception:
                 disconnected.append(ws)
 
@@ -564,15 +602,15 @@ class GroundTruthCreate(BaseModel):
     embryo_id: str
     stage: str
     start_timepoint: int
-    end_timepoint: Optional[int] = None
-    annotator: Optional[str] = None
-    notes: Optional[str] = None
+    end_timepoint: int | None = None
+    annotator: str | None = None
+    notes: str | None = None
 
 
 class GroundTruthDelete(BaseModel):
     session_id: str
     embryo_id: str
-    stage: Optional[str] = None
+    stage: str | None = None
 
 
 class DatasetExplorer:
@@ -658,8 +696,7 @@ class DatasetExplorer:
             """Get session details."""
             conn = get_connection(self.db_path)
             session = conn.execute(
-                "SELECT * FROM sessions WHERE session_id = ?",
-                (session_id,)
+                "SELECT * FROM sessions WHERE session_id = ?", (session_id,)
             ).fetchone()
             conn.close()
 
@@ -674,8 +711,8 @@ class DatasetExplorer:
 
         @app.get("/api/embryos")
         async def list_embryos(
-            session_id: Optional[str] = None,
-            has_ground_truth: Optional[bool] = None,
+            session_id: str | None = None,
+            has_ground_truth: bool | None = None,
         ):
             """List embryos with optional filters."""
             embryos = []
@@ -683,15 +720,17 @@ class DatasetExplorer:
                 session_id=session_id,
                 has_ground_truth=has_ground_truth,
             ):
-                embryos.append({
-                    "embryo_id": embryo.embryo_id,
-                    "session_id": embryo.session_id,
-                    "num_images": embryo.num_images,
-                    "num_volumes": embryo.num_volumes,
-                    "timepoint_range": embryo.timepoint_range,
-                    "has_ground_truth": embryo.has_ground_truth,
-                    "ground_truth_stages": embryo.ground_truth_stages,
-                })
+                embryos.append(
+                    {
+                        "embryo_id": embryo.embryo_id,
+                        "session_id": embryo.session_id,
+                        "num_images": embryo.num_images,
+                        "num_volumes": embryo.num_volumes,
+                        "timepoint_range": embryo.timepoint_range,
+                        "has_ground_truth": embryo.has_ground_truth,
+                        "ground_truth_stages": embryo.ground_truth_stages,
+                    }
+                )
             return embryos
 
         @app.get("/api/embryos/{session_id}/{embryo_id}")
@@ -745,8 +784,8 @@ class DatasetExplorer:
         async def list_images(
             session_id: str,
             embryo_id: str,
-            start_tp: Optional[int] = None,
-            end_tp: Optional[int] = None,
+            start_tp: int | None = None,
+            end_tp: int | None = None,
         ):
             """List images for an embryo (without image data)."""
             timepoint_range = None
@@ -828,7 +867,10 @@ class DatasetExplorer:
                 notes=data.notes,
             )
             end_str = f"-{data.end_timepoint}" if data.end_timepoint else ""
-            return {"status": "ok", "message": f"Set {data.stage} @ t={data.start_timepoint}{end_str}"}
+            return {
+                "status": "ok",
+                "message": f"Set {data.stage} @ t={data.start_timepoint}{end_str}",
+            }
 
         @app.delete("/api/ground_truth")
         async def delete_ground_truth(data: GroundTruthDelete):
@@ -857,7 +899,7 @@ class DatasetExplorer:
         @app.get("/api/runs/{run_id}/predictions")
         async def get_run_predictions(
             run_id: int,
-            embryo_id: Optional[str] = None,
+            embryo_id: str | None = None,
             limit: int = Query(100, le=1000),
             offset: int = 0,
         ):
@@ -895,31 +937,38 @@ class DatasetExplorer:
             """
             # Get all images
             images = []
-            for idx, img in enumerate(self.dataset.iter_images(
-                embryo_id=embryo_id,
-                session_id=session_id,
-                load_image_data=False,
-            )):
-                images.append({
-                    "index": idx,
-                    "timepoint": img.timepoint,
-                    "timestamp": img.timestamp,
-                    "ground_truth_stage": img.ground_truth_stage,
-                    "uid": img.uid,
-                    "volume_path": img.volume_path,
-                })
+            for idx, img in enumerate(
+                self.dataset.iter_images(
+                    embryo_id=embryo_id,
+                    session_id=session_id,
+                    load_image_data=False,
+                )
+            ):
+                images.append(
+                    {
+                        "index": idx,
+                        "timepoint": img.timepoint,
+                        "timestamp": img.timestamp,
+                        "ground_truth_stage": img.ground_truth_stage,
+                        "uid": img.uid,
+                        "volume_path": img.volume_path,
+                    }
+                )
 
             # Get ground truth transitions
             ground_truth = self.dataset.get_ground_truth(session_id, embryo_id)
 
             # Get predictions if any
             conn = get_connection(self.db_path)
-            predictions = conn.execute("""
+            predictions = conn.execute(
+                """
                 SELECT timepoint, predicted_stage, confidence, perception_run_id, reasoning
                 FROM predictions
                 WHERE session_id = ? AND embryo_id = ?
                 ORDER BY perception_run_id DESC, timepoint
-            """, (session_id, embryo_id)).fetchall()
+            """,
+                (session_id, embryo_id),
+            ).fetchall()
             conn.close()
 
             return {
@@ -949,7 +998,7 @@ class DatasetExplorer:
                 return trace_data
             except Exception as e:
                 logger.error(f"Failed to read trace file: {e}")
-                raise HTTPException(status_code=500, detail=str(e))
+                raise HTTPException(status_code=500, detail=str(e)) from e
 
         @app.get("/api/traces/{session_id}/{embryo_id}")
         async def list_perception_traces(session_id: str, embryo_id: str):
@@ -976,7 +1025,8 @@ class DatasetExplorer:
             # Get all volumes for this embryo UID
             # Sort by session (using min timestamp per session) then by timepoint within session
             conn = get_connection(self.db_path)
-            rows = conn.execute("""
+            rows = conn.execute(
+                """
                 SELECT
                     v.uid,
                     v.session_id,
@@ -984,11 +1034,14 @@ class DatasetExplorer:
                     v.timepoint,
                     v.timestamp,
                     v.file_path,
-                    (SELECT MIN(v2.uid) FROM volumes v2 WHERE v2.session_id = v.session_id) as session_min_uid
+                    (SELECT MIN(v2.uid) FROM volumes v2
+                     WHERE v2.session_id = v.session_id) as session_min_uid
                 FROM volumes v
                 WHERE v.embryo_uid = ?
                 ORDER BY session_min_uid ASC, v.uid ASC
-            """, (embryo_uid,)).fetchall()
+            """,
+                (embryo_uid,),
+            ).fetchall()
 
             if not rows:
                 conn.close()
@@ -999,16 +1052,20 @@ class DatasetExplorer:
             session_embryos = set((r[1], r[2]) for r in rows)
             gt_maps = {}
             for session_id, embryo_id in session_embryos:
-                gt_rows = conn.execute("""
+                gt_rows = conn.execute(
+                    """
                     SELECT stage, start_timepoint, end_timepoint
                     FROM ground_truth
                     WHERE session_id = ? AND embryo_id = ?
                     ORDER BY start_timepoint
-                """, (session_id, embryo_id)).fetchall()
+                """,
+                    (session_id, embryo_id),
+                ).fetchall()
                 gt_maps[(session_id, embryo_id)] = gt_rows
             conn.close()
 
-            # Build unified image list with ground truth based on row index within each session/embryo
+            # Build unified image list with ground truth based on row index
+            # within each session/embryo
             images = []
             session_embryo_counts = {}  # Track row index within each session/embryo
 
@@ -1029,16 +1086,18 @@ class DatasetExplorer:
                         gt_stage = stage
                         break
 
-                images.append({
-                    "index": idx,
-                    "uid": r[0],
-                    "session_id": session_id,
-                    "embryo_id": embryo_id,
-                    "timepoint": r[3],
-                    "timestamp": r[4],
-                    "file_path": r[5],
-                    "ground_truth_stage": gt_stage,
-                })
+                images.append(
+                    {
+                        "index": idx,
+                        "uid": r[0],
+                        "session_id": session_id,
+                        "embryo_id": embryo_id,
+                        "timepoint": r[3],
+                        "timestamp": r[4],
+                        "file_path": r[5],
+                        "ground_truth_stage": gt_stage,
+                    }
+                )
 
             # Get unique sessions
             sessions = list(set(img["session_id"] for img in images))
@@ -1085,6 +1144,7 @@ class DatasetExplorer:
 
             # Apply Gaussian blur along Z axis to reduce banding at side views
             from scipy import ndimage
+
             vol_norm = ndimage.gaussian_filter1d(vol_norm, sigma=1.0, axis=0)
 
             vol_uint8 = (vol_norm * 255).astype(np.uint8)
@@ -1126,11 +1186,13 @@ class DatasetExplorer:
             for method_name, method_func in PROJECTION_METHODS.items():
                 try:
                     proj_img, desc = method_func(vol)
-                    projections.append({
-                        "method": method_name,
-                        "description": desc,
-                        "data": image_to_base64(proj_img),
-                    })
+                    projections.append(
+                        {
+                            "method": method_name,
+                            "description": desc,
+                            "data": image_to_base64(proj_img),
+                        }
+                    )
                 except Exception as e:
                     logger.warning(f"Projection {method_name} failed: {e}")
 
@@ -1159,12 +1221,12 @@ class DatasetExplorer:
             try:
                 while True:
                     data = await websocket.receive_json()
-                    msg_type = data.get('type')
+                    msg_type = data.get("type")
 
-                    if msg_type == 'join':
+                    if msg_type == "join":
                         # Client joining with ID and name
-                        client_id = data.get('client_id')
-                        name = data.get('name')
+                        client_id = data.get("client_id")
+                        name = data.get("name")
                         # Update client info
                         async with self.manager._lock:
                             if websocket in self.manager.active_connections:
@@ -1172,18 +1234,20 @@ class DatasetExplorer:
                                 self.manager.active_connections[websocket] = ClientInfo(
                                     client_id=client_id or old_info.client_id,
                                     name=name or old_info.name,
-                                    color=self.manager._generate_color(client_id or old_info.client_id),
-                                    connected_at=old_info.connected_at
+                                    color=self.manager._generate_color(
+                                        client_id or old_info.client_id
+                                    ),
+                                    connected_at=old_info.connected_at,
                                 )
                         await self.manager.broadcast_presence()
 
-                    elif msg_type == 'update_name':
+                    elif msg_type == "update_name":
                         # Client updating their display name
-                        name = data.get('name')
+                        name = data.get("name")
                         if name:
                             await self.manager.update_client_name(websocket, name)
 
-                    elif msg_type == 'get_presence':
+                    elif msg_type == "get_presence":
                         # Client requesting current presence list
                         await self.manager.broadcast_presence()
 
@@ -1222,6 +1286,7 @@ class DatasetExplorer:
     def run(self):
         """Start the server."""
         import uvicorn
+
         logger.info("=== Embryo Dataset Explorer ===")
         logger.info("Database: %s", self.db_path)
         logger.info("Open http://localhost:%d in your browser", self.port)

@@ -10,7 +10,7 @@ into a ``DetectorResult`` with stage-related findings.
 
 import logging
 import time
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
@@ -35,7 +35,7 @@ class PerceptionProxy(Detector):
     async def run(
         self,
         volume: np.ndarray,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> DetectorResult:
         embryo_id = context.get("embryo_id", "?")
         timepoint = int(context.get("timepoint", 0))
@@ -66,8 +66,12 @@ class PerceptionProxy(Detector):
 
         try:
             from datetime import datetime
+
             result = await perceiver(
-                embryo_id, timepoint, b64_image, datetime.now().isoformat(),
+                embryo_id,
+                timepoint,
+                b64_image,
+                datetime.now().isoformat(),
             )
         except Exception as e:
             logger.exception("[%s] perceiver error for %s", self.name, embryo_id)

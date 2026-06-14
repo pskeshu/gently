@@ -92,6 +92,8 @@ device = [
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
+    "ruff>=0.4.0",
+    "pre-commit>=3.7.0",
 ]
 
 [project.scripts]
@@ -136,3 +138,10 @@ exclude = ["tests*", "benchmarks*", "scripts*", "examples*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

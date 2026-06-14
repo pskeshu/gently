@@ -2,15 +2,13 @@
 DiSPIM scanner/galvo mirror control devices.
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
-from typing import Dict, Tuple
 
 import numpy as np
-
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
 from gently.exceptions import HardwareError, StageMovementError
 
@@ -36,9 +34,7 @@ class _ScannerAxisOffset:
 
         def wait():
             try:
-                self.scanner.core.setProperty(
-                    self.scanner.name, self.property_name, float(value)
-                )
+                self.scanner.core.setProperty(self.scanner.name, self.property_name, float(value))
                 self.scanner.core.waitForDevice(self.scanner.name)
             except (RuntimeError, StageMovementError) as exc:
                 status.set_exception(exc)
@@ -46,6 +42,7 @@ class _ScannerAxisOffset:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
         return status
 
@@ -56,38 +53,32 @@ class _ScannerAxisOffset:
         the Status/thread plumbing. MMCore traffic stays inside this ophyd
         boundary.
         """
-        self.scanner.core.setProperty(
-            self.scanner.name, self.property_name, float(value)
-        )
+        self.scanner.core.setProperty(self.scanner.name, self.property_name, float(value))
         self.scanner.core.waitForDevice(self.scanner.name)
 
     def read(self):
         """Read current offset value"""
         try:
-            value = float(self.scanner.core.getProperty(
-                self.scanner.name, self.property_name
-            ))
+            value = float(self.scanner.core.getProperty(self.scanner.name, self.property_name))
         except (RuntimeError, HardwareError):
             value = 0.0
 
-        return OrderedDict({
-            self.name: {
-                'value': value,
-                'timestamp': time.time(),
-                'units': 'degrees'
-            }
-        })
+        return OrderedDict(
+            {self.name: {"value": value, "timestamp": time.time(), "units": "degrees"}}
+        )
 
     def describe(self):
         """Describe component"""
-        return OrderedDict({
-            self.name: {
-                'source': self.name,
-                'dtype': 'number',
-                'shape': [],
-                'units': 'degrees'
+        return OrderedDict(
+            {
+                self.name: {
+                    "source": self.name,
+                    "dtype": "number",
+                    "shape": [],
+                    "units": "degrees",
+                }
             }
-        })
+        )
 
 
 class DiSPIMScanner:
@@ -102,16 +93,20 @@ class DiSPIMScanner:
         bps.mv(scanner.sa_offset_y, y_value)  # Y-axis offset (galvo position)
     """
 
-    def __init__(self, name: str, core: pymmcore.CMMCore,
-                 limits: Tuple[float, float] = (-5.0, 5.0)):
+    def __init__(
+        self,
+        name: str,
+        core: pymmcore.CMMCore,
+        limits: tuple[float, float] = (-5.0, 5.0),
+    ):
         self.name = name
         self.core = core
         self.parent = None  # Required for Bluesky
         self._limits = limits
 
         # Create movable axis offset components for use with bps.mv()
-        self.sa_offset_x = _ScannerAxisOffset(self, 'x', 'SingleAxisXOffset(deg)')
-        self.sa_offset_y = _ScannerAxisOffset(self, 'y', 'SingleAxisYOffset(deg)')
+        self.sa_offset_x = _ScannerAxisOffset(self, "x", "SingleAxisXOffset(deg)")
+        self.sa_offset_y = _ScannerAxisOffset(self, "y", "SingleAxisYOffset(deg)")
 
     @property
     def limits(self):
@@ -143,6 +138,7 @@ class DiSPIMScanner:
                     status.set_finished()
 
             import threading
+
             threading.Thread(target=wait).start()
 
             return status
@@ -162,21 +158,17 @@ class DiSPIMScanner:
             ab_pos = np.array([0.0, 0.0])
 
         data = OrderedDict()
-        data[self.name] = {
-            'value': ab_pos,
-            'timestamp': time.time(),
-            'units': 'volts'
-        }
+        data[self.name] = {"value": ab_pos, "timestamp": time.time(), "units": "volts"}
         return data
 
     def describe(self):
         """Describe scanner device - required for Bluesky"""
         data = OrderedDict()
         data[self.name] = {
-            'source': self.name,
-            'dtype': 'array',
-            'shape': [2],
-            'units': 'volts'
+            "source": self.name,
+            "dtype": "array",
+            "shape": [2],
+            "units": "volts",
         }
         return data
 
@@ -224,9 +216,13 @@ class DiSPIMScanner:
         if state == "Idle":
             self.core.waitForDevice(self.name)
 
-    def configure_x_axis(self, amplitude_deg: float, offset_deg: float,
-                         pattern: str = "1 - Triangle",
-                         mode: str = "3 - Enabled with axes synced"):
+    def configure_x_axis(
+        self,
+        amplitude_deg: float,
+        offset_deg: float,
+        pattern: str = "1 - Triangle",
+        mode: str = "3 - Enabled with axes synced",
+    ):
         """
         Configure galvo X-axis (light sheet width scanning).
 
@@ -246,9 +242,13 @@ class DiSPIMScanner:
         self.core.setProperty(self.name, "SingleAxisXPattern", pattern)
         self.core.setProperty(self.name, "SingleAxisXMode", mode)
 
-    def configure_y_axis(self, amplitude_deg: float, offset_deg: float,
-                         pattern: str = "1 - Triangle",
-                         mode: str = "3 - Enabled with axes synced"):
+    def configure_y_axis(
+        self,
+        amplitude_deg: float,
+        offset_deg: float,
+        pattern: str = "1 - Triangle",
+        mode: str = "3 - Enabled with axes synced",
+    ):
         """
         Configure galvo Y-axis (light sheet Z-plane positioning).
 
@@ -282,14 +282,16 @@ class DiSPIMScanner:
         self.core.setProperty(self.name, "SingleAxisYOffset(deg)", float(angle_deg))
         self.core.waitForDevice(self.name)
 
-    def configure_spim_timing(self,
-                              scan_delay_ms: float = 6.75,
-                              num_scans_per_slice: int = 1,
-                              scan_duration_ms: float = 5.5,
-                              laser_delay_ms: float = 8.0,
-                              laser_duration_ms: float = 5.0,
-                              camera_delay_ms: float = 8.0,
-                              camera_duration_ms: float = 1.0):
+    def configure_spim_timing(
+        self,
+        scan_delay_ms: float = 6.75,
+        num_scans_per_slice: int = 1,
+        scan_duration_ms: float = 5.5,
+        laser_delay_ms: float = 8.0,
+        laser_duration_ms: float = 5.0,
+        camera_delay_ms: float = 8.0,
+        camera_duration_ms: float = 1.0,
+    ):
         """
         Configure SPIM timing parameters for hardware-triggered acquisition.
 
@@ -318,11 +320,13 @@ class DiSPIMScanner:
         self.core.setProperty(self.name, "SPIMDelayBeforeCamera(ms)", camera_delay_ms)
         self.core.setProperty(self.name, "SPIMCameraDuration(ms)", camera_duration_ms)
 
-    def configure_spim_parameters(self,
-                                   num_slices: int,
-                                   slices_per_piezo: int = 1,
-                                   num_sides: int = 1,
-                                   first_side: str = "A"):
+    def configure_spim_parameters(
+        self,
+        num_slices: int,
+        slices_per_piezo: int = 1,
+        num_sides: int = 1,
+        first_side: str = "A",
+    ):
         """
         Configure SPIM acquisition parameters.
 
@@ -358,11 +362,13 @@ class DiSPIMScanner:
         self.configure_y_axis(amplitude_deg=0.0001, offset_deg=0.0)
         self.core.waitForDevice(self.name)
 
-    def configure_for_volume_acquisition(self,
-                                          galvo_amplitude: float,
-                                          galvo_center: float,
-                                          num_slices: int,
-                                          timing_params: Dict = None):
+    def configure_for_volume_acquisition(
+        self,
+        galvo_amplitude: float,
+        galvo_center: float,
+        num_slices: int,
+        timing_params: dict = None,
+    ):
         """
         Configure scanner for hardware-triggered volume acquisition.
 

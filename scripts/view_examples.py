@@ -2,14 +2,14 @@
 Simple web viewer for stage examples with descriptions.
 """
 
-import json
 import base64
-from pathlib import Path
+import json
 from http.server import HTTPServer, SimpleHTTPRequestHandler
-import urllib.parse
+from pathlib import Path
 
 EXAMPLES_DIR = Path(__file__).parent.parent / "gently" / "examples" / "stages"
 STAGES = ["early", "comma", "1.5fold", "pretzel", "hatching", "hatched"]
+
 
 def load_examples():
     """Load all examples with metadata."""
@@ -33,11 +33,13 @@ def load_examples():
                 img_b64 = base64.b64encode(f.read()).decode()
 
             description = metadata.get("examples", {}).get(img_path.name, "")
-            examples.append({
-                "filename": img_path.name,
-                "image_b64": img_b64,
-                "description": description,
-            })
+            examples.append(
+                {
+                    "filename": img_path.name,
+                    "image_b64": img_b64,
+                    "description": description,
+                }
+            )
 
         all_examples[stage] = {
             "description": metadata.get("description", ""),
@@ -45,6 +47,7 @@ def load_examples():
         }
 
     return all_examples
+
 
 def generate_html():
     """Generate HTML page showing all examples."""
@@ -134,18 +137,22 @@ def generate_html():
     <div class="stage-section">
         <div class="stage-header">
             <span class="stage-name">{stage}</span>
-            <span class="stage-desc">{stage_data['description']}</span>
+            <span class="stage-desc">{stage_data["description"]}</span>
         </div>
         <div class="examples-grid">
 """
 
         for ex in stage_data["examples"]:
-            desc_html = ex["description"] if ex["description"] else '<span class="no-desc">No description</span>'
+            desc_html = (
+                ex["description"]
+                if ex["description"]
+                else '<span class="no-desc">No description</span>'
+            )
             html += f"""
             <div class="example-card">
-                <img src="data:image/jpeg;base64,{ex['image_b64']}" alt="{ex['filename']}">
+                <img src="data:image/jpeg;base64,{ex["image_b64"]}" alt="{ex["filename"]}">
                 <div class="example-info">
-                    <div class="example-filename">{ex['filename']}</div>
+                    <div class="example-filename">{ex["filename"]}</div>
                     <div class="example-description">{desc_html}</div>
                 </div>
             </div>
@@ -179,9 +186,9 @@ class ExamplesHandler(SimpleHTTPRequestHandler):
 def main():
     port = 8766
     server = HTTPServer(("127.0.0.1", port), ExamplesHandler)
-    print(f"\n{'='*50}")
+    print(f"\n{'=' * 50}")
     print(f"Examples viewer running at: http://127.0.0.1:{port}")
-    print(f"{'='*50}\n")
+    print(f"{'=' * 50}\n")
     server.serve_forever()
 
 

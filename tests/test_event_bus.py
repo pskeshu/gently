@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from gently.core.event_bus import EventBus, Event, EventType
+from gently.core.event_bus import Event, EventBus, EventType
 
 
 @pytest.fixture
@@ -29,12 +29,13 @@ def bus():
 # Subscribe and publish
 # =========================================================================
 
+
 class TestSubscribeAndPublish:
     def test_subscribe_and_publish(self, bus):
         received = []
         bus.subscribe(EventType.IMAGE_ACQUIRED, lambda e: received.append(e))
 
-        event = bus.publish(EventType.IMAGE_ACQUIRED, {"frame": 1}, source="camera")
+        bus.publish(EventType.IMAGE_ACQUIRED, {"frame": 1}, source="camera")
         assert len(received) == 1
         assert received[0].event_type == EventType.IMAGE_ACQUIRED
         assert received[0].data["frame"] == 1
@@ -84,6 +85,7 @@ class TestSubscribeAndPublish:
 # Async handlers
 # =========================================================================
 
+
 class TestAsyncHandlers:
     @pytest.mark.asyncio
     async def test_async_handler(self, bus):
@@ -107,6 +109,7 @@ class TestAsyncHandlers:
 # =========================================================================
 # Event history
 # =========================================================================
+
 
 class TestEventHistory:
     def test_event_history(self, bus):
@@ -156,6 +159,7 @@ class TestEventHistory:
 # Serialization
 # =========================================================================
 
+
 class TestEventSerialization:
     def test_event_to_dict_from_dict(self):
         original = Event(
@@ -180,6 +184,7 @@ class TestEventSerialization:
 # =========================================================================
 # Handler count
 # =========================================================================
+
 
 class TestHandlerCount:
     def test_handler_count_specific(self, bus):

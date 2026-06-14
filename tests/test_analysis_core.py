@@ -16,14 +16,14 @@ import numpy as np
 import pytest
 
 from gently.analysis.core import (
-    calculate_focus_score,
-    fit_focus_curve,
-    analyze_focus_stack,
-    create_focus_montage,
     AdaptiveSweepState,
-    FocusAlgorithm,
     FitFunction,
+    FocusAlgorithm,
     FocusAnalysisConfig,
+    analyze_focus_stack,
+    calculate_focus_score,
+    create_focus_montage,
+    fit_focus_curve,
 )
 
 
@@ -32,13 +32,14 @@ def _make_focused_image(size=128):
     img = np.zeros((size, size), dtype=np.float64)
     # Sharp square in center
     q = size // 4
-    img[q:3*q, q:3*q] = 200.0
+    img[q : 3 * q, q : 3 * q] = 200.0
     return img
 
 
 def _make_blurry_image(size=128):
     """Create a synthetic blurry image (low focus)."""
     from scipy.ndimage import gaussian_filter
+
     return gaussian_filter(_make_focused_image(size), sigma=10.0)
 
 
@@ -59,6 +60,7 @@ def _make_gaussian_focus_stack(n_positions=20, peak_pos=50.0):
 # =========================================================================
 # Focus scoring
 # =========================================================================
+
 
 class TestFocusScoring:
     def test_volath_focus_score_positive(self):
@@ -95,6 +97,7 @@ class TestFocusScoring:
 # =========================================================================
 # Curve fitting
 # =========================================================================
+
 
 class TestCurveFitting:
     def test_gaussian_fit_finds_peak(self):
@@ -138,6 +141,7 @@ class TestCurveFitting:
 # Adaptive sweep
 # =========================================================================
 
+
 class TestAdaptiveSweep:
     def test_adaptive_sweep_detects_peak(self):
         state = AdaptiveSweepState()
@@ -149,7 +153,7 @@ class TestAdaptiveSweep:
 
         stopped = False
         stop_reason = None
-        for pos, score in zip(positions, scores):
+        for pos, score in zip(positions, scores, strict=False):
             result = state.add_point(float(pos), max(score, 0.1))
             if result["should_stop"]:
                 stopped = True
@@ -163,6 +167,7 @@ class TestAdaptiveSweep:
 # =========================================================================
 # Montage
 # =========================================================================
+
 
 class TestFocusMontage:
     def test_focus_montage_shape(self):
@@ -182,6 +187,7 @@ class TestFocusMontage:
 # =========================================================================
 # End-to-end: analyze_focus_stack
 # =========================================================================
+
 
 class TestAnalyzeFocusStack:
     def test_analyze_focus_stack_basic(self):
@@ -207,7 +213,5 @@ class TestAnalyzeFocusStack:
 
     def test_analyze_focus_stack_too_few(self):
         config = FocusAnalysisConfig()
-        result = analyze_focus_stack(
-            [1, 2], [np.zeros((10, 10)), np.zeros((10, 10))], config
-        )
+        result = analyze_focus_stack([1, 2], [np.zeros((10, 10)), np.zeros((10, 10))], config)
         assert result.success is False

@@ -2,8 +2,6 @@
 Tests for ML data models — MLPipeline, TrainingRun, ModelConfig, etc.
 """
 
-import pytest
-
 from gently.ml.models import (
     DataSplit,
     MLPipeline,
@@ -17,8 +15,12 @@ from gently.ml.models import (
 
 class TestModelConfig:
     def test_round_trip(self):
-        mc = ModelConfig(architecture="efficientnet_b2", num_classes=8,
-                          pretrained=True, input_channels=1)
+        mc = ModelConfig(
+            architecture="efficientnet_b2",
+            num_classes=8,
+            pretrained=True,
+            input_channels=1,
+        )
         d = mc.to_dict()
         mc2 = ModelConfig.from_dict(d)
         assert mc2.architecture == "efficientnet_b2"
@@ -35,8 +37,7 @@ class TestModelConfig:
 
 class TestTrainingConfig:
     def test_round_trip(self):
-        tc = TrainingConfig(batch_size=64, epochs=100, learning_rate=3e-4,
-                             mixed_precision=True)
+        tc = TrainingConfig(batch_size=64, epochs=100, learning_rate=3e-4, mixed_precision=True)
         d = tc.to_dict()
         tc2 = TrainingConfig.from_dict(d)
         assert tc2.batch_size == 64
@@ -51,8 +52,7 @@ class TestTrainingConfig:
 
 class TestDataSplit:
     def test_round_trip(self):
-        ds = DataSplit(train_ratio=0.8, val_ratio=0.1, test_ratio=0.1,
-                        random_seed=123)
+        ds = DataSplit(train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, random_seed=123)
         d = ds.to_dict()
         ds2 = DataSplit.from_dict(d)
         assert ds2.train_ratio == 0.8
@@ -66,10 +66,13 @@ class TestDataSplit:
 class TestTrainingRun:
     def test_round_trip(self):
         run = TrainingRun(
-            id="run1", pipeline_id="pipe1",
+            id="run1",
+            pipeline_id="pipe1",
             status=TrainingStatus.TRAINING.value,
-            current_epoch=10, total_epochs=50,
-            val_accuracy=0.85, best_val_accuracy=0.87,
+            current_epoch=10,
+            total_epochs=50,
+            val_accuracy=0.85,
+            best_val_accuracy=0.87,
             model_config=ModelConfig(architecture="resnet18"),
         )
         d = run.to_dict()
@@ -88,7 +91,9 @@ class TestTrainingRun:
 class TestMLPipeline:
     def test_round_trip(self):
         pipeline = MLPipeline(
-            id="p1", campaign_id="c1", name="Embryo Classifier",
+            id="p1",
+            campaign_id="c1",
+            name="Embryo Classifier",
             task="embryo_stage_classification",
             model_config=ModelConfig(architecture="efficientnet_b2"),
             best_accuracy=0.94,

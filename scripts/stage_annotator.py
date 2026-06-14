@@ -10,24 +10,24 @@ Usage:
 """
 
 import argparse
+import base64
+import io
 import json
 import logging
 import os
 import signal
+import socketserver
 import subprocess
 import sys
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-import base64
-import io
-import socketserver
 
 import numpy as np
 import tifffile
 from PIL import Image
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 logger = logging.getLogger(__name__)
 
 # Configuration
@@ -67,7 +67,7 @@ def load_and_project(tif_path: Path) -> np.ndarray:
         # Check if width is roughly 4x height (dual-view format)
         if width > height * 2:
             # Extract View A (left half) - shape (Z, Y, X/2)
-            view_a = vol[:, :, :width // 2]
+            view_a = vol[:, :, : width // 2]
         else:
             view_a = vol
 
@@ -122,8 +122,8 @@ def image_to_base64(img: np.ndarray) -> str:
     pil_img = Image.fromarray(img)
 
     # Convert to RGB for JPEG (grayscale works but RGB is more compatible)
-    if pil_img.mode != 'RGB':
-        pil_img = pil_img.convert('RGB')
+    if pil_img.mode != "RGB":
+        pil_img = pil_img.convert("RGB")
 
     buffer = io.BytesIO()
     pil_img.save(buffer, format="JPEG", quality=90)
@@ -162,7 +162,7 @@ state = AppState()
 class AnnotatorHandler(BaseHTTPRequestHandler):
     """HTTP handler for annotation interface."""
 
-    protocol_version = 'HTTP/1.1'
+    protocol_version = "HTTP/1.1"
 
     def log_message(self, format, *args):
         pass  # Suppress HTTP logging
@@ -205,12 +205,12 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
 
             if parsed.path == "/api/save_markers":
                 # Read POST body
-                content_length = int(self.headers.get('Content-Length', 0))
+                content_length = int(self.headers.get("Content-Length", 0))
                 body = self.rfile.read(content_length)
                 data = json.loads(body.decode())
 
                 # Get labels from client
-                labels = data.get('labels', {})
+                labels = data.get("labels", {})
                 count = self.save_with_labels(labels)
                 self.send_json({"ok": True, "saved": count})
             else:
@@ -317,7 +317,8 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         <div class="nav-container">
             <button class="nav-btn" onclick="prev()">&larr; Prev (A)</button>
             <div class="slider-container">
-                <input type="range" class="slider" id="slider" min="0" max="100" value="0" oninput="gotoIdx(this.value)">
+                <input type="range" class="slider" id="slider" min="0" max="100"
+                  value="0" oninput="gotoIdx(this.value)">
                 <div class="timeline-track" id="timeline-track">
                     <div class="timeline-cursor" id="timeline-cursor"></div>
                 </div>
@@ -335,10 +336,14 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         <div class="controls">
             <button class="stage-btn" data-stage="early" onclick="label('early')">1: Early</button>
             <button class="stage-btn" data-stage="comma" onclick="label('comma')">2: Comma</button>
-            <button class="stage-btn" data-stage="1.5fold" onclick="label('1.5fold')">3: 1.5-Fold</button>
-            <button class="stage-btn" data-stage="pretzel" onclick="label('pretzel')">4: Pretzel</button>
-            <button class="stage-btn" data-stage="hatching" onclick="label('hatching')">5: Hatching</button>
-            <button class="stage-btn" data-stage="hatched" onclick="label('hatched')">6: Hatched</button>
+            <button class="stage-btn" data-stage="1.5fold"
+              onclick="label('1.5fold')">3: 1.5-Fold</button>
+            <button class="stage-btn" data-stage="pretzel"
+              onclick="label('pretzel')">4: Pretzel</button>
+            <button class="stage-btn" data-stage="hatching"
+              onclick="label('hatching')">5: Hatching</button>
+            <button class="stage-btn" data-stage="hatched"
+              onclick="label('hatched')">6: Hatched</button>
             <button class="stage-btn" data-stage="" onclick="label('')">0: Clear</button>
         </div>
 
@@ -347,12 +352,15 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         </div>
 
         <p class="keyboard-hint">
-            <strong>How to use:</strong> Navigate to where a stage STARTS, then press the stage key (1-6).<br>
-            All images from that point until the next marked stage will be labeled automatically.<br>
+            <strong>How to use:</strong> Navigate to where a stage STARTS, then press the
+            stage key (1-6).<br>
+            All images from that point until the next marked stage will be labeled
+            automatically.<br>
             Keys: 1-6 = mark stage start, 0 = clear mark, A/D or Arrows = navigate, S = save
         </p>
 
-        <div id="stage-markers" style="margin-top: 15px; padding: 10px; background: #222; border-radius: 6px;">
+        <div id="stage-markers"
+          style="margin-top: 15px; padding: 10px; background: #222; border-radius: 6px;">
             <strong>Stage Transitions:</strong>
             <div id="markers-list" style="margin-top: 8px; font-family: monospace;"></div>
         </div>
@@ -442,7 +450,9 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
             let markerIndices = Object.keys(stageMarkers).map(Number).sort((a, b) => a - b);
 
             if (markerIndices.length === 0) {
-                list.innerHTML = '<span style="color: #666;">No markers set. Navigate to where a stage starts and press 1-7.</span>';
+                list.innerHTML = '<span style="color: #666;">'
+                    + 'No markers set. Navigate to where a stage starts and press 1-7.'
+                    + '</span>';
                 return;
             }
 
@@ -454,13 +464,22 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
                 let nextIdx = markerIndices[i + 1] || totalImages;
                 let count = nextIdx - idx;
 
-                html += '<div style="margin: 4px 0; display: flex; align-items: center; gap: 10px;">';
-                html += '<span style="display: inline-block; width: 12px; height: 12px; background: ' + color + '; border-radius: 2px;"></span>';
-                html += '<span style="color: ' + color + '; font-weight: bold; min-width: 70px;">' + stage.toUpperCase() + '</span>';
+                html += '<div style="margin: 4px 0; display: flex;'
+                    + ' align-items: center; gap: 10px;">';
+                html += '<span style="display: inline-block; width: 12px; height: 12px;'
+                    + ' background: ' + color + '; border-radius: 2px;"></span>';
+                html += '<span style="color: ' + color + '; font-weight: bold;'
+                    + ' min-width: 70px;">' + stage.toUpperCase() + '</span>';
                 html += '<span style="color: #888;">frame ' + (idx + 1) + '</span>';
                 html += '<span style="color: #666;">(' + count + ' frames)</span>';
-                html += '<button onclick="clearMarker(' + idx + ')" style="padding: 2px 8px; background: #c00; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">×</button>';
-                html += '<button onclick="gotoIdx(' + idx + ')" style="padding: 2px 8px; background: #555; color: white; border: none; border-radius: 3px; cursor: pointer; font-size: 11px;">Go</button>';
+                html += '<button onclick="clearMarker(' + idx + ')"'
+                    + ' style="padding: 2px 8px; background: #c00; color: white;'
+                    + ' border: none; border-radius: 3px;'
+                    + ' cursor: pointer; font-size: 11px;">×</button>';
+                html += '<button onclick="gotoIdx(' + idx + ')"'
+                    + ' style="padding: 2px 8px; background: #555; color: white;'
+                    + ' border: none; border-radius: 3px;'
+                    + ' cursor: pointer; font-size: 11px;">Go</button>';
                 html += '</div>';
             }
             list.innerHTML = html;
@@ -660,17 +679,19 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         # Get all paths for client-side label computation
         all_paths = [str(p) for p, _ in state.images]
 
-        self.send_json({
-            "data": b64,
-            "path": str(path),
-            "filename": path.name,
-            "idx": state.current_idx,
-            "total": len(state.images),
-            "all_paths": all_paths,
-            "session": state.session_id,
-            "embryo": state.current_embryo,
-            "embryo_list": state.embryo_list,
-        })
+        self.send_json(
+            {
+                "data": b64,
+                "path": str(path),
+                "filename": path.name,
+                "idx": state.current_idx,
+                "total": len(state.images),
+                "all_paths": all_paths,
+                "session": state.session_id,
+                "embryo": state.current_embryo,
+                "embryo_list": state.embryo_list,
+            }
+        )
 
     def switch_embryo(self, embryo_name):
         if embryo_name in state.embryos:
@@ -726,6 +747,7 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
 
 class ThreadedHTTPServer(socketserver.ThreadingMixIn, HTTPServer):
     """Handle requests in separate threads."""
+
     allow_reuse_address = True
     daemon_threads = True
 
@@ -745,6 +767,7 @@ def open_chrome(url):
 
     # Fallback to default browser
     import webbrowser
+
     webbrowser.open(url)
     return False
 
@@ -824,10 +847,10 @@ def main():
     server = ThreadedHTTPServer(("127.0.0.1", args.port), AnnotatorHandler)
     url = f"http://127.0.0.1:{args.port}"
 
-    logger.info(f"\n{'='*50}")
+    logger.info(f"\n{'=' * 50}")
     logger.info(f"Annotation server running at: {url}")
-    logger.info(f"Press Ctrl+C to stop")
-    logger.info(f"{'='*50}\n")
+    logger.info("Press Ctrl+C to stop")
+    logger.info(f"{'=' * 50}\n")
 
     if not args.no_browser:
         open_chrome(url)

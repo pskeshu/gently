@@ -4,8 +4,6 @@ Tests for ContextStore — campaigns, plan items, observations, learnings.
 
 from datetime import datetime
 
-import pytest
-
 from gently.harness.memory.model import (
     Confidence,
     Learning,
@@ -23,12 +21,23 @@ class TestSchema:
         ).fetchall()
         table_names = {row["name"] for row in tables}
         expected = {
-            "campaigns", "projects", "session_intents", "session_campaigns",
-            "planned_sessions", "planned_session_campaigns",
-            "learnings", "embryo_understanding", "observations",
-            "expectations", "watchpoints", "questions",
-            "plan_items", "plan_item_dependencies",
-            "plan_templates", "plan_snapshots", "agent_state",
+            "campaigns",
+            "projects",
+            "session_intents",
+            "session_campaigns",
+            "planned_sessions",
+            "planned_session_campaigns",
+            "learnings",
+            "embryo_understanding",
+            "observations",
+            "expectations",
+            "watchpoints",
+            "questions",
+            "plan_items",
+            "plan_item_dependencies",
+            "plan_templates",
+            "plan_snapshots",
+            "agent_state",
             "campaign_participants",
         }
         for t in expected:
@@ -70,8 +79,8 @@ class TestCampaigns:
 
     def test_subcampaigns(self, context_store):
         root = context_store.create_campaign(description="Root")
-        child1 = context_store.create_campaign(description="Phase 1", parent_id=root)
-        child2 = context_store.create_campaign(description="Phase 2", parent_id=root)
+        context_store.create_campaign(description="Phase 1", parent_id=root)
+        context_store.create_campaign(description="Phase 2", parent_id=root)
         children = context_store.get_subcampaigns(root)
         assert len(children) == 2
 
@@ -118,7 +127,9 @@ class TestPlanItems:
     def test_create_and_get(self, context_store):
         cid = context_store.create_campaign(description="C1")
         item_id = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="Image embryos",
+            campaign_id=cid,
+            type="imaging",
+            title="Image embryos",
             description="20C timelapse",
         )
         item = context_store.get_plan_item(item_id)
@@ -138,7 +149,9 @@ class TestPlanItems:
     def test_update_status(self, context_store):
         cid = context_store.create_campaign(description="C1")
         item_id = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="T1",
+            campaign_id=cid,
+            type="imaging",
+            title="T1",
         )
         context_store.complete_plan_item(item_id, "Successful — 12 embryos")
         item = context_store.get_plan_item(item_id)
@@ -149,7 +162,9 @@ class TestPlanItems:
         cid = context_store.create_campaign(description="C1")
         id1 = context_store.create_plan_item(campaign_id=cid, type="bench", title="Prepare worms")
         id2 = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="Image worms",
+            campaign_id=cid,
+            type="imaging",
+            title="Image worms",
             depends_on=[id1],
         )
         deps = context_store.get_plan_item_dependencies(id2)
@@ -179,7 +194,9 @@ class TestPlanItems:
     def test_claim_plan_item(self, context_store):
         cid = context_store.create_campaign(description="C1")
         item_id = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="T1",
+            campaign_id=cid,
+            type="imaging",
+            title="T1",
         )
         success = context_store.claim_plan_item(item_id, "peer-1", "workstation")
         assert success is True
@@ -192,7 +209,9 @@ class TestPlanItems:
     def test_unclaim_plan_item(self, context_store):
         cid = context_store.create_campaign(description="C1")
         item_id = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="T1",
+            campaign_id=cid,
+            type="imaging",
+            title="T1",
         )
         context_store.claim_plan_item(item_id, "peer-1", "ws")
         context_store.unclaim_plan_item(item_id)
@@ -202,7 +221,9 @@ class TestPlanItems:
     def test_delete_plan_item(self, context_store):
         cid = context_store.create_campaign(description="C1")
         item_id = context_store.create_plan_item(
-            campaign_id=cid, type="imaging", title="T1",
+            campaign_id=cid,
+            type="imaging",
+            title="T1",
         )
         deleted = context_store.delete_plan_item(item_id)
         assert deleted is True
@@ -235,13 +256,15 @@ class TestObservations:
 
     def test_filter_by_embryo(self, context_store):
         for i in range(3):
-            context_store.add_observation(Observation(
-                id=f"obs-{i}",
-                timestamp=datetime.now(),
-                type="check",
-                content=f"Check {i}",
-                embryo_id="emb-1" if i < 2 else "emb-2",
-            ))
+            context_store.add_observation(
+                Observation(
+                    id=f"obs-{i}",
+                    timestamp=datetime.now(),
+                    type="check",
+                    content=f"Check {i}",
+                    embryo_id="emb-1" if i < 2 else "emb-2",
+                )
+            )
         emb1_obs = context_store.get_observations_for_embryo("emb-1")
         assert len(emb1_obs) == 2
 
@@ -262,11 +285,13 @@ class TestLearnings:
 
     def test_multiple_learnings(self, context_store):
         for i in range(5):
-            context_store.add_learning(Learning(
-                id=f"learn-{i}",
-                content=f"Learning {i}",
-                created_at=datetime.now(),
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=f"learn-{i}",
+                    content=f"Learning {i}",
+                    created_at=datetime.now(),
+                )
+            )
         learnings = context_store.get_learnings()
         assert len(learnings) == 5
 
@@ -288,9 +313,13 @@ class TestAgentState:
 class TestReset:
     def test_reset_clears_data(self, context_store):
         context_store.create_campaign(description="C1")
-        context_store.add_learning(Learning(
-            id="l1", content="test", created_at=datetime.now(),
-        ))
+        context_store.add_learning(
+            Learning(
+                id="l1",
+                content="test",
+                created_at=datetime.now(),
+            )
+        )
         counts = context_store.reset()
         assert sum(counts.values()) > 0
         assert len(context_store.get_active_campaigns()) == 0
@@ -300,6 +329,7 @@ class TestReset:
 class TestContextManager:
     def test_context_manager(self, tmp_path):
         from gently.harness.memory.store import ContextStore
+
         with ContextStore(tmp_path / "ctx.db") as cs:
             cs.create_campaign(description="Test")
             assert len(cs.get_active_campaigns()) == 1

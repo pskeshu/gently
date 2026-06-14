@@ -61,6 +61,6 @@ def create_router(server) -> APIRouter:
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to build strategy: {e}",
-            )
+            ) from e
 
     return router

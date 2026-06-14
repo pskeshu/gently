@@ -6,12 +6,12 @@ and runtime switching support via /theme command.
 """
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass
 class Theme:
     """Theme definition with colors and text indicators."""
+
     name: str
     color_mode: str  # "dark" or "light"
 
@@ -44,7 +44,7 @@ class Theme:
     icon_system: str = "System"
 
 
-THEMES: Dict[str, Theme] = {
+THEMES: dict[str, Theme] = {
     "vibrant": Theme(
         name="Vibrant",
         color_mode="dark",
@@ -193,6 +193,6 @@ def set_theme(name: str) -> None:
         raise ValueError(f"Unknown theme: '{name}'. Available: {available}")
 
 
-def list_themes() -> Dict[str, Theme]:
+def list_themes() -> dict[str, Theme]:
     """Get all available themes."""
     return THEMES.copy()

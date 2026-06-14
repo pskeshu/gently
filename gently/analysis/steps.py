@@ -10,12 +10,12 @@ Provides concrete implementations of AnalysisStep for:
 import asyncio
 import logging
 import os
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 from ..settings import settings
-from .pipeline import AnalysisStep, AnalysisResult, StepType
+from .pipeline import AnalysisResult, AnalysisStep, StepType
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # Image Processing Steps
 # =============================================================================
+
 
 class MaxProjectionStep(AnalysisStep):
     """
@@ -38,7 +39,7 @@ class MaxProjectionStep(AnalysisStep):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Execute max projection"""
         if not isinstance(input_data, np.ndarray):
@@ -56,7 +57,7 @@ class MaxProjectionStep(AnalysisStep):
                 step_type=self.step_type,
                 data=input_data,
                 success=True,
-                metadata={'already_2d': True},
+                metadata={"already_2d": True},
             )
 
         # Perform projection
@@ -68,9 +69,9 @@ class MaxProjectionStep(AnalysisStep):
             data=projection,
             success=True,
             metadata={
-                'input_shape': list(input_data.shape),
-                'output_shape': list(projection.shape),
-                'axis': self.axis,
+                "input_shape": list(input_data.shape),
+                "output_shape": list(projection.shape),
+                "axis": self.axis,
             },
         )
 
@@ -89,7 +90,7 @@ class ThresholdStep(AnalysisStep):
     def __init__(
         self,
         method: str = "otsu",
-        value: Optional[float] = None,
+        value: float | None = None,
         name: str = "threshold",
     ):
         super().__init__(name=name, step_type=StepType.THRESHOLD)
@@ -99,7 +100,7 @@ class ThresholdStep(AnalysisStep):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Apply threshold"""
         if not isinstance(input_data, np.ndarray):
@@ -117,6 +118,7 @@ class ThresholdStep(AnalysisStep):
             # Otsu's method
             try:
                 from skimage.filters import threshold_otsu
+
                 threshold_value = threshold_otsu(image)
             except ImportError:
                 # Fallback to simple percentile
@@ -151,9 +153,9 @@ class ThresholdStep(AnalysisStep):
             data=binary.astype(np.uint8) * 255,
             success=True,
             metadata={
-                'method': self.method,
-                'threshold_value': float(threshold_value),
-                'pixels_above': int(np.sum(binary)),
+                "method": self.method,
+                "threshold_value": float(threshold_value),
+                "pixels_above": int(np.sum(binary)),
             },
         )
 
@@ -184,7 +186,7 @@ class MorphologyStep(AnalysisStep):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Apply morphological operation"""
         if not isinstance(input_data, np.ndarray):
@@ -197,6 +199,7 @@ class MorphologyStep(AnalysisStep):
 
         try:
             import cv2
+
             kernel = np.ones((self.kernel_size, self.kernel_size), np.uint8)
 
             if self.operation == "erode":
@@ -219,25 +222,38 @@ class MorphologyStep(AnalysisStep):
             # Fallback without OpenCV using scipy
             try:
                 from scipy import ndimage
+
                 kernel = np.ones((self.kernel_size, self.kernel_size))
 
                 if self.operation in ("erode", "open"):
-                    result = ndimage.binary_erosion(
-                        input_data > 0, structure=kernel, iterations=self.iterations
-                    ).astype(np.uint8) * 255
+                    result = (
+                        ndimage.binary_erosion(
+                            input_data > 0, structure=kernel, iterations=self.iterations
+                        ).astype(np.uint8)
+                        * 255
+                    )
                     if self.operation == "open":
-                        result = ndimage.binary_dilation(
-                            result > 0, structure=kernel, iterations=self.iterations
-                        ).astype(np.uint8) * 255
+                        result = (
+                            ndimage.binary_dilation(
+                                result > 0, structure=kernel, iterations=self.iterations
+                            ).astype(np.uint8)
+                            * 255
+                        )
 
                 elif self.operation in ("dilate", "close"):
-                    result = ndimage.binary_dilation(
-                        input_data > 0, structure=kernel, iterations=self.iterations
-                    ).astype(np.uint8) * 255
+                    result = (
+                        ndimage.binary_dilation(
+                            input_data > 0, structure=kernel, iterations=self.iterations
+                        ).astype(np.uint8)
+                        * 255
+                    )
                     if self.operation == "close":
-                        result = ndimage.binary_erosion(
-                            result > 0, structure=kernel, iterations=self.iterations
-                        ).astype(np.uint8) * 255
+                        result = (
+                            ndimage.binary_erosion(
+                                result > 0, structure=kernel, iterations=self.iterations
+                            ).astype(np.uint8)
+                            * 255
+                        )
 
             except ImportError:
                 return AnalysisResult(
@@ -253,9 +269,9 @@ class MorphologyStep(AnalysisStep):
             data=result,
             success=True,
             metadata={
-                'operation': self.operation,
-                'kernel_size': self.kernel_size,
-                'iterations': self.iterations,
+                "operation": self.operation,
+                "kernel_size": self.kernel_size,
+                "iterations": self.iterations,
             },
         )
 
@@ -284,7 +300,7 @@ class BlobDetectionStep(AnalysisStep):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Detect blobs"""
         if not isinstance(input_data, np.ndarray):
@@ -316,25 +332,27 @@ class BlobDetectionStep(AnalysisStep):
             detections = []
             for blob in blobs:
                 y, x, sigma = blob
-                detections.append({
-                    'x': float(x),
-                    'y': float(y),
-                    'radius': float(sigma * np.sqrt(2)),
-                })
+                detections.append(
+                    {
+                        "x": float(x),
+                        "y": float(y),
+                        "radius": float(sigma * np.sqrt(2)),
+                    }
+                )
 
             return AnalysisResult(
                 step_name=self.name,
                 step_type=self.step_type,
                 data={
-                    'detections': detections,
-                    'count': len(detections),
-                    'image': input_data,  # Keep original for next step
+                    "detections": detections,
+                    "count": len(detections),
+                    "image": input_data,  # Keep original for next step
                 },
                 success=True,
                 metadata={
-                    'num_blobs': len(detections),
-                    'min_sigma': self.min_sigma,
-                    'max_sigma': self.max_sigma,
+                    "num_blobs": len(detections),
+                    "min_sigma": self.min_sigma,
+                    "max_sigma": self.max_sigma,
                 },
             )
 
@@ -351,6 +369,7 @@ class BlobDetectionStep(AnalysisStep):
 # VLM (Vision Language Model) Step
 # =============================================================================
 
+
 class VLMStep(AnalysisStep):
     """
     Analyze image using Claude Vision API
@@ -364,7 +383,7 @@ class VLMStep(AnalysisStep):
         model: str = settings.models.perception,
         max_tokens: int = 1024,
         name: str = "vlm_analysis",
-        api_key: Optional[str] = None,
+        api_key: str | None = None,
     ):
         super().__init__(name=name, step_type=StepType.VLM)
         self.prompt = prompt
@@ -374,21 +393,22 @@ class VLMStep(AnalysisStep):
 
     def _encode_image(self, image: np.ndarray) -> str:
         """Encode image to base64 JPEG."""
-        from gently.core.imaging import normalize_to_uint8, image_to_base64
+        from gently.core.imaging import image_to_base64, normalize_to_uint8
+
         img = normalize_to_uint8(image, method="minmax")
         return image_to_base64(img, format="JPEG", quality=85)
 
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Analyze with Claude Vision"""
         context = context or {}
 
         # Get image from input (handle dict from previous step)
         if isinstance(input_data, dict):
-            image = input_data.get('image', input_data.get('data'))
+            image = input_data.get("image", input_data.get("data"))
         else:
             image = input_data
 
@@ -404,7 +424,7 @@ class VLMStep(AnalysisStep):
             import anthropic
 
             # Get API key
-            api_key = self.api_key or context.get('api_key') or os.getenv("ANTHROPIC_API_KEY")
+            api_key = self.api_key or context.get("api_key") or os.getenv("ANTHROPIC_API_KEY")
             if not api_key:
                 return AnalysisResult(
                     step_name=self.name,
@@ -424,12 +444,12 @@ class VLMStep(AnalysisStep):
                         "type": "base64",
                         "media_type": "image/jpeg",
                         "data": b64_image,
-                    }
+                    },
                 },
                 {
                     "type": "text",
                     "text": self.prompt,
-                }
+                },
             ]
 
             # Call Claude
@@ -438,7 +458,7 @@ class VLMStep(AnalysisStep):
                 client.messages.create,
                 model=self.model,
                 max_tokens=self.max_tokens,
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             result_text = response.content[0].text
@@ -447,15 +467,15 @@ class VLMStep(AnalysisStep):
                 step_name=self.name,
                 step_type=self.step_type,
                 data={
-                    'analysis': result_text,
-                    'image': image,  # Pass through for next step
+                    "analysis": result_text,
+                    "image": image,  # Pass through for next step
                 },
                 success=True,
                 metadata={
-                    'model': self.model,
-                    'prompt': self.prompt[:100] + "..." if len(self.prompt) > 100 else self.prompt,
-                    'input_tokens': response.usage.input_tokens,
-                    'output_tokens': response.usage.output_tokens,
+                    "model": self.model,
+                    "prompt": self.prompt[:100] + "..." if len(self.prompt) > 100 else self.prompt,
+                    "input_tokens": response.usage.input_tokens,
+                    "output_tokens": response.usage.output_tokens,
                 },
             )
 
@@ -473,6 +493,7 @@ class VLMStep(AnalysisStep):
 # SAM (Segment Anything Model) Step
 # =============================================================================
 
+
 class SAMStep(AnalysisStep):
     """
     Segment image using SAM (Segment Anything Model)
@@ -485,9 +506,9 @@ class SAMStep(AnalysisStep):
 
     def __init__(
         self,
-        prompt: Optional[str] = None,
-        points: Optional[List[Tuple[int, int]]] = None,
-        model_path: Optional[str] = None,
+        prompt: str | None = None,
+        points: list[tuple[int, int]] | None = None,
+        model_path: str | None = None,
         min_area: int = 1000,
         name: str = "sam_segmentation",
     ):
@@ -505,8 +526,12 @@ class SAMStep(AnalysisStep):
             return
 
         try:
-            from segment_anything import sam_model_registry, SamPredictor, SamAutomaticMaskGenerator
             import torch
+            from segment_anything import (
+                SamAutomaticMaskGenerator,
+                SamPredictor,
+                sam_model_registry,
+            )
 
             device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -528,12 +553,12 @@ class SAMStep(AnalysisStep):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Run SAM segmentation"""
         # Get image from input
         if isinstance(input_data, dict):
-            image = input_data.get('image', input_data.get('data'))
+            image = input_data.get("image", input_data.get("data"))
         else:
             image = input_data
 
@@ -565,28 +590,29 @@ class SAMStep(AnalysisStep):
                 if image_rgb.max() <= 1.0:
                     image_rgb = (image_rgb * 255).astype(np.uint8)
                 else:
-                    image_rgb = ((image_rgb - image_rgb.min()) /
-                                 (image_rgb.max() - image_rgb.min()) * 255).astype(np.uint8)
+                    image_rgb = (
+                        (image_rgb - image_rgb.min()) / (image_rgb.max() - image_rgb.min()) * 255
+                    ).astype(np.uint8)
 
             # Run in thread (SAM is CPU/GPU intensive)
             masks = await asyncio.to_thread(self._run_sam, image_rgb)
 
             # Filter by area
-            filtered_masks = [m for m in masks if m['area'] >= self.min_area]
+            filtered_masks = [m for m in masks if m["area"] >= self.min_area]
 
             return AnalysisResult(
                 step_name=self.name,
                 step_type=self.step_type,
                 data={
-                    'masks': filtered_masks,
-                    'count': len(filtered_masks),
-                    'image': image,
+                    "masks": filtered_masks,
+                    "count": len(filtered_masks),
+                    "image": image,
                 },
                 success=True,
                 metadata={
-                    'total_masks': len(masks),
-                    'filtered_masks': len(filtered_masks),
-                    'min_area': self.min_area,
+                    "total_masks": len(masks),
+                    "filtered_masks": len(filtered_masks),
+                    "min_area": self.min_area,
                 },
             )
 
@@ -599,7 +625,7 @@ class SAMStep(AnalysisStep):
                 error=str(e),
             )
 
-    def _run_sam(self, image_rgb: np.ndarray) -> List[Dict]:
+    def _run_sam(self, image_rgb: np.ndarray) -> list[dict]:
         """Run SAM (blocking, called in thread)"""
         if self.points:
             # Point-prompted segmentation
@@ -615,9 +641,9 @@ class SAMStep(AnalysisStep):
 
             return [
                 {
-                    'segmentation': masks[i],
-                    'area': int(np.sum(masks[i])),
-                    'score': float(scores[i]),
+                    "segmentation": masks[i],
+                    "area": int(np.sum(masks[i])),
+                    "score": float(scores[i]),
                 }
                 for i in range(len(masks))
             ]
@@ -643,25 +669,27 @@ class SAMStep(AnalysisStep):
             for region in regions:
                 if region.area >= self.min_area:
                     mask = labeled == region.label
-                    masks.append({
-                        'segmentation': mask,
-                        'area': region.area,
-                        'centroid': region.centroid,
-                        'bbox': region.bbox,
-                    })
+                    masks.append(
+                        {
+                            "segmentation": mask,
+                            "area": region.area,
+                            "centroid": region.centroid,
+                            "bbox": region.bbox,
+                        }
+                    )
 
             return AnalysisResult(
                 step_name=self.name,
                 step_type=self.step_type,
                 data={
-                    'masks': masks,
-                    'count': len(masks),
-                    'image': image,
+                    "masks": masks,
+                    "count": len(masks),
+                    "image": image,
                 },
                 success=True,
                 metadata={
-                    'method': 'fallback_threshold',
-                    'num_masks': len(masks),
+                    "method": "fallback_threshold",
+                    "num_masks": len(masks),
                 },
             )
 

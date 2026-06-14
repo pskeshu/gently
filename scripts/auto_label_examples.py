@@ -16,11 +16,8 @@ import asyncio
 import base64
 import io
 import json
-import os
-import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
 import anthropic
 import numpy as np
@@ -34,7 +31,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 STAGES = ["early", "comma", "pretzel", "3fold", "hatching", "hatched"]
 
 # Staging prompt for Claude
-STAGE_PROMPT = """You are classifying C. elegans embryo developmental stages from diSPIM microscopy max projections.
+STAGE_PROMPT = """You are classifying C. elegans embryo developmental stages from diSPIM
+microscopy max projections.
 
 The stages in order are:
 1. EARLY - Round/oval shape, no visible folding, may see cell divisions
@@ -77,7 +75,7 @@ def sample_timelapse(
     timelapse_dir: Path,
     embryo_num: int = 1,
     num_samples: int = 40,
-) -> List[Tuple[int, Path]]:
+) -> list[tuple[int, Path]]:
     """
     Sample images spread across timelapse to cover all stages.
 
@@ -100,8 +98,8 @@ def sample_timelapse(
     def get_timepoint(f: Path) -> int:
         # Pattern: embryo_001_embryo001_t0042_...
         name = f.stem
-        for part in name.split('_'):
-            if part.startswith('t') and part[1:].isdigit():
+        for part in name.split("_"):
+            if part.startswith("t") and part[1:].isdigit():
                 return int(part[1:])
         return 0
 
@@ -122,26 +120,28 @@ async def classify_image(
     client: anthropic.Anthropic,
     image_b64: str,
     timepoint: int,
-) -> Dict:
+) -> dict:
     """Use Claude to classify a single image."""
     response = await asyncio.to_thread(
         client.messages.create,
         model="claude-haiku-4-5-20251001",  # Fast and cheap for bulk labeling
         max_tokens=200,
-        messages=[{
-            "role": "user",
-            "content": [
-                {"type": "text", "text": STAGE_PROMPT},
-                {
-                    "type": "image",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "image/jpeg",
-                        "data": image_b64,
-                    }
-                }
-            ]
-        }]
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": STAGE_PROMPT},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "image/jpeg",
+                            "data": image_b64,
+                        },
+                    },
+                ],
+            }
+        ],
     )
 
     # Parse response
@@ -149,23 +149,29 @@ async def classify_image(
     try:
         # Find JSON in response
         import re
-        json_match = re.search(r'\{[^{}]+\}', text)
+
+        json_match = re.search(r"\{[^{}]+\}", text)
         if json_match:
             result = json.loads(json_match.group())
             result["timepoint"] = timepoint
             return result
-    except:
+    except Exception:
         pass
 
-    return {"stage": "unknown", "confidence": 0.0, "notes": text[:100], "timepoint": timepoint}
+    return {
+        "stage": "unknown",
+        "confidence": 0.0,
+        "notes": text[:100],
+        "timepoint": timepoint,
+    }
 
 
 async def auto_label_batch(
     timelapse_dir: Path,
     embryo_num: int,
     num_samples: int = 40,
-    output_file: Optional[Path] = None,
-) -> Dict[str, List[Dict]]:
+    output_file: Path | None = None,
+) -> dict[str, list[dict]]:
     """
     Auto-label a batch of images from a timelapse.
 
@@ -178,7 +184,7 @@ async def auto_label_batch(
     samples = sample_timelapse(timelapse_dir, embryo_num, num_samples)
 
     # Process images
-    results_by_stage: Dict[str, List[Dict]] = {stage: [] for stage in STAGES}
+    results_by_stage: dict[str, list[dict]] = {stage: [] for stage in STAGES}
     results_by_stage["unknown"] = []
 
     print(f"Classifying {len(samples)} images with Claude...")
@@ -216,15 +222,15 @@ async def auto_label_batch(
         if count > 0:
             avg_conf = sum(r["confidence"] for r in results_by_stage[stage]) / count
             timepoints = [r["timepoint"] for r in results_by_stage[stage]]
-            print(f"  {stage:10s}: {count:3d} images (avg confidence: {avg_conf:.0%}, T={min(timepoints)}-{max(timepoints)})")
+            print(
+                f"  {stage:10s}: {count:3d} images (avg confidence: {avg_conf:.0%},"
+                f" T={min(timepoints)}-{max(timepoints)})"
+            )
 
     # Save results for review
     output_file = output_file or Path("labeled_results.json")
     save_data = {
-        stage: [
-            {k: v for k, v in r.items() if k != "image_b64"}
-            for r in results
-        ]
+        stage: [{k: v for k, v in r.items() if k != "image_b64"} for r in results]
         for stage, results in results_by_stage.items()
     }
     save_data["_metadata"] = {
@@ -241,7 +247,7 @@ async def auto_label_batch(
 
 
 def populate_examples(
-    results_by_stage: Dict[str, List[Dict]],
+    results_by_stage: dict[str, list[dict]],
     examples_dir: Path,
     max_per_stage: int = 3,
     min_confidence: float = 0.7,
@@ -284,11 +290,14 @@ def populate_examples(
 
                 # Save as JPEG
                 img_bytes = base64.b64decode(b64)
-                out_path = stage_dir / f"example_{i+1:03d}.jpg"
+                out_path = stage_dir / f"example_{i + 1:03d}.jpg"
                 with open(out_path, "wb") as f:
                     f.write(img_bytes)
 
-                print(f"  {stage}: Saved {out_path.name} (T={result['timepoint']}, conf={result['confidence']:.0%})")
+                print(
+                    f"  {stage}: Saved {out_path.name}"
+                    f" (T={result['timepoint']}, conf={result['confidence']:.0%})"
+                )
 
     print("\nDone! Examples populated.")
 
@@ -324,9 +333,9 @@ async def interactive_review(results_file: Path, examples_dir: Path):
     while True:
         choice = input("\nChoice: ").strip().lower()
 
-        if choice == 'q':
+        if choice == "q":
             break
-        elif choice == 'a':
+        elif choice == "a":
             # Reload with image data and populate
             print("\nReloading images and populating examples...")
             # We need to reload since we didn't save b64 data
@@ -338,7 +347,7 @@ async def interactive_review(results_file: Path, examples_dir: Path):
             )
             populate_examples(results, examples_dir)
             break
-        elif choice == 'p':
+        elif choice == "p":
             # Just populate from saved file - need to reload images
             print("Reloading images...")
             results_with_images = {}
@@ -354,12 +363,17 @@ async def interactive_review(results_file: Path, examples_dir: Path):
                         results_with_images[stage].append(item_copy)
             populate_examples(results_with_images, examples_dir)
             break
-        elif choice == 's':
-            stage = input("Which stage? (early/comma/pretzel/3fold/hatching/hatched): ").strip().lower()
+        elif choice == "s":
+            stage = (
+                input("Which stage? (early/comma/pretzel/3fold/hatching/hatched): ").strip().lower()
+            )
             if stage in data:
                 print(f"\n{stage} examples:")
                 for item in data[stage]:
-                    print(f"  T={item['timepoint']:04d}: {item.get('notes', 'no notes')} (conf={item.get('confidence', 0):.0%})")
+                    print(
+                        f"  T={item['timepoint']:04d}: {item.get('notes', 'no notes')}"
+                        f" (conf={item.get('confidence', 0):.0%})"
+                    )
             else:
                 print(f"No examples for {stage}")
 
@@ -370,9 +384,16 @@ def main():
     parser.add_argument("--embryo", "-e", type=int, default=1, help="Embryo number to sample")
     parser.add_argument("--samples", "-n", type=int, default=40, help="Number of images to sample")
     parser.add_argument("--review", "-r", action="store_true", help="Review existing labels")
-    parser.add_argument("--output", "-o", default="labeled_results.json", help="Output file for labels")
+    parser.add_argument(
+        "--output", "-o", default="labeled_results.json", help="Output file for labels"
+    )
     parser.add_argument("--examples-dir", default="gently/examples", help="Examples directory")
-    parser.add_argument("--auto-populate", "-a", action="store_true", help="Auto-populate without review")
+    parser.add_argument(
+        "--auto-populate",
+        "-a",
+        action="store_true",
+        help="Auto-populate without review",
+    )
 
     args = parser.parse_args()
 
@@ -391,12 +412,14 @@ def main():
             print(f"Directory not found: {timelapse_dir}")
             return
 
-        results = asyncio.run(auto_label_batch(
-            timelapse_dir,
-            args.embryo,
-            args.samples,
-            output_file,
-        ))
+        results = asyncio.run(
+            auto_label_batch(
+                timelapse_dir,
+                args.embryo,
+                args.samples,
+                output_file,
+            )
+        )
 
         if args.auto_populate:
             populate_examples(results, examples_dir)

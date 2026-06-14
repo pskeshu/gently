@@ -15,8 +15,6 @@ This module is the SINGLE SOURCE OF TRUTH for coordinate conversions.
 All other files should import from here.
 """
 
-from typing import Tuple
-
 # Default optical parameters for bottom detection camera
 DEFAULT_PIXEL_SIZE_UM = 6.5
 DEFAULT_OBJECTIVE_MAG = 10.0  # 10x objective on bottom camera
@@ -29,7 +27,7 @@ SPIM_Z_STEP_UM = 1.0  # Z-step between slices
 
 def get_um_per_pixel(
     pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-    objective_mag: float = DEFAULT_OBJECTIVE_MAG
+    objective_mag: float = DEFAULT_OBJECTIVE_MAG,
 ) -> float:
     """
     Calculate microns per pixel for the optical system.
@@ -56,8 +54,8 @@ def pixel_to_stage_position(
     image_center_y: float,
     stage_x: float,
     stage_y: float,
-    um_per_pixel: float = None
-) -> Tuple[float, float]:
+    um_per_pixel: float = None,
+) -> tuple[float, float]:
     """
     Convert pixel coordinates to stage position (for embryo POSITION calculation).
 
@@ -101,7 +99,8 @@ def pixel_to_stage_position(
     dy_pixels = pixel_y - image_center_y
 
     # X: NOT inverted (stage coords match image coords for X)
-    # Y: IS inverted (stage +Y moves embryo down, but image +Y is also down, need to invert for centering)
+    # Y: IS inverted (stage +Y moves embryo down, but image +Y is also down,
+    # need to invert for centering)
     embryo_stage_x = stage_x + dx_pixels * um_per_pixel
     embryo_stage_y = stage_y - dy_pixels * um_per_pixel
 
@@ -115,8 +114,8 @@ def stage_to_pixel_position(
     current_stage_y: float,
     image_center_x: float,
     image_center_y: float,
-    um_per_pixel: float = None
-) -> Tuple[float, float]:
+    um_per_pixel: float = None,
+) -> tuple[float, float]:
     """
     Convert stage position to pixel coordinates (for DISPLAY/visualization).
 
@@ -155,10 +154,8 @@ def stage_to_pixel_position(
 
 
 def pixel_displacement_to_stage_movement(
-    pixel_displacement_x: float,
-    pixel_displacement_y: float,
-    um_per_pixel: float = None
-) -> Tuple[float, float]:
+    pixel_displacement_x: float, pixel_displacement_y: float, um_per_pixel: float = None
+) -> tuple[float, float]:
     """
     Convert pixel displacement to stage MOVEMENT (for centering an embryo).
 

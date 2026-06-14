@@ -8,12 +8,11 @@ pairs so the WebSocket route can drive the conversation.
 """
 
 import asyncio
-import json
 import logging
-import time
-from typing import Any, Callable, Coroutine, Dict, Optional
+from collections.abc import Callable, Coroutine
+from typing import Any
 
-from .commands import get_command_registry, CommandCategory
+from .commands import get_command_registry
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +38,17 @@ class AgentBridge:
 
     def __init__(self, agent):
         self.agent = agent
-        self._launch_info: Dict[str, Any] = {}
+        self._launch_info: dict[str, Any] = {}
         self._wizard = None  # StartupWizard, set by init_wizard()
-        self._active_remote: Optional[Dict[str, Any]] = None  # {"peer": PeerInfo, "campaign_id": str}
-        self._pending_import: Optional[Dict] = None  # For /import-embryos picker
+        self._active_remote: dict[str, Any] | None = None  # {"peer": PeerInfo, "campaign_id": str}
+        self._pending_import: dict | None = None  # For /import-embryos picker
         # Set by the web layer (register_display_broadcaster) so AGENT-INITIATED
         # turns (the wake-router) can stream to all chat clients + the transcript.
-        self._display_broadcaster: Optional[Callable] = None
+        self._display_broadcaster: Callable | None = None
 
-    def register_display_broadcaster(self, broadcast_fn, choice_factory=None,
-                                     choice_discard=None) -> None:
+    def register_display_broadcaster(
+        self, broadcast_fn, choice_factory=None, choice_discard=None
+    ) -> None:
         """Register the web layer's broadcast fn for autonomous (wake) turns.
 
         The wake-router has no per-connection send_fn, so to make autonomous
@@ -99,7 +99,7 @@ class AgentBridge:
             return True
         return False
 
-    def set_launch_info(self, info: Dict[str, Any]) -> None:
+    def set_launch_info(self, info: dict[str, Any]) -> None:
         """Store launch metadata to include in the connect message."""
         self._launch_info = info
 
@@ -122,13 +122,13 @@ class AgentBridge:
         returns an empty string — the agent's first turn becomes the
         opener instead of static text.
         """
-        if not hasattr(self.agent, 'memory') or not self.agent.memory:
+        if not hasattr(self.agent, "memory") or not self.agent.memory:
             return ""
 
         memory = self.agent.memory
 
         # Restore active_plan_item_id from experiment state (session resume)
-        experiment = getattr(self.agent, 'experiment', None)
+        experiment = getattr(self.agent, "experiment", None)
         if experiment and experiment.active_plan_item_id:
             memory.active_plan_item_id = experiment.active_plan_item_id
         elif experiment:
@@ -140,13 +140,14 @@ class AgentBridge:
                 logger.info(f"Auto-set active plan item: {active_id}")
 
                 # Link session to the campaign
-                cs = getattr(self.agent, 'context_store', None)
+                cs = getattr(self.agent, "context_store", None)
                 if cs and self.agent.session_id:
                     try:
                         item = cs.get_plan_item(active_id)
                         if item:
                             cs.link_session_campaign(
-                                self.agent.session_id, item.campaign_id,
+                                self.agent.session_id,
+                                item.campaign_id,
                             )
                     except Exception:
                         pass
@@ -156,7 +157,7 @@ class AgentBridge:
 
         # Invalidate prompt cache so the system prompt picks up the
         # active plan item on the next message
-        prompts = getattr(self.agent, 'prompts', None)
+        prompts = getattr(self.agent, "prompts", None)
         if prompts and memory.active_plan_item_id:
             prompts.invalidate_context_cache()
 
@@ -172,9 +173,9 @@ class AgentBridge:
         replaces the older O(memory-scan) ``resolve_plan_context()`` gate
         that was making the picker take seconds to appear at startup.
         """
-        if not hasattr(self.agent, 'memory') or not self.agent.memory:
+        if not hasattr(self.agent, "memory") or not self.agent.memory:
             return False
-        experiment = getattr(self.agent, 'experiment', None)
+        experiment = getattr(self.agent, "experiment", None)
         if experiment is None:
             return False
         if experiment.active_plan_item_id:
@@ -209,7 +210,7 @@ class AgentBridge:
         candidates.sort(key=_sort_key)
         return candidates
 
-    def _candidate_to_option(self, item, spec, campaign) -> Dict:
+    def _candidate_to_option(self, item, spec, campaign) -> dict:
         """Turn a ``(item, spec, campaign)`` tuple into a picker option."""
         memory = getattr(self.agent, "memory", None)
         spec_summary = ""
@@ -219,10 +220,11 @@ class AgentBridge:
             except Exception:
                 spec_summary = ""
 
-        meta: Dict[str, Any] = {}
+        meta: dict[str, Any] = {}
         if campaign is not None:
-            c_name = getattr(campaign, "shorthand", None) or (
-                (getattr(campaign, "description", "") or "")[:60]
+            c_name = (
+                getattr(campaign, "shorthand", None)
+                or ((getattr(campaign, "description", "") or "")[:60])
             )
             if c_name:
                 meta["campaign"] = c_name
@@ -236,8 +238,7 @@ class AgentBridge:
                 order = getattr(item, "phase_order", 0) or 0
                 if total > 0:
                     meta["sequence"] = (
-                        f"{order} of {total} · {done} done"
-                        if order else f"{done}/{total} done"
+                        f"{order} of {total} · {done} done" if order else f"{done}/{total} done"
                     )
             except Exception:
                 pass
@@ -247,10 +248,15 @@ class AgentBridge:
             meta["status"] = status_val
 
         if spec is not None:
-            spec_dict: Dict[str, Any] = {}
+            spec_dict: dict[str, Any] = {}
             for field in (
-                "strain", "temperature_c", "num_slices", "exposure_ms",
-                "interval_s", "stop_condition", "success_criteria",
+                "strain",
+                "temperature_c",
+                "num_slices",
+                "exposure_ms",
+                "interval_s",
+                "stop_condition",
+                "success_criteria",
             ):
                 val = getattr(spec, field, None)
                 if val is not None:
@@ -266,8 +272,10 @@ class AgentBridge:
         }
 
     def _build_resolution_choice_payload(
-        self, candidates: list, full_list: bool = False,
-    ) -> Dict:
+        self,
+        candidates: list,
+        full_list: bool = False,
+    ) -> dict:
         """Build the ``choice_data`` payload for the resolution picker.
 
         Top 3 candidates by default; ``full_list=True`` shows up to 20
@@ -280,26 +288,33 @@ class AgentBridge:
 
         if not full_list and len(candidates) > show_n:
             remaining = len(candidates) - show_n
-            options.append({
-                "id": "show_all",
-                "label": f"See all imaging tasks ({remaining} more)…",
-                "description": "Browse the full unblocked list",
-            })
+            options.append(
+                {
+                    "id": "show_all",
+                    "label": f"See all imaging tasks ({remaining} more)…",
+                    "description": "Browse the full unblocked list",
+                }
+            )
 
-        options.append({
-            "id": "standalone",
-            "label": "Standalone — just exploring",
-            "description": "No plan attached, default settings",
-        })
-        options.append({
-            "id": "plan_new",
-            "label": "Design a new plan",
-            "description": "Enter plan mode first",
-        })
+        options.append(
+            {
+                "id": "standalone",
+                "label": "Standalone — just exploring",
+                "description": "No plan attached, default settings",
+            }
+        )
+        options.append(
+            {
+                "id": "plan_new",
+                "label": "Design a new plan",
+                "description": "Enter plan mode first",
+            }
+        )
 
         question = (
             f"All {len(candidates)} unblocked imaging tasks — pick one:"
-            if full_list else "What is this session for?"
+            if full_list
+            else "What is this session for?"
         )
 
         return {
@@ -312,8 +327,8 @@ class AgentBridge:
 
     async def bootstrap_resolution_picker(
         self,
-        send_fn: Callable[[Dict], Coroutine],
-        choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
+        send_fn: Callable[[dict], Coroutine],
+        choice_future_factory: Callable[[dict], "asyncio.Future[str]"],
     ) -> None:
         """Open the session with a deterministic resolution picker.
 
@@ -345,9 +360,7 @@ class AgentBridge:
 
         # Kick off the slow candidate scan in the background. By the time
         # the user picks "Continue", this is almost always already done.
-        candidates_task = asyncio.create_task(
-            asyncio.to_thread(self._build_resolution_candidates)
-        )
+        candidates_task = asyncio.create_task(asyncio.to_thread(self._build_resolution_candidates))
 
         # --- Phase 1: fast top-level question -------------------------
         top_payload = {
@@ -374,11 +387,13 @@ class AgentBridge:
         top_request_id = f"resolve_top_{_uuid.uuid4().hex[:8]}"
         top_payload["request_id"] = top_request_id
         top_future = choice_future_factory(top_payload)
-        await send_fn({
-            "type": "choice_request",
-            "choice_data": top_payload,
-            "request_id": top_request_id,
-        })
+        await send_fn(
+            {
+                "type": "choice_request",
+                "choice_data": top_payload,
+                "request_id": top_request_id,
+            }
+        )
 
         try:
             top_choice = await top_future
@@ -391,7 +406,9 @@ class AgentBridge:
         if top_choice != "resume_plan":
             candidates_task.cancel()
             await self._dispatch_resolution_pick(
-                top_choice or "standalone", send_fn, choice_future_factory,
+                top_choice or "standalone",
+                send_fn,
+                choice_future_factory,
             )
             return
 
@@ -408,11 +425,13 @@ class AgentBridge:
             if briefing:
                 await send_fn({"type": "stream_start"})
                 await send_fn({"type": "text", "text": briefing})
-                await send_fn({
-                    "type": "stream_end",
-                    "tokens": self._get_token_snapshot(),
-                    "mode": self.agent.mode,
-                })
+                await send_fn(
+                    {
+                        "type": "stream_end",
+                        "tokens": self._get_token_snapshot(),
+                        "mode": self.agent.mode,
+                    }
+                )
             else:
                 await self._emit_resolution_result(
                     send_fn,
@@ -424,7 +443,8 @@ class AgentBridge:
         full_list = False
         while True:
             payload = self._build_resolution_choice_payload(
-                candidates, full_list=full_list,
+                candidates,
+                full_list=full_list,
             )
             # Re-label the question for the secondary picker so the user
             # knows they're now picking the specific plan item.
@@ -432,11 +452,13 @@ class AgentBridge:
             request_id = f"resolve_pick_{_uuid.uuid4().hex[:8]}"
             payload["request_id"] = request_id
             future = choice_future_factory(payload)
-            await send_fn({
-                "type": "choice_request",
-                "choice_data": payload,
-                "request_id": request_id,
-            })
+            await send_fn(
+                {
+                    "type": "choice_request",
+                    "choice_data": payload,
+                    "request_id": request_id,
+                }
+            )
             try:
                 selected = await future
             except asyncio.CancelledError:
@@ -447,15 +469,17 @@ class AgentBridge:
                 continue
 
             await self._dispatch_resolution_pick(
-                selected, send_fn, choice_future_factory,
+                selected,
+                send_fn,
+                choice_future_factory,
             )
             return
 
     async def _dispatch_resolution_pick(
         self,
         selected: str,
-        send_fn: Callable[[Dict], Coroutine],
-        choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
+        send_fn: Callable[[dict], Coroutine],
+        choice_future_factory: Callable[[dict], "asyncio.Future[str]"],
     ) -> None:
         """Apply the user's resolution pick.
 
@@ -498,7 +522,8 @@ class AgentBridge:
                 logger.error(f"attach_session_to_plan failed: {e}", exc_info=True)
                 await self._emit_resolution_result(
                     send_fn,
-                    "Couldn't attach the session to that plan item. You can try again or pick standalone.",
+                    "Couldn't attach the session to that plan item."
+                    " You can try again or pick standalone.",
                 )
                 return
 
@@ -514,7 +539,9 @@ class AgentBridge:
             spec_dict = self._get_active_plan_spec()
             closer = self._compose_attach_closer(spec_dict)
             await self._emit_resolution_result(
-                send_fn, closer, applied_spec=spec_dict,
+                send_fn,
+                closer,
+                applied_spec=spec_dict,
             )
             return
 
@@ -540,7 +567,8 @@ class AgentBridge:
                 logger.error(f"enter_plan_mode failed: {e}", exc_info=True)
                 msg = "Plan mode active."
             await self._emit_resolution_result(
-                send_fn, msg or "Plan mode — what are we designing?",
+                send_fn,
+                msg or "Plan mode — what are we designing?",
             )
             return
 
@@ -552,14 +580,17 @@ class AgentBridge:
         except Exception as e:
             logger.warning(f"enter_resolution_mode failed: {e}")
             await self._emit_resolution_result(
-                send_fn, "Couldn't enter resolution mode.",
+                send_fn,
+                "Couldn't enter resolution mode.",
             )
             return
         await self.stream_response(
-            selected or "(no input)", send_fn, choice_future_factory,
+            selected or "(no input)",
+            send_fn,
+            choice_future_factory,
         )
 
-    def _get_active_plan_spec(self) -> Optional[Dict]:
+    def _get_active_plan_spec(self) -> dict | None:
         """Return the ``active_plan_spec`` dict stashed on
         ``experiment.metadata`` by ``apply_plan_acquisition_spec``."""
         try:
@@ -568,35 +599,40 @@ class AgentBridge:
         except Exception:
             return None
 
-    def _compose_attach_closer(self, spec_dict: Optional[Dict]) -> str:
+    def _compose_attach_closer(self, spec_dict: dict | None) -> str:
         """One-line conversational closer to follow attach + apply."""
         title = (spec_dict or {}).get("plan_item_title") or "this plan item"
         return f"Attached to **{title}**. Mark embryo positions when you're ready."
 
     async def _emit_resolution_result(
         self,
-        send_fn: Callable[[Dict], Coroutine],
+        send_fn: Callable[[dict], Coroutine],
         closer_text: str,
-        applied_spec: Optional[Dict] = None,
+        applied_spec: dict | None = None,
     ) -> None:
         """Emit a deterministic stream_start → text → stream_end pair,
         followed by an optional ``applied_spec`` panel message."""
         await send_fn({"type": "stream_start"})
         await send_fn({"type": "text", "text": closer_text})
-        await send_fn({
-            "type": "stream_end",
-            "tokens": self._get_token_snapshot(),
-            "mode": self.agent.mode,
-        })
+        await send_fn(
+            {
+                "type": "stream_end",
+                "tokens": self._get_token_snapshot(),
+                "mode": self.agent.mode,
+            }
+        )
         if applied_spec:
-            await send_fn({
-                "type": "applied_spec",
-                "spec": applied_spec,
-            })
+            await send_fn(
+                {
+                    "type": "applied_spec",
+                    "spec": applied_spec,
+                }
+            )
 
     def init_wizard(self, context_store, claude_client=None) -> None:
         """Create the startup wizard from a ContextStore."""
         from .memory.startup_wizard import StartupWizard
+
         self._context_store = context_store
         self._wizard = StartupWizard(
             context_store=context_store,
@@ -607,8 +643,8 @@ class AgentBridge:
     async def stream_response(
         self,
         message: str,
-        send_fn: Callable[[Dict], Coroutine],
-        choice_future_factory: Callable[[Dict], "asyncio.Future[str]"],
+        send_fn: Callable[[dict], Coroutine],
+        choice_future_factory: Callable[[dict], "asyncio.Future[str]"],
     ) -> None:
         """
         Stream an agent response over WebSocket.
@@ -636,11 +672,13 @@ class AgentBridge:
                         chunk = await stream_iter.__anext__()
                 except StopAsyncIteration:
                     # Stream finished — send token usage summary + current mode
-                    await send_fn({
-                        "type": "stream_end",
-                        "tokens": self._get_token_snapshot(),
-                        "mode": self.agent.mode,
-                    })
+                    await send_fn(
+                        {
+                            "type": "stream_end",
+                            "tokens": self._get_token_snapshot(),
+                            "mode": self.agent.mode,
+                        }
+                    )
                     return
 
                 chunk_type = chunk.get("type")
@@ -679,8 +717,8 @@ class AgentBridge:
     async def handle_command(
         self,
         command: str,
-        send_fn: Callable[[Dict], Coroutine],
-        choice_futures: Dict = None,
+        send_fn: Callable[[dict], Coroutine],
+        choice_futures: dict = None,
     ) -> None:
         """
         Execute a slash command and send the result.
@@ -699,69 +737,87 @@ class AgentBridge:
         cmd = command.strip().lower()
         cmd_name = cmd.split()[0]
         cmd_def = registry.get(cmd_name)
-        logger.info("handle_command: %s (resolved: %s)", cmd_name, cmd_def.name if cmd_def else "NOT FOUND")
+        logger.info(
+            "handle_command: %s (resolved: %s)",
+            cmd_name,
+            cmd_def.name if cmd_def else "NOT FOUND",
+        )
 
         if not cmd_def:
-            await send_fn({
-                "type": "command_result",
-                "command": command,
-                "error": f"Unknown command: {cmd_name}",
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": command,
+                    "error": f"Unknown command: {cmd_name}",
+                }
+            )
             return
 
         if cmd in ("/quit", "/exit", "/q"):
-            await send_fn({
-                "type": "command_result",
-                "command": cmd,
-                "action": "quit",
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": cmd,
+                    "action": "quit",
+                }
+            )
             return
 
         if cmd == "/status":
             status = self._get_status_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/status",
-                "content": status,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/status",
+                    "content": status,
+                }
+            )
             return
 
         if cmd in ("/peers", "/mesh") or cmd.startswith("/peers ") or cmd.startswith("/mesh "):
             parts = command.strip().split()
             if len(parts) >= 3 and parts[2].lower() == "campaigns":
                 data = await self._get_peer_campaigns(parts[1])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/peers",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/peers",
+                        "content": data,
+                    }
+                )
             else:
                 data = self._get_peers_data()
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/peers",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/peers",
+                        "content": data,
+                    }
+                )
             return
 
         if cmd == "/embryos" or cmd.startswith("/embryos "):
             parts = cmd.split(maxsplit=1)
             embryo_id = parts[1].strip() if len(parts) > 1 else None
             data = self._get_embryos_data(embryo_id)
-            await send_fn({
-                "type": "command_result",
-                "command": "/embryos",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/embryos",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/tokens":
             data = self._get_tokens_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/tokens",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/tokens",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/help" or cmd.startswith("/help "):
@@ -773,111 +829,137 @@ class AgentBridge:
                     text = f"Unknown command: {help_cmd}"
             else:
                 text = registry.generate_help_markdown()
-            await send_fn({
-                "type": "command_result",
-                "command": "/help",
-                "content": {"text": text},
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/help",
+                    "content": {"text": text},
+                }
+            )
             return
 
         if cmd.startswith("/theme"):
             parts = cmd.split()
             if len(parts) > 1:
-                from gently.app.theme import set_theme, get_theme
+                from gently.app.theme import get_theme, set_theme
+
                 try:
                     set_theme(parts[1])
                     theme = get_theme()
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/theme",
-                        "content": {"theme": theme.name, "changed": True},
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/theme",
+                            "content": {"theme": theme.name, "changed": True},
+                        }
+                    )
                 except ValueError as e:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/theme",
-                        "error": str(e),
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/theme",
+                            "error": str(e),
+                        }
+                    )
             else:
-                from gently.app.theme import list_themes, get_theme
+                from gently.app.theme import get_theme, list_themes
+
                 current = get_theme()
                 themes = {k: v.name for k, v in list_themes().items()}
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/theme",
-                    "content": {"themes": themes, "current": current.name},
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/theme",
+                        "content": {"themes": themes, "current": current.name},
+                    }
+                )
             return
 
         if cmd == "/sessions":
-            await send_fn({
-                "type": "command_result",
-                "command": "/sessions",
-                "content": {"sessions": self._get_sessions_list()},
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/sessions",
+                    "content": {"sessions": self._get_sessions_list()},
+                }
+            )
             return
 
         if cmd == "/timelapse" or cmd == "/timelapse watch":
             data = self._get_timelapse_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/timelapse",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/timelapse",
+                    "content": data,
+                }
+            )
             return
 
         if cmd.startswith("/timeline"):
             parts = command.strip().split()
             data = self._get_timeline_data(parts[1:] if len(parts) > 1 else [])
-            await send_fn({
-                "type": "command_result",
-                "command": "/timeline",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/timeline",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/detectors":
             data = self._get_detectors_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/detectors",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/detectors",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/history":
             data = self._get_history_data()
-            await send_fn({
-                "type": "command_result",
-                "command": "/history",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/history",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/save":
             success = self.agent.save_session()
             if success:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/save",
-                    "content": {"text": f"Session saved: {self.agent.session_id}"},
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/save",
+                        "content": {"text": f"Session saved: {self.agent.session_id}"},
+                    }
+                )
             else:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/save",
-                    "error": "Failed to save session",
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/save",
+                        "error": "Failed to save session",
+                    }
+                )
             return
 
         if cmd == "/reset-context":
             cs = self._require_context_store()
             if cs is None:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/reset-context",
-                    "error": "Context store not available",
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/reset-context",
+                        "error": "Context store not available",
+                    }
+                )
             else:
                 counts = cs.reset()
                 total = sum(counts.values())
@@ -886,25 +968,32 @@ class AgentBridge:
                 self.init_wizard(cs, claude_client)
                 if total > 0:
                     details = ", ".join(f"{v} {k}" for k, v in counts.items())
-                    msg = f"Context cleared: {total} entries removed ({details}).\nRun /wizard to set up again."
+                    msg = (
+                        f"Context cleared: {total} entries removed ({details})."
+                        "\nRun /wizard to set up again."
+                    )
                 else:
                     msg = "Context already empty — nothing to clear."
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/reset-context",
-                    "content": {"text": msg},
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/reset-context",
+                        "content": {"text": msg},
+                    }
+                )
             return
 
         if cmd == "/wizard":
             # Handled by the WebSocket route (agent_ws.py), not the bridge.
             # If we reach here, it means the wizard loop called handle_command
             # — i.e. /wizard was typed while the wizard is already running.
-            await send_fn({
-                "type": "command_result",
-                "command": "/wizard",
-                "content": {"text": "The wizard is already running."},
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/wizard",
+                    "content": {"text": "The wizard is already running."},
+                }
+            )
             return
 
         if cmd == "/campaign" or cmd == "/campaigns" or cmd.startswith("/campaign "):
@@ -913,53 +1002,67 @@ class AgentBridge:
 
             if subcmd == "share" and len(parts) >= 3:
                 data = self._share_campaign(parts[2])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             elif subcmd == "unshare" and len(parts) >= 3:
                 data = self._unshare_campaign(parts[2])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             elif subcmd == "delete" and len(parts) >= 3:
                 data = self._delete_campaign(parts[2])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             elif subcmd == "rename" and len(parts) >= 4:
                 data = self._rename_campaign(parts[2], " ".join(parts[3:]))
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             elif subcmd == "pause" and len(parts) >= 3:
                 data = self._pause_campaign(parts[2])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             elif subcmd == "resume" and len(parts) >= 3:
                 data = self._resume_campaign(parts[2])
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             else:
                 data = self._get_campaigns_data(command.strip())
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/campaign",
-                    "content": data,
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/campaign",
+                        "content": data,
+                    }
+                )
             return
 
         if cmd.startswith("/join-campaign"):
@@ -968,11 +1071,13 @@ class AgentBridge:
                 data = await self._join_campaign(parts[1], parts[2])
             else:
                 data = {"text": "Usage: /join-campaign <hostname> <campaign_id>"}
-            await send_fn({
-                "type": "command_result",
-                "command": "/join-campaign",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/join-campaign",
+                    "content": data,
+                }
+            )
             return
 
         if cmd.startswith("/claim"):
@@ -981,11 +1086,13 @@ class AgentBridge:
                 data = await self._claim_item(parts[1])
             else:
                 data = {"text": "Usage: /claim <item_id>"}
-            await send_fn({
-                "type": "command_result",
-                "command": "/claim",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/claim",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/pair" or cmd.startswith("/pair "):
@@ -1004,17 +1111,30 @@ class AgentBridge:
             elif subcmd == "scopes":
                 extra_args = parts[3] if len(parts) > 3 else ""
                 data = self._pair_scopes(arg, extra_args)
-            elif subcmd and subcmd not in ("accept", "reject", "list", "unpair", "scopes"):
+            elif subcmd and subcmd not in (
+                "accept",
+                "reject",
+                "list",
+                "unpair",
+                "scopes",
+            ):
                 # Treat as hostname — initiate pairing
                 data = await self._pair_initiate(subcmd, send_fn)
             else:
-                data = {"text": "Usage: /pair <hostname> | accept | reject | list | unpair <id> | scopes [hostname] [scope_list]"}
+                data = {
+                    "text": (
+                        "Usage: /pair <hostname> | accept | reject | list"
+                        " | unpair <id> | scopes [hostname] [scope_list]"
+                    )
+                }
 
-            await send_fn({
-                "type": "command_result",
-                "command": "/pair",
-                "content": data,
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/pair",
+                    "content": data,
+                }
+            )
             return
 
         if cmd == "/plan" or cmd.startswith("/plan "):
@@ -1023,28 +1143,32 @@ class AgentBridge:
 
             if subcmd == "exit":
                 msg = self.agent.exit_plan_mode()
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/plan",
-                    "content": {
-                        "text": msg,
-                        "mode": self.agent.mode,
-                    },
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/plan",
+                        "content": {
+                            "text": msg,
+                            "mode": self.agent.mode,
+                        },
+                    }
+                )
             elif subcmd == "status":
                 summary = self.agent._get_active_plan_summary()
                 if summary:
                     text = f"Mode: {self.agent.mode}\n\n{summary}"
                 else:
                     text = f"Mode: {self.agent.mode}\nNo active campaigns found."
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/plan",
-                    "content": {
-                        "text": text,
-                        "mode": self.agent.mode,
-                    },
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/plan",
+                        "content": {
+                            "text": text,
+                            "mode": self.agent.mode,
+                        },
+                    }
+                )
             else:
                 # Enter plan mode (or show status if already in it)
                 if self.agent.mode == "plan":
@@ -1053,32 +1177,38 @@ class AgentBridge:
                     if summary:
                         text += f"\n\n{summary}"
                     text += "\n\nUse /plan exit to return to run mode."
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/plan",
-                        "content": {
-                            "text": text,
-                            "mode": "plan",
-                        },
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/plan",
+                            "content": {
+                                "text": text,
+                                "mode": "plan",
+                            },
+                        }
+                    )
                 else:
                     msg = self.agent.enter_plan_mode()
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/plan",
-                        "content": {
-                            "text": msg,
-                            "mode": "plan",
-                        },
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/plan",
+                            "content": {
+                                "text": msg,
+                                "mode": "plan",
+                            },
+                        }
+                    )
             return
 
         if cmd == "/clear":
-            await send_fn({
-                "type": "command_result",
-                "command": "/clear",
-                "action": "clear",
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/clear",
+                    "action": "clear",
+                }
+            )
             return
 
         if cmd.startswith("/resume"):
@@ -1089,39 +1219,48 @@ class AgentBridge:
                 if success:
                     embryo_count = len(self.agent.experiment.embryos)
                     msg_count = len(self.agent.conversation_history)
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/resume",
-                        "content": {
-                            "text": f"Session resumed: {session_id}\n  {embryo_count} embryos, {msg_count} messages",
-                        },
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/resume",
+                            "content": {
+                                "text": (
+                                    f"Session resumed: {session_id}\n"
+                                    f"  {embryo_count} embryos, {msg_count} messages"
+                                ),
+                            },
+                        }
+                    )
                 else:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/resume",
-                        "error": f"Session '{session_id}' not found",
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/resume",
+                            "error": f"Session '{session_id}' not found",
+                        }
+                    )
             else:
                 # No session ID — list available sessions for the user
                 sessions = self._get_sessions_list()
                 if sessions:
                     lines = ["Available sessions (use /resume <id>):"]
                     for s in sessions:
-                        lines.append(
-                            f"  {s['session_id']} — {s['embryo_count']} embryos"
-                        )
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/resume",
-                        "content": {"text": "\n".join(lines)},
-                    })
+                        lines.append(f"  {s['session_id']} — {s['embryo_count']} embryos")
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/resume",
+                            "content": {"text": "\n".join(lines)},
+                        }
+                    )
                 else:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/resume",
-                        "content": {"text": "No saved sessions found."},
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/resume",
+                            "content": {"text": "No saved sessions found."},
+                        }
+                    )
             return
 
         if cmd.startswith("/import-embryos"):
@@ -1133,11 +1272,13 @@ class AgentBridge:
                     sessions = self._get_sessions_list()
                     sessions_with = [s for s in sessions if s["embryo_count"] > 0]
                     if not sessions_with:
-                        await send_fn({
-                            "type": "command_result",
-                            "command": "/import-embryos",
-                            "error": "No sessions with embryos found.",
-                        })
+                        await send_fn(
+                            {
+                                "type": "command_result",
+                                "command": "/import-embryos",
+                                "error": "No sessions with embryos found.",
+                            }
+                        )
                         return
                     session_id = sessions_with[0]["session_id"]
                 else:
@@ -1150,6 +1291,7 @@ class AgentBridge:
                 sessions_with = [s for s in sessions if s["embryo_count"] > 0]
                 if sessions_with:
                     import uuid as _uuid
+
                     request_id = f"import_embryos_{_uuid.uuid4().hex[:8]}"
                     options = []
                     for s in sessions_with[:10]:
@@ -1162,6 +1304,7 @@ class AgentBridge:
                         if last_active:
                             try:
                                 from datetime import datetime
+
                                 dt = datetime.fromisoformat(last_active)
                                 time_str = dt.strftime("%b %d %H:%M")
                             except (ValueError, TypeError):
@@ -1172,21 +1315,25 @@ class AgentBridge:
                         desc = f"Import embryos from session {sid}"
                         if name:
                             desc = name
-                        options.append({
-                            "id": sid,
-                            "label": label,
-                            "description": desc,
-                        })
-                    await send_fn({
-                        "type": "choice_request",
-                        "choice_data": {
-                            "_type": "single",
-                            "question": "Import embryos from which session?",
-                            "options": options,
-                            "allow_multiple": False,
-                        },
-                        "request_id": request_id,
-                    })
+                        options.append(
+                            {
+                                "id": sid,
+                                "label": label,
+                                "description": desc,
+                            }
+                        )
+                    await send_fn(
+                        {
+                            "type": "choice_request",
+                            "choice_data": {
+                                "_type": "single",
+                                "question": "Import embryos from which session?",
+                                "options": options,
+                                "allow_multiple": False,
+                            },
+                            "request_id": request_id,
+                        }
+                    )
                     # Register a callback so the choice response triggers the import.
                     # We can't await here (would deadlock the REPL loop), so we
                     # store state for _handle_import_choice to pick up.
@@ -1195,11 +1342,13 @@ class AgentBridge:
                         "send_fn": send_fn,
                     }
                 else:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/import-embryos",
-                        "content": {"text": "No sessions with embryos found."},
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/import-embryos",
+                            "content": {"text": "No sessions with embryos found."},
+                        }
+                    )
             return
 
         if cmd.startswith("/make-video"):
@@ -1222,33 +1371,43 @@ class AgentBridge:
 
             session_id = self.agent.session_id
             if not session_id:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/make-video",
-                    "error": "No active session",
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/make-video",
+                        "error": "No active session",
+                    }
+                )
                 return
 
             try:
-                from gently.app.video_maker import discover_volumes, create_timelapse_video
+                from gently.app.video_maker import (
+                    create_timelapse_video,
+                    discover_volumes,
+                )
+
                 storage_path = self.agent.storage_path
                 session_images_dir = storage_path / "images" / session_id
 
                 if not session_images_dir.exists():
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/make-video",
-                        "error": f"No images found for session {session_id}",
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/make-video",
+                            "error": f"No images found for session {session_id}",
+                        }
+                    )
                     return
 
                 all_volumes = discover_volumes(session_images_dir, embryo_id)
                 if not all_volumes:
-                    await send_fn({
-                        "type": "command_result",
-                        "command": "/make-video",
-                        "content": {"text": "No timelapse volumes found."},
-                    })
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/make-video",
+                            "content": {"text": "No timelapse volumes found."},
+                        }
+                    )
                     return
 
                 lines = [f"Creating timelapse videos (fps={fps})..."]
@@ -1257,23 +1416,29 @@ class AgentBridge:
                     create_timelapse_video(vol_paths, str(output_path), fps=fps)
                     lines.append(f"  {eid}: {len(vol_paths)} frames → {output_path.name}")
 
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/make-video",
-                    "content": {"text": "\n".join(lines)},
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/make-video",
+                        "content": {"text": "\n".join(lines)},
+                    }
+                )
             except ImportError:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/make-video",
-                    "error": "Video maker module not available.",
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/make-video",
+                        "error": "Video maker module not available.",
+                    }
+                )
             except Exception as e:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/make-video",
-                    "error": str(e),
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/make-video",
+                        "error": str(e),
+                    }
+                )
             return
 
         if cmd.startswith("/test-device") or cmd.startswith("/benchmark"):
@@ -1325,17 +1490,26 @@ class AgentBridge:
                         text = "  ".join(parts)
                     else:
                         return
-                    await send_fn({
+                    await send_fn(
+                        {
+                            "type": "command_result",
+                            "command": "/test-device",
+                            "content": {"text": text},
+                        }
+                    )
+
+                await send_fn(
+                    {
                         "type": "command_result",
                         "command": "/test-device",
-                        "content": {"text": text},
-                    })
-
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/test-device",
-                    "content": {"text": f"Running device test ({n_volumes} volumes, {n_slices} slices, {n_warmup} warmup)..."},
-                })
+                        "content": {
+                            "text": (
+                                f"Running device test ({n_volumes} volumes,"
+                                f" {n_slices} slices, {n_warmup} warmup)..."
+                            )
+                        },
+                    }
+                )
                 results = await run_benchmark(
                     self.agent,
                     n_volumes=n_volumes,
@@ -1355,65 +1529,80 @@ class AgentBridge:
                     f"  Throughput: {results.fps:.2f} vol/s",
                     "",
                     "  Stage          Mean      Std       Min       Max",
-                    f"  Acquisition  {acq['mean']:.3f}s  {acq['std']:.3f}s  {acq['min']:.3f}s  {acq['max']:.3f}s",
-                    f"  Storage      {stor['mean']:.3f}s  {stor['std']:.3f}s  {stor['min']:.3f}s  {stor['max']:.3f}s",
+                    f"  Acquisition  {acq['mean']:.3f}s  {acq['std']:.3f}s  "
+                    f"{acq['min']:.3f}s  {acq['max']:.3f}s",
+                    f"  Storage      {stor['mean']:.3f}s  {stor['std']:.3f}s  "
+                    f"{stor['min']:.3f}s  {stor['max']:.3f}s",
                 ]
-                if viz['mean'] > 0:
+                if viz["mean"] > 0:
                     lines.append(
-                        f"  Viz push     {viz['mean']:.3f}s  {viz['std']:.3f}s  {viz['min']:.3f}s  {viz['max']:.3f}s"
+                        f"  Viz push     {viz['mean']:.3f}s  {viz['std']:.3f}s  "
+                        f"{viz['min']:.3f}s  {viz['max']:.3f}s"
                     )
-                lines.extend([
-                    f"  Total        {total['mean']:.3f}s  {total['std']:.3f}s  {total['min']:.3f}s  {total['max']:.3f}s",
-                ])
+                lines.extend(
+                    [
+                        f"  Total        {total['mean']:.3f}s  {total['std']:.3f}s  "
+                        f"{total['min']:.3f}s  {total['max']:.3f}s",
+                    ]
+                )
                 if results.avg_file_size_mb > 0:
                     lines.append(f"  File size:   {results.avg_file_size_mb:.1f} MB avg")
                 if results.failed:
                     lines.append(f"  Failures:    {len(results.failed)}")
 
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/test-device",
-                    "content": {"text": "\n".join(lines)},
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/test-device",
+                        "content": {"text": "\n".join(lines)},
+                    }
+                )
             except ImportError as e:
                 logger.error("Benchmark import failed: %s", e, exc_info=True)
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/test-device",
-                    "error": f"Benchmark module not available: {e}",
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/test-device",
+                        "error": f"Benchmark module not available: {e}",
+                    }
+                )
             except Exception as e:
-                await send_fn({
-                    "type": "command_result",
-                    "command": "/test-device",
-                    "error": str(e),
-                })
+                await send_fn(
+                    {
+                        "type": "command_result",
+                        "command": "/test-device",
+                        "error": str(e),
+                    }
+                )
             return
 
         # Fallback for truly unimplemented commands
-        await send_fn({
-            "type": "command_result",
-            "command": cmd,
-            "content": {"text": f"Command `{cmd}` is not yet available in the TUI."},
-        })
+        await send_fn(
+            {
+                "type": "command_result",
+                "command": cmd,
+                "content": {"text": f"Command `{cmd}` is not yet available in the TUI."},
+            }
+        )
 
     def get_commands_json(self) -> list:
         """Serialize the command registry for the TUI client."""
         registry = get_command_registry()
         commands = []
         for cmd in registry.get_all():
-            commands.append({
-                "name": cmd.name,
-                "description": cmd.description,
-                "aliases": cmd.aliases,
-                "category": cmd.category.name,
-                "usage": cmd.usage_string(),
-                "arg_hint": cmd.arg_hint_string(),
-                "subcommands": [
-                    {"name": s.name, "description": s.description}
-                    for s in cmd.subcommands
-                ],
-            })
+            commands.append(
+                {
+                    "name": cmd.name,
+                    "description": cmd.description,
+                    "aliases": cmd.aliases,
+                    "category": cmd.category.name,
+                    "usage": cmd.usage_string(),
+                    "arg_hint": cmd.arg_hint_string(),
+                    "subcommands": [
+                        {"name": s.name, "description": s.description} for s in cmd.subcommands
+                    ],
+                }
+            )
         return commands
 
     def get_tools_json(self) -> list:
@@ -1425,6 +1614,7 @@ class AgentBridge:
         """
         try:
             from gently.harness.tools.registry import get_tool_registry
+
             registry = get_tool_registry()
         except Exception:
             return []
@@ -1432,15 +1622,18 @@ class AgentBridge:
         for t in registry.list_all():
             desc = (t.description or "").strip().split("\n", 1)[0][:200]
             category = getattr(t.category, "name", None) or str(t.category)
-            tools.append({
-                "name": t.name,
-                "description": desc,
-                "category": category,
-                "params": [
-                    {"name": p.name, "type": p.type, "required": bool(p.required)}
-                    for p in t.parameters if p.name != "context"
-                ],
-            })
+            tools.append(
+                {
+                    "name": t.name,
+                    "description": desc,
+                    "category": category,
+                    "params": [
+                        {"name": p.name, "type": p.type, "required": bool(p.required)}
+                        for p in t.parameters
+                        if p.name != "context"
+                    ],
+                }
+            )
         tools.sort(key=lambda x: x["name"])
         return tools
 
@@ -1479,11 +1672,13 @@ class AgentBridge:
 
         embryos = []
         for eid, emb in exp.embryos.items():
-            embryos.append({
-                "id": eid,
-                "nickname": emb.nickname,
-                "user_label": emb.user_label,
-            })
+            embryos.append(
+                {
+                    "id": eid,
+                    "nickname": emb.nickname,
+                    "user_label": emb.user_label,
+                }
+            )
         return {"embryos": embryos}
 
     def _get_tokens_data(self) -> dict:
@@ -1506,6 +1701,7 @@ class AgentBridge:
     def get_connect_metadata(self) -> dict:
         """Metadata sent to the TUI on connect."""
         import gently
+
         exp = self.agent.experiment
         meta = {
             "session_id": self.agent.session_id,
@@ -1588,12 +1784,14 @@ class AgentBridge:
             for s in raw:
                 sid = s.get("session_id", "unknown")
                 embryos = self.agent.store.list_embryos(sid)
-                sessions.append({
-                    "session_id": sid,
-                    "name": s.get("name", ""),
-                    "embryo_count": len(embryos) if embryos else 0,
-                    "last_active": s.get("last_active", ""),
-                })
+                sessions.append(
+                    {
+                        "session_id": sid,
+                        "name": s.get("name", ""),
+                        "embryo_count": len(embryos) if embryos else 0,
+                        "last_active": s.get("last_active", ""),
+                    }
+                )
         return sessions
 
     async def _send_import_result(self, send_fn, result: dict, session_label: str):
@@ -1606,17 +1804,21 @@ class AgentBridge:
                 lines.append(f"  {', '.join(imported)}")
             if skipped:
                 lines.append(f"  Skipped (exist): {', '.join(skipped)}")
-            await send_fn({
-                "type": "command_result",
-                "command": "/import-embryos",
-                "content": {"text": "\n".join(lines)},
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/import-embryos",
+                    "content": {"text": "\n".join(lines)},
+                }
+            )
         else:
-            await send_fn({
-                "type": "command_result",
-                "command": "/import-embryos",
-                "error": result.get("error", "Import failed"),
-            })
+            await send_fn(
+                {
+                    "type": "command_result",
+                    "command": "/import-embryos",
+                    "error": result.get("error", "Import failed"),
+                }
+            )
 
     def _get_timelapse_data(self) -> dict:
         """Build structured timelapse status."""
@@ -1718,7 +1920,9 @@ class AgentBridge:
         if counts["campaigns"] > 0:
             parts.append(f"{counts['campaigns']} campaign{'s' if counts['campaigns'] != 1 else ''}")
         if counts["plan_items"] > 0:
-            parts.append(f"{counts['plan_items']} plan item{'s' if counts['plan_items'] != 1 else ''}")
+            parts.append(
+                f"{counts['plan_items']} plan item{'s' if counts['plan_items'] != 1 else ''}"
+            )
         detail = f" ({', '.join(parts)})" if parts else ""
         return {"text": f"Deleted **{label}**{detail}."}
 
@@ -1773,6 +1977,7 @@ class AgentBridge:
         if not campaign:
             return {"text": f"Campaign '{campaign_ref}' not found."}
         from .memory.model import Status
+
         cs.update_campaign_status(campaign.id, Status.PAUSED)
         label = campaign.shorthand or campaign.display_name
         return {"text": f"Campaign **{label}** paused."}
@@ -1786,6 +1991,7 @@ class AgentBridge:
         if not campaign:
             return {"text": f"Campaign '{campaign_ref}' not found."}
         from .memory.model import Status
+
         cs.update_campaign_status(campaign.id, Status.ACTIVE)
         label = campaign.shorthand or campaign.display_name
         return {"text": f"Campaign **{label}** resumed."}
@@ -1839,6 +2045,7 @@ class AgentBridge:
             return {"text": "Peer client not available."}
 
         import socket
+
         local_hostname = socket.gethostname()
 
         ok = await pc.join_campaign(peer, campaign_ref, mesh.instance_id, local_hostname)
@@ -1846,12 +2053,19 @@ class AgentBridge:
             return {"text": f"Failed to join campaign '{campaign_ref}' on {hostname}."}
 
         self._active_remote = {"peer": peer, "campaign_id": campaign_ref}
-        return {"text": f"Joined campaign **{campaign_ref}** on **{hostname}**.\nUse `/claim <item_id>` to claim items."}
+        return {
+            "text": (
+                f"Joined campaign **{campaign_ref}** on **{hostname}**."
+                "\nUse `/claim <item_id>` to claim items."
+            )
+        }
 
     async def _claim_item(self, item_id: str) -> dict:
         """Claim a plan item from the active remote campaign."""
         if self._active_remote is None:
-            return {"text": "No active remote campaign. Use `/join-campaign <hostname> <id>` first."}
+            return {
+                "text": "No active remote campaign. Use `/join-campaign <hostname> <id>` first."
+            }
 
         mesh = self._require_mesh()
         if mesh is None:
@@ -1862,6 +2076,7 @@ class AgentBridge:
             return {"text": "Peer client not available."}
 
         import socket
+
         local_hostname = socket.gethostname()
 
         peer = self._active_remote["peer"]
@@ -1869,9 +2084,17 @@ class AgentBridge:
 
         ok = await pc.claim_item(peer, campaign_id, item_id, mesh.instance_id, local_hostname)
         if not ok:
-            return {"text": f"Failed to claim item `{item_id}` — it may already be claimed by another node."}
+            return {
+                "text": (
+                    f"Failed to claim item `{item_id}` — it may already be claimed by another node."
+                )
+            }
 
-        return {"text": f"Claimed item `{item_id}` from campaign **{campaign_id}** on **{peer.hostname}**."}
+        return {
+            "text": (
+                f"Claimed item `{item_id}` from campaign **{campaign_id}** on **{peer.hostname}**."
+            )
+        }
 
     # ------------------------------------------------------------------
     # /pair helpers
@@ -1898,7 +2121,10 @@ class AgentBridge:
             return {"text": "Peer client not available."}
 
         resp = await pc.send_pair_request(
-            peer, pm.instance_id, pm.hostname, nonce_local,
+            peer,
+            pm.instance_id,
+            pm.hostname,
+            nonce_local,
             cert_fingerprint=pm.cert_fingerprint,
             udp_sign_key=pm.udp_sign_key,
         )
@@ -1919,7 +2145,11 @@ class AgentBridge:
 
         # Create local session and compute PIN
         session = pm.process_initiation_response(
-            peer_id, peer_host, nonce_local, nonce_remote, pairing_id,
+            peer_id,
+            peer_host,
+            nonce_local,
+            nonce_remote,
+            pairing_id,
         )
         # Store remote peer's TLS cert fingerprint and UDP signing key
         session.responder_cert_fingerprint = remote_cert_fp
@@ -1931,9 +2161,14 @@ class AgentBridge:
         await pc.confirm_pair_remote(peer, pairing_id, pm.instance_id)
 
         # Start background polling for confirmation
-        asyncio.create_task(self._pair_poll(
-            mesh, peer, pairing_id, send_fn,
-        ))
+        asyncio.create_task(
+            self._pair_poll(
+                mesh,
+                peer,
+                pairing_id,
+                send_fn,
+            )
+        )
 
         return {
             "text": (
@@ -1961,15 +2196,24 @@ class AgentBridge:
             mesh.mark_peer_trusted(session.initiator_id)
 
             from gently.core.event_bus import EventType, get_event_bus
+
             get_event_bus().publish(
                 EventType.MESH_PAIRING_COMPLETED,
-                {"pairing_id": session.pairing_id, "peer_hostname": session.initiator_hostname},
+                {
+                    "pairing_id": session.pairing_id,
+                    "peer_hostname": session.initiator_hostname,
+                },
                 source="mesh",
             )
 
             return {"text": f"Paired with **{session.initiator_hostname}**!"}
 
-        return {"text": f"Confirmed pairing with **{session.initiator_hostname}**. Waiting for their confirmation..."}
+        return {
+            "text": (
+                f"Confirmed pairing with **{session.initiator_hostname}**."
+                " Waiting for their confirmation..."
+            )
+        }
 
     async def _pair_reject(self) -> dict:
         """Reject the most recent pending pairing request."""
@@ -2026,6 +2270,7 @@ class AgentBridge:
                 scope_str = ", ".join(tp.scopes) if tp.scopes else "none"
                 lines.append(f"  **{tp.hostname}** ({tp.instance_id[:8]}): {scope_str}")
             from gently.mesh.pairing import ALL_SCOPES
+
             lines.append("")
             lines.append(f"Available scopes: {', '.join(ALL_SCOPES)}")
             return {"text": "\n".join(lines)}
@@ -2042,9 +2287,12 @@ class AgentBridge:
         # Set scopes
         new_scopes = [s.strip() for s in scope_arg.split(",") if s.strip()]
         from gently.mesh.pairing import ALL_SCOPES
+
         invalid = [s for s in new_scopes if s not in ALL_SCOPES]
         if invalid:
-            return {"text": f"Invalid scopes: {', '.join(invalid)}. Available: {', '.join(ALL_SCOPES)}"}
+            return {
+                "text": f"Invalid scopes: {', '.join(invalid)}. Available: {', '.join(ALL_SCOPES)}"
+            }
 
         if pm.set_scopes(hostname, new_scopes):
             return {"text": f"Scopes for **{hostname}** updated to: {', '.join(new_scopes)}"}
@@ -2063,12 +2311,18 @@ class AgentBridge:
 
         # Mark the peer as untrusted in the mesh
         for peer in mesh.get_all_peers():
-            if (peer.hostname.lower() == identifier.lower()
-                    or peer.instance_id.startswith(identifier)):
+            if peer.hostname.lower() == identifier.lower() or peer.instance_id.startswith(
+                identifier
+            ):
                 peer.is_trusted = False
                 break
 
-        return {"text": f"Unpaired from **{identifier}**. They will need to re-pair to access mesh services."}
+        return {
+            "text": (
+                f"Unpaired from **{identifier}**."
+                " They will need to re-pair to access mesh services."
+            )
+        }
 
     async def _pair_poll(self, mesh, peer, pairing_id, send_fn):
         """Background poll: wait for remote to confirm pairing."""
@@ -2094,35 +2348,42 @@ class AgentBridge:
                 mesh.mark_peer_trusted(peer.instance_id)
 
                 from gently.core.event_bus import EventType, get_event_bus
+
                 get_event_bus().publish(
                     EventType.MESH_PAIRING_COMPLETED,
                     {"pairing_id": pairing_id, "peer_hostname": peer.hostname},
                     source="mesh",
                 )
 
-                await send_fn({
-                    "type": "notification",
-                    "level": "success",
-                    "title": f"Paired with {peer.hostname}",
-                })
+                await send_fn(
+                    {
+                        "type": "notification",
+                        "level": "success",
+                        "title": f"Paired with {peer.hostname}",
+                    }
+                )
                 return
 
             if status in ("rejected", "expired"):
-                await send_fn({
-                    "type": "notification",
-                    "level": "warning",
-                    "title": f"Pairing {status}",
-                    "body": peer.hostname,
-                })
+                await send_fn(
+                    {
+                        "type": "notification",
+                        "level": "warning",
+                        "title": f"Pairing {status}",
+                        "body": peer.hostname,
+                    }
+                )
                 return
 
         # Timeout
-        await send_fn({
-            "type": "notification",
-            "level": "warning",
-            "title": f"Pairing timed out",
-            "body": peer.hostname,
-        })
+        await send_fn(
+            {
+                "type": "notification",
+                "level": "warning",
+                "title": "Pairing timed out",
+                "body": peer.hostname,
+            }
+        )
 
     def _get_campaigns_data(self, command: str) -> dict:
         """Build structured campaign/plan data."""
@@ -2167,7 +2428,9 @@ class AgentBridge:
 
             lines.append("")
 
-        lines.append(f"Use `/campaign <id>` for details, or browse at the viz server /campaigns page.")
+        lines.append(
+            "Use `/campaign <id>` for details, or browse at the viz server /campaigns page."
+        )
         return {"text": "\n".join(lines)}
 
     def _render_campaign_detail(self, cs, campaign_id: str) -> dict:
@@ -2201,7 +2464,10 @@ class AgentBridge:
             lines.append(f"Target: {campaign.target}")
         if campaign.progress:
             lines.append(f"Progress: {campaign.progress}")
-        lines.append(f"Status: {campaign.status.value} · {completed}/{total} complete · {in_progress} in progress")
+        lines.append(
+            f"Status: {campaign.status.value} · {completed}/{total} complete"
+            f" · {in_progress} in progress"
+        )
         lines.append("")
 
         TYPE_ICONS = {

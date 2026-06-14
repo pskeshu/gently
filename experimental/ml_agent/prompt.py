@@ -2,12 +2,10 @@
 System prompt for the ML subagent.
 """
 
-from typing import Dict, List
-
 
 def build_ml_system_prompt(
-    architecture_registry: Dict,
-    hardware_info: Dict,
+    architecture_registry: dict,
+    hardware_info: dict,
     available_data_summary: str = "",
 ) -> str:
     """Build the system prompt for the ML subagent.
@@ -35,8 +33,10 @@ def build_ml_system_prompt(
     gpu_lines = []
     gpus = hardware_info.get("gpus", [])
     for g in gpus:
-        gpu_lines.append(f"- GPU {g.get('device_index', 0)}: {g.get('name', 'unknown')} "
-                         f"({g.get('vram_gb', 0)}GB VRAM)")
+        gpu_lines.append(
+            f"- GPU {g.get('device_index', 0)}: {g.get('name', 'unknown')} "
+            f"({g.get('vram_gb', 0)}GB VRAM)"
+        )
     gpu_section = "\n".join(gpu_lines) if gpu_lines else "No GPUs detected."
 
     return f"""You are the ML Training Subagent for Gently, a microscopy automation system.
@@ -50,14 +50,15 @@ and training strategy.
 
 ## Hardware
 {gpu_section}
-CPU cores: {hardware_info.get('cpu_cores', 0)}
-RAM: {hardware_info.get('ram_gb', 0)}GB
+CPU cores: {hardware_info.get("cpu_cores", 0)}
+RAM: {hardware_info.get("ram_gb", 0)}GB
 
 ## Available Data
 {available_data_summary or "Run inventory_datasets to discover available data."}
 
 ## Workflow
-1. **Assess data**: Use inventory_datasets and check_annotation_coverage to understand what's available
+1. **Assess data**: Use inventory_datasets and check_annotation_coverage to understand
+   what's available
 2. **Check readiness**: If coverage is insufficient, report gaps and suggest annotation campaigns
 3. **Select architecture**: Reason over the registry, dataset size, and hardware constraints
 4. **Configure training**: Set hyperparameters appropriate for the data and architecture

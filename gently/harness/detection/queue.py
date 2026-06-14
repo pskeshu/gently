@@ -3,14 +3,16 @@ Detection queue - executes all enabled detectors on volumes
 """
 
 import asyncio
-from typing import List, Dict, Optional, Callable
+from collections.abc import Callable
 from datetime import datetime
+
 import anthropic
 
 from gently.settings import settings
-from .detector import Detector, DetectionResult, ConfidenceLevel
-from .registry import DetectorRegistry
+
 from ..state import EmbryoState
+from .detector import ConfidenceLevel, DetectionResult, Detector
+from .registry import DetectorRegistry
 
 
 class DetectionQueue:
@@ -25,8 +27,8 @@ class DetectionQueue:
         registry: DetectorRegistry,
         claude_client: anthropic.Anthropic,
         model: str = settings.models.perception,
-        on_detection_callback: Optional[Callable] = None,
-        on_evaluation_callback: Optional[Callable] = None
+        on_detection_callback: Callable | None = None,
+        on_evaluation_callback: Callable | None = None,
     ):
         """
         Parameters
@@ -49,10 +51,8 @@ class DetectionQueue:
         self.on_evaluation_callback = on_evaluation_callback
 
     async def run_detectors(
-        self,
-        embryo_state: EmbryoState,
-        timepoint: int
-    ) -> List[DetectionResult]:
+        self, embryo_state: EmbryoState, timepoint: int
+    ) -> list[DetectionResult]:
         """
         Run all applicable detectors for an embryo/timepoint
 
@@ -80,9 +80,7 @@ class DetectionQueue:
                 continue
 
             # Run detector
-            result = await self._run_single_detector(
-                detector, embryo_state, timepoint
-            )
+            result = await self._run_single_detector(detector, embryo_state, timepoint)
 
             results.append(result)
 
@@ -107,10 +105,7 @@ class DetectionQueue:
         return results
 
     async def _run_single_detector(
-        self,
-        detector: Detector,
-        embryo_state: EmbryoState,
-        timepoint: int
+        self, detector: Detector, embryo_state: EmbryoState, timepoint: int
     ) -> DetectionResult:
         """
         Run a single detector
@@ -135,7 +130,9 @@ class DetectionQueue:
         try:
             # Get recent images
             num_images = detector.temporal_context_size if detector.use_temporal_context else 1
-            recent_images = embryo_state.recent_images[-num_images:] if embryo_state.recent_images else []
+            recent_images = (
+                embryo_state.recent_images[-num_images:] if embryo_state.recent_images else []
+            )
 
             if not recent_images:
                 # No images available
@@ -146,15 +143,15 @@ class DetectionQueue:
                     timestamp=datetime.now(),
                     detected=False,
                     error=True,
-                    error_message="No images available"
+                    error_message="No images available",
                 )
 
             # Build image data for detector
             image_data = [
                 {
-                    'timepoint': img.timepoint,
-                    'b64_image': img.max_projection_b64,
-                    'size': img.size_kb
+                    "timepoint": img.timepoint,
+                    "b64_image": img.max_projection_b64,
+                    "size": img.size_kb,
                 }
                 for img in recent_images
             ]
@@ -167,7 +164,7 @@ class DetectionQueue:
                 self.claude.messages.create,
                 model=self.model,
                 max_tokens=1024,
-                messages=[{"role": "user", "content": content}]
+                messages=[{"role": "user", "content": content}],
             )
 
             response_text = response.content[0].text
@@ -181,13 +178,13 @@ class DetectionQueue:
                 embryo_id=embryo_id,
                 timepoint=timepoint,
                 timestamp=datetime.now(),
-                detected=parsed['detected'],
-                confidence=parsed['confidence'],
-                reasoning=parsed['reasoning'],
+                detected=parsed["detected"],
+                confidence=parsed["confidence"],
+                reasoning=parsed["reasoning"],
                 error=False,
                 api_duration=api_duration,
                 num_images=len(image_data),
-                full_response=response_text
+                full_response=response_text,
             )
 
         except Exception as e:
@@ -202,14 +199,10 @@ class DetectionQueue:
                 detected=False,
                 error=True,
                 error_message=str(e),
-                api_duration=api_duration
+                api_duration=api_duration,
             )
 
-    def _meets_confidence_threshold(
-        self,
-        result: DetectionResult,
-        detector: Detector
-    ) -> bool:
+    def _meets_confidence_threshold(self, result: DetectionResult, detector: Detector) -> bool:
         """
         Check if detection result meets confidence threshold
 
@@ -232,7 +225,7 @@ class DetectionQueue:
         confidence_map = {
             ConfidenceLevel.LOW: 1,
             ConfidenceLevel.MEDIUM: 2,
-            ConfidenceLevel.HIGH: 3
+            ConfidenceLevel.HIGH: 3,
         }
 
         result_value = confidence_map.get(result.confidence, 0)
@@ -244,8 +237,8 @@ class DetectionQueue:
         self,
         detector_name: str,
         embryo_state: EmbryoState,
-        timepoint: Optional[int] = None
-    ) -> Optional[DetectionResult]:
+        timepoint: int | None = None,
+    ) -> DetectionResult | None:
         """
         Test a detector on a specific embryo/timepoint
 
@@ -280,7 +273,7 @@ class DetectionQueue:
 
         return result
 
-    def get_detection_summary(self, embryo_states: Dict[str, EmbryoState]) -> Dict:
+    def get_detection_summary(self, embryo_states: dict[str, EmbryoState]) -> dict:
         """
         Get summary of all detections across all embryos
 
@@ -294,48 +287,44 @@ class DetectionQueue:
         dict
             Summary of detections
         """
-        summary = {
-            'detectors': {},
-            'embryos': {}
-        }
+        summary = {"detectors": {}, "embryos": {}}
 
         # Per-detector summary
         for detector in self.registry.list_all():
             detector_summary = {
-                'name': detector.name,
-                'description': detector.description,
-                'enabled': detector.enabled,
-                'total_runs': detector.run_count,
-                'total_detections': detector.detection_count,
-                'embryos_detected': []
+                "name": detector.name,
+                "description": detector.description,
+                "enabled": detector.enabled,
+                "total_runs": detector.run_count,
+                "total_detections": detector.detection_count,
+                "embryos_detected": [],
             }
 
             for embryo_id, embryo_state in embryo_states.items():
                 if embryo_state.was_detected(detector.name):
                     latest = embryo_state.get_latest_detection(detector.name)
-                    detector_summary['embryos_detected'].append({
-                        'embryo_id': embryo_id,
-                        'timepoint': latest.get('timepoint'),
-                        'confidence': latest.get('confidence')
-                    })
+                    detector_summary["embryos_detected"].append(
+                        {
+                            "embryo_id": embryo_id,
+                            "timepoint": latest.get("timepoint"),
+                            "confidence": latest.get("confidence"),
+                        }
+                    )
 
-            summary['detectors'][detector.name] = detector_summary
+            summary["detectors"][detector.name] = detector_summary
 
         # Per-embryo summary
         for embryo_id, embryo_state in embryo_states.items():
-            embryo_summary = {
-                'embryo_id': embryo_id,
-                'detections': {}
-            }
+            embryo_summary = {"embryo_id": embryo_id, "detections": {}}
 
             for detector_name in embryo_state.detection_results.keys():
                 latest = embryo_state.get_latest_detection(detector_name)
-                embryo_summary['detections'][detector_name] = {
-                    'detected': latest.get('detected', False) if latest else False,
-                    'timepoint': latest.get('timepoint') if latest else None,
-                    'confidence': latest.get('confidence') if latest else None
+                embryo_summary["detections"][detector_name] = {
+                    "detected": latest.get("detected", False) if latest else False,
+                    "timepoint": latest.get("timepoint") if latest else None,
+                    "confidence": latest.get("confidence") if latest else None,
                 }
 
-            summary['embryos'][embryo_id] = embryo_summary
+            summary["embryos"][embryo_id] = embryo_summary
 
         return summary

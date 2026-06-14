@@ -8,20 +8,18 @@ into structured context, based on what the agent lacks.
 
 import logging
 import uuid
-from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any
 
 from gently.settings import settings
+
 from .gap_assessment import ContextGapReport, GapLayer
 from .model import (
-    Campaign,
-    Learning,
-    SessionIntent,
-    Watchpoint,
     Confidence,
-    Significance,
+    Learning,
+    Watchpoint,
 )
+
 try:
     from .file_store import FileContextStore as ContextStore
 except ImportError:
@@ -31,10 +29,12 @@ except ImportError:
 @dataclass
 class OnboardingMessage:
     """A message to surface to the researcher during onboarding."""
+
     message: str
     layer: GapLayer
     priority: str = "normal"  # "high", "normal", "low"
     reason: str = ""
+
 
 logger = logging.getLogger(__name__)
 
@@ -80,8 +80,8 @@ What are you planning to do today?"""
 
 def generate_onboarding_messages(
     gap_report: ContextGapReport,
-    session_id: Optional[str] = None,
-) -> List[OnboardingMessage]:
+    session_id: str | None = None,
+) -> list[OnboardingMessage]:
     """
     Generate onboarding messages based on the gap assessment.
 
@@ -100,12 +100,14 @@ def generate_onboarding_messages(
     messages = []
 
     if gap_report.needs_lab_onboarding:
-        messages.append(OnboardingMessage(
-            message=LAB_ONBOARDING_GREETING,
-            layer=GapLayer.LAB,
-            priority="high",
-            reason="First launch — need to learn about the lab.",
-        ))
+        messages.append(
+            OnboardingMessage(
+                message=LAB_ONBOARDING_GREETING,
+                layer=GapLayer.LAB,
+                priority="high",
+                reason="First launch — need to learn about the lab.",
+            )
+        )
 
     if gap_report.needs_campaign:
         if gap_report.past_campaign_count > 0:
@@ -116,12 +118,14 @@ def generate_onboarding_messages(
         else:
             prompt = CAMPAIGN_PROMPT_FRESH
 
-        messages.append(OnboardingMessage(
-            message=prompt,
-            layer=GapLayer.CAMPAIGN,
-            priority="normal",
-            reason="No active campaign — need research direction.",
-        ))
+        messages.append(
+            OnboardingMessage(
+                message=prompt,
+                layer=GapLayer.CAMPAIGN,
+                priority="normal",
+                reason="No active campaign — need research direction.",
+            )
+        )
 
     if gap_report.needs_session_intent and session_id:
         if gap_report.has_campaigns:
@@ -137,12 +141,14 @@ def generate_onboarding_messages(
         else:
             prompt = SESSION_PROMPT_NO_CAMPAIGN
 
-        messages.append(OnboardingMessage(
-            message=prompt,
-            layer=GapLayer.SESSION,
-            priority="normal",
-            reason="Need to establish session intent.",
-        ))
+        messages.append(
+            OnboardingMessage(
+                message=prompt,
+                layer=GapLayer.SESSION,
+                priority="normal",
+                reason="Need to establish session intent.",
+            )
+        )
 
     if messages:
         logger.info(
@@ -155,8 +161,8 @@ def generate_onboarding_messages(
 
 def get_onboarding_messages(
     gap_report: ContextGapReport,
-    session_id: Optional[str] = None,
-) -> List[str]:
+    session_id: str | None = None,
+) -> list[str]:
     """
     Get plain-text onboarding messages for direct CLI display.
 
@@ -179,10 +185,12 @@ def get_onboarding_messages(
 
     if gap_report.needs_campaign:
         if gap_report.past_campaign_count > 0:
-            messages.append(CAMPAIGN_PROMPT_RETURNING.format(
-                campaign_description="(previous campaigns completed)",
-                campaign_status="completed",
-            ))
+            messages.append(
+                CAMPAIGN_PROMPT_RETURNING.format(
+                    campaign_description="(previous campaigns completed)",
+                    campaign_status="completed",
+                )
+            )
         else:
             messages.append(CAMPAIGN_PROMPT_FRESH)
 
@@ -192,10 +200,12 @@ def get_onboarding_messages(
             if gap_report.session_count > 0:
                 history = f"This is session #{gap_report.session_count + 1}. "
             campaign_name = gap_report.active_campaigns[0].display_name
-            messages.append(SESSION_PROMPT_WITH_CAMPAIGN.format(
-                campaign_description=campaign_name,
-                history_context=history,
-            ))
+            messages.append(
+                SESSION_PROMPT_WITH_CAMPAIGN.format(
+                    campaign_description=campaign_name,
+                    history_context=history,
+                )
+            )
         else:
             messages.append(SESSION_PROMPT_NO_CAMPAIGN)
 
@@ -238,9 +248,9 @@ async def process_onboarding_response(
     response: str,
     topic: str,
     context_store: ContextStore,
-    claude_client: Optional[Any] = None,
-    session_id: Optional[str] = None,
-) -> Dict[str, Any]:
+    claude_client: Any | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
     """
     Process a researcher's response during onboarding.
 
@@ -274,8 +284,7 @@ async def process_onboarding_response(
         extracted = _extract_basic(response, topic, context_store, session_id)
 
     logger.info(
-        f"Onboarding response processed ({topic}): "
-        f"{extracted['entries_created']} entries created"
+        f"Onboarding response processed ({topic}): {extracted['entries_created']} entries created"
     )
     return extracted
 
@@ -285,8 +294,8 @@ async def _extract_with_llm(
     topic: str,
     context_store: ContextStore,
     claude_client: Any,
-    session_id: Optional[str],
-) -> Dict[str, Any]:
+    session_id: str | None,
+) -> dict[str, Any]:
     """Use Claude to extract structured context from a response."""
     import asyncio
     import json
@@ -314,33 +323,37 @@ async def _extract_with_llm(
     entries = 0
 
     # Store learnings
-    for item in (data.get("learnings") or []):
+    for item in data.get("learnings") or []:
         if item and item.get("content"):
-            context_store.add_learning(Learning(
-                id=str(uuid.uuid4())[:8],
-                content=item["content"],
-                confidence=Confidence(item.get("confidence", "medium")),
-                basis=item.get("basis", f"onboarding:{topic}"),
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=str(uuid.uuid4())[:8],
+                    content=item["content"],
+                    confidence=Confidence(item.get("confidence", "medium")),
+                    basis=item.get("basis", f"onboarding:{topic}"),
+                )
+            )
             entries += 1
 
     # Store campaign
     campaign_data = data.get("campaign")
     if campaign_data and campaign_data.get("description"):
-        cid = context_store.create_campaign(
+        context_store.create_campaign(
             description=campaign_data["description"],
             target=campaign_data.get("target"),
         )
         entries += 1
 
     # Store watchpoints
-    for item in (data.get("watchpoints") or []):
+    for item in data.get("watchpoints") or []:
         if item and item.get("target"):
-            context_store.add_watchpoint(Watchpoint(
-                id=str(uuid.uuid4())[:8],
-                target=item["target"],
-                condition=item.get("condition", "monitor"),
-            ))
+            context_store.add_watchpoint(
+                Watchpoint(
+                    id=str(uuid.uuid4())[:8],
+                    target=item["target"],
+                    condition=item.get("condition", "monitor"),
+                )
+            )
             entries += 1
 
     # Store session intent
@@ -356,12 +369,14 @@ async def _extract_with_llm(
     for field_name in ("organism", "microscope"):
         value = data.get(field_name)
         if value:
-            context_store.add_learning(Learning(
-                id=str(uuid.uuid4())[:8],
-                content=f"Lab {field_name}: {value}",
-                confidence=Confidence.HIGH,
-                basis="onboarding:identity",
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=str(uuid.uuid4())[:8],
+                    content=f"Lab {field_name}: {value}",
+                    confidence=Confidence.HIGH,
+                    basis="onboarding:identity",
+                )
+            )
             entries += 1
 
     return {
@@ -375,8 +390,8 @@ def _extract_basic(
     response: str,
     topic: str,
     context_store: ContextStore,
-    session_id: Optional[str],
-) -> Dict[str, Any]:
+    session_id: str | None,
+) -> dict[str, Any]:
     """
     Basic keyword-based extraction when no LLM is available.
 
@@ -385,12 +400,14 @@ def _extract_basic(
     entries = 0
 
     # Store the raw response as a learning
-    context_store.add_learning(Learning(
-        id=str(uuid.uuid4())[:8],
-        content=f"Researcher ({topic}): {response[:500]}",
-        confidence=Confidence.MEDIUM,
-        basis=f"onboarding:{topic}",
-    ))
+    context_store.add_learning(
+        Learning(
+            id=str(uuid.uuid4())[:8],
+            content=f"Researcher ({topic}): {response[:500]}",
+            confidence=Confidence.MEDIUM,
+            basis=f"onboarding:{topic}",
+        )
+    )
     entries += 1
 
     # If this is a session topic and we have a session ID, create intent
@@ -411,8 +428,9 @@ def _extract_basic(
 # Ingestion result → context store
 # ---------------------------------------------------------------------------
 
+
 def apply_ingestion_to_context(
-    result: "IngestionResult",
+    result: "IngestionResult",  # noqa: F821
     context_store: ContextStore,
 ) -> int:
     """
@@ -443,34 +461,40 @@ def apply_ingestion_to_context(
     # Learnings
     for item in result.learnings:
         if item.get("content"):
-            context_store.add_learning(Learning(
-                id=str(uuid.uuid4())[:8],
-                content=item["content"],
-                confidence=Confidence(item.get("confidence", "medium")),
-                basis=f"ingestion:{result.source}",
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=str(uuid.uuid4())[:8],
+                    content=item["content"],
+                    confidence=Confidence(item.get("confidence", "medium")),
+                    basis=f"ingestion:{result.source}",
+                )
+            )
             entries += 1
 
     # Imaging parameters as learnings
     if result.imaging_parameters:
         for key, value in result.imaging_parameters.items():
             if value is not None and key != "notes":
-                context_store.add_learning(Learning(
-                    id=str(uuid.uuid4())[:8],
-                    content=f"Recommended {key}: {value}",
-                    confidence=Confidence.MEDIUM,
-                    basis=f"ingestion:{result.source}",
-                ))
+                context_store.add_learning(
+                    Learning(
+                        id=str(uuid.uuid4())[:8],
+                        content=f"Recommended {key}: {value}",
+                        confidence=Confidence.MEDIUM,
+                        basis=f"ingestion:{result.source}",
+                    )
+                )
                 entries += 1
         # Store notes separately if present
         notes = result.imaging_parameters.get("notes")
         if notes:
-            context_store.add_learning(Learning(
-                id=str(uuid.uuid4())[:8],
-                content=f"Imaging notes: {notes}",
-                confidence=Confidence.MEDIUM,
-                basis=f"ingestion:{result.source}",
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=str(uuid.uuid4())[:8],
+                    content=f"Imaging notes: {notes}",
+                    confidence=Confidence.MEDIUM,
+                    basis=f"ingestion:{result.source}",
+                )
+            )
             entries += 1
 
     # Sample requirements as a learning
@@ -480,22 +504,26 @@ def apply_ingestion_to_context(
             if value and key != "notes":
                 parts.append(f"{key}: {value}")
         if parts:
-            context_store.add_learning(Learning(
-                id=str(uuid.uuid4())[:8],
-                content=f"Sample requirements: {', '.join(parts)}",
-                confidence=Confidence.MEDIUM,
-                basis=f"ingestion:{result.source}",
-            ))
+            context_store.add_learning(
+                Learning(
+                    id=str(uuid.uuid4())[:8],
+                    content=f"Sample requirements: {', '.join(parts)}",
+                    confidence=Confidence.MEDIUM,
+                    basis=f"ingestion:{result.source}",
+                )
+            )
             entries += 1
 
     # Watchpoints
     for item in result.watchpoints:
         if item.get("target"):
-            context_store.add_watchpoint(Watchpoint(
-                id=str(uuid.uuid4())[:8],
-                target=item["target"],
-                condition=item.get("condition", "monitor"),
-            ))
+            context_store.add_watchpoint(
+                Watchpoint(
+                    id=str(uuid.uuid4())[:8],
+                    target=item["target"],
+                    condition=item.get("condition", "monitor"),
+                )
+            )
             entries += 1
 
     logger.info(f"Applied {entries} entries from ingestion of {result.source}")

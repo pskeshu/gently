@@ -14,13 +14,14 @@ Defines the core dataclasses:
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from ..settings import settings
 
 
 class PeerRole(str, Enum):
     """Dynamic roles a gently node can fill."""
+
     MICROSCOPE_CONTROLLER = "microscope_controller"
     ML_TRAINER = "ml_trainer"
     DATA_SERVER = "data_server"
@@ -30,6 +31,7 @@ class PeerRole(str, Enum):
 @dataclass
 class GpuInfo:
     """Details about a single GPU device."""
+
     device_index: int = 0
     name: str = ""
     vram_gb: float = 0.0
@@ -37,7 +39,7 @@ class GpuInfo:
     utilization_pct: float = 0.0
     memory_used_gb: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "device_index": self.device_index,
             "name": self.name,
@@ -48,7 +50,7 @@ class GpuInfo:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "GpuInfo":
+    def from_dict(cls, d: dict[str, Any]) -> "GpuInfo":
         return cls(
             device_index=d.get("device_index", 0),
             name=d.get("name", ""),
@@ -62,16 +64,17 @@ class GpuInfo:
 @dataclass
 class DatasetAdvertisement:
     """Advertises what data a node has available for training."""
+
     session_id: str = ""
     session_name: str = ""
     embryo_count: int = 0
     volume_count: int = 0
     has_ground_truth: bool = False
     ground_truth_count: int = 0
-    stages_covered: List[str] = field(default_factory=list)
+    stages_covered: list[str] = field(default_factory=list)
     total_size_gb: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "session_name": self.session_name,
@@ -84,7 +87,7 @@ class DatasetAdvertisement:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DatasetAdvertisement":
+    def from_dict(cls, d: dict[str, Any]) -> "DatasetAdvertisement":
         return cls(
             session_id=d.get("session_id", ""),
             session_name=d.get("session_name", ""),
@@ -107,19 +110,19 @@ class PeerCapability:
     gpu_name: str = ""
     gpu_vram_gb: float = 0.0
     storage_free_gb: float = 0.0
-    tool_categories: List[str] = field(default_factory=list)
+    tool_categories: list[str] = field(default_factory=list)
     organism: str = ""
     hardware_profile: str = ""
     # Enhanced capability fields (backward-compatible — old peers get defaults)
-    gpus: List[GpuInfo] = field(default_factory=list)
-    roles: List[str] = field(default_factory=list)
-    datasets: List[DatasetAdvertisement] = field(default_factory=list)
+    gpus: list[GpuInfo] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)
+    datasets: list[DatasetAdvertisement] = field(default_factory=list)
     microscope_connected: bool = False
     cpu_cores: int = 0
     ram_gb: float = 0.0
     storage_total_gb: float = 0.0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "has_microscope": self.has_microscope,
             "has_sam": self.has_sam,
@@ -140,7 +143,7 @@ class PeerCapability:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PeerCapability":
+    def from_dict(cls, d: dict[str, Any]) -> "PeerCapability":
         return cls(
             has_microscope=d.get("has_microscope", False),
             has_sam=d.get("has_sam", False),
@@ -174,7 +177,7 @@ class PeerStatus:
     active_plan: str = ""
     version: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "session_id": self.session_id,
             "acquisition_status": self.acquisition_status,
@@ -187,7 +190,7 @@ class PeerStatus:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PeerStatus":
+    def from_dict(cls, d: dict[str, Any]) -> "PeerStatus":
         return cls(
             session_id=d.get("session_id", ""),
             acquisition_status=d.get("acquisition_status", "idle"),
@@ -232,7 +235,7 @@ class PeerInfo:
         """True if no heartbeat beyond the dead threshold."""
         return (time.time() - self.last_seen) > settings.mesh.dead_threshold_s
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "instance_id": self.instance_id,
             "hostname": self.hostname,
@@ -252,7 +255,7 @@ class PeerInfo:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PeerInfo":
+    def from_dict(cls, d: dict[str, Any]) -> "PeerInfo":
         return cls(
             instance_id=d.get("instance_id", ""),
             hostname=d.get("hostname", ""),
@@ -289,15 +292,15 @@ class PersistedPeer:
     # Persistence fields
     online: bool = True
     last_online: float = field(default_factory=time.time)
-    roles: List[str] = field(default_factory=list)
-    datasets: List[DatasetAdvertisement] = field(default_factory=list)
+    roles: list[str] = field(default_factory=list)
+    datasets: list[DatasetAdvertisement] = field(default_factory=list)
 
     @property
     def base_url(self) -> str:
         scheme = "https" if self.tls_enabled else "http"
         return f"{scheme}://{self.ip_address}:{self.viz_port}"
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "instance_id": self.instance_id,
             "hostname": self.hostname,
@@ -316,7 +319,7 @@ class PersistedPeer:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "PersistedPeer":
+    def from_dict(cls, d: dict[str, Any]) -> "PersistedPeer":
         return cls(
             instance_id=d.get("instance_id", ""),
             hostname=d.get("hostname", ""),

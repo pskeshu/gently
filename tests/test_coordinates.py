@@ -15,12 +15,12 @@ Tests cover:
 import pytest
 
 from gently.core.coordinates import (
+    DEFAULT_OBJECTIVE_MAG,
+    DEFAULT_PIXEL_SIZE_UM,
     get_um_per_pixel,
+    pixel_displacement_to_stage_movement,
     pixel_to_stage_position,
     stage_to_pixel_position,
-    pixel_displacement_to_stage_movement,
-    DEFAULT_PIXEL_SIZE_UM,
-    DEFAULT_OBJECTIVE_MAG,
 )
 
 
@@ -39,9 +39,12 @@ class TestPixelToStage:
     def test_pixel_to_stage_basic(self):
         # Embryo 100px right of center → stage X increases
         sx, sy = pixel_to_stage_position(
-            pixel_x=612, pixel_y=512,
-            image_center_x=512, image_center_y=512,
-            stage_x=1000.0, stage_y=2000.0,
+            pixel_x=612,
+            pixel_y=512,
+            image_center_x=512,
+            image_center_y=512,
+            stage_x=1000.0,
+            stage_y=2000.0,
             um_per_pixel=1.0,
         )
         assert sx == pytest.approx(1100.0)
@@ -51,9 +54,12 @@ class TestPixelToStage:
     def test_center_pixel_maps_to_stage_origin(self):
         # Embryo at image center → stage position unchanged
         sx, sy = pixel_to_stage_position(
-            pixel_x=512, pixel_y=512,
-            image_center_x=512, image_center_y=512,
-            stage_x=1000.0, stage_y=2000.0,
+            pixel_x=512,
+            pixel_y=512,
+            image_center_x=512,
+            image_center_y=512,
+            stage_x=1000.0,
+            stage_y=2000.0,
             um_per_pixel=1.0,
         )
         assert sx == pytest.approx(1000.0)
@@ -64,9 +70,12 @@ class TestStageToPixel:
     def test_stage_to_pixel_basic(self):
         # Embryo 100um right of current stage → pixel right of center
         px, py = stage_to_pixel_position(
-            stage_x=1100.0, stage_y=2000.0,
-            current_stage_x=1000.0, current_stage_y=2000.0,
-            image_center_x=512, image_center_y=512,
+            stage_x=1100.0,
+            stage_y=2000.0,
+            current_stage_x=1000.0,
+            current_stage_y=2000.0,
+            image_center_x=512,
+            image_center_y=512,
             um_per_pixel=1.0,
         )
         assert px == pytest.approx(612.0)
@@ -83,12 +92,24 @@ class TestRoundTrip:
 
         # Forward: pixel → stage
         embryo_sx, embryo_sy = pixel_to_stage_position(
-            orig_px, orig_py, cx, cy, stg_x, stg_y, um_per_pixel=um_pp,
+            orig_px,
+            orig_py,
+            cx,
+            cy,
+            stg_x,
+            stg_y,
+            um_per_pixel=um_pp,
         )
 
         # Reverse: stage → pixel (same capture position)
         recovered_px, recovered_py = stage_to_pixel_position(
-            embryo_sx, embryo_sy, stg_x, stg_y, cx, cy, um_per_pixel=um_pp,
+            embryo_sx,
+            embryo_sy,
+            stg_x,
+            stg_y,
+            cx,
+            cy,
+            um_per_pixel=um_pp,
         )
 
         assert recovered_px == pytest.approx(orig_px)
@@ -109,5 +130,5 @@ class TestPixelDisplacement:
 
     def test_negative_displacement(self):
         dx, dy = pixel_displacement_to_stage_movement(-50.0, 30.0, um_per_pixel=2.0)
-        assert dx == pytest.approx(100.0)   # inverted: -(-50)*2
-        assert dy == pytest.approx(60.0)    # not inverted: 30*2
+        assert dx == pytest.approx(100.0)  # inverted: -(-50)*2
+        assert dy == pytest.approx(60.0)  # not inverted: 30*2

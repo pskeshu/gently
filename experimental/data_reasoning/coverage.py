@@ -3,7 +3,6 @@ CoverageAnalyzer — Annotation coverage analysis and gap detection.
 """
 
 import logging
-from typing import Dict, List, Optional
 
 from .models import CoverageReport
 
@@ -11,9 +10,21 @@ logger = logging.getLogger(__name__)
 
 # Known C. elegans embryonic stages (common ordering)
 KNOWN_STAGES = [
-    "early", "2-cell", "4-cell", "8-cell", "16-cell",
-    "32-cell", "64-cell", "gastrulation", "bean", "comma",
-    "1.5-fold", "2-fold", "pretzel", "3-fold", "hatching",
+    "early",
+    "2-cell",
+    "4-cell",
+    "8-cell",
+    "16-cell",
+    "32-cell",
+    "64-cell",
+    "gastrulation",
+    "bean",
+    "comma",
+    "1.5-fold",
+    "2-fold",
+    "pretzel",
+    "3-fold",
+    "hatching",
 ]
 
 # Minimum recommended samples per stage for training
@@ -32,7 +43,7 @@ class CoverageAnalyzer:
     def __init__(self, gently_store=None):
         self._store = gently_store
 
-    def analyze(self, session_ids: Optional[List[str]] = None) -> CoverageReport:
+    def analyze(self, session_ids: list[str] | None = None) -> CoverageReport:
         """Analyze annotation coverage across specified sessions (or all).
 
         Parameters
@@ -49,7 +60,7 @@ class CoverageAnalyzer:
 
         total_embryos = 0
         annotated_embryos = 0
-        stage_counts: Dict[str, int] = {}
+        stage_counts: dict[str, int] = {}
 
         try:
             sessions = self._store.list_sessions()
@@ -89,7 +100,11 @@ class CoverageAnalyzer:
         # Find gaps and generate recommendations
         gaps = self._find_gaps(stage_counts)
         recommendations = self._generate_recommendations(
-            total_embryos, annotated_embryos, coverage_pct, stage_counts, gaps,
+            total_embryos,
+            annotated_embryos,
+            coverage_pct,
+            stage_counts,
+            gaps,
         )
 
         return CoverageReport(
@@ -104,7 +119,7 @@ class CoverageAnalyzer:
 
     def analyze_from_inventory(self, inventory) -> CoverageReport:
         """Build a coverage report from a NetworkDataInventory."""
-        stage_counts: Dict[str, int] = {}
+        stage_counts: dict[str, int] = {}
         total_embryos = inventory.total_embryos
         annotated_embryos = inventory.total_annotated
 
@@ -118,7 +133,11 @@ class CoverageAnalyzer:
         imbalance_ratio = (max(counts) / min(counts)) if counts and min(counts) > 0 else 0.0
         gaps = self._find_gaps(stage_counts)
         recommendations = self._generate_recommendations(
-            total_embryos, annotated_embryos, coverage_pct, stage_counts, gaps,
+            total_embryos,
+            annotated_embryos,
+            coverage_pct,
+            stage_counts,
+            gaps,
         )
 
         return CoverageReport(
@@ -131,7 +150,7 @@ class CoverageAnalyzer:
             recommendations=recommendations,
         )
 
-    def _find_gaps(self, stage_counts: Dict[str, int]) -> List[str]:
+    def _find_gaps(self, stage_counts: dict[str, int]) -> list[str]:
         """Identify underrepresented stages."""
         gaps = []
         if not stage_counts:
@@ -142,7 +161,9 @@ class CoverageAnalyzer:
         # Stages with too few samples
         for stage, count in stage_counts.items():
             if count < MIN_SAMPLES_PER_STAGE:
-                gaps.append(f"{stage} underrepresented ({count} samples, need {MIN_SAMPLES_PER_STAGE})")
+                gaps.append(
+                    f"{stage} underrepresented ({count} samples, need {MIN_SAMPLES_PER_STAGE})"
+                )
             elif count < avg * 0.5:
                 gaps.append(f"{stage} below average ({count} vs avg {avg:.0f})")
 
@@ -159,9 +180,9 @@ class CoverageAnalyzer:
         total_embryos: int,
         annotated: int,
         coverage_pct: float,
-        stage_counts: Dict[str, int],
-        gaps: List[str],
-    ) -> List[str]:
+        stage_counts: dict[str, int],
+        gaps: list[str],
+    ) -> list[str]:
         """Generate actionable recommendations."""
         recs = []
 

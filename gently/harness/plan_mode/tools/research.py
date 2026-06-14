@@ -14,10 +14,9 @@ APIs used:
 import json
 import logging
 import ssl
-from typing import Dict, List, Optional
 
-from ...tools.registry import tool, ToolCategory, ToolExample
 from ....settings import settings
+from ...tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
 
@@ -37,12 +36,13 @@ def _ssl_context() -> ssl.SSLContext:
     """
     try:
         import certifi
+
         return ssl.create_default_context(cafile=certifi.where())
     except ImportError:
         return ssl.create_default_context()
 
 
-def _ncbi_params(**kwargs) -> Dict:
+def _ncbi_params(**kwargs) -> dict:
     """Add standard NCBI tool/email to query params."""
     kwargs["tool"] = _NCBI_TOOL
     kwargs["email"] = _NCBI_EMAIL
@@ -53,6 +53,7 @@ def _ncbi_params(**kwargs) -> Dict:
 def _http_session():
     """Create an aiohttp ClientSession with explicit SSL certs."""
     import aiohttp
+
     connector = aiohttp.TCPConnector(ssl=_ssl_context())
     return aiohttp.ClientSession(connector=connector)
 
@@ -61,11 +62,12 @@ def _http_session():
 # PubMed literature search
 # ---------------------------------------------------------------------------
 
-async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
+
+async def _pubmed_search(query: str, max_results: int) -> list[dict]:
     """Search PubMed via E-utilities and return article summaries."""
     import aiohttp
 
-    results: List[Dict] = []
+    results: list[dict] = []
 
     try:
         async with _http_session() as session:
@@ -120,21 +122,23 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
                     else:
                         author_str = first
 
-                results.append({
-                    "pmid": pmid,
-                    "title": article.get("title", ""),
-                    "authors": author_str,
-                    "journal": article.get("fulljournalname", article.get("source", "")),
-                    "year": article.get("pubdate", "")[:4],
-                    "doi": next(
-                        (
-                            aid.get("value", "")
-                            for aid in article.get("articleids", [])
-                            if aid.get("idtype") == "doi"
+                results.append(
+                    {
+                        "pmid": pmid,
+                        "title": article.get("title", ""),
+                        "authors": author_str,
+                        "journal": article.get("fulljournalname", article.get("source", "")),
+                        "year": article.get("pubdate", "")[:4],
+                        "doi": next(
+                            (
+                                aid.get("value", "")
+                                for aid in article.get("articleids", [])
+                                if aid.get("idtype") == "doi"
+                            ),
+                            "",
                         ),
-                        "",
-                    ),
-                })
+                    }
+                )
 
     except Exception as e:
         logger.warning(f"PubMed search failed: {e}", exc_info=True)
@@ -146,11 +150,12 @@ async def _pubmed_search(query: str, max_results: int) -> List[Dict]:
 # NCBI Gene search
 # ---------------------------------------------------------------------------
 
-async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
+
+async def _ncbi_gene_search(query: str, max_results: int = 5) -> list[dict]:
     """Search NCBI Gene database for C. elegans genes."""
     import aiohttp
 
-    results: List[Dict] = []
+    results: list[dict] = []
 
     try:
         async with _http_session() as session:
@@ -199,14 +204,16 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
                 if org.get("taxid") != 6239:
                     continue
 
-                results.append({
-                    "gene_id": gid,
-                    "name": gene.get("name", ""),
-                    "description": gene.get("description", ""),
-                    "summary": gene.get("summary", ""),
-                    "chromosome": gene.get("chromosome", ""),
-                    "aliases": gene.get("otheraliases", ""),
-                })
+                results.append(
+                    {
+                        "gene_id": gid,
+                        "name": gene.get("name", ""),
+                        "description": gene.get("description", ""),
+                        "summary": gene.get("summary", ""),
+                        "chromosome": gene.get("chromosome", ""),
+                        "aliases": gene.get("otheraliases", ""),
+                    }
+                )
 
     except Exception as e:
         logger.warning(f"NCBI Gene search failed: {e}", exc_info=True)
@@ -218,7 +225,8 @@ async def _ncbi_gene_search(query: str, max_results: int = 5) -> List[Dict]:
 # WormBase strain lookup (by gene ID)
 # ---------------------------------------------------------------------------
 
-async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
+
+async def _wormbase_gene_strains(wbgene_id: str) -> list[dict]:
     """Get strains carrying a gene from WormBase REST API.
 
     Parameters
@@ -228,7 +236,7 @@ async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
     """
     import aiohttp
 
-    results: List[Dict] = []
+    results: list[dict] = []
 
     try:
         url = f"https://rest.wormbase.org/rest/field/gene/{wbgene_id}/strains"
@@ -255,12 +263,14 @@ async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
             for entry in strain_list:
                 if not isinstance(entry, dict):
                     continue
-                results.append({
-                    "name": entry.get("label", ""),
-                    "genotype": entry.get("genotype", ""),
-                    "cgc_available": is_cgc or category == "available_from_cgc",
-                    "category": category,
-                })
+                results.append(
+                    {
+                        "name": entry.get("label", ""),
+                        "genotype": entry.get("genotype", ""),
+                        "cgc_available": is_cgc or category == "available_from_cgc",
+                        "category": category,
+                    }
+                )
 
     except Exception as e:
         logger.warning(f"WormBase strain lookup failed: {e}", exc_info=True)
@@ -268,7 +278,7 @@ async def _wormbase_gene_strains(wbgene_id: str) -> List[Dict]:
     return results
 
 
-async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
+async def _wormbase_gene_id_lookup(gene_name: str) -> str | None:
     """Look up a WormBase gene ID from an NCBI gene name.
 
     Uses NCBI gene → dbxrefs to find WormBase ID, or falls back to
@@ -314,7 +324,8 @@ async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
 
             # Look for WBGene ID in the response text
             import re
-            match = re.search(r'(WBGene\d+)', text)
+
+            match = re.search(r"(WBGene\d+)", text)
             if match:
                 return match.group(1)
 
@@ -328,7 +339,8 @@ async def _wormbase_gene_id_lookup(gene_name: str) -> Optional[str]:
 # CGC strain search (HTML scraping fallback)
 # ---------------------------------------------------------------------------
 
-async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
+
+async def _cgc_search(query: str, field: str = "strain") -> list[dict]:
     """Search CGC (Caenorhabditis Genetics Center) strain database.
 
     Parameters
@@ -338,10 +350,11 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
     field : str
         Field to search: "strain", "genotype", "description", "all".
     """
-    import aiohttp
     import re
 
-    results: List[Dict] = []
+    import aiohttp
+
+    results: list[dict] = []
 
     try:
         url = "https://cgc.umn.edu/strain/search"
@@ -361,25 +374,27 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
         # CGC uses table rows with strain name, species, genotype, description
         # Pattern: look for strain links like /strain/OH904
         strain_pattern = re.compile(
-            r'/strain/([A-Z]{1,3}\d+).*?'
-            r'<td[^>]*>(.*?)</td>.*?'  # species
-            r'<td[^>]*>(.*?)</td>.*?'  # genotype
-            r'<td[^>]*>(.*?)</td>',     # description
+            r"/strain/([A-Z]{1,3}\d+).*?"
+            r"<td[^>]*>(.*?)</td>.*?"  # species
+            r"<td[^>]*>(.*?)</td>.*?"  # genotype
+            r"<td[^>]*>(.*?)</td>",  # description
             re.DOTALL,
         )
 
         for match in strain_pattern.finditer(html):
             strain_name = match.group(1).strip()
-            genotype = re.sub(r'<[^>]+>', '', match.group(3)).strip()
-            description = re.sub(r'<[^>]+>', '', match.group(4)).strip()
+            genotype = re.sub(r"<[^>]+>", "", match.group(3)).strip()
+            description = re.sub(r"<[^>]+>", "", match.group(4)).strip()
 
             if strain_name:
-                results.append({
-                    "name": strain_name,
-                    "genotype": genotype,
-                    "description": description[:200] if description else "",
-                    "source": "CGC",
-                })
+                results.append(
+                    {
+                        "name": strain_name,
+                        "genotype": genotype,
+                        "description": description[:200] if description else "",
+                        "source": "CGC",
+                    }
+                )
 
         # If regex didn't work, try a simpler approach — find strain names
         if not results:
@@ -389,12 +404,14 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
                 name = m.group(1)
                 if name not in seen:
                     seen.add(name)
-                    results.append({
-                        "name": name,
-                        "genotype": "",
-                        "description": "",
-                        "source": "CGC",
-                    })
+                    results.append(
+                        {
+                            "name": name,
+                            "genotype": "",
+                            "description": "",
+                            "source": "CGC",
+                        }
+                    )
 
         # Check for "no results" message
         if "no results for this search" in html.lower():
@@ -409,6 +426,7 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
 # ---------------------------------------------------------------------------
 # Tools
 # ---------------------------------------------------------------------------
+
 
 @tool(
     name="search_literature",
@@ -430,7 +448,7 @@ async def _cgc_search(query: str, field: str = "strain") -> List[Dict]:
 async def search_literature(
     query: str,
     max_results: int = 5,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Search PubMed for relevant papers.
 
@@ -447,11 +465,10 @@ async def search_literature(
 
     # If no results, try progressively simpler queries
     if not results:
-        import re as _re
         words = query.split()
         if len(words) > 3:
             # Strategy 1: keep first ~60% of terms (drop trailing specifics)
-            shorter = " ".join(words[:max(3, len(words) * 2 // 3)])
+            shorter = " ".join(words[: max(3, len(words) * 2 // 3)])
             results = await _pubmed_search(shorter, max_results)
             if results:
                 used_query = shorter
@@ -459,8 +476,23 @@ async def search_literature(
         if not results and len(words) > 4:
             # Strategy 2: keep only the core noun phrases (drop adjectives/filler)
             # Remove common filler words
-            stopwords = {"and", "or", "the", "of", "in", "for", "with", "a", "an",
-                         "using", "based", "via", "during", "after", "before"}
+            stopwords = {
+                "and",
+                "or",
+                "the",
+                "of",
+                "in",
+                "for",
+                "with",
+                "a",
+                "an",
+                "using",
+                "based",
+                "via",
+                "during",
+                "after",
+                "before",
+            }
             core = [w for w in words if w.lower() not in stopwords]
             if len(core) > 3:
                 core = core[:4]
@@ -514,9 +546,9 @@ async def search_literature(
     lines.append("\n---")
     lines.append("**Citation references for plan items** (pass to `references` param):")
     for r in results:
-        author = r['authors'] or 'Unknown'
-        year = r['year'] or ''
-        journal = r['journal'] or ''
+        author = r["authors"] or "Unknown"
+        year = r["year"] or ""
+        journal = r["journal"] or ""
         cite = f"{author} ({year}) {r['title'][:80]}. {journal}"
         ref = {
             "source": "pubmed",
@@ -558,7 +590,7 @@ async def search_literature(
 async def search_strains(
     query: str,
     organism: str = "celegans",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Search for strains and genes via NCBI Gene + WormBase REST API.
 
@@ -574,7 +606,7 @@ async def search_strains(
     import re as _re
 
     # Detect if query looks like a strain name (e.g. OH904, N2, CB1370)
-    is_strain_query = bool(_re.match(r'^[A-Z]{1,3}\d+$', query.strip()))
+    is_strain_query = bool(_re.match(r"^[A-Z]{1,3}\d+$", query.strip()))
 
     # Step 0: If it looks like a strain name, search CGC directly
     cgc_results = []
@@ -632,7 +664,8 @@ async def search_strains(
                     lines.append(f"   **Strains ({len(strains)} found):**")
                     # Show up to 6, prioritising CGC-available
                     sorted_strains = sorted(
-                        strains, key=lambda s: (not s["cgc_available"], s["name"]),
+                        strains,
+                        key=lambda s: (not s["cgc_available"], s["name"]),
                     )
                     for s in sorted_strains[:6]:
                         cgc_tag = " [CGC]" if s["cgc_available"] else ""
@@ -663,17 +696,21 @@ async def search_strains(
     citation_refs = []
     if cgc_results:
         for s in cgc_results:
-            citation_refs.append({
-                "source": "cgc",
-                "citation": f"{s['name']} available from CGC",
-                "id": f"CGC:{s['name']}",
-            })
+            citation_refs.append(
+                {
+                    "source": "cgc",
+                    "citation": f"{s['name']} available from CGC",
+                    "id": f"CGC:{s['name']}",
+                }
+            )
     for gene in genes:
-        citation_refs.append({
-            "source": "ncbi_gene",
-            "citation": f"{gene['name']} — {gene['description']}",
-            "id": f"GeneID:{gene['gene_id']}",
-        })
+        citation_refs.append(
+            {
+                "source": "ncbi_gene",
+                "citation": f"{gene['name']} — {gene['description']}",
+                "id": f"GeneID:{gene['gene_id']}",
+            }
+        )
     if citation_refs:
         lines.append("\n---")
         lines.append("**Citation references for plan items** (pass to `references` param):")
@@ -687,7 +724,8 @@ async def search_strains(
 # Paper reading — full text retrieval
 # ---------------------------------------------------------------------------
 
-async def _pmid_to_pmcid(pmid: str) -> Optional[str]:
+
+async def _pmid_to_pmcid(pmid: str) -> str | None:
     """Convert a PMID to a PMCID via the NCBI ID converter."""
     import aiohttp
 
@@ -716,10 +754,11 @@ async def _pmid_to_pmcid(pmid: str) -> Optional[str]:
     return None
 
 
-async def _fetch_pmc_fulltext(pmcid: str) -> Optional[str]:
+async def _fetch_pmc_fulltext(pmcid: str) -> str | None:
     """Fetch full text from PubMed Central as XML, parse into sections."""
-    import aiohttp
     import xml.etree.ElementTree as ET
+
+    import aiohttp
 
     try:
         # Strip "PMC" prefix for efetch — it wants just the number
@@ -836,7 +875,7 @@ def _find_parent(root, target):
     return None
 
 
-async def _unpaywall_lookup(doi: str) -> Optional[str]:
+async def _unpaywall_lookup(doi: str) -> str | None:
     """Find an open access full text URL via Unpaywall."""
     import aiohttp
 
@@ -861,10 +900,11 @@ async def _unpaywall_lookup(doi: str) -> Optional[str]:
     return None
 
 
-async def _fetch_url_text(url: str) -> Optional[str]:
+async def _fetch_url_text(url: str) -> str | None:
     """Fetch a URL and extract text content (HTML → plain text)."""
-    import aiohttp
     import re as _re
+
+    import aiohttp
 
     try:
         async with _http_session() as session:
@@ -884,10 +924,10 @@ async def _fetch_url_text(url: str) -> Optional[str]:
                 html = await resp.text()
 
         # Simple HTML → text: strip tags, collapse whitespace
-        text = _re.sub(r'<script[^>]*>.*?</script>', '', html, flags=_re.DOTALL)
-        text = _re.sub(r'<style[^>]*>.*?</style>', '', html, flags=_re.DOTALL)
-        text = _re.sub(r'<[^>]+>', ' ', text)
-        text = _re.sub(r'\s+', ' ', text).strip()
+        text = _re.sub(r"<script[^>]*>.*?</script>", "", html, flags=_re.DOTALL)
+        text = _re.sub(r"<style[^>]*>.*?</style>", "", html, flags=_re.DOTALL)
+        text = _re.sub(r"<[^>]+>", " ", text)
+        text = _re.sub(r"\s+", " ", text).strip()
 
         if len(text) > 15000:
             text = text[:15000] + "\n\n[... truncated ...]"
@@ -899,7 +939,7 @@ async def _fetch_url_text(url: str) -> Optional[str]:
         return None
 
 
-def _read_pdf_file(path: str) -> Optional[str]:
+def _read_pdf_file(path: str) -> str | None:
     """Extract text from a local PDF file using pymupdf if available."""
     import os
 
@@ -908,6 +948,7 @@ def _read_pdf_file(path: str) -> Optional[str]:
 
     try:
         import fitz  # pymupdf
+
         doc = fitz.open(path)
         pages = []
         for page in doc:
@@ -920,15 +961,16 @@ def _read_pdf_file(path: str) -> Optional[str]:
         return text if text.strip() else None
 
     except ImportError:
-        logger.info("pymupdf not installed — cannot extract PDF text. "
-                     "Install with: pip install pymupdf")
+        logger.info(
+            "pymupdf not installed — cannot extract PDF text. Install with: pip install pymupdf"
+        )
         return None
     except Exception as e:
         logger.warning(f"PDF extraction failed for {path}: {e}")
         return None
 
 
-async def _pubmed_abstract(pmid: str) -> Optional[Dict]:
+async def _pubmed_abstract(pmid: str) -> dict | None:
     """Fetch article metadata + abstract from PubMed."""
     import aiohttp
 
@@ -948,6 +990,7 @@ async def _pubmed_abstract(pmid: str) -> Optional[Dict]:
                 xml_text = await resp.text()
 
         import xml.etree.ElementTree as ET
+
         root = ET.fromstring(xml_text)
 
         article = root.find(".//PubmedArticle")
@@ -998,26 +1041,26 @@ async def _pubmed_abstract(pmid: str) -> Optional[Dict]:
         return None
 
 
-async def _resolve_reference(reference: str) -> Dict:
+async def _resolve_reference(reference: str) -> dict:
     """Parse a reference string and determine what kind of input it is.
 
     Returns a dict with keys: type, pmid, doi, url, path, query
     """
-    import re
     import os
+    import re
 
     ref = reference.strip()
     result = {"type": "unknown", "raw": ref}
 
     # PMID
-    m = re.match(r'^(?:PMID[:\s]*)?(\d{6,9})$', ref, re.IGNORECASE)
+    m = re.match(r"^(?:PMID[:\s]*)?(\d{6,9})$", ref, re.IGNORECASE)
     if m:
         result["type"] = "pmid"
         result["pmid"] = m.group(1)
         return result
 
     # DOI
-    m = re.search(r'(10\.\d{4,}/[^\s]+)', ref)
+    m = re.search(r"(10\.\d{4,}/[^\s]+)", ref)
     if m:
         result["type"] = "doi"
         result["doi"] = m.group(1).rstrip(".,;)")
@@ -1029,13 +1072,13 @@ async def _resolve_reference(reference: str) -> Dict:
         result["url"] = ref if ref.startswith("http") else "https://" + ref
 
         # Extract PMID from PubMed URLs
-        m = re.search(r'pubmed\.ncbi.*?/(\d{6,9})', ref)
+        m = re.search(r"pubmed\.ncbi.*?/(\d{6,9})", ref)
         if m:
             result["type"] = "pmid"
             result["pmid"] = m.group(1)
 
         # Extract PMCID from PMC URLs
-        m = re.search(r'/pmc/articles/(PMC\d+)', ref)
+        m = re.search(r"/pmc/articles/(PMC\d+)", ref)
         if m:
             result["type"] = "pmcid"
             result["pmcid"] = m.group(1)
@@ -1054,7 +1097,7 @@ async def _resolve_reference(reference: str) -> Dict:
     return result
 
 
-async def _search_pmid(query: str) -> Optional[str]:
+async def _search_pmid(query: str) -> str | None:
     """Search PubMed for a citation string and return the best PMID.
 
     Tries multiple query strategies to handle imprecise citations like
@@ -1066,7 +1109,7 @@ async def _search_pmid(query: str) -> Optional[str]:
 
     # Detect "Author et al YEAR topic" pattern
     m = _re.match(
-        r'^([A-Z][a-z]+)\s+(?:et\s+al\.?\s+)?(\d{4})?\s*(.*)?$',
+        r"^([A-Z][a-z]+)\s+(?:et\s+al\.?\s+)?(\d{4})?\s*(.*)?$",
         query.strip(),
     )
     if m:
@@ -1076,8 +1119,10 @@ async def _search_pmid(query: str) -> Optional[str]:
 
         # Fix common organism names in topic
         topic_fixed = _re.sub(
-            r'\bC\.?\s*elegans\b', '"Caenorhabditis elegans"',
-            topic, flags=_re.IGNORECASE,
+            r"\bC\.?\s*elegans\b",
+            '"Caenorhabditis elegans"',
+            topic,
+            flags=_re.IGNORECASE,
         )
 
         # Strategy 1: author + organism MeSH + quoted topic (most specific)
@@ -1087,15 +1132,11 @@ async def _search_pmid(query: str) -> Optional[str]:
             )
 
         # Strategy 2: author + organism MeSH (no topic — topic may not be in title)
-        strategies.append(
-            f'{author}[author] AND "Caenorhabditis elegans"[Mesh]'
-        )
+        strategies.append(f'{author}[author] AND "Caenorhabditis elegans"[Mesh]')
 
         # Strategy 3: author + year + topic (exact year, may be wrong)
         if year and topic_fixed:
-            strategies.append(
-                f'{author}[author] AND {year}[pdat] AND {topic_fixed}'
-            )
+            strategies.append(f"{author}[author] AND {year}[pdat] AND {topic_fixed}")
 
         # Strategy 4: author + year only
         if year:
@@ -1103,8 +1144,10 @@ async def _search_pmid(query: str) -> Optional[str]:
 
     # Strategy 5: original query with organism name fix
     fixed = _re.sub(
-        r'\bC\.?\s*elegans\b', '"Caenorhabditis elegans"',
-        query, flags=_re.IGNORECASE,
+        r"\bC\.?\s*elegans\b",
+        '"Caenorhabditis elegans"',
+        query,
+        flags=_re.IGNORECASE,
     )
     if fixed != query:
         strategies.append(fixed)
@@ -1122,6 +1165,7 @@ async def _search_pmid(query: str) -> Optional[str]:
 
     # Try each strategy
     import aiohttp
+
     for attempt in unique:
         try:
             async with _http_session() as session:
@@ -1145,7 +1189,7 @@ async def _search_pmid(query: str) -> Optional[str]:
     return None
 
 
-async def _doi_to_pmid(doi: str) -> Optional[str]:
+async def _doi_to_pmid(doi: str) -> str | None:
     """Resolve a DOI to a PMID via PubMed search."""
     return await _search_pmid(f"{doi}[doi]")
 
@@ -1177,7 +1221,7 @@ async def _doi_to_pmid(doi: str) -> Optional[str]:
 )
 async def read_paper(
     reference: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Read a scientific paper and return its content.
 
@@ -1229,11 +1273,7 @@ async def read_paper(
         status_lines.append(f"Reading local PDF: {path}")
         text = _read_pdf_file(path)
         if text:
-            return (
-                f"[Paper from local file: {path}]\n\n"
-                f"{text}\n\n---\n"
-                f"Source: local file"
-            )
+            return f"[Paper from local file: {path}]\n\n{text}\n\n---\nSource: local file"
         else:
             return (
                 f"[Paper from local file: {path}]\n\n"
@@ -1308,7 +1348,7 @@ async def read_paper(
         meta = await _pubmed_abstract(pmid)
         if meta:
             lines = [
-                f"[Abstract only — full text not freely available]\n",
+                "[Abstract only — full text not freely available]\n",
                 f"# {meta['title']}\n",
                 f"**Authors:** {meta['authors']}",
                 f"**Journal:** {meta['journal']} ({meta['year']})",
@@ -1319,9 +1359,9 @@ async def read_paper(
             lines.append(f"\n## Abstract\n\n{meta['abstract']}")
 
             lines.append(
-                f"\n---\n"
-                f"*Full text not available through open access channels. "
-                f"If you have a PDF, provide the file path and I can read it.*"
+                "\n---\n"
+                "*Full text not available through open access channels. "
+                "If you have a PDF, provide the file path and I can read it.*"
             )
             lines.append(f"\n*Resolution path: {' → '.join(status_lines)}*")
 

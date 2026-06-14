@@ -51,15 +51,21 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                         if required_scope not in scopes:
                             if audit_log:
                                 audit_log.log(
-                                    AuditEvent.SCOPE_DENIED, outcome="deny",
-                                    peer_id=peer_id, ip=host,
+                                    AuditEvent.SCOPE_DENIED,
+                                    outcome="deny",
+                                    peer_id=peer_id,
+                                    ip=host,
                                     detail=f"scope={required_scope} path={request.url.path}",
                                 )
                             if viz_server.event_bus is not None:
                                 viz_server.event_bus.publish(
                                     EventType.MESH_SCOPE_DENIED,
-                                    {"peer_id": peer_id, "scope": required_scope,
-                                     "ip": host, "path": str(request.url.path)},
+                                    {
+                                        "peer_id": peer_id,
+                                        "scope": required_scope,
+                                        "ip": host,
+                                        "path": str(request.url.path),
+                                    },
                                     source="mesh",
                                 )
                             raise HTTPException(
@@ -68,16 +74,20 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                             )
                     if audit_log:
                         audit_log.log(
-                            AuditEvent.AUTH_SUCCESS, outcome="allow",
-                            peer_id=peer_id, ip=host,
+                            AuditEvent.AUTH_SUCCESS,
+                            outcome="allow",
+                            peer_id=peer_id,
+                            ip=host,
                         )
                     return
 
             # Auth failed
             if audit_log:
                 audit_log.log(
-                    AuditEvent.AUTH_FAILURE, outcome="deny",
-                    ip=host, detail=f"path={request.url.path}",
+                    AuditEvent.AUTH_FAILURE,
+                    outcome="deny",
+                    ip=host,
+                    detail=f"path={request.url.path}",
                 )
             if viz_server.event_bus is not None:
                 viz_server.event_bus.publish(
@@ -106,13 +116,15 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                 shared_list = []
                 for c in shared:
                     status = cs.get_plan_status(c.id)
-                    shared_list.append({
-                        "id": c.id,
-                        "shorthand": c.shorthand,
-                        "description": c.description,
-                        "item_count": status["total"],
-                        "completed_count": status["completed"],
-                    })
+                    shared_list.append(
+                        {
+                            "id": c.id,
+                            "shorthand": c.shorthand,
+                            "description": c.description,
+                            "item_count": status["total"],
+                            "completed_count": status["completed"],
+                        }
+                    )
                 info["shared_campaigns"] = shared_list
             except Exception:
                 pass
@@ -123,12 +135,17 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
     async def mesh_peers():
         """List all discovered peers."""
         peers = mesh_service.get_peers()
-        return JSONResponse({
-            "peers": [p.to_dict() for p in peers],
-            "count": len(peers),
-        })
+        return JSONResponse(
+            {
+                "peers": [p.to_dict() for p in peers],
+                "count": len(peers),
+            }
+        )
 
-    @router.get("/api/mesh/peers/{instance_id}", dependencies=[Depends(_make_auth_dep("status"))])
+    @router.get(
+        "/api/mesh/peers/{instance_id}",
+        dependencies=[Depends(_make_auth_dep("status"))],
+    )
     async def mesh_peer_detail(instance_id: str):
         """Get specific peer details."""
         peer = mesh_service.get_peer(instance_id)
@@ -144,11 +161,13 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         """Full mesh view: self + all peers."""
         local = mesh_service.get_local_info()
         peers = mesh_service.get_all_peers()
-        return JSONResponse({
-            "self": local,
-            "peers": [p.to_dict() for p in peers],
-            "total_nodes": 1 + len(peers),
-        })
+        return JSONResponse(
+            {
+                "self": local,
+                "peers": [p.to_dict() for p in peers],
+                "total_nodes": 1 + len(peers),
+            }
+        )
 
     # ------------------------------------------------------------------
     # Pairing endpoints (no auth — these bootstrap trust)
@@ -181,15 +200,19 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
             raise HTTPException(status_code=400, detail="initiator_id and nonce required")
 
         session = pairing_mgr.handle_pair_request(
-            initiator_id, hostname, nonce,
+            initiator_id,
+            hostname,
+            nonce,
             initiator_cert_fingerprint=initiator_cert_fp,
             initiator_udp_sign_key=initiator_udp_key,
         )
 
         if audit_log:
             audit_log.log(
-                AuditEvent.PAIR_REQUESTED, outcome="info",
-                peer_id=initiator_id, ip=client_ip,
+                AuditEvent.PAIR_REQUESTED,
+                outcome="info",
+                peer_id=initiator_id,
+                ip=client_ip,
                 detail=f"hostname={hostname}",
             )
 
@@ -205,15 +228,17 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                 source="mesh",
             )
 
-        return JSONResponse({
-            "nonce": session.nonce_responder,
-            "pairing_id": session.pairing_id,
-            "status": session.status,
-            "responder_id": mesh_service.instance_id,
-            "responder_hostname": mesh_service._hostname,
-            "cert_fingerprint": pairing_mgr.cert_fingerprint,
-            "udp_sign_key": pairing_mgr.udp_sign_key,
-        })
+        return JSONResponse(
+            {
+                "nonce": session.nonce_responder,
+                "pairing_id": session.pairing_id,
+                "status": session.status,
+                "responder_id": mesh_service.instance_id,
+                "responder_hostname": mesh_service._hostname,
+                "cert_fingerprint": pairing_mgr.cert_fingerprint,
+                "udp_sign_key": pairing_mgr.udp_sign_key,
+            }
+        )
 
     @router.get("/api/mesh/pair/{pairing_id}/status")
     async def pair_status(pairing_id: str):
@@ -225,12 +250,14 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         if session is None:
             raise HTTPException(status_code=404, detail="Pairing session not found")
 
-        return JSONResponse({
-            "pairing_id": session.pairing_id,
-            "status": session.status,
-            "confirmed_by_initiator": session.confirmed_by_initiator,
-            "confirmed_by_responder": session.confirmed_by_responder,
-        })
+        return JSONResponse(
+            {
+                "pairing_id": session.pairing_id,
+                "status": session.status,
+                "confirmed_by_initiator": session.confirmed_by_initiator,
+                "confirmed_by_responder": session.confirmed_by_responder,
+            }
+        )
 
     @router.post("/api/mesh/pair/{pairing_id}/confirm")
     async def pair_confirm(pairing_id: str, request: Request):
@@ -267,10 +294,12 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                     source="mesh",
                 )
 
-        return JSONResponse({
-            "pairing_id": session.pairing_id,
-            "status": session.status,
-        })
+        return JSONResponse(
+            {
+                "pairing_id": session.pairing_id,
+                "status": session.status,
+            }
+        )
 
     @router.post("/api/mesh/pair/{pairing_id}/reject")
     async def pair_reject(pairing_id: str):
@@ -282,10 +311,12 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         if session is None:
             raise HTTPException(status_code=404, detail="Pairing session not found")
 
-        return JSONResponse({
-            "pairing_id": session.pairing_id,
-            "status": session.status,
-        })
+        return JSONResponse(
+            {
+                "pairing_id": session.pairing_id,
+                "status": session.status,
+            }
+        )
 
     # ------------------------------------------------------------------
     # Verse map routes (scope: status)
@@ -296,12 +327,14 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         """Full persistent topology — includes offline peers."""
         vm = mesh_service.verse_map
         peers = vm.get_all_peers()
-        return JSONResponse({
-            "peers": [p.to_dict() for p in peers],
-            "online_count": len(vm.get_online_peers()),
-            "offline_count": len(vm.get_offline_peers()),
-            "total_count": len(peers),
-        })
+        return JSONResponse(
+            {
+                "peers": [p.to_dict() for p in peers],
+                "online_count": len(vm.get_online_peers()),
+                "offline_count": len(vm.get_offline_peers()),
+                "total_count": len(peers),
+            }
+        )
 
     @router.get(
         "/api/mesh/verse-map/resources/{capability}",
@@ -311,11 +344,13 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         """Find peers matching a capability (route-finding)."""
         vm = mesh_service.verse_map
         peers = vm.find_resource(capability)
-        return JSONResponse({
-            "capability": capability,
-            "peers": [p.to_dict() for p in peers],
-            "count": len(peers),
-        })
+        return JSONResponse(
+            {
+                "capability": capability,
+                "peers": [p.to_dict() for p in peers],
+                "count": len(peers),
+            }
+        )
 
     # ------------------------------------------------------------------
     # Data catalog routes (scope: data)
@@ -334,25 +369,32 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                 sid = s.session_id if hasattr(s, "session_id") else s.get("session_id", "")
                 name = s.name if hasattr(s, "name") else s.get("name", "")
                 created = s.created_at if hasattr(s, "created_at") else s.get("created_at", "")
-                last_active = s.last_active if hasattr(s, "last_active") else s.get("last_active", "")
+                last_active = (
+                    s.last_active if hasattr(s, "last_active") else s.get("last_active", "")
+                )
                 embryos = store.list_embryos(sid)
                 vol_count = 0
                 for e in embryos:
                     eid = e.embryo_id if hasattr(e, "embryo_id") else e.get("embryo_id", "")
                     vol_count += len(store.list_volumes(sid, eid))
-                result.append({
-                    "session_id": sid,
-                    "name": name,
-                    "embryo_count": len(embryos),
-                    "volume_count": vol_count,
-                    "created_at": created,
-                    "last_active": last_active,
-                })
+                result.append(
+                    {
+                        "session_id": sid,
+                        "name": name,
+                        "embryo_count": len(embryos),
+                        "volume_count": vol_count,
+                        "created_at": created,
+                        "last_active": last_active,
+                    }
+                )
             return JSONResponse({"sessions": result, "count": len(result)})
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
-    @router.get("/api/data/sessions/{session_id}", dependencies=[Depends(_make_auth_dep("data"))])
+    @router.get(
+        "/api/data/sessions/{session_id}",
+        dependencies=[Depends(_make_auth_dep("data"))],
+    )
     async def data_session_detail(session_id: str):
         """Detailed session info with embryo list."""
         store = getattr(viz_server, "gently_store", None)
@@ -376,26 +418,29 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                 try:
                     gts = store.get_ground_truth(session_id, eid)
                     has_gt = len(gts) > 0
-                    stages = list({
-                        (gt.stage if hasattr(gt, "stage") else gt.get("stage", ""))
-                        for gt in gts
-                    })
+                    stages = list(
+                        {(gt.stage if hasattr(gt, "stage") else gt.get("stage", "")) for gt in gts}
+                    )
                 except Exception:
                     pass
-                embryo_list.append({
-                    "embryo_id": eid,
-                    "nickname": nickname,
-                    "volume_count": vol_count,
-                    "has_ground_truth": has_gt,
-                    "stages_annotated": stages,
-                })
+                embryo_list.append(
+                    {
+                        "embryo_id": eid,
+                        "nickname": nickname,
+                        "volume_count": vol_count,
+                        "has_ground_truth": has_gt,
+                        "stages_annotated": stages,
+                    }
+                )
             sname = session.name if hasattr(session, "name") else session.get("name", "")
-            return JSONResponse({
-                "session_id": session_id,
-                "name": sname,
-                "embryos": embryo_list,
-                "total_volumes": total_vols,
-            })
+            return JSONResponse(
+                {
+                    "session_id": session_id,
+                    "name": sname,
+                    "embryos": embryo_list,
+                    "total_volumes": total_vols,
+                }
+            )
         except HTTPException:
             raise
         except Exception as e:
@@ -406,10 +451,16 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
         """Annotation coverage summary across all sessions."""
         store = getattr(viz_server, "gently_store", None)
         if store is None:
-            return JSONResponse({
-                "total_embryos": 0, "annotated_embryos": 0,
-                "coverage_pct": 0.0, "stage_counts": {}, "imbalance_ratio": 0.0, "gaps": [],
-            })
+            return JSONResponse(
+                {
+                    "total_embryos": 0,
+                    "annotated_embryos": 0,
+                    "coverage_pct": 0.0,
+                    "stage_counts": {},
+                    "imbalance_ratio": 0.0,
+                    "gaps": [],
+                }
+            )
         try:
             sessions = store.list_sessions()
             total_embryos = 0
@@ -437,14 +488,16 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
             # Find stages with notably low counts
             avg = sum(counts) / len(counts) if counts else 0
             gaps = [s for s, c in stage_counts.items() if c < avg * 0.5]
-            return JSONResponse({
-                "total_embryos": total_embryos,
-                "annotated_embryos": annotated_embryos,
-                "coverage_pct": round(coverage_pct, 1),
-                "stage_counts": stage_counts,
-                "imbalance_ratio": round(imbalance_ratio, 2),
-                "gaps": gaps,
-            })
+            return JSONResponse(
+                {
+                    "total_embryos": total_embryos,
+                    "annotated_embryos": annotated_embryos,
+                    "coverage_pct": round(coverage_pct, 1),
+                    "stage_counts": stage_counts,
+                    "imbalance_ratio": round(imbalance_ratio, 2),
+                    "gaps": gaps,
+                }
+            )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -475,10 +528,12 @@ def register_mesh_routes(viz_server, mesh_service, audit_log=None) -> None:
                         pass
                 if session_dist:
                     by_session[sid] = session_dist
-            return JSONResponse({
-                "stage_distribution": total_dist,
-                "by_session": by_session,
-            })
+            return JSONResponse(
+                {
+                    "stage_distribution": total_dist,
+                    "by_session": by_session,
+                }
+            )
         except Exception as e:
             return JSONResponse({"error": str(e)}, status_code=500)
 

@@ -9,32 +9,30 @@ retired; the map view is the single spatial GUI.
 """
 
 import uuid
-from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-from gently.harness.tools.helpers import require_agent
 from gently.core.coordinates import (
+    DEFAULT_OBJECTIVE_MAG,
+    DEFAULT_PIXEL_SIZE_UM,
+    get_um_per_pixel,
     pixel_to_stage_position,
     stage_to_pixel_position,
-    get_um_per_pixel,
-    DEFAULT_PIXEL_SIZE_UM,
-    DEFAULT_OBJECTIVE_MAG,
 )
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 async def _route_to_map_view(
     agent,
     image: np.ndarray,
-    initial_markers: List[Dict],
-    stage_position: Tuple[float, float],
+    initial_markers: list[dict],
+    stage_position: tuple[float, float],
     default_role: str = "test",
     pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
-    timeout: Optional[float] = None,
-) -> Tuple[Optional[List[Dict]], Optional[str]]:
+    timeout: float | None = None,
+) -> tuple[list[dict] | None, str | None]:
     """Hand off image + markers to the web map view; await user-edited result.
 
     Returns ``(marked, None)`` on success or ``(None, error_message)`` if the
@@ -42,8 +40,7 @@ async def _route_to_map_view(
     """
     if getattr(agent, "viz_server", None) is None:
         return None, (
-            "Map view requires the web visualization server. "
-            "Start it with start_viz_server first."
+            "Map view requires the web visualization server. Start it with start_viz_server first."
         )
 
     from gently.ui.web.embryo_marker import mark_embryos_web
@@ -73,28 +70,38 @@ def _next_embryo_number(experiment) -> int:
 
 
 def _stage_from_pixel(
-    pixel_x: float, pixel_y: float,
-    image_shape: Tuple[int, int],
-    current_stage: Tuple[float, float],
+    pixel_x: float,
+    pixel_y: float,
+    image_shape: tuple[int, int],
+    current_stage: tuple[float, float],
     pixel_size_um: float = DEFAULT_PIXEL_SIZE_UM,
     objective_mag: float = DEFAULT_OBJECTIVE_MAG,
-) -> Tuple[float, float]:
+) -> tuple[float, float]:
     """Convert a pixel position in the bottom-cam image to a stage XY."""
     h, w = image_shape[:2]
     um_per_px = get_um_per_pixel(pixel_size_um, objective_mag)
     return pixel_to_stage_position(
-        pixel_x, pixel_y,
-        w / 2, h / 2,
-        current_stage[0], current_stage[1],
+        pixel_x,
+        pixel_y,
+        w / 2,
+        h / 2,
+        current_stage[0],
+        current_stage[1],
         um_per_px,
     )
 
 
 @tool(
     name="detect_embryos",
-    description="""Automatically detect embryos in the current field of view using brightness detection + SAM segmentation, then hand off to the web map view for editing and role assignment.
+    description="""Automatically detect embryos in the current field of view using brightness
+detection + SAM segmentation, then hand off to the web map view for editing and role
+assignment.
 
-Use when user says "find embryos", "detect embryos", or at the start of an experiment to locate samples. Captures a bottom camera image, runs SAM detection, and opens the web map view with SAM markers pre-placed. User adds/removes markers, cycles each marker's role (Test / Calibration / unassigned), and presses Done. The confirmed embryos are registered with their roles in the experiment.""",
+Use when user says "find embryos", "detect embryos", or at the start of an experiment to
+locate samples. Captures a bottom camera image, runs SAM detection, and opens the web map
+view with SAM markers pre-placed. User adds/removes markers, cycles each marker's role
+(Test / Calibration / unassigned), and presses Done. The confirmed embryos are registered
+with their roles in the experiment.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -111,18 +118,21 @@ async def detect_embryos(
     min_area: int = 5000,
     max_area: int = 150000,
     default_role: str = "test",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Detect embryos via SAM + edit/assign roles in the web map view."""
-    agent = context.get('agent')
-    client = context.get('client')
+    agent = context.get("agent")
+    client = context.get("client")
 
     if not agent:
         return "Error: No agent context"
     if not client:
         return "Error: Microscope not connected. Cannot detect embryos in offline mode."
     if not client.has_sam:
-        return "Error: SAM server not connected. Embryo detection requires the SAM segmentation server."
+        return (
+            "Error: SAM server not connected."
+            " Embryo detection requires the SAM segmentation server."
+        )
 
     try:
         result = await client.detect_embryos(
@@ -134,15 +144,18 @@ async def detect_embryos(
             max_area=max_area,
         )
 
-        if not result.get('success'):
+        if not result.get("success"):
             return f"Detection failed: {result.get('error', 'Unknown error')}"
 
-        sam_embryos = result.get('embryos', [])
-        image = result.get('image')
-        stage_pos = tuple(result.get('stage_position', [0.0, 0.0]))
+        sam_embryos = result.get("embryos", [])
+        image = result.get("image")
+        stage_pos = tuple(result.get("stage_position", [0.0, 0.0]))
 
         if image is None:
-            return f"Detection ran but no image was returned for the map view (got {len(sam_embryos)} SAM detections)."
+            return (
+                f"Detection ran but no image was returned for the map view"
+                f" (got {len(sam_embryos)} SAM detections)."
+            )
 
         # Hand off SAM detections as editable initial markers in the map view.
         initial_markers = [
@@ -184,8 +197,10 @@ async def detect_embryos(
                 next_num += 1
 
             stage_x, stage_y = _stage_from_pixel(
-                m["pixel_x"], m["pixel_y"],
-                image.shape, stage_pos,
+                m["pixel_x"],
+                m["pixel_y"],
+                image.shape,
+                stage_pos,
             )
             position = {"x": stage_x, "y": stage_y}
 
@@ -207,19 +222,20 @@ async def detect_embryos(
         # OPERATOR_MARKED_EMBRYOS — operator confirmed via the web canvas.
         # This is the intent signal eval/shadow listeners hook for ReactiveCandidate.
         if added:
-            bus = getattr(agent, '_event_bus', None)
+            bus = getattr(agent, "_event_bus", None)
             if bus is not None:
                 from gently.core.event_bus import EventType
+
                 try:
                     bus.publish(
                         event_type=EventType.OPERATOR_MARKED_EMBRYOS,
                         data={
-                            'embryo_ids': [eid for eid, _ in added],
-                            'count': len(added),
-                            'stage_origin': list(stage_pos),
-                            'pre_edit_count': len(sam_embryos),
+                            "embryo_ids": [eid for eid, _ in added],
+                            "count": len(added),
+                            "stage_origin": list(stage_pos),
+                            "pre_edit_count": len(sam_embryos),
                         },
-                        source='detect_embryos:web-editor',
+                        source="detect_embryos:web-editor",
                     )
                 except Exception:
                     pass
@@ -230,20 +246,28 @@ async def detect_embryos(
         role_summary = ", ".join(f"{n} {r}" for r, n in sorted(role_counts.items()))
 
         if auto_calibrate and added:
-            return f"Detected & registered {len(added)} embryos ({role_summary}). Starting calibration..."
+            return (
+                f"Detected & registered {len(added)} embryos ({role_summary})."
+                " Starting calibration..."
+            )
         return f"Detection complete: {len(added)} embryo(s) ({role_summary})."
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return f"Error detecting embryos: {str(e)}"
 
 
 @tool(
     name="manual_mark_embryos",
-    description="""Capture a bottom-camera image and open the web map view for manual embryo marking. User clicks to add markers and cycles each marker's role (Test / Calibration / unassigned).
+    description="""Capture a bottom-camera image and open the web map view for manual embryo
+marking. User clicks to add markers and cycles each marker's role (Test / Calibration /
+unassigned).
 
-Use when automatic detection missed embryos, or when the user wants to add embryos manually (e.g., "let me mark embryos", "I'll click on them"). Newly marked embryos are registered with the role assigned in the map view; existing embryos remain untouched.""",
+Use when automatic detection missed embryos, or when the user wants to add embryos manually
+(e.g., "let me mark embryos", "I'll click on them"). Newly marked embryos are registered with
+the role assigned in the map view; existing embryos remain untouched.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -254,11 +278,11 @@ Use when automatic detection missed embryos, or when the user wants to add embry
 async def manual_mark_embryos(
     exposure_ms: float = None,
     default_role: str = "test",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Manual marking via the web map view."""
-    agent = context.get('agent')
-    client = context.get('client')
+    agent = context.get("agent")
+    client = context.get("client")
 
     if not agent:
         return "Error: No agent context"
@@ -285,19 +309,24 @@ async def manual_mark_embryos(
             pos = emb.stage_position or {}
             sx, sy = pos.get("x", 0), pos.get("y", 0)
             px, py = stage_to_pixel_position(
-                stage_x=sx, stage_y=sy,
-                current_stage_x=stage_pos[0], current_stage_y=stage_pos[1],
-                image_center_x=w / 2, image_center_y=h / 2,
+                stage_x=sx,
+                stage_y=sy,
+                current_stage_x=stage_pos[0],
+                current_stage_y=stage_pos[1],
+                image_center_x=w / 2,
+                image_center_y=h / 2,
                 um_per_pixel=um_per_px,
             )
-            initial_markers.append({
-                "pixel_x": px,
-                "pixel_y": py,
-                "role": emb.role,
-                "source": "existing",
-                "embryo_id": embryo_id,
-                "confidence": emb.detection_confidence,
-            })
+            initial_markers.append(
+                {
+                    "pixel_x": px,
+                    "pixel_y": py,
+                    "role": emb.role,
+                    "source": "existing",
+                    "embryo_id": embryo_id,
+                    "confidence": emb.detection_confidence,
+                }
+            )
 
         marked, err = await _route_to_map_view(
             agent=agent,
@@ -321,7 +350,10 @@ async def manual_mark_embryos(
         added_ids, updated_ids = [], []
         for m in marked:
             stage_x, stage_y = _stage_from_pixel(
-                m["pixel_x"], m["pixel_y"], image.shape, stage_pos,
+                m["pixel_x"],
+                m["pixel_y"],
+                image.shape,
+                stage_pos,
             )
             pos = {"x": stage_x, "y": stage_y}
             existing_id = m.get("embryo_id")
@@ -345,10 +377,7 @@ async def manual_mark_embryos(
 
         # Removals: any existing embryo NOT mentioned in marked is dropped.
         seen_ids = {m.get("embryo_id") for m in marked if m.get("embryo_id")}
-        removed_ids = [
-            eid for eid in existing_ids
-            if eid not in seen_ids and eid not in added_ids
-        ]
+        removed_ids = [eid for eid in existing_ids if eid not in seen_ids and eid not in added_ids]
         for rid in removed_ids:
             agent.experiment.embryos.pop(rid, None)
 
@@ -363,15 +392,20 @@ async def manual_mark_embryos(
 
     except Exception as e:
         import traceback
+
         traceback.print_exc()
         return f"Error: {str(e)}"
 
 
 @tool(
     name="edit_embryos",
-    description="""Capture a fresh bottom-camera image and open the web map view to edit current embryos — add, remove, move, or re-label Test/Calibration. Same surface as manual_mark_embryos; this tool exists to match user intent when they say "edit" rather than "mark".
+    description="""Capture a fresh bottom-camera image and open the web map view to edit
+current embryos — add, remove, move, or re-label Test/Calibration. Same surface as
+manual_mark_embryos; this tool exists to match user intent when they say "edit" rather than
+"mark".
 
-Use when user wants to adjust existing detection results (e.g., "edit embryos", "remove embryo_3", "swap roles", "fix detection").""",
+Use when user wants to adjust existing detection results (e.g., "edit embryos",
+"remove embryo_3", "swap roles", "fix detection").""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -383,10 +417,10 @@ Use when user wants to adjust existing detection results (e.g., "edit embryos", 
 async def edit_embryos(
     exposure_ms: float = None,
     default_role: str = "test",
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Edit existing embryos via the web map view."""
-    agent = context.get('agent')
+    agent = context.get("agent")
     if not agent:
         return "Error: No agent context"
     if not agent.experiment.embryos:
@@ -404,9 +438,11 @@ async def edit_embryos(
 
 @tool(
     name="show_detected_embryos",
-    description="""Capture a fresh image and display all tracked embryos with labeled bounding boxes. Shows embryo IDs at their positions.
-Use when user wants to see where embryos are visually (e.g., "show me the embryos", "display embryo positions").
-Captures a new bottom camera image and overlays all active (non-skipped) embryo positions. Image is saved to detection_results/.""",
+    description="""Capture a fresh image and display all tracked embryos with labeled bounding
+boxes. Shows embryo IDs at their positions.
+Use when user wants to see where embryos are visually (e.g., "show me the embryos",
+"display embryo positions"). Captures a new bottom camera image and overlays all active
+(non-skipped) embryo positions. Image is saved to detection_results/.""",
     category=ToolCategory.DETECTION,
     requires_microscope=True,
     examples=[
@@ -414,13 +450,10 @@ Captures a new bottom camera image and overlays all active (non-skipped) embryo 
         ToolExample("Display embryo positions", {}),
     ],
 )
-async def show_detected_embryos(
-    save_to_file: bool = True,
-    context: Dict = None
-) -> str:
+async def show_detected_embryos(save_to_file: bool = True, context: dict = None) -> str:
     """Show detected embryos visualization using experiment.embryos as source of truth"""
-    agent = context.get('agent')
-    client = context.get('client')
+    agent = context.get("agent")
+    client = context.get("client")
 
     if not agent:
         return "Error: No agent context"
@@ -433,21 +466,21 @@ async def show_detected_embryos(
 
     try:
         snap = await client.capture_bottom_image()
-        image = snap['image']
+        image = snap["image"]
         if image is None or image.shape == (100, 100):
             return "Failed to capture image for visualization."
 
         current_stage = await client.get_stage_position()
 
         # Archive the bottom camera image with metadata
-        if snap.get('image_path') and agent.store and agent.session_id:
+        if snap.get("image_path") and agent.store and agent.session_id:
             try:
                 from gently.harness.tools.helpers import build_snapshot_metadata
-                meta = build_snapshot_metadata(
-                    current_stage, image.shape, agent.experiment)
+
+                meta = build_snapshot_metadata(current_stage, image.shape, agent.experiment)
                 agent.store.register_snapshot(
-                    agent.session_id, "bottom_camera", snap['image_path'],
-                    metadata=meta)
+                    agent.session_id, "bottom_camera", snap["image_path"], metadata=meta
+                )
             except Exception:
                 pass
 
@@ -461,8 +494,8 @@ async def show_detected_embryos(
         for embryo_id, embryo_state in agent.experiment.embryos.items():
             pos = embryo_state.stage_position or {}
 
-            stage_x = pos.get('x', current_stage[0])
-            stage_y = pos.get('y', current_stage[1])
+            stage_x = pos.get("x", current_stage[0])
+            stage_y = pos.get("y", current_stage[1])
 
             # Convert stage to pixel using centralized function
             pixel_x, pixel_y = stage_to_pixel_position(
@@ -472,17 +505,19 @@ async def show_detected_embryos(
                 current_stage_y=current_stage[1],
                 image_center_x=image_center_x,
                 image_center_y=image_center_y,
-                um_per_pixel=um_per_pixel
+                um_per_pixel=um_per_pixel,
             )
 
-            embryos.append({
-                'embryo_id': embryo_id,
-                'pixel_x': pixel_x,
-                'pixel_y': pixel_y,
-                'stage_x_um': stage_x,
-                'stage_y_um': stage_y,
-                'confidence': embryo_state.detection_confidence,
-            })
+            embryos.append(
+                {
+                    "embryo_id": embryo_id,
+                    "pixel_x": pixel_x,
+                    "pixel_y": pixel_y,
+                    "stage_x_um": stage_x,
+                    "stage_y_um": stage_y,
+                    "confidence": embryo_state.detection_confidence,
+                }
+            )
 
         if not embryos:
             return "No embryos to display."
@@ -496,13 +531,13 @@ async def show_detected_embryos(
             embryos=embryos,
             title=f"Embryos ({len(embryos)})",
             save_path=save_path,
-            show=True
+            show=True,
         )
 
-        if view_result.get('success'):
-            embryo_ids = [e.get('embryo_id', '?') for e in embryos]
+        if view_result.get("success"):
+            embryo_ids = [e.get("embryo_id", "?") for e in embryos]
             return f"Showing {len(embryos)} embryos: {', '.join(embryo_ids)}\nSaved to: {save_path}"
-        elif view_result.get('error'):
+        elif view_result.get("error"):
             return f"Display error: {view_result.get('error')}"
         else:
             return f"Visualization complete. Check {save_path}"

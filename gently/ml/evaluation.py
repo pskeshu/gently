@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -14,17 +14,18 @@ logger = logging.getLogger(__name__)
 @dataclass
 class EvaluationReport:
     """Complete evaluation report for a trained model."""
+
     run_id: str = ""
     accuracy: float = 0.0
-    per_stage_precision: Dict[str, float] = field(default_factory=dict)
-    per_stage_recall: Dict[str, float] = field(default_factory=dict)
-    per_stage_f1: Dict[str, float] = field(default_factory=dict)
-    confusion_matrix: List[List[int]] = field(default_factory=list)
-    class_names: List[str] = field(default_factory=list)
+    per_stage_precision: dict[str, float] = field(default_factory=dict)
+    per_stage_recall: dict[str, float] = field(default_factory=dict)
+    per_stage_f1: dict[str, float] = field(default_factory=dict)
+    confusion_matrix: list[list[int]] = field(default_factory=list)
+    class_names: list[str] = field(default_factory=list)
     total_samples: int = 0
     correct: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "run_id": self.run_id,
             "accuracy": self.accuracy,
@@ -38,7 +39,7 @@ class EvaluationReport:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "EvaluationReport":
+    def from_dict(cls, d: dict[str, Any]) -> "EvaluationReport":
         return cls(
             run_id=d.get("run_id", ""),
             accuracy=d.get("accuracy", 0.0),
@@ -66,7 +67,7 @@ class EvaluationReport:
 def evaluate_model(
     model,
     data_loader,
-    class_names: List[str],
+    class_names: list[str],
     device=None,
     run_id: str = "",
 ) -> EvaluationReport:
@@ -111,7 +112,7 @@ def evaluate_model(
             outputs = model(batch_x)
             _, predicted = outputs.max(1)
 
-            for true, pred in zip(batch_y.cpu().tolist(), predicted.cpu().tolist()):
+            for true, pred in zip(batch_y.cpu().tolist(), predicted.cpu().tolist(), strict=False):
                 cm[true][pred] += 1
                 total += 1
                 if true == pred:

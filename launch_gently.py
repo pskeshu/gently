@@ -21,16 +21,15 @@ Usage:
     python launch_gently.py --debug              # Debug logging
 """
 
+import argparse
 import asyncio
-import json
 import logging
 import os
-import sys
 import shutil
 import subprocess
-import argparse
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import yaml
 
@@ -50,13 +49,13 @@ except ImportError:
 if not any(flag in sys.argv for flag in ("-h", "--help")):
     print("Starting gently — loading modules (this can take a few seconds)...", flush=True)
 
-from gently.log_config import configure_logging
-from gently.core.log_bridge import configure_log_bridge
 from gently.app.agent import MicroscopyAgent
-from gently.organisms import load_organism
-from gently.hardware import load_hardware, get_hardware
-from gently.settings import settings
 from gently.core.file_store import FileStore
+from gently.core.log_bridge import configure_log_bridge
+from gently.hardware import get_hardware, load_hardware
+from gently.log_config import configure_logging
+from gently.organisms import load_organism
+from gently.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -88,11 +87,13 @@ def _build_session_items(store: FileStore) -> list:
         session_id = session.get("session_id", "unknown")
         embryos = store.list_embryos(session_id)
         embryo_count = len(embryos) if embryos else 0
-        items.append({
-            "session_id": session_id,
-            "embryo_count": embryo_count,
-            "time": _format_elapsed(session.get("last_active", "")),
-        })
+        items.append(
+            {
+                "session_id": session_id,
+                "embryo_count": embryo_count,
+                "time": _format_elapsed(session.get("last_active", "")),
+            }
+        )
     return items
 
 
@@ -136,7 +137,7 @@ def _print_banner(viz_url, device_connected, offline, storage_dir, log_file, res
     print(f"    Device:  {dev}")
     print(f"    Storage: {storage_dir}")
     print(f"    Logs:    {log_file}")
-    print(f"    Stop:    Ctrl-C")
+    print("    Stop:    Ctrl-C")
     print(f"    {line}")
     print()
 
@@ -153,7 +154,11 @@ def _open_browser(url: str) -> None:
     override = os.environ.get("GENTLY_BROWSER", "").strip()
 
     # 1) Registered browser names (override first, then Chrome aliases).
-    for name in ([override] if override else []) + ["chrome", "google-chrome", "chromium"]:
+    for name in ([override] if override else []) + [
+        "chrome",
+        "google-chrome",
+        "chromium",
+    ]:
         try:
             webbrowser.get(name).open(url)
             return
@@ -171,8 +176,10 @@ def _open_browser(url: str) -> None:
         try:
             if exe and Path(exe).exists():
                 webbrowser.register(
-                    "gently-browser", None,
-                    webbrowser.BackgroundBrowser(exe), preferred=True,
+                    "gently-browser",
+                    None,
+                    webbrowser.BackgroundBrowser(exe),
+                    preferred=True,
                 )
                 webbrowser.get("gently-browser").open(url)
                 return
@@ -210,13 +217,21 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     # Parse the SESSION:<id> protocol line from stdout
     for line in (proc.stdout or "").splitlines():
         if line.startswith("SESSION:"):
-            selected = line[len("SESSION:"):].strip()
+            selected = line[len("SESSION:") :].strip()
             return selected if selected else None
 
     return None
 
 
-async def main(offline: bool = False, resume_session: str = None, show_sessions: bool = False, pick_session: bool = False, log_level: str = "WARNING", no_browser: bool = False, no_api: bool = False):
+async def main(
+    offline: bool = False,
+    resume_session: str = None,
+    show_sessions: bool = False,
+    pick_session: bool = False,
+    log_level: str = "WARNING",
+    no_browser: bool = False,
+    no_api: bool = False,
+):
     # Set up log file in storage directory
     # Unified with FileStore: logs live under the same root as data
     # (settings.storage.base_path reads GENTLY_STORAGE_PATH). Previously this
@@ -250,6 +265,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
     # Create unified store (FileStore) early for session queries
     from gently.core.gently_manifest import write_manifest
+
     write_manifest(storage_dir)
     store = FileStore(storage_dir)
 
@@ -261,6 +277,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     if os.environ.get("GENTLY_NO_AUTH", "").strip().lower() not in ("1", "true", "yes"):
         try:
             from gently.ui.web.accounts import AccountStore, set_account_store
+
             account_store = AccountStore(storage_dir / "auth")
             set_account_store(account_store)
             admin_creds = account_store.bootstrap_admin_if_empty()
@@ -285,8 +302,10 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         if sessions:
             session_to_resume = sessions[0].get("session_id")
             if pick_session:
-                print(f"Resuming most recent session: {session_to_resume} "
-                      "(interactive session picking is moving into the browser)")
+                print(
+                    f"Resuming most recent session: {session_to_resume} "
+                    "(interactive session picking is moving into the browser)"
+                )
         else:
             print("No sessions found - starting fresh")
     elif resume_session:
@@ -305,11 +324,12 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     if not offline:
         hw = get_hardware()
         http_url = f"http://{settings.network.device_host}:{settings.network.device_port}"
-        if hasattr(hw, 'create_client'):
+        if hasattr(hw, "create_client"):
             client = hw.create_client(http_url=http_url)
         else:
             # Fallback for hardware modules without create_client
             from gently.app.queue_server_client import QueueServerClient
+
             client = QueueServerClient(http_url=http_url)
         connected = await client.connect()
         if not connected:
@@ -320,14 +340,15 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             # makes Claude hallucinate XML tool calls as plain text.
             logger.debug(
                 "Device layer not reachable at %s — microscope tools "
-                "available but will return errors until connected", http_url,
+                "available but will return errors until connected",
+                http_url,
             )
 
     # Configure device session for zero-copy volume transfer
     if client and client.is_connected:
         try:
             incoming = str(store.incoming_dir)
-            resp = await client.configure_device_session(incoming)
+            await client.configure_device_session(incoming)
             logger.info("Device session configured: volume_dir=%s", incoming)
         except Exception as e:
             logger.error("Failed to configure device session (volumes will be slow): %s", e)
@@ -336,6 +357,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     if client and client.is_connected:
         try:
             from gently.harness.microscope import register_microscope_tools
+
             n = register_microscope_tools(client)
             if n:
                 logger.info("Registered %d microscope tools from device layer", n)
@@ -355,6 +377,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     cert_path, key_path = None, None
     try:
         from gently.mesh.tls import ensure_tls_cert, get_cert_fingerprint
+
         _config_dir = Path(__file__).parent / "config"
         cert_path, key_path = ensure_tls_cert(_config_dir)
     except Exception:
@@ -364,15 +387,20 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # self-signed certs trigger browser "unsafe" warnings for visitors).
     await agent.start_viz_server(port=settings.network.viz_port)
     scheme = "http"
-    viz_url = f"{scheme}://localhost:{settings.network.viz_port}" if agent.viz_server is not None else None
+    viz_url = (
+        f"{scheme}://localhost:{settings.network.viz_port}"
+        if agent.viz_server is not None
+        else None
+    )
 
     # ── Mesh discovery ──────────────────────────────────────────────
     mesh = None
     try:
+        import uuid as _uuid
+
         from gently.mesh import MeshService, register_mesh_routes
         from gently.mesh.audit import MeshAuditLog
         from gently.mesh.pairing import PairingManager
-        import uuid as _uuid
 
         # Persistent instance ID
         instance_id_path = Path(__file__).parent / "config" / "mesh_instance_id"
@@ -398,6 +426,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             # GPU detection — try torch first, fall back to nvidia-smi
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     caps["has_gpu"] = True
                     caps["gpu_name"] = torch.cuda.get_device_name(0)
@@ -407,10 +436,15 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             except ImportError:
                 try:
                     import subprocess as _sp
+
                     out = _sp.check_output(
-                        ["nvidia-smi", "--query-gpu=name,memory.total",
-                         "--format=csv,noheader,nounits"],
-                        timeout=5, text=True,
+                        [
+                            "nvidia-smi",
+                            "--query-gpu=name,memory.total",
+                            "--format=csv,noheader,nounits",
+                        ],
+                        timeout=5,
+                        text=True,
                     ).strip()
                     if out:
                         parts = out.split(",", 1)
@@ -430,6 +464,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
 
         def _status_provider():
             import gently as _gently
+
             return {
                 "session_id": agent.session_id or "",
                 "acquisition_status": "idle",
@@ -442,6 +477,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
             }
 
         import socket as _socket
+
         config_dir = Path(__file__).parent / "config"
         audit_log = MeshAuditLog(config_dir)
         pairing_mgr = PairingManager(
@@ -474,27 +510,32 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         await mesh.start()
     except Exception as e:
         import logging as _log
+
         _log.getLogger(__name__).warning(f"Mesh discovery failed to start: {e}")
         mesh = None
     # ── End mesh ────────────────────────────────────────────────────
 
     # Attach the agent bridge to the viz server
     from gently.harness.bridge import AgentBridge
+
     bridge = AgentBridge(agent)
 
-    bridge.set_launch_info({
-        "device_connected": client.is_connected if client else False,
-        "sam_available": client.has_sam if client else False,
-        "offline": offline or (client is None) or not client.is_connected,
-        "store_path": str(storage_dir),
-        "viz_url": viz_url,
-        "log_path": str(log_file),
-        "resumed": session_to_resume is not None,
-        "mesh_service": mesh,
-    })
+    bridge.set_launch_info(
+        {
+            "device_connected": client.is_connected if client else False,
+            "sam_available": client.has_sam if client else False,
+            "offline": offline or (client is None) or not client.is_connected,
+            "store_path": str(storage_dir),
+            "viz_url": viz_url,
+            "log_path": str(log_file),
+            "resumed": session_to_resume is not None,
+            "mesh_service": mesh,
+        }
+    )
 
     # Initialize startup wizard (gap-driven onboarding)
     from gently.harness.memory.file_store import FileContextStore
+
     agent_dir = storage_dir / "agent"
     context_store = FileContextStore(agent_dir)
     agent.set_context_store(context_store)
@@ -540,6 +581,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
     # bare Event().wait(), so install signal handlers and poll on a short
     # interval (which also lets a pending KeyboardInterrupt surface).
     import signal as _signal
+
     _loop = asyncio.get_running_loop()
     _stop = asyncio.Event()
     try:
@@ -550,6 +592,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         # signal.signal, waking the loop via call_soon_threadsafe.
         def _sig(*_a):
             _loop.call_soon_threadsafe(_stop.set)
+
         try:
             _signal.signal(_signal.SIGINT, _sig)
             _signal.signal(_signal.SIGTERM, _sig)
@@ -565,6 +608,7 @@ async def main(offline: bool = False, resume_session: str = None, show_sessions:
         # Suppress noisy CancelledError / overlapped IO errors from
         # uvicorn during shutdown on Windows.
         import logging as _logging
+
         _logging.getLogger("uvicorn.error").setLevel(_logging.CRITICAL)
         _logging.getLogger("uvicorn").setLevel(_logging.CRITICAL)
         # Cleanup: stop mesh service
@@ -585,15 +629,29 @@ def cli_main():
     """Sync entry point for ``gently`` console script (pyproject.toml)."""
     parser = argparse.ArgumentParser(description="Launch Microscopy Agent")
     parser.add_argument("--offline", action="store_true", help="Run without server connections")
-    parser.add_argument("--no-api", action="store_true",
-                        help="UI-only mode: boot the web UI without any Anthropic API key. "
-                             "Chat, perception, and plan generation are disabled.")
+    parser.add_argument(
+        "--no-api",
+        action="store_true",
+        help="UI-only mode: boot the web UI without any Anthropic API key. "
+        "Chat, perception, and plan generation are disabled.",
+    )
     parser.add_argument("--sessions", action="store_true", help="List available sessions and exit")
-    parser.add_argument("--resume", nargs="?", const="__PICK__", metavar="ID",
-                        help="Resume a session. Without ID: shows picker. With ID: resumes that session.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose (INFO) logging")
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="__PICK__",
+        metavar="ID",
+        help="Resume a session. Without ID: shows picker. With ID: resumes that session.",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose (INFO) logging"
+    )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
-    parser.add_argument("--no-browser", action="store_true", help="Do not auto-open the web UI in a browser")
+    parser.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="Do not auto-open the web UI in a browser",
+    )
     args = parser.parse_args()
 
     # An API key is required unless running in UI-only mode.
@@ -613,19 +671,21 @@ def cli_main():
     if args.debug:
         log_level = "DEBUG"
 
-    pick_session = (args.resume == "__PICK__")
+    pick_session = args.resume == "__PICK__"
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
     try:
-        asyncio.run(main(
-            offline=args.offline,
-            show_sessions=args.sessions,
-            resume_session=resume_id,
-            pick_session=pick_session,
-            log_level=log_level,
-            no_browser=args.no_browser,
-            no_api=args.no_api,
-        ))
+        asyncio.run(
+            main(
+                offline=args.offline,
+                show_sessions=args.sessions,
+                resume_session=resume_id,
+                pick_session=pick_session,
+                log_level=log_level,
+                no_browser=args.no_browser,
+                no_api=args.no_api,
+            )
+        )
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass
 

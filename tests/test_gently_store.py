@@ -15,8 +15,6 @@ Tests cover:
 """
 
 import json
-import shutil
-import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -43,6 +41,7 @@ def store(store_dir):
 # =========================================================================
 # Session tests
 # =========================================================================
+
 
 class TestSessions:
     def test_create_session(self, store):
@@ -101,6 +100,7 @@ class TestSessions:
 # Embryo tests
 # =========================================================================
 
+
 class TestEmbryos:
     def test_register_embryo(self, store):
         store.create_session("s1")
@@ -142,6 +142,7 @@ class TestEmbryos:
 # =========================================================================
 # Volume tests
 # =========================================================================
+
 
 def _make_volume(shape=(2, 20, 64, 64), dtype=np.uint16):
     """Create a test volume with some structure."""
@@ -271,6 +272,7 @@ class TestVolumes:
 # Projection tests
 # =========================================================================
 
+
 class TestProjections:
     def test_projection_b64(self, store):
         store.create_session("s1")
@@ -299,11 +301,14 @@ class TestProjections:
 # Perception run lifecycle tests
 # =========================================================================
 
+
 class TestPerception:
     def test_create_and_complete_run(self, store):
         store.create_session("s1")
         run_id = store.create_perception_run(
-            "s1", "test_run", "vlm_stage_classification",
+            "s1",
+            "test_run",
+            "vlm_stage_classification",
             model_name="claude-opus-4-5-20251101",
         )
         assert isinstance(run_id, int)
@@ -340,7 +345,7 @@ class TestPerception:
             "perception_result": {"stage": "early"},
             "steps": ["step1", "step2"],
         }
-        pred_id = store.store_prediction(
+        store.store_prediction(
             run_id=run_id,
             session_id="s1",
             embryo_id="e1",
@@ -400,7 +405,9 @@ class TestPerception:
         store.create_session("s1")
         config = {"interval": 120, "stop_condition": "hatched"}
         run_id = store.create_perception_run(
-            "s1", "run1", "vlm",
+            "s1",
+            "run1",
+            "vlm",
             config=config,
         )
         assert run_id > 0
@@ -415,6 +422,7 @@ class TestPerception:
 # =========================================================================
 # Ground truth tests
 # =========================================================================
+
 
 class TestGroundTruth:
     def test_set_and_get_ground_truth(self, store):
@@ -442,6 +450,7 @@ class TestGroundTruth:
 # =========================================================================
 # Stats and utility tests
 # =========================================================================
+
 
 class TestUtility:
     def test_stats(self, store):
@@ -481,6 +490,7 @@ class TestUtility:
 # =========================================================================
 # EmbryoDataset integration with GentlyStore
 # =========================================================================
+
 
 class TestEmbryoDatasetIntegration:
     def test_from_store(self, store):
@@ -559,7 +569,8 @@ class TestEmbryoDatasetIntegration:
 
         dataset = EmbryoDataset.from_store(store)
         run_id = dataset.create_perception_run(
-            name="test", perception_method="vlm",
+            name="test",
+            perception_method="vlm",
             session_id="s1",
         )
         pred_id = dataset.store_prediction(
@@ -578,7 +589,9 @@ class TestEmbryoDatasetIntegration:
         store.create_session("s1")
         dataset = EmbryoDataset.from_store(store)
         run_id = dataset.create_perception_run(
-            name="test", perception_method="vlm", session_id="s1",
+            name="test",
+            perception_method="vlm",
+            session_id="s1",
         )
         dataset.complete_perception_run(run_id, status="completed")
         # No exception = success
@@ -596,15 +609,25 @@ class TestEmbryoDatasetIntegration:
 
         dataset = EmbryoDataset.from_store(store)
         run_id = dataset.create_perception_run(
-            name="test", perception_method="vlm", session_id="s1",
+            name="test",
+            perception_method="vlm",
+            session_id="s1",
         )
         dataset.store_prediction(
-            run_id=run_id, embryo_id="e1", timepoint=0,
-            predicted_stage="early", confidence=0.9, session_id="s1",
+            run_id=run_id,
+            embryo_id="e1",
+            timepoint=0,
+            predicted_stage="early",
+            confidence=0.9,
+            session_id="s1",
         )
         dataset.store_prediction(
-            run_id=run_id, embryo_id="e1", timepoint=1,
-            predicted_stage="bean", confidence=0.6, session_id="s1",
+            run_id=run_id,
+            embryo_id="e1",
+            timepoint=1,
+            predicted_stage="bean",
+            confidence=0.6,
+            session_id="s1",
         )
 
         metrics = dataset.compute_run_metrics(run_id)
@@ -617,6 +640,7 @@ class TestEmbryoDatasetIntegration:
 # Device-side serialize_value file-ref protocol tests
 # =========================================================================
 
+
 class TestSerializeValueFileRef:
     """Test the file-ref protocol in simple_server.serialize_value()."""
 
@@ -624,6 +648,7 @@ class TestSerializeValueFileRef:
         """Arrays > 1MB should be written as TIFF and return a file ref dict."""
         # Import the function under test
         import sys
+
         backend_path = str(Path(__file__).parent.parent / "backend")
         if backend_path not in sys.path:
             sys.path.insert(0, backend_path)
@@ -651,6 +676,7 @@ class TestSerializeValueFileRef:
     def test_small_array_stays_inline(self, tmp_path):
         """Arrays < 1MB should be serialized normally (as list)."""
         import sys
+
         backend_path = str(Path(__file__).parent.parent / "backend")
         if backend_path not in sys.path:
             sys.path.insert(0, backend_path)
@@ -673,6 +699,7 @@ class TestSerializeValueFileRef:
     def test_no_volume_dir_falls_back(self):
         """Without volume_dir, serialize_value behaves as before (list)."""
         import sys
+
         backend_path = str(Path(__file__).parent.parent / "backend")
         if backend_path not in sys.path:
             sys.path.insert(0, backend_path)
@@ -690,6 +717,7 @@ class TestSerializeValueFileRef:
 # =========================================================================
 # Client-side _resolve_file_refs tests
 # =========================================================================
+
 
 class TestResolveFileRefs:
     """Test _resolve_file_refs() in QueueServerClient."""
@@ -740,7 +768,7 @@ class TestResolveFileRefs:
                     "dtype": "uint16",
                 },
                 "other_key": "kept",
-            }
+            },
         }
 
         client = QueueServerClient.__new__(QueueServerClient)

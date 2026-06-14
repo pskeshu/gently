@@ -2,14 +2,14 @@
 Transfer data models.
 """
 
-import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class TransferType(str, Enum):
     """Type of data being transferred."""
+
     DATASET = "dataset"
     MODEL_WEIGHTS = "model_weights"
     SESSION = "session"
@@ -17,6 +17,7 @@ class TransferType(str, Enum):
 
 class TransferStatus(str, Enum):
     """Transfer state machine."""
+
     PENDING = "pending"
     TRANSFERRING = "transferring"
     PAUSED = "paused"
@@ -28,12 +29,13 @@ class TransferStatus(str, Enum):
 @dataclass
 class TransferFile:
     """A single file in a transfer manifest."""
+
     relative_path: str = ""
     total_size: int = 0
     sha256: str = ""
     transferred: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "relative_path": self.relative_path,
             "total_size": self.total_size,
@@ -42,7 +44,7 @@ class TransferFile:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TransferFile":
+    def from_dict(cls, d: dict[str, Any]) -> "TransferFile":
         return cls(
             relative_path=d.get("relative_path", ""),
             total_size=d.get("total_size", 0),
@@ -54,11 +56,12 @@ class TransferFile:
 @dataclass
 class TransferManifest:
     """List of files to transfer."""
-    files: List[TransferFile] = field(default_factory=list)
+
+    files: list[TransferFile] = field(default_factory=list)
     total_size: int = 0
     file_count: int = 0
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "files": [f.to_dict() for f in self.files],
             "total_size": self.total_size,
@@ -66,7 +69,7 @@ class TransferManifest:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TransferManifest":
+    def from_dict(cls, d: dict[str, Any]) -> "TransferManifest":
         files = [TransferFile.from_dict(f) for f in d.get("files", [])]
         return cls(
             files=files,
@@ -78,6 +81,7 @@ class TransferManifest:
 @dataclass
 class TransferJob:
     """State of a single transfer (send or receive)."""
+
     id: str = ""
     transfer_type: str = TransferType.DATASET.value
     status: str = TransferStatus.PENDING.value
@@ -103,7 +107,7 @@ class TransferJob:
             return 0.0
         return (self.bytes_transferred / self.total_bytes) * 100
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "transfer_type": self.transfer_type,
@@ -125,7 +129,7 @@ class TransferJob:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TransferJob":
+    def from_dict(cls, d: dict[str, Any]) -> "TransferJob":
         return cls(
             id=d.get("id", ""),
             transfer_type=d.get("transfer_type", TransferType.DATASET.value),

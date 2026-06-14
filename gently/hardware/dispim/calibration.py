@@ -12,7 +12,6 @@ would have different calibration models.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, Optional
 
 
 @dataclass
@@ -24,13 +23,14 @@ class CalibrationPrior:
     time by using cross-embryo learning. The prior is updated after each
     successful calibration using an exponential moving average.
     """
+
     # Linear relationship: piezo = slope * galvo + offset
     slope_um_per_deg: float = 100.0  # Default heuristic
     offset_um: float = 0.0
 
     # Confidence metrics
     r_squared_mean: float = 0.0  # Average R-squared from contributing calibrations
-    num_calibrations: int = 0    # Number of embryos contributing to prior
+    num_calibrations: int = 0  # Number of embryos contributing to prior
 
     # Observed ranges (for adaptive sweep window sizing)
     slope_min: float = 90.0
@@ -39,15 +39,15 @@ class CalibrationPrior:
     offset_max: float = 20.0
 
     # Edge detection statistics
-    typical_extent_deg: float = 0.3   # Average embryo Z extent in degrees
-    extent_std_deg: float = 0.1       # Variation in extent
+    typical_extent_deg: float = 0.3  # Average embryo Z extent in degrees
+    extent_std_deg: float = 0.1  # Variation in extent
 
     # Timestamp for staleness checking
-    last_updated: Optional[datetime] = None
+    last_updated: datetime | None = None
 
     # Fast calibration: lock slope after first embryo bootstrap
     session_slope_locked: bool = False
-    bootstrap_embryo_id: Optional[str] = None  # Which embryo established the slope
+    bootstrap_embryo_id: str | None = None  # Which embryo established the slope
 
     def lock_session_slope(self, slope: float, r_squared: float, embryo_id: str):
         """
@@ -82,7 +82,7 @@ class CalibrationPrior:
         offset: float,
         r_squared: float,
         extent_deg: float,
-        alpha: float = 0.3
+        alpha: float = 0.3,
     ):
         """
         Update prior with new calibration result using exponential moving average.
@@ -122,41 +122,41 @@ class CalibrationPrior:
         self.num_calibrations += 1
         self.last_updated = datetime.now()
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize for JSON storage"""
         return {
-            'slope_um_per_deg': self.slope_um_per_deg,
-            'offset_um': self.offset_um,
-            'r_squared_mean': self.r_squared_mean,
-            'num_calibrations': self.num_calibrations,
-            'slope_min': self.slope_min,
-            'slope_max': self.slope_max,
-            'offset_min': self.offset_min,
-            'offset_max': self.offset_max,
-            'typical_extent_deg': self.typical_extent_deg,
-            'extent_std_deg': self.extent_std_deg,
-            'last_updated': self.last_updated.isoformat() if self.last_updated else None,
-            'session_slope_locked': self.session_slope_locked,
-            'bootstrap_embryo_id': self.bootstrap_embryo_id,
+            "slope_um_per_deg": self.slope_um_per_deg,
+            "offset_um": self.offset_um,
+            "r_squared_mean": self.r_squared_mean,
+            "num_calibrations": self.num_calibrations,
+            "slope_min": self.slope_min,
+            "slope_max": self.slope_max,
+            "offset_min": self.offset_min,
+            "offset_max": self.offset_max,
+            "typical_extent_deg": self.typical_extent_deg,
+            "extent_std_deg": self.extent_std_deg,
+            "last_updated": self.last_updated.isoformat() if self.last_updated else None,
+            "session_slope_locked": self.session_slope_locked,
+            "bootstrap_embryo_id": self.bootstrap_embryo_id,
         }
 
     @classmethod
-    def from_dict(cls, data: Dict) -> 'CalibrationPrior':
+    def from_dict(cls, data: dict) -> "CalibrationPrior":
         """Deserialize from JSON"""
         prior = cls(
-            slope_um_per_deg=data.get('slope_um_per_deg', 100.0),
-            offset_um=data.get('offset_um', 0.0),
-            r_squared_mean=data.get('r_squared_mean', 0.0),
-            num_calibrations=data.get('num_calibrations', 0),
-            slope_min=data.get('slope_min', 90.0),
-            slope_max=data.get('slope_max', 110.0),
-            offset_min=data.get('offset_min', -20.0),
-            offset_max=data.get('offset_max', 20.0),
-            typical_extent_deg=data.get('typical_extent_deg', 0.3),
-            extent_std_deg=data.get('extent_std_deg', 0.1),
-            session_slope_locked=data.get('session_slope_locked', False),
-            bootstrap_embryo_id=data.get('bootstrap_embryo_id'),
+            slope_um_per_deg=data.get("slope_um_per_deg", 100.0),
+            offset_um=data.get("offset_um", 0.0),
+            r_squared_mean=data.get("r_squared_mean", 0.0),
+            num_calibrations=data.get("num_calibrations", 0),
+            slope_min=data.get("slope_min", 90.0),
+            slope_max=data.get("slope_max", 110.0),
+            offset_min=data.get("offset_min", -20.0),
+            offset_max=data.get("offset_max", 20.0),
+            typical_extent_deg=data.get("typical_extent_deg", 0.3),
+            extent_std_deg=data.get("extent_std_deg", 0.1),
+            session_slope_locked=data.get("session_slope_locked", False),
+            bootstrap_embryo_id=data.get("bootstrap_embryo_id"),
         )
-        if data.get('last_updated'):
-            prior.last_updated = datetime.fromisoformat(data['last_updated'])
+        if data.get("last_updated"):
+            prior.last_updated = datetime.fromisoformat(data["last_updated"])
         return prior

@@ -2,15 +2,17 @@
 Detector registry for managing all configured detectors
 """
 
-import logging
 import json
-from pathlib import Path
-from typing import Dict, List, Optional
+import logging
 from datetime import datetime
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-from .detector import Detector, DetectorConditions, DetectorActions, DetectionMode, ConfidenceLevel
+from .detector import (  # noqa: E402
+    ConfidenceLevel,
+    Detector,
+)
 
 
 class DetectorRegistry:
@@ -20,14 +22,14 @@ class DetectorRegistry:
     Handles CRUD operations, persistence, and querying of detectors.
     """
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self, storage_path: Path | None = None):
         """
         Parameters
         ----------
         storage_path : Path, optional
             Where to save detector registry JSON
         """
-        self.detectors: Dict[str, Detector] = {}
+        self.detectors: dict[str, Detector] = {}
         self.storage_path = storage_path or Path("./detector_registry.json")
 
         # Load existing detectors if file exists
@@ -76,15 +78,15 @@ class DetectorRegistry:
         self.save()
         return True
 
-    def get(self, name: str) -> Optional[Detector]:
+    def get(self, name: str) -> Detector | None:
         """Get detector by name"""
         return self.detectors.get(name)
 
-    def list_all(self) -> List[Detector]:
+    def list_all(self) -> list[Detector]:
         """Get all detectors"""
         return list(self.detectors.values())
 
-    def list_enabled(self) -> List[Detector]:
+    def list_enabled(self) -> list[Detector]:
         """Get all enabled detectors"""
         return [d for d in self.detectors.values() if d.enabled]
 
@@ -162,7 +164,7 @@ class DetectorRegistry:
         self.save()
         return True
 
-    def get_stats(self) -> Dict:
+    def get_stats(self) -> dict:
         """
         Get registry statistics
 
@@ -177,34 +179,31 @@ class DetectorRegistry:
         total_runs = sum(d.run_count for d in self.detectors.values())
 
         return {
-            'total_detectors': total,
-            'enabled_detectors': enabled,
-            'disabled_detectors': total - enabled,
-            'total_detections_fired': total_detections,
-            'total_runs': total_runs,
-            'detectors': {
+            "total_detectors": total,
+            "enabled_detectors": enabled,
+            "disabled_detectors": total - enabled,
+            "total_detections_fired": total_detections,
+            "total_runs": total_runs,
+            "detectors": {
                 name: {
-                    'enabled': d.enabled,
-                    'detection_count': d.detection_count,
-                    'run_count': d.run_count
+                    "enabled": d.enabled,
+                    "detection_count": d.detection_count,
+                    "run_count": d.run_count,
                 }
                 for name, d in self.detectors.items()
-            }
+            },
         }
 
     def save(self):
         """Save registry to disk"""
         data = {
-            'version': '1.0',
-            'saved_at': datetime.now().isoformat(),
-            'detectors': {
-                name: detector.to_dict()
-                for name, detector in self.detectors.items()
-            }
+            "version": "1.0",
+            "saved_at": datetime.now().isoformat(),
+            "detectors": {name: detector.to_dict() for name, detector in self.detectors.items()},
         }
 
         self.storage_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(self.storage_path, 'w') as f:
+        with open(self.storage_path, "w") as f:
             json.dump(data, f, indent=2)
 
     def load(self):
@@ -212,18 +211,18 @@ class DetectorRegistry:
         if not self.storage_path.exists():
             return
 
-        with open(self.storage_path, 'r') as f:
+        with open(self.storage_path) as f:
             data = json.load(f)
 
         self.detectors = {}
-        for name, detector_data in data.get('detectors', {}).items():
+        for name, detector_data in data.get("detectors", {}).items():
             try:
                 detector = Detector.from_dict(detector_data)
                 self.detectors[name] = detector
             except Exception as e:
                 logger.warning("Failed to load detector '%s': %s", name, e)
 
-    def create_preset_detector(self, preset_name: str) -> Optional[Detector]:
+    def create_preset_detector(self, preset_name: str) -> Detector | None:
         """
         Create a detector from preset
 
@@ -243,12 +242,12 @@ class DetectorRegistry:
 
         preset_data = presets[preset_name]
         detector = Detector(
-            name=preset_data['name'],
-            description=preset_data['description'],
-            detection_prompt=preset_data['prompt'],
-            use_temporal_context=preset_data.get('use_temporal_context', True),
-            temporal_context_size=preset_data.get('temporal_context_size', 5),
-            confidence_threshold=ConfidenceLevel(preset_data.get('confidence_threshold', 'MEDIUM')),
+            name=preset_data["name"],
+            description=preset_data["description"],
+            detection_prompt=preset_data["prompt"],
+            use_temporal_context=preset_data.get("use_temporal_context", True),
+            temporal_context_size=preset_data.get("temporal_context_size", 5),
+            confidence_threshold=ConfidenceLevel(preset_data.get("confidence_threshold", "MEDIUM")),
         )
 
         return detector
@@ -258,6 +257,7 @@ class DetectorRegistry:
 def get_detector_presets():
     """Get detector presets from the active organism module."""
     from gently.organisms import get_organism
+
     org = get_organism()
     presets_module = __import__(
         f"gently.organisms.{org.ORGANISM_NAME}.detector_presets",

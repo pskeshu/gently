@@ -8,16 +8,15 @@ available to the agent in plan mode.
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Any, Dict, List, Optional
 
 from gently.harness.tools.registry import ToolCategory, ToolParameter
 
 logger = logging.getLogger(__name__)
 
 
-def register_ml_tools(registry, context_store=None, gently_store=None,
-                      verse_map=None, peer_client=None):
+def register_ml_tools(
+    registry, context_store=None, gently_store=None, verse_map=None, peer_client=None
+):
     """Register ML tools on a tool registry.
 
     Parameters
@@ -50,6 +49,7 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
     )
     async def inventory_datasets(include_remote: bool = True, **kwargs) -> str:
         from gently.data_reasoning.assessment import DataAssessmentEngine
+
         engine = DataAssessmentEngine(
             gently_store=gently_store,
             peer_client=peer_client,
@@ -76,6 +76,7 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
     )
     async def check_annotation_coverage(session_ids: str = "", **kwargs) -> str:
         from gently.data_reasoning.coverage import CoverageAnalyzer
+
         analyzer = CoverageAnalyzer(gently_store=gently_store)
         sid_list = [s.strip() for s in session_ids.split(",") if s.strip()] or None
         report = analyzer.analyze(session_ids=sid_list)
@@ -105,6 +106,7 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
     )
     async def select_architecture(dataset_size: int, vram_gb: float, **kwargs) -> str:
         from gently.ml.architectures import get_suitable_architectures
+
         results = get_suitable_architectures(dataset_size, vram_gb)
         return json.dumps(results, indent=2)
 
@@ -116,20 +118,46 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
         ),
         category=ToolCategory.ML,
         parameters=[
-            ToolParameter(name="campaign_id", type="string",
-                          description="Campaign this pipeline belongs to", required=True),
-            ToolParameter(name="name", type="string",
-                          description="Pipeline name", required=True),
-            ToolParameter(name="architecture", type="string",
-                          description="Model architecture ID", required=True),
-            ToolParameter(name="num_classes", type="integer",
-                          description="Number of output classes", required=True),
-            ToolParameter(name="batch_size", type="integer",
-                          description="Training batch size", required=False, default=32),
-            ToolParameter(name="epochs", type="integer",
-                          description="Number of training epochs", required=False, default=50),
-            ToolParameter(name="learning_rate", type="number",
-                          description="Learning rate", required=False, default=1e-4),
+            ToolParameter(
+                name="campaign_id",
+                type="string",
+                description="Campaign this pipeline belongs to",
+                required=True,
+            ),
+            ToolParameter(name="name", type="string", description="Pipeline name", required=True),
+            ToolParameter(
+                name="architecture",
+                type="string",
+                description="Model architecture ID",
+                required=True,
+            ),
+            ToolParameter(
+                name="num_classes",
+                type="integer",
+                description="Number of output classes",
+                required=True,
+            ),
+            ToolParameter(
+                name="batch_size",
+                type="integer",
+                description="Training batch size",
+                required=False,
+                default=32,
+            ),
+            ToolParameter(
+                name="epochs",
+                type="integer",
+                description="Number of training epochs",
+                required=False,
+                default=50,
+            ),
+            ToolParameter(
+                name="learning_rate",
+                type="number",
+                description="Learning rate",
+                required=False,
+                default=1e-4,
+            ),
         ],
     )
     async def configure_training(
@@ -170,8 +198,12 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
         ),
         category=ToolCategory.ML,
         parameters=[
-            ToolParameter(name="pipeline_id", type="string",
-                          description="Pipeline ID to train", required=True),
+            ToolParameter(
+                name="pipeline_id",
+                type="string",
+                description="Pipeline ID to train",
+                required=True,
+            ),
         ],
     )
     async def start_local_training(pipeline_id: str, **kwargs) -> str:
@@ -198,6 +230,7 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
             return "Error: No data store available"
 
         from gently.ml.data_loader import build_labels_from_store
+
         labels = build_labels_from_store(gently_store)
 
         if not labels.get("samples"):
@@ -205,14 +238,15 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
 
         # Write labels file
         from gently.settings import settings
+
         run_dir = settings.storage.base_path / "ml_runs" / run_data["id"]
         run_dir.mkdir(parents=True, exist_ok=True)
         labels_file = run_dir / "labels.json"
         labels_file.write_text(json.dumps(labels, indent=2))
 
         # Start trainer
+        from gently.ml.models import ModelConfig, TrainingConfig, TrainingRun
         from gently.ml.trainer import LocalTrainer
-        from gently.ml.models import TrainingRun, ModelConfig, TrainingConfig
 
         trainer = LocalTrainer(run_dir)
         run = TrainingRun(
@@ -228,22 +262,30 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
         )
 
         context_store.update_training_run(
-            run_data["id"], status="training", started_at=datetime.now().isoformat(),
+            run_data["id"],
+            status="training",
+            started_at=datetime.now().isoformat(),
         )
 
-        return json.dumps({
-            "status": "training_started",
-            "run_id": run_data["id"],
-            "pipeline_id": pipeline_id,
-        })
+        return json.dumps(
+            {
+                "status": "training_started",
+                "run_id": run_data["id"],
+                "pipeline_id": pipeline_id,
+            }
+        )
 
     @registry.register(
         name="get_ml_status",
         description="Get the status of ML pipelines and training runs.",
         category=ToolCategory.ML,
         parameters=[
-            ToolParameter(name="pipeline_id", type="string",
-                          description="Pipeline ID (empty = list all)", required=False),
+            ToolParameter(
+                name="pipeline_id",
+                type="string",
+                description="Pipeline ID (empty = list all)",
+                required=False,
+            ),
         ],
     )
     async def get_ml_status(pipeline_id: str = "", **kwargs) -> str:
@@ -265,11 +307,19 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
         ),
         category=ToolCategory.ML,
         parameters=[
-            ToolParameter(name="campaign_id", type="string",
-                          description="Campaign to add items to", required=True),
-            ToolParameter(name="target_per_stage", type="integer",
-                          description="Target annotations per stage (default 50)",
-                          required=False, default=50),
+            ToolParameter(
+                name="campaign_id",
+                type="string",
+                description="Campaign to add items to",
+                required=True,
+            ),
+            ToolParameter(
+                name="target_per_stage",
+                type="integer",
+                description="Target annotations per stage (default 50)",
+                required=False,
+                default=50,
+            ),
         ],
     )
     async def plan_annotation_campaign(
@@ -290,8 +340,11 @@ def register_ml_tools(registry, context_store=None, gently_store=None,
             target_per_stage=target_per_stage,
         )
 
-        return json.dumps({
-            "created_plan_items": len(created_ids),
-            "item_ids": created_ids,
-            "coverage_before": report.to_dict(),
-        }, indent=2)
+        return json.dumps(
+            {
+                "created_plan_items": len(created_ids),
+                "item_ids": created_ids,
+                "coverage_before": report.to_dict(),
+            },
+            indent=2,
+        )

@@ -20,6 +20,7 @@ Run:
 
     .venv/bin/python diagnostics/switchbot_webgui.py --address EC:6F:04:06:5B:23 --port 8765
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,13 +42,42 @@ DEFAULT_ADDRESS = "EC:6F:04:06:5B:23"
 
 # ITU morse, letters + digits. Unsupported characters are skipped.
 MORSE = {
-    "A": ".-", "B": "-...", "C": "-.-.", "D": "-..", "E": ".", "F": "..-.",
-    "G": "--.", "H": "....", "I": "..", "J": ".---", "K": "-.-", "L": ".-..",
-    "M": "--", "N": "-.", "O": "---", "P": ".--.", "Q": "--.-", "R": ".-.",
-    "S": "...", "T": "-", "U": "..-", "V": "...-", "W": ".--", "X": "-..-",
-    "Y": "-.--", "Z": "--..",
-    "0": "-----", "1": ".----", "2": "..---", "3": "...--", "4": "....-",
-    "5": ".....", "6": "-....", "7": "--...", "8": "---..", "9": "----.",
+    "A": ".-",
+    "B": "-...",
+    "C": "-.-.",
+    "D": "-..",
+    "E": ".",
+    "F": "..-.",
+    "G": "--.",
+    "H": "....",
+    "I": "..",
+    "J": ".---",
+    "K": "-.-",
+    "L": ".-..",
+    "M": "--",
+    "N": "-.",
+    "O": "---",
+    "P": ".--.",
+    "Q": "--.-",
+    "R": ".-.",
+    "S": "...",
+    "T": "-",
+    "U": "..-",
+    "V": "...-",
+    "W": ".--",
+    "X": "-..-",
+    "Y": "-.--",
+    "Z": "--..",
+    "0": "-----",
+    "1": ".----",
+    "2": "..---",
+    "3": "...--",
+    "4": "....-",
+    "5": ".....",
+    "6": "-....",
+    "7": "--...",
+    "8": "---..",
+    "9": "----.",
 }
 
 
@@ -64,6 +94,7 @@ class Bot:
 
     async def _ensure(self):
         from bleak import BleakClient
+
         if self._client is not None and self._client.is_connected:
             return
         self._client = BleakClient(self.address, timeout=20)
@@ -73,6 +104,7 @@ class Bot:
     async def _write(self, action: str):
         """Write one command, reconnecting once if the link dropped."""
         from bleak.exc import BleakError
+
         for attempt in (1, 2):
             try:
                 await self._ensure()
@@ -243,7 +275,8 @@ PAGE = """<!doctype html>
   input[type=text]{ width:100%; box-sizing:border-box; padding:10px; margin-bottom:10px;
            background:#0d1117; color:#e6edf3; border:1px solid #30363d; border-radius:8px;
            font-size:15px; text-transform:uppercase; letter-spacing:.1em; }
-  .speed { display:flex; align-items:center; gap:8px; font-size:12px; color:#8b949e; margin-bottom:12px; }
+  .speed { display:flex; align-items:center; gap:8px; font-size:12px;
+           color:#8b949e; margin-bottom:12px; }
   .speed input { flex:1; }
   .mrow { display:flex; gap:8px; }
   .status { margin-top:14px; font-size:12px; color:#8b949e; min-height:16px; }
@@ -277,7 +310,8 @@ PAGE = """<!doctype html>
 const $ = id => document.getElementById(id);
 let timers = [];
 function setBulb(on){ $('bulb').classList.toggle('on', on); }
-function setState(s){ $('state').textContent = s; if(s==='on')setBulb(true); else if(s==='off')setBulb(false); }
+function setState(s){ $('state').textContent = s;
+  if(s==='on')setBulb(true); else if(s==='off')setBulb(false); }
 function clearTimers(){ timers.forEach(clearTimeout); timers = []; }
 function sv(){ $('speedval').textContent = (+$('speed').value).toFixed(1)+'s'; }
 

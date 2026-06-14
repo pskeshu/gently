@@ -11,7 +11,7 @@ The bbox is in projection-pixel coordinates (matching the geometry the
 dopaminergic detector uses).
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -28,8 +28,8 @@ class EdgeRoiCalibration(CalibrationPipeline):
 
     def capture(
         self,
-        source_volumes: Dict[str, Any],
-        context: Dict[str, Any],
+        source_volumes: dict[str, Any],
+        context: dict[str, Any],
     ) -> CalibrationData:
         """``source_volumes`` here is expected to be a flat
         ``{embryo_id: volume_ndarray}`` dict (no dark/flat split).
@@ -39,10 +39,10 @@ class EdgeRoiCalibration(CalibrationPipeline):
         elsewhere and we just want to reuse its output.
         """
         precomputed = context.get("embryo_bboxes") if context else None
-        bboxes: List[Tuple[int, int, int, int]] = []
+        bboxes: list[tuple[int, int, int, int]] = []
 
         if precomputed:
-            for eid, bb in precomputed.items():
+            for _eid, bb in precomputed.items():
                 if bb is not None and len(bb) == 4:
                     bboxes.append(tuple(map(int, bb)))
         else:
@@ -65,8 +65,10 @@ class EdgeRoiCalibration(CalibrationPipeline):
         xs1 = np.array([b[2] for b in bboxes])
         ys1 = np.array([b[3] for b in bboxes])
         agg = (
-            int(np.median(xs0)), int(np.median(ys0)),
-            int(np.median(xs1)), int(np.median(ys1)),
+            int(np.median(xs0)),
+            int(np.median(ys0)),
+            int(np.median(xs1)),
+            int(np.median(ys1)),
         )
 
         return CalibrationData(
@@ -77,7 +79,7 @@ class EdgeRoiCalibration(CalibrationPipeline):
         )
 
 
-def _bbox_from_volume(vol, padding: int = 10) -> Optional[Tuple[int, int, int, int]]:
+def _bbox_from_volume(vol, padding: int = 10) -> tuple[int, int, int, int] | None:
     """Cheap thresholding-based bbox fallback when SAM hasn't run.
 
     Max-projects, thresholds at 25th percentile + delta, returns the

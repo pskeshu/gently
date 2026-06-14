@@ -2,12 +2,12 @@
 DiSPIM optical control devices (LED and laser).
 """
 
-import time
 import logging
+import time
 from collections import OrderedDict
 
-from ophyd.status import Status
 import pymmcore
+from ophyd.status import Status
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +39,7 @@ class DiSPIMLED:
     def set(self, state: str):
         """Set LED state - called by bps.mv(led, 'Open') or bps.mv(led, 'Closed')"""
         if state not in self._available_configs:
-            raise ValueError(f"State '{state}' not available. "
-                           f"Available: {self._available_configs}")
+            raise ValueError(f"State '{state}' not available. Available: {self._available_configs}")
 
         status = Status(obj=self, timeout=5)
 
@@ -54,6 +53,7 @@ class DiSPIMLED:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -63,23 +63,16 @@ class DiSPIMLED:
         try:
             current_config = self.core.getCurrentConfig(self.group_name)
         except Exception:
-            current_config = 'unknown'
+            current_config = "unknown"
 
         data = OrderedDict()
-        data[self.name] = {
-            'value': current_config,
-            'timestamp': time.time()
-        }
+        data[self.name] = {"value": current_config, "timestamp": time.time()}
         return data
 
     def describe(self):
         """Describe LED device - required for Bluesky"""
         data = OrderedDict()
-        data[self.name] = {
-            'source': self.name,
-            'dtype': 'string',
-            'shape': []
-        }
+        data[self.name] = {"source": self.name, "dtype": "string", "shape": []}
         return data
 
     def read_configuration(self):
@@ -154,8 +147,9 @@ class DiSPIMLightSource:
     def set(self, config_name: str):
         """Set laser configuration - called by bps.mv(laser, 'config_name')"""
         if config_name not in self._available_configs:
-            raise ValueError(f"Config '{config_name}' not available. "
-                           f"Available: {self._available_configs}")
+            raise ValueError(
+                f"Config '{config_name}' not available. Available: {self._available_configs}"
+            )
 
         status = Status(obj=self, timeout=5)
 
@@ -169,6 +163,7 @@ class DiSPIMLightSource:
                 status.set_finished()
 
         import threading
+
         threading.Thread(target=wait).start()
 
         return status
@@ -214,7 +209,10 @@ class DiSPIMLightSource:
         # No waitForDevice — analog setpoint applies on the next exposure.
         logger.debug(
             "Set %dnm power to %.4f%% (%s / %s)",
-            wavelength, pct, self.POWER_DEVICE_LABEL, prop,
+            wavelength,
+            pct,
+            self.POWER_DEVICE_LABEL,
+            prop,
         )
 
     def get_power_pct(self, wavelength: int) -> float:
@@ -224,32 +222,25 @@ class DiSPIMLightSource:
                 f"Unknown laser wavelength {wavelength}nm. "
                 f"Available: {sorted(self.POWER_PROPERTY.keys())}"
             )
-        return float(self.core.getProperty(
-            self.POWER_DEVICE_LABEL, self.POWER_PROPERTY[wavelength]
-        ))
+        return float(
+            self.core.getProperty(self.POWER_DEVICE_LABEL, self.POWER_PROPERTY[wavelength])
+        )
 
     def read(self):
         """Read current laser configuration - required for Bluesky"""
         try:
             current_config = self.core.getCurrentConfig(self.group_name)
         except Exception:
-            current_config = 'unknown'
+            current_config = "unknown"
 
         data = OrderedDict()
-        data[self.name] = {
-            'value': current_config,
-            'timestamp': time.time()
-        }
+        data[self.name] = {"value": current_config, "timestamp": time.time()}
         return data
 
     def describe(self):
         """Describe laser control device - required for Bluesky"""
         data = OrderedDict()
-        data[self.name] = {
-            'source': self.group_name,
-            'dtype': 'string',
-            'shape': []
-        }
+        data[self.name] = {"source": self.group_name, "dtype": "string", "shape": []}
         return data
 
     def read_configuration(self):

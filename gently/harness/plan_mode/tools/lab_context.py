@@ -5,9 +5,7 @@ These tools let the agent search past sessions, existing campaigns,
 learnings, and hardware specs to inform experimental design.
 """
 
-from typing import Dict, Optional
-
-from ...tools.registry import tool, ToolCategory, ToolExample
+from ...tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
@@ -27,7 +25,7 @@ from ...tools.registry import tool, ToolCategory, ToolExample
 )
 async def query_lab_history(
     query: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Search lab history for relevant context."""
     agent = context.get("agent") if context else None
@@ -59,19 +57,19 @@ async def query_lab_history(
     # Search learnings
     learnings = store.get_learnings(limit=100)
     matching_learnings = [
-        l for l in learnings
-        if any(term in l.content.lower() for term in query_lower.split())
+        learning
+        for learning in learnings
+        if any(term in learning.content.lower() for term in query_lower.split())
     ]
     if matching_learnings:
         results.append("\n## Relevant Learnings")
-        for l in matching_learnings[:10]:
-            results.append(f"- {l.content} (confidence: {l.confidence.value})")
+        for learning in matching_learnings[:10]:
+            results.append(f"- {learning.content} (confidence: {learning.confidence.value})")
 
     # Search observations
     observations = store.get_recent_observations(limit=100)
     matching_obs = [
-        o for o in observations
-        if any(term in o.content.lower() for term in query_lower.split())
+        o for o in observations if any(term in o.content.lower() for term in query_lower.split())
     ]
     if matching_obs:
         results.append("\n## Relevant Observations")
@@ -116,7 +114,7 @@ async def query_lab_history(
 )
 async def check_hardware_capability(
     question: str,
-    context: Dict = None,
+    context: dict = None,
 ) -> str:
     """Check hardware capabilities against a question."""
     from gently.hardware import get_hardware

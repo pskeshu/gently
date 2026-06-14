@@ -6,15 +6,15 @@ enforcement using a mock CMMCore to avoid pymmcore/Micro-Manager dependency.
 """
 
 import time
-import pytest
-import numpy as np
-from unittest.mock import MagicMock, patch, call
-from collections import OrderedDict
+from unittest.mock import MagicMock
 
+import numpy as np
+import pytest
 
 # ---------------------------------------------------------------------------
 # Mock CMMCore — stands in for pymmcore.CMMCore
 # ---------------------------------------------------------------------------
+
 
 class MockCore:
     """Minimal mock of pymmcore.CMMCore for safety tests."""
@@ -37,38 +37,38 @@ class MockCore:
         self.call_log = []
 
     def setPosition(self, device, position):
-        self.call_log.append(('setPosition', device, position))
+        self.call_log.append(("setPosition", device, position))
         self._positions[device] = position
 
     def getPosition(self, device):
         return self._positions.get(device, 0.0)
 
     def waitForDevice(self, device):
-        self.call_log.append(('waitForDevice', device))
+        self.call_log.append(("waitForDevice", device))
 
     def setXYPosition(self, x, y):
-        self.call_log.append(('setXYPosition', x, y))
+        self.call_log.append(("setXYPosition", x, y))
         self._xy_position = (x, y)
 
     def getXYPosition(self):
         return self._xy_position
 
     def setGalvoPosition(self, device, a, b):
-        self.call_log.append(('setGalvoPosition', device, a, b))
+        self.call_log.append(("setGalvoPosition", device, a, b))
         self._galvo_positions[device] = (a, b)
 
     def getGalvoPosition(self, device):
         return self._galvo_positions.get(device, (0.0, 0.0))
 
     def setProperty(self, device, prop, value):
-        self.call_log.append(('setProperty', device, prop, value))
+        self.call_log.append(("setProperty", device, prop, value))
         self._properties[(device, prop)] = value
 
     def getProperty(self, device, prop):
         return self._properties.get((device, prop), "")
 
     def setConfig(self, group, config):
-        self.call_log.append(('setConfig', group, config))
+        self.call_log.append(("setConfig", group, config))
         self._configs[group] = config
 
     def getCurrentConfig(self, group):
@@ -78,7 +78,7 @@ class MockCore:
         return self._available_configs.get(group, [])
 
     def waitForConfig(self, group, config):
-        self.call_log.append(('waitForConfig', group, config))
+        self.call_log.append(("waitForConfig", group, config))
 
     def setCameraDevice(self, name):
         self._camera_device = name
@@ -96,13 +96,13 @@ class MockCore:
         return self._exposure
 
     def snapImage(self):
-        self.call_log.append(('snapImage',))
+        self.call_log.append(("snapImage",))
 
     def getImage(self):
         return np.zeros((512, 512), dtype=np.uint16)
 
     def setROI(self, device, x, y, w, h):
-        self.call_log.append(('setROI', device, x, y, w, h))
+        self.call_log.append(("setROI", device, x, y, w, h))
 
     def clearCircularBuffer(self):
         self._circular_buffer = []
@@ -114,17 +114,17 @@ class MockCore:
         pass
 
     def prepareSequenceAcquisition(self, camera):
-        self.call_log.append(('prepareSequenceAcquisition', camera))
+        self.call_log.append(("prepareSequenceAcquisition", camera))
 
     def startSequenceAcquisition(self, camera, count, interval, stopOnOverflow):
-        self.call_log.append(('startSequenceAcquisition', camera, count))
+        self.call_log.append(("startSequenceAcquisition", camera, count))
         self._sequence_running = True
         self._sequence_expected = count
         # Pre-load images into buffer
         self._circular_buffer = [np.zeros((512, 512), dtype=np.uint16)] * count
 
     def stopSequenceAcquisition(self):
-        self.call_log.append(('stopSequenceAcquisition',))
+        self.call_log.append(("stopSequenceAcquisition",))
         self._sequence_running = False
 
     def isSequenceRunning(self):
@@ -146,6 +146,7 @@ class MockCore:
 # Patch pymmcore and ophyd so device modules can be imported
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
 def _patch_imports(monkeypatch):
     """Patch pymmcore and ophyd.status so device imports succeed."""
@@ -154,20 +155,20 @@ def _patch_imports(monkeypatch):
     # Create minimal mock modules if not installed
     mock_modules = {}
 
-    if 'pymmcore' not in sys.modules:
+    if "pymmcore" not in sys.modules:
         pymmcore_mock = MagicMock()
         pymmcore_mock.CMMCore = MockCore
-        mock_modules['pymmcore'] = pymmcore_mock
+        mock_modules["pymmcore"] = pymmcore_mock
 
-    if 'ophyd' not in sys.modules:
+    if "ophyd" not in sys.modules:
         ophyd_mock = MagicMock()
-        mock_modules['ophyd'] = ophyd_mock
+        mock_modules["ophyd"] = ophyd_mock
 
-    if 'ophyd.status' not in sys.modules:
-        from unittest.mock import MagicMock as _MM
+    if "ophyd.status" not in sys.modules:
 
         class _RealStatus:
             """Minimal Status that actually tracks finished/exception."""
+
             def __init__(self, obj=None, timeout=None):
                 self._finished = False
                 self._exception = None
@@ -207,7 +208,7 @@ def _patch_imports(monkeypatch):
 
         ophyd_status_mock = MagicMock()
         ophyd_status_mock.Status = _RealStatus
-        mock_modules['ophyd.status'] = ophyd_status_mock
+        mock_modules["ophyd.status"] = ophyd_status_mock
 
     for name, mod in mock_modules.items():
         monkeypatch.setitem(sys.modules, name, mod)
@@ -217,32 +218,38 @@ def _patch_imports(monkeypatch):
 # Device constructors with mock core
 # ---------------------------------------------------------------------------
 
+
 def make_core():
     return MockCore()
 
 
 def make_z_stage(core=None, limits=(50.0, 250.0)):
     from gently.hardware.dispim.devices.stage import DiSPIMZstage
+
     return DiSPIMZstage("ZStage", core or make_core(), limits=limits)
 
 
 def make_xy_stage(core=None, x_limits=(2000.0, 4000.0), y_limits=(-1000.0, 1000.0)):
     from gently.hardware.dispim.devices.stage import DiSPIMXYStage
+
     return DiSPIMXYStage("XYStage", core or make_core(), x_limits=x_limits, y_limits=y_limits)
 
 
 def make_piezo(core=None, limits=(-200.0, 200.0)):
     from gently.hardware.dispim.devices.piezo import DiSPIMPiezo
+
     return DiSPIMPiezo("Piezo", core or make_core(), limits=limits)
 
 
 def make_fdrive(core=None):
     from gently.hardware.dispim.devices.piezo import DiSPIMFDrive
+
     return DiSPIMFDrive("FDrive", core or make_core())
 
 
 def make_scanner(core=None, limits=(-5.0, 5.0)):
     from gently.hardware.dispim.devices.scanner import DiSPIMScanner
+
     return DiSPIMScanner("Scanner", core or make_core(), limits=limits)
 
 
@@ -250,6 +257,7 @@ def make_led(core=None, available_configs=None):
     core = core or make_core()
     core._available_configs["LED"] = available_configs or ["Open", "Closed"]
     from gently.hardware.dispim.devices.optical import DiSPIMLED
+
     return DiSPIMLED(core, name="LED")
 
 
@@ -258,12 +266,14 @@ def make_laser(core=None, available_configs=None):
     configs = available_configs or ["488 and 561", "488 only", "561 only", "ALL OFF"]
     core._available_configs["Laser"] = configs
     from gently.hardware.dispim.devices.optical import DiSPIMLaserControl
+
     return DiSPIMLaserControl(core, name="Laser")
 
 
 # ===========================================================================
 # 1. BOUNDS CHECKING
 # ===========================================================================
+
 
 class TestZStageBounds:
     """Z stage must reject positions outside configured limits."""
@@ -310,7 +320,7 @@ class TestZStageBounds:
         stage = make_z_stage(core=core)
         with pytest.raises(ValueError):
             stage.set(300.0)
-        assert ('setPosition', 'ZStage', 300.0) not in core.call_log
+        assert ("setPosition", "ZStage", 300.0) not in core.call_log
 
 
 class TestXYStageBounds:
@@ -351,7 +361,7 @@ class TestXYStageBounds:
         stage = make_xy_stage(core=core)
         stage.set([0.0, 0.0])  # x=0 is below x_limits[0]=2000
         time.sleep(0.1)
-        assert not any(c[0] == 'setXYPosition' for c in core.call_log)
+        assert not any(c[0] == "setXYPosition" for c in core.call_log)
 
 
 class TestPiezoBounds:
@@ -419,8 +429,10 @@ class TestFDriveBounds:
 
     def test_limits_property_is_module_constants(self):
         from gently.hardware.dispim.devices.piezo import (
-            F_DRIVE_MIN_UM, F_DRIVE_MAX_UM,
+            F_DRIVE_MAX_UM,
+            F_DRIVE_MIN_UM,
         )
+
         fdrive = make_fdrive()
         assert fdrive.limits == (F_DRIVE_MIN_UM, F_DRIVE_MAX_UM)
         assert fdrive.limits == (30.0, 25000.0)
@@ -458,12 +470,13 @@ class TestScannerBounds:
         scanner = make_scanner(core=core)
         scanner.set([6.0, 0.0])
         time.sleep(0.1)
-        assert not any(c[0] == 'setGalvoPosition' for c in core.call_log)
+        assert not any(c[0] == "setGalvoPosition" for c in core.call_log)
 
 
 # ===========================================================================
 # 2. CONFIG VALIDATION
 # ===========================================================================
+
 
 class TestLEDConfigValidation:
     """LED must only accept configurations from the cached available set."""
@@ -511,6 +524,7 @@ class TestLaserConfigValidation:
 # 3. STATE MACHINE / CONFIGURE-BEFORE-TRIGGER
 # ===========================================================================
 
+
 class TestVolumeScanner:
     """Volume scanner requires configure() before trigger()."""
 
@@ -521,14 +535,15 @@ class TestVolumeScanner:
 
         scanner = make_scanner(core=core)
         from gently.hardware.dispim.devices.camera import DiSPIMCamera
+
         camera = DiSPIMCamera("Camera", core)
         piezo = make_piezo(core=core)
         laser = make_laser(core=core)
 
         from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
         return DiSPIMVolumeScanner(
-            scanner=scanner, camera=camera, piezo=piezo,
-            laser_control=laser, core=core
+            scanner=scanner, camera=camera, piezo=piezo, laser_control=laser, core=core
         )
 
     def test_trigger_before_configure_raises(self):
@@ -539,9 +554,12 @@ class TestVolumeScanner:
     def test_configure_then_trigger_succeeds(self):
         vs = self._make_volume_scanner()
         vs.configure(
-            num_slices=10, exposure_ms=5.0,
-            galvo_amplitude=1.0, galvo_center=0.0,
-            piezo_amplitude=50.0, piezo_center=0.0,
+            num_slices=10,
+            exposure_ms=5.0,
+            galvo_amplitude=1.0,
+            galvo_center=0.0,
+            piezo_amplitude=50.0,
+            piezo_center=0.0,
             laser_config="488 and 561",
         )
         assert vs._configured is True
@@ -554,6 +572,7 @@ class TestVolumeScanner:
 # 4. HAPPY-PATH CLEANUP — LASER/LED OFF AFTER SUCCESS
 # ===========================================================================
 
+
 class TestVolumeScannerHappyPathCleanup:
     """Volume scanner must disable lasers and reset state after successful acquisition."""
 
@@ -563,19 +582,23 @@ class TestVolumeScannerHappyPathCleanup:
 
         scanner = make_scanner(core=core)
         from gently.hardware.dispim.devices.camera import DiSPIMCamera
+
         camera = DiSPIMCamera("Camera", core)
         piezo = make_piezo(core=core)
         laser = make_laser(core=core)
 
         from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
         vs = DiSPIMVolumeScanner(
-            scanner=scanner, camera=camera, piezo=piezo,
-            laser_control=laser, core=core
+            scanner=scanner, camera=camera, piezo=piezo, laser_control=laser, core=core
         )
         vs.configure(
-            num_slices=5, exposure_ms=5.0,
-            galvo_amplitude=1.0, galvo_center=0.0,
-            piezo_amplitude=50.0, piezo_center=0.0,
+            num_slices=5,
+            exposure_ms=5.0,
+            galvo_amplitude=1.0,
+            galvo_center=0.0,
+            piezo_amplitude=50.0,
+            piezo_center=0.0,
         )
         return vs, core
 
@@ -587,8 +610,9 @@ class TestVolumeScannerHappyPathCleanup:
         assert status.success
 
         laser_off_calls = [
-            c for c in core.call_log
-            if c[0] == 'setConfig' and c[1] == 'Laser' and c[2] == 'ALL OFF'
+            c
+            for c in core.call_log
+            if c[0] == "setConfig" and c[1] == "Laser" and c[2] == "ALL OFF"
         ]
         assert len(laser_off_calls) >= 1, "Lasers must be disabled after successful acquisition"
 
@@ -600,8 +624,9 @@ class TestVolumeScannerHappyPathCleanup:
 
         # Both scanner and piezo should be set to Idle
         idle_calls = [
-            c for c in core.call_log
-            if c[0] == 'setProperty' and c[2] == 'SPIMState' and c[3] == 'Idle'
+            c
+            for c in core.call_log
+            if c[0] == "setProperty" and c[2] == "SPIMState" and c[3] == "Idle"
         ]
         assert len(idle_calls) >= 2, "Both scanner and piezo SPIM state must be reset to Idle"
 
@@ -612,10 +637,13 @@ class TestVolumeScannerHappyPathCleanup:
         status.wait(timeout=5)
 
         trigger_resets = [
-            c for c in core.call_log
-            if c[0] == 'setProperty' and c[2] == 'TRIGGER SOURCE' and c[3] == 'INTERNAL'
+            c
+            for c in core.call_log
+            if c[0] == "setProperty" and c[2] == "TRIGGER SOURCE" and c[3] == "INTERNAL"
         ]
-        assert len(trigger_resets) >= 1, "Camera must be reset to INTERNAL trigger after acquisition"
+        assert len(trigger_resets) >= 1, (
+            "Camera must be reset to INTERNAL trigger after acquisition"
+        )
 
     def test_laser_sequence_on_then_off(self):
         """Lasers must be enabled THEN disabled — verify ordering."""
@@ -623,18 +651,15 @@ class TestVolumeScannerHappyPathCleanup:
         status = vs.trigger()
         status.wait(timeout=5)
 
-        laser_calls = [
-            c for c in core.call_log
-            if c[0] == 'setConfig' and c[1] == 'Laser'
-        ]
+        laser_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "Laser"]
         configs = [c[2] for c in laser_calls]
-        assert configs == ["488 and 561", "ALL OFF"], \
-            f"Expected laser on then off, got: {configs}"
+        assert configs == ["488 and 561", "ALL OFF"], f"Expected laser on then off, got: {configs}"
 
 
 # ===========================================================================
 # 5. TIMEOUT PROTECTION
 # ===========================================================================
+
 
 class TestVolumeScannerTimeout:
     """Volume scanner must not hang if image collection stalls."""
@@ -646,37 +671,43 @@ class TestVolumeScannerTimeout:
 
         # Override: startSequenceAcquisition runs but delivers no images
         def stalling_start(camera, count, interval, stopOnOverflow):
-            core.call_log.append(('startSequenceAcquisition', camera, count))
+            core.call_log.append(("startSequenceAcquisition", camera, count))
             core._sequence_running = True
             core._circular_buffer = []  # No images delivered
 
         # Override: sequence stays "running" forever
         def always_running():
             return core._sequence_running
+
         core.startSequenceAcquisition = stalling_start
         core.isSequenceRunning = always_running
 
         scanner = make_scanner(core=core)
         from gently.hardware.dispim.devices.camera import DiSPIMCamera
+
         camera = DiSPIMCamera("Camera", core)
         piezo = make_piezo(core=core)
         laser = make_laser(core=core)
 
         from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
         vs = DiSPIMVolumeScanner(
-            scanner=scanner, camera=camera, piezo=piezo,
-            laser_control=laser, core=core
+            scanner=scanner, camera=camera, piezo=piezo, laser_control=laser, core=core
         )
         vs.configure(
-            num_slices=10, exposure_ms=5.0,
-            galvo_amplitude=1.0, galvo_center=0.0,
-            piezo_amplitude=50.0, piezo_center=0.0,
+            num_slices=10,
+            exposure_ms=5.0,
+            galvo_amplitude=1.0,
+            galvo_center=0.0,
+            piezo_amplitude=50.0,
+            piezo_center=0.0,
         )
 
         # Shorten timeout (frozen dataclass — bypass with object.__setattr__)
         from gently.settings import settings
+
         original = settings.timeouts.volume_acquisition
-        object.__setattr__(settings.timeouts, 'volume_acquisition', 0.5)
+        object.__setattr__(settings.timeouts, "volume_acquisition", 0.5)
 
         try:
             status = vs.trigger()
@@ -685,48 +716,55 @@ class TestVolumeScannerTimeout:
 
             # Even on timeout, lasers must be off
             laser_off = [
-                c for c in core.call_log
-                if c[0] == 'setConfig' and c[1] == 'Laser' and c[2] == 'ALL OFF'
+                c
+                for c in core.call_log
+                if c[0] == "setConfig" and c[1] == "Laser" and c[2] == "ALL OFF"
             ]
             assert len(laser_off) >= 1, "Lasers must be disabled even on timeout"
         finally:
-            object.__setattr__(settings.timeouts, 'volume_acquisition', original)
+            object.__setattr__(settings.timeouts, "volume_acquisition", original)
 
 
 # ===========================================================================
 # 6. ERROR CLEANUP — LASER/LED AUTO-DISABLE ON FAILURE
 # ===========================================================================
 
+
 class TestVolumeScannerErrorCleanup:
     """Volume scanner must disable lasers even when acquisition fails."""
 
-    def _make_failing_volume_scanner(self, fail_at='sequence'):
+    def _make_failing_volume_scanner(self, fail_at="sequence"):
         """Create volume scanner where core fails during acquisition."""
         core = make_core()
         core._available_configs["Laser"] = ["488 and 561", "ALL OFF"]
 
-        if fail_at == 'sequence':
-            original_start = core.startSequenceAcquisition
+        if fail_at == "sequence":
+
             def failing_start(*args, **kwargs):
                 core._sequence_running = False
                 raise RuntimeError("Camera sequence failed")
+
             core.startSequenceAcquisition = failing_start
 
         scanner = make_scanner(core=core)
         from gently.hardware.dispim.devices.camera import DiSPIMCamera
+
         camera = DiSPIMCamera("Camera", core)
         piezo = make_piezo(core=core)
         laser = make_laser(core=core)
 
         from gently.hardware.dispim.devices.acquisition import DiSPIMVolumeScanner
+
         vs = DiSPIMVolumeScanner(
-            scanner=scanner, camera=camera, piezo=piezo,
-            laser_control=laser, core=core
+            scanner=scanner, camera=camera, piezo=piezo, laser_control=laser, core=core
         )
         vs.configure(
-            num_slices=10, exposure_ms=5.0,
-            galvo_amplitude=1.0, galvo_center=0.0,
-            piezo_amplitude=50.0, piezo_center=0.0,
+            num_slices=10,
+            exposure_ms=5.0,
+            galvo_amplitude=1.0,
+            galvo_center=0.0,
+            piezo_amplitude=50.0,
+            piezo_center=0.0,
         )
         return vs, core
 
@@ -739,8 +777,9 @@ class TestVolumeScannerErrorCleanup:
 
         # Verify lasers were turned off in cleanup
         laser_off_calls = [
-            c for c in core.call_log
-            if c[0] == 'setConfig' and c[1] == 'Laser' and c[2] == 'ALL OFF'
+            c
+            for c in core.call_log
+            if c[0] == "setConfig" and c[1] == "Laser" and c[2] == "ALL OFF"
         ]
         assert len(laser_off_calls) >= 1, "Lasers must be disabled on error"
 
@@ -753,8 +792,9 @@ class TestVolumeScannerErrorCleanup:
 
         # Verify scanner SPIM state was set to Idle in cleanup
         idle_calls = [
-            c for c in core.call_log
-            if c[0] == 'setProperty' and c[2] == 'SPIMState' and c[3] == 'Idle'
+            c
+            for c in core.call_log
+            if c[0] == "setProperty" and c[2] == "SPIMState" and c[3] == "Idle"
         ]
         assert len(idle_calls) >= 1, "SPIM state must be reset to Idle on error"
 
@@ -762,6 +802,7 @@ class TestVolumeScannerErrorCleanup:
 # ===========================================================================
 # 7. LED CLEANUP ON BOTTOM CAMERA
 # ===========================================================================
+
 
 class TestBottomCameraLEDCleanup:
     """Bottom camera must turn LED off even when capture fails."""
@@ -771,13 +812,16 @@ class TestBottomCameraLEDCleanup:
         core._available_configs["LED"] = ["Open", "Closed"]
 
         if snap_fails:
+
             def failing_snap():
                 raise RuntimeError("Camera snap failed")
+
             core.snapImage = failing_snap
 
         led = make_led(core=core)
 
         from gently.hardware.dispim.devices.camera import DiSPIMBottomCamera
+
         cam = DiSPIMBottomCamera("BottomCam", core, led_control=led)
         cam.use_led = True
         return cam, core
@@ -788,7 +832,7 @@ class TestBottomCameraLEDCleanup:
         status.wait(timeout=5)
 
         # LED should have been opened then closed
-        config_calls = [c for c in core.call_log if c[0] == 'setConfig' and c[1] == 'LED']
+        config_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
         configs_set = [c[2] for c in config_calls]
         assert "Open" in configs_set, "LED must be turned on before capture"
         assert "Closed" in configs_set, "LED must be turned off after capture"
@@ -801,8 +845,8 @@ class TestBottomCameraLEDCleanup:
             status.wait(timeout=5)
 
         # Despite error, LED must have been closed
-        config_calls = [c for c in core.call_log if c[0] == 'setConfig' and c[1] == 'LED']
-        closed_calls = [c for c in config_calls if c[2] == 'Closed']
+        config_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
+        closed_calls = [c for c in config_calls if c[2] == "Closed"]
         assert len(closed_calls) >= 1, "LED must be turned off even on capture error"
 
     def test_led_not_used_when_disabled(self):
@@ -812,7 +856,7 @@ class TestBottomCameraLEDCleanup:
         status = cam.trigger()
         status.wait(timeout=5)
 
-        led_calls = [c for c in core.call_log if c[0] == 'setConfig' and c[1] == 'LED']
+        led_calls = [c for c in core.call_log if c[0] == "setConfig" and c[1] == "LED"]
         assert len(led_calls) == 0, "LED should not be controlled when use_led=False"
 
 
@@ -820,11 +864,13 @@ class TestBottomCameraLEDCleanup:
 # 8. CALIBRATION PRIOR
 # ===========================================================================
 
+
 class TestCalibrationPrior:
     """CalibrationPrior tracks piezo-galvo relationship across embryos."""
 
     def test_default_state(self):
         from gently.hardware.dispim.calibration import CalibrationPrior
+
         prior = CalibrationPrior()
         assert prior.slope_um_per_deg == 100.0
         assert prior.num_calibrations == 0
@@ -833,6 +879,7 @@ class TestCalibrationPrior:
 
     def test_lock_session_slope(self):
         from gently.hardware.dispim.calibration import CalibrationPrior
+
         prior = CalibrationPrior()
         prior.lock_session_slope(slope=95.5, r_squared=0.98, embryo_id="e1")
         assert prior.session_slope_locked
@@ -842,6 +889,7 @@ class TestCalibrationPrior:
 
     def test_not_ready_with_low_r_squared(self):
         from gently.hardware.dispim.calibration import CalibrationPrior
+
         prior = CalibrationPrior()
         prior.lock_session_slope(slope=95.0, r_squared=0.5, embryo_id="e1")
         assert prior.session_slope_locked
@@ -849,6 +897,7 @@ class TestCalibrationPrior:
 
     def test_ema_update(self):
         from gently.hardware.dispim.calibration import CalibrationPrior
+
         prior = CalibrationPrior()
 
         # First calibration — set directly
@@ -864,6 +913,7 @@ class TestCalibrationPrior:
 
     def test_serialization_roundtrip(self):
         from gently.hardware.dispim.calibration import CalibrationPrior
+
         prior = CalibrationPrior()
         prior.lock_session_slope(slope=97.0, r_squared=0.96, embryo_id="e1")
         prior.update_from_calibration(slope=98.0, offset=3.0, r_squared=0.97, extent_deg=0.25)
@@ -880,6 +930,7 @@ class TestCalibrationPrior:
 # ===========================================================================
 # 9. ROUNDING / PRECISION
 # ===========================================================================
+
 
 class TestPositionRounding:
     """Devices should round to avoid floating-point precision issues."""

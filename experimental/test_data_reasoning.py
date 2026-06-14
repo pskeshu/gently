@@ -2,17 +2,15 @@
 Tests for data reasoning engine — coverage, assessment, gap planning.
 """
 
-from unittest.mock import MagicMock, AsyncMock
-import pytest
+from unittest.mock import MagicMock
 
+import pytest
+from gently.data_reasoning.assessment import DataAssessmentEngine
+from gently.data_reasoning.coverage import CoverageAnalyzer
+from gently.data_reasoning.gap_planner import GapPlanner
 from gently.data_reasoning.models import (
     CoverageReport,
-    NetworkDataInventory,
-    SessionSummary,
 )
-from gently.data_reasoning.coverage import CoverageAnalyzer
-from gently.data_reasoning.assessment import DataAssessmentEngine
-from gently.data_reasoning.gap_planner import GapPlanner
 
 
 def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None):
@@ -41,10 +39,12 @@ def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None
             e.nickname = eid
             result.append(e)
         return result
+
     store.list_embryos.side_effect = list_embryos
 
     def list_volumes(sid, eid):
         return [MagicMock(timepoint=i) for i in range(3)]
+
     store.list_volumes.side_effect = list_volumes
 
     def get_ground_truth(sid, eid):
@@ -57,6 +57,7 @@ def _make_mock_store(sessions=None, embryos_per_session=None, gt_per_embryo=None
             gt.end_tp = 10
             result.append(gt)
         return result
+
     store.get_ground_truth.side_effect = get_ground_truth
 
     return store
@@ -101,8 +102,8 @@ class TestCoverageAnalyzer:
             embryos_per_session={"s1": ["e1", "e2", "e3"]},
             gt_per_embryo={
                 ("s1", "e1"): ["early", "early", "early"],  # 3 early
-                ("s1", "e2"): ["comma"],                     # 1 comma
-                ("s1", "e3"): ["early"],                     # 1 more early
+                ("s1", "e2"): ["comma"],  # 1 comma
+                ("s1", "e3"): ["early"],  # 1 more early
             },
         )
         analyzer = CoverageAnalyzer(gently_store=store)

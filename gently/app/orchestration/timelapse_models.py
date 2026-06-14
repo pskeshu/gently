@@ -8,18 +8,19 @@ and timelapse status — all pure data with no dependency on the orchestrator.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from typing import Any
 
 from gently.organisms import get_organism
 
 
 class StopConditionType(Enum):
     """Types of stop conditions for embryo acquisition"""
-    MANUAL = "manual"                    # Stop only when user says
-    STAGE_BASED = "stage_based"          # Stop when any of target stages reached
+
+    MANUAL = "manual"  # Stop only when user says
+    STAGE_BASED = "stage_based"  # Stop when any of target stages reached
     FIXED_TIMEPOINTS = "fixed_timepoints"  # Stop after N timepoints
-    DURATION = "duration"                # Stop after X hours
-    ALL_TERMINAL = "all_terminal"        # Stop when all embryos reach terminal stage
+    DURATION = "duration"  # Stop after X hours
+    ALL_TERMINAL = "all_terminal"  # Stop when all embryos reach terminal stage
     # Phase 8: stop when every role='test' embryo has hatched
     # (via the dopaminergic detector setting hatching_status.hatched=True).
     ALL_TEST_HATCHED = "all_test_hatched"
@@ -38,19 +39,20 @@ class IntervalRule:
     ``applies_to`` filters which embryos this rule listens to — it is not a
     fan-out target list.
     """
+
     name: str
-    trigger_detector: Optional[str] = None  # Detector name that triggers this rule
-    trigger_stage: Optional[str] = None     # Stage name that triggers (comma, pretzel, etc.)
-    new_interval_seconds: float = 30.0      # New interval when triggered
-    applies_to: Optional[List[str]] = None  # Embryo IDs this rule listens to (None = all)
-    confirm_timepoints: int = 0             # require N consecutive trigger matches before firing
-    one_time: bool = True                   # Only apply once per embryo
+    trigger_detector: str | None = None  # Detector name that triggers this rule
+    trigger_stage: str | None = None  # Stage name that triggers (comma, pretzel, etc.)
+    new_interval_seconds: float = 30.0  # New interval when triggered
+    applies_to: list[str] | None = None  # Embryo IDs this rule listens to (None = all)
+    confirm_timepoints: int = 0  # require N consecutive trigger matches before firing
+    one_time: bool = True  # Only apply once per embryo
 
     def matches(
         self,
         embryo_id: str,
-        detector_name: Optional[str] = None,
-        stage: Optional[str] = None,
+        detector_name: str | None = None,
+        stage: str | None = None,
     ) -> bool:
         """Check if this rule should trigger"""
         if self.applies_to and embryo_id not in self.applies_to:
@@ -77,25 +79,26 @@ class PowerRule:
     The hard safety limit at DiSPIMLightSource.POWER_LIMITS_PCT is the
     bottom-line bound; this is the soft control on top.
     """
+
     name: str
     wavelength: int = 488
-    trigger_detector: Optional[str] = None
-    trigger_intensity_levels: Optional[List[str]] = None  # e.g. ["SATURATING"]
-    trigger_stage: Optional[str] = None
-    step_pct: float = 1.0           # how much to change per firing
-    floor_pct: float = 2.0          # never go below
-    ceiling_pct: float = 6.0        # never go above
-    direction: str = "down"         # "down" (sticky-downward) or "up"
-    applies_to: Optional[List[str]] = None
-    confirm_timepoints: int = 0     # require N consecutive firings before applying
-    one_time: bool = False          # default: fire repeatedly for ramps
+    trigger_detector: str | None = None
+    trigger_intensity_levels: list[str] | None = None  # e.g. ["SATURATING"]
+    trigger_stage: str | None = None
+    step_pct: float = 1.0  # how much to change per firing
+    floor_pct: float = 2.0  # never go below
+    ceiling_pct: float = 6.0  # never go above
+    direction: str = "down"  # "down" (sticky-downward) or "up"
+    applies_to: list[str] | None = None
+    confirm_timepoints: int = 0  # require N consecutive firings before applying
+    one_time: bool = False  # default: fire repeatedly for ramps
 
     def matches(
         self,
         embryo_id: str,
-        detector_name: Optional[str] = None,
-        stage: Optional[str] = None,
-        intensity_level: Optional[str] = None,
+        detector_name: str | None = None,
+        stage: str | None = None,
+        intensity_level: str | None = None,
     ) -> bool:
         if self.applies_to and embryo_id not in self.applies_to:
             return False
@@ -127,22 +130,23 @@ class BurstRule:
     downstream by ``queue_burst`` (which gates on ``_burst_applied``),
     so this rule doesn't need its own ``one_time`` flag.
     """
+
     name: str
-    trigger_detector: Optional[str] = None
-    trigger_intensity_levels: Optional[List[str]] = None  # AND-combined predicate
-    trigger_structure_qualities: Optional[List[str]] = None  # AND-combined predicate
+    trigger_detector: str | None = None
+    trigger_intensity_levels: list[str] | None = None  # AND-combined predicate
+    trigger_structure_qualities: list[str] | None = None  # AND-combined predicate
     frames: int = 60
-    mode: str = "1hz"        # "1hz" | "asap"
+    mode: str = "1hz"  # "1hz" | "asap"
     num_slices: int = 1
-    applies_to: Optional[List[str]] = None  # listen-filter
+    applies_to: list[str] | None = None  # listen-filter
     confirm_timepoints: int = 0  # require N consecutive matches before firing
 
     def matches(
         self,
         embryo_id: str,
-        detector_name: Optional[str] = None,
-        intensity_level: Optional[str] = None,
-        structure_quality: Optional[str] = None,
+        detector_name: str | None = None,
+        intensity_level: str | None = None,
+        structure_quality: str | None = None,
     ) -> bool:
         if self.applies_to and embryo_id not in self.applies_to:
             return False
@@ -173,29 +177,33 @@ class StopCondition:
     specifies how many additional timepoints to acquire after detection before
     actually stopping - useful to verify the detection is real.
     """
+
     condition_type: StopConditionType
     value: Any = None  # e.g., number of timepoints, hours, etc.
-    target_stages: Optional[Set[str]] = None  # Stages that satisfy STAGE_BASED condition
+    target_stages: set[str] | None = None  # Stages that satisfy STAGE_BASED condition
     confirm_timepoints: int = 0  # Extra timepoints to acquire after detection
-    additional_conditions: List['StopCondition'] = field(default_factory=list)
+    additional_conditions: list["StopCondition"] = field(default_factory=list)
 
-    def add_condition(self, condition: 'StopCondition') -> None:
+    def add_condition(self, condition: "StopCondition") -> None:
         """Add another stop condition (OR logic)."""
         self.additional_conditions.append(condition)
 
-    def all_conditions(self) -> List['StopCondition']:
+    def all_conditions(self) -> list["StopCondition"]:
         """Get all conditions including self (flattened)."""
         return [self] + self.additional_conditions
 
     def describe(self) -> str:
         """Human-readable description of the stop condition(s)."""
-        def _describe_single(cond: 'StopCondition') -> str:
+
+        def _describe_single(cond: "StopCondition") -> str:
             confirm_suffix = f"+{cond.confirm_timepoints}tp" if cond.confirm_timepoints > 0 else ""
             if cond.condition_type == StopConditionType.MANUAL:
                 return "manual"
-            elif cond.condition_type in (StopConditionType.STAGE_BASED,
-                                         StopConditionType.HATCHING,
-                                         StopConditionType.COMMA_STAGE):
+            elif cond.condition_type in (
+                StopConditionType.STAGE_BASED,
+                StopConditionType.HATCHING,
+                StopConditionType.COMMA_STAGE,
+            ):
                 stages_str = ",".join(sorted(cond.target_stages)) if cond.target_stages else "?"
                 return f"stages({stages_str}){confirm_suffix}"
             elif cond.condition_type == StopConditionType.FIXED_TIMEPOINTS:
@@ -214,7 +222,7 @@ class StopCondition:
         return " OR ".join(descriptions)
 
     @classmethod
-    def until_hatching(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+    def until_hatching(cls, confirm_timepoints: int = 0) -> "StopCondition":
         """Stop when hatching is detected (backward-compatible convenience method)."""
         organism = get_organism()
         return cls(
@@ -224,7 +232,7 @@ class StopCondition:
         )
 
     @classmethod
-    def until_comma(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+    def until_comma(cls, confirm_timepoints: int = 0) -> "StopCondition":
         """Stop when comma stage is detected (backward-compatible convenience method)."""
         organism = get_organism()
         return cls(
@@ -234,19 +242,19 @@ class StopCondition:
         )
 
     @classmethod
-    def fixed_timepoints(cls, n: int) -> 'StopCondition':
+    def fixed_timepoints(cls, n: int) -> "StopCondition":
         return cls(StopConditionType.FIXED_TIMEPOINTS, value=n)
 
     @classmethod
-    def duration_hours(cls, hours: float) -> 'StopCondition':
+    def duration_hours(cls, hours: float) -> "StopCondition":
         return cls(StopConditionType.DURATION, value=hours)
 
     @classmethod
-    def manual(cls) -> 'StopCondition':
+    def manual(cls) -> "StopCondition":
         return cls(StopConditionType.MANUAL)
 
     @classmethod
-    def all_test_hatched(cls, confirm_timepoints: int = 0) -> 'StopCondition':
+    def all_test_hatched(cls, confirm_timepoints: int = 0) -> "StopCondition":
         """Stop when EVERY role='test' embryo's ``hatching_status.hatched``
         flag is True (set by the dopaminergic detector / Phase 2 path)."""
         return cls(
@@ -255,7 +263,7 @@ class StopCondition:
         )
 
     @classmethod
-    def composite(cls, *conditions: 'StopCondition') -> 'StopCondition':
+    def composite(cls, *conditions: "StopCondition") -> "StopCondition":
         """Create a composite stop condition from multiple conditions (OR logic)."""
         if not conditions:
             return cls.manual()
@@ -265,7 +273,7 @@ class StopCondition:
         return primary
 
     @classmethod
-    def parse(cls, spec: str) -> 'StopCondition':
+    def parse(cls, spec: str) -> "StopCondition":
         """
         Parse a stop condition specification string.
 
@@ -278,29 +286,30 @@ class StopCondition:
         spec : str
             Specification like "hatching", "duration:10", "hatching|duration:10"
         """
-        def _parse_single(s: str) -> 'StopCondition':
+
+        def _parse_single(s: str) -> "StopCondition":
             s = s.strip().lower()
 
             # Check for confirmation timepoints suffix: "hatching+3" or "comma+5"
             confirm_timepoints = 0
-            if '+' in s:
-                base, confirm_str = s.rsplit('+', 1)
+            if "+" in s:
+                base, confirm_str = s.rsplit("+", 1)
                 try:
                     confirm_timepoints = int(confirm_str)
                     s = base
                 except ValueError:
                     pass
 
-            if s == 'manual':
+            if s == "manual":
                 return cls.manual()
-            elif s in ('all_test_hatched', 'test_hatched'):
+            elif s in ("all_test_hatched", "test_hatched"):
                 return cls.all_test_hatched(confirm_timepoints=confirm_timepoints)
-            elif s.startswith('timepoints:'):
-                n = int(s.split(':')[1])
+            elif s.startswith("timepoints:"):
+                n = int(s.split(":")[1])
                 return cls.fixed_timepoints(n)
-            elif s.startswith('duration:'):
-                hours_str = s.split(':')[1]
-                if hours_str.endswith('h'):
+            elif s.startswith("duration:"):
+                hours_str = s.split(":")[1]
+                if hours_str.endswith("h"):
                     hours_str = hours_str[:-1]
                 hours = float(hours_str)
                 return cls.duration_hours(hours)
@@ -319,7 +328,7 @@ class StopCondition:
                     f"{', '.join(organism.STOP_CONDITIONS.keys())}"
                 )
 
-        parts = spec.split('|')
+        parts = spec.split("|")
         conditions = [_parse_single(p) for p in parts]
         return cls.composite(*conditions)
 
@@ -334,6 +343,7 @@ class StopCondition:
 
 class TimelapseStatus(Enum):
     """Overall timelapse status"""
+
     IDLE = "idle"
     RUNNING = "running"
     PAUSED = "paused"
@@ -344,41 +354,44 @@ class TimelapseStatus(Enum):
 @dataclass
 class TimelapseState:
     """Current state of the timelapse"""
+
     status: TimelapseStatus
-    started_at: Optional[datetime]
+    started_at: datetime | None
     # Dict of embryo_id -> EmbryoState reference (from agent.experiment.embryos).
     # Typed Any to avoid importing harness/ from models/ (dependency direction).
-    embryos: Dict[str, Any]
+    embryos: dict[str, Any]
     total_timepoints: int = 0
     current_round: int = 0
     interval_seconds: float = 120.0
-    next_round_time: Optional[datetime] = None
-    seconds_until_next_round: Optional[float] = None
-    error_message: Optional[str] = None
+    next_round_time: datetime | None = None
+    seconds_until_next_round: float | None = None
+    error_message: str | None = None
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize for display"""
         active = [e for e in self.embryos.values() if not e.is_complete]
         completed = [e for e in self.embryos.values() if e.is_complete]
 
         return {
-            'status': self.status.value,
-            'started_at': self.started_at.isoformat() if self.started_at else None,
-            'duration_minutes': (datetime.now() - self.started_at).total_seconds() / 60 if self.started_at else 0,
-            'total_timepoints': self.total_timepoints,
-            'current_round': self.current_round,
-            'interval_seconds': self.interval_seconds,
-            'next_round_time': self.next_round_time.isoformat() if self.next_round_time else None,
-            'seconds_until_next_round': self.seconds_until_next_round,
-            'active_embryos': len(active),
-            'completed_embryos': len(completed),
-            'embryo_details': {
+            "status": self.status.value,
+            "started_at": self.started_at.isoformat() if self.started_at else None,
+            "duration_minutes": (datetime.now() - self.started_at).total_seconds() / 60
+            if self.started_at
+            else 0,
+            "total_timepoints": self.total_timepoints,
+            "current_round": self.current_round,
+            "interval_seconds": self.interval_seconds,
+            "next_round_time": self.next_round_time.isoformat() if self.next_round_time else None,
+            "seconds_until_next_round": self.seconds_until_next_round,
+            "active_embryos": len(active),
+            "completed_embryos": len(completed),
+            "embryo_details": {
                 eid: {
-                    'timepoints': e.timepoints_acquired,
-                    'is_complete': e.is_complete,
-                    'completion_reason': e.completion_reason,
+                    "timepoints": e.timepoints_acquired,
+                    "is_complete": e.is_complete,
+                    "completion_reason": e.completion_reason,
                 }
                 for eid, e in self.embryos.items()
             },
-            'error': self.error_message,
+            "error": self.error_message,
         }

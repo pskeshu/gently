@@ -4,7 +4,6 @@ Core Pipeline Framework
 Provides the base classes and execution engine for composable analysis pipelines.
 """
 
-import asyncio
 import logging
 import time
 import uuid
@@ -12,25 +11,24 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum, auto
-from typing import Any, Callable, Dict, List, Optional, Type, Union
+from typing import Any
 
 from ..settings import settings
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
 class StepType(Enum):
     """Types of analysis steps"""
-    VLM = auto()           # Vision Language Model (Claude)
-    SAM = auto()           # Segment Anything Model
-    CLASSICAL = auto()     # Classical CV (OpenCV, scikit-image)
-    PROJECTION = auto()    # Dimension reduction (max proj, etc.)
-    THRESHOLD = auto()     # Thresholding operations
-    MORPHOLOGY = auto()    # Morphological operations
-    DETECTION = auto()     # Object detection
-    CUSTOM = auto()        # Custom step
+
+    VLM = auto()  # Vision Language Model (Claude)
+    SAM = auto()  # Segment Anything Model
+    CLASSICAL = auto()  # Classical CV (OpenCV, scikit-image)
+    PROJECTION = auto()  # Dimension reduction (max proj, etc.)
+    THRESHOLD = auto()  # Thresholding operations
+    MORPHOLOGY = auto()  # Morphological operations
+    DETECTION = auto()  # Object detection
+    CUSTOM = auto()  # Custom step
 
 
 @dataclass
@@ -44,37 +42,38 @@ class AnalysisResult:
     - Metadata about the analysis
     - The actual result data
     """
+
     uid: str = field(default_factory=lambda: str(uuid.uuid4()))
     step_name: str = ""
     step_type: StepType = StepType.CUSTOM
-    parent_uid: Optional[str] = None
+    parent_uid: str | None = None
     timestamp: datetime = field(default_factory=datetime.now)
 
     # Result data
     data: Any = None  # Primary result (image, mask, dict, etc.)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     # Execution info
     duration_ms: float = 0.0
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
     def __str__(self) -> str:
         status = "+" if self.success else "x"
         return f"{status} {self.step_name} ({self.step_type.name}) [{self.uid[:8]}]"
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """Serialize to dictionary"""
         return {
-            'uid': self.uid,
-            'step_name': self.step_name,
-            'step_type': self.step_type.name,
-            'parent_uid': self.parent_uid,
-            'timestamp': self.timestamp.isoformat(),
-            'metadata': self.metadata,
-            'duration_ms': self.duration_ms,
-            'success': self.success,
-            'error': self.error,
+            "uid": self.uid,
+            "step_name": self.step_name,
+            "step_type": self.step_type.name,
+            "parent_uid": self.parent_uid,
+            "timestamp": self.timestamp.isoformat(),
+            "metadata": self.metadata,
+            "duration_ms": self.duration_ms,
+            "success": self.success,
+            "error": self.error,
         }
 
 
@@ -91,9 +90,9 @@ class AnalysisStep(ABC):
 
     def __init__(
         self,
-        name: Optional[str] = None,
+        name: str | None = None,
         step_type: StepType = StepType.CUSTOM,
-        config: Optional[Dict] = None,
+        config: dict | None = None,
     ):
         self.name = name or self.__class__.__name__
         self.step_type = step_type
@@ -103,7 +102,7 @@ class AnalysisStep(ABC):
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """
         Execute the analysis step
@@ -125,7 +124,7 @@ class AnalysisStep(ABC):
     async def __call__(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Allow calling step directly"""
         return await self.execute(input_data, context)
@@ -148,15 +147,15 @@ class Pipeline:
     def __init__(
         self,
         name: str = "pipeline",
-        steps: Optional[List[AnalysisStep]] = None,
+        steps: list[AnalysisStep] | None = None,
         store_intermediate: bool = False,
     ):
         self.name = name
-        self.steps: List[AnalysisStep] = steps or []
+        self.steps: list[AnalysisStep] = steps or []
         self.store_intermediate = store_intermediate
         self._data_store = None
 
-    def add_step(self, step: AnalysisStep) -> 'Pipeline':
+    def add_step(self, step: AnalysisStep) -> "Pipeline":
         """Add a step to the pipeline (fluent)"""
         self.steps.append(step)
         return self
@@ -168,7 +167,7 @@ class Pipeline:
     async def execute(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """
         Execute the full pipeline
@@ -187,8 +186,8 @@ class Pipeline:
         """
         context = context or {}
         current_data = input_data
-        parent_uid = context.get('input_uid')
-        results: List[AnalysisResult] = []
+        parent_uid = context.get("input_uid")
+        results: list[AnalysisResult] = []
 
         start_time = time.time()
 
@@ -210,10 +209,10 @@ class Pipeline:
                             data=result.data,
                             data_type="analysis",
                             metadata={
-                                'step_name': result.step_name,
-                                'step_type': result.step_type.name,
-                                'pipeline': self.name,
-                                'step_index': i,
+                                "step_name": result.step_name,
+                                "step_type": result.step_type.name,
+                                "pipeline": self.name,
+                                "step_index": i,
                                 **result.metadata,
                             },
                             parent_uid=parent_uid,
@@ -228,7 +227,7 @@ class Pipeline:
                 # Pass result data to next step
                 current_data = result.data
 
-                logger.debug(f"Step {i+1}/{len(self.steps)}: {result}")
+                logger.debug(f"Step {i + 1}/{len(self.steps)}: {result}")
 
             except Exception as e:
                 logger.error(f"Pipeline step {step.name} failed: {e}")
@@ -238,7 +237,7 @@ class Pipeline:
                     parent_uid=parent_uid,
                     success=False,
                     error=str(e),
-                    metadata={'failed_at_step': i, 'pipeline': self.name},
+                    metadata={"failed_at_step": i, "pipeline": self.name},
                 )
 
         # Create final result
@@ -246,14 +245,14 @@ class Pipeline:
         final_result = AnalysisResult(
             step_name=self.name,
             step_type=StepType.CUSTOM,
-            parent_uid=context.get('input_uid'),
+            parent_uid=context.get("input_uid"),
             data=current_data,
             duration_ms=total_duration,
             success=True,
             metadata={
-                'pipeline': self.name,
-                'num_steps': len(self.steps),
-                'step_results': [r.to_dict() for r in results],
+                "pipeline": self.name,
+                "num_steps": len(self.steps),
+                "step_results": [r.to_dict() for r in results],
             },
         )
 
@@ -264,8 +263,8 @@ class Pipeline:
                     data=final_result.data,
                     data_type="analysis",
                     metadata={
-                        'pipeline': self.name,
-                        'final': True,
+                        "pipeline": self.name,
+                        "final": True,
                         **final_result.metadata,
                     },
                     parent_uid=parent_uid,
@@ -279,7 +278,7 @@ class Pipeline:
     async def __call__(
         self,
         input_data: Any,
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> AnalysisResult:
         """Allow calling pipeline directly"""
         return await self.execute(input_data, context)
@@ -305,28 +304,30 @@ class PipelineBuilder:
 
     def __init__(self, name: str = "pipeline"):
         self.name = name
-        self._steps: List[AnalysisStep] = []
+        self._steps: list[AnalysisStep] = []
         self._store_intermediate = False
         self._data_store = None
 
-    def add(self, step: AnalysisStep) -> 'PipelineBuilder':
+    def add(self, step: AnalysisStep) -> "PipelineBuilder":
         """Add a custom step"""
         self._steps.append(step)
         return self
 
-    def max_projection(self, axis: int = 0) -> 'PipelineBuilder':
+    def max_projection(self, axis: int = 0) -> "PipelineBuilder":
         """Add max projection step"""
         from .steps import MaxProjectionStep
+
         self._steps.append(MaxProjectionStep(axis=axis))
         return self
 
     def threshold(
         self,
         method: str = "otsu",
-        value: Optional[float] = None,
-    ) -> 'PipelineBuilder':
+        value: float | None = None,
+    ) -> "PipelineBuilder":
         """Add threshold step"""
         from .steps import ThresholdStep
+
         self._steps.append(ThresholdStep(method=method, value=value))
         return self
 
@@ -334,9 +335,10 @@ class PipelineBuilder:
         self,
         operation: str = "open",
         kernel_size: int = 3,
-    ) -> 'PipelineBuilder':
+    ) -> "PipelineBuilder":
         """Add morphological operation step"""
         from .steps import MorphologyStep
+
         self._steps.append(MorphologyStep(operation=operation, kernel_size=kernel_size))
         return self
 
@@ -345,23 +347,27 @@ class PipelineBuilder:
         min_sigma: float = 10,
         max_sigma: float = 50,
         threshold: float = 0.1,
-    ) -> 'PipelineBuilder':
+    ) -> "PipelineBuilder":
         """Add blob detection step"""
         from .steps import BlobDetectionStep
-        self._steps.append(BlobDetectionStep(
-            min_sigma=min_sigma,
-            max_sigma=max_sigma,
-            threshold=threshold,
-        ))
+
+        self._steps.append(
+            BlobDetectionStep(
+                min_sigma=min_sigma,
+                max_sigma=max_sigma,
+                threshold=threshold,
+            )
+        )
         return self
 
     def sam_segment(
         self,
-        prompt: Optional[str] = None,
-        points: Optional[List] = None,
-    ) -> 'PipelineBuilder':
+        prompt: str | None = None,
+        points: list | None = None,
+    ) -> "PipelineBuilder":
         """Add SAM segmentation step"""
         from .steps import SAMStep
+
         self._steps.append(SAMStep(prompt=prompt, points=points))
         return self
 
@@ -370,13 +376,14 @@ class PipelineBuilder:
         prompt: str,
         model: str = settings.models.perception,
         max_tokens: int = 1024,
-    ) -> 'PipelineBuilder':
+    ) -> "PipelineBuilder":
         """Add VLM analysis step"""
         from .steps import VLMStep
+
         self._steps.append(VLMStep(prompt=prompt, model=model, max_tokens=max_tokens))
         return self
 
-    def store_intermediate(self, store=None) -> 'PipelineBuilder':
+    def store_intermediate(self, store=None) -> "PipelineBuilder":
         """Enable storing intermediate results"""
         self._store_intermediate = True
         self._data_store = store
@@ -397,6 +404,7 @@ class PipelineBuilder:
 # =============================================================================
 # Pre-built pipelines for common analysis tasks
 # =============================================================================
+
 
 def create_embryo_detection_pipeline(
     use_sam: bool = True,
@@ -434,7 +442,7 @@ def create_embryo_detection_pipeline(
     if use_vlm_verification:
         builder.vlm_analyze(
             prompt="Verify these are C. elegans embryos. "
-                   "Count the number of valid embryos and note any false positives."
+            "Count the number of valid embryos and note any false positives."
         )
 
     return builder.build()

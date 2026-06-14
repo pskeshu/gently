@@ -4,24 +4,23 @@ Session and Interaction Tools
 Tools for session statistics, interaction logging, and experiment comparison.
 """
 
-from typing import Dict, List
-
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
 from gently.harness.tools.helpers import (
-    require_agent, get_embryo_or_error,
-    require_interaction_logger
+    get_embryo_or_error,
+    require_agent,
+    require_interaction_logger,
 )
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
 @tool(
     name="assess_image_quality",
-    description="Assess image quality metrics (focus, brightness, noise) and suggest parameter adjustments",
+    description=(
+        "Assess image quality metrics (focus, brightness, noise) and suggest parameter adjustments"
+    ),
     category=ToolCategory.ANALYSIS,
 )
 async def assess_image_quality(
-    embryo_id: str = None,
-    suggest_parameters: bool = True,
-    context: Dict = None
+    embryo_id: str = None, suggest_parameters: bool = True, context: dict = None
 ) -> str:
     """Assess image quality and suggest improvements"""
     agent, err = require_agent(context)
@@ -80,20 +79,22 @@ SUGGESTIONS: [List specific parameter adjustments if any aspect is POOR]"""
         response = agent.claude.messages.create(
             model=agent.model,
             max_tokens=800,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": quality_prompt},
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/jpeg",
-                            "data": image_b64
-                        }
-                    }
-                ]
-            }]
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": quality_prompt},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/jpeg",
+                                "data": image_b64,
+                            },
+                        },
+                    ],
+                }
+            ],
         )
 
         assessment = response.content[0].text
@@ -136,10 +137,13 @@ SUGGESTIONS: [List specific parameter adjustments if any aspect is POOR]"""
 
 @tool(
     name="get_session_stats",
-    description="Get statistics for the current agent session including interactions, corrections, and tool usage",
+    description=(
+        "Get statistics for the current agent session including interactions,"
+        " corrections, and tool usage"
+    ),
     category=ToolCategory.DATA,
 )
-def get_session_stats(context: Dict = None) -> str:
+def get_session_stats(context: dict = None) -> str:
     """Get session statistics from interaction logger"""
     agent, err = require_agent(context)
     if err:
@@ -168,10 +172,7 @@ def get_session_stats(context: Dict = None) -> str:
     description="Compare developmental progress across multiple embryos in the current experiment",
     category=ToolCategory.ANALYSIS,
 )
-def compare_embryo_development(
-    embryo_ids: List[str] = None,
-    context: Dict = None
-) -> str:
+def compare_embryo_development(embryo_ids: list[str] = None, context: dict = None) -> str:
     """Compare embryo development"""
     agent, err = require_agent(context)
     if err:
@@ -188,14 +189,16 @@ def compare_embryo_development(
 
     lines = ["Embryo Development Comparison:", ""]
 
-    lines.append(f"{'Embryo':<15} {'Timepoints':<12} {'Stage':<15} {'Hatching Est.':<15} {'Status'}")
+    lines.append(
+        f"{'Embryo':<15} {'Timepoints':<12} {'Stage':<15} {'Hatching Est.':<15} {'Status'}"
+    )
     lines.append("-" * 70)
 
     for embryo in embryos:
         stage = "unknown"
         hatching_est = "N/A"
 
-        if hasattr(agent, 'developmental_tracker') and agent.developmental_tracker:
+        if hasattr(agent, "developmental_tracker") and agent.developmental_tracker:
             current = agent.developmental_tracker.get_current_stage(embryo.id)
             if current:
                 stage = current.stage.value
@@ -205,17 +208,18 @@ def compare_embryo_development(
 
         if embryo.should_skip:
             status = f"skipped ({embryo.skip_reason})"
-        elif embryo.hatching_status and embryo.hatching_status.get('detected'):
+        elif embryo.hatching_status and embryo.hatching_status.get("detected"):
             status = "HATCHED"
         else:
             status = "active"
 
         lines.append(
-            f"{embryo.id:<15} {embryo.timepoints_acquired:<12} {stage:<15} {hatching_est:<15} {status}"
+            f"{embryo.id:<15} {embryo.timepoints_acquired:<12} {stage:<15}"
+            f" {hatching_est:<15} {status}"
         )
 
     active = sum(1 for e in embryos if not e.should_skip)
-    hatched = sum(1 for e in embryos if e.hatching_status and e.hatching_status.get('detected'))
+    hatched = sum(1 for e in embryos if e.hatching_status and e.hatching_status.get("detected"))
 
     lines.append("")
     lines.append(f"Summary: {active} active, {hatched} hatched, {len(embryos) - active} skipped")
@@ -225,13 +229,12 @@ def compare_embryo_development(
 
 @tool(
     name="analyze_corrections",
-    description="Analyze user corrections from interaction logs to identify patterns in agent mistakes",
+    description=(
+        "Analyze user corrections from interaction logs to identify patterns in agent mistakes"
+    ),
     category=ToolCategory.DATA,
 )
-def analyze_corrections(
-    limit: int = 50,
-    context: Dict = None
-) -> str:
+def analyze_corrections(limit: int = 50, context: dict = None) -> str:
     """Analyze correction patterns"""
     agent, err = require_agent(context)
     if err:
@@ -252,8 +255,9 @@ def analyze_corrections(
         return f"No corrections detected in {len(interactions)} interactions."
 
     lines = [
-        f"Correction Analysis ({len(corrections)} corrections in {len(interactions)} interactions):",
-        ""
+        f"Correction Analysis ({len(corrections)} corrections in"
+        f" {len(interactions)} interactions):",
+        "",
     ]
 
     indicator_counts = {}
@@ -272,8 +276,8 @@ def analyze_corrections(
 
     lines.append("")
     lines.append("Tools frequently followed by corrections:")
-    for tool, count in sorted(tool_corrections.items(), key=lambda x: -x[1])[:5]:
-        lines.append(f"  {tool}: {count} times")
+    for tool_name, count in sorted(tool_corrections.items(), key=lambda x: -x[1])[:5]:
+        lines.append(f"  {tool_name}: {count} times")
 
     lines.append("")
     lines.append("Recent correction examples:")
@@ -290,10 +294,7 @@ def analyze_corrections(
     description="Export interaction logs for external analysis",
     category=ToolCategory.DATA,
 )
-def export_interaction_log(
-    format: str = "summary",
-    context: Dict = None
-) -> str:
+def export_interaction_log(format: str = "summary", context: dict = None) -> str:
     """Export interaction log"""
     agent, err = require_agent(context)
     if err:
@@ -341,20 +342,24 @@ def export_interaction_log(
 
 @tool(
     name="import_embryos_from_session",
-    description="""Import embryos (positions, calibration, settings) from another session into the current experiment.
-Use when user wants to start a fresh session but keep embryo positions from a previous session (e.g., "import embryos from last session", "load embryos from session X").
-This imports positions and calibration data but NOT conversation history or detection results - it's a fresh start with known embryos.
+    description="""Import embryos (positions, calibration, settings) from another session into
+the current experiment.
+Use when user wants to start a fresh session but keep embryo positions from a previous
+session (e.g., "import embryos from last session", "load embryos from session X").
+This imports positions and calibration data but NOT conversation history or detection
+results - it's a fresh start with known embryos.
 Use list_sessions or /sessions first to find the session_id to import from.""",
     category=ToolCategory.DATA,
     examples=[
         ToolExample("Import embryos from session abc123", {"session_id": "abc123"}),
-        ToolExample("Load embryos from previous session, replacing current ones", {"session_id": "abc123", "clear_existing": True}),
+        ToolExample(
+            "Load embryos from previous session, replacing current ones",
+            {"session_id": "abc123", "clear_existing": True},
+        ),
     ],
 )
 def import_embryos_from_session(
-    session_id: str,
-    clear_existing: bool = False,
-    context: Dict = None
+    session_id: str, clear_existing: bool = False, context: dict = None
 ) -> str:
     """
     Import embryos from another session.
@@ -372,12 +377,9 @@ def import_embryos_from_session(
     if err:
         return err
 
-    result = agent.import_embryos_from_session(
-        session_id=session_id,
-        clear_existing=clear_existing
-    )
+    result = agent.import_embryos_from_session(session_id=session_id, clear_existing=clear_existing)
 
-    if not result.get('success'):
+    if not result.get("success"):
         return f"Import failed: {result.get('error', 'Unknown error')}"
 
     lines = [
@@ -385,16 +387,16 @@ def import_embryos_from_session(
         f"  Imported: {len(result['imported'])} embryo(s)",
     ]
 
-    if result['imported']:
+    if result["imported"]:
         lines.append(f"    {', '.join(result['imported'])}")
 
-    if result['skipped']:
+    if result["skipped"]:
         lines.append(f"  Skipped (already exist): {len(result['skipped'])}")
         lines.append(f"    {', '.join(result['skipped'])}")
 
-    if result.get('errors'):
+    if result.get("errors"):
         lines.append(f"  Errors: {len(result['errors'])}")
-        for err in result['errors']:
+        for err in result["errors"]:
             lines.append(f"    - {err}")
 
     return "\n".join(lines)
@@ -402,19 +404,18 @@ def import_embryos_from_session(
 
 @tool(
     name="list_sessions",
-    description="""List available sessions with their IDs, embryo counts, message counts, and last active times.
-Use when user asks "show sessions", "what sessions exist", or needs to pick a session to resume or import from.
-Returns ALL sessions — do NOT filter by embryo count. Sessions are valuable for conversation history too.""",
+    description="""List available sessions with their IDs, embryo counts, message counts,
+and last active times.
+Use when user asks "show sessions", "what sessions exist", or needs to pick a session to
+resume or import from. Returns ALL sessions — do NOT filter by embryo count. Sessions are
+valuable for conversation history too.""",
     category=ToolCategory.DATA,
     examples=[
         ToolExample("Show available sessions", {}),
         ToolExample("List recent sessions", {"limit": 5}),
     ],
 )
-def list_sessions(
-    limit: int = 20,
-    context: Dict = None
-) -> str:
+def list_sessions(limit: int = 20, context: dict = None) -> str:
     """
     List available sessions.
 
@@ -442,15 +443,16 @@ def list_sessions(
     lines.append("-" * 80)
 
     for s in sessions:
-        session_id = s.get('session_id', 'unknown')[:38]
-        embryo_count = s.get('embryo_count', 0)
-        msg_count = s.get('message_count', 0)
-        last_active = s.get('last_active', '')
+        session_id = s.get("session_id", "unknown")[:38]
+        embryo_count = s.get("embryo_count", 0)
+        msg_count = s.get("message_count", 0)
+        last_active = s.get("last_active", "")
         if last_active:
             # Format datetime string
             try:
                 from datetime import datetime
-                dt = datetime.fromisoformat(last_active.replace('Z', '+00:00'))
+
+                dt = datetime.fromisoformat(last_active.replace("Z", "+00:00"))
                 last_active = dt.strftime("%Y-%m-%d %H:%M")
             except Exception:
                 last_active = last_active[:16]
@@ -462,6 +464,9 @@ def list_sessions(
 
     lines.append("")
     lines.append("To resume a session (full history + state): /resume <session_id>")
-    lines.append("To import only embryo positions into current session: import_embryos_from_session(session_id)")
+    lines.append(
+        "To import only embryo positions into current session:"
+        " import_embryos_from_session(session_id)"
+    )
 
     return "\n".join(lines)

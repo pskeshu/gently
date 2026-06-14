@@ -19,9 +19,9 @@ Calibration is present.
 """
 
 from .base import CalibrationData, CalibrationPipeline, aggregate_calibrations
-from .two_point import TwoPointCalibration
 from .edge_roi import EdgeRoiCalibration
 from .registry import CALIBRATION_REGISTRY, get_calibration_pipeline
+from .two_point import TwoPointCalibration
 
 __all__ = [
     "CalibrationData",

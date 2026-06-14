@@ -3,21 +3,21 @@ Tests for core database export utilities.
 """
 
 import json
-import pytest
-import numpy as np
-from pathlib import Path
 from datetime import datetime
 
+import numpy as np
+import pytest
+
 from gently.core.database import (
-    format_timestamp,
-    numpy_to_python,
+    add_embryo_to_database,
     format_embryo_calibration_for_json,
     format_embryo_entry_for_json,
-    load_multi_embryo_database,
-    save_multi_embryo_database,
-    add_embryo_to_database,
+    format_timestamp,
     get_embryo_calibration,
     list_embryos,
+    load_multi_embryo_database,
+    numpy_to_python,
+    save_multi_embryo_database,
 )
 
 
@@ -57,7 +57,7 @@ class TestNumpyToPython:
             "array": np.zeros(3),
             "int": np.int32(5),
             "float": np.float32(2.5),
-            "nested": {"x": np.array([1, 2])}
+            "nested": {"x": np.array([1, 2])},
         }
         result = numpy_to_python(data)
         # Must not raise
@@ -83,9 +83,9 @@ class TestFormatCalibration:
 
     def test_fills_missing_required_fields(self):
         result = format_embryo_calibration_for_json({})
-        assert 'slope_um_per_deg' in result
-        assert 'timestamp' in result
-        assert result['sample_type'] == 'embryo'
+        assert "slope_um_per_deg" in result
+        assert "timestamp" in result
+        assert result["sample_type"] == "embryo"
 
     def test_preserves_existing_data(self):
         data = {"slope_um_per_deg": 95.5, "offset_um": 3.0}
@@ -104,18 +104,17 @@ class TestFormatEmbryoEntry:
     def test_basic_entry(self):
         data = {
             "embryo_number": 1,
-            "pixel_x": 500.0, "pixel_y": 300.0,
-            "initial_stage_x": 1000.0, "initial_stage_y": 200.0,
+            "pixel_x": 500.0,
+            "pixel_y": 300.0,
+            "initial_stage_x": 1000.0,
+            "initial_stage_y": 200.0,
         }
         result = format_embryo_entry_for_json(data)
         assert result["embryo_number"] == 1
         assert result["bottom_camera_position_pixel"]["x"] == 500.0
 
     def test_with_calibration(self):
-        data = {
-            "embryo_number": 1,
-            "calibration": {"slope_um_per_deg": 95.0}
-        }
+        data = {"embryo_number": 1, "calibration": {"slope_um_per_deg": 95.0}}
         result = format_embryo_entry_for_json(data)
         assert "calibration" in result
 
@@ -125,7 +124,7 @@ class TestDatabaseFileOps:
 
     def test_load_missing_returns_empty(self, tmp_path):
         db = load_multi_embryo_database(tmp_path / "nonexistent.json")
-        assert db['embryos'] == {}
+        assert db["embryos"] == {}
 
     def test_save_and_load_roundtrip(self, tmp_path):
         path = tmp_path / "db.json"
@@ -143,13 +142,7 @@ class TestDatabaseFileOps:
         assert "embryo_001" in db["embryos"]
 
     def test_get_calibration(self):
-        db = {
-            "embryos": {
-                "embryo_001": {
-                    "calibration": {"slope_um_per_deg": 95.0}
-                }
-            }
-        }
+        db = {"embryos": {"embryo_001": {"calibration": {"slope_um_per_deg": 95.0}}}}
         cal = get_embryo_calibration(db, "embryo_001")
         assert cal["slope_um_per_deg"] == 95.0
 

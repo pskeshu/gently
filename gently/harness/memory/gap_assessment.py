@@ -9,9 +9,9 @@ is needed before the agent can be a useful partner.
 import logging
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
 
 from .model import Campaign
+
 try:
     from .file_store import FileContextStore as ContextStore
 except ImportError:
@@ -22,22 +22,25 @@ logger = logging.getLogger(__name__)
 
 class GapLayer(str, Enum):
     """Which context layer has a gap."""
-    LAB = "lab"           # Layer 1: lab identity, setup, organism
+
+    LAB = "lab"  # Layer 1: lab identity, setup, organism
     CAMPAIGN = "campaign"  # Layer 2: research direction, goals
-    SESSION = "session"    # Layer 3: today's intent
+    SESSION = "session"  # Layer 3: today's intent
     REALTIME = "realtime"  # Layer 4: current observations (never gapped)
 
 
 class GapSeverity(str, Enum):
     """How critical this gap is."""
-    EMPTY = "empty"        # Nothing at all — full onboarding needed
-    THIN = "thin"          # Some context exists but insufficient
+
+    EMPTY = "empty"  # Nothing at all — full onboarding needed
+    THIN = "thin"  # Some context exists but insufficient
     ADEQUATE = "adequate"  # Enough to function, could be richer
 
 
 @dataclass
 class Gap:
     """A single identified gap in the daemon's knowledge."""
+
     layer: GapLayer
     severity: GapSeverity
     description: str
@@ -51,12 +54,13 @@ class ContextGapReport:
 
     Drives the startup wizard: which steps to show, what to ask.
     """
-    gaps: List[Gap] = field(default_factory=list)
+
+    gaps: list[Gap] = field(default_factory=list)
     readiness: float = 0.0  # 0.0 (blank) to 1.0 (fully oriented)
     needs_lab_onboarding: bool = False
     needs_campaign: bool = False
     needs_session_intent: bool = False
-    active_campaigns: List[Campaign] = field(default_factory=list)  # All active campaigns
+    active_campaigns: list[Campaign] = field(default_factory=list)  # All active campaigns
     past_campaign_count: int = 0  # Completed/paused campaigns
     session_count: int = 0  # How many past sessions exist
     learning_count: int = 0
@@ -102,28 +106,41 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
 
     # Check for lab-level knowledge (learnings about the setup, organism, etc.)
     lab_learnings = [
-        l for l in learnings
-        if l.basis and any(
-            kw in l.basis.lower()
-            for kw in ("lab", "setup", "microscope", "organism", "onboarding", "identity")
+        learning
+        for learning in learnings
+        if learning.basis
+        and any(
+            kw in learning.basis.lower()
+            for kw in (
+                "lab",
+                "setup",
+                "microscope",
+                "organism",
+                "onboarding",
+                "identity",
+            )
         )
     ]
 
     if not learnings:
         report.needs_lab_onboarding = True
-        report.gaps.append(Gap(
-            layer=GapLayer.LAB,
-            severity=GapSeverity.EMPTY,
-            description="No learnings at all — this appears to be a first launch.",
-            suggested_action="Conduct lab onboarding conversation.",
-        ))
+        report.gaps.append(
+            Gap(
+                layer=GapLayer.LAB,
+                severity=GapSeverity.EMPTY,
+                description="No learnings at all — this appears to be a first launch.",
+                suggested_action="Conduct lab onboarding conversation.",
+            )
+        )
     elif not lab_learnings:
-        report.gaps.append(Gap(
-            layer=GapLayer.LAB,
-            severity=GapSeverity.THIN,
-            description="Have learnings but none about lab identity/setup.",
-            suggested_action="Ask about lab setup and research program.",
-        ))
+        report.gaps.append(
+            Gap(
+                layer=GapLayer.LAB,
+                severity=GapSeverity.THIN,
+                description="Have learnings but none about lab identity/setup.",
+                suggested_action="Ask about lab setup and research program.",
+            )
+        )
         readiness_score += 0.1
     else:
         readiness_score += 0.25
@@ -139,19 +156,23 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
         report.needs_campaign = True
 
         if report.past_campaign_count == 0:
-            report.gaps.append(Gap(
-                layer=GapLayer.CAMPAIGN,
-                severity=GapSeverity.EMPTY,
-                description="No campaigns ever created — no research direction.",
-                suggested_action="Ask about research goals or suggest ingesting papers.",
-            ))
+            report.gaps.append(
+                Gap(
+                    layer=GapLayer.CAMPAIGN,
+                    severity=GapSeverity.EMPTY,
+                    description="No campaigns ever created — no research direction.",
+                    suggested_action="Ask about research goals or suggest ingesting papers.",
+                )
+            )
         else:
-            report.gaps.append(Gap(
-                layer=GapLayer.CAMPAIGN,
-                severity=GapSeverity.THIN,
-                description=f"{report.past_campaign_count} past campaigns but none active.",
-                suggested_action="Ask if starting new work or resuming.",
-            ))
+            report.gaps.append(
+                Gap(
+                    layer=GapLayer.CAMPAIGN,
+                    severity=GapSeverity.THIN,
+                    description=f"{report.past_campaign_count} past campaigns but none active.",
+                    suggested_action="Ask if starting new work or resuming.",
+                )
+            )
             readiness_score += 0.1
     else:
         readiness_score += 0.25
@@ -166,19 +187,23 @@ def assess_gaps(context_store: ContextStore) -> ContextGapReport:
         report.session_count = context_store.count_session_intents()
 
         if report.session_count == 0:
-            report.gaps.append(Gap(
-                layer=GapLayer.SESSION,
-                severity=GapSeverity.EMPTY,
-                description="No session history at all.",
-                suggested_action="Establish session intent after campaign context.",
-            ))
+            report.gaps.append(
+                Gap(
+                    layer=GapLayer.SESSION,
+                    severity=GapSeverity.EMPTY,
+                    description="No session history at all.",
+                    suggested_action="Establish session intent after campaign context.",
+                )
+            )
         else:
-            report.gaps.append(Gap(
-                layer=GapLayer.SESSION,
-                severity=GapSeverity.THIN,
-                description=f"{report.session_count} past sessions, but no intent for current.",
-                suggested_action="Quick check-in: continuing campaign or starting fresh?",
-            ))
+            report.gaps.append(
+                Gap(
+                    layer=GapLayer.SESSION,
+                    severity=GapSeverity.THIN,
+                    description=f"{report.session_count} past sessions, but no intent for current.",
+                    suggested_action="Quick check-in: continuing campaign or starting fresh?",
+                )
+            )
             readiness_score += 0.1
     else:
         readiness_score += 0.25

@@ -25,18 +25,18 @@ Example usage:
             )
 """
 
-import base64
 import json
 import logging
 import sqlite3
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Iterator, List, Dict, Any, Tuple
+from typing import Any, Optional
 
 import numpy as np
 
-from .schema import get_connection, DEFAULT_DB_PATH
+from .schema import DEFAULT_DB_PATH, get_connection
 
 logger = logging.getLogger(__name__)
 
@@ -44,40 +44,41 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ImageData:
     """Data for a single image in the dataset."""
+
     uid: str
     embryo_id: str
     timepoint: int
     timestamp: str
 
     # Image data (loaded on demand)
-    _image_b64: Optional[str] = field(default=None, repr=False)
-    _volume_path: Optional[str] = None
-    _image_path: Optional[str] = None
+    _image_b64: str | None = field(default=None, repr=False)
+    _volume_path: str | None = None
+    _image_path: str | None = None
 
     # Ground truth (if available)
-    ground_truth_stage: Optional[str] = None
+    ground_truth_stage: str | None = None
 
     # Metadata
-    shape: Optional[Tuple[int, int]] = None
+    shape: tuple[int, int] | None = None
     projection_type: str = "max_z"
-    session_id: Optional[str] = None
+    session_id: str | None = None
 
     # Internal reference to dataset for lazy loading
     _dataset: Optional["EmbryoDataset"] = field(default=None, repr=False)
 
     @property
-    def image_b64(self) -> Optional[str]:
+    def image_b64(self) -> str | None:
         """Load and return base64 image data (lazy loading)."""
         if self._image_b64 is None and self._dataset:
             self._image_b64 = self._dataset._load_image_b64(self)
         return self._image_b64
 
     @property
-    def volume_path(self) -> Optional[str]:
+    def volume_path(self) -> str | None:
         """Path to the source volume TIFF."""
         return self._volume_path
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary (without image data)."""
         return {
             "uid": self.uid,
@@ -95,20 +96,21 @@ class ImageData:
 @dataclass
 class DatasetEmbryoEntry:
     """Information about an embryo in the dataset."""
+
     embryo_id: str
-    session_id: Optional[str]
+    session_id: str | None
     num_images: int
     num_volumes: int
-    timepoint_range: Tuple[int, int]  # (min, max)
+    timepoint_range: tuple[int, int]  # (min, max)
     has_ground_truth: bool
-    ground_truth_stages: List[str] = field(default_factory=list)
+    ground_truth_stages: list[str] = field(default_factory=list)
 
     # Internal reference to dataset
     _dataset: Optional["EmbryoDataset"] = field(default=None, repr=False)
 
     def iter_images(
         self,
-        timepoint_range: Optional[Tuple[int, int]] = None,
+        timepoint_range: tuple[int, int] | None = None,
         load_image_data: bool = True,
     ) -> Iterator[ImageData]:
         """
@@ -158,7 +160,7 @@ class EmbryoDataset:
 
     def __init__(
         self,
-        db_path: Optional[Path] = None,
+        db_path: Path | None = None,
         data_dir: Path = Path("D:/gently/data"),
         gently_store=None,
     ):
@@ -170,8 +172,8 @@ class EmbryoDataset:
             self.db_path = db_path or DEFAULT_DB_PATH
             self.data_dir = data_dir
             self._gently_store = None
-        self._conn: Optional[sqlite3.Connection] = None
-        self._is_gently_schema: Optional[bool] = None
+        self._conn: sqlite3.Connection | None = None
+        self._is_gently_schema: bool | None = None
 
     @classmethod
     def from_store(cls, store) -> "EmbryoDataset":
@@ -195,7 +197,7 @@ class EmbryoDataset:
             self._is_gently_schema = "uid" not in columns
         return self._is_gently_schema
 
-    def _resolve_db_path(self, db_path: Optional[str]) -> Optional[str]:
+    def _resolve_db_path(self, db_path: str | None) -> str | None:
         """Convert DB-stored file path to absolute path string."""
         if db_path is None:
             return None
@@ -215,8 +217,8 @@ class EmbryoDataset:
 
     def iter_embryos(
         self,
-        session_id: Optional[str] = None,
-        has_ground_truth: Optional[bool] = None,
+        session_id: str | None = None,
+        has_ground_truth: bool | None = None,
         min_images: int = 1,
     ) -> Iterator[DatasetEmbryoEntry]:
         """
@@ -281,11 +283,14 @@ class EmbryoDataset:
             sess_id = row[1]
 
             # Check ground truth
-            gt_rows = self.conn.execute("""
+            gt_rows = self.conn.execute(
+                """
                 SELECT stage FROM ground_truth
                 WHERE embryo_id = ? AND (session_id = ? OR ? IS NULL)
                 ORDER BY start_timepoint
-            """, (embryo_id, sess_id, sess_id)).fetchall()
+            """,
+                (embryo_id, sess_id, sess_id),
+            ).fetchall()
 
             gt_stages = [r[0] for r in gt_rows]
             has_gt = len(gt_stages) > 0
@@ -310,8 +315,8 @@ class EmbryoDataset:
     def iter_images(
         self,
         embryo_id: str,
-        session_id: Optional[str] = None,
-        timepoint_range: Optional[Tuple[int, int]] = None,
+        session_id: str | None = None,
+        timepoint_range: tuple[int, int] | None = None,
         load_image_data: bool = True,
     ) -> Iterator[ImageData]:
         """
@@ -404,7 +409,7 @@ class EmbryoDataset:
             if row[8]:  # image_shape
                 try:
                     shape = tuple(json.loads(row[8]))
-                except:
+                except Exception:
                     pass
 
             img_data = ImageData(
@@ -425,8 +430,8 @@ class EmbryoDataset:
         self,
         embryo_id: str,
         timepoint: int,
-        session_id: Optional[str] = None,
-    ) -> Optional[ImageData]:
+        session_id: str | None = None,
+    ) -> ImageData | None:
         """Get a single image by embryo and timepoint."""
         for img in self.iter_images(
             embryo_id=embryo_id,
@@ -440,18 +445,20 @@ class EmbryoDataset:
         self,
         embryo_id: str,
         index: int,
-        session_id: Optional[str] = None,
-    ) -> Optional[ImageData]:
+        session_id: str | None = None,
+    ) -> ImageData | None:
         """Get a single image by sequential index (for volumes without timepoints)."""
-        for i, img in enumerate(self.iter_images(
-            embryo_id=embryo_id,
-            session_id=session_id,
-        )):
+        for i, img in enumerate(
+            self.iter_images(
+                embryo_id=embryo_id,
+                session_id=session_id,
+            )
+        ):
             if i == index:
                 return img
         return None
 
-    def get_image_by_uid(self, uid: str) -> Optional[ImageData]:
+    def get_image_by_uid(self, uid: str) -> ImageData | None:
         """Get a single image by its UID.
 
         For GentlyStore schema (no UIDs), returns None.
@@ -461,7 +468,8 @@ class EmbryoDataset:
             return None
 
         # Legacy schema — query the volume directly
-        row = self.conn.execute("""
+        row = self.conn.execute(
+            """
             SELECT
                 v.uid as volume_uid,
                 v.embryo_id,
@@ -477,7 +485,9 @@ class EmbryoDataset:
                 AND i.timepoint = v.timepoint
             WHERE v.uid = ? OR i.uid = ?
             LIMIT 1
-        """, (uid, uid)).fetchone()
+        """,
+            (uid, uid),
+        ).fetchone()
 
         if not row:
             return None
@@ -496,7 +506,7 @@ class EmbryoDataset:
         if row[8]:
             try:
                 shape = tuple(json.loads(row[8]))
-            except:
+            except Exception:
                 pass
 
         return ImageData(
@@ -518,8 +528,8 @@ class EmbryoDataset:
     def _get_ground_truth_map(
         self,
         embryo_id: str,
-        session_id: Optional[str] = None,
-    ) -> Dict[str, Tuple[int, int]]:
+        session_id: str | None = None,
+    ) -> dict[str, tuple[int, int]]:
         """
         Get ground truth stage → (start_tp, end_tp) mapping.
 
@@ -565,9 +575,9 @@ class EmbryoDataset:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
-        end_timepoint: Optional[int] = None,
-        annotator: Optional[str] = None,
-        notes: Optional[str] = None,
+        end_timepoint: int | None = None,
+        annotator: str | None = None,
+        notes: str | None = None,
     ):
         """
         Set or update a ground truth annotation.
@@ -589,11 +599,22 @@ class EmbryoDataset:
         notes : str, optional
             Additional notes
         """
-        self.conn.execute("""
+        self.conn.execute(
+            """
             INSERT OR REPLACE INTO ground_truth
             (session_id, embryo_id, stage, start_timepoint, end_timepoint, annotator, notes)
             VALUES (?, ?, ?, ?, ?, ?, ?)
-        """, (session_id, embryo_id, stage, start_timepoint, end_timepoint, annotator, notes))
+        """,
+            (
+                session_id,
+                embryo_id,
+                stage,
+                start_timepoint,
+                end_timepoint,
+                annotator,
+                notes,
+            ),
+        )
         self.conn.commit()
         end_str = f"-{end_timepoint}" if end_timepoint else ""
         logger.info(f"Set ground truth: {embryo_id} {stage} @ t={start_timepoint}{end_str}")
@@ -602,7 +623,7 @@ class EmbryoDataset:
         self,
         session_id: str,
         embryo_id: str,
-        stage: Optional[str] = None,
+        stage: str | None = None,
     ):
         """
         Delete ground truth annotation(s).
@@ -617,29 +638,38 @@ class EmbryoDataset:
             If provided, delete only this stage. Otherwise delete all.
         """
         if stage:
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 DELETE FROM ground_truth
                 WHERE session_id = ? AND embryo_id = ? AND stage = ?
-            """, (session_id, embryo_id, stage))
+            """,
+                (session_id, embryo_id, stage),
+            )
         else:
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 DELETE FROM ground_truth
                 WHERE session_id = ? AND embryo_id = ?
-            """, (session_id, embryo_id))
+            """,
+                (session_id, embryo_id),
+            )
         self.conn.commit()
 
     def get_ground_truth(
         self,
         session_id: str,
         embryo_id: str,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Get all ground truth entries for an embryo."""
-        rows = self.conn.execute("""
+        rows = self.conn.execute(
+            """
             SELECT stage, start_timepoint, end_timepoint, annotator, notes, created_at
             FROM ground_truth
             WHERE session_id = ? AND embryo_id = ?
             ORDER BY start_timepoint
-        """, (session_id, embryo_id)).fetchall()
+        """,
+            (session_id, embryo_id),
+        ).fetchall()
 
         return [
             {
@@ -661,12 +691,12 @@ class EmbryoDataset:
         self,
         name: str,
         perception_method: str,
-        model_name: Optional[str] = None,
-        config: Optional[Dict] = None,
-        description: Optional[str] = None,
-        trace_type: str = 'perception',
-        source: str = 'benchmark',
-        session_id: Optional[str] = None,
+        model_name: str | None = None,
+        config: dict | None = None,
+        description: str | None = None,
+        trace_type: str = "perception",
+        source: str = "benchmark",
+        session_id: str | None = None,
     ) -> int:
         """
         Create a new perception run record.
@@ -698,26 +728,43 @@ class EmbryoDataset:
         config_json = json.dumps(config) if config else None
 
         if self.is_gently_schema:
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(
+                """
                 INSERT INTO perception_runs
                 (session_id, name, perception_method, model_name, config,
                  status, trace_type, source, created_at)
                 VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
-            """, (
-                session_id, name, perception_method, model_name,
-                config_json, trace_type, source,
-                datetime.now().isoformat(),
-            ))
+            """,
+                (
+                    session_id,
+                    name,
+                    perception_method,
+                    model_name,
+                    config_json,
+                    trace_type,
+                    source,
+                    datetime.now().isoformat(),
+                ),
+            )
         else:
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(
+                """
                 INSERT INTO perception_runs
                 (name, perception_method, model_name, config_json, description, status,
                  trace_type, source, session_id)
                 VALUES (?, ?, ?, ?, ?, 'running', ?, ?, ?)
-            """, (
-                name, perception_method, model_name,
-                config_json, description, trace_type, source, session_id,
-            ))
+            """,
+                (
+                    name,
+                    perception_method,
+                    model_name,
+                    config_json,
+                    description,
+                    trace_type,
+                    source,
+                    session_id,
+                ),
+            )
         self.conn.commit()
         return cursor.lastrowid
 
@@ -727,15 +774,15 @@ class EmbryoDataset:
         embryo_id: str,
         timepoint: int,
         predicted_stage: str,
-        confidence: Optional[float] = None,
-        reasoning: Optional[str] = None,
-        image_uid: Optional[str] = None,
-        session_id: Optional[str] = None,
+        confidence: float | None = None,
+        reasoning: str | None = None,
+        image_uid: str | None = None,
+        session_id: str | None = None,
         is_transitional: bool = False,
-        observed_features: Optional[Dict] = None,
-        reasoning_trace: Optional[Dict] = None,
-        execution_time_ms: Optional[float] = None,
-        trace_file_path: Optional[str] = None,
+        observed_features: dict | None = None,
+        reasoning_trace: dict | None = None,
+        execution_time_ms: float | None = None,
+        trace_file_path: str | None = None,
     ) -> int:
         """
         Store a perception prediction.
@@ -759,22 +806,32 @@ class EmbryoDataset:
 
         if self.is_gently_schema:
             # GentlyStore schema: single predictions table with JSON blobs
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(
+                """
                 INSERT INTO predictions
                 (run_id, session_id, embryo_id, timepoint,
                  predicted_stage, confidence, reasoning, is_transitional,
                  ground_truth_stage, is_correct, execution_time_ms,
                  trace_file, observed_features, created_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id, session_id, embryo_id, timepoint,
-                predicted_stage, confidence, reasoning,
-                1 if is_transitional else 0,
-                gt_stage, is_correct, execution_time_ms,
-                trace_file_path,
-                json.dumps(observed_features) if observed_features else None,
-                datetime.now().isoformat(),
-            ))
+            """,
+                (
+                    run_id,
+                    session_id,
+                    embryo_id,
+                    timepoint,
+                    predicted_stage,
+                    confidence,
+                    reasoning,
+                    1 if is_transitional else 0,
+                    gt_stage,
+                    is_correct,
+                    execution_time_ms,
+                    trace_file_path,
+                    json.dumps(observed_features) if observed_features else None,
+                    datetime.now().isoformat(),
+                ),
+            )
             prediction_id = cursor.lastrowid
         else:
             # Legacy schema: separate observed_features + reasoning_traces tables
@@ -787,56 +844,78 @@ class EmbryoDataset:
                 else:
                     confidence_level = "LOW"
 
-            cursor = self.conn.execute("""
+            cursor = self.conn.execute(
+                """
                 INSERT INTO predictions
                 (perception_run_id, image_uid, session_id, embryo_id, timepoint,
                  predicted_stage, confidence, confidence_level, is_transitional,
                  reasoning, ground_truth_stage, is_correct, execution_time_ms)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                run_id, image_uid, session_id, embryo_id, timepoint,
-                predicted_stage, confidence, confidence_level,
-                1 if is_transitional else 0,
-                reasoning, gt_stage, is_correct, execution_time_ms,
-            ))
+            """,
+                (
+                    run_id,
+                    image_uid,
+                    session_id,
+                    embryo_id,
+                    timepoint,
+                    predicted_stage,
+                    confidence,
+                    confidence_level,
+                    1 if is_transitional else 0,
+                    reasoning,
+                    gt_stage,
+                    is_correct,
+                    execution_time_ms,
+                ),
+            )
 
             prediction_id = cursor.lastrowid
 
             # Store observed features if provided
             if observed_features:
-                self.conn.execute("""
+                self.conn.execute(
+                    """
                     INSERT INTO observed_features
                     (prediction_id, shape, curvature, shell_status, body_segments,
                      emergence, movement, texture, features_json)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    prediction_id,
-                    observed_features.get("shape"),
-                    observed_features.get("curvature"),
-                    observed_features.get("shell_status"),
-                    observed_features.get("body_segments"),
-                    observed_features.get("emergence"),
-                    observed_features.get("movement"),
-                    observed_features.get("texture"),
-                    json.dumps(observed_features),
-                ))
+                """,
+                    (
+                        prediction_id,
+                        observed_features.get("shape"),
+                        observed_features.get("curvature"),
+                        observed_features.get("shell_status"),
+                        observed_features.get("body_segments"),
+                        observed_features.get("emergence"),
+                        observed_features.get("movement"),
+                        observed_features.get("texture"),
+                        json.dumps(observed_features),
+                    ),
+                )
 
             # Store reasoning trace if provided
             if reasoning_trace or trace_file_path:
-                self.conn.execute("""
+                self.conn.execute(
+                    """
                     INSERT INTO reasoning_traces
                     (prediction_id, contrastive_reasoning, steps_json,
                      tool_calls_json, tools_used_json, total_tool_calls, file_path)
                     VALUES (?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    prediction_id,
-                    reasoning_trace.get("contrastive_reasoning") if reasoning_trace else None,
-                    json.dumps(reasoning_trace.get("steps", [])) if reasoning_trace else None,
-                    json.dumps(reasoning_trace.get("tool_calls", [])) if reasoning_trace else None,
-                    json.dumps(reasoning_trace.get("tools_used", [])) if reasoning_trace else None,
-                    reasoning_trace.get("total_tool_calls", 0) if reasoning_trace else 0,
-                    trace_file_path,
-                ))
+                """,
+                    (
+                        prediction_id,
+                        reasoning_trace.get("contrastive_reasoning") if reasoning_trace else None,
+                        json.dumps(reasoning_trace.get("steps", [])) if reasoning_trace else None,
+                        json.dumps(reasoning_trace.get("tool_calls", []))
+                        if reasoning_trace
+                        else None,
+                        json.dumps(reasoning_trace.get("tools_used", []))
+                        if reasoning_trace
+                        else None,
+                        reasoning_trace.get("total_tool_calls", 0) if reasoning_trace else 0,
+                        trace_file_path,
+                    ),
+                )
 
         self.conn.commit()
         return prediction_id
@@ -845,19 +924,23 @@ class EmbryoDataset:
         self,
         run_id: int,
         status: str = "completed",
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ):
         """Mark a perception run as completed."""
         now = datetime.now().isoformat()
 
         if self.is_gently_schema:
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 UPDATE perception_runs SET
                     status = ?, completed_at = ?, error_message = ?
                 WHERE run_id = ?
-            """, (status, now, error_message, run_id))
+            """,
+                (status, now, error_message, run_id),
+            )
         else:
-            self.conn.execute("""
+            self.conn.execute(
+                """
                 UPDATE perception_runs SET
                     status = ?,
                     completed_at = ?,
@@ -866,14 +949,16 @@ class EmbryoDataset:
                         SELECT COUNT(*) FROM predictions WHERE perception_run_id = ?
                     )
                 WHERE id = ?
-            """, (status, now, error_message, run_id, run_id))
+            """,
+                (status, now, error_message, run_id, run_id),
+            )
         self.conn.commit()
 
     # =========================================================================
     # Metrics Methods
     # =========================================================================
 
-    def compute_run_metrics(self, run_id: int) -> Dict[str, Any]:
+    def compute_run_metrics(self, run_id: int) -> dict[str, Any]:
         """
         Compute accuracy metrics for a perception run.
 
@@ -884,11 +969,14 @@ class EmbryoDataset:
         """
         # Get predictions with ground truth
         run_col = "run_id" if self.is_gently_schema else "perception_run_id"
-        rows = self.conn.execute(f"""
+        rows = self.conn.execute(
+            f"""
             SELECT predicted_stage, ground_truth_stage, is_correct, confidence
             FROM predictions
             WHERE {run_col} = ? AND ground_truth_stage IS NOT NULL
-        """, (run_id,)).fetchall()
+        """,
+            (run_id,),
+        ).fetchall()
 
         if not rows:
             return {"error": "No predictions with ground truth"}
@@ -938,7 +1026,7 @@ class EmbryoDataset:
     # Image Loading
     # =========================================================================
 
-    def _load_image_b64(self, img: ImageData) -> Optional[str]:
+    def _load_image_b64(self, img: ImageData) -> str | None:
         """
         Load base64 image data for an ImageData object.
 
@@ -957,9 +1045,8 @@ class EmbryoDataset:
 
     def _load_projection_from_volume(self, volume_path: str) -> str:
         """Load volume and create max projection as base64 JPEG."""
+
         import tifffile
-        from PIL import Image
-        import io
 
         # Load volume
         volume = tifffile.imread(volume_path)
@@ -974,7 +1061,7 @@ class EmbryoDataset:
             z_depth, height, width = volume.shape
             # Extract View A (left half) if dual-view format
             if width > height * 1.5:
-                volume = volume[:, :, :width // 2]
+                volume = volume[:, :, : width // 2]
             # Max projection
             projection = np.max(volume, axis=0)
         else:
@@ -982,10 +1069,11 @@ class EmbryoDataset:
             # Extract View A if 2D dual-view
             height, width = projection.shape
             if width > height * 1.5:
-                projection = projection[:, :width // 2]
+                projection = projection[:, : width // 2]
 
         # Normalize and encode
-        from gently.core.imaging import normalize_to_uint8, image_to_base64
+        from gently.core.imaging import image_to_base64, normalize_to_uint8
+
         projection = normalize_to_uint8(projection, method="percentile", p_low=1, p_high=99.5)
         return image_to_base64(projection, format="JPEG", quality=85, max_dimension=1024)
 
@@ -993,7 +1081,7 @@ class EmbryoDataset:
     # Query Methods
     # =========================================================================
 
-    def get_sessions(self) -> List[Dict[str, Any]]:
+    def get_sessions(self) -> list[dict[str, Any]]:
         """Get list of sessions with summary stats."""
         rows = self.conn.execute("""
             SELECT
@@ -1024,7 +1112,7 @@ class EmbryoDataset:
             for r in rows
         ]
 
-    def get_perception_runs(self) -> List[Dict[str, Any]]:
+    def get_perception_runs(self) -> list[dict[str, Any]]:
         """Get list of perception runs with metrics."""
         if self.is_gently_schema:
             # GentlyStore schema — inline the accuracy view
@@ -1062,9 +1150,9 @@ class EmbryoDataset:
         self,
         embryo_id: str,
         timepoint: int,
-        session_id: Optional[str] = None,
-        trace_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        session_id: str | None = None,
+        trace_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Get all traces for a specific image (embryo + timepoint).
 
@@ -1172,8 +1260,8 @@ class EmbryoDataset:
     def get_runs_for_session(
         self,
         session_id: str,
-        trace_type: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        trace_type: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Get all perception runs for a session.
 
@@ -1258,8 +1346,8 @@ class EmbryoDataset:
     def get_run_predictions(
         self,
         run_id: int,
-        embryo_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
+        embryo_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Get all predictions for a run, optionally filtered by embryo.
 
@@ -1338,7 +1426,7 @@ class EmbryoDataset:
     # Cross-Session UID Methods
     # =========================================================================
 
-    def get_embryo_by_uid(self, uid: str) -> List[Dict[str, Any]]:
+    def get_embryo_by_uid(self, uid: str) -> list[dict[str, Any]]:
         """
         Get all instances of an embryo across sessions by its UID.
 
@@ -1353,7 +1441,8 @@ class EmbryoDataset:
             All embryo instances matching this UID across different sessions
         """
         if self.is_gently_schema:
-            rows = self.conn.execute("""
+            rows = self.conn.execute(
+                """
                 SELECT
                     e.embryo_id,
                     e.session_id,
@@ -1376,9 +1465,12 @@ class EmbryoDataset:
                 LEFT JOIN sessions s ON e.session_id = s.session_id
                 WHERE e.embryo_uid = ?
                 ORDER BY e.created_at ASC
-            """, (uid,)).fetchall()
+            """,
+                (uid,),
+            ).fetchall()
         else:
-            rows = self.conn.execute("""
+            rows = self.conn.execute(
+                """
                 SELECT
                     e.embryo_id,
                     e.session_id,
@@ -1392,14 +1484,18 @@ class EmbryoDataset:
                     s.name as session_name,
                     s.created_at as session_created_at,
                     (SELECT COUNT(*) FROM volumes v
-                     WHERE v.embryo_uid = e.embryo_uid AND v.session_id = e.session_id) as volume_count,
+                     WHERE v.embryo_uid = e.embryo_uid
+                     AND v.session_id = e.session_id) as volume_count,
                     (SELECT COUNT(*) FROM images i
-                     WHERE i.embryo_uid = e.embryo_uid AND i.session_id = e.session_id) as image_count
+                     WHERE i.embryo_uid = e.embryo_uid
+                     AND i.session_id = e.session_id) as image_count
                 FROM embryos e
                 LEFT JOIN sessions s ON e.session_id = s.session_id
                 WHERE e.embryo_uid = ?
                 ORDER BY e.created_at ASC
-            """, (uid,)).fetchall()
+            """,
+                (uid,),
+            ).fetchall()
 
         return [
             {
@@ -1501,7 +1597,7 @@ class EmbryoDataset:
             if row[8]:
                 try:
                     shape = tuple(json.loads(row[8]))
-                except:
+                except Exception:
                     pass
 
             img_data = ImageData(
@@ -1518,7 +1614,7 @@ class EmbryoDataset:
 
             yield img_data
 
-    def get_embryos_with_multiple_sessions(self) -> List[Dict[str, Any]]:
+    def get_embryos_with_multiple_sessions(self) -> list[dict[str, Any]]:
         """
         Get embryos that appear in multiple sessions (imported).
 
@@ -1584,7 +1680,7 @@ class EmbryoDataset:
             for r in rows
         ]
 
-    def get_embryo_timeline_by_uid(self, uid: str) -> Dict[str, Any]:
+    def get_embryo_timeline_by_uid(self, uid: str) -> dict[str, Any]:
         """
         Get complete cross-session timeline for an embryo.
 
@@ -1611,7 +1707,8 @@ class EmbryoDataset:
 
             # Get timepoint range and image count for this session
             if self.is_gently_schema:
-                stats = self.conn.execute("""
+                stats = self.conn.execute(
+                    """
                     SELECT
                         MIN(v.acquired_at) as first_timestamp,
                         MAX(v.acquired_at) as last_timestamp,
@@ -1622,9 +1719,12 @@ class EmbryoDataset:
                     JOIN embryos e ON v.embryo_id = e.embryo_id
                         AND v.session_id = e.session_id
                     WHERE e.embryo_uid = ? AND v.session_id = ?
-                """, (uid, session_id)).fetchone()
+                """,
+                    (uid, session_id),
+                ).fetchone()
             else:
-                stats = self.conn.execute("""
+                stats = self.conn.execute(
+                    """
                     SELECT
                         MIN(v.timestamp) as first_timestamp,
                         MAX(v.timestamp) as last_timestamp,
@@ -1633,27 +1733,34 @@ class EmbryoDataset:
                         MAX(v.timepoint) as max_timepoint
                     FROM volumes v
                     WHERE v.embryo_uid = ? AND v.session_id = ?
-                """, (uid, session_id)).fetchone()
+                """,
+                    (uid, session_id),
+                ).fetchone()
 
             # Get ground truth stages for this session
-            gt_rows = self.conn.execute("""
+            gt_rows = self.conn.execute(
+                """
                 SELECT stage, start_timepoint FROM ground_truth
                 WHERE embryo_id = ? AND session_id = ?
                 ORDER BY start_timepoint
-            """, (instance["embryo_id"], session_id)).fetchall()
+            """,
+                (instance["embryo_id"], session_id),
+            ).fetchall()
 
-            timeline.append({
-                "session_id": session_id,
-                "session_name": instance["session_name"],
-                "embryo_id": instance["embryo_id"],
-                "first_timestamp": stats[0] if stats else None,
-                "last_timestamp": stats[1] if stats else None,
-                "volume_count": stats[2] if stats else 0,
-                "timepoint_range": (stats[3], stats[4]) if stats else (None, None),
-                "ground_truth_stages": [
-                    {"stage": gt[0], "start_timepoint": gt[1]} for gt in gt_rows
-                ],
-            })
+            timeline.append(
+                {
+                    "session_id": session_id,
+                    "session_name": instance["session_name"],
+                    "embryo_id": instance["embryo_id"],
+                    "first_timestamp": stats[0] if stats else None,
+                    "last_timestamp": stats[1] if stats else None,
+                    "volume_count": stats[2] if stats else 0,
+                    "timepoint_range": (stats[3], stats[4]) if stats else (None, None),
+                    "ground_truth_stages": [
+                        {"stage": gt[0], "start_timepoint": gt[1]} for gt in gt_rows
+                    ],
+                }
+            )
 
         return {
             "embryo_uid": uid,

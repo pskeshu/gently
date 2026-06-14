@@ -5,12 +5,12 @@ The agent reasons over this registry to pick the best architecture
 for a given task, dataset size, and hardware constraints.
 """
 
-from typing import Any, Dict, List
+from typing import Any
 
 from .models import ModelArchitectureType
 
 # Architecture registry: metadata per architecture
-ARCHITECTURE_REGISTRY: Dict[str, Dict[str, Any]] = {
+ARCHITECTURE_REGISTRY: dict[str, dict[str, Any]] = {
     ModelArchitectureType.RESNET_18.value: {
         "name": "ResNet-18",
         "family": "resnet",
@@ -147,7 +147,7 @@ def get_suitable_architectures(
     dataset_size: int,
     vram_gb: float,
     image_type: str = "microscopy",
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Filter architectures suitable for given constraints.
 
     Parameters

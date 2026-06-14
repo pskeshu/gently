@@ -13,16 +13,11 @@ Tests cover:
 - Execution of non-existent tool
 """
 
-import asyncio
-
 import pytest
 
 from gently.harness.tools.registry import (
-    ToolRegistry,
     ToolCategory,
-    ToolParameter,
-    _python_type_to_json_schema,
-    _extract_parameters_from_function,
+    ToolRegistry,
 )
 
 
@@ -35,6 +30,7 @@ def registry():
 # =========================================================================
 # Registration
 # =========================================================================
+
 
 class TestRegistration:
     def test_register_and_get(self, registry):
@@ -49,7 +45,9 @@ class TestRegistration:
         assert tool.description == "test tool"
 
     def test_register_with_decorator(self, registry):
-        @registry.register(name="deco_tool", description="decorated", category=ToolCategory.ANALYSIS)
+        @registry.register(
+            name="deco_tool", description="decorated", category=ToolCategory.ANALYSIS
+        )
         async def deco_tool(value: float) -> str:
             return f"result: {value}"
 
@@ -77,6 +75,7 @@ class TestRegistration:
 # =========================================================================
 # Schema generation
 # =========================================================================
+
 
 class TestSchemaGeneration:
     def test_schema_generation_from_type_hints(self, registry):
@@ -121,6 +120,7 @@ class TestSchemaGeneration:
 # =========================================================================
 # Filtering
 # =========================================================================
+
 
 class TestFiltering:
     def test_list_by_category(self, registry):
@@ -167,6 +167,7 @@ class TestFiltering:
 # =========================================================================
 # Execution
 # =========================================================================
+
 
 class TestExecution:
     @pytest.mark.asyncio

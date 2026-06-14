@@ -2,11 +2,10 @@
 GentlyDataset — PyTorch Dataset loading projections + ground_truth from FileStore.
 """
 
-import json
 import logging
 import random
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -14,9 +13,11 @@ try:
     import numpy as np
     import torch
     from torch.utils.data import Dataset
+
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+
     # Stub for import-time safety
     class Dataset:
         pass
@@ -37,7 +38,7 @@ class GentlyDataset(Dataset):
 
     def __init__(
         self,
-        samples: List[Tuple[str, int]],
+        samples: list[tuple[str, int]],
         input_size: int = 224,
         augment: bool = False,
     ):
@@ -57,6 +58,7 @@ class GentlyDataset(Dataset):
         # Load image
         try:
             from PIL import Image
+
             img = Image.open(img_path).convert("L")  # grayscale
             img = img.resize((self.input_size, self.input_size))
             img_np = np.array(img, dtype=np.float32) / 255.0
@@ -92,13 +94,13 @@ class GentlyDataset(Dataset):
 
 
 def create_data_splits(
-    labels_data: Dict[str, Any],
+    labels_data: dict[str, Any],
     data_root: Path,
     input_size: int = 224,
     train_ratio: float = 0.7,
     val_ratio: float = 0.15,
     random_seed: int = 42,
-) -> Tuple:
+) -> tuple:
     """Create train/val/test datasets from a labels file.
 
     Parameters
@@ -141,15 +143,15 @@ def create_data_splits(
     val_samples = []
     test_samples = []
 
-    for label, items in by_label.items():
+    for _label, items in by_label.items():
         random.shuffle(items)
         n = len(items)
         n_train = max(1, int(n * train_ratio))
         n_val = max(1, int(n * val_ratio))
 
         train_samples.extend(items[:n_train])
-        val_samples.extend(items[n_train:n_train + n_val])
-        test_samples.extend(items[n_train + n_val:])
+        val_samples.extend(items[n_train : n_train + n_val])
+        test_samples.extend(items[n_train + n_val :])
 
     train_ds = GentlyDataset(train_samples, input_size=input_size, augment=True)
     val_ds = GentlyDataset(val_samples, input_size=input_size, augment=False)
@@ -158,7 +160,7 @@ def create_data_splits(
     return train_ds, val_ds, test_ds
 
 
-def build_labels_from_store(gently_store, session_ids: Optional[List[str]] = None) -> Dict:
+def build_labels_from_store(gently_store, session_ids: list[str] | None = None) -> dict:
     """Build a labels dict from FileStore ground truth.
 
     Returns
@@ -193,13 +195,15 @@ def build_labels_from_store(gently_store, session_ids: Optional[List[str]] = Non
                     try:
                         proj_path = gently_store.get_projection_path(sid, eid, start_tp)
                         if proj_path:
-                            samples.append({
-                                "path": str(proj_path),
-                                "label": stage_to_idx[stage],
-                                "session_id": sid,
-                                "embryo_id": eid,
-                                "stage": stage,
-                            })
+                            samples.append(
+                                {
+                                    "path": str(proj_path),
+                                    "label": stage_to_idx[stage],
+                                    "session_id": sid,
+                                    "embryo_id": eid,
+                                    "stage": stage,
+                                }
+                            )
                     except Exception:
                         pass
             except Exception:

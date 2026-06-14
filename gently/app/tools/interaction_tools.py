@@ -6,10 +6,8 @@ and collecting user input in a UX-friendly way.
 """
 
 import json
-from typing import Dict, List, Optional
 
-from gently.harness.tools.registry import tool, ToolCategory, ToolExample
-
+from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 # Special marker for CLI to detect choice responses
 CHOICE_RESPONSE_TYPE = "_user_choice_request"
@@ -33,28 +31,34 @@ Only include specific, meaningful choices.""",
     category=ToolCategory.EXPERIMENT,
     requires_microscope=False,
     examples=[
-        ToolExample("Ask which session", {
-            "question": "Which session to import from?",
-            "options": [
-                {"id": "abc123", "label": "Today's session (4 embryos)"},
-                {"id": "def456", "label": "Yesterday (2 embryos)"},
-            ]
-        }),
-        ToolExample("Yes/No confirmation", {
-            "question": "Start the timelapse?",
-            "options": [
-                {"id": "yes", "label": "Yes, start now"},
-                {"id": "no", "label": "No, cancel"},
-            ]
-        }),
+        ToolExample(
+            "Ask which session",
+            {
+                "question": "Which session to import from?",
+                "options": [
+                    {"id": "abc123", "label": "Today's session (4 embryos)"},
+                    {"id": "def456", "label": "Yesterday (2 embryos)"},
+                ],
+            },
+        ),
+        ToolExample(
+            "Yes/No confirmation",
+            {
+                "question": "Start the timelapse?",
+                "options": [
+                    {"id": "yes", "label": "Yes, start now"},
+                    {"id": "no", "label": "No, cancel"},
+                ],
+            },
+        ),
     ],
 )
 async def ask_user_choice(
     question: str,
-    options: List[Dict[str, str]],
+    options: list[dict[str, str]],
     allow_multiple: bool = False,
-    default_id: Optional[str] = None,
-    context: Dict = None
+    default_id: str | None = None,
+    context: dict = None,
 ) -> str:
     """
     Present user with selectable options.
@@ -88,7 +92,7 @@ async def ask_user_choice(
         return "Error: Must provide at least one option"
 
     for i, opt in enumerate(options):
-        if 'id' not in opt or 'label' not in opt:
+        if "id" not in opt or "label" not in opt:
             return f"Error: Option {i} missing required 'id' or 'label' field"
 
     # Return special format that CLI will intercept and render
@@ -103,7 +107,7 @@ async def ask_user_choice(
     return json.dumps(choice_request)
 
 
-def parse_choice_response(response: str) -> Optional[Dict]:
+def parse_choice_response(response: str) -> dict | None:
     """
     Parse a tool response to check if it's a choice request.
 
@@ -128,7 +132,8 @@ def parse_choice_response(response: str) -> Optional[Dict]:
 
 # Helper functions for common choice patterns
 
-def yes_no_options(yes_label: str = "Yes", no_label: str = "No") -> List[Dict[str, str]]:
+
+def yes_no_options(yes_label: str = "Yes", no_label: str = "No") -> list[dict[str, str]]:
     """Generate standard Yes/No options"""
     return [
         {"id": "yes", "label": yes_label},
@@ -137,10 +142,8 @@ def yes_no_options(yes_label: str = "Yes", no_label: str = "No") -> List[Dict[st
 
 
 def yes_no_cancel_options(
-    yes_label: str = "Yes",
-    no_label: str = "No",
-    cancel_label: str = "Cancel"
-) -> List[Dict[str, str]]:
+    yes_label: str = "Yes", no_label: str = "No", cancel_label: str = "Cancel"
+) -> list[dict[str, str]]:
     """Generate Yes/No/Cancel options"""
     return [
         {"id": "yes", "label": yes_label},
@@ -149,7 +152,7 @@ def yes_no_cancel_options(
     ]
 
 
-def embryo_options(agent) -> List[Dict[str, str]]:
+def embryo_options(agent) -> list[dict[str, str]]:
     """Generate options from available embryos"""
     options = []
     for eid, embryo in agent.experiment.embryos.items():
@@ -168,23 +171,19 @@ def embryo_options(agent) -> List[Dict[str, str]]:
     return options
 
 
-def session_options(sessions: List[Dict]) -> List[Dict[str, str]]:
+def session_options(sessions: list[dict]) -> list[dict[str, str]]:
     """Generate options from available sessions"""
     options = []
     for session in sessions:
-        sid = session.get('session_id', session.get('id', 'unknown'))
-        embryo_count = session.get('embryo_count', 0)
-        message_count = session.get('message_count', 0)
-        last_active = session.get('last_active', 'unknown')
+        sid = session.get("session_id", session.get("id", "unknown"))
+        embryo_count = session.get("embryo_count", 0)
+        message_count = session.get("message_count", 0)
+        last_active = session.get("last_active", "unknown")
 
         label = f"{sid[:8]} - {embryo_count} embryos, {message_count} messages"
-        if last_active != 'unknown':
+        if last_active != "unknown":
             label += f" (last: {last_active})"
 
-        options.append({
-            "id": sid,
-            "label": label,
-            "description": f"Session {sid}"
-        })
+        options.append({"id": sid, "label": label, "description": f"Session {sid}"})
 
     return options

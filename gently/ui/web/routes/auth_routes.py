@@ -10,7 +10,12 @@ import logging
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
-from gently.ui.web.accounts import get_account_store, CONTROL_ROLES, ROLES, _SESSION_TTL_SECONDS
+from gently.ui.web.accounts import (
+    _SESSION_TTL_SECONDS,
+    CONTROL_ROLES,
+    ROLES,
+    get_account_store,
+)
 from gently.ui.web.auth import SESSION_COOKIE, current_username
 
 logger = logging.getLogger(__name__)
@@ -52,9 +57,13 @@ def create_router(server) -> APIRouter:
         token = store.issue_session(username)
         resp = JSONResponse({"ok": True, "username": username, "role": role})
         resp.set_cookie(
-            SESSION_COOKIE, token,
-            httponly=True, samesite="lax", secure=_secure(request),
-            max_age=_SESSION_TTL_SECONDS, path="/",
+            SESSION_COOKIE,
+            token,
+            httponly=True,
+            samesite="lax",
+            secure=_secure(request),
+            max_age=_SESSION_TTL_SECONDS,
+            path="/",
         )
         logger.info("login ok: %s (%s)", username, role)
         return resp
@@ -74,11 +83,15 @@ def create_router(server) -> APIRouter:
         if not username:
             return JSONResponse({"accounts": True, "authenticated": False})
         role = store.get_role(username)
-        return JSONResponse({
-            "accounts": True, "authenticated": True,
-            "username": username, "role": role,
-            "can_control": role in CONTROL_ROLES,
-        })
+        return JSONResponse(
+            {
+                "accounts": True,
+                "authenticated": True,
+                "username": username,
+                "role": role,
+                "can_control": role in CONTROL_ROLES,
+            }
+        )
 
     @router.post("/api/auth/users")
     async def create_user(request: Request):

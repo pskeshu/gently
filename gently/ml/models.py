@@ -4,11 +4,12 @@ ML data models — pipelines, training runs, configs.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class TrainingStatus(str, Enum):
     """Status of an ML pipeline or training run."""
+
     PLANNED = "planned"
     DATA_PREP = "data_prep"
     TRAINING = "training"
@@ -20,6 +21,7 @@ class TrainingStatus(str, Enum):
 
 class ModelArchitectureType(str, Enum):
     """Supported model architecture families."""
+
     RESNET_18 = "resnet18"
     RESNET_50 = "resnet50"
     EFFICIENTNET_B0 = "efficientnet_b0"
@@ -33,6 +35,7 @@ class ModelArchitectureType(str, Enum):
 @dataclass
 class ModelConfig:
     """Configuration for a model architecture."""
+
     architecture: str = "resnet18"
     num_classes: int = 8
     pretrained: bool = True
@@ -41,7 +44,7 @@ class ModelConfig:
     dropout: float = 0.2
     freeze_backbone_epochs: int = 5  # freeze backbone for N epochs, then unfreeze
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "architecture": self.architecture,
             "num_classes": self.num_classes,
@@ -53,7 +56,7 @@ class ModelConfig:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "ModelConfig":
+    def from_dict(cls, d: dict[str, Any]) -> "ModelConfig":
         return cls(
             architecture=d.get("architecture", "resnet18"),
             num_classes=d.get("num_classes", 8),
@@ -68,6 +71,7 @@ class ModelConfig:
 @dataclass
 class TrainingConfig:
     """Training hyperparameters."""
+
     batch_size: int = 32
     epochs: int = 50
     learning_rate: float = 1e-4
@@ -76,13 +80,15 @@ class TrainingConfig:
     warmup_epochs: int = 5
     mixed_precision: bool = True  # AMP on A5000
     early_stopping_patience: int = 10
-    augmentations: List[str] = field(default_factory=lambda: [
-        "random_horizontal_flip",
-        "random_rotation",
-        "random_brightness",
-    ])
+    augmentations: list[str] = field(
+        default_factory=lambda: [
+            "random_horizontal_flip",
+            "random_rotation",
+            "random_brightness",
+        ]
+    )
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "batch_size": self.batch_size,
             "epochs": self.epochs,
@@ -96,7 +102,7 @@ class TrainingConfig:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrainingConfig":
+    def from_dict(cls, d: dict[str, Any]) -> "TrainingConfig":
         return cls(
             batch_size=d.get("batch_size", 32),
             epochs=d.get("epochs", 50),
@@ -113,14 +119,15 @@ class TrainingConfig:
 @dataclass
 class DataSplit:
     """Defines how data is split for training."""
+
     train_ratio: float = 0.7
     val_ratio: float = 0.15
     test_ratio: float = 0.15
     stratify_by: str = "stage"  # stratify splits by stage label
-    session_ids: List[str] = field(default_factory=list)
+    session_ids: list[str] = field(default_factory=list)
     random_seed: int = 42
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "train_ratio": self.train_ratio,
             "val_ratio": self.val_ratio,
@@ -131,7 +138,7 @@ class DataSplit:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "DataSplit":
+    def from_dict(cls, d: dict[str, Any]) -> "DataSplit":
         return cls(
             train_ratio=d.get("train_ratio", 0.7),
             val_ratio=d.get("val_ratio", 0.15),
@@ -145,12 +152,13 @@ class DataSplit:
 @dataclass
 class TrainingRun:
     """State of a single training run."""
+
     id: str = ""
     pipeline_id: str = ""
     status: str = TrainingStatus.PLANNED.value
-    model_config: Optional[ModelConfig] = None
-    training_config: Optional[TrainingConfig] = None
-    data_split: Optional[DataSplit] = None
+    model_config: ModelConfig | None = None
+    training_config: TrainingConfig | None = None
+    data_split: DataSplit | None = None
     current_epoch: int = 0
     total_epochs: int = 0
     train_loss: float = 0.0
@@ -164,7 +172,7 @@ class TrainingRun:
     completed_at: str = ""
     error_message: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "pipeline_id": self.pipeline_id,
@@ -187,7 +195,7 @@ class TrainingRun:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "TrainingRun":
+    def from_dict(cls, d: dict[str, Any]) -> "TrainingRun":
         mc = d.get("model_config")
         tc = d.get("training_config")
         ds = d.get("data_split")
@@ -216,20 +224,21 @@ class TrainingRun:
 @dataclass
 class MLPipeline:
     """Top-level pipeline that coordinates one ML task."""
+
     id: str = ""
     campaign_id: str = ""
     name: str = ""
     task: str = "embryo_stage_classification"
     status: str = TrainingStatus.PLANNED.value
-    model_config: Optional[ModelConfig] = None
-    data_split: Optional[DataSplit] = None
-    training_config: Optional[TrainingConfig] = None
+    model_config: ModelConfig | None = None
+    data_split: DataSplit | None = None
+    training_config: TrainingConfig | None = None
     best_run_id: str = ""
     best_accuracy: float = 0.0
     created_at: str = ""
     updated_at: str = ""
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "id": self.id,
             "campaign_id": self.campaign_id,
@@ -246,7 +255,7 @@ class MLPipeline:
         }
 
     @classmethod
-    def from_dict(cls, d: Dict[str, Any]) -> "MLPipeline":
+    def from_dict(cls, d: dict[str, Any]) -> "MLPipeline":
         mc = d.get("model_config")
         ds = d.get("data_split")
         tc = d.get("training_config")

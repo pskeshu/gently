@@ -43,15 +43,17 @@ def create_router(server) -> APIRouter:
                     count = len(store.list_embryos(sid) or [])
                 except Exception:
                     count = 0
-                sessions.append({
-                    "session_id": sid,
-                    "name": s.get("name") or sid,
-                    "created_at": s.get("created_at", ""),
-                    "last_active": s.get("last_active", ""),
-                    "embryo_count": count,
-                    "description": s.get("description", ""),
-                    "active": sid == active_id,
-                })
+                sessions.append(
+                    {
+                        "session_id": sid,
+                        "name": s.get("name") or sid,
+                        "created_at": s.get("created_at", ""),
+                        "last_active": s.get("last_active", ""),
+                        "embryo_count": count,
+                        "description": s.get("description", ""),
+                        "active": sid == active_id,
+                    }
+                )
         except Exception as e:
             logger.warning("Failed to list sessions from FileStore: %s", e)
         return {"sessions": sessions}
@@ -82,7 +84,7 @@ def create_router(server) -> APIRouter:
         scan = max(1, min(int(scan), 500))
         out = []
         try:
-            for sid in (store.recent_session_ids(scan) or []):
+            for sid in store.recent_session_ids(scan) or []:
                 try:
                     eids = store.list_embryo_ids(sid)
                 except Exception:
@@ -101,12 +103,14 @@ def create_router(server) -> APIRouter:
                         except Exception:
                             info = None
                         sname = (info.get("name") if info else None) or sid
-                    out.append({
-                        "session_id": sid,
-                        "session_name": sname,
-                        "embryo_id": eid,
-                        "timepoint": int(max(tps)),
-                    })
+                    out.append(
+                        {
+                            "session_id": sid,
+                            "session_name": sname,
+                            "embryo_id": eid,
+                            "timepoint": int(max(tps)),
+                        }
+                    )
                     if len(out) >= limit:
                         break
                 if len(out) >= limit:
@@ -139,7 +143,7 @@ def create_router(server) -> APIRouter:
         except HTTPException:
             raise
         except Exception:
-            raise HTTPException(status_code=404, detail="Not found")
+            raise HTTPException(status_code=404, detail="Not found") from None
         try:
             st = resolved.stat()
             etag = f'"{int(st.st_mtime)}-{st.st_size}"'
@@ -148,11 +152,9 @@ def create_router(server) -> APIRouter:
         headers = {"Cache-Control": "private, max-age=60"}
         if etag:
             headers["ETag"] = etag
-        return FileResponse(str(resolved), media_type="image/jpeg",
-                            headers=headers)
+        return FileResponse(str(resolved), media_type="image/jpeg", headers=headers)
 
-    @router.post("/api/sessions/{session_id}/resume",
-                 dependencies=[Depends(require_control)])
+    @router.post("/api/sessions/{session_id}/resume", dependencies=[Depends(require_control)])
     async def resume_session(session_id: str):
         """Switch the live agent to a different saved session.
 
@@ -169,13 +171,17 @@ def create_router(server) -> APIRouter:
         if store is None or store.get_session(session_id) is None:
             raise HTTPException(status_code=404, detail="Session not found")
         if session_id == getattr(agent, "session_id", None):
-            return {"ok": True, "session_id": session_id, "active": True,
-                    "note": "already active"}
+            return {
+                "ok": True,
+                "session_id": session_id,
+                "active": True,
+                "note": "already active",
+            }
         try:
             ok = agent.resume_session(session_id)
         except Exception as e:
             logger.exception("Session resume failed")
-            raise HTTPException(status_code=500, detail=f"resume failed: {e}")
+            raise HTTPException(status_code=500, detail=f"resume failed: {e}") from e
         if not ok:
             raise HTTPException(status_code=500, detail="resume returned false")
         # Rehydrate the viz image store from disk so the resumed session's
@@ -188,12 +194,15 @@ def create_router(server) -> APIRouter:
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
         try:
-            await server.manager.broadcast({"type": "session_changed",
-                                            "session_id": session_id})
+            await server.manager.broadcast({"type": "session_changed", "session_id": session_id})
         except Exception:
             pass
-        return {"ok": True, "session_id": session_id, "active": True,
-                "rehydrated_projections": rehydrated}
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "active": True,
+            "rehydrated_projections": rehydrated,
+        }
 
     @router.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):

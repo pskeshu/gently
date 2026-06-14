@@ -12,11 +12,9 @@ Each round:
 
 import asyncio
 import copy
-import json
 import logging
-import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from ..core.event_bus import EventType, get_event_bus
 
@@ -24,9 +22,9 @@ logger = logging.getLogger(__name__)
 
 
 def federated_average(
-    state_dicts: List[Dict[str, Any]],
-    weights: List[float],
-) -> Dict[str, Any]:
+    state_dicts: list[dict[str, Any]],
+    weights: list[float],
+) -> dict[str, Any]:
     """Compute weighted average of model state dicts.
 
     Parameters
@@ -50,7 +48,7 @@ def federated_average(
     try:
         import torch
     except ImportError:
-        raise ImportError("PyTorch required for federated averaging")
+        raise ImportError("PyTorch required for federated averaging") from None
 
     total_weight = sum(weights)
     if total_weight == 0:
@@ -66,7 +64,7 @@ def federated_average(
         averaged[key] = torch.zeros_like(state_dicts[0][key], dtype=torch.float32)
 
     # Weighted sum
-    for sd, w in zip(state_dicts, norm_weights):
+    for sd, w in zip(state_dicts, norm_weights, strict=False):
         for key in averaged:
             averaged[key] += sd[key].float() * w
 
@@ -98,14 +96,14 @@ class FederatedOrchestrator:
     async def run_federated_training(
         self,
         pipeline_id: str,
-        worker_peers: List,
+        worker_peers: list,
         initial_weights_path: Path,
         local_epochs_per_round: int = 5,
         max_rounds: int = 20,
         convergence_threshold: float = 0.001,
-        training_config: Optional[Dict] = None,
-        model_config: Optional[Dict] = None,
-    ) -> Dict[str, Any]:
+        training_config: dict | None = None,
+        model_config: dict | None = None,
+    ) -> dict[str, Any]:
         """Run federated averaging across mesh peers.
 
         Parameters
@@ -175,10 +173,12 @@ class FederatedOrchestrator:
 
             # 3. Federated average
             state_dicts = [r["state_dict"] for r in worker_results if r.get("state_dict")]
-            dataset_sizes = [r.get("dataset_size", 1) for r in worker_results if r.get("state_dict")]
+            dataset_sizes = [
+                r.get("dataset_size", 1) for r in worker_results if r.get("state_dict")
+            ]
 
             if state_dicts:
-                global_state = federated_average(state_dicts, dataset_sizes)
+                federated_average(state_dicts, dataset_sizes)
             else:
                 logger.warning(f"Round {round_num}: no state dicts to average")
                 continue
@@ -234,13 +234,13 @@ class FederatedOrchestrator:
 
     async def _train_workers(
         self,
-        workers: List,
+        workers: list,
         pipeline_id: str,
         round_num: int,
         local_epochs: int,
-        training_config: Optional[Dict],
-        model_config: Optional[Dict],
-    ) -> List[Dict]:
+        training_config: dict | None,
+        model_config: dict | None,
+    ) -> list[dict]:
         """Send training jobs to all workers and collect results.
 
         In production this uses PeerClient to POST /api/ml/train on each
@@ -253,18 +253,20 @@ class FederatedOrchestrator:
         for worker in workers:
             tasks.append(
                 self._train_single_worker(
-                    worker, pipeline_id, round_num, local_epochs,
-                    training_config, model_config,
+                    worker,
+                    pipeline_id,
+                    round_num,
+                    local_epochs,
+                    training_config,
+                    model_config,
                 )
             )
 
         completed = await asyncio.gather(*tasks, return_exceptions=True)
 
-        for worker, result in zip(workers, completed):
+        for worker, result in zip(workers, completed, strict=False):
             if isinstance(result, Exception):
-                logger.warning(
-                    f"Worker {worker.hostname} failed in round {round_num}: {result}"
-                )
+                logger.warning(f"Worker {worker.hostname} failed in round {round_num}: {result}")
                 continue
             if result:
                 results.append(result)
@@ -277,9 +279,9 @@ class FederatedOrchestrator:
         pipeline_id: str,
         round_num: int,
         local_epochs: int,
-        training_config: Optional[Dict],
-        model_config: Optional[Dict],
-    ) -> Optional[Dict]:
+        training_config: dict | None,
+        model_config: dict | None,
+    ) -> dict | None:
         """Train on a single worker peer via HTTP API.
 
         Returns worker result dict with state_dict, val_accuracy, dataset_size.
@@ -289,7 +291,8 @@ class FederatedOrchestrator:
 
         # Build a PeerInfo for the HTTP client
         from ..models import PeerInfo
-        peer = PeerInfo(
+
+        PeerInfo(
             instance_id=worker.instance_id,
             hostname=worker.hostname,
             ip_address=worker.ip_address,

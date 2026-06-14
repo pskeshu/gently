@@ -4,9 +4,7 @@ LED Control Tools
 Tools for controlling microscope LED illumination.
 """
 
-from typing import Dict
-
-from gently.harness.tools.registry import tool, ToolCategory
+from gently.harness.tools.registry import ToolCategory, tool
 
 
 @tool(
@@ -15,13 +13,13 @@ from gently.harness.tools.registry import tool, ToolCategory
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
-async def set_led(state: str, context: Dict) -> str:
+async def set_led(state: str, context: dict) -> str:
     """Set LED state"""
-    client = context.get('client')
+    client = context.get("client")
 
     try:
         result = await client.set_led(state)
-        if result.get('success'):
+        if result.get("success"):
             return f"LED set to '{state}'"
         else:
             return f"Error setting LED: {result.get('error', 'Unknown error')}"
@@ -35,21 +33,23 @@ async def set_led(state: str, context: Dict) -> str:
     category=ToolCategory.HARDWARE,
     requires_microscope=True,
 )
-async def get_led_status(context: Dict) -> str:
+async def get_led_status(context: dict) -> str:
     """Get LED status"""
-    client = context.get('client')
+    client = context.get("client")
 
     try:
         result = await client.get_led_status()
-        if result.get('success'):
-            current = result.get('current_state', 'unknown')
-            available = result.get('available_configs', [])
-            group = result.get('group_name', 'unknown')
+        if result.get("success"):
+            current = result.get("current_state", "unknown")
+            available = result.get("available_configs", [])
+            group = result.get("group_name", "unknown")
 
-            return (f"LED Status:\n"
-                    f"  Current state: {current}\n"
-                    f"  ConfigGroup: {group}\n"
-                    f"  Available configs: {available}")
+            return (
+                f"LED Status:\n"
+                f"  Current state: {current}\n"
+                f"  ConfigGroup: {group}\n"
+                f"  Available configs: {available}"
+            )
         else:
             return f"Error getting LED status: {result.get('error', 'Unknown error')}"
     except Exception as e:

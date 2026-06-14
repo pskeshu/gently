@@ -16,18 +16,19 @@ import importlib
 import logging
 import pkgutil
 from types import ModuleType
-from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-_active_hardware: Optional[ModuleType] = None
+_active_hardware: ModuleType | None = None
 
 
-def available_hardware() -> List[str]:
+def available_hardware() -> list[str]:
     """Names of the hardware plugins shipped under gently.hardware."""
     import gently.hardware as _pkg
+
     return sorted(
-        m.name for m in pkgutil.iter_modules(_pkg.__path__)
+        m.name
+        for m in pkgutil.iter_modules(_pkg.__path__)
         if m.ispkg and not m.name.startswith("_")
     )
 
@@ -81,7 +82,6 @@ def get_hardware() -> ModuleType:
     """
     if _active_hardware is None:
         raise RuntimeError(
-            "No hardware loaded. Call load_hardware() at startup, "
-            "or set 'hardware' in config.yml."
+            "No hardware loaded. Call load_hardware() at startup, or set 'hardware' in config.yml."
         )
     return _active_hardware

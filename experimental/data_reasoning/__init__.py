@@ -8,16 +8,16 @@ Provides:
 - GapPlanner: create plan items to fill annotation gaps
 """
 
+from .assessment import DataAssessmentEngine
+from .coverage import CoverageAnalyzer
+from .gap_planner import GapPlanner
 from .models import (
     CoverageReport,
     DataQualityReport,
     NetworkDataInventory,
     SessionSummary,
 )
-from .assessment import DataAssessmentEngine
-from .coverage import CoverageAnalyzer
 from .quality import QualityAnalyzer
-from .gap_planner import GapPlanner
 
 __all__ = [
     "CoverageReport",

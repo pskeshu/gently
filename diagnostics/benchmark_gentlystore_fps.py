@@ -22,23 +22,22 @@ Usage:
 import argparse
 import shutil
 import statistics
+
+# Add gently to path
+import sys
 import tempfile
 import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 import numpy as np
 
-# Add gently to path
-import sys
 GENTLY_ROOT = Path(__file__).resolve().parent.parent
 if str(GENTLY_ROOT) not in sys.path:
     sys.path.insert(0, str(GENTLY_ROOT))
 
-from gently.core.file_store import FileStore
-
+from gently.core.file_store import FileStore  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Default parameters -- typical diSPIM volume dimensions
@@ -60,9 +59,9 @@ class BenchmarkResult:
     approach: str
     num_slices: int
     volume_shape: tuple
-    timings: List[float] = field(default_factory=list)
-    sizes_mb: List[float] = field(default_factory=list)
-    errors: List[str] = field(default_factory=list)
+    timings: list[float] = field(default_factory=list)
+    sizes_mb: list[float] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
 
     @property
     def mean(self) -> float:
@@ -130,7 +129,7 @@ def generate_synthetic_volume(
         z = np.linspace(0, 1, num_slices)[:, None, None]
         y = np.linspace(0, 1, height)[None, :, None]
         x = np.linspace(0, 1, width)[None, None, :]
-        vol = (z * 0.3 + y * 0.3 + x * 0.4)
+        vol = z * 0.3 + y * 0.3 + x * 0.4
         if np.issubdtype(dtype, np.integer):
             info = np.iinfo(dtype)
             vol = (vol * info.max).astype(dtype)
@@ -149,14 +148,18 @@ def generate_synthetic_volume(
             cx = np.random.randint(width // 4, 3 * width // 4)
             sz, sy, sx = 3, 15, 15
 
-            z_idx = np.clip(np.arange(cz - sz*2, cz + sz*2), 0, num_slices - 1)
-            y_idx = np.clip(np.arange(cy - sy*2, cy + sy*2), 0, height - 1)
-            x_idx = np.clip(np.arange(cx - sx*2, cx + sx*2), 0, width - 1)
+            z_idx = np.clip(np.arange(cz - sz * 2, cz + sz * 2), 0, num_slices - 1)
+            y_idx = np.clip(np.arange(cy - sy * 2, cy + sy * 2), 0, height - 1)
+            x_idx = np.clip(np.arange(cx - sx * 2, cx + sx * 2), 0, width - 1)
 
-            zz, yy, xx = np.meshgrid(z_idx, y_idx, x_idx, indexing='ij')
+            zz, yy, xx = np.meshgrid(z_idx, y_idx, x_idx, indexing="ij")
             d2 = ((zz - cz) / sz) ** 2 + ((yy - cy) / sy) ** 2 + ((xx - cx) / sx) ** 2
             blob = np.exp(-d2 / 2)
-            vol[z_idx[0]:z_idx[-1]+1, y_idx[0]:y_idx[-1]+1, x_idx[0]:x_idx[-1]+1] += blob
+            vol[
+                z_idx[0] : z_idx[-1] + 1,
+                y_idx[0] : y_idx[-1] + 1,
+                x_idx[0] : x_idx[-1] + 1,
+            ] += blob
 
         # Add background noise
         vol += np.random.random(shape) * 0.1
@@ -178,7 +181,7 @@ def generate_synthetic_volume(
 def benchmark_raw_tiff_write(
     volume: np.ndarray,
     output_dir: Path,
-    compression: Optional[str] = "zlib",
+    compression: str | None = "zlib",
 ) -> tuple[float, float]:
     """
     Benchmark raw tifffile write (no FileStore).
@@ -255,7 +258,7 @@ def benchmark_register_volume(
 # Main benchmark sweep
 # ---------------------------------------------------------------------------
 def run_benchmark_sweep(
-    slices_list: List[int],
+    slices_list: list[int],
     width: int,
     height: int,
     num_repeats: int,
@@ -265,9 +268,9 @@ def run_benchmark_sweep(
     run_put_volume: bool = True,
     run_register: bool = True,
     skip_projection: bool = False,
-) -> List[BenchmarkResult]:
+) -> list[BenchmarkResult]:
     """Run the full benchmark sweep."""
-    results: List[BenchmarkResult] = []
+    results: list[BenchmarkResult] = []
 
     # Create temporary directory for benchmark
     temp_dir = Path(tempfile.mkdtemp(prefix="gently_benchmark_"))
@@ -291,10 +294,12 @@ def run_benchmark_sweep(
         timepoint = 0
 
         for config_idx, num_slices in enumerate(slices_list):
-            print(f"\n{'='*60}")
-            print(f"Config {config_idx + 1}/{total_configs}: "
-                  f"slices={num_slices}, shape=({num_slices}, {height}, {width})")
-            print(f"{'='*60}")
+            print(f"\n{'=' * 60}")
+            print(
+                f"Config {config_idx + 1}/{total_configs}: "
+                f"slices={num_slices}, shape=({num_slices}, {height}, {width})"
+            )
+            print(f"{'=' * 60}")
 
             volume_shape = (num_slices, height, width)
 
@@ -307,22 +312,22 @@ def run_benchmark_sweep(
             # --- Raw TIFF write (baseline) ---
             if run_raw:
                 res_raw = BenchmarkResult("raw_tiff_zlib", num_slices, volume_shape)
-                print(f"\n[Raw TIFF zlib]")
+                print("\n[Raw TIFF zlib]")
 
                 # Warmup
                 for w in range(num_warmup):
-                    print(f"  Warmup {w+1}/{num_warmup}...", end=" ", flush=True)
+                    print(f"  Warmup {w + 1}/{num_warmup}...", end=" ", flush=True)
                     dur, size = benchmark_raw_tiff_write(volume, raw_dir, "zlib")
                     print(f"{dur:.3f}s, {size:.1f} MB")
 
                 # Timed repeats
                 for r in range(num_repeats):
-                    print(f"  Repeat {r+1}/{num_repeats}...", end=" ", flush=True)
+                    print(f"  Repeat {r + 1}/{num_repeats}...", end=" ", flush=True)
                     try:
                         dur, size = benchmark_raw_tiff_write(volume, raw_dir, "zlib")
                         res_raw.timings.append(dur)
                         res_raw.sizes_mb.append(size)
-                        print(f"{dur:.3f}s, {size:.1f} MB ({1/dur:.1f} vol/s)")
+                        print(f"{dur:.3f}s, {size:.1f} MB ({1 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
                         res_raw.errors.append(str(e))
@@ -333,26 +338,38 @@ def run_benchmark_sweep(
             # --- put_volume (full pipeline) ---
             if run_put_volume:
                 res_put = BenchmarkResult("put_volume", num_slices, volume_shape)
-                print(f"\n[FileStore.put_volume]")
+                print("\n[FileStore.put_volume]")
 
                 # Warmup
                 for w in range(num_warmup):
                     embryo_id = f"embryo_{w % NUM_EMBRYOS}"
-                    print(f"  Warmup {w+1}/{num_warmup} ({embryo_id})...", end=" ", flush=True)
-                    dur, size = benchmark_put_volume(store, session_id, embryo_id, timepoint, volume)
+                    print(
+                        f"  Warmup {w + 1}/{num_warmup} ({embryo_id})...",
+                        end=" ",
+                        flush=True,
+                    )
+                    dur, size = benchmark_put_volume(
+                        store, session_id, embryo_id, timepoint, volume
+                    )
                     timepoint += 1
                     print(f"{dur:.3f}s, {size:.1f} MB")
 
                 # Timed repeats
                 for r in range(num_repeats):
                     embryo_id = f"embryo_{r % NUM_EMBRYOS}"
-                    print(f"  Repeat {r+1}/{num_repeats} ({embryo_id})...", end=" ", flush=True)
+                    print(
+                        f"  Repeat {r + 1}/{num_repeats} ({embryo_id})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
-                        dur, size = benchmark_put_volume(store, session_id, embryo_id, timepoint, volume)
+                        dur, size = benchmark_put_volume(
+                            store, session_id, embryo_id, timepoint, volume
+                        )
                         timepoint += 1
                         res_put.timings.append(dur)
                         res_put.sizes_mb.append(size)
-                        print(f"{dur:.3f}s, {size:.1f} MB ({1/dur:.1f} vol/s)")
+                        print(f"{dur:.3f}s, {size:.1f} MB ({1 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
                         res_put.errors.append(str(e))
@@ -363,26 +380,38 @@ def run_benchmark_sweep(
             # --- register_volume (zero-copy path) ---
             if run_register:
                 res_reg = BenchmarkResult("register_volume", num_slices, volume_shape)
-                print(f"\n[FileStore.register_volume]")
+                print("\n[FileStore.register_volume]")
 
                 # Warmup
                 for w in range(num_warmup):
                     embryo_id = f"embryo_{w % NUM_EMBRYOS}"
-                    print(f"  Warmup {w+1}/{num_warmup} ({embryo_id})...", end=" ", flush=True)
-                    dur, size = benchmark_register_volume(store, session_id, embryo_id, timepoint, volume)
+                    print(
+                        f"  Warmup {w + 1}/{num_warmup} ({embryo_id})...",
+                        end=" ",
+                        flush=True,
+                    )
+                    dur, size = benchmark_register_volume(
+                        store, session_id, embryo_id, timepoint, volume
+                    )
                     timepoint += 1
                     print(f"{dur:.3f}s, {size:.1f} MB")
 
                 # Timed repeats
                 for r in range(num_repeats):
                     embryo_id = f"embryo_{r % NUM_EMBRYOS}"
-                    print(f"  Repeat {r+1}/{num_repeats} ({embryo_id})...", end=" ", flush=True)
+                    print(
+                        f"  Repeat {r + 1}/{num_repeats} ({embryo_id})...",
+                        end=" ",
+                        flush=True,
+                    )
                     try:
-                        dur, size = benchmark_register_volume(store, session_id, embryo_id, timepoint, volume)
+                        dur, size = benchmark_register_volume(
+                            store, session_id, embryo_id, timepoint, volume
+                        )
                         timepoint += 1
                         res_reg.timings.append(dur)
                         res_reg.sizes_mb.append(size)
-                        print(f"{dur:.3f}s, {size:.1f} MB ({1/dur:.1f} vol/s)")
+                        print(f"{dur:.3f}s, {size:.1f} MB ({1 / dur:.1f} vol/s)")
                     except Exception as e:
                         print(f"ERROR: {e}")
                         res_reg.errors.append(str(e))
@@ -410,20 +439,24 @@ def _print_single_result(res: BenchmarkResult):
     if not res.timings:
         print(f"  -> {res.approach}: NO SUCCESSFUL RUNS ({len(res.errors)} errors)")
         return
-    print(f"  -> {res.approach}: {res.vol_per_sec:.2f} vol/s, "
-          f"mean={res.mean:.3f}s, std={res.std:.3f}s, "
-          f"avg_size={res.avg_size_mb:.1f} MB")
+    print(
+        f"  -> {res.approach}: {res.vol_per_sec:.2f} vol/s, "
+        f"mean={res.mean:.3f}s, std={res.std:.3f}s, "
+        f"avg_size={res.avg_size_mb:.1f} MB"
+    )
 
 
-def print_results_table(results: List[BenchmarkResult]):
+def print_results_table(results: list[BenchmarkResult]):
     """Print formatted ASCII results table."""
     if not results:
         print("No results to display.")
         return
 
-    header = (f"{'Slices':>6} | {'Approach':>18} | {'Vol/s':>7} | "
-              f"{'Mean(s)':>7} | {'Std(s)':>6} | {'Min(s)':>6} | "
-              f"{'Max(s)':>6} | {'Size(MB)':>8} | {'MB/s':>7}")
+    header = (
+        f"{'Slices':>6} | {'Approach':>18} | {'Vol/s':>7} | "
+        f"{'Mean(s)':>7} | {'Std(s)':>6} | {'Min(s)':>6} | "
+        f"{'Max(s)':>6} | {'Size(MB)':>8} | {'MB/s':>7}"
+    )
     sep = "-" * len(header)
 
     print(f"\n{sep}")
@@ -434,19 +467,23 @@ def print_results_table(results: List[BenchmarkResult]):
 
     for r in results:
         if r.timings:
-            print(f"{r.num_slices:>6} | {r.approach:>18} | "
-                  f"{r.vol_per_sec:>7.2f} | {r.mean:>7.3f} | {r.std:>6.3f} | "
-                  f"{r.min_t:>6.3f} | {r.max_t:>6.3f} | {r.avg_size_mb:>8.1f} | "
-                  f"{r.mb_per_sec:>7.1f}")
+            print(
+                f"{r.num_slices:>6} | {r.approach:>18} | "
+                f"{r.vol_per_sec:>7.2f} | {r.mean:>7.3f} | {r.std:>6.3f} | "
+                f"{r.min_t:>6.3f} | {r.max_t:>6.3f} | {r.avg_size_mb:>8.1f} | "
+                f"{r.mb_per_sec:>7.1f}"
+            )
         else:
-            print(f"{r.num_slices:>6} | {r.approach:>18} | "
-                  f"{'FAIL':>7} | {'---':>7} | {'---':>6} | "
-                  f"{'---':>6} | {'---':>6} | {'---':>8} | {'---':>7}")
+            print(
+                f"{r.num_slices:>6} | {r.approach:>18} | "
+                f"{'FAIL':>7} | {'---':>7} | {'---':>6} | "
+                f"{'---':>6} | {'---':>6} | {'---':>8} | {'---':>7}"
+            )
 
     print(sep)
 
 
-def print_overhead_analysis(results: List[BenchmarkResult]):
+def print_overhead_analysis(results: list[BenchmarkResult]):
     """Print overhead analysis comparing FileStore to raw TIFF."""
     from collections import defaultdict
 
@@ -454,9 +491,11 @@ def print_overhead_analysis(results: List[BenchmarkResult]):
     for r in results:
         groups[r.num_slices][r.approach] = r
 
-    has_data = [(k, v) for k, v in groups.items()
-                if "raw_tiff_zlib" in v and
-                ("put_volume" in v or "register_volume" in v)]
+    has_data = [
+        (k, v)
+        for k, v in groups.items()
+        if "raw_tiff_zlib" in v and ("put_volume" in v or "register_volume" in v)
+    ]
 
     if not has_data:
         return
@@ -487,7 +526,7 @@ def print_overhead_analysis(results: List[BenchmarkResult]):
     print(sep)
 
 
-def save_results_csv(results: List[BenchmarkResult], path: Path, run_params: dict):
+def save_results_csv(results: list[BenchmarkResult], path: Path, run_params: dict):
     """Save results to CSV."""
     import csv
     import json
@@ -508,30 +547,44 @@ def save_results_csv(results: List[BenchmarkResult], path: Path, run_params: dic
         writer.writerow([])
 
         # Summary table
-        writer.writerow([
-            "slices", "approach", "vol_per_sec", "mean_s", "std_s",
-            "min_s", "max_s", "avg_size_mb", "mb_per_sec", "num_repeats", "errors",
-        ])
+        writer.writerow(
+            [
+                "slices",
+                "approach",
+                "vol_per_sec",
+                "mean_s",
+                "std_s",
+                "min_s",
+                "max_s",
+                "avg_size_mb",
+                "mb_per_sec",
+                "num_repeats",
+                "errors",
+            ]
+        )
         for r in results:
-            writer.writerow([
-                r.num_slices, r.approach,
-                f"{r.vol_per_sec:.4f}" if r.timings else "",
-                f"{r.mean:.6f}" if r.timings else "",
-                f"{r.std:.6f}" if r.timings else "",
-                f"{r.min_t:.6f}" if r.timings else "",
-                f"{r.max_t:.6f}" if r.timings else "",
-                f"{r.avg_size_mb:.2f}" if r.sizes_mb else "",
-                f"{r.mb_per_sec:.2f}" if r.timings else "",
-                len(r.timings),
-                "; ".join(r.errors) if r.errors else "",
-            ])
+            writer.writerow(
+                [
+                    r.num_slices,
+                    r.approach,
+                    f"{r.vol_per_sec:.4f}" if r.timings else "",
+                    f"{r.mean:.6f}" if r.timings else "",
+                    f"{r.std:.6f}" if r.timings else "",
+                    f"{r.min_t:.6f}" if r.timings else "",
+                    f"{r.max_t:.6f}" if r.timings else "",
+                    f"{r.avg_size_mb:.2f}" if r.sizes_mb else "",
+                    f"{r.mb_per_sec:.2f}" if r.timings else "",
+                    len(r.timings),
+                    "; ".join(r.errors) if r.errors else "",
+                ]
+            )
 
         # Per-volume timings
         writer.writerow([])
         writer.writerow(["# Per-volume timings"])
         writer.writerow(["slices", "approach", "repeat", "elapsed_s", "size_mb"])
         for r in results:
-            for i, (t, s) in enumerate(zip(r.timings, r.sizes_mb)):
+            for i, (t, s) in enumerate(zip(r.timings, r.sizes_mb, strict=False)):
                 writer.writerow([r.num_slices, r.approach, i + 1, f"{t:.6f}", f"{s:.2f}"])
 
     print(f"\nResults saved to: {path}")
@@ -541,24 +594,45 @@ def save_results_csv(results: List[BenchmarkResult], path: Path, run_params: dic
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(
-        description="Benchmark FileStore volume storage throughput"
+    parser = argparse.ArgumentParser(description="Benchmark FileStore volume storage throughput")
+    parser.add_argument(
+        "--slices",
+        type=int,
+        nargs="+",
+        default=DEFAULT_SLICES,
+        help=f"Slice counts to test (default: {DEFAULT_SLICES})",
     )
-    parser.add_argument("--slices", type=int, nargs="+", default=DEFAULT_SLICES,
-                        help=f"Slice counts to test (default: {DEFAULT_SLICES})")
-    parser.add_argument("--width", type=int, default=DEFAULT_WIDTH,
-                        help=f"Image width (default: {DEFAULT_WIDTH})")
-    parser.add_argument("--height", type=int, default=DEFAULT_HEIGHT,
-                        help=f"Image height (default: {DEFAULT_HEIGHT})")
-    parser.add_argument("--repeats", type=int, default=NUM_REPEATS,
-                        help=f"Number of timed repeats (default: {NUM_REPEATS})")
-    parser.add_argument("--warmup", type=int, default=NUM_WARMUP,
-                        help=f"Number of warmup runs (default: {NUM_WARMUP})")
-    parser.add_argument("--pattern", choices=["noise", "gradient", "embryo"],
-                        default="embryo",
-                        help="Volume pattern: noise, gradient, or embryo (default: embryo)")
-    parser.add_argument("--save", action="store_true",
-                        help="Save results to CSV")
+    parser.add_argument(
+        "--width",
+        type=int,
+        default=DEFAULT_WIDTH,
+        help=f"Image width (default: {DEFAULT_WIDTH})",
+    )
+    parser.add_argument(
+        "--height",
+        type=int,
+        default=DEFAULT_HEIGHT,
+        help=f"Image height (default: {DEFAULT_HEIGHT})",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=NUM_REPEATS,
+        help=f"Number of timed repeats (default: {NUM_REPEATS})",
+    )
+    parser.add_argument(
+        "--warmup",
+        type=int,
+        default=NUM_WARMUP,
+        help=f"Number of warmup runs (default: {NUM_WARMUP})",
+    )
+    parser.add_argument(
+        "--pattern",
+        choices=["noise", "gradient", "embryo"],
+        default="embryo",
+        help="Volume pattern: noise, gradient, or embryo (default: embryo)",
+    )
+    parser.add_argument("--save", action="store_true", help="Save results to CSV")
     args = parser.parse_args()
 
     print("FileStore Volume Storage Benchmark")
@@ -566,7 +640,7 @@ def main():
     print(f"  Dimensions: {args.width} x {args.height}")
     print(f"  Pattern:   {args.pattern}")
     print(f"  Repeats:   {args.repeats} (+ {args.warmup} warmup)")
-    print(f"  Approaches: raw_tiff_zlib / put_volume / register_volume")
+    print("  Approaches: raw_tiff_zlib / put_volume / register_volume")
 
     results = run_benchmark_sweep(
         slices_list=args.slices,
@@ -581,7 +655,10 @@ def main():
     print_overhead_analysis(results)
 
     if args.save:
-        csv_path = Path("results") / f"benchmark_gentlystore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        csv_path = (
+            Path("results")
+            / f"benchmark_gentlystore_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        )
         run_params = {
             "slices": args.slices,
             "width": args.width,

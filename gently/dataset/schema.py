@@ -13,11 +13,10 @@ Tables:
 - reasoning_traces: Full VLM reasoning traces
 """
 
-import sqlite3
 import logging
-from pathlib import Path
-from typing import Optional
+import sqlite3
 from contextlib import contextmanager
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ DATABASE_VERSION = 1
 DEFAULT_DB_PATH = Path("D:/gently/dataset.db")
 
 
-def get_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def get_connection(db_path: Path | None = None) -> sqlite3.Connection:
     """
     Get a database connection with optimized settings.
 
@@ -59,7 +58,7 @@ def transaction(conn: sqlite3.Connection):
         raise
 
 
-def init_database(db_path: Optional[Path] = None) -> sqlite3.Connection:
+def init_database(db_path: Path | None = None) -> sqlite3.Connection:
     """
     Initialize the database with all tables.
 
@@ -84,7 +83,7 @@ def init_database(db_path: Optional[Path] = None) -> sqlite3.Connection:
     # Set version
     conn.execute(
         "INSERT OR REPLACE INTO metadata (key, value) VALUES ('version', ?)",
-        (str(DATABASE_VERSION),)
+        (str(DATABASE_VERSION),),
     )
     conn.commit()
 
@@ -378,7 +377,7 @@ def migrate_to_v2(conn: sqlite3.Connection) -> bool:
     cursor = conn.execute("PRAGMA table_info(perception_runs)")
     columns = {row[1] for row in cursor.fetchall()}
 
-    if 'trace_type' in columns:
+    if "trace_type" in columns:
         logger.info("Database already at v2, no migration needed")
         return False
 
@@ -397,7 +396,7 @@ def migrate_to_v2(conn: sqlite3.Connection) -> bool:
     # Check if file_path column exists in reasoning_traces
     cursor = conn.execute("PRAGMA table_info(reasoning_traces)")
     trace_columns = {row[1] for row in cursor.fetchall()}
-    if 'file_path' not in trace_columns:
+    if "file_path" not in trace_columns:
         statements.append("ALTER TABLE reasoning_traces ADD COLUMN file_path TEXT")
 
     for stmt in statements:
@@ -432,7 +431,7 @@ def migrate_to_v3(conn: sqlite3.Connection) -> bool:
     cursor = conn.execute("PRAGMA table_info(embryos)")
     columns = {row[1] for row in cursor.fetchall()}
 
-    if 'embryo_uid' in columns:
+    if "embryo_uid" in columns:
         logger.info("Database already at v3, no migration needed")
         return False
 
@@ -513,7 +512,7 @@ def migrate_to_v4(conn: sqlite3.Connection) -> bool:
     cursor = conn.execute("PRAGMA table_info(ground_truth)")
     columns = {row[1] for row in cursor.fetchall()}
 
-    if 'end_timepoint' in columns:
+    if "end_timepoint" in columns:
         logger.info("Database already at v4, no migration needed")
         return False
 
@@ -542,28 +541,33 @@ def get_database_stats(conn: sqlite3.Connection) -> dict:
     """
     stats = {}
 
-    tables = ['sessions', 'embryos', 'volumes', 'images', 'ground_truth',
-              'perception_runs', 'predictions']
+    tables = [
+        "sessions",
+        "embryos",
+        "volumes",
+        "images",
+        "ground_truth",
+        "perception_runs",
+        "predictions",
+    ]
 
     for table in tables:
         count = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         stats[table] = count
 
     # Additional stats
-    stats['unique_embryo_sessions'] = conn.execute(
+    stats["unique_embryo_sessions"] = conn.execute(
         "SELECT COUNT(DISTINCT session_id || embryo_id) FROM volumes"
     ).fetchone()[0]
 
     # Count unique embryos with ground truth (more useful than annotation count)
-    stats['embryos_with_gt'] = conn.execute(
+    stats["embryos_with_gt"] = conn.execute(
         "SELECT COUNT(DISTINCT session_id || '|' || embryo_id) FROM ground_truth"
     ).fetchone()[0]
 
     # Date range
-    result = conn.execute(
-        "SELECT MIN(timestamp), MAX(timestamp) FROM volumes"
-    ).fetchone()
-    stats['earliest_volume'] = result[0]
-    stats['latest_volume'] = result[1]
+    result = conn.execute("SELECT MIN(timestamp), MAX(timestamp) FROM volumes").fetchone()
+    stats["earliest_volume"] = result[0]
+    stats["latest_volume"] = result[1]
 
     return stats

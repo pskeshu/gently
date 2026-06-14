@@ -2,15 +2,14 @@
 Tests for SessionManager: message serialization, sanitization, and session lifecycle.
 """
 
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from gently.harness.session.manager import SessionManager
-
 
 # ===========================================================================
 # Message Sanitization
 # ===========================================================================
+
 
 class TestSanitizeMessages:
     """sanitize_loaded_messages cleans conversation history from JSON snapshots."""
@@ -22,28 +21,43 @@ class TestSanitizeMessages:
         assert result[0]["content"] == "hello"
 
     def test_valid_dict_blocks(self):
-        msgs = [{"role": "assistant", "content": [
-            {"type": "text", "text": "hi"},
-        ]}]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "hi"},
+                ],
+            }
+        ]
         result = SessionManager.sanitize_loaded_messages(msgs)
         assert len(result) == 1
         assert result[0]["content"][0]["type"] == "text"
 
     def test_filters_textblock_repr_strings(self):
         """Old snapshots may have serialized TextBlock repr strings."""
-        msgs = [{"role": "assistant", "content": [
-            "TextBlock(text='hello', type='text')",
-            {"type": "text", "text": "valid"},
-        ]}]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    "TextBlock(text='hello', type='text')",
+                    {"type": "text", "text": "valid"},
+                ],
+            }
+        ]
         result = SessionManager.sanitize_loaded_messages(msgs)
         assert len(result) == 1
         assert len(result[0]["content"]) == 1
         assert result[0]["content"][0]["type"] == "text"
 
     def test_filters_tooluseblock_repr(self):
-        msgs = [{"role": "assistant", "content": [
-            "ToolUseBlock(id='x', name='y', input={})",
-        ]}]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    "ToolUseBlock(id='x', name='y', input={})",
+                ],
+            }
+        ]
         result = SessionManager.sanitize_loaded_messages(msgs)
         assert len(result) == 0  # No valid blocks left
 
@@ -62,6 +76,7 @@ class TestSanitizeMessages:
 # Message Serialization
 # ===========================================================================
 
+
 class TestSerializeMessages:
     """serialize_messages converts SDK objects to plain dicts."""
 
@@ -71,14 +86,20 @@ class TestSerializeMessages:
         assert result == msgs
 
     def test_list_of_dict_blocks(self):
-        msgs = [{"role": "assistant", "content": [
-            {"type": "text", "text": "response"},
-        ]}]
+        msgs = [
+            {
+                "role": "assistant",
+                "content": [
+                    {"type": "text", "text": "response"},
+                ],
+            }
+        ]
         result = SessionManager.serialize_messages(msgs)
         assert result[0]["content"][0] == {"type": "text", "text": "response"}
 
     def test_model_dump_objects(self):
         """Objects with model_dump() (Pydantic) should be converted."""
+
         class FakeBlock:
             def model_dump(self):
                 return {"type": "text", "text": "from pydantic"}
@@ -89,6 +110,7 @@ class TestSerializeMessages:
 
     def test_typed_objects_without_model_dump(self):
         """Objects with .type/.text attrs should be converted."""
+
         class FakeTextBlock:
             type = "text"
             text = "hello"
@@ -114,6 +136,7 @@ class TestSerializeMessages:
 # ===========================================================================
 # Session Lifecycle
 # ===========================================================================
+
 
 class TestSessionLifecycle:
     """SessionManager create/save/list operations."""

@@ -70,8 +70,10 @@ Based on analysis of:
 """
 
 import time
+
 import numpy as np
 from client import get_mmc
+
 
 def configure_camera_for_hardware_trigger(core, camera_name, exposure_ms):
     """
@@ -132,8 +134,15 @@ def configure_camera_for_hardware_trigger(core, camera_name, exposure_ms):
         raise Exception(f"Failed to set TRIGGER ACTIVE to EDGE (got: {trigger_active})")
 
 
-def configure_spim_scanner(core, scanner_name, num_slices, slice_step_um,
-                          scan_duration_ms, camera_duration_ms, laser_duration_ms):
+def configure_spim_scanner(
+    core,
+    scanner_name,
+    num_slices,
+    slice_step_um,
+    scan_duration_ms,
+    camera_duration_ms,
+    laser_duration_ms,
+):
     """
     Configure ASI Tiger scanner for SPIM state machine operation.
 
@@ -180,7 +189,7 @@ def configure_spim_scanner(core, scanner_name, num_slices, slice_step_um,
     core.setProperty(scanner_name, "SingleAxisYPattern", "1 - Triangle")
     core.setProperty(scanner_name, "SingleAxisYMode", "3 - Enabled with axes synced")
 
-    print(f"  X-axis (light sheet): Amplitude=2.0°, Pattern=Triangle, Mode=Synced")
+    print("  X-axis (light sheet): Amplitude=2.0°, Pattern=Triangle, Mode=Synced")
     print(f"  Y-axis (slice step): Amplitude={y_amplitude:.4f}°, Pattern=Triangle, Mode=Synced")
     print(f"    (Calculated for {num_slices} slices × {slice_step_um} μm steps)")
 
@@ -206,7 +215,7 @@ def configure_spim_scanner(core, scanner_name, num_slices, slice_step_um,
     core.setProperty(scanner_name, "SPIMDelayBeforeScan(ms)", 0.0)
     core.setProperty(scanner_name, "SPIMDelayBeforeCamera(ms)", 0.5)
 
-    print(f"  SPIM State Machine:")
+    print("  SPIM State Machine:")
     print(f"    NumSlices: {num_slices}")
     print(f"    ScanDuration: {scan_duration_ms} ms (total time per slice)")
     print(f"    CameraDuration: {camera_duration_ms} ms (TTL trigger pulse width)")
@@ -214,10 +223,16 @@ def configure_spim_scanner(core, scanner_name, num_slices, slice_step_um,
 
     # Verify critical timing relationships
     if camera_duration_ms > scan_duration_ms:
-        raise Exception(f"CameraDuration ({camera_duration_ms}ms) must be <= ScanDuration ({scan_duration_ms}ms)")
+        raise Exception(
+            f"CameraDuration ({camera_duration_ms}ms) must be <="
+            f" ScanDuration ({scan_duration_ms}ms)"
+        )
 
     if laser_duration_ms > camera_duration_ms:
-        raise Exception(f"LaserDuration ({laser_duration_ms}ms) must be <= CameraDuration ({camera_duration_ms}ms)")
+        raise Exception(
+            f"LaserDuration ({laser_duration_ms}ms) must be <="
+            f" CameraDuration ({camera_duration_ms}ms)"
+        )
 
 
 def arm_spim_state_machine(core, scanner_name):
@@ -256,8 +271,9 @@ def trigger_spim_acquisition(core, scanner_name):
     print(f"  SPIMState: {state}")
 
 
-def acquire_spim_volume(core, camera_name, scanner_name, num_slices,
-                       scan_duration_ms, timeout_extra_sec=5.0):
+def acquire_spim_volume(
+    core, camera_name, scanner_name, num_slices, scan_duration_ms, timeout_extra_sec=5.0
+):
     """
     Perform hardware-triggered SPIM volume acquisition.
 
@@ -337,7 +353,10 @@ def acquire_spim_volume(core, camera_name, scanner_name, num_slices,
             count = core.getRemainingImageCount()
             seq_running = core.isSequenceRunning(camera_name)
             spim_state = core.getProperty(scanner_name, "SPIMState")
-            print(f"    t={elapsed:.1f}s: images={count}/{num_slices}, seq={seq_running}, SPIM={spim_state}")
+            print(
+                f"    t={elapsed:.1f}s: images={count}/{num_slices},"
+                f" seq={seq_running}, SPIM={spim_state}"
+            )
             last_print_time = time.time()
 
         time.sleep(0.01)
@@ -350,13 +369,16 @@ def acquire_spim_volume(core, camera_name, scanner_name, num_slices,
 
     print("  Retrieving images from buffer...")
     import rpyc
+
     images = []
     for i in range(count):
         img = core.popNextImage()
         img = rpyc.classic.obtain(img)  # Transfer from remote to local
         images.append(img)
-        print(f"    Image {i+1}/{count}: shape={img.shape}, dtype={img.dtype}, "
-              f"range=[{img.min()}, {img.max()}], mean={img.mean():.1f}")
+        print(
+            f"    Image {i + 1}/{count}: shape={img.shape}, dtype={img.dtype}, "
+            f"range=[{img.min()}, {img.max()}], mean={img.mean():.1f}"
+        )
 
     # Convert to 3D numpy array
     volume = np.array(images)
@@ -380,9 +402,9 @@ def main():
     camera_duration_ms = 155.0  # TTL pulse width (should be ~= exposure)
     laser_duration_ms = 154.0  # Laser on time (slightly less than camera)
 
-    print("="*80)
+    print("=" * 80)
     print("ASI diSPIM HARDWARE-TRIGGERED VOLUME ACQUISITION")
-    print("="*80)
+    print("=" * 80)
 
     try:
         # Apply system configuration
@@ -413,8 +435,13 @@ def main():
         # Configure SPIM scanner
         print()
         configure_spim_scanner(
-            core, scanner_name, num_slices, slice_step_um,
-            scan_duration_ms, camera_duration_ms, laser_duration_ms
+            core,
+            scanner_name,
+            num_slices,
+            slice_step_um,
+            scan_duration_ms,
+            camera_duration_ms,
+            laser_duration_ms,
         )
 
         # Arm SPIM state machine
@@ -423,43 +450,50 @@ def main():
 
         # Acquire volume
         print()
-        volume = acquire_spim_volume(
-            core, camera_name, scanner_name, num_slices, scan_duration_ms
-        )
+        volume = acquire_spim_volume(core, camera_name, scanner_name, num_slices, scan_duration_ms)
 
         # Save volume
         print("\nSaving volume...")
         from PIL import Image as PILImage
+
         img_list = [PILImage.fromarray(img.astype(np.uint16)) for img in volume]
-        img_list[0].save('spim_hardware_triggered_volume.tif',
-                        save_all=True, append_images=img_list[1:])
+        img_list[0].save(
+            "spim_hardware_triggered_volume.tif",
+            save_all=True,
+            append_images=img_list[1:],
+        )
         print(f"  Saved {len(volume)}-slice volume to: spim_hardware_triggered_volume.tif")
         print(f"  Volume shape: {volume.shape} (slices, height, width)")
 
         # Display in napari (optional)
         try:
             import napari
+
             print("\nDisplaying in napari...")
             viewer = napari.Viewer()
-            viewer.add_image(volume, name='SPIM Volume', colormap='gray',
-                           contrast_limits=[np.percentile(volume, 1),
-                                          np.percentile(volume, 99)])
-            viewer.dims.axis_labels = ['Z', 'Y', 'X']
+            viewer.add_image(
+                volume,
+                name="SPIM Volume",
+                colormap="gray",
+                contrast_limits=[np.percentile(volume, 1), np.percentile(volume, 99)],
+            )
+            viewer.dims.axis_labels = ["Z", "Y", "X"]
             print("  Close napari window to continue...")
             napari.run()
         except ImportError:
             print("  (napari not available, skipping visualization)")
 
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("ACQUISITION COMPLETE!")
-        print("="*80)
+        print("=" * 80)
 
     except Exception as e:
-        print("\n" + "="*80)
+        print("\n" + "=" * 80)
         print("ACQUISITION FAILED")
-        print("="*80)
+        print("=" * 80)
         print(f"Error: {e}")
         import traceback
+
         traceback.print_exc()
 
     finally:
@@ -469,26 +503,26 @@ def main():
             if core.isSequenceRunning(camera_name):
                 core.stopSequenceAcquisition(camera_name)
                 print("  Stopped camera sequence")
-        except:
+        except Exception:
             pass
 
         try:
             core.setProperty(scanner_name, "SPIMState", "Idle")
             print("  Reset SPIM to Idle")
-        except:
+        except Exception:
             pass
 
         try:
             # Reset camera to internal triggering for live mode
             core.setProperty(camera_name, "TRIGGER SOURCE", "INTERNAL")
             print("  Reset camera to internal triggering")
-        except:
+        except Exception:
             pass
 
         try:
             core.setConfig("Laser", "ALL OFF")
             print("  Lasers OFF")
-        except:
+        except Exception:
             pass
 
 

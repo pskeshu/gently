@@ -4,19 +4,16 @@ Video generation from timelapse volumes
 Creates MP4 videos from max projections of timelapse volumes.
 """
 
-import numpy as np
-from pathlib import Path
-from typing import List, Optional, Dict, Tuple
-from datetime import datetime
 import logging
+from datetime import datetime
+from pathlib import Path
+
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
 
-def discover_volumes(
-    session_dir: Path,
-    embryo_id: Optional[str] = None
-) -> Dict[str, List[Path]]:
+def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict[str, list[Path]]:
     """
     Discover volume files in a session directory.
 
@@ -39,7 +36,7 @@ def discover_volumes(
     tif_files = list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
 
     # Group by embryo ID (filename format: embryo_1_20251210_095317.tif)
-    embryo_volumes: Dict[str, List[Tuple[datetime, Path]]] = {}
+    embryo_volumes: dict[str, list[tuple[datetime, Path]]] = {}
 
     for f in tif_files:
         parts = f.stem.split("_")
@@ -82,16 +79,19 @@ def make_max_projection(volume: np.ndarray) -> np.ndarray:
         return volume
 
 
-def normalize_for_video(image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99.5) -> np.ndarray:
+def normalize_for_video(
+    image: np.ndarray, percentile_low: float = 1, percentile_high: float = 99.5
+) -> np.ndarray:
     """Normalize image to 8-bit for video encoding."""
     from gently.core.imaging import normalize_to_uint8
-    return normalize_to_uint8(image, method="percentile", p_low=percentile_low, p_high=percentile_high)
+
+    return normalize_to_uint8(
+        image, method="percentile", p_low=percentile_low, p_high=percentile_high
+    )
 
 
 def add_timestamp_overlay(
-    image: np.ndarray,
-    timestamp: str,
-    position: str = "top-left"
+    image: np.ndarray, timestamp: str, position: str = "top-left"
 ) -> np.ndarray:
     """Add timestamp text overlay to image."""
     import cv2
@@ -126,7 +126,7 @@ def add_timestamp_overlay(
         (x - 2, y - text_height - 2),
         (x + text_width + 2, y + baseline + 2),
         (0, 0, 0),
-        -1
+        -1,
     )
 
     # Draw text
@@ -136,13 +136,13 @@ def add_timestamp_overlay(
 
 
 def create_timelapse_video(
-    volume_paths: List[Path],
+    volume_paths: list[Path],
     output_path: Path,
     fps: int = 10,
     add_timestamps: bool = True,
     embryo_id: str = None,
-    progress_callback=None
-) -> Dict:
+    progress_callback=None,
+) -> dict:
     """
     Create MP4 video from list of volume files.
 
@@ -223,21 +223,17 @@ def create_timelapse_video(
 
                     # Try different codecs in order of preference
                     codecs = [
-                        ('mp4v', '.mp4'),
-                        ('avc1', '.mp4'),
-                        ('XVID', '.avi'),
-                        ('MJPG', '.avi'),
+                        ("mp4v", ".mp4"),
+                        ("avc1", ".mp4"),
+                        ("XVID", ".avi"),
+                        ("MJPG", ".avi"),
                     ]
 
                     for codec, ext in codecs:
                         fourcc = cv2.VideoWriter_fourcc(*codec)
                         test_path = output_path.with_suffix(ext)
                         writer = cv2.VideoWriter(
-                            str(test_path),
-                            fourcc,
-                            fps,
-                            (width, height),
-                            isColor=True
+                            str(test_path), fourcc, fps, (width, height), isColor=True
                         )
                         if writer.isOpened():
                             output_path = test_path
@@ -274,14 +270,14 @@ def create_timelapse_video(
             "frame_count": frame_count,
             "duration_seconds": duration,
             "fps": fps,
-            "resolution": f"{first_shape[1]}x{first_shape[0]}" if first_shape else "unknown"
+            "resolution": f"{first_shape[1]}x{first_shape[0]}" if first_shape else "unknown",
         }
 
     except Exception as e:
         if writer:
             try:
                 writer.release()
-            except:
+            except Exception:
                 pass
         return {"error": str(e)}
 
@@ -289,11 +285,11 @@ def create_timelapse_video(
 def make_session_videos(
     storage_path: Path,
     session_id: str,
-    output_dir: Optional[Path] = None,
-    embryo_ids: Optional[List[str]] = None,
+    output_dir: Path | None = None,
+    embryo_ids: list[str] | None = None,
     fps: int = 10,
-    progress_callback=None
-) -> Dict[str, Dict]:
+    progress_callback=None,
+) -> dict[str, dict]:
     """
     Create videos for all embryos in a session.
 
@@ -344,9 +340,9 @@ def make_session_videos(
 
         output_path = output_dir / f"{embryo_id}_timelapse.mp4"
 
-        def embryo_progress(current, total):
+        def embryo_progress(current, total, _eid=embryo_id):
             if progress_callback:
-                progress_callback(embryo_id, current, total)
+                progress_callback(_eid, current, total)
 
         result = create_timelapse_video(
             volume_paths=volumes,
@@ -354,7 +350,7 @@ def make_session_videos(
             fps=fps,
             add_timestamps=True,
             embryo_id=embryo_id,
-            progress_callback=embryo_progress
+            progress_callback=embryo_progress,
         )
 
         results[embryo_id] = result

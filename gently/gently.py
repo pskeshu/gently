@@ -32,24 +32,10 @@ Usage:
     result = await gently.analyze(volume, pipeline="embryo_detection")
 """
 
-import asyncio
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-from .core import (
-    EventBus,
-    EventType,
-    ServiceRegistry,
-    ServiceClient,
-    ServiceInfo,
-    get_event_bus,
-    get_service_registry,
-)
-from .log_config import configure_logging
-from .settings import settings
-from .core.file_store import FileStore
-from .harness.tools.registry import ToolRegistry, get_tool_registry
 from .analysis import (
     Pipeline,
     PipelineBuilder,
@@ -57,6 +43,19 @@ from .analysis import (
     create_hatching_detection_pipeline,
     create_morphology_analysis_pipeline,
 )
+from .core import (
+    EventBus,
+    EventType,
+    ServiceClient,
+    ServiceInfo,
+    ServiceRegistry,
+    get_event_bus,
+    get_service_registry,
+)
+from .core.file_store import FileStore
+from .harness.tools.registry import ToolRegistry, get_tool_registry
+from .log_config import configure_logging
+from .settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -99,16 +98,16 @@ class Gently:
         self._store = FileStore(self.storage_path)
 
         # Current session ID (set by start_session or resume_session)
-        self._current_session_id: Optional[str] = None
+        self._current_session_id: str | None = None
 
         # Initialize tool registry
         self._tools = get_tool_registry()
 
         # Pre-built pipelines
-        self._pipelines: Dict[str, Pipeline] = {
-            'embryo_detection': create_embryo_detection_pipeline(),
-            'hatching_detection': create_hatching_detection_pipeline(),
-            'morphology_analysis': create_morphology_analysis_pipeline(),
+        self._pipelines: dict[str, Pipeline] = {
+            "embryo_detection": create_embryo_detection_pipeline(),
+            "hatching_detection": create_hatching_detection_pipeline(),
+            "morphology_analysis": create_morphology_analysis_pipeline(),
         }
 
         # Agent instance (lazy loaded)
@@ -131,21 +130,21 @@ class Gently:
                 service_type="rpc",
                 host="localhost",
                 port=18861,
-                metadata={'description': 'Main microscope control server'},
+                metadata={"description": "Main microscope control server"},
             ),
             ServiceInfo(
                 name="sam_server",
                 service_type="rpc",
                 host="localhost",
                 port=18862,
-                metadata={'description': 'SAM segmentation server'},
+                metadata={"description": "SAM segmentation server"},
             ),
             ServiceInfo(
                 name="queue_server",
                 service_type="http",
                 host="localhost",
                 port=settings.network.device_port,
-                metadata={'description': 'Bluesky queue server'},
+                metadata={"description": "Bluesky queue server"},
             ),
         ]
 
@@ -182,7 +181,7 @@ class Gently:
         return self._tools
 
     @property
-    def pipelines(self) -> Dict[str, Pipeline]:
+    def pipelines(self) -> dict[str, Pipeline]:
         """Access pre-built pipelines"""
         return self._pipelines
 
@@ -192,8 +191,8 @@ class Gently:
 
     async def start_session(
         self,
-        name: Optional[str] = None,
-        description: Optional[str] = None,
+        name: str | None = None,
+        description: str | None = None,
     ) -> str:
         """
         Start a new session
@@ -211,13 +210,14 @@ class Gently:
             Session ID
         """
         import uuid
+
         session_id = str(uuid.uuid4())[:8]
         self._store.create_session(session_id, name=name)
         self._current_session_id = session_id
 
         self._event_bus.publish(
             EventType.SESSION_STARTED,
-            {'session_id': session_id, 'name': name},
+            {"session_id": session_id, "name": name},
             source="gently",
         )
 
@@ -243,14 +243,14 @@ class Gently:
             self._current_session_id = session_id
             self._event_bus.publish(
                 EventType.SESSION_RESTORED,
-                {'session_id': session_id},
+                {"session_id": session_id},
                 source="gently",
             )
             logger.info(f"Resumed session: {session_id}")
             return True
         return False
 
-    def list_sessions(self) -> List[Dict]:
+    def list_sessions(self) -> list[dict]:
         """List available sessions"""
         return self._store.list_sessions()
 
@@ -285,7 +285,7 @@ class Gently:
             info.port = port
 
         try:
-            conn = await self._client.connect("microscope_server")
+            await self._client.connect("microscope_server")
             logger.info(f"Connected to microscope server at {host}:{port}")
             return True
         except Exception as e:
@@ -318,7 +318,7 @@ class Gently:
             info.port = port
 
         try:
-            conn = await self._client.connect("sam_server")
+            await self._client.connect("sam_server")
             logger.info(f"Connected to SAM server at {host}:{port}")
             return True
         except Exception as e:
@@ -333,7 +333,7 @@ class Gently:
         self,
         data: Any,
         pipeline: str = "embryo_detection",
-        context: Optional[Dict] = None,
+        context: dict | None = None,
     ) -> Any:
         """
         Run analysis pipeline on data
@@ -353,8 +353,9 @@ class Gently:
             Pipeline result with lineage tracking
         """
         if pipeline not in self._pipelines:
-            raise ValueError(f"Unknown pipeline: {pipeline}. "
-                           f"Available: {list(self._pipelines.keys())}")
+            raise ValueError(
+                f"Unknown pipeline: {pipeline}. Available: {list(self._pipelines.keys())}"
+            )
 
         pipe = self._pipelines[pipeline]
 
@@ -363,9 +364,9 @@ class Gently:
         self._event_bus.publish(
             EventType.ANALYSIS_COMPLETED,
             {
-                'pipeline': pipeline,
-                'result_uid': result.uid,
-                'success': result.success,
+                "pipeline": pipeline,
+                "result_uid": result.uid,
+                "success": result.success,
             },
             source="gently",
         )
@@ -414,7 +415,7 @@ class Gently:
         """
         return self._event_bus.subscribe(event_type, handler)
 
-    def emit(self, event_type: EventType, data: Dict):
+    def emit(self, event_type: EventType, data: dict):
         """Emit an event"""
         self._event_bus.publish(event_type, data, source="gently")
 
@@ -438,10 +439,9 @@ class Gently:
         """
         if self._agent is None:
             from .app.agent import MicroscopyAgent
+
             self._agent = MicroscopyAgent(
-                storage_path=self.storage_path,
-                store=self._store,
-                **kwargs
+                storage_path=self.storage_path, store=self._store, **kwargs
             )
         return self._agent
 
@@ -465,6 +465,7 @@ class Gently:
         """
         if self._viz_server is None:
             from .ui.web.server import VisualizationServer
+
             self._viz_server = VisualizationServer(
                 port=port,
                 data_store=None,  # Legacy DataStore removed; viz uses event bus
@@ -479,7 +480,7 @@ class Gently:
         array,
         uid: str,
         data_type: str = "image",
-        metadata: Optional[Dict] = None,
+        metadata: dict | None = None,
     ):
         """
         Push an image to the visualization server
@@ -520,7 +521,7 @@ class Gently:
         if self._current_session_id:
             self._event_bus.publish(
                 EventType.SESSION_ENDED,
-                {'session_id': self._current_session_id},
+                {"session_id": self._current_session_id},
                 source="gently",
             )
 

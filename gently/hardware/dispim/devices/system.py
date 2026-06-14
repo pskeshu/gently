@@ -31,7 +31,7 @@ Lifecycle ordering (must happen before per-device ophyds exist):
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List
+from typing import Any
 
 import pymmcore
 
@@ -53,13 +53,13 @@ class DiSPIMSystem:
     def enable_stderr_log(self, enabled: bool) -> None:
         self.core.enableStderrLog(bool(enabled))
 
-    def set_device_adapter_search_paths(self, paths: List[str]) -> None:
+    def set_device_adapter_search_paths(self, paths: list[str]) -> None:
         self.core.setDeviceAdapterSearchPaths(list(paths))
 
     def load_system_configuration(self, path: str) -> None:
         self.core.loadSystemConfiguration(str(path))
 
-    def get_loaded_devices(self) -> List[str]:
+    def get_loaded_devices(self) -> list[str]:
         return list(self.core.getLoadedDevices())
 
     # ----- system-wide property cache ------------------------------------
