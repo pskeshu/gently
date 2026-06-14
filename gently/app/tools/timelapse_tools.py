@@ -22,8 +22,8 @@ async def generate_bluesky_plan(
     goal: str,
     embryo_ids: list[str],
     plan_type: str = "adaptive_timelapse",
-    parameters: dict = None,
-    context: dict = None,
+    parameters: dict | None = None,
+    context: dict | None = None,
 ) -> str:
     """Generate Bluesky plan"""
     agent = context.get("agent")
@@ -58,12 +58,12 @@ async def generate_bluesky_plan(
     requires_microscope=True,
 )
 async def start_adaptive_timelapse(
-    embryo_ids: list[str] = None,
+    embryo_ids: list[str] | None = None,
     stop_condition: str = "manual",
     interval_seconds: float = 120.0,
-    condition_value: int = None,
+    condition_value: int | None = None,
     monitoring_mode: str | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Start adaptive timelapse in background"""
     agent, err = require_agent(context)
@@ -121,7 +121,7 @@ async def start_adaptive_timelapse(
     description="Get current status of the running timelapse including per-embryo progress",
     category=ToolCategory.EXPERIMENT,
 )
-def get_timelapse_status(context: dict = None) -> str:
+def get_timelapse_status(context: dict | None = None) -> str:
     """Get timelapse status"""
     agent, err = require_agent(context)
     if err:
@@ -176,9 +176,9 @@ def get_timelapse_status(context: dict = None) -> str:
 )
 async def modify_timelapse_embryo(
     embryo_id: str,
-    stop_condition: str = None,
-    condition_value: int = None,
-    context: dict = None,
+    stop_condition: str | None = None,
+    condition_value: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Modify embryo parameters during timelapse (stop condition only - interval is global)"""
     agent, err = require_agent(context)
@@ -211,9 +211,9 @@ async def modify_timelapse_embryo(
 )
 async def add_embryo_to_timelapse(
     embryo_id: str,
-    stop_condition: str = None,
-    condition_value: int = None,
-    context: dict = None,
+    stop_condition: str | None = None,
+    condition_value: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Add an embryo to a running timelapse (uses global interval)"""
     agent, err = require_agent(context)
@@ -242,7 +242,7 @@ async def add_embryo_to_timelapse(
     requires_microscope=True,
 )
 async def stop_timelapse_embryo(
-    embryo_id: str, reason: str = "user_request", context: dict = None
+    embryo_id: str, reason: str = "user_request", context: dict | None = None
 ) -> str:
     """Stop imaging a specific embryo"""
     agent, err = require_agent(context)
@@ -266,7 +266,7 @@ async def stop_timelapse_embryo(
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
-async def stop_timelapse(reason: str = "user_request", context: dict = None) -> str:
+async def stop_timelapse(reason: str = "user_request", context: dict | None = None) -> str:
     """Stop entire timelapse"""
     agent, err = require_agent(context)
     if err:
@@ -289,7 +289,7 @@ async def stop_timelapse(reason: str = "user_request", context: dict = None) -> 
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
-async def pause_timelapse(context: dict = None) -> str:
+async def pause_timelapse(context: dict | None = None) -> str:
     """Pause timelapse"""
     agent, err = require_agent(context)
     if err:
@@ -312,7 +312,7 @@ async def pause_timelapse(context: dict = None) -> str:
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
-async def resume_timelapse(context: dict = None) -> str:
+async def resume_timelapse(context: dict | None = None) -> str:
     """Resume timelapse"""
     agent, err = require_agent(context)
     if err:
@@ -337,7 +337,7 @@ async def resume_timelapse(context: dict = None) -> str:
     ),
     category=ToolCategory.EXPERIMENT,
 )
-def add_stop_condition(embryo_id: str, condition: str, context: dict = None) -> str:
+def add_stop_condition(embryo_id: str, condition: str, context: dict | None = None) -> str:
     """
     Add an additional stop condition to an embryo in a running timelapse.
 
@@ -408,8 +408,8 @@ def add_stop_condition(embryo_id: str, condition: str, context: dict = None) -> 
 def add_interval_speedup_rule(
     trigger_stage: str,
     new_interval_seconds: float = 30.0,
-    embryo_ids: list[str] = None,
-    context: dict = None,
+    embryo_ids: list[str] | None = None,
+    context: dict | None = None,
 ) -> str:
     """Add interval speedup rule based on developmental stage"""
     agent, err = require_agent(context)
@@ -444,7 +444,9 @@ def add_interval_speedup_rule(
     ),
     category=ToolCategory.EXPERIMENT,
 )
-def enable_pre_hatching_speedup(fast_interval_seconds: float = 30.0, context: dict = None) -> str:
+def enable_pre_hatching_speedup(
+    fast_interval_seconds: float = 30.0, context: dict | None = None
+) -> str:
     """Enable pre-hatching speedup based on developmental stage"""
     agent, err = require_agent(context)
     if err:
@@ -476,7 +478,7 @@ def enable_pre_hatching_speedup(fast_interval_seconds: float = 30.0, context: di
     description="Use Claude Vision to classify the current developmental stage of an embryo",
     category=ToolCategory.ANALYSIS,
 )
-async def classify_embryo_stage(embryo_id: str, context: dict = None) -> str:
+async def classify_embryo_stage(embryo_id: str, context: dict | None = None) -> str:
     """Classify embryo stage"""
     agent, err = require_agent(context)
     if err:
@@ -538,7 +540,7 @@ async def classify_embryo_stage(embryo_id: str, context: dict = None) -> str:
     description="Get the developmental stage progression history for an embryo",
     category=ToolCategory.ANALYSIS,
 )
-def get_stage_history(embryo_id: str, context: dict = None) -> str:
+def get_stage_history(embryo_id: str, context: dict | None = None) -> str:
     """Get stage history"""
     agent, err = require_agent(context)
     if err:
@@ -637,7 +639,9 @@ def _perceiver_hatching_estimate(session) -> float | None:
     ),
     category=ToolCategory.ANALYSIS,
 )
-def predict_hatching(embryo_id: str = None, all_embryos: bool = False, context: dict = None) -> str:
+def predict_hatching(
+    embryo_id: str | None = None, all_embryos: bool = False, context: dict | None = None
+) -> str:
     """Predict hatching time with confidence intervals"""
     agent, err = require_agent(context)
     if err:
@@ -754,7 +758,9 @@ You can switch modes mid-run. Use when the user says "enable autopilot/autonomou
         ToolExample("Turn off autonomy", {"mode": "off"}),
     ],
 )
-def set_autonomy(mode: str = None, enabled: bool = None, context: dict = None) -> str:
+def set_autonomy(
+    mode: str | None = None, enabled: bool | None = None, context: dict | None = None
+) -> str:
     """Set the wake-router mode (off/ask/auto). `enabled` kept for back-compat."""
     agent, err = require_agent(context)
     if err:
@@ -806,7 +812,7 @@ For a single embryo use set_embryo_cadence instead.""",
         ToolExample("Slow everything down to 10 minutes", {"new_interval_seconds": 600}),
     ],
 )
-def modify_timelapse_interval(new_interval_seconds: float, context: dict = None) -> str:
+def modify_timelapse_interval(new_interval_seconds: float, context: dict | None = None) -> str:
     """Globally re-anchor the timelapse interval (live)."""
     agent, err = require_agent(context)
     if err:
@@ -836,9 +842,9 @@ Use for per-embryo tuning, e.g. speed up the one that's developing fastest.""",
 )
 def set_embryo_cadence(
     embryo_id: str,
-    new_interval_seconds: float = None,
-    new_phase: str = None,
-    context: dict = None,
+    new_interval_seconds: float | None = None,
+    new_phase: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Per-embryo cadence change routed through the re-anchoring path."""
     agent, err = require_agent(context)
@@ -897,9 +903,9 @@ Use to enforce gentleness on precious samples, or to lift the cap when the user 
     ],
 )
 def set_photodose_budget(
-    base_dose_budget_ms: float = None,
+    base_dose_budget_ms: float | None = None,
     resume_paused: bool = True,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Set/clear the photodose budget; optionally resume budget-paused embryos."""
     agent, err = require_agent(context)
@@ -951,7 +957,7 @@ Use to reason about gentleness before/after changing the budget, power, or caden
     category=ToolCategory.ANALYSIS,
     examples=[ToolExample("How much light has each embryo gotten?", {})],
 )
-def get_photodose_status(context: dict = None) -> str:
+def get_photodose_status(context: dict | None = None) -> str:
     """Read-only photodose / budget status across embryos."""
     agent, err = require_agent(context)
     if err:
@@ -1017,7 +1023,7 @@ def get_photodose_status(context: dict = None) -> str:
 )
 def enable_monitoring_mode(
     mode_name: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Install a named reactive monitoring mode on the orchestrator."""
     agent, err = require_agent(context)
@@ -1050,7 +1056,7 @@ def enable_monitoring_mode(
 def add_test_onset_speedup(
     fast_interval: float = 60.0,
     embryo_ids: list[str] | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Install the canonical signal-onset cadence speedup rule."""
     agent, err = require_agent(context)
@@ -1094,7 +1100,7 @@ def add_test_saturation_rampdown(
     ceiling_pct: float = 6.0,
     confirm_timepoints: int = 0,
     embryo_ids: list[str] | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Install the canonical 488 saturation rampdown power rule."""
     agent, err = require_agent(context)
@@ -1146,7 +1152,7 @@ def queue_burst(
     mode: str = "1hz",
     num_slices: int = 1,
     force: bool = False,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Queue an exclusive burst acquisition for one embryo."""
     agent, err = require_agent(context)

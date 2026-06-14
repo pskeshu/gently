@@ -79,7 +79,7 @@ class MicroscopyAgent:
         model: str = settings.models.main,
         microscope_client=None,
         session_id: str | None = None,
-        store: FileStore = None,
+        store: FileStore | None = None,
         no_api: bool = False,
     ):
         """
@@ -411,7 +411,7 @@ class MicroscopyAgent:
         logger.info("Entered resolution mode")
         return "Resolution mode active. Determining what this session is for."
 
-    def exit_resolution_mode(self, outcome: str = None) -> str:
+    def exit_resolution_mode(self, outcome: str | None = None) -> str:
         """Leave resolution mode for run mode.
 
         Called by resolution tools (attach_session_to_plan,
@@ -490,7 +490,7 @@ class MicroscopyAgent:
 
     # ===== Prompt & System Prompt =====
 
-    def _update_system_prompt(self, context_summary: str = None):
+    def _update_system_prompt(self, context_summary: str | None = None):
         """Rebuild system prompt via PromptManager."""
         self.system_prompt = self.prompts.update_system_prompt(
             self.experiment,
@@ -1065,7 +1065,9 @@ class MicroscopyAgent:
             if acquired:
                 lock.release()
 
-    async def run_wake_turn(self, wake_note: str, trigger: str = None, interactive: bool = False):
+    async def run_wake_turn(
+        self, wake_note: str, trigger: str | None = None, interactive: bool = False
+    ):
         """Drive one autonomous (no-user) turn for the wake-router.
 
         Runs through the normal streaming pipeline (so it acquires the turn-lock

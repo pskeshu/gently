@@ -143,8 +143,8 @@ class VisualizationServer(Service):
         event_bus=None,
         sessions_dir: str = str(settings.storage.sessions_dir),
         gently_store=None,
-        ssl_certfile: str = None,
-        ssl_keyfile: str = None,
+        ssl_certfile: str | None = None,
+        ssl_keyfile: str | None = None,
     ):
         super().__init__(name="visualization", service_type="http", host=host, port=port)
         if not FASTAPI_AVAILABLE:
@@ -636,7 +636,7 @@ class VisualizationServer(Service):
         )
         return session_id
 
-    async def wait_for_marking(self, session_id: str, timeout: float = None) -> list:
+    async def wait_for_marking(self, session_id: str, timeout: float | None = None) -> list:
         """
         Wait for a marking session to complete.
 

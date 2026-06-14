@@ -244,15 +244,15 @@ class EmbryoState:
 
     def add_focus_datapoint(
         self,
-        z: float = None,
+        z: float | None = None,
         secondary_axis: float = 0.0,
         score: float = 0.0,
         r_squared: float = 0.0,
         method: str = "manual",
         algorithm: str = "fft_bandpass",
         # Backward-compatible kwargs
-        galvo: float = None,
-        piezo: float = None,
+        galvo: float | None = None,
+        piezo: float | None = None,
     ):
         """
         Record a focus measurement for this embryo.
@@ -440,7 +440,7 @@ class EmbryoState:
     def get_focus_drift_rate(
         self,
         secondary_position: float = 0.0,
-        galvo_position: float = None,
+        galvo_position: float | None = None,
         min_measurements: int = 3,
     ) -> float | None:
         """
@@ -498,7 +498,7 @@ class EmbryoState:
         self,
         max_age_minutes: float = 60,
         secondary_position: float = 0.0,
-        galvo_position: float = None,
+        galvo_position: float | None = None,
     ) -> bool:
         """
         Determine if this embryo needs focus re-measurement.
@@ -936,13 +936,13 @@ class ExperimentState:
     def add_embryo(
         self,
         embryo_id: str,
-        position: dict = None,
-        calibration: dict = None,
+        position: dict | None = None,
+        calibration: dict | None = None,
         user_label: str | None = None,
         confidence: float = 0.0,
         uid: str | None = None,
         role: str = "test",
-        position_fine: dict = None,
+        position_fine: dict | None = None,
     ):
         """Register new embryo.
 

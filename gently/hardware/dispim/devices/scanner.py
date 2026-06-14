@@ -367,7 +367,7 @@ class DiSPIMScanner:
         galvo_amplitude: float,
         galvo_center: float,
         num_slices: int,
-        timing_params: dict = None,
+        timing_params: dict | None = None,
     ):
         """
         Configure scanner for hardware-triggered volume acquisition.

@@ -365,9 +365,9 @@ def build_perception_snapshot(perceiver, embryos) -> str:
 
 def build_system_prompt(
     experiment_state: ExperimentState,
-    connection_status: dict = None,
-    context_summary: str = None,
-    memory_awareness: str = None,
+    connection_status: dict | None = None,
+    context_summary: str | None = None,
+    memory_awareness: str | None = None,
     microscope=None,
     perceiver=None,
 ) -> str:

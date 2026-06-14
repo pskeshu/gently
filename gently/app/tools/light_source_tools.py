@@ -43,7 +43,7 @@ instead.""",
 async def set_laser_power(
     wavelength: int,
     pct: float,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Set laser power and read back the actual setpoint."""
     agent, err = require_agent(context)
@@ -87,7 +87,7 @@ state before/after a change, or to spot-check the current illumination during a 
 )
 async def get_laser_power(
     wavelength: int,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Read current laser power %."""
     agent, err = require_agent(context)

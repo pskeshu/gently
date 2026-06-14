@@ -40,8 +40,8 @@ logger = logging.getLogger(__name__)
 )
 async def execute_plan_item(
     item_ref: str,
-    embryo_ids: list[str] = None,
-    context: dict = None,
+    embryo_ids: list[str] | None = None,
+    context: dict | None = None,
 ) -> str:
     """Execute a planned imaging item."""
     agent, err = require_agent(context)
@@ -198,8 +198,8 @@ async def execute_plan_item(
 )
 async def complete_current_plan_item(
     item_ref: str,
-    outcome: str = None,
-    context: dict = None,
+    outcome: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Complete a plan item and report newly unblocked items."""
     agent, err = require_agent(context)

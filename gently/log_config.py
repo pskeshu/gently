@@ -20,8 +20,8 @@ _DEFAULT_DATEFMT = "%H:%M:%S"
 
 
 def configure_logging(
-    level: str = None,
-    log_file: str = None,
+    level: str | None = None,
+    log_file: str | None = None,
 ):
     """Configure root logger for the Gently system.
 

@@ -57,7 +57,7 @@ async def fine_focus(
     move_to_best: bool = True,
     galvo_position: float = 0.0,
     embryo_id: str | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """
     Perform fine focus sweep to find optimal piezo position.
@@ -234,10 +234,10 @@ Algorithm options: 'fft_bandpass' (default), 'gradient', 'volath', 'variance'.""
     ],
 )
 async def get_focus_score(
-    piezo_position: float = None,
+    piezo_position: float | None = None,
     galvo_position: float = 0.0,
     algorithm: str = "fft_bandpass",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """
     Get focus score for current or specified position.
@@ -304,7 +304,7 @@ has changed during a timelapse and whether recalibration is needed.""",
         ToolExample("Check focus history for embryo 2", {"embryo_id": "embryo_2"}),
     ],
 )
-async def get_focus_history(embryo_id: str, context: dict = None) -> str:
+async def get_focus_history(embryo_id: str, context: dict | None = None) -> str:
     """
     Get focus measurement history for an embryo.
 

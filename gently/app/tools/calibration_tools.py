@@ -946,15 +946,15 @@ acquisition.""",
 async def calibrate_embryo(
     embryo_id: str,
     skip_edge_detection: bool = False,
-    galvo_top: float = None,
-    galvo_bottom: float = None,
+    galvo_top: float | None = None,
+    galvo_bottom: float | None = None,
     edge_step: float = 0.05,
     edge_max_range: float = 0.5,
     edge_tolerance_deg: float = 0.20,
     inset_fraction: float = 0.4,
     z_buffer_um: float = 25.0,
     use_v04_plan: bool = False,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Run piezo-galvo calibration with Claude vision edge detection.
 
@@ -1396,10 +1396,10 @@ Default is 15\u00b5m.""",
     ],
 )
 async def calibrate_all_embryos(
-    embryo_ids: list[str] = None,
+    embryo_ids: list[str] | None = None,
     skip_edge_detection: bool = False,
     z_buffer_um: float = 25.0,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Calibrate all embryos sequentially with Claude vision"""
     agent = context.get("agent")
@@ -1512,7 +1512,7 @@ def apply_calibration_to_embryos(
     source_embryo_id: str,
     target_embryo_ids: list[str] | None = None,
     overwrite_existing: bool = True,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Broadcast one embryo's calibration to others.
 

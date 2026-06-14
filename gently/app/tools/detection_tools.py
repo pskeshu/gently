@@ -113,12 +113,12 @@ async def detect_embryos(
     auto_calibrate: bool = False,
     min_confidence: float = 0.7,
     use_claude_review: bool = False,
-    exposure_ms: float = None,
+    exposure_ms: float | None = None,
     brightness_percentile: float = 99.0,
     min_area: int = 5000,
     max_area: int = 150000,
     default_role: str = "test",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Detect embryos via SAM + edit/assign roles in the web map view."""
     agent = context.get("agent")
@@ -276,9 +276,9 @@ the role assigned in the map view; existing embryos remain untouched.""",
     ],
 )
 async def manual_mark_embryos(
-    exposure_ms: float = None,
+    exposure_ms: float | None = None,
     default_role: str = "test",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Manual marking via the web map view."""
     agent = context.get("agent")
@@ -415,9 +415,9 @@ Use when user wants to adjust existing detection results (e.g., "edit embryos",
     ],
 )
 async def edit_embryos(
-    exposure_ms: float = None,
+    exposure_ms: float | None = None,
     default_role: str = "test",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Edit existing embryos via the web map view."""
     agent = context.get("agent")
@@ -450,7 +450,7 @@ Use when user wants to see where embryos are visually (e.g., "show me the embryo
         ToolExample("Display embryo positions", {}),
     ],
 )
-async def show_detected_embryos(save_to_file: bool = True, context: dict = None) -> str:
+async def show_detected_embryos(save_to_file: bool = True, context: dict | None = None) -> str:
     """Show detected embryos visualization using experiment.embryos as source of truth"""
     agent = context.get("agent")
     client = context.get("client")

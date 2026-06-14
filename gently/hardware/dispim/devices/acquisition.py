@@ -97,11 +97,11 @@ class DiSPIMVolumeScanner:
         piezo_amplitude: float,
         piezo_center: float,
         laser_config: str = "488 and 561",
-        laser_power_488_pct: float = None,
-        laser_power_561_pct: float = None,
-        laser_power_405_pct: float = None,
-        laser_power_637_pct: float = None,
-        timing_params: dict = None,
+        laser_power_488_pct: float | None = None,
+        laser_power_561_pct: float | None = None,
+        laser_power_405_pct: float | None = None,
+        laser_power_637_pct: float | None = None,
+        timing_params: dict | None = None,
     ):
         """
         Configure all devices for hardware-triggered volume acquisition.

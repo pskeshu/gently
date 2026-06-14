@@ -31,8 +31,8 @@ from ...tools.registry import ToolCategory, ToolExample, tool
 async def save_plan_template(
     campaign_id: str,
     name: str,
-    description: str = None,
-    context: dict = None,
+    description: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Save a campaign as a reusable template."""
     agent = context.get("agent") if context else None
@@ -65,7 +65,7 @@ async def save_plan_template(
     category=ToolCategory.UTILITY,
 )
 async def list_templates(
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """List available plan templates."""
     agent = context.get("agent") if context else None
@@ -110,8 +110,8 @@ async def list_templates(
 )
 async def apply_template(
     template_id: str,
-    overrides: dict = None,
-    context: dict = None,
+    overrides: dict | None = None,
+    context: dict | None = None,
 ) -> str:
     """Instantiate a template into a new campaign."""
     agent = context.get("agent") if context else None

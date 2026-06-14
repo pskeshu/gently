@@ -58,7 +58,7 @@ async def ask_user_choice(
     options: list[dict[str, str]],
     allow_multiple: bool = False,
     default_id: str | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """
     Present user with selectable options.

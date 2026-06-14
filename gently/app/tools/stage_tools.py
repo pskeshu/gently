@@ -92,7 +92,7 @@ For moving to a specific embryo, use move_to_embryo instead.""",
         ToolExample("Move stage to coordinates 1200, -600", {"x": 1200, "y": -600}),
     ],
 )
-async def move_stage(x: float, y: float, context: dict = None) -> str:
+async def move_stage(x: float, y: float, context: dict | None = None) -> str:
     """Move stage to arbitrary XY coordinates"""
     client = context.get("client")
 

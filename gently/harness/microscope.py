@@ -317,7 +317,7 @@ def register_microscope_tools(microscope: Microscope, registry=None) -> int:
     def _make_handler(pname):
         """Create an async handler that delegates to microscope.execute()."""
 
-        async def handler(context: dict = None, **params):
+        async def handler(context: dict | None = None, **params):
             ms = context.get("client") if context else microscope
             if ms is None:
                 return "Error: microscope not connected"

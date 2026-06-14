@@ -36,7 +36,7 @@ def _get_memory(context: dict):
 )
 async def recall_campaigns(
     status: str = "active",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """List campaigns filtered by status."""
     memory = _get_memory(context)
@@ -64,9 +64,9 @@ async def recall_campaigns(
     ],
 )
 async def recall_learnings(
-    query: str = None,
+    query: str | None = None,
     limit: int = 20,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Search or list learnings."""
     memory = _get_memory(context)
@@ -93,10 +93,10 @@ async def recall_learnings(
     ],
 )
 async def recall_observations(
-    query: str = None,
-    embryo_id: str = None,
+    query: str | None = None,
+    embryo_id: str | None = None,
     limit: int = 20,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Search or list observations."""
     memory = _get_memory(context)
@@ -121,8 +121,8 @@ async def recall_observations(
     ],
 )
 async def recall_context(
-    campaign_id: str = None,
-    context: dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Full context snapshot."""
     memory = _get_memory(context)

@@ -35,7 +35,7 @@ class AgentMemory:
     or prompt injection.
     """
 
-    def __init__(self, context_store, session_id: str = None):
+    def __init__(self, context_store, session_id: str | None = None):
         self.store = context_store
         self.session_id = session_id
         # Set by startup flow after resolve_plan_context()
@@ -243,7 +243,7 @@ class AgentMemory:
     # Briefing layer — auto-briefing at session start
     # ------------------------------------------------------------------
 
-    def get_session_briefing(self, campaign_id: str = None) -> str:
+    def get_session_briefing(self, campaign_id: str | None = None) -> str:
         """Generate a session briefing for new sessions.
 
         If campaign_id is provided (or session is linked to a campaign),
@@ -455,7 +455,7 @@ class AgentMemory:
 
         return "\n".join(lines)
 
-    def recall_learnings(self, query: str = None, limit: int = 20) -> str:
+    def recall_learnings(self, query: str | None = None, limit: int = 20) -> str:
         """Search or list learnings."""
         learnings = self.store.get_learnings(limit=max(limit, 50))
 
@@ -491,7 +491,9 @@ class AgentMemory:
 
         return "\n".join(lines)
 
-    def recall_observations(self, query: str = None, embryo_id: str = None, limit: int = 20) -> str:
+    def recall_observations(
+        self, query: str | None = None, embryo_id: str | None = None, limit: int = 20
+    ) -> str:
         """Search or list observations."""
         if embryo_id:
             observations = self.store.get_observations_for_embryo(embryo_id)
@@ -531,7 +533,7 @@ class AgentMemory:
 
         return "\n".join(lines)
 
-    def recall_full_context(self, campaign_id: str = None) -> str:
+    def recall_full_context(self, campaign_id: str | None = None) -> str:
         """Full context snapshot — the 'catch me up' method.
 
         If campaign_id provided (or session is linked), focuses there.

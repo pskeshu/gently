@@ -448,7 +448,7 @@ async def _cgc_search(query: str, field: str = "strain") -> list[dict]:
 async def search_literature(
     query: str,
     max_results: int = 5,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Search PubMed for relevant papers.
 
@@ -590,7 +590,7 @@ async def search_literature(
 async def search_strains(
     query: str,
     organism: str = "celegans",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Search for strains and genes via NCBI Gene + WormBase REST API.
 
@@ -1221,7 +1221,7 @@ async def _doi_to_pmid(doi: str) -> str | None:
 )
 async def read_paper(
     reference: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Read a scientific paper and return its content.
 

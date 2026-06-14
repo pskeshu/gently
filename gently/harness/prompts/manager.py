@@ -47,7 +47,7 @@ class PromptManager:
         self.memory = None  # AgentMemory instance
 
     def update_system_prompt(
-        self, experiment, client, mode: str, context_summary: str = None, perceiver=None
+        self, experiment, client, mode: str, context_summary: str | None = None, perceiver=None
     ) -> str:
         """
         Rebuild system prompt with current experiment state and connection status.

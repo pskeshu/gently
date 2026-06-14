@@ -400,7 +400,7 @@ class ToolRegistry:
         """Get Claude API tool schemas for available tools"""
         return [tool.to_claude_schema() for tool in self.list_available(has_microscope)]
 
-    async def execute(self, tool_name: str, tool_input: dict, context: dict = None) -> str:
+    async def execute(self, tool_name: str, tool_input: dict, context: dict | None = None) -> str:
         """
         Execute a tool by name
 

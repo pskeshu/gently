@@ -37,10 +37,10 @@ from ...tools.registry import ToolCategory, ToolExample, tool
 )
 async def create_campaign(
     description: str,
-    shorthand: str = None,
-    target: str = None,
-    parent_id: str = None,
-    context: dict = None,
+    shorthand: str | None = None,
+    target: str | None = None,
+    parent_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Create a campaign or sub-campaign (phase)."""
     agent = context.get("agent") if context else None
@@ -112,15 +112,15 @@ async def create_plan_item(
     campaign_id: str,
     type: str,
     title: str,
-    description: str = None,
-    spec: dict = None,
-    inherit_from: str = None,
-    depends_on: list[str] = None,
-    phase_number: int = None,
+    description: str | None = None,
+    spec: dict | None = None,
+    inherit_from: str | None = None,
+    depends_on: list[str] | None = None,
+    phase_number: int | None = None,
     phase_order: int = -1,
-    references: list[dict] = None,
-    estimated_days: int = None,
-    context: dict = None,
+    references: list[dict] | None = None,
+    estimated_days: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Create a plan item within a campaign/phase.
 
@@ -198,15 +198,15 @@ async def create_plan_item(
 )
 async def update_plan_item(
     item_id: str,
-    status: str = None,
-    title: str = None,
-    description: str = None,
-    outcome: str = None,
-    spec: dict = None,
-    references: list[dict] = None,
-    estimated_days: int = None,
-    campaign_id: str = None,
-    context: dict = None,
+    status: str | None = None,
+    title: str | None = None,
+    description: str | None = None,
+    outcome: str | None = None,
+    spec: dict | None = None,
+    references: list[dict] | None = None,
+    estimated_days: int | None = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Update a plan item. item_id can be a UUID, task number (e.g. '3'),
     or phase.task reference (e.g. '1.3'). campaign_id scopes resolution
@@ -263,8 +263,8 @@ async def update_plan_item(
 async def link_plan_items(
     item_id: str,
     depends_on_id: str,
-    campaign_id: str = None,
-    context: dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Add a dependency between plan items. campaign_id scopes resolution
     when using shorthand refs (e.g. '1.3') with multiple plans."""
@@ -308,8 +308,8 @@ async def link_plan_items(
 )
 async def get_plan_item_tool(
     ref: str,
-    campaign_id: str = None,
-    context: dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Look up a plan item by natural reference."""
     agent = context.get("agent") if context else None
@@ -347,7 +347,7 @@ async def get_plan_item_tool(
 )
 async def propose_plan(
     campaign_id: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Render the full plan for review."""
     agent = context.get("agent") if context else None
@@ -506,7 +506,7 @@ def _format_plan_item(item, store, task_num: str = "") -> str:
 )
 async def get_plan_status(
     campaign_id: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Get plan progress summary."""
     agent = context.get("agent") if context else None
@@ -576,10 +576,10 @@ async def get_plan_status(
 async def batch_update_status(
     campaign_id: str,
     new_status: str,
-    outcome: str = None,
-    phase_number: int = None,
-    item_type: str = None,
-    context: dict = None,
+    outcome: str | None = None,
+    phase_number: int | None = None,
+    item_type: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Batch-update status of plan items."""
     agent = context.get("agent") if context else None
@@ -659,8 +659,8 @@ async def batch_update_spec(
     campaign_id: str,
     field_name: str,
     field_value: object,
-    phase_number: int = None,
-    context: dict = None,
+    phase_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Batch-update a spec field on imaging items."""
     agent = context.get("agent") if context else None
@@ -737,10 +737,10 @@ async def batch_update_spec(
 async def move_plan_item(
     campaign_id: str,
     item_ref: str,
-    to_phase_number: int = None,
-    to_campaign_id: str = None,
-    position: int = None,
-    context: dict = None,
+    to_phase_number: int | None = None,
+    to_campaign_id: str | None = None,
+    position: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Move a plan item to a different phase."""
     agent = context.get("agent") if context else None
@@ -799,8 +799,8 @@ async def move_plan_item(
 )
 async def delete_plan_item_tool(
     item_ref: str,
-    campaign_id: str = None,
-    context: dict = None,
+    campaign_id: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Delete a plan item."""
     agent = context.get("agent") if context else None
@@ -856,8 +856,8 @@ async def delete_plan_item_tool(
 async def reorder_plan_items(
     campaign_id: str,
     item_order: list[str],
-    phase_number: int = None,
-    context: dict = None,
+    phase_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Reorder plan items within a phase."""
     agent = context.get("agent") if context else None
@@ -919,10 +919,10 @@ async def reorder_plan_items(
 async def update_phase(
     campaign_id: str,
     phase_number: int,
-    description: str = None,
-    shorthand: str = None,
-    target: str = None,
-    context: dict = None,
+    description: str | None = None,
+    shorthand: str | None = None,
+    target: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Update a phase's metadata."""
     agent = context.get("agent") if context else None
@@ -963,7 +963,7 @@ async def update_phase(
 async def delete_phase(
     campaign_id: str,
     phase_number: int,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Delete a phase and its contents."""
     agent = context.get("agent") if context else None
@@ -1017,7 +1017,7 @@ async def delete_phase(
 async def export_plan(
     campaign_id: str,
     include_validation: bool = False,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Export a plan as a shareable markdown document."""
     agent = context.get("agent") if context else None
@@ -1327,8 +1327,8 @@ async def validate_plan_for_export(campaign_id: str, store) -> str:
 )
 async def snapshot_plan(
     campaign_id: str,
-    label: str = None,
-    context: dict = None,
+    label: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Save a snapshot of the current plan."""
     agent = context.get("agent") if context else None
@@ -1367,7 +1367,7 @@ async def snapshot_plan(
 )
 async def list_plan_versions(
     campaign_id: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """List saved plan versions."""
     agent = context.get("agent") if context else None
@@ -1415,9 +1415,9 @@ async def list_plan_versions(
 )
 async def restore_plan_version(
     campaign_id: str,
-    version_id: str = None,
-    version_number: int = None,
-    context: dict = None,
+    version_id: str | None = None,
+    version_number: int | None = None,
+    context: dict | None = None,
 ) -> str:
     """Restore a plan to a previous snapshot."""
     agent = context.get("agent") if context else None

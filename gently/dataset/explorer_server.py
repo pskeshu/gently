@@ -505,7 +505,9 @@ class ConnectionManager:
         hash_val = sum(ord(c) for c in client_id)
         return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
 
-    async def connect(self, websocket: WebSocket, client_id: str = None, name: str = None):
+    async def connect(
+        self, websocket: WebSocket, client_id: str | None = None, name: str | None = None
+    ):
         await websocket.accept()
 
         # Generate defaults if not provided

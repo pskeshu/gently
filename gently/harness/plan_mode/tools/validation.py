@@ -165,7 +165,7 @@ def _normalise_stage(name: str) -> str | None:
 )
 async def validate_plan(
     campaign_id: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Validate a plan and return errors/warnings."""
     agent = context.get("agent") if context else None

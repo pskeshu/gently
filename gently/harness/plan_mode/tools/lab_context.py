@@ -25,7 +25,7 @@ from ...tools.registry import ToolCategory, ToolExample, tool
 )
 async def query_lab_history(
     query: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Search lab history for relevant context."""
     agent = context.get("agent") if context else None
@@ -114,7 +114,7 @@ async def query_lab_history(
 )
 async def check_hardware_capability(
     question: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Check hardware capabilities against a question."""
     from gently.hardware import get_hardware

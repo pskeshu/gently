@@ -30,10 +30,10 @@ Image is automatically saved to camera_captures/ folder.""",
 )
 async def view_image(
     title: str = "Bottom Camera Image",
-    exposure_ms: float = None,
+    exposure_ms: float | None = None,
     show: bool = True,
     show_embryos: bool = True,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Capture and display bottom camera image with embryo annotations"""
     client = context.get("client")
@@ -146,10 +146,10 @@ Use when the user says "open volume", "view volume", "show the 3D data", or
     ],
 )
 async def view_volume(
-    embryo_id: str = None,
-    timepoint: int = None,
-    file_path: str = None,
-    context: dict = None,
+    embryo_id: str | None = None,
+    timepoint: int | None = None,
+    file_path: str | None = None,
+    context: dict | None = None,
 ) -> str:
     """Open a volume in the browser-based viewer (no blocking desktop window)."""
     from pathlib import Path
@@ -239,7 +239,7 @@ Use to see what data is available before viewing.""",
         ToolExample("List all volumes", {}),
     ],
 )
-async def list_volumes(embryo_id: str = None, context: dict = None) -> str:
+async def list_volumes(embryo_id: str | None = None, context: dict | None = None) -> str:
     """List available volumes"""
     agent, err = require_agent(context)
     if err:
