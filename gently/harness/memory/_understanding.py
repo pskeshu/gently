@@ -11,6 +11,7 @@ import logging
 import sqlite3
 from datetime import datetime
 
+from ._protocols import StoreProtocol
 from .model import (
     Attention,
     Confidence,
@@ -31,7 +32,7 @@ from .model import (
 logger = logging.getLogger(__name__)
 
 
-class UnderstandingMixin:
+class UnderstandingMixin(StoreProtocol):
     """Observations, expectations, watchpoints, questions, learnings,
     embryo understanding, agent state, and batch updates."""
 

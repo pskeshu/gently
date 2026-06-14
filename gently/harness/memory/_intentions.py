@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from ._protocols import StoreProtocol
 from .model import (
     Campaign,
     Intentions,
@@ -24,7 +25,7 @@ from .model import (
 logger = logging.getLogger(__name__)
 
 
-class IntentionsMixin:
+class IntentionsMixin(StoreProtocol):
     """Campaign management, projects, session intents, and planned sessions."""
 
     # ------------------------------------------------------------------

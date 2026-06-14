@@ -11,6 +11,8 @@ import json
 import logging
 from typing import Any
 
+from ._protocols import StoreProtocol
+
 logger = logging.getLogger(__name__)
 
 ML_SCHEMA_SQL = """\
@@ -74,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_ml_data_assessments_pipeline ON ml_data_assessmen
 """
 
 
-class MlPipelinesMixin:
+class MlPipelinesMixin(StoreProtocol):
     """ContextStore mixin for ML pipeline management."""
 
     def _ensure_ml_tables(self):
@@ -117,7 +119,9 @@ class MlPipelinesMixin:
                     now,
                 ),
             )
-        return self.get_ml_pipeline(pipeline_id)
+        pipeline = self.get_ml_pipeline(pipeline_id)
+        assert pipeline is not None
+        return pipeline
 
     def get_ml_pipeline(self, pipeline_id: str) -> dict[str, Any] | None:
         """Get a pipeline by ID."""
@@ -227,7 +231,9 @@ class MlPipelinesMixin:
                     peer_instance_id,
                 ),
             )
-        return self.get_training_run(run_id)
+        run = self.get_training_run(run_id)
+        assert run is not None
+        return run
 
     def get_training_run(self, run_id: str) -> dict[str, Any] | None:
         """Get a training run by ID."""
@@ -347,7 +353,9 @@ class MlPipelinesMixin:
                     now,
                 ),
             )
-        return self.get_data_assessment(assessment_id)
+        assessment = self.get_data_assessment(assessment_id)
+        assert assessment is not None
+        return assessment
 
     def get_data_assessment(self, assessment_id: str) -> dict[str, Any] | None:
         """Get a data assessment by ID."""
