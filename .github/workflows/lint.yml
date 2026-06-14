@@ -24,3 +24,9 @@ jobs:
 
       - name: ruff format check
         run: ruff format --check .
+
+      - name: Install mypy
+        run: pip install mypy
+
+      - name: mypy
+        run: mypy .

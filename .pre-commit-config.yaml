@@ -5,3 +5,10 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.1.0  # run `pre-commit autoupdate` to pin to latest
+    hooks:
+      - id: mypy
+        pass_filenames: false
+        args: ["."]
