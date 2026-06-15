@@ -1113,7 +1113,7 @@ class DiSPIMMicroscope(Microscope):
 
     async def view_image(
         self,
-        image: np.ndarray = None,
+        image: np.ndarray | None = None,
         title: str = "Image View",
         exposure_ms: float | None = None,
         save_path: str | None = None,
