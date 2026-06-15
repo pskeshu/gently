@@ -656,7 +656,7 @@ class FileStore:
         timepoint: int,
         incoming_path: Path,
         metadata: dict | None = None,
-        volume_data: np.ndarray = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.

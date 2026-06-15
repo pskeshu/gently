@@ -12,11 +12,12 @@ see those members without introducing a runtime dependency between mixins.
 
 import sqlite3
 from contextlib import AbstractContextManager
-from typing import Protocol
+from typing import Protocol, runtime_checkable
 
 from .model import Campaign, PlanItem
 
 
+@runtime_checkable
 class StoreProtocol(Protocol):
     _conn: sqlite3.Connection
 

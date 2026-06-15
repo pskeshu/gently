@@ -492,7 +492,7 @@ class GentlyStore:
         timepoint: int,
         incoming_path: Path,
         metadata: dict | None = None,
-        volume_data: np.ndarray = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: rename an existing TIFF to canonical location.

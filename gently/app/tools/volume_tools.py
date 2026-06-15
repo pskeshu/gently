@@ -7,7 +7,7 @@ Tools for viewing and listing acquired lightsheet volumes.
 import logging
 
 from gently.core.coordinates import get_um_per_pixel, stage_to_pixel_position
-from gently.harness.tools.helpers import ctx_get, require_agent
+from gently.harness.tools.helpers import ctx_get, require_agent, require_microscope
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,9 @@ async def view_image(
     context: dict | None = None,
 ) -> str:
     """Capture and display bottom camera image with embryo annotations"""
-    client = ctx_get(context, "client")
+    client, err = require_microscope(context)
+    if err:
+        return err
     agent = ctx_get(context, "agent")
 
     try:

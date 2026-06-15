@@ -195,7 +195,7 @@ class TimelapseOrchestrator:
 
     async def start(
         self,
-        embryo_ids: list[str],
+        embryo_ids: list[str] | None = None,
         stop_condition: str = "manual",
         base_interval_seconds: float = 120.0,
         condition_value: Any = None,
