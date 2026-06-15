@@ -145,3 +145,6 @@ electron/
 /stage_definitions_for_review.txt
 gently/ui/tui/node_modules/
 gently/ui/tui/dist/
+
+# Runtime storage accidentally created on Linux when GENTLY_STORAGE_PATH="D:/" resolves literally
+D:/
