@@ -292,6 +292,21 @@ body.ux-v2 .home-hero { display: none; }
 .v2-plan-activity { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .v2-plan-activity:empty { display: none; margin: 0; }
 
+/* Paginated feed — one agent step (turn) per page, flipped with ‹ Prev / Next ›.
+   The pager bar / dots reuse .v2-plan-pager / .v2-plan-dots styling. */
+.v2-feed-pages { display: flex; flex-direction: column; }
+.v2-act-page { display: none; flex-direction: column; gap: 8px; }
+.v2-act-page.active { display: flex; }
+/* beat .v2-plan-pager/.v2-plan-dots { display:flex } so [hidden] actually hides */
+.v2-plan-pager[hidden], .v2-plan-dots[hidden] { display: none; }
+.v2-feed-pager-bar { margin: 0 0 4px; }
+.v2-feed-dots { margin-top: 10px; }
+/* the current question, pinned below the paged feed, set off by a divider —
+   only once there are steps above it (no stray line on the first choice card) */
+#v2-plan-activity:has(.v2-act-page) + .v2-plan-ask:not(:empty) {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border, #e4e9f0);
+}
+
 /* agent prose between tool calls */
 .v2-act-text { font-size: var(--v2-fs-sm); line-height: 1.55; color: var(--text-secondary, #475569); white-space: pre-wrap; }
 
@@ -359,6 +374,29 @@ body.ux-v2[data-theme="dark"] .v2-plan-error {
 .v2-plan-task::before { content: "·"; color: var(--text-muted, #94a3b8); }
 .v2-plan-title-row { font-size: var(--v2-fs-sm); font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin-bottom: 8px; }
 .v2-plan-row.v2-plan-row-freetext .v { font-style: italic; }
+.v2-plan-task-empty { color: var(--text-muted, #94a3b8); font-style: italic; }
+.v2-plan-task-empty::before { color: transparent; }
+
+/* THE PLAN pager: ‹ Prev · "Phase · i of N" · Next › + dots, one phase per page */
+.v2-plan-pager { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; }
+.v2-plan-pager-btn {
+    flex: none; background: none; border: 0; cursor: pointer; font: inherit;
+    font-size: var(--v2-fs-cap); font-weight: 600; color: var(--accent, #2f6df6);
+    padding: 5px 7px; border-radius: 7px; transition: background .15s, color .15s, opacity .15s;
+}
+.v2-plan-pager-btn:hover:not(:disabled) { background: var(--accent-soft); }
+.v2-plan-pager-btn:disabled { color: var(--text-muted, #94a3b8); opacity: .45; cursor: default; }
+.v2-plan-pager-pos {
+    flex: 1; min-width: 0; text-align: center; font-size: var(--v2-fs-cap); font-weight: 600;
+    color: var(--text, #0f172a); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.v2-plan-dots { display: flex; gap: 6px; justify-content: center; margin-top: 12px; }
+.v2-plan-dot {
+    width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+    background: var(--border, #e4e9f0); transition: background .2s, transform .2s;
+}
+.v2-plan-dot:hover { transform: scale(1.25); }
+.v2-plan-dot.active { background: var(--accent, #2f6df6); }
 
 @media (prefers-reduced-motion: reduce) {
     .v2-landing, .v2-landing::before, .v2-landing-rise, .v2-landing-orb, .v2-plan-orb,
@@ -366,7 +404,8 @@ body.ux-v2[data-theme="dark"] .v2-plan-error {
     .v2-landing[data-screen="welcome"] .v2-screen-welcome,
     .v2-typing i, .v2-act-spin, .v2-act-chev,
     .v2-act-tool-body, .v2-act-tool-head,
-    .v2-choice, .v2-escape-field, .v2-escape-toggle {
+    .v2-choice, .v2-escape-field, .v2-escape-toggle,
+    .v2-plan-pager-btn, .v2-plan-dot {
         animation: none !important;
         transition-duration: .12s !important;
     }

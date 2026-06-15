@@ -54,7 +54,22 @@ const V2Landing = (() => {
     }
 
     // ── status / error helpers ────────────────────────────────────────
-    function showThinking(on) { const t = $('v2-plan-thinking'); if (t) t.classList.toggle('hidden', !on); }
+    function setThinkingLabel(text) {
+        const l = document.querySelector('#v2-plan-thinking .v2-plan-thinking-label');
+        if (l && text) l.textContent = text;
+    }
+    function showThinking(on, label) {
+        const t = $('v2-plan-thinking');
+        if (t) t.classList.toggle('hidden', !on);
+        if (on && label) setThinkingLabel(label);
+    }
+    // Human-readable "what's happening right now" from a tool activity event,
+    // so the status line names the live operation instead of a static string.
+    function prettyTool(act) {
+        const raw = (act && (act.label || act.name)) || 'the next step';
+        const s = String(raw).replace(/_/g, ' ').trim();
+        return s.charAt(0).toUpperCase() + s.slice(1) + '…';
+    }
     function errorVisible() { const e = $('v2-plan-error'); return !!e && !e.classList.contains('hidden'); }
     function showPlanError(msg) {
         const e = $('v2-plan-error'); if (!e) return;
@@ -67,17 +82,90 @@ const V2Landing = (() => {
     function resetSummary() {
         const list = $('v2-plan-summary');
         if (list) list.innerHTML = '<div class="v2-plan-side-empty">The plan will take shape here as Gently designs it.</div>';
+        planPage = 0; planPages = []; planTitleText = '';
     }
 
-    // ── activity feed (claude.ai-style collapsible tool cards) ─────────
+    // ── activity feed: paginated, ONE agent step (turn) per page ───────
+    // Instead of one ever-growing scroll, each agent turn — its reasoning +
+    // the tool calls it made — is a page you flip through with ‹ Prev / Next ›.
+    // The current question stays pinned below the feed (#v2-plan-ask). A new
+    // turn auto-advances to its page; you can flip back to review earlier steps.
+    let feedPages = [];        // .v2-act-page elements, one per turn
+    let feedPage = 0;          // index currently shown
+    let curPageEl = null;      // page receiving this turn's content
+    let pendingNewPage = false; // a turn started; open a fresh page on first content
+
     function feedEl() { return $('v2-plan-activity'); }
+    function feedPagesWrap() { return feedEl()?.querySelector('.v2-feed-pages'); }
     function clearActivity() {
-        const f = feedEl(); if (f) f.innerHTML = '';
+        const f = feedEl();
+        if (f) {
+            f.innerHTML =
+                '<div class="v2-plan-pager v2-feed-pager-bar" hidden></div>' +
+                '<div class="v2-feed-pages"></div>' +
+                '<div class="v2-plan-dots v2-feed-dots" hidden></div>';
+        }
+        feedPages = []; feedPage = 0; curPageEl = null; pendingNewPage = false;
         feedTextEl = null; runningTools = {}; feedHadContent = false;
         capturedCampaignId = null;
         hidePlanError();
     }
+    function newFeedPage() {
+        const wrap = feedPagesWrap(); if (!wrap) return null;
+        const page = document.createElement('div');
+        page.className = 'v2-act-page';
+        wrap.appendChild(page);
+        feedPages.push(page);
+        curPageEl = page;
+        feedPage = feedPages.length - 1;   // auto-advance to the live step
+        feedTextEl = null;
+        drawFeedPager();
+        return page;
+    }
+    // Where this turn's prose/tool cards land. Opens a fresh page the first time
+    // content arrives after a turn_start (so content-less command turns don't
+    // leave empty pages), and lazily on the very first content.
+    function feedTarget() {
+        if (pendingNewPage || !curPageEl) { newFeedPage(); pendingNewPage = false; }
+        return curPageEl;
+    }
+    function viewingLatest() { return feedPage >= feedPages.length - 1; }
+    function drawFeedPager() {
+        const f = feedEl(); if (!f) return;
+        const n = feedPages.length;
+        const i = Math.min(Math.max(feedPage, 0), Math.max(n - 1, 0));
+        feedPages.forEach((p, idx) => p.classList.toggle('active', idx === i));
+        const bar = f.querySelector('.v2-feed-pager-bar');
+        const dots = f.querySelector('.v2-feed-dots');
+        if (!bar || !dots) return;
+        if (n <= 1) { bar.hidden = true; dots.hidden = true; return; }
+        bar.hidden = false; dots.hidden = false;
+        bar.innerHTML = '';
+        const mkBtn = (txt, disabled, fn) => {
+            const b = document.createElement('button');
+            b.className = 'v2-plan-pager-btn'; b.type = 'button'; b.textContent = txt;
+            b.disabled = disabled; b.addEventListener('click', fn);
+            return b;
+        };
+        const pos = document.createElement('span');
+        pos.className = 'v2-plan-pager-pos'; pos.textContent = `Step ${i + 1} of ${n}`;
+        bar.append(
+            mkBtn('‹ Prev', i === 0, () => { if (feedPage > 0) { feedPage--; drawFeedPager(); } }),
+            pos,
+            mkBtn('Next ›', i === n - 1, () => { if (feedPage < n - 1) { feedPage++; drawFeedPager(); } }),
+        );
+        dots.innerHTML = '';
+        for (let d = 0; d < n; d++) {
+            const dot = document.createElement('button');
+            dot.className = 'v2-plan-dot' + (d === i ? ' active' : '');
+            dot.type = 'button';
+            dot.setAttribute('aria-label', `Step ${d + 1} of ${n}`);
+            dot.addEventListener('click', () => { feedPage = d; drawFeedPager(); });
+            dots.appendChild(dot);
+        }
+    }
     function scrollFeedIfNearBottom() {
+        if (!viewingLatest()) return;   // don't yank the user off an earlier step
         const m = document.querySelector('.v2-screen-plan .v2-plan-main');
         if (m && (m.scrollHeight - m.scrollTop - m.clientHeight) < 140) m.scrollTop = m.scrollHeight;
     }
@@ -172,10 +260,11 @@ const V2Landing = (() => {
         const f = feedEl(); if (!f) return;
         switch (act.kind) {
             case 'turn_start':
-                feedTextEl = null; hidePlanError(); clearFallback(); showThinking(true);
+                feedTextEl = null; pendingNewPage = true; hidePlanError(); clearFallback();
+                showThinking(true, 'reviewing your campaign and plan…');
                 break;
             case 'thinking':
-                showThinking(true);
+                showThinking(true, 'thinking through the next step…');
                 break;
             case 'text': {
                 const chunk = act.text || '';
@@ -184,11 +273,11 @@ const V2Landing = (() => {
                     feedTextEl = document.createElement('div');
                     feedTextEl.className = 'v2-act-text';
                     feedTextEl._raw = '';
-                    f.appendChild(feedTextEl);
+                    feedTarget().appendChild(feedTextEl);
                 }
                 feedTextEl._raw += chunk;
                 feedTextEl.innerHTML = renderMd(feedTextEl._raw);
-                feedHadContent = true; showThinking(true); scrollFeedIfNearBottom();
+                feedHadContent = true; showThinking(true, 'composing the response…'); scrollFeedIfNearBottom();
                 break;
             }
             case 'tool_start': {
@@ -197,9 +286,9 @@ const V2Landing = (() => {
                 if (act.name === 'ask_user_choice') break;
                 feedTextEl = null;
                 const card = buildToolCard(act, false);
-                f.appendChild(card);
+                feedTarget().appendChild(card);
                 (runningTools[act.name] = runningTools[act.name] || []).push(card);
-                feedHadContent = true; showThinking(true); scrollFeedIfNearBottom();
+                feedHadContent = true; showThinking(true, prettyTool(act)); scrollFeedIfNearBottom();
                 break;
             }
             case 'tool_result': {
@@ -211,8 +300,8 @@ const V2Landing = (() => {
                 const arr = runningTools[act.name] || [];
                 const card = arr.pop();
                 if (card) updateToolCard(card, act);
-                else f.appendChild(buildToolCard(act, true));
-                feedHadContent = true; scrollFeedIfNearBottom();
+                else feedTarget().appendChild(buildToolCard(act, true));
+                feedHadContent = true; setThinkingLabel('working through the next step…'); scrollFeedIfNearBottom();
                 break;
             }
             case 'turn_end':
@@ -232,7 +321,7 @@ const V2Landing = (() => {
         d.className = 'v2-plan-fallback';
         d.innerHTML = 'Gently replied in prose — <a>open the conversation</a> to read it.';
         d.querySelector('a').addEventListener('click', openChat);
-        f.appendChild(d);
+        feedTarget().appendChild(d);
     }
 
     // ── THE PLAN panel: mirror the real campaign tree ──────────────────
@@ -254,35 +343,101 @@ const V2Landing = (() => {
         c = c || {};
         return c.shorthand || c.display_name || c.description || 'Plan';
     }
+    // THE PLAN renders as a pager — one phase per page with ‹ Prev / Next ›,
+    // a position label, and dots — instead of one long scroll. planPage is held
+    // across re-renders (the panel refetches on every plan-writing tool) so the
+    // page you're reading doesn't snap back to the start mid-design.
+    let planPage = 0;
+    let planPages = [];     // [{ name, items }]
+    let planTitleText = '';
+
     function renderPlanTree(tree) {
-        const list = $('v2-plan-summary');
-        if (!list || !tree) return;
+        if (!tree) return;
         const phases = tree.children || [];
         const rootItems = tree.items || [];
         if (!phases.length && !rootItems.length) return;  // nothing to show yet — keep placeholder
+        const pages = [];
+        if (rootItems.length) pages.push({ name: 'Tasks', items: rootItems });
+        phases.forEach(phase => {
+            if (!phase) return;
+            pages.push({ name: planName(phase.campaign), items: phase.items || [] });
+        });
+        planPages = pages;
+        planTitleText = planName(tree.campaign);
+        if (planPage >= pages.length) planPage = pages.length - 1;
+        if (planPage < 0) planPage = 0;
+        drawPlanPage();
+    }
+
+    function drawPlanPage() {
+        const list = $('v2-plan-summary');
+        if (!list) return;
+        const pages = planPages;
+        const n = pages.length;
+        if (!n) return;
+        const i = Math.min(Math.max(planPage, 0), n - 1);
+        const page = pages[i];
+
         list.innerHTML = '';
         const title = document.createElement('div');
         title.className = 'v2-plan-title-row';
-        title.textContent = planName(tree.campaign);
+        title.textContent = planTitleText;
         list.appendChild(title);
-        const addTask = (parent, it) => {
-            const t = document.createElement('div');
-            t.className = 'v2-plan-task';
-            t.textContent = it.title || it.shorthand || '(task)';
-            parent.appendChild(t);
-        };
-        rootItems.forEach(it => addTask(list, it));
-        phases.forEach(phase => {
-            if (!phase) return;
-            const wrap = document.createElement('div');
-            wrap.className = 'v2-plan-phase';
+
+        if (n > 1) {
+            const bar = document.createElement('div');
+            bar.className = 'v2-plan-pager';
+            const prev = document.createElement('button');
+            prev.className = 'v2-plan-pager-btn'; prev.type = 'button'; prev.textContent = '‹ Prev';
+            prev.disabled = i === 0;
+            prev.addEventListener('click', () => { if (planPage > 0) { planPage--; drawPlanPage(); } });
+            const pos = document.createElement('span');
+            pos.className = 'v2-plan-pager-pos';
+            pos.textContent = `${page.name} · ${i + 1} of ${n}`;
+            const next = document.createElement('button');
+            next.className = 'v2-plan-pager-btn'; next.type = 'button'; next.textContent = 'Next ›';
+            next.disabled = i === n - 1;
+            next.addEventListener('click', () => { if (planPage < n - 1) { planPage++; drawPlanPage(); } });
+            bar.append(prev, pos, next);
+            list.appendChild(bar);
+        } else {
             const h = document.createElement('div');
             h.className = 'v2-plan-phase-h';
-            h.textContent = planName(phase.campaign);
-            wrap.appendChild(h);
-            (phase.items || []).forEach(it => addTask(wrap, it));
-            list.appendChild(wrap);
-        });
+            h.textContent = page.name;
+            list.appendChild(h);
+        }
+
+        const tasks = document.createElement('div');
+        tasks.className = 'v2-plan-phase';
+        const items = page.items || [];
+        if (items.length) {
+            items.forEach(it => {
+                const t = document.createElement('div');
+                t.className = 'v2-plan-task';
+                t.textContent = it.title || it.shorthand || '(task)';
+                tasks.appendChild(t);
+            });
+        } else {
+            const e = document.createElement('div');
+            e.className = 'v2-plan-task v2-plan-task-empty';
+            e.textContent = 'no items in this phase yet';
+            tasks.appendChild(e);
+        }
+        list.appendChild(tasks);
+
+        if (n > 1) {
+            const dots = document.createElement('div');
+            dots.className = 'v2-plan-dots';
+            for (let d = 0; d < n; d++) {
+                const dot = document.createElement('button');
+                dot.className = 'v2-plan-dot' + (d === i ? ' active' : '');
+                dot.type = 'button';
+                dot.setAttribute('aria-label', `Go to ${pages[d].name} (${d + 1} of ${n})`);
+                dot.addEventListener('click', () => { planPage = d; drawPlanPage(); });
+                dots.appendChild(dot);
+            }
+            list.appendChild(dots);
+        }
     }
 
     // ── ask rendering (the active question) ────────────────────────────
@@ -470,6 +625,11 @@ const V2Landing = (() => {
             if (request_id === '*' || (current && request_id === current.reqId)) {
                 current = null; clearAsk();
                 if (planActive() && !errorVisible()) showThinking(true);
+                // A question was just answered — the agent's continuation is the
+                // next step, so open a fresh feed page for it. (A turn stays one
+                // stream across an ask_user_choice pause, so turn_start alone
+                // would lump every step of the design into a single page.)
+                pendingNewPage = true;
             }
         });
         ClientEventBus.on('AGENT_CONTROL', () => { if (current && planActive()) renderAsk(); });

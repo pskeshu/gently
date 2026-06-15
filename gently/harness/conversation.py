@@ -737,12 +737,21 @@ class ConversationManager:
                     if len(result_summary) > 140:
                         result_summary = result_summary[:139] + "…"
 
+                    # Full result (bounded) so the UI's expandable tool card can
+                    # show what the tool actually returned — not just the 140-char
+                    # one-liner. The web client caps/scrolls this further; keep the
+                    # streamed payload sane.
+                    result_full = result_text or ""
+                    if len(result_full) > 4000:
+                        result_full = result_full[:4000] + "\n…(truncated)"
+
                     yield {
                         "type": "tool_call",
                         "tool_name": block.name,
                         "tool_input": block.input,
                         "duration": time.time() - start_time,
                         "result_summary": result_summary,
+                        "result_full": result_full,
                         "is_error": is_error_flag,
                     }
 
