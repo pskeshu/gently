@@ -152,7 +152,7 @@ class VerseMap:
         ]
         return self._sorted_peers(results)
 
-    def find_data_peers(self, session_id: str = None) -> list[PersistedPeer]:
+    def find_data_peers(self, session_id: str | None = None) -> list[PersistedPeer]:
         """Find peers with data, optionally filtering by session."""
         results = []
         for p in self._peers.values():

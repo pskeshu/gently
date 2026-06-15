@@ -225,7 +225,7 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
 
 async def main(
     offline: bool = False,
-    resume_session: str = None,
+    resume_session: str | None = None,
     show_sessions: bool = False,
     pick_session: bool = False,
     log_level: str = "WARNING",

@@ -5,3 +5,12 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    # Keep in sync with the mypy pin in pyproject.toml dev group and
+    # .github/workflows/lint.yml. Run `pre-commit autoupdate` to bump.
+    rev: v2.1.0
+    hooks:
+      - id: mypy
+        pass_filenames: false
+        args: ["."]

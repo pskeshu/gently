@@ -140,7 +140,7 @@ def create_timelapse_video(
     output_path: Path,
     fps: int = 10,
     add_timestamps: bool = True,
-    embryo_id: str = None,
+    embryo_id: str | None = None,
     progress_callback=None,
 ) -> dict:
     """

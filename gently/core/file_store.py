@@ -328,9 +328,9 @@ class FileStore:
     def create_session(
         self,
         session_id: str,
-        name: str = None,
-        description: str = None,
-        metadata: dict = None,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Create a new session.  Returns session_id."""
         # If session already exists, return silently (matches INSERT OR IGNORE)
@@ -477,14 +477,14 @@ class FileStore:
         self,
         session_id: str,
         embryo_id: str,
-        embryo_uid: str = None,
-        nickname: str = None,
-        position_x: float = None,
-        position_y: float = None,
-        position_coarse: dict = None,
-        position_fine: dict = None,
-        calibration: dict = None,
-        role: str = None,
+        embryo_uid: str | None = None,
+        nickname: str | None = None,
+        position_x: float | None = None,
+        position_y: float | None = None,
+        position_coarse: dict | None = None,
+        position_fine: dict | None = None,
+        calibration: dict | None = None,
+        role: str | None = None,
     ) -> None:
         """Register or update an embryo in a session.
 
@@ -605,7 +605,7 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, write sidecar metadata.
@@ -655,8 +655,8 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         incoming_path: Path,
-        metadata: dict = None,
-        volume_data: np.ndarray = None,
+        metadata: dict | None = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: move an existing TIFF to its canonical location.
@@ -735,7 +735,7 @@ class FileStore:
             return vol_path
         return None
 
-    def list_volumes(self, session_id: str, embryo_id: str = None) -> list[VolumeInfo]:
+    def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata by scanning sidecar YAML files on disk."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -778,7 +778,7 @@ class FileStore:
         result.sort(key=lambda v: (v["embryo_id"], v["timepoint"]))
         return result
 
-    def get_acquisition_params(self, session_id: str, embryo_id: str = None) -> dict | None:
+    def get_acquisition_params(self, session_id: str, embryo_id: str | None = None) -> dict | None:
         """
         Get acquisition parameters from the most recent volume sidecar.
 
@@ -895,7 +895,7 @@ class FileStore:
         session_id: str,
         source: str,
         incoming_path: Path,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """Move a transient TIFF from incoming/ to ``snapshots/``."""
         incoming_path = Path(incoming_path)
@@ -942,7 +942,7 @@ class FileStore:
         logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
         return canonical
 
-    def list_snapshots(self, session_id: str, source: str = None) -> list[dict[str, Any]]:
+    def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         sd = self._session_dir(session_id)
         if sd is None:
@@ -1018,10 +1018,10 @@ class FileStore:
         session_id: str,
         name: str,
         method: str,
-        model_name: str = None,
+        model_name: str | None = None,
         trace_type: str = "perception",
         source: str = "live",
-        config: dict = None,
+        config: dict | None = None,
     ) -> int:
         """Create a perception run.  Returns run_id (auto-increment)."""
         runs = self._load_perception_runs(session_id)
@@ -1047,7 +1047,7 @@ class FileStore:
         return run_id
 
     def complete_perception_run(
-        self, run_id: int, status: str = "completed", error_message: str = None
+        self, run_id: int, status: str = "completed", error_message: str | None = None
     ) -> None:
         """Mark a perception run as completed or failed.
 
@@ -1071,14 +1071,14 @@ class FileStore:
         embryo_id: str,
         timepoint: int,
         predicted_stage: str,
-        confidence: float = None,
-        reasoning: str = None,
+        confidence: float | None = None,
+        reasoning: str | None = None,
         is_transitional: bool = False,
-        execution_time_ms: float = None,
-        trace_data: dict = None,
-        observed_features: dict = None,
-        ground_truth_stage: str = None,
-        is_correct: int = None,
+        execution_time_ms: float | None = None,
+        trace_data: dict | None = None,
+        observed_features: dict | None = None,
+        ground_truth_stage: str | None = None,
+        is_correct: int | None = None,
     ) -> int:
         """
         Append a prediction to predictions.jsonl and optionally write trace JSON.
@@ -1133,8 +1133,8 @@ class FileStore:
     def get_predictions(
         self,
         session_id: str,
-        embryo_id: str = None,
-        run_id: int = None,
+        embryo_id: str | None = None,
+        run_id: int | None = None,
     ) -> list[PredictionInfo]:
         """Query predictions with optional filters."""
         sd = self._session_dir(session_id)
@@ -1174,9 +1174,9 @@ class FileStore:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
-        end_timepoint: int = None,
-        annotator: str = None,
-        notes: str = None,
+        end_timepoint: int | None = None,
+        annotator: str | None = None,
+        notes: str | None = None,
     ) -> None:
         """Insert or update a ground-truth annotation."""
         ed = self._embryo_dir(session_id, embryo_id)

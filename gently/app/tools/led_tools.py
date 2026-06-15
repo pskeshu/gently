@@ -4,6 +4,7 @@ LED Control Tools
 Tools for controlling microscope LED illumination.
 """
 
+from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, tool
 
 
@@ -15,7 +16,7 @@ from gently.harness.tools.registry import ToolCategory, tool
 )
 async def set_led(state: str, context: dict) -> str:
     """Set LED state"""
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     try:
         result = await client.set_led(state)
@@ -35,7 +36,7 @@ async def set_led(state: str, context: dict) -> str:
 )
 async def get_led_status(context: dict) -> str:
     """Get LED status"""
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     try:
         result = await client.get_led_status()

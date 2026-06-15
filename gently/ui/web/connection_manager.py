@@ -54,7 +54,9 @@ class ConnectionManager:
         hash_val = sum(ord(c) for c in client_id)
         return self.AVATAR_COLORS[hash_val % len(self.AVATAR_COLORS)]
 
-    async def connect(self, websocket: WebSocket, client_id: str = None, name: str = None):
+    async def connect(
+        self, websocket: WebSocket, client_id: str | None = None, name: str | None = None
+    ):
         await websocket.accept()
 
         # Generate defaults if not provided
@@ -168,7 +170,7 @@ class ConnectionManager:
         await self.broadcast({"type": "image", "data": image_data.to_dict()})
 
     async def send_event(
-        self, event_type: str, data: dict, source: str = None, event_id: str = None
+        self, event_type: str, data: dict, source: str | None = None, event_id: str | None = None
     ):
         """Send event notification to all clients"""
         await self.broadcast(

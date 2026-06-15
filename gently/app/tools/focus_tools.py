@@ -22,6 +22,7 @@ from gently.analysis.core import (
     calculate_focus_score,
     fit_focus_curve,
 )
+from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -57,7 +58,7 @@ async def fine_focus(
     move_to_best: bool = True,
     galvo_position: float = 0.0,
     embryo_id: str | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """
     Perform fine focus sweep to find optimal piezo position.
@@ -82,8 +83,8 @@ async def fine_focus(
     context : dict
         Execution context with client and agent
     """
-    client = context.get("client")
-    agent = context.get("agent")
+    client = ctx_get(context, "client")
+    agent = ctx_get(context, "agent")
 
     if not client:
         return "Error: No microscope client connected"
@@ -234,10 +235,10 @@ Algorithm options: 'fft_bandpass' (default), 'gradient', 'volath', 'variance'.""
     ],
 )
 async def get_focus_score(
-    piezo_position: float = None,
+    piezo_position: float | None = None,
     galvo_position: float = 0.0,
     algorithm: str = "fft_bandpass",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """
     Get focus score for current or specified position.
@@ -253,7 +254,7 @@ async def get_focus_score(
     context : dict
         Execution context
     """
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     if not client:
         return "Error: No microscope client connected"
@@ -304,7 +305,7 @@ has changed during a timelapse and whether recalibration is needed.""",
         ToolExample("Check focus history for embryo 2", {"embryo_id": "embryo_2"}),
     ],
 )
-async def get_focus_history(embryo_id: str, context: dict = None) -> str:
+async def get_focus_history(embryo_id: str, context: dict | None = None) -> str:
     """
     Get focus measurement history for an embryo.
 
@@ -315,7 +316,7 @@ async def get_focus_history(embryo_id: str, context: dict = None) -> str:
     context : dict
         Execution context with agent
     """
-    agent = context.get("agent")
+    agent = ctx_get(context, "agent")
 
     if not agent:
         return "Error: No agent context available"

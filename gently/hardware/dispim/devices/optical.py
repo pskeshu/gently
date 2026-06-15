@@ -20,7 +20,7 @@ class DiSPIMLED:
     Device-agnostic: any plan that sets device state will work
     """
 
-    def __init__(self, core: pymmcore.CMMCore, name: str = "LED", group_name: str = None):
+    def __init__(self, core: pymmcore.CMMCore, name: str = "LED", group_name: str | None = None):
         self.core = core
         self.name = name
         self.group_name = group_name or name
@@ -128,7 +128,7 @@ class DiSPIMLightSource:
         637: (0.0, 100.0),
     }
 
-    def __init__(self, core: pymmcore.CMMCore, name: str = "Laser", group_name: str = None):
+    def __init__(self, core: pymmcore.CMMCore, name: str = "Laser", group_name: str | None = None):
         self.core = core
         self.name = name
         self.group_name = group_name or name

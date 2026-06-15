@@ -20,6 +20,8 @@ Three groups:
 """
 
 import logging
+from types import SimpleNamespace
+from typing import Any
 
 from gently.harness.tools.helpers import require_agent
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
@@ -92,7 +94,7 @@ def _short(text: str | None, n: int = 80) -> str:
 async def attach_session_to_plan(
     plan_item_id: str,
     rationale: str = "",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Attach the current session to a plan item."""
     agent, err = require_agent(context)
@@ -160,7 +162,7 @@ async def attach_session_to_plan(
 )
 async def mark_session_standalone(
     description: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Mark the session as a standalone (non-plan) run."""
     agent, err = require_agent(context)
@@ -212,7 +214,7 @@ async def mark_session_standalone(
 )
 async def detach_session_from_plan(
     reason: str = "",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Detach the current session from its plan item."""
     agent, err = require_agent(context)
@@ -276,7 +278,7 @@ async def mark_plan_item_status(
     plan_item_id: str,
     status: str,
     notes: str = "",
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Update a plan item's status."""
     agent, err = require_agent(context)
@@ -359,8 +361,8 @@ def _apply_spec_to_embryo(embryo, spec) -> list[str]:
 )
 async def apply_plan_acquisition_spec(
     plan_item_id: str,
-    overrides: dict = None,
-    context: dict = None,
+    overrides: dict | None = None,
+    context: dict | None = None,
 ) -> str:
     """Apply a plan's ImagingSpec to the experiment."""
     agent, err = require_agent(context)
@@ -389,10 +391,7 @@ async def apply_plan_acquisition_spec(
         for embryo in experiment.embryos.values():
             # Build an "effective" spec respecting overrides — copy then
             # zero out any field the caller asked us to skip.
-            class _Filtered:
-                pass
-
-            eff = _Filtered()
+            eff = SimpleNamespace()
             eff.num_slices = (
                 None
                 if "num_slices" in overrides and overrides["num_slices"] is None
@@ -512,7 +511,7 @@ async def apply_plan_acquisition_spec(
 async def recall_sibling_sessions(
     identifier: str,
     limit: int = 10,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Return sessions sharing the given plan item's campaign or the campaign itself."""
     agent, err = require_agent(context)
@@ -554,10 +553,10 @@ async def recall_sibling_sessions(
         sid = getattr(item, "session_id", None)
         if not sid:
             continue
-        meta = {}
+        meta: dict[str, Any] = {}
         if file_store is not None:
             try:
-                meta = file_store.get_session(sid) or {}
+                meta = dict(file_store.get_session(sid) or {})
             except Exception:
                 meta = {}
         sessions.append(
@@ -605,7 +604,7 @@ async def recall_sibling_sessions(
 )
 async def summarize_campaign_history(
     campaign_id: str,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Compact campaign-progress summary for resolution-mode reasoning."""
     agent, err = require_agent(context)
@@ -665,7 +664,7 @@ async def summarize_campaign_history(
     ],
 )
 async def list_imaging_candidates(
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Full deterministic listing of unblocked imaging plan items."""
     agent, err = require_agent(context)

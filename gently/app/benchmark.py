@@ -138,9 +138,9 @@ async def run_benchmark(
     exposure_ms: float = 10.0,
     warmup: int = 1,
     # Legacy parameters (ignored, kept for API compat with bridge)
-    n_volumes: int = None,
-    n_slices: int = None,
-    n_warmup: int = None,
+    n_volumes: int | None = None,
+    n_slices: int | None = None,
+    n_warmup: int | None = None,
     progress_fn: callable | None = None,
 ) -> BenchmarkResults:
     """

@@ -256,7 +256,7 @@ class DiSPIMMicroscope(Microscope):
         async with self._session.get(f"{self.http_url}{path}") as resp:
             return await resp.json()
 
-    async def _api_post(self, path: str, json: dict = None) -> dict:
+    async def _api_post(self, path: str, json: dict | None = None) -> dict:
         """POST request using the shared session."""
         self._ensure_connected()
         async with self._session.post(f"{self.http_url}{path}", json=json) as resp:
@@ -265,7 +265,7 @@ class DiSPIMMicroscope(Microscope):
     async def _submit_plan_and_wait(
         self,
         plan_name: str,
-        kwargs: dict = None,
+        kwargs: dict | None = None,
         timeout: float = 120.0,
     ) -> dict:
         """Submit a Bluesky plan to the server and wait for completion.
@@ -541,11 +541,11 @@ class DiSPIMMicroscope(Microscope):
         galvo_center: float = 0.0,
         piezo_amplitude: float = 25.0,
         piezo_center: float = 50.0,
-        laser_config: str = None,
-        laser_power_488_pct: float = None,
-        laser_power_561_pct: float = None,
-        laser_power_405_pct: float = None,
-        laser_power_637_pct: float = None,
+        laser_config: str | None = None,
+        laser_power_488_pct: float | None = None,
+        laser_power_561_pct: float | None = None,
+        laser_power_405_pct: float | None = None,
+        laser_power_637_pct: float | None = None,
         **kwargs,
     ) -> dict:
         """
@@ -629,12 +629,12 @@ class DiSPIMMicroscope(Microscope):
         galvo_center: float = 0.0,
         piezo_amplitude: float = 25.0,
         piezo_center: float = 50.0,
-        laser_config: str = None,
-        laser_power_488_pct: float = None,
-        laser_power_561_pct: float = None,
-        laser_power_405_pct: float = None,
-        laser_power_637_pct: float = None,
-        timeout: float = None,
+        laser_config: str | None = None,
+        laser_power_488_pct: float | None = None,
+        laser_power_561_pct: float | None = None,
+        laser_power_405_pct: float | None = None,
+        laser_power_637_pct: float | None = None,
+        timeout: float | None = None,
     ) -> dict:
         """
         Acquire ``frames`` volumes back-to-back as a single device-layer plan.
@@ -956,7 +956,9 @@ class DiSPIMMicroscope(Microscope):
         """Get current bottom camera exposure time."""
         return await self._api_get("/api/camera/exposure")
 
-    async def capture_bottom_image(self, use_led: bool = False, exposure_ms: float = None) -> dict:
+    async def capture_bottom_image(
+        self, use_led: bool = False, exposure_ms: float | None = None
+    ) -> dict:
         """
         Capture image from bottom camera.
 
@@ -1000,7 +1002,7 @@ class DiSPIMMicroscope(Microscope):
         objective_mag: float = DEFAULT_OBJECTIVE_MAG,
         use_claude_review: bool = True,
         min_confidence: float = 0.7,
-        exposure_ms: float = None,
+        exposure_ms: float | None = None,
         brightness_percentile: float = 99.0,
         min_area: int = 5000,
         max_area: int = 150000,
@@ -1088,7 +1090,7 @@ class DiSPIMMicroscope(Microscope):
             }
 
     async def _get_detection_image(
-        self, detection_result: dict, exposure_ms: float = None
+        self, detection_result: dict, exposure_ms: float | None = None
     ) -> np.ndarray | None:
         """Load or capture an image for the detection editor."""
         image_path = detection_result.get("image_path")
@@ -1111,12 +1113,12 @@ class DiSPIMMicroscope(Microscope):
 
     async def view_image(
         self,
-        image: np.ndarray = None,
+        image: np.ndarray | None = None,
         title: str = "Image View",
-        exposure_ms: float = None,
-        save_path: str = None,
+        exposure_ms: float | None = None,
+        save_path: str | None = None,
         show: bool = True,
-        embryo_annotations: list = None,
+        embryo_annotations: list | None = None,
     ) -> dict:
         """Save a bottom-camera image to disk (replaces the napari display).
 
@@ -1224,7 +1226,7 @@ class DiSPIMMicroscope(Microscope):
 
     async def capture_for_marking(
         self,
-        exposure_ms: float = None,
+        exposure_ms: float | None = None,
     ) -> dict:
         """
         Capture a bottom-camera image for manual marking in the map view.

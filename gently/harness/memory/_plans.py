@@ -11,6 +11,7 @@ import sqlite3
 from datetime import datetime
 from typing import Any
 
+from ._protocols import StoreProtocol
 from .model import (
     BenchSpec,
     ImagingSpec,
@@ -22,7 +23,7 @@ from .model import (
 logger = logging.getLogger(__name__)
 
 
-class PlansMixin:
+class PlansMixin(StoreProtocol):
     """Plan items, templates, snapshots, and dependency management."""
 
     # ==================================================================
@@ -474,7 +475,7 @@ class PlansMixin:
             campaign_id=campaign_id,
             include_children=True,
         )
-        result = {
+        result: dict[str, Any] = {
             "total": len(items),
             "completed": 0,
             "in_progress": 0,
@@ -589,7 +590,7 @@ class PlansMixin:
         all_item_ids = [it.id for it in items]
         serialized_items = []
         for item in items:
-            item_data = {
+            item_data: dict[str, Any] = {
                 "type": item.type.value,
                 "title": item.title,
                 "description": item.description,

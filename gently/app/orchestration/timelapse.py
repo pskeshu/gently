@@ -195,7 +195,7 @@ class TimelapseOrchestrator:
 
     async def start(
         self,
-        embryo_ids: list[str],
+        embryo_ids: list[str] | None = None,
         stop_condition: str = "manual",
         base_interval_seconds: float = 120.0,
         condition_value: Any = None,
@@ -739,7 +739,7 @@ class TimelapseOrchestrator:
                 },
             )
 
-    async def _acquire_embryo(self, embryo_state: EmbryoState, round_time: datetime = None):
+    async def _acquire_embryo(self, embryo_state: EmbryoState, round_time: datetime | None = None):
         """Acquire a single volume for one embryo
 
         Parameters
@@ -2510,7 +2510,7 @@ class TimelapseOrchestrator:
                 result,
             )
 
-    def _finalize_perception_run(self, status: str = "completed", error_message: str = None):
+    def _finalize_perception_run(self, status: str = "completed", error_message: str | None = None):
         """Mark the perception run as finished in FileStore."""
         if self._store and self._perception_run_id is not None:
             try:
@@ -2575,7 +2575,7 @@ class TimelapseOrchestrator:
         volume,
         embryo_state: EmbryoState,
         detector_name: str,
-        volume_uids: dict = None,
+        volume_uids: dict | None = None,
     ):
         """Run a role-declared Detector (Phase 2) and persist + emit results.
 
@@ -2791,7 +2791,7 @@ class TimelapseOrchestrator:
         timepoint: int,
         volume,
         embryo_state: EmbryoState,
-        volume_uids: dict = None,
+        volume_uids: dict | None = None,
     ):
         """Run the per-role detector on the acquired volume and emit results.
 

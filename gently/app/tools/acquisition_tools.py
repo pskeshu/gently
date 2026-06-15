@@ -9,7 +9,7 @@ import logging
 
 import numpy as np
 
-from gently.harness.tools.helpers import get_embryo_or_error
+from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
@@ -44,12 +44,12 @@ async def acquire_volume(
     embryo_id: str,
     num_slices: int = 50,
     exposure_ms: float = 10.0,
-    z_buffer_um: float = None,
-    context: dict = None,
+    z_buffer_um: float | None = None,
+    context: dict | None = None,
 ) -> str:
     """Acquire single volume - moves to embryo first, uses calibration"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -237,15 +237,15 @@ If embryo has no focus data for the requested galvo_position, consider running f
     ],
 )
 async def capture_lightsheet(
-    piezo_position: float = None,
+    piezo_position: float | None = None,
     galvo_position: float = 0.0,
-    embryo_id: str = None,
+    embryo_id: str | None = None,
     show: bool = True,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Capture and optionally display a single lightsheet image"""
-    client = context.get("client")
-    agent = context.get("agent")
+    client = ctx_get(context, "client")
+    agent = ctx_get(context, "agent")
 
     try:
         embryo = None
@@ -355,10 +355,10 @@ capturing one at a time.""",
         ToolExample("Capture all embryos", {}),
     ],
 )
-async def batch_lightsheet(galvo_position: float = 0.0, context: dict = None) -> str:
+async def batch_lightsheet(galvo_position: float = 0.0, context: dict | None = None) -> str:
     """Capture lightsheet images from all embryos and show them in the web UI"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent or not client:
         return "Error: Agent or microscope not available"

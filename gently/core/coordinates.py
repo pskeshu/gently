@@ -54,7 +54,7 @@ def pixel_to_stage_position(
     image_center_y: float,
     stage_x: float,
     stage_y: float,
-    um_per_pixel: float = None,
+    um_per_pixel: float | None = None,
 ) -> tuple[float, float]:
     """
     Convert pixel coordinates to stage position (for embryo POSITION calculation).
@@ -114,7 +114,7 @@ def stage_to_pixel_position(
     current_stage_y: float,
     image_center_x: float,
     image_center_y: float,
-    um_per_pixel: float = None,
+    um_per_pixel: float | None = None,
 ) -> tuple[float, float]:
     """
     Convert stage position to pixel coordinates (for DISPLAY/visualization).
@@ -154,7 +154,7 @@ def stage_to_pixel_position(
 
 
 def pixel_displacement_to_stage_movement(
-    pixel_displacement_x: float, pixel_displacement_y: float, um_per_pixel: float = None
+    pixel_displacement_x: float, pixel_displacement_y: float, um_per_pixel: float | None = None
 ) -> tuple[float, float]:
     """
     Convert pixel displacement to stage MOVEMENT (for centering an embryo).

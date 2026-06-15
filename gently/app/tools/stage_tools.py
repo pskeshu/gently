@@ -4,7 +4,7 @@ Stage Movement Tools
 Tools for controlling microscope XY stage movement.
 """
 
-from gently.harness.tools.helpers import get_embryo_or_error
+from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -24,8 +24,8 @@ takes ~0.5 seconds.""",
 )
 async def move_to_embryo(embryo_id: str, context: dict) -> str:
     """Move stage to embryo position"""
-    agent = context.get("agent")
-    client = context.get("client")
+    agent = ctx_get(context, "agent")
+    client = ctx_get(context, "client")
 
     if not agent:
         return "Error: No agent context"
@@ -66,7 +66,7 @@ positions which are in the experiment data.""",
 )
 async def get_stage_position(context: dict) -> str:
     """Get current stage position"""
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     if not client:
         return "Error: No microscope client connected"
@@ -92,9 +92,9 @@ For moving to a specific embryo, use move_to_embryo instead.""",
         ToolExample("Move stage to coordinates 1200, -600", {"x": 1200, "y": -600}),
     ],
 )
-async def move_stage(x: float, y: float, context: dict = None) -> str:
+async def move_stage(x: float, y: float, context: dict | None = None) -> str:
     """Move stage to arbitrary XY coordinates"""
-    client = context.get("client")
+    client = ctx_get(context, "client")
 
     if not client:
         return "Error: No microscope client connected"

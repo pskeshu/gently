@@ -1260,7 +1260,7 @@ class DeviceLayerServer(Service):
             if len(self._plan_execution_log) > 1000:
                 self._plan_execution_log = self._plan_execution_log[-1000:]
 
-    async def submit_plan(self, plan_name: str, kwargs: dict = None) -> dict:
+    async def submit_plan(self, plan_name: str, kwargs: dict | None = None) -> dict:
         """Submit a plan and wait for completion"""
         kwargs = kwargs or {}
 
@@ -2945,7 +2945,7 @@ class DeviceLayerServer(Service):
         base["sam_loaded"] = self._sam_detector is not None
         return base
 
-    async def run(self, host: str = None, port: int = None):
+    async def run(self, host: str | None = None, port: int | None = None):
         """Start the server and run until interrupted."""
         if host is not None:
             self.host = host

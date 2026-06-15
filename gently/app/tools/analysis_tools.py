@@ -18,7 +18,7 @@ async def analyze_volume(
     analysis_prompt: str,
     use_recent_context: bool = False,
     timepoint: int | None = None,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Analyze embryo volume with Claude Vision"""
     agent, err = require_agent(context)
@@ -60,7 +60,7 @@ Use when the user asks "what stage is embryo X", "is anything stuck/arrested",
 def get_recent_perceptions(
     embryo_id: str | None = None,
     n: int = 5,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Read live per-embryo perception state from the perception sessions.
 

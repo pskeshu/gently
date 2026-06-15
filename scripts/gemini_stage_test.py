@@ -67,7 +67,7 @@ def ensure_dependencies():
 # ============================================================================
 
 
-def discover_volumes(session_dir: Path, embryo_id: str = None) -> dict:
+def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict:
     """Discover volume files in a session directory."""
     if not session_dir.exists():
         return {}
@@ -258,7 +258,7 @@ def create_embryo_video(
     embryo_id: str,
     storage_path: Path,
     fps: int = 10,
-    output_path: Path = None,
+    output_path: Path | None = None,
 ) -> dict:
     """
     Create timelapse video from embryo images.
@@ -496,7 +496,7 @@ Be precise with frame numbers. Watch the ENTIRE video to capture all stage trans
 def analyze_with_gemini(
     video_path: str,
     model: str = "gemini-3-pro-preview",
-    api_key: str = None,
+    api_key: str | None = None,
     frame_count: int = 100,
     fps: int = 10,
     duration_seconds: float = 10.0,

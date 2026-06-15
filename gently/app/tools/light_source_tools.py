@@ -14,7 +14,7 @@ For experiment-scoped power changes that should ride with the embryo
 ``modify_parameters(embryo_id, {"laser_power_488_pct": ...}, ...)``.
 """
 
-from gently.harness.tools.helpers import require_agent
+from gently.harness.tools.helpers import ctx_get, require_agent
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -43,13 +43,13 @@ instead.""",
 async def set_laser_power(
     wavelength: int,
     pct: float,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Set laser power and read back the actual setpoint."""
     agent, err = require_agent(context)
     if err:
         return err
-    client = context.get("client")
+    client = ctx_get(context, "client")
     if not client:
         return "Error: Microscope not connected."
 
@@ -87,13 +87,13 @@ state before/after a change, or to spot-check the current illumination during a 
 )
 async def get_laser_power(
     wavelength: int,
-    context: dict = None,
+    context: dict | None = None,
 ) -> str:
     """Read current laser power %."""
     agent, err = require_agent(context)
     if err:
         return err
-    client = context.get("client")
+    client = ctx_get(context, "client")
     if not client:
         return "Error: Microscope not connected."
 

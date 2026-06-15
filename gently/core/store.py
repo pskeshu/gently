@@ -279,9 +279,9 @@ class GentlyStore:
     def create_session(
         self,
         session_id: str,
-        name: str = None,
-        description: str = None,
-        metadata: dict = None,
+        name: str | None = None,
+        description: str | None = None,
+        metadata: dict | None = None,
     ) -> str:
         """Create a new session. Returns session_id."""
         now = self._now()
@@ -355,11 +355,11 @@ class GentlyStore:
         self,
         session_id: str,
         embryo_id: str,
-        embryo_uid: str = None,
-        nickname: str = None,
-        position_x: float = None,
-        position_y: float = None,
-        calibration: dict = None,
+        embryo_uid: str | None = None,
+        nickname: str | None = None,
+        position_x: float | None = None,
+        position_y: float | None = None,
+        calibration: dict | None = None,
     ):
         """Register or update an embryo in a session."""
         now = self._now()
@@ -433,7 +433,7 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         volume: np.ndarray,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """
         Write a volume to disk, generate a JPEG projection, insert DB rows.
@@ -491,8 +491,8 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         incoming_path: Path,
-        metadata: dict = None,
-        volume_data: np.ndarray = None,
+        metadata: dict | None = None,
+        volume_data: np.ndarray | None = None,
     ) -> Path:
         """
         Zero-copy path: rename an existing TIFF to canonical location.
@@ -575,7 +575,7 @@ class GentlyStore:
         session_id: str,
         source: str,
         incoming_path: Path,
-        metadata: dict = None,
+        metadata: dict | None = None,
     ) -> Path:
         """Move a transient TIFF from *incoming/* to ``snapshots/{session}/``.
 
@@ -633,7 +633,7 @@ class GentlyStore:
         logger.debug("register_snapshot: %s -> %s", incoming_path.name, canonical)
         return canonical
 
-    def list_snapshots(self, session_id: str, source: str = None) -> list[dict[str, Any]]:
+    def list_snapshots(self, session_id: str, source: str | None = None) -> list[dict[str, Any]]:
         """List snapshot records for a session, optionally filtered by source."""
         if source:
             rows = self._conn.execute(
@@ -706,7 +706,7 @@ class GentlyStore:
             return None
         return self._abs_path(row["file_path"])
 
-    def list_volumes(self, session_id: str, embryo_id: str = None) -> list[VolumeInfo]:
+    def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata rows for a session (optionally filtered)."""
         if embryo_id:
             rows = self._conn.execute(
@@ -728,7 +728,7 @@ class GentlyStore:
             result.append(d)
         return result
 
-    def get_acquisition_params(self, session_id: str, embryo_id: str = None) -> dict | None:
+    def get_acquisition_params(self, session_id: str, embryo_id: str | None = None) -> dict | None:
         """
         Get the acquisition parameters used in a session.
 
@@ -887,10 +887,10 @@ class GentlyStore:
         session_id: str,
         name: str,
         method: str,
-        model_name: str = None,
+        model_name: str | None = None,
         trace_type: str = "perception",
         source: str = "live",
-        config: dict = None,
+        config: dict | None = None,
     ) -> int:
         """Create a perception run. Returns run_id."""
         now = self._now()
@@ -920,14 +920,14 @@ class GentlyStore:
         embryo_id: str,
         timepoint: int,
         predicted_stage: str,
-        confidence: float = None,
-        reasoning: str = None,
+        confidence: float | None = None,
+        reasoning: str | None = None,
         is_transitional: bool = False,
-        execution_time_ms: float = None,
-        trace_data: dict = None,
-        observed_features: dict = None,
-        ground_truth_stage: str = None,
-        is_correct: int = None,
+        execution_time_ms: float | None = None,
+        trace_data: dict | None = None,
+        observed_features: dict | None = None,
+        ground_truth_stage: str | None = None,
+        is_correct: int | None = None,
     ) -> int:
         """
         Insert a prediction row. Optionally writes trace JSON file.
@@ -981,7 +981,7 @@ class GentlyStore:
             return cursor.lastrowid
 
     def complete_perception_run(
-        self, run_id: int, status: str = "completed", error_message: str = None
+        self, run_id: int, status: str = "completed", error_message: str | None = None
     ):
         """Mark a perception run as completed or failed."""
         now = self._now()
@@ -995,8 +995,8 @@ class GentlyStore:
     def get_predictions(
         self,
         session_id: str,
-        embryo_id: str = None,
-        run_id: int = None,
+        embryo_id: str | None = None,
+        run_id: int | None = None,
     ) -> list[PredictionInfo]:
         """Query predictions with optional filters."""
         clauses = ["session_id = ?"]
@@ -1033,9 +1033,9 @@ class GentlyStore:
         embryo_id: str,
         stage: str,
         start_timepoint: int,
-        end_timepoint: int = None,
-        annotator: str = None,
-        notes: str = None,
+        end_timepoint: int | None = None,
+        annotator: str | None = None,
+        notes: str | None = None,
     ):
         """Insert or update a ground-truth annotation."""
         with self._tx():

@@ -718,7 +718,7 @@ class AgentBridge:
         self,
         command: str,
         send_fn: Callable[[dict], Coroutine],
-        choice_futures: dict = None,
+        choice_futures: dict | None = None,
     ) -> None:
         """
         Execute a slash command and send the result.
@@ -1413,7 +1413,7 @@ class AgentBridge:
                 lines = [f"Creating timelapse videos (fps={fps})..."]
                 for eid, vol_paths in all_volumes.items():
                     output_path = session_images_dir / f"{eid}_timelapse.mp4"
-                    create_timelapse_video(vol_paths, str(output_path), fps=fps)
+                    create_timelapse_video(vol_paths, output_path, fps=fps)
                     lines.append(f"  {eid}: {len(vol_paths)} frames → {output_path.name}")
 
                 await send_fn(
@@ -1654,7 +1654,7 @@ class AgentBridge:
             "has_sam": client.has_sam if client else False,
         }
 
-    def _get_embryos_data(self, embryo_id: str = None) -> dict:
+    def _get_embryos_data(self, embryo_id: str | None = None) -> dict:
         """Build structured embryo data."""
         exp = self.agent.experiment
         if embryo_id:

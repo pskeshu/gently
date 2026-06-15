@@ -6,6 +6,7 @@ development rate, so these let the agent hold or shift the sample temperature as
 part of closed-loop experiments.
 """
 
+from gently.harness.tools.helpers import ctx_get
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -33,7 +34,7 @@ async def set_temperature(target_c: float, context: dict) -> str:
     target_c : float
         Target temperature in degrees Celsius (0.0-99.9).
     """
-    client = context.get("client")
+    client = ctx_get(context, "client")
     try:
         result = await client.set_temperature(target_c)
         if result.get("success"):
@@ -62,7 +63,7 @@ async def set_temperature(target_c: float, context: dict) -> str:
 )
 async def get_temperature(context: dict) -> str:
     """Read current temperature, setpoint, and lock state."""
-    client = context.get("client")
+    client = ctx_get(context, "client")
     try:
         r = await client.get_temperature()
         if r.get("success"):

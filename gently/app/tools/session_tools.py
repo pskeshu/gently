@@ -20,7 +20,7 @@ from gently.harness.tools.registry import ToolCategory, ToolExample, tool
     category=ToolCategory.ANALYSIS,
 )
 async def assess_image_quality(
-    embryo_id: str = None, suggest_parameters: bool = True, context: dict = None
+    embryo_id: str | None = None, suggest_parameters: bool = True, context: dict | None = None
 ) -> str:
     """Assess image quality and suggest improvements"""
     agent, err = require_agent(context)
@@ -143,7 +143,7 @@ SUGGESTIONS: [List specific parameter adjustments if any aspect is POOR]"""
     ),
     category=ToolCategory.DATA,
 )
-def get_session_stats(context: dict = None) -> str:
+def get_session_stats(context: dict | None = None) -> str:
     """Get session statistics from interaction logger"""
     agent, err = require_agent(context)
     if err:
@@ -172,7 +172,9 @@ def get_session_stats(context: dict = None) -> str:
     description="Compare developmental progress across multiple embryos in the current experiment",
     category=ToolCategory.ANALYSIS,
 )
-def compare_embryo_development(embryo_ids: list[str] = None, context: dict = None) -> str:
+def compare_embryo_development(
+    embryo_ids: list[str] | None = None, context: dict | None = None
+) -> str:
     """Compare embryo development"""
     agent, err = require_agent(context)
     if err:
@@ -234,7 +236,7 @@ def compare_embryo_development(embryo_ids: list[str] = None, context: dict = Non
     ),
     category=ToolCategory.DATA,
 )
-def analyze_corrections(limit: int = 50, context: dict = None) -> str:
+def analyze_corrections(limit: int = 50, context: dict | None = None) -> str:
     """Analyze correction patterns"""
     agent, err = require_agent(context)
     if err:
@@ -260,8 +262,8 @@ def analyze_corrections(limit: int = 50, context: dict = None) -> str:
         "",
     ]
 
-    indicator_counts = {}
-    tool_corrections = {}
+    indicator_counts: dict[str, int] = {}
+    tool_corrections: dict[str, int] = {}
 
     for corr in corrections[:limit]:
         for indicator in corr.correction_indicators:
@@ -294,7 +296,7 @@ def analyze_corrections(limit: int = 50, context: dict = None) -> str:
     description="Export interaction logs for external analysis",
     category=ToolCategory.DATA,
 )
-def export_interaction_log(format: str = "summary", context: dict = None) -> str:
+def export_interaction_log(format: str = "summary", context: dict | None = None) -> str:
     """Export interaction log"""
     agent, err = require_agent(context)
     if err:
@@ -359,7 +361,7 @@ Use list_sessions or /sessions first to find the session_id to import from.""",
     ],
 )
 def import_embryos_from_session(
-    session_id: str, clear_existing: bool = False, context: dict = None
+    session_id: str, clear_existing: bool = False, context: dict | None = None
 ) -> str:
     """
     Import embryos from another session.
@@ -415,7 +417,7 @@ valuable for conversation history too.""",
         ToolExample("List recent sessions", {"limit": 5}),
     ],
 )
-def list_sessions(limit: int = 20, context: dict = None) -> str:
+def list_sessions(limit: int = 20, context: dict | None = None) -> str:
     """
     List available sessions.
 
