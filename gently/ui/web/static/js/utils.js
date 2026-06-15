@@ -6,6 +6,66 @@
 const TABS = { HOME: 'home', EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions', DEVICES: 'devices', EXPERIMENT: 'experiment' };
 
 /**
+ * Extract the XY firmware fence (the addressable stage box) from a device-state
+ * properties map. The ASI adapter exposes LowerLimX/UpperLimX/LowerLimY/
+ * UpperLimY in mm; we convert to µm. Single source of truth for both the 2D
+ * devices map and the 3D optical-space view.
+ *
+ * @param {Object} propsByDevice - payload.properties from DEVICE_STATE_UPDATE
+ * @returns {{x:[number,number], y:[number,number]}|null}
+ */
+function extractFirmwareBox(propsByDevice) {
+    if (!propsByDevice) return null;
+    for (const name of Object.keys(propsByDevice)) {
+        const p = propsByDevice[name] || {};
+        const xMinMm = parseFloat(p['LowerLimX(mm)']);
+        const xMaxMm = parseFloat(p['UpperLimX(mm)']);
+        const yMinMm = parseFloat(p['LowerLimY(mm)']);
+        const yMaxMm = parseFloat(p['UpperLimY(mm)']);
+        if (isFinite(xMinMm) && isFinite(xMaxMm) &&
+            isFinite(yMinMm) && isFinite(yMaxMm)) {
+            return {
+                x: [xMinMm * 1000, xMaxMm * 1000],   // mm → µm
+                y: [yMinMm * 1000, yMaxMm * 1000],
+            };
+        }
+    }
+    return null;
+}
+
+/**
+ * Build a coordinate mapper from device microns to Three.js scene units.
+ * Centers each axis on its range midpoint and divides by the LARGEST span so
+ * the whole scene fits a ~[-0.5, 0.5] cube while keeping axes proportional
+ * (anisotropic Z vs XY preserved). Returns helpers used by all scene objects
+ * so a single scale governs geometry and camera distance.
+ *
+ * @param {{xRange:[number,number], yRange:[number,number], zRange:[number,number]}} ranges (µm)
+ */
+function makeSceneScaler(ranges) {
+    const xc = (ranges.xRange[0] + ranges.xRange[1]) / 2;
+    const yc = (ranges.yRange[0] + ranges.yRange[1]) / 2;
+    const zc = (ranges.zRange[0] + ranges.zRange[1]) / 2;
+    const xs = Math.abs(ranges.xRange[1] - ranges.xRange[0]);
+    const ys = Math.abs(ranges.yRange[1] - ranges.yRange[0]);
+    const zs = Math.abs(ranges.zRange[1] - ranges.zRange[0]);
+    const maxExtent = Math.max(xs, ys, zs, 1e-6);
+    return {
+        maxExtent,
+        center: { x: xc, y: yc, z: zc },
+        // Map an absolute µm position on one axis into scene space.
+        toScene(um, axis) {
+            const c = axis === 'x' ? xc : axis === 'y' ? yc : zc;
+            return (um - c) / maxExtent;
+        },
+        // Map a µm length (span) into scene units (no centering).
+        scaleLen(um) {
+            return um / maxExtent;
+        },
+    };
+}
+
+/**
  * HTML-escape a string (safe for insertion into innerHTML).
  * Uses the browser's built-in text node escaping.
  */

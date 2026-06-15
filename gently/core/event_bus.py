@@ -86,6 +86,7 @@ class EventType(Enum):
     DEVICE_STATE_UPDATE = auto()  # Periodic device-state snapshot from device layer
     BOTTOM_CAMERA_FRAME = auto()  # Live JPEG frame from the bottom camera stream
     EMBRYOS_UPDATE = auto()  # Full embryo list snapshot from agent.experiment
+    SCAN_GEOMETRY_UPDATE = auto()  # Scan cuboid + light-sheet mode for the 3D optical-space view
 
     # Python logging.LogRecord republished onto the bus so the Events page
     # surfaces what would otherwise only land in the terminal. See

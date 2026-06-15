@@ -14,7 +14,7 @@
  */
 const DevicesManager = (function () {
     const STALE_AFTER_MS = 4000;
-    const VIEWS = ['map', 'details'];
+    const VIEWS = ['map', 'details', 'optical3d'];
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     // Status / details DOM
@@ -1500,6 +1500,12 @@ const DevicesManager = (function () {
         if (typeof updateViewButtons === 'function') {
             updateViewButtons('devices-view-switcher', viewName);
         }
+        // The 3D optical-space view owns its own WebGL module. Build it lazily
+        // on first activation (the panel was display:none, so its container had
+        // no size until now); init() is idempotent and resizes on re-entry.
+        if (viewName === 'optical3d' && typeof Occupancy3DManager !== 'undefined') {
+            Occupancy3DManager.init();
+        }
     }
 
     function setupViewSwitcher() {
@@ -1511,6 +1517,7 @@ const DevicesManager = (function () {
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
             if (e.key === 'm') { e.preventDefault(); switchView('map'); }
             else if (e.key === 'd') { e.preventDefault(); switchView('details'); }
+            else if (e.key === 'v') { e.preventDefault(); switchView('optical3d'); }
         });
     }
 

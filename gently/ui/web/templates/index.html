@@ -417,6 +417,7 @@
                     <div class="view-switcher" id="devices-view-switcher">
                         <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
                         <button class="view-btn" data-view="details" title="Details (d)">Details</button>
+                        <button class="view-btn" data-view="optical3d" title="3D volume (v)">3D</button>
                     </div>
                 </div>
                 <div class="devices-status">
@@ -648,6 +649,40 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 3D view: live digital-twin of the addressable imaging volume -->
+            <div class="devices-view devices-view-optical3d" id="devices-view-optical3d" style="display:none">
+              <style>
+                .occ3d-wrap { position: relative; width: 100%; height: calc(100vh - 200px); min-height: 420px; }
+                .occ3d-canvas { position: absolute; inset: 0; background: #0a0e12; border-radius: 8px; }
+                .occ3d-overlay { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+                .occ3d-overlay > * { pointer-events: auto; }
+                .occ3d-mode { align-self: flex-start; font: 600 12px/1 'Inter Tight', system-ui, sans-serif; letter-spacing: .08em; color: #39d0ff; border: 1px solid #39d0ff; border-radius: 4px; padding: 5px 9px; background: rgba(10,14,18,.7); }
+                .occ3d-mode.is-pencil { color: #ffd166; border-color: #ffd166; }
+                .occ3d-readouts { font: 12px/1.5 ui-monospace, monospace; color: #cdd6df; background: rgba(10,14,18,.7); border: 1px solid #1f2a33; border-radius: 6px; padding: 8px 10px; min-width: 172px; }
+                .occ3d-row { display: flex; justify-content: space-between; gap: 14px; }
+                .occ3d-row span { color: #7d8b97; }
+                .occ3d-row b { color: #e7eef4; font-weight: 600; }
+                .occ3d-minimap { width: 200px; height: 120px; background: rgba(10,14,18,.7); border: 1px solid #1f2a33; border-radius: 6px; }
+                .occ3d-mm-box { fill: rgba(51,65,77,.25); stroke: #4a5a66; stroke-width: 1; }
+                .occ3d-mm-cuboid { fill: none; stroke: #14b8c4; stroke-width: 1; }
+                .occ3d-mm-stage { fill: #ff5a4d; }
+                .occ3d-mm-embryo { fill: #6fae46; }
+                .occ3d-hint { font: 11px/1 system-ui, sans-serif; color: #5e6b76; }
+                .occ3d-demo-btn { align-self: flex-start; font: 600 11px/1 system-ui; color: #cdd6df; background: rgba(10,14,18,.7); border: 1px solid #2a3a44; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+                .occ3d-demo-btn.is-on { color: #39d0ff; border-color: #39d0ff; }
+              </style>
+              <div class="occ3d-wrap">
+                <div id="occ3d-container" class="occ3d-canvas"></div>
+                <div class="occ3d-overlay">
+                  <div class="occ3d-mode" id="occ3d-mode">SHEET</div>
+                  <div class="occ3d-readouts" id="occ3d-readouts"></div>
+                  <svg class="occ3d-minimap" id="occ3d-minimap" viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet"></svg>
+                  <button class="occ3d-demo-btn" id="occ3d-demo-btn">▶ Demo (no hardware)</button>
+                  <div class="occ3d-hint">drag rotate · wheel zoom · dbl-click reset</div>
+                </div>
+              </div>
+            </div>
         </div>
     </div>
 
@@ -748,6 +783,7 @@
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/js/occupancy3d.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/home.js"></script>
     <script src="/static/js/campaigns.js"></script>

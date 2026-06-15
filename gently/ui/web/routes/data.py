@@ -214,6 +214,48 @@ def create_router(server) -> APIRouter:
             }
         }
 
+    @router.get("/api/devices/scan_geometry")
+    async def get_scan_geometry():
+        """Return the most recent scan geometry for the 3D optical-space view.
+
+        SCAN_GEOMETRY_UPDATE is published only when a volume is acquired, so a
+        page opened before the first acquisition would have no cuboid to draw.
+        This serves the last emitted payload (stashed on the agent by
+        acquisition_tools._publish_scan_geometry), or nominal defaults so the
+        scene is never empty.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        last = getattr(agent, "last_scan_geometry", None) if agent else None
+        if isinstance(last, dict):
+            return last
+        # Nominal defaults (calibration defaults; no acquisition yet).
+        num_slices = 50
+        piezo_amplitude = 25.0
+        piezo_center = 50.0
+        z_extent = 2.0 * piezo_amplitude
+        return {
+            "embryo_id": None,
+            "stage_position_um": {"x": None, "y": None},
+            "scan": {
+                "num_slices": num_slices,
+                "exposure_ms": 10.0,
+                "galvo_amplitude_deg": 0.5,
+                "galvo_center_deg": 0.0,
+                "piezo_amplitude_um": piezo_amplitude,
+                "piezo_center_um": piezo_center,
+            },
+            "derived": {
+                "z_extent_um": z_extent,
+                "slice_spacing_um": z_extent / (num_slices - 1),
+                "z_min_um": piezo_center - piezo_amplitude,
+                "z_max_um": piezo_center + piezo_amplitude,
+            },
+            "mode": "sheet",
+            "ts": None,
+            "is_default": True,
+        }
+
     @router.get("/api/devices/bottom_camera/status")
     async def get_bottom_camera_status():
         """Return whether the bottom-camera stream bridge is running."""
