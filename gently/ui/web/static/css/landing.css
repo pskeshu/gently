@@ -279,6 +279,21 @@ body.ux-v2 .home-hero { display: none; }
 }
 .v2-plan-skip:hover { color: var(--text-secondary, #475569); }
 
+/* ── Plan-ready state: the design is done, signpost the finish line ───────── */
+.v2-screen-plan.ready .v2-plan-orb {
+    background: radial-gradient(closest-side at 38% 34%, #ffffff, #c8f0d4 40%, var(--accent-green, #16a34a) 100%);
+}
+.v2-screen-plan.ready .v2-plan-who { color: var(--accent-green, #16a34a); }
+.v2-screen-plan.ready .v2-plan-foot { border-top-color: color-mix(in srgb, var(--accent-green) 35%, var(--border)); }
+/* promote "open the workspace" from a quiet skip link to the primary action */
+.v2-screen-plan.ready #v2-plan-continue {
+    background: var(--accent-green, #16a34a); color: #fff;
+    border-radius: 999px; padding: 11px 20px; font-weight: 600;
+}
+.v2-screen-plan.ready #v2-plan-continue:hover {
+    color: #fff; background: color-mix(in srgb, var(--accent-green) 88%, #000);
+}
+
 /* ── Agent-activity feed: claude.ai-style collapsible tool cards ──────────── */
 /* Both screens share the .v2-landing-inner top anchor (no per-screen align flip —
    that was the welcome→plan lurch). The feed is a fixed-height viewport (height
@@ -369,13 +384,37 @@ body.ux-v2[data-theme="dark"] .v2-plan-error {
 /* plan-panel: phases + tasks (real plan), and a free-text-answer row variant */
 .v2-plan-phase { margin-top: 12px; }
 .v2-plan-phase:first-child { margin-top: 0; }
-.v2-plan-phase-h { font-size: 13px; font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin-bottom: 5px; }
-.v2-plan-task { display: flex; gap: 8px; font-size: var(--v2-fs-cap); color: var(--text-secondary, #475569); padding: 2px 0; }
-.v2-plan-task::before { content: "·"; color: var(--text-muted, #94a3b8); }
+.v2-plan-phase-h {
+    font-size: var(--v2-fs-eyebrow); font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-secondary, #475569); margin-bottom: 6px;
+}
+/* a plan item: "P.I" number · type-color dot · title · optional duration.
+   the type dot encodes the item kind (imaging/genetics/analysis/…) at a glance. */
+.v2-plan-task {
+    display: grid; grid-template-columns: auto 8px 1fr auto; align-items: baseline;
+    gap: 9px; font-size: var(--v2-fs-cap); color: var(--text-secondary, #475569);
+    padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--border, #e4e9f0) 55%, transparent);
+}
+.v2-plan-phase .v2-plan-task:first-child { border-top: 0; }
+.v2-task-num {
+    font: 600 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-muted, #94a3b8); font-variant-numeric: tabular-nums;
+}
+.v2-task-dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; background: var(--text-muted, #94a3b8); }
+.v2-task-ttl { min-width: 0; color: var(--text, #0f172a); line-height: 1.45; }
+.v2-task-days {
+    font-size: 10.5px; font-weight: 600; color: var(--text-muted, #94a3b8);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.v2-plan-task.type-imaging .v2-task-dot { background: var(--accent, #2f6df6); }
+.v2-plan-task.type-genetics .v2-task-dot { background: #8b5cf6; }
+.v2-plan-task.type-analysis .v2-task-dot { background: var(--accent-green, #16a34a); }
+.v2-plan-task.type-bench .v2-task-dot { background: #d97706; }
+/* decision points read as gates — a rotated square, not a round bead */
+.v2-plan-task.type-decision_point .v2-task-dot { background: #e11d48; border-radius: 1px; transform: rotate(45deg); }
 .v2-plan-title-row { font-size: var(--v2-fs-sm); font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin-bottom: 8px; }
 .v2-plan-row.v2-plan-row-freetext .v { font-style: italic; }
-.v2-plan-task-empty { color: var(--text-muted, #94a3b8); font-style: italic; }
-.v2-plan-task-empty::before { color: transparent; }
+.v2-plan-task-empty { grid-column: 1 / -1; color: var(--text-muted, #94a3b8); font-style: italic; }
 
 /* THE PLAN pager: ‹ Prev · "Phase · i of N" · Next › + dots, one phase per page */
 .v2-plan-pager { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; }

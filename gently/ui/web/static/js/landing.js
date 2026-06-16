@@ -22,6 +22,7 @@ const V2Landing = (() => {
     let runningTools = {};         // tool name -> stack of running card elements
     let feedHadContent = false;    // did this turn surface anything in the feed?
     let capturedCampaignId = null; // best-effort id scraped from tool results
+    let planProposed = false;      // propose_plan ran → plan is ready to commit
 
     const $ = (id) => document.getElementById(id);
 
@@ -137,7 +138,8 @@ const V2Landing = (() => {
         }
         feedPages = []; feedPage = 0; curPageEl = null; pendingNewPage = false;
         feedTextEl = null; feedThinkingEl = null; runningTools = {}; feedHadContent = false;
-        capturedCampaignId = null;
+        capturedCampaignId = null; planProposed = false;
+        clearPlanReady();
         hidePlanError();
     }
     function newFeedPage() {
@@ -291,6 +293,7 @@ const V2Landing = (() => {
         switch (act.kind) {
             case 'turn_start':
                 feedTextEl = null; feedThinkingEl = null; pendingNewPage = true; hidePlanError(); clearFallback();
+                clearPlanReady();   // new work in flight — drop any "ready" state
                 showThinking(true, 'reviewing your campaign and plan…');
                 break;
             case 'thinking': {
@@ -344,6 +347,7 @@ const V2Landing = (() => {
                 captureCampaignId(act.summary);
                 captureCampaignId(act.full);
                 if (PLAN_TOOLS.has(act.name)) schedulePlanRefresh();
+                if (act.name === 'propose_plan' && !act.is_error) planProposed = true;
                 if (act.name === 'ask_user_choice') break;
                 feedTextEl = null; feedThinkingEl = null;
                 const arr = runningTools[act.name] || [];
@@ -357,6 +361,10 @@ const V2Landing = (() => {
                 showThinking(false); feedTextEl = null; feedThinkingEl = null;
                 refreshPlanPanel();
                 if (!current && !feedHadContent) showFallback();
+                // Plan proposed and the agent has settled (no pending question) →
+                // the design is done. Surface a clear "ready" state instead of
+                // leaving the user parked on the last wizard step.
+                if (planProposed && !current) showPlanReady();
                 break;
             case 'turn_error':
                 showPlanError(act.error || 'Something went wrong — open the conversation for detail.');
@@ -371,6 +379,48 @@ const V2Landing = (() => {
         d.innerHTML = 'Gently replied in prose — <a>open the conversation</a> to read it.';
         d.querySelector('a').addEventListener('click', openChat);
         feedTarget().appendChild(d);
+    }
+
+    // ── plan-ready state ───────────────────────────────────────────────
+    // Once the agent has proposed the plan and gone quiet, the wizard is done.
+    // Mark the screen "ready": rename the header, count phases/items from the
+    // panel, and promote "open workspace" to the obvious primary action — so the
+    // finish line is signposted instead of looking like one more wizard step.
+    function planCounts() {
+        let phases = 0, items = 0;
+        planPages.forEach(p => {
+            if (p.name !== 'Tasks') phases++;
+            items += (p.items || []).length;
+        });
+        return { phases, items };
+    }
+    function showPlanReady() {
+        const sec = document.querySelector('.v2-screen-plan');
+        if (!sec) return;
+        sec.classList.add('ready');
+        showThinking(false);
+        const who = sec.querySelector('.v2-plan-who');
+        const title = sec.querySelector('.v2-plan-title');
+        if (who) who.textContent = 'Gently · plan ready';
+        if (title) {
+            const { phases, items } = planCounts();
+            title.textContent = items
+                ? `Your plan is ready — ${items} item${items === 1 ? '' : 's'} across ${phases} phase${phases === 1 ? '' : 's'}`
+                : 'Your plan is ready';
+        }
+        const cont = $('v2-plan-continue');
+        if (cont) cont.textContent = 'Open the workspace ›';
+    }
+    function clearPlanReady() {
+        const sec = document.querySelector('.v2-screen-plan');
+        if (!sec || !sec.classList.contains('ready')) return;
+        sec.classList.remove('ready');
+        const who = sec.querySelector('.v2-plan-who');
+        const title = sec.querySelector('.v2-plan-title');
+        if (who) who.textContent = 'Gently · planning';
+        if (title) title.textContent = "Let's design your run";
+        const cont = $('v2-plan-continue');
+        if (cont) cont.textContent = 'Continue in workspace ›';
     }
 
     // ── THE PLAN panel: mirror the real campaign tree ──────────────────
@@ -392,6 +442,12 @@ const V2Landing = (() => {
         c = c || {};
         return c.shorthand || c.display_name || c.description || 'Plan';
     }
+    // Phases read better by their human name ("Phase 1 — Reporter validation")
+    // than by their code shorthand ("nrp-p1"), which looks like a machine id.
+    function phaseName(c) {
+        c = c || {};
+        return c.display_name || c.description || c.shorthand || 'Phase';
+    }
     // THE PLAN renders as a pager — one phase per page with ‹ Prev / Next ›,
     // a position label, and dots — instead of one long scroll. planPage is held
     // across re-renders (the panel refetches on every plan-writing tool) so the
@@ -409,7 +465,7 @@ const V2Landing = (() => {
         if (rootItems.length) pages.push({ name: 'Tasks', items: rootItems });
         phases.forEach(phase => {
             if (!phase) return;
-            pages.push({ name: planName(phase.campaign), items: phase.items || [] });
+            pages.push({ name: phaseName(phase.campaign), items: phase.items || [] });
         });
         planPages = pages;
         planTitleText = planName(tree.campaign);
@@ -442,7 +498,8 @@ const V2Landing = (() => {
             prev.addEventListener('click', () => { if (planPage > 0) { planPage--; drawPlanPage(); } });
             const pos = document.createElement('span');
             pos.className = 'v2-plan-pager-pos';
-            pos.textContent = `${page.name} · ${i + 1} of ${n}`;
+            pos.textContent = page.name;   // position shown by the dots below
+            pos.title = `${page.name} · ${i + 1} of ${n}`;
             const next = document.createElement('button');
             next.className = 'v2-plan-pager-btn'; next.type = 'button'; next.textContent = 'Next ›';
             next.disabled = i === n - 1;
@@ -459,11 +516,30 @@ const V2Landing = (() => {
         const tasks = document.createElement('div');
         tasks.className = 'v2-plan-phase';
         const items = page.items || [];
+        // phase ordinal (1-based) for "P.I" numbering; the rootItems "Tasks" page
+        // isn't a phase, so it numbers items bare (1, 2, …).
+        const phaseOrd = pages.slice(0, i + 1).filter(p => p.name !== 'Tasks').length;
         if (items.length) {
-            items.forEach(it => {
+            items.forEach((it, idx) => {
+                const type = String(it.type || '').toLowerCase();
                 const t = document.createElement('div');
-                t.className = 'v2-plan-task';
-                t.textContent = it.title || it.shorthand || '(task)';
+                t.className = 'v2-plan-task type-' + (type || 'other');
+                const num = document.createElement('span');
+                num.className = 'v2-task-num';
+                num.textContent = phaseOrd ? `${phaseOrd}.${idx + 1}` : `${idx + 1}`;
+                const dot = document.createElement('span');
+                dot.className = 'v2-task-dot';
+                dot.title = type || 'task';
+                const ttl = document.createElement('span');
+                ttl.className = 'v2-task-ttl';
+                ttl.textContent = it.title || it.shorthand || '(task)';
+                t.append(num, dot, ttl);
+                if (it.estimated_days) {
+                    const d = document.createElement('span');
+                    d.className = 'v2-task-days';
+                    d.textContent = `${it.estimated_days}d`;
+                    t.append(d);
+                }
                 tasks.appendChild(t);
             });
         } else {
