@@ -1,0 +1,62 @@
+/* ── Notebook tab (LIBRARY) ──────────────────────────────────────────────
+   The reading room for the shared lab notebook: thread rail + kind filter +
+   note cards. Tokens reuse the app theme (--accent, --accent-green, --border …). */
+
+.nb-container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+
+.nb-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.nb-title { font-size: 22px; font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin: 0; }
+
+.nb-kinds { display: flex; gap: 6px; }
+.nb-kind {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 6px 13px; font: inherit; font-size: 13px; cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s;
+}
+.nb-kind:hover { color: var(--text, #0f172a); border-color: var(--border-strong, #cbd5e1); }
+.nb-kind.active { background: var(--accent, #2f6df6); border-color: var(--accent, #2f6df6); color: #fff; }
+
+.nb-body-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 22px; align-items: start; }
+@media (max-width: 760px) { .nb-body-wrap { grid-template-columns: 1fr; } }
+
+/* thread rail (the inquiry spine) */
+.nb-threads { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 12px; }
+.nb-thread {
+    text-align: left; background: none; border: 0; cursor: pointer; font: inherit; font-size: 13px;
+    color: var(--text-secondary, #475569); padding: 8px 11px; border-radius: 9px;
+    transition: background .15s, color .15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nb-thread:hover { background: var(--bg-hover, #f1f5f9); color: var(--text, #0f172a); }
+.nb-thread.active { background: var(--accent-soft, #eaf1ff); color: var(--accent, #2f6df6); font-weight: 600; }
+
+/* notes */
+.nb-notes { display: flex; flex-direction: column; gap: 12px; }
+.nb-empty { color: var(--text-muted, #94a3b8); font-size: 14px; font-style: italic; padding: 28px 4px; }
+
+.nb-card {
+    border: 1px solid var(--border, #e4e9f0); border-radius: 13px; padding: 14px 16px;
+    background: var(--bg-card, #fff); box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.nb-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.nb-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 2px 9px; border-radius: 999px; color: #fff; background: var(--text-muted, #94a3b8);
+}
+.nb-badge.nb-k-obs { background: var(--accent, #2f6df6); }
+.nb-badge.nb-k-find { background: var(--accent-green, #16a34a); }
+.nb-badge.nb-k-q { background: #d97706; }
+.nb-author { font-size: 12px; color: var(--text-secondary, #475569); }
+.nb-status {
+    margin-left: auto; font-size: 11px; color: var(--text-muted, #94a3b8);
+    text-transform: uppercase; letter-spacing: .05em;
+}
+.nb-body-text { font-size: 14px; line-height: 1.5; color: var(--text, #0f172a); white-space: pre-wrap; }
+
+.nb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.nb-chip {
+    font-size: 11.5px; color: var(--text-secondary, #475569);
+    background: var(--bg-hover, #f1f5f9); border-radius: 7px; padding: 2px 8px;
+}

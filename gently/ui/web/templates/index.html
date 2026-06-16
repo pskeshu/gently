@@ -18,6 +18,7 @@
     <link rel="stylesheet" href="/static/css/ask-stage.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <link rel="stylesheet" href="/static/css/landing.css">
+    <link rel="stylesheet" href="/static/css/notebook.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% if ux_v2 %}
@@ -122,6 +123,7 @@
           <div class="v2-nav-label">Library</div>
           <button class="v2-nav-item" data-tab="plans">Plans</button>
           <button class="v2-nav-item" data-tab="sessions">Sessions</button>
+          <button class="v2-nav-item" data-tab="notebook">Notebook</button>
         </div>
         <div class="v2-nav-group">
           <div class="v2-nav-label">System</div>
@@ -407,6 +409,25 @@
     <!-- Sessions Tab -->
     <div id="sessions-content" class="tab-content">
         {% include '_sessions_panel.html' %}
+    </div>
+
+    <!-- Notebook Tab -->
+    <div id="notebook-content" class="tab-content">
+        <div class="nb-container">
+            <div class="nb-header">
+                <h2 class="nb-title">Notebook</h2>
+                <div class="nb-kinds">
+                    <button class="nb-kind active" data-nb-kind="">All</button>
+                    <button class="nb-kind" data-nb-kind="observation">Observations</button>
+                    <button class="nb-kind" data-nb-kind="finding">Findings</button>
+                    <button class="nb-kind" data-nb-kind="question">Questions</button>
+                </div>
+            </div>
+            <div class="nb-body-wrap">
+                <aside class="nb-threads" id="nb-threads"></aside>
+                <div class="nb-notes" id="nb-notes"></div>
+            </div>
+        </div>
     </div>
 
     <!-- Devices Tab -->
@@ -785,6 +806,7 @@
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="/static/js/occupancy3d.js"></script>
+    <script src="/static/js/notebook.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/home.js"></script>
     <script src="/static/js/campaigns.js"></script>

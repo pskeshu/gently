@@ -100,6 +100,11 @@ function switchTab(tabName) {
         ExperimentOverview.init();
     }
 
+    // Lazy-init Notebook tab
+    if (tabName === TABS.NOTEBOOK && typeof NotebookApp !== 'undefined') {
+        NotebookApp.init();
+    }
+
     // Update statusbar for context
     updateStatusbar();
 }
@@ -651,7 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT) {
+        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK) {
             switchTab(tab);
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);
