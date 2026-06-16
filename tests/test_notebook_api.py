@@ -67,3 +67,19 @@ class TestGetNote:
         client = TestClient(_make_app(_seed(file_context_store)))
         resp = client.get("/api/notebook/notes/nope")
         assert resp.status_code == 404
+
+
+class TestThreads:
+    def test_no_store(self):
+        client = TestClient(_make_app(None))
+        assert client.get("/api/notebook/threads").json() == {"available": False, "threads": []}
+
+    def test_thread_counts(self, file_context_store):
+        cs = file_context_store
+        nb = cs.notebook
+        nb.write_note(Note(id="a", kind=NoteKind.QUESTION, body="q", threads=["t1"]))
+        nb.write_note(Note(id="b", kind=NoteKind.FINDING, body="f", threads=["t1", "t2"]))
+        client = TestClient(_make_app(cs))
+        data = client.get("/api/notebook/threads").json()
+        assert data["available"] is True
+        assert data["threads"] == [{"id": "t1", "count": 2}, {"id": "t2", "count": 1}]

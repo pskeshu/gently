@@ -58,4 +58,16 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=404, detail="note not found")
         return note_to_dict(note)
 
+    @router.get("/api/notebook/threads")
+    async def list_threads():
+        nb = _nb()
+        if nb is None:
+            return {"available": False, "threads": []}
+        counts: dict[str, int] = {}
+        for n in nb.query_notes():
+            for t in n.threads:
+                counts[t] = counts.get(t, 0) + 1
+        threads = [{"id": t, "count": c} for t, c in sorted(counts.items())]
+        return {"available": True, "threads": threads}
+
     return router
