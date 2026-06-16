@@ -582,6 +582,11 @@ class FileContextStore:
         return children
 
     def get_nth_subcampaign(self, parent_id: str, n: int) -> Campaign | None:
+        # Tolerate n arriving as a numeric string (tool args are often stringified).
+        try:
+            n = int(n)
+        except (ValueError, TypeError):
+            return None
         phases = self.get_subcampaigns(parent_id)
         if 1 <= n <= len(phases):
             return phases[n - 1]

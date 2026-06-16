@@ -158,6 +158,16 @@ async def create_plan_item(
 
     store = agent.context_store
     spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
+    if isinstance(phase_number, str):
+        try:
+            phase_number = int(phase_number)
+        except (ValueError, TypeError):
+            phase_number = None
+    if isinstance(phase_order, str):
+        try:
+            phase_order = int(phase_order)
+        except (ValueError, TypeError):
+            phase_order = -1
 
     # Resolve phase_number → subcampaign ID
     target_campaign_id = campaign_id
