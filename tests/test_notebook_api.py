@@ -83,3 +83,10 @@ class TestThreads:
         data = client.get("/api/notebook/threads").json()
         assert data["available"] is True
         assert data["threads"] == [{"id": "t1", "count": 2}, {"id": "t2", "count": 1}]
+
+
+class TestLimit:
+    def test_limit_returns_newest(self, file_context_store):
+        client = TestClient(_make_app(_seed(file_context_store)))
+        data = client.get("/api/notebook/notes?limit=1").json()
+        assert len(data["notes"]) == 1  # newest-first, capped

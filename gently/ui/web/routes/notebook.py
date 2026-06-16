@@ -34,6 +34,7 @@ def create_router(server) -> APIRouter:
         strain: str | None = None,
         embryo: str | None = None,
         thread: str | None = None,
+        limit: int | None = None,
     ):
         nb = _nb()
         if nb is None:
@@ -46,6 +47,8 @@ def create_router(server) -> APIRouter:
             embryo=embryo,
             thread=thread,
         )
+        if limit is not None and limit >= 0:
+            notes = notes[:limit]
         return {"available": True, "notes": [note_to_dict(n) for n in notes]}
 
     @router.get("/api/notebook/notes/{note_id}")
