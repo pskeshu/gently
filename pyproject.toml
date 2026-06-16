@@ -36,6 +36,11 @@ dependencies = [
     "tifffile>=2023.0.0",
     "scipy>=1.10.0",
     "scikit-image>=0.21.0",
+    # OpenCV is imported (unguarded) by detection (sam_detection), the device
+    # layer, analysis steps, and video_maker — so it's a true runtime dep, not
+    # optional. headless avoids the libGL.so requirement of full opencv-python
+    # on headless servers/agents.
+    "opencv-python-headless>=4.8.0",
     "jinja2>=3.1.0",
     "pyyaml>=6.0",
     "matplotlib>=3.7.0",
