@@ -95,3 +95,41 @@ class TestNotebookIndex:
         # a fresh store over the same dir must rebuild the index by scanning notes/
         store2 = NotebookStore(tmp_path / "notebook")
         assert store2.ids_for_strain("N2") == [a]
+
+
+class TestNotebookQuery:
+    def _seed(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        store.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="o", strains=["N2"]))
+        store.write_note(Note(id="f1", kind=NoteKind.FINDING, body="f",
+                              status=NoteStatus.PROPOSED, strains=["N2"], threads=["t1"]))
+        store.write_note(Note(id="q1", kind=NoteKind.QUESTION, body="q",
+                              status=NoteStatus.OPEN, threads=["t1"]))
+        return store
+
+    def test_query_by_kind(self, tmp_path):
+        store = self._seed(tmp_path)
+        ids = {n.id for n in store.query_notes(kind=NoteKind.FINDING)}
+        assert ids == {"f1"}
+
+    def test_query_by_thread_scope(self, tmp_path):
+        store = self._seed(tmp_path)
+        ids = {n.id for n in store.query_notes(thread="t1")}
+        assert ids == {"f1", "q1"}
+
+    def test_query_by_thread_and_kind(self, tmp_path):
+        store = self._seed(tmp_path)
+        ids = {n.id for n in store.query_notes(thread="t1", kind=NoteKind.QUESTION)}
+        assert ids == {"q1"}
+
+    def test_query_by_status(self, tmp_path):
+        store = self._seed(tmp_path)
+        ids = {n.id for n in store.query_notes(status=NoteStatus.OPEN)}
+        assert ids == {"q1"}
+
+    def test_query_all_sorted_newest_first(self, tmp_path):
+        store = self._seed(tmp_path)
+        notes = store.query_notes()
+        assert len(notes) == 3
+        ts = [n.created_at for n in notes]
+        assert ts == sorted(ts, reverse=True)

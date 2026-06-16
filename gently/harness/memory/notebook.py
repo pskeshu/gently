@@ -198,3 +198,49 @@ class NotebookStore:
             return None
         data = self._read_yaml(path)
         return note_from_dict(data) if data else None
+
+    def query_notes(
+        self,
+        *,
+        kind: NoteKind | None = None,
+        author: Author | None = None,
+        status: NoteStatus | None = None,
+        strain: str | None = None,
+        embryo: str | None = None,
+        thread: str | None = None,
+    ) -> list[Note]:
+        """Structural query: narrow by scope via the indexes, then filter by
+        kind/author/status. Returned newest-first. (No semantic ranking here —
+        that's a later increment.)"""
+        # 1. candidate ids — intersect any scope facets given, else all notes
+        scope_sets: list[set[str]] = []
+        if strain is not None:
+            scope_sets.append(set(self.ids_for_strain(strain)))
+        if embryo is not None:
+            scope_sets.append(set(self.ids_for_embryo(embryo)))
+        if thread is not None:
+            scope_sets.append(set(self.ids_for_thread(thread)))
+        candidate_ids: set[str] | None = (
+            set.intersection(*scope_sets) if scope_sets else None
+        )
+
+        # 2. load + filter
+        if candidate_ids is not None:
+            notes = [n for n in (self.get_note(i) for i in candidate_ids) if n]
+        else:
+            notes = [
+                note_from_dict(d)
+                for d in (self._read_yaml(f) for f in self.notes_dir.glob("*.yaml"))
+                if d
+            ]
+        results: list[Note] = []
+        for n in notes:
+            if kind is not None and n.kind != kind:
+                continue
+            if author is not None and n.author != author:
+                continue
+            if status is not None and n.status != status:
+                continue
+            results.append(n)
+        results.sort(key=lambda n: n.created_at, reverse=True)
+        return results
