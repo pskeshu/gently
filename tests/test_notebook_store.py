@@ -71,3 +71,27 @@ class TestNotebookStoreReadWrite:
     def test_get_missing_returns_none(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
         assert store.get_note("nope") is None
+
+
+class TestNotebookIndex:
+    def test_index_updated_on_write(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        a = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="a", strains=["N2"]))
+        b = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="b", strains=["N2", "OH904"]))
+        assert set(store.ids_for_strain("N2")) == {a, b}
+        assert store.ids_for_strain("OH904") == [b]
+        assert store.ids_for_strain("missing") == []
+
+    def test_index_by_embryo_and_thread(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        a = store.write_note(Note(id="", kind=NoteKind.FINDING, body="a",
+                                  embryos=["e1"], threads=["t1"]))
+        assert store.ids_for_embryo("e1") == [a]
+        assert store.ids_for_thread("t1") == [a]
+
+    def test_rebuild_index_from_disk(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        a = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="a", strains=["N2"]))
+        # a fresh store over the same dir must rebuild the index by scanning notes/
+        store2 = NotebookStore(tmp_path / "notebook")
+        assert store2.ids_for_strain("N2") == [a]

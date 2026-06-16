@@ -112,12 +112,44 @@ class NotebookStore:
     """File-backed store for notebook Notes. One YAML per note under notes/;
     flat pool, rebuildable reverse-indexes (added in Task 3)."""
 
+    _FACETS = {"strain": "strains", "embryo": "embryos", "thread": "threads"}
+
     def __init__(self, notebook_dir: Path):
         self.root = Path(notebook_dir)
         self.notes_dir = self.root / "notes"
         self.index_dir = self.root / "index"
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
+        # reverse indexes: facet -> {value: [note_id, ...]}
+        self._index: dict[str, dict[str, list[str]]] = {
+            "strain": {}, "embryo": {}, "thread": {}
+        }
+        self.rebuild_index()
+
+    # ---- reverse indexes (notes are authoritative; indexes are caches) ----
+    def _index_note(self, note: Note) -> None:
+        for facet, attr in self._FACETS.items():
+            for value in getattr(note, attr):
+                bucket = self._index[facet].setdefault(value, [])
+                if note.id not in bucket:
+                    bucket.append(note.id)
+
+    def rebuild_index(self) -> None:
+        """Rebuild reverse-indexes by scanning notes/."""
+        self._index = {"strain": {}, "embryo": {}, "thread": {}}
+        for f in sorted(self.notes_dir.glob("*.yaml")):
+            data = self._read_yaml(f)
+            if data:
+                self._index_note(note_from_dict(data))
+
+    def ids_for_strain(self, strain: str) -> list[str]:
+        return list(self._index["strain"].get(strain, []))
+
+    def ids_for_embryo(self, embryo: str) -> list[str]:
+        return list(self._index["embryo"].get(embryo, []))
+
+    def ids_for_thread(self, thread: str) -> list[str]:
+        return list(self._index["thread"].get(thread, []))
 
     # ---- helpers (mirror FileContextStore conventions) ----
     @staticmethod
@@ -157,6 +189,7 @@ class NotebookStore:
         if old is not None:
             old.unlink()
         self._write_yaml(self.notes_dir / f"{note.id}_{slug}.yaml", note_to_dict(note))
+        self._index_note(note)
         return note.id
 
     def get_note(self, note_id: str) -> Note | None:
