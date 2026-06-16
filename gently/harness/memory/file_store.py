@@ -2538,6 +2538,14 @@ class FileContextStore:
         imaging_spec = None
         bench_spec = None
 
+        # Tolerate specs persisted as JSON strings (older tool calls that passed
+        # spec as a string instead of an object) so read-back never crashes.
+        if isinstance(spec_data, str):
+            try:
+                spec_data = json.loads(spec_data)
+            except (json.JSONDecodeError, TypeError):
+                spec_data = None
+
         if spec_data:
             if item_type == PlanItemType.IMAGING:
                 valid = {f.name for f in dataclasses.fields(ImagingSpec)}
@@ -2547,6 +2555,11 @@ class FileContextStore:
                 bench_spec = BenchSpec(**{k: v for k, v in spec_data.items() if k in valid})
 
         references = d.get("references") or []
+        if isinstance(references, str):
+            try:
+                references = json.loads(references) or []
+            except (json.JSONDecodeError, TypeError):
+                references = []
 
         return PlanItem(
             id=d["id"],

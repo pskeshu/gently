@@ -7,8 +7,33 @@ and their dependencies.
 """
 
 import dataclasses
+import json
 
 from ...tools.registry import ToolCategory, ToolExample, tool
+
+
+def _coerce_plan_args(spec, references, estimated_days):
+    """The model often serializes nested args (spec/references) as JSON strings
+    instead of objects — accept either so plan-item creation doesn't store a raw
+    string (which later breaks ImagingSpec/BenchSpec hydration). Returns the
+    normalized (spec, references, estimated_days)."""
+    if isinstance(spec, str):
+        try:
+            spec = json.loads(spec)
+        except (json.JSONDecodeError, TypeError):
+            spec = None
+    if isinstance(references, str):
+        try:
+            references = json.loads(references)
+        except (json.JSONDecodeError, TypeError):
+            references = None
+    if isinstance(estimated_days, str):
+        try:
+            estimated_days = int(estimated_days)
+        except (ValueError, TypeError):
+            estimated_days = None
+    return spec, references, estimated_days
+
 
 # ---------------------------------------------------------------------------
 # Campaign / Phase Management
@@ -132,6 +157,7 @@ async def create_plan_item(
         return "Error: Context store not available"
 
     store = agent.context_store
+    spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
 
     # Resolve phase_number → subcampaign ID
     target_campaign_id = campaign_id
@@ -226,6 +252,7 @@ async def update_plan_item(
     from gently.harness.memory.model import PlanItemStatus
 
     status_enum = PlanItemStatus(status) if status else None
+    spec, references, estimated_days = _coerce_plan_args(spec, references, estimated_days)
     store.update_plan_item(
         item_id=resolved_id,
         status=status_enum,
