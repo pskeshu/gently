@@ -2,15 +2,17 @@
 
 from datetime import datetime
 
-from gently.harness.memory.model import Confidence
+from gently.harness.memory.model import Confidence, Learning, Observation
 from gently.harness.memory.notebook import (
     Author,
     Note,
     NoteKind,
     NoteStatus,
     NotebookStore,
+    learning_to_note,
     note_from_dict,
     note_to_dict,
+    observation_to_note,
 )
 
 
@@ -154,3 +156,31 @@ class TestNotebookLinkSupersede:
         assert old_n.status == NoteStatus.SUPERSEDED
         assert old_n.superseded_by == new
         assert {"rel": "refines", "to": old} in new_n.links
+
+
+class TestConverters:
+    def test_observation_to_note(self):
+        obs = Observation(
+            id="o1", timestamp=datetime(2026, 6, 16, 9, 0, 0), type="milestone",
+            content="nerve ring formed", embryo_id="e1", session_id="s1",
+            relates_to=["o0"], gently_refs={"kind": "projection", "t": 42},
+        )
+        n = observation_to_note(obs)
+        assert n.id == "o1"
+        assert n.kind == NoteKind.OBSERVATION
+        assert n.body == "nerve ring formed"
+        assert n.author == Author.AGENT
+        assert n.embryos == ["e1"]
+        assert n.sessions == ["s1"]
+        assert {"rel": "relates_to", "to": "o0"} in n.links
+        assert n.artifacts == [{"kind": "projection", "t": 42}]
+        assert n.created_at == datetime(2026, 6, 16, 9, 0, 0)
+
+    def test_learning_to_note(self):
+        lrn = Learning(id="l1", content="rings form by comma", confidence=Confidence.HIGH)
+        n = learning_to_note(lrn)
+        assert n.id == "l1"
+        assert n.kind == NoteKind.FINDING
+        assert n.body == "rings form by comma"
+        assert n.status == NoteStatus.PROPOSED   # agent-drafted, awaits confirm
+        assert n.confidence == Confidence.HIGH

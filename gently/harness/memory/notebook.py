@@ -19,7 +19,7 @@ from typing import Any
 
 import yaml
 
-from .model import Confidence
+from .model import Confidence, Learning, Observation
 
 
 class NoteKind(str, Enum):
@@ -105,6 +105,36 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         superseded_by=d.get("superseded_by"),
         created_at=datetime.fromisoformat(d["created_at"]),
         updated_at=datetime.fromisoformat(d["updated_at"]),
+    )
+
+
+def observation_to_note(obs: Observation) -> Note:
+    """Bridge a legacy Observation into a notebook Note (kind=observation)."""
+    return Note(
+        id=obs.id,
+        kind=NoteKind.OBSERVATION,
+        body=obs.content,
+        author=Author.AGENT,
+        embryos=[obs.embryo_id] if obs.embryo_id else [],
+        sessions=[obs.session_id] if obs.session_id else [],
+        links=[{"rel": "relates_to", "to": r} for r in (obs.relates_to or [])],
+        artifacts=[obs.gently_refs] if obs.gently_refs else [],
+        created_at=obs.timestamp,
+        updated_at=obs.timestamp,
+    )
+
+
+def learning_to_note(learning: Learning) -> Note:
+    """Bridge a legacy Learning into a notebook Note (kind=finding, proposed)."""
+    return Note(
+        id=learning.id,
+        kind=NoteKind.FINDING,
+        body=learning.content,
+        author=Author.AGENT,
+        status=NoteStatus.PROPOSED,
+        confidence=learning.confidence,
+        created_at=learning.created_at,
+        updated_at=learning.created_at,
     )
 
 
