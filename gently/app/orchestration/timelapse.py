@@ -231,6 +231,13 @@ class TimelapseOrchestrator:
         # Parse stop condition
         stop_cond = self._parse_stop_condition(stop_condition, condition_value)
 
+        # Tolerate a comma-separated string: some agent tool calls pass
+        # embryo_ids as "embryo_1,embryo_2" rather than a JSON list. Without
+        # this, the membership check below iterates the string character by
+        # character and reports every letter as a missing embryo.
+        if isinstance(embryo_ids, str):
+            embryo_ids = [e.strip() for e in embryo_ids.split(",") if e.strip()]
+
         # Get embryo list
         if not embryo_ids:
             embryo_ids = [e.id for e in self.experiment.embryos.values() if not e.should_skip]
