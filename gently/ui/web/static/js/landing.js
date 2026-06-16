@@ -416,6 +416,8 @@ const V2Landing = (() => {
         }
         const cont = $('v2-plan-continue');
         if (cont) cont.textContent = 'Open the workspace ›';
+        const exp = $('v2-plan-export');
+        if (exp) exp.hidden = false;   // the plan is final → offer the download
     }
     function clearPlanReady() {
         const sec = document.querySelector('.v2-screen-plan');
@@ -427,6 +429,89 @@ const V2Landing = (() => {
         if (title) title.textContent = "Let's design your run";
         const cont = $('v2-plan-continue');
         if (cont) cont.textContent = 'Continue in workspace ›';
+        const exp = $('v2-plan-export');
+        if (exp) exp.hidden = true;
+    }
+
+    // ── export the finished plan as a shareable markdown doc ────────────
+    // Replaces the agent's end-of-plan "want me to export this?" prose with a
+    // real action: pull the enriched plan tree (/export) and render it to
+    // markdown client-side so the biologist can drop it in a doc or share it.
+    function specToLines(spec) {
+        let s = spec;
+        if (typeof s === 'string') { try { s = JSON.parse(s); } catch { return s ? ['- ' + s] : []; } }
+        if (!s || typeof s !== 'object') return [];
+        const out = [];
+        const fmt = (v) => Array.isArray(v) ? v.join(', ') : (typeof v === 'object' ? JSON.stringify(v) : String(v));
+        const pick = (k, label) => { if (s[k] != null && s[k] !== '') out.push(`- **${label}:** ${fmt(s[k])}`); };
+        pick('strain', 'Strain'); pick('goal', 'Goal');
+        if (Array.isArray(s.channels) && s.channels.length) {
+            out.push('- **Channels:** ' + s.channels.map(c => `${c.name || '?'} (${c.excitation_nm || '?'} nm${c.exposure_ms ? `, ${c.exposure_ms} ms` : ''})`).join(', '));
+        }
+        pick('num_slices', 'Slices'); pick('interval_s', 'Interval (s)'); pick('temperature_c', 'Temperature (°C)');
+        pick('num_embryos', 'Embryos'); pick('start_stage', 'Start stage'); pick('stop_condition', 'Stop condition');
+        pick('criteria', 'Criteria'); pick('success_criteria', 'Success criteria');
+        return out;
+    }
+    function buildPlanMarkdown(tree) {
+        const L = [];
+        L.push(`# ${tree.description || tree.shorthand || 'Experimental plan'}`, '');
+        if (tree.target) L.push(`**Goal:** ${tree.target}`, '');
+        if (tree.shorthand) L.push(`**Plan ID:** \`${tree.shorthand}\``, '');
+        L.push(`_Exported from Gently — ${new Date().toLocaleString()}_`, '');
+        const renderItems = (items, prefix) => {
+            (items || []).slice().sort((a, b) => (a.phase_order || 0) - (b.phase_order || 0)).forEach((it, idx) => {
+                L.push(`### ${prefix}${idx + 1} ${it.title || '(task)'}  \`${it.type || 'task'}\``, '');
+                if (it.description) L.push(it.description, '');
+                const sl = specToLines(it.spec);
+                if (sl.length) L.push(...sl, '');
+                const refs = it.references || [];
+                if (refs.length) {
+                    L.push('**References:**');
+                    refs.forEach((r, i) => L.push(`${i + 1}. ${r.citation || r.id || ''}${r.source ? ` _(${r.source})_` : ''}`));
+                    L.push('');
+                }
+            });
+        };
+        if ((tree.items || []).length) { L.push('## Tasks', ''); renderItems(tree.items, ''); }
+        (tree.children || []).forEach((ph, pi) => {
+            if (!ph) return;
+            L.push(`## ${ph.display_name || ph.description || ph.shorthand || `Phase ${pi + 1}`}`, '');
+            if (ph.target) L.push(ph.target, '');
+            renderItems(ph.items, `${pi + 1}.`);
+        });
+        return L.join('\n').replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+    }
+    async function resolveCampaignId() {
+        if (capturedCampaignId) return capturedCampaignId;
+        try {
+            const r = await fetch('/api/campaigns');
+            if (r.ok) { const d = await r.json(); const t = (d.campaigns || [])[0]; return (t && t.campaign && t.campaign.id) || null; }
+        } catch (e) { /* offline */ }
+        return null;
+    }
+    async function exportPlan() {
+        const btn = $('v2-plan-export');
+        const id = await resolveCampaignId();
+        if (!id) { showPlanError('No plan to export yet.'); return; }
+        if (btn) { btn.disabled = true; btn.textContent = '↓ Exporting…'; }
+        try {
+            const r = await fetch(`/api/campaigns/${encodeURIComponent(id)}/export`);
+            if (!r.ok) throw new Error(`export ${r.status}`);
+            const tree = await r.json();
+            const md = buildPlanMarkdown(tree);
+            const blob = new Blob([md], { type: 'text/markdown' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `${(tree.shorthand || 'plan').replace(/[^\w.-]+/g, '_')}.md`;
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (e) {
+            showPlanError('Could not export the plan — open the conversation to export it manually.');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '↓ Export plan'; }
+        }
     }
 
     // ── THE PLAN panel: mirror the real campaign tree ──────────────────
@@ -744,6 +829,8 @@ const V2Landing = (() => {
         if (planChat) planChat.addEventListener('click', openChat);
         const cont = $('v2-plan-continue');
         if (cont) cont.addEventListener('click', dismiss);
+        const exp = $('v2-plan-export');
+        if (exp) exp.addEventListener('click', exportPlan);
 
         // The agent's questions + work render in the plan stage while it's active;
         // once we've receded into the workspace, AskStage (#ask-stage) takes over.

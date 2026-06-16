@@ -278,6 +278,14 @@ body.ux-v2 .home-hero { display: none; }
     color: var(--text-muted, #94a3b8); padding: 11px 10px; border-radius: 8px; transition: color .2s;
 }
 .v2-plan-skip:hover { color: var(--text-secondary, #475569); }
+.v2-plan-export {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 11px 16px; font: inherit; font-size: var(--v2-fs-sm);
+    font-weight: 600; cursor: pointer; transition: border-color .2s, color .2s, background .2s;
+}
+.v2-plan-export:hover { border-color: var(--border-strong); color: var(--text, #0f172a); background: var(--bg-hover); }
+.v2-plan-export:disabled { opacity: .6; cursor: default; }
+.v2-plan-export[hidden] { display: none; }
 
 /* ── Plan-ready state: the design is done, signpost the finish line ───────── */
 .v2-screen-plan.ready .v2-plan-orb {
