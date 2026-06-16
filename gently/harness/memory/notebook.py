@@ -8,7 +8,6 @@ docs/superpowers/specs/2026-06-16-shared-lab-notebook-design.md.
 
 from __future__ import annotations
 
-import copy
 import os
 import re
 import uuid
@@ -107,3 +106,62 @@ def note_from_dict(d: dict[str, Any]) -> Note:
         created_at=datetime.fromisoformat(d["created_at"]),
         updated_at=datetime.fromisoformat(d["updated_at"]),
     )
+
+
+class NotebookStore:
+    """File-backed store for notebook Notes. One YAML per note under notes/;
+    flat pool, rebuildable reverse-indexes (added in Task 3)."""
+
+    def __init__(self, notebook_dir: Path):
+        self.root = Path(notebook_dir)
+        self.notes_dir = self.root / "notes"
+        self.index_dir = self.root / "index"
+        self.notes_dir.mkdir(parents=True, exist_ok=True)
+        self.index_dir.mkdir(parents=True, exist_ok=True)
+
+    # ---- helpers (mirror FileContextStore conventions) ----
+    @staticmethod
+    def _gen_id() -> str:
+        return str(uuid.uuid4())[:8]
+
+    @staticmethod
+    def _slugify(text: str) -> str:
+        slug = re.sub(r"[^a-z0-9]+", "-", (text or "").lower()).strip("-")
+        return slug[:30]
+
+    def _write_yaml(self, path: Path, data: dict) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            yaml.safe_dump(data, fh, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        os.replace(str(tmp), str(path))
+
+    def _read_yaml(self, path: Path) -> dict | None:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                return yaml.safe_load(fh)
+        except OSError:
+            return None
+
+    def _note_path(self, note_id: str) -> Path | None:
+        return next(self.notes_dir.glob(f"{note_id}_*.yaml"), None)
+
+    # ---- read/write ----
+    def write_note(self, note: Note) -> str:
+        if not note.id:
+            note.id = self._gen_id()
+        note.updated_at = datetime.now()
+        slug = self._slugify(note.title or note.body or note.kind.value)
+        # remove any stale file for this id (slug may have changed)
+        old = self._note_path(note.id)
+        if old is not None:
+            old.unlink()
+        self._write_yaml(self.notes_dir / f"{note.id}_{slug}.yaml", note_to_dict(note))
+        return note.id
+
+    def get_note(self, note_id: str) -> Note | None:
+        path = self._note_path(note_id)
+        if path is None:
+            return None
+        data = self._read_yaml(path)
+        return note_from_dict(data) if data else None

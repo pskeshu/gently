@@ -8,6 +8,7 @@ from gently.harness.memory.notebook import (
     Note,
     NoteKind,
     NoteStatus,
+    NotebookStore,
     note_from_dict,
     note_to_dict,
 )
@@ -45,3 +46,28 @@ class TestNoteModel:
         back = note_from_dict(note_to_dict(n))
         assert back == n
         assert note_to_dict(n)["confidence"] == "medium"
+
+
+class TestNotebookStoreReadWrite:
+    def test_write_assigns_id_and_persists(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        n = Note(id="", kind=NoteKind.OBSERVATION, body="bean stage at t40")
+        note_id = store.write_note(n)
+        assert note_id  # non-empty id assigned
+        files = list((tmp_path / "notebook" / "notes").glob("*.yaml"))
+        assert len(files) == 1
+        assert files[0].name.startswith(note_id + "_")
+
+    def test_get_note_round_trip(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        n = Note(id="", kind=NoteKind.FINDING, body="x", strains=["N2"], threads=["t1"])
+        note_id = store.write_note(n)
+        got = store.get_note(note_id)
+        assert got is not None
+        assert got.id == note_id
+        assert got.kind == NoteKind.FINDING
+        assert got.strains == ["N2"]
+
+    def test_get_missing_returns_none(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        assert store.get_note("nope") is None
