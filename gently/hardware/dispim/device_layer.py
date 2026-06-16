@@ -1428,6 +1428,26 @@ class DeviceLayerServer(Service):
                 return dev
         return None
 
+    async def _set_room_light(self, state: str) -> bool:
+        """Drive the room-light SwitchBot to ``state`` ('on'/'off'/'press').
+
+        Blocks until the BLE command lands (or times out). Returns True on
+        success, False if no bot is configured or the command failed. Shared
+        by the HTTP handler and internal callers (e.g. detect_embryos, which
+        images under room light rather than the camera LED).
+        """
+        bot = self._room_light_device()
+        if bot is None:
+            return False
+        import time
+
+        status = bot.set(state)
+        timeout = float(getattr(bot, "timeout", 20.0)) + 5
+        start = time.time()
+        while not status.done and (time.time() - start) < timeout:
+            await asyncio.sleep(0.1)
+        return bool(status.done and status.success)
+
     async def handle_get_room_light_status(self, request):
         """GET /api/room_light/status - cached on/off state of the room light.
 
@@ -1930,6 +1950,21 @@ class DeviceLayerServer(Service):
                 bottom_camera = self.devices.get("bottom_camera")
                 if bottom_camera:
                     bottom_camera.configure_exposure(exposure_ms)
+
+            # Detection always images under ROOM LIGHT, never the camera LED.
+            # use_led is a persistent device flag that other flows (e.g. manual
+            # marking via capture_for_marking) leave switched on, so force it
+            # off here and turn the room light on so there's illumination.
+            bottom_camera = self.devices.get("bottom_camera")
+            if bottom_camera is not None:
+                bottom_camera.use_led = False
+            if await self._set_room_light("on"):
+                logger.info("[detect_embryos] Room light ON, camera LED disabled")
+            else:
+                logger.warning(
+                    "[detect_embryos] Could not turn room light on "
+                    "(no SwitchBot configured?) — capturing under ambient light"
+                )
 
             # Capture image via plan
             logger.info("[detect_embryos] Capturing bottom camera image...")

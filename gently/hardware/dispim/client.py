@@ -374,8 +374,18 @@ class DiSPIMMicroscope(Microscope):
             events = docs.get("events", [])
             if events:
                 data = events[0].get("data", {})
-                # Look for stage coordinates
-                for key in ["XY:31", "xy_stage", "stage"]:
+                # Look for stage coordinates. Keys must match what
+                # read_stage_plan (bp.count on the xy_stage device) actually
+                # emits — the device-layer's own handle_detect_embryos uses
+                # "XYStage:XY:31"/"xy_stage_position", so include those here too
+                # (the bare "XY:31" was stale and never matched).
+                for key in [
+                    "xy_stage",
+                    "XYStage:XY:31",
+                    "xy_stage_position",
+                    "XY:31",
+                    "stage",
+                ]:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (list, tuple)) and len(val) >= 2:
@@ -1244,7 +1254,8 @@ class DiSPIMMicroscope(Microscope):
         self._ensure_connected()
 
         try:
-            snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
+            # No LED ever — the bottom camera images under room light only.
+            snap = await self.capture_bottom_image(use_led=False, exposure_ms=exposure_ms)
             image = snap["image"]
 
             if image is None or (image.shape == (100, 100) and image.max() == 0):
