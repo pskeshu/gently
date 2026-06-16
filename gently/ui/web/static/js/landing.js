@@ -18,6 +18,7 @@ const V2Landing = (() => {
     let el = null;
     let current = null;            // the ask currently in #v2-plan-ask
     let feedTextEl = null;         // current accumulating prose paragraph in the feed
+    let feedThinkingEl = null;     // current accumulating reasoning (thinking) block
     let runningTools = {};         // tool name -> stack of running card elements
     let feedHadContent = false;    // did this turn surface anything in the feed?
     let capturedCampaignId = null; // best-effort id scraped from tool results
@@ -58,10 +59,39 @@ const V2Landing = (() => {
         const l = document.querySelector('#v2-plan-thinking .v2-plan-thinking-label');
         if (l && text) l.textContent = text;
     }
+    // Elapsed-time counter so a long think reads as progress, not a hang. Starts
+    // when the thinking indicator first shows and runs until it's hidden (turn end).
+    let _thinkTimer = null;
+    let _thinkStart = 0;
+    function _thinkTick() {
+        const t = $('v2-plan-thinking');
+        if (!t) return;
+        let el = t.querySelector('.v2-plan-elapsed');
+        if (!el) {
+            el = document.createElement('span');
+            el.className = 'v2-plan-elapsed';
+            el.style.cssText = 'margin-left:6px;opacity:.55;font-variant-numeric:tabular-nums;';
+            t.appendChild(el);
+        }
+        const s = Math.round((Date.now() - _thinkStart) / 1000);
+        el.textContent = s > 0 ? s + 's' : '';
+    }
     function showThinking(on, label) {
         const t = $('v2-plan-thinking');
         if (t) t.classList.toggle('hidden', !on);
         if (on && label) setThinkingLabel(label);
+        if (on) {
+            if (!_thinkTimer) {
+                _thinkStart = Date.now();
+                _thinkTick();
+                _thinkTimer = setInterval(_thinkTick, 1000);
+            }
+        } else if (_thinkTimer) {
+            clearInterval(_thinkTimer);
+            _thinkTimer = null;
+            const el = t && t.querySelector('.v2-plan-elapsed');
+            if (el) el.textContent = '';
+        }
     }
     // Human-readable "what's happening right now" from a tool activity event,
     // so the status line names the live operation instead of a static string.
@@ -106,7 +136,7 @@ const V2Landing = (() => {
                 '<div class="v2-plan-dots v2-feed-dots" hidden></div>';
         }
         feedPages = []; feedPage = 0; curPageEl = null; pendingNewPage = false;
-        feedTextEl = null; runningTools = {}; feedHadContent = false;
+        feedTextEl = null; feedThinkingEl = null; runningTools = {}; feedHadContent = false;
         capturedCampaignId = null;
         hidePlanError();
     }
@@ -260,15 +290,34 @@ const V2Landing = (() => {
         const f = feedEl(); if (!f) return;
         switch (act.kind) {
             case 'turn_start':
-                feedTextEl = null; pendingNewPage = true; hidePlanError(); clearFallback();
+                feedTextEl = null; feedThinkingEl = null; pendingNewPage = true; hidePlanError(); clearFallback();
                 showThinking(true, 'reviewing your campaign and plan…');
                 break;
-            case 'thinking':
-                showThinking(true, 'thinking through the next step…');
+            case 'thinking': {
+                // Stream the model's reasoning summary live into the feed as a dim
+                // block, so the wait shows what the agent is actually considering.
+                showThinking(true);
+                const chunk = act.text || '';
+                if (!chunk) { setThinkingLabel('thinking through the next step…'); break; }
+                if (!feedThinkingEl) {
+                    feedThinkingEl = document.createElement('div');
+                    feedThinkingEl.className = 'v2-act-think';
+                    feedThinkingEl.style.cssText =
+                        'font-style:italic;opacity:.7;white-space:pre-wrap;margin:2px 0 8px;font-size:12.5px;line-height:1.5;';
+                    feedThinkingEl._raw = '';
+                    feedTarget().appendChild(feedThinkingEl);
+                }
+                feedThinkingEl._raw += chunk;
+                feedThinkingEl.textContent = feedThinkingEl._raw;
+                feedHadContent = true;
+                setThinkingLabel('reasoning…');
+                scrollFeedIfNearBottom();
                 break;
+            }
             case 'text': {
                 const chunk = act.text || '';
                 if (!chunk) break;
+                feedThinkingEl = null;   // reasoning block ends when prose begins
                 if (!feedTextEl) {
                     feedTextEl = document.createElement('div');
                     feedTextEl.className = 'v2-act-text';
@@ -284,7 +333,7 @@ const V2Landing = (() => {
                 // ask_user_choice IS the active question (rendered separately in
                 // #v2-plan-ask) — don't also show it as a feed card.
                 if (act.name === 'ask_user_choice') break;
-                feedTextEl = null;
+                feedTextEl = null; feedThinkingEl = null;
                 const card = buildToolCard(act, false);
                 feedTarget().appendChild(card);
                 (runningTools[act.name] = runningTools[act.name] || []).push(card);
@@ -296,7 +345,7 @@ const V2Landing = (() => {
                 captureCampaignId(act.full);
                 if (PLAN_TOOLS.has(act.name)) schedulePlanRefresh();
                 if (act.name === 'ask_user_choice') break;
-                feedTextEl = null;
+                feedTextEl = null; feedThinkingEl = null;
                 const arr = runningTools[act.name] || [];
                 const card = arr.pop();
                 if (card) updateToolCard(card, act);
@@ -305,7 +354,7 @@ const V2Landing = (() => {
                 break;
             }
             case 'turn_end':
-                showThinking(false); feedTextEl = null;
+                showThinking(false); feedTextEl = null; feedThinkingEl = null;
                 refreshPlanPanel();
                 if (!current && !feedHadContent) showFallback();
                 break;

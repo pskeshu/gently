@@ -546,80 +546,142 @@ class ConversationManager:
         """
         from anthropic import APIStatusError, BadRequestError
 
-        def stream_and_collect(model):
-            def _run(m):
-                events = []
-                with self.claude.messages.stream(
-                    model=m,
-                    system=system_prompt,
-                    messages=self.conversation_history,
-                    tools=tools,
-                    max_tokens=4096,
-                ) as stream:
-                    for event in stream:
-                        events.append(event)
-                    return events, stream.get_final_message()
+        # Live streaming: a worker thread drains the SDK's (blocking) stream and
+        # pushes each event onto an asyncio queue as it arrives, so this coroutine
+        # can yield text/thinking deltas in real time instead of collecting the
+        # whole turn first (which left the UI on a blank spinner for the entire
+        # turn). thinking=summarized surfaces the model's reasoning during the
+        # wait. The full assistant content (incl. thinking blocks) is replayed from
+        # final_message below, so the tool-loop continuation stays valid.
+        _DONE = object()
 
-            try:
-                return _run(model)
-            except BadRequestError:
-                # Fable 5 under <30-day org data retention (or unavailable) rejects
-                # with a 400 — fall back to Opus 4.8 so the turn still streams.
-                fb = settings.models.refusal_fallback
-                if not fb or fb == model:
-                    raise
-                logger.warning(
-                    "Stream model %s rejected the request (400); falling back to %s", model, fb
-                )
-                return _run(fb)
+        async def _stream_live(model, sink):
+            """Stream one attempt live: yield delta dicts as they arrive; record
+            events / final_message / error / full_text into `sink`."""
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+            state: dict = {}
 
-        # Run streaming in thread with retry logic
+            def worker():
+                try:
+                    with self.claude.messages.stream(
+                        model=model,
+                        system=system_prompt,
+                        messages=self.conversation_history,
+                        tools=tools,
+                        max_tokens=16000,
+                        # Adaptive thinking with a streamed, human-readable summary —
+                        # this is what fills the "working…" wait. Opus 4.8 defaults to
+                        # display="omitted" (empty thinking text), so it must be set.
+                        thinking={"type": "adaptive", "display": "summarized"},
+                        output_config={"effort": "medium"},
+                    ) as stream:
+                        for event in stream:
+                            loop.call_soon_threadsafe(queue.put_nowait, event)
+                        state["final"] = stream.get_final_message()
+                except BaseException as exc:  # noqa: BLE001 — re-raised to caller below
+                    state["error"] = exc
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, _DONE)
+
+            task = asyncio.create_task(asyncio.to_thread(worker))
+            events: list = []
+            full_text: list = []
+            while True:
+                item = await queue.get()
+                if item is _DONE:
+                    break
+                events.append(item)
+                if item.type != "content_block_delta":
+                    continue
+                delta = item.delta
+                dtype = getattr(delta, "type", None)
+                if dtype == "thinking_delta":
+                    chunk = getattr(delta, "thinking", "") or ""
+                    if chunk:
+                        yield {"type": "thinking", "text": chunk}
+                elif dtype == "text_delta" or hasattr(delta, "text"):
+                    chunk = getattr(delta, "text", "") or ""
+                    if chunk:
+                        full_text.append(chunk)
+                        yield {"type": "text", "text": chunk}
+            await task
+            sink["events"] = events
+            sink["full_text"] = full_text
+            sink["final"] = state.get("final")
+            sink["error"] = state.get("error")
+
         max_retries = 3
         retry_delay = 1.0
+        fb = settings.models.refusal_fallback
+        model_in_use = self.model
+        sink: dict = {}
 
         for attempt in range(max_retries):
-            try:
-                events, final_message = await asyncio.to_thread(stream_and_collect, self.model)
-                self._track_token_usage(final_message)
+            sink = {}
+            yielded_any = False
+            async for chunk in _stream_live(model_in_use, sink):
+                yielded_any = True
+                yield chunk
+            err = sink.get("error")
+            if err is None:
                 break
-            except APIStatusError as e:
-                error_type = getattr(e, "body", {})
+            # Fable 5 under <30-day data retention (or unavailable) rejects with a
+            # 400 — fall back to Opus 4.8. Only safe before any partial was streamed.
+            if isinstance(err, BadRequestError) and fb and fb != model_in_use and not yielded_any:
+                logger.warning(
+                    "Stream model %s rejected the request (400); falling back to %s",
+                    model_in_use,
+                    fb,
+                )
+                model_in_use = fb
+                continue
+            if isinstance(err, APIStatusError):
+                error_type = getattr(err, "body", {})
                 if isinstance(error_type, dict):
                     error_type = error_type.get("error", {}).get("type", "")
-
-                if (
+                overloaded = (
                     error_type in ("overloaded_error", "rate_limit_error")
-                    or "overloaded" in str(e).lower()
-                ):
-                    if attempt < max_retries - 1:
-                        wait_time = retry_delay * (2**attempt)
-                        logger.warning(
-                            f"API overloaded, retrying in {wait_time:.1f}s "
-                            f"(attempt {attempt + 1}/{max_retries})"
-                        )
-                        yield {
-                            "type": "text",
-                            "text": f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n",
-                        }
-                        await asyncio.sleep(wait_time)
-                        continue
-                raise
+                    or "overloaded" in str(err).lower()
+                )
+                if overloaded and attempt < max_retries - 1 and not yielded_any:
+                    wait_time = retry_delay * (2**attempt)
+                    logger.warning(
+                        "API overloaded, retrying in %.1fs (attempt %d/%d)",
+                        wait_time,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    yield {
+                        "type": "text",
+                        "text": f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n",
+                    }
+                    await asyncio.sleep(wait_time)
+                    continue
+            raise err
         else:
             raise RuntimeError("API overloaded after multiple retries")
 
-        # Refusal → retry the whole streamed turn on the fallback model (Opus 4.8)
-        # before giving up. The original partial output is discarded (we re-collect
-        # and only yield the fallback's events below).
-        fb = settings.models.refusal_fallback
-        if final_message.stop_reason == "refusal" and fb and fb != self.model:
-            logger.warning("Model %s declined the streamed turn; retrying on %s", self.model, fb)
-            events, final_message = await asyncio.to_thread(stream_and_collect, fb)
+        final_message = sink["final"]
+        full_text = sink["full_text"]
+        self._track_token_usage(final_message)
+
+        # Refusal → retry on the fallback model. Re-streaming live is only safe when
+        # the refusal came before any visible output (pre-output refusals carry empty
+        # content, so nothing was yielded); otherwise we keep the partial we showed.
+        if final_message.stop_reason == "refusal" and fb and model_in_use != fb and not full_text:
+            logger.warning("Model %s declined the streamed turn; retrying on %s", model_in_use, fb)
+            sink = {}
+            async for chunk in _stream_live(fb, sink):
+                yield chunk
+            model_in_use = fb
+            final_message = sink["final"]
+            full_text = sink["full_text"]
             self._track_token_usage(final_message)
 
-        # Last resort: if even the fallback declined, surface it and stop —
-        # discard any partial, don't iterate empty content or process tools.
+        # Last resort: if even the fallback declined, surface it and stop.
         if final_message.stop_reason == "refusal":
-            logger.warning("Claude declined the request (model=%s)", self.model)
+            logger.warning("Claude declined the request (model=%s)", model_in_use)
             yield {
                 "type": "text",
                 "text": "(The request was declined by the model's safety system. Try rephrasing.)",
@@ -639,7 +701,7 @@ class ConversationManager:
             len(final_message.content),
             tool_block_count,
             len(tools),
-            self.model,
+            model_in_use,
         )
         if tool_block_count > 0 and final_message.stop_reason != "tool_use":
             logger.error(
@@ -647,14 +709,6 @@ class ConversationManager:
                 tool_block_count,
                 final_message.stop_reason,
             )
-
-        # Process events and yield text
-        full_text = []
-        for event in events:
-            if event.type == "content_block_delta":
-                if hasattr(event.delta, "text"):
-                    full_text.append(event.delta.text)
-                    yield {"type": "text", "text": event.delta.text}
 
         # Detect fake XML tool calls in text (Claude writing tool_use as text)
         joined_text = "".join(full_text)
