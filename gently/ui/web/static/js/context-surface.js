@@ -19,23 +19,29 @@ const ContextSurface = (() => {
     async function fetchAndRender() {
         if (!el || loading) return;
         loading = true;
-        try { render(await (await fetch('/api/context')).json()); }
-        catch (e) { /* keep last render */ }
+        try {
+            const [ctx, nb] = await Promise.all([
+                fetch('/api/context').then(r => r.json()).catch(() => ({})),
+                fetch('/api/notebook/notes?limit=5').then(r => r.json()).catch(() => ({})),
+            ]);
+            render(ctx || {}, (nb && nb.notes) || []);
+        } catch (e) { /* keep last render */ }
         finally { loading = false; }
     }
 
     function section(label, html) { return html ? `<div class="cx-lens"><div class="cx-lens-h">${label}</div>${html}</div>` : ''; }
 
-    function render(data) {
+    function render(data, notes) {
         if (!el) return;
+        notes = notes || [];
         const hc = hasControl();
         const questions = data.questions || [], watchpoints = data.watchpoints || [], expectations = data.expectations || [];
         el.classList.remove('hidden');
-        if (!questions.length && !watchpoints.length && !expectations.length) {
+        if (!questions.length && !watchpoints.length && !expectations.length && !notes.length) {
             // Show an empty-state rather than vanishing, so the surface is
             // discoverable before the agent has formed any beliefs.
             el.innerHTML = '<div class="cx-title">Agent’s view</div>' +
-                '<div class="cx-empty">Nothing yet — the agent’s expectations, watchpoints, and open questions appear here as it works.</div>';
+                '<div class="cx-empty">Nothing yet — the agent’s notes, expectations, and open questions appear here as it works.</div>';
             return;
         }
 
@@ -59,8 +65,17 @@ const ContextSurface = (() => {
                 ${hc ? '<button class="cx-act" data-act="confirm" title="Mark confirmed">✓</button>' : ''}
             </div>`).join('');
 
+        // kind → existing cx-dot color: observation=blue, finding=green, question=amber
+        const dotFor = (k) => k === 'finding' ? 'cx-e' : (k === 'question' ? 'cx-q' : 'cx-w');
+        const nHtml = notes.map(n => `
+            <div class="cx-item cx-note" data-note="1">
+                <span class="cx-dot ${dotFor(n.kind)}"></span>
+                <span class="cx-text">${esc(n.title || n.body)}</span>
+            </div>`).join('');
+
         el.innerHTML = '<div class="cx-title">Agent’s view</div>' +
-            section('Open questions', qHtml) + section('Watching', wHtml) + section('Expectations', eHtml);
+            section('Open questions', qHtml) + section('Watching', wHtml) +
+            section('Expectations', eHtml) + section('From the notebook', nHtml);
         wire();
     }
 
@@ -82,6 +97,12 @@ const ContextSurface = (() => {
             } else if (act === 'confirm') {
                 actBtn.addEventListener('click', () => resolve(kind, id, { status: 'confirmed' }));
             }
+        });
+        el.querySelectorAll('.cx-note').forEach(row => {
+            row.style.cursor = 'pointer';
+            row.addEventListener('click', () => {
+                if (typeof switchTab === 'function') switchTab('notebook');
+            });
         });
     }
 
