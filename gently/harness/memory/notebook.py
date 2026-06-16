@@ -24,8 +24,8 @@ from .model import Confidence, Learning, Observation
 
 class NoteKind(str, Enum):
     OBSERVATION = "observation"  # immutable record of what was seen/done/read/noted
-    FINDING = "finding"          # revisable, supersedable believed claim
-    QUESTION = "question"        # open inquiry; large ones are the thread spine
+    FINDING = "finding"  # revisable, supersedable believed claim
+    QUESTION = "question"  # open inquiry; large ones are the thread spine
 
 
 class Author(str, Enum):
@@ -35,10 +35,10 @@ class Author(str, Enum):
 
 
 class NoteStatus(str, Enum):
-    OPEN = "open"              # questions not yet answered
-    PROPOSED = "proposed"      # agent-drafted finding awaiting human confirm
-    CONFIRMED = "confirmed"    # accepted observation/finding (default)
-    ANSWERED = "answered"      # question resolved
+    OPEN = "open"  # questions not yet answered
+    PROPOSED = "proposed"  # agent-drafted finding awaiting human confirm
+    CONFIRMED = "confirmed"  # accepted observation/finding (default)
+    ANSWERED = "answered"  # question resolved
     SUPERSEDED = "superseded"  # replaced by a newer note
 
 
@@ -55,9 +55,9 @@ class Note:
     embryos: list[str] = field(default_factory=list)
     sessions: list[str] = field(default_factory=list)
     threads: list[str] = field(default_factory=list)
-    basis: list[str] = field(default_factory=list)        # note ids this rests on
-    links: list[dict] = field(default_factory=list)        # [{"rel": ..., "to": ...}]
-    artifacts: list[dict] = field(default_factory=list)    # FileStore pointers
+    basis: list[str] = field(default_factory=list)  # note ids this rests on
+    links: list[dict] = field(default_factory=list)  # [{"rel": ..., "to": ...}]
+    artifacts: list[dict] = field(default_factory=list)  # FileStore pointers
     superseded_by: str | None = None
     created_at: datetime = field(default_factory=datetime.now)
     updated_at: datetime = field(default_factory=datetime.now)
@@ -151,9 +151,7 @@ class NotebookStore:
         self.notes_dir.mkdir(parents=True, exist_ok=True)
         self.index_dir.mkdir(parents=True, exist_ok=True)
         # reverse indexes: facet -> {value: [note_id, ...]}
-        self._index: dict[str, dict[str, list[str]]] = {
-            "strain": {}, "embryo": {}, "thread": {}
-        }
+        self._index: dict[str, dict[str, list[str]]] = {"strain": {}, "embryo": {}, "thread": {}}
         self.rebuild_index()
 
     # ---- reverse indexes (notes are authoritative; indexes are caches) ----
@@ -250,9 +248,7 @@ class NotebookStore:
             scope_sets.append(set(self.ids_for_embryo(embryo)))
         if thread is not None:
             scope_sets.append(set(self.ids_for_thread(thread)))
-        candidate_ids: set[str] | None = (
-            set.intersection(*scope_sets) if scope_sets else None
-        )
+        candidate_ids: set[str] | None = set.intersection(*scope_sets) if scope_sets else None
 
         # 2. load + filter
         if candidate_ids is not None:

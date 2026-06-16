@@ -6,9 +6,9 @@ from gently.harness.memory.model import Confidence, Learning, Observation
 from gently.harness.memory.notebook import (
     Author,
     Note,
+    NotebookStore,
     NoteKind,
     NoteStatus,
-    NotebookStore,
     learning_to_note,
     note_from_dict,
     note_to_dict,
@@ -21,8 +21,8 @@ class TestNoteModel:
         n = Note(id="abc123", kind=NoteKind.OBSERVATION, body="dim rings at 10 ms")
         d = note_to_dict(n)
         assert d["kind"] == "observation"
-        assert d["author"] == "agent"            # default
-        assert d["status"] == "confirmed"        # default
+        assert d["author"] == "agent"  # default
+        assert d["status"] == "confirmed"  # default
         back = note_from_dict(d)
         assert back == n
 
@@ -79,15 +79,18 @@ class TestNotebookIndex:
     def test_index_updated_on_write(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
         a = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="a", strains=["N2"]))
-        b = store.write_note(Note(id="", kind=NoteKind.OBSERVATION, body="b", strains=["N2", "OH904"]))
+        b = store.write_note(
+            Note(id="", kind=NoteKind.OBSERVATION, body="b", strains=["N2", "OH904"])
+        )
         assert set(store.ids_for_strain("N2")) == {a, b}
         assert store.ids_for_strain("OH904") == [b]
         assert store.ids_for_strain("missing") == []
 
     def test_index_by_embryo_and_thread(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
-        a = store.write_note(Note(id="", kind=NoteKind.FINDING, body="a",
-                                  embryos=["e1"], threads=["t1"]))
+        a = store.write_note(
+            Note(id="", kind=NoteKind.FINDING, body="a", embryos=["e1"], threads=["t1"])
+        )
         assert store.ids_for_embryo("e1") == [a]
         assert store.ids_for_thread("t1") == [a]
 
@@ -103,10 +106,19 @@ class TestNotebookQuery:
     def _seed(self, tmp_path):
         store = NotebookStore(tmp_path / "notebook")
         store.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="o", strains=["N2"]))
-        store.write_note(Note(id="f1", kind=NoteKind.FINDING, body="f",
-                              status=NoteStatus.PROPOSED, strains=["N2"], threads=["t1"]))
-        store.write_note(Note(id="q1", kind=NoteKind.QUESTION, body="q",
-                              status=NoteStatus.OPEN, threads=["t1"]))
+        store.write_note(
+            Note(
+                id="f1",
+                kind=NoteKind.FINDING,
+                body="f",
+                status=NoteStatus.PROPOSED,
+                strains=["N2"],
+                threads=["t1"],
+            )
+        )
+        store.write_note(
+            Note(id="q1", kind=NoteKind.QUESTION, body="q", status=NoteStatus.OPEN, threads=["t1"])
+        )
         return store
 
     def test_query_by_kind(self, tmp_path):
@@ -161,9 +173,14 @@ class TestNotebookLinkSupersede:
 class TestConverters:
     def test_observation_to_note(self):
         obs = Observation(
-            id="o1", timestamp=datetime(2026, 6, 16, 9, 0, 0), type="milestone",
-            content="nerve ring formed", embryo_id="e1", session_id="s1",
-            relates_to=["o0"], gently_refs={"kind": "projection", "t": 42},
+            id="o1",
+            timestamp=datetime(2026, 6, 16, 9, 0, 0),
+            type="milestone",
+            content="nerve ring formed",
+            embryo_id="e1",
+            session_id="s1",
+            relates_to=["o0"],
+            gently_refs={"kind": "projection", "t": 42},
         )
         n = observation_to_note(obs)
         assert n.id == "o1"
@@ -182,7 +199,7 @@ class TestConverters:
         assert n.id == "l1"
         assert n.kind == NoteKind.FINDING
         assert n.body == "rings form by comma"
-        assert n.status == NoteStatus.PROPOSED   # agent-drafted, awaits confirm
+        assert n.status == NoteStatus.PROPOSED  # agent-drafted, awaits confirm
         assert n.confidence == Confidence.HIGH
 
 
@@ -200,8 +217,13 @@ class TestApplyUpdatesMirror:
         from gently.harness.memory.model import ContextUpdates
 
         cs = file_context_store
-        obs = Observation(id="o1", timestamp=datetime(2026, 6, 16, 9, 0, 0),
-                          type="milestone", content="ring formed", embryo_id="e1")
+        obs = Observation(
+            id="o1",
+            timestamp=datetime(2026, 6, 16, 9, 0, 0),
+            type="milestone",
+            content="ring formed",
+            embryo_id="e1",
+        )
         lrn = Learning(id="l1", content="rings form by comma", confidence=Confidence.HIGH)
         cs.apply_updates(ContextUpdates(new_observations=[obs], new_learnings=[lrn]))
 

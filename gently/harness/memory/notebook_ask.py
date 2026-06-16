@@ -45,7 +45,9 @@ ASK_TOOL = {
             "suggested_next": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "Concrete next experiments/moves if the question asks what to do; else empty.",
+                "description": (
+                    "Concrete next experiments/moves if the question asks what to do; else empty."
+                ),
             },
             "coverage": {
                 "type": "string",
@@ -80,9 +82,7 @@ def _render_notes(notes: list[Note]) -> str:
 
 def build_ask_messages(question: str, notes: list[Note]) -> list[dict]:
     body = (
-        "Notebook entries:\n"
-        + _render_notes(notes)
-        + f"\n\nQuestion: {question}\n\n"
+        "Notebook entries:\n" + _render_notes(notes) + f"\n\nQuestion: {question}\n\n"
         "Answer using only these entries, citing note ids."
     )
     return [{"role": "user", "content": body}]

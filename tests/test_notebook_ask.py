@@ -13,8 +13,12 @@ from gently.harness.memory.notebook_ask import (
 
 def _seed(cs):
     nb = cs.notebook
-    nb.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="ring formed", strains=["N2"], threads=["t1"]))
-    nb.write_note(Note(id="f1", kind=NoteKind.FINDING, body="12 min/degC", strains=["N2"], threads=["t1"]))
+    nb.write_note(
+        Note(id="o1", kind=NoteKind.OBSERVATION, body="ring formed", strains=["N2"], threads=["t1"])
+    )
+    nb.write_note(
+        Note(id="f1", kind=NoteKind.FINDING, body="12 min/degC", strains=["N2"], threads=["t1"])
+    )
     nb.write_note(Note(id="x1", kind=NoteKind.OBSERVATION, body="unrelated", strains=["OH904"]))
     return nb
 
@@ -71,8 +75,12 @@ class TestAnswerQuestion:
         assert "o1" in text and "ring formed" in text and "what formed?" in text
 
     def test_answer_returns_structured_and_forces_tool(self):
-        canned = {"answer": "A ring formed.", "points": [{"text": "ring formed", "note_ids": ["o1"]}],
-                  "suggested_next": [], "coverage": "covered"}
+        canned = {
+            "answer": "A ring formed.",
+            "points": [{"text": "ring formed", "note_ids": ["o1"]}],
+            "suggested_next": [],
+            "coverage": "covered",
+        }
         client = _FakeClient(canned)
         notes = [Note(id="o1", kind=NoteKind.OBSERVATION, body="ring formed")]
         out = asyncio.run(answer_question(client, "m", "what formed?", notes))

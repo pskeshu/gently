@@ -23,8 +23,16 @@ def _make_app(context_store):
 def _seed(cs):
     nb = cs.notebook
     nb.write_note(Note(id="o1", kind=NoteKind.OBSERVATION, body="ring formed", strains=["N2"]))
-    nb.write_note(Note(id="f1", kind=NoteKind.FINDING, body="rings by comma",
-                       status=NoteStatus.PROPOSED, strains=["N2"], threads=["t1"]))
+    nb.write_note(
+        Note(
+            id="f1",
+            kind=NoteKind.FINDING,
+            body="rings by comma",
+            status=NoteStatus.PROPOSED,
+            strains=["N2"],
+            threads=["t1"],
+        )
+    )
     return cs
 
 
@@ -135,8 +143,12 @@ def _make_app_with_client(context_store, client):
 class TestAsk:
     def test_ask_returns_grounded_answer(self, file_context_store):
         cs = _seed(file_context_store)
-        canned = {"answer": "A ring formed.", "points": [{"text": "ring", "note_ids": ["o1"]}],
-                  "suggested_next": [], "coverage": "covered"}
+        canned = {
+            "answer": "A ring formed.",
+            "points": [{"text": "ring", "note_ids": ["o1"]}],
+            "suggested_next": [],
+            "coverage": "covered",
+        }
         client = TestClient(_make_app_with_client(cs, _AskClient(canned)))
         resp = client.post("/api/notebook/ask", json={"question": "what happened?"})
         assert resp.status_code == 200
