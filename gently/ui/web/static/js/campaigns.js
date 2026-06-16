@@ -117,6 +117,7 @@ function boot() {
             case 'select-item': selectItem(id); break;
             case 'open-campaign': openCampaign(id); break;
             case 'navigate-item': e.stopPropagation(); navigateToItem(id); break;
+            case 'run-item': e.stopPropagation(); runPlanItem(id); break;
             case 'filter-type': applyTypeFilter(el.dataset.filterType); break;
             case 'view-version': viewVersion(el.dataset.versionId, el.dataset.isCurrent === 'true'); break;
             case 'back-to-current': backToCurrent(); break;
@@ -639,6 +640,19 @@ function renderInspector(data) {
         <span class="detail-id">${item.id}</span>
     </div>`;
 
+    // Run affordance — only for an actionable imaging item. Routes through the
+    // agent (it applies this item's spec via execute_plan_item), in keeping with
+    // the agent-first paradigm.
+    if (item.type === 'imaging' && item.status === 'planned') {
+        html += `<div class="detail-actions" style="margin:4px 0 14px">
+            <button data-action="run-item" data-id="${item.id}"
+                style="background:var(--accent,#2f6df6);color:#fff;border:0;border-radius:9px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">
+                ▶ Run this imaging item
+            </button>
+            <span style="margin-left:10px;color:var(--text-muted,#94a3b8);font-size:12px">Hands it to the agent to apply the spec and start</span>
+        </div>`;
+    }
+
     // Description
     if (item.description) {
         html += section('Description', `<div class="detail-section-content">${esc(item.description)}</div>`);
@@ -725,6 +739,15 @@ function renderInspector(data) {
     }
 
     if ($inspectorBody) $inspectorBody.innerHTML = html;
+}
+
+// Hand a planned imaging item to the agent to execute. The agent resolves the
+// item ref, applies its spec, and starts the timelapse (execute_plan_item). We
+// open the chat so the user sees it pick up and can confirm/adjust.
+function runPlanItem(id) {
+    if (typeof AgentChat === 'undefined' || !AgentChat.runCommand) return;
+    AgentChat.runCommand(`Start imaging for plan item ${id}`);
+    if (AgentChat.togglePanel) AgentChat.togglePanel(true);
 }
 
 function closeInspector() {
