@@ -578,6 +578,8 @@ def clip_volume(
         return volume[z0:z1, y0:y1, x0:x1]
 
     # Rotated clip box: build a mask in volume space
+    # has_rotation is only True when rotation is not None
+    assert rotation is not None
     # 1. Compute box half-extents in voxel coordinates
     z0, z1 = _frac_to_abs(z_range, z_depth)
     y0, y1 = _frac_to_abs(y_range, height)
