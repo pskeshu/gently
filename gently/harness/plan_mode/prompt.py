@@ -180,6 +180,10 @@ PLAN_MODE_GUIDELINES = """\
    strains, several papers, or a few lab-history queries — request them together in
    one turn so they run in parallel. Don't fetch one, wait for it, then fetch the
    next; that's slow. (The system runs same-turn read-only lookups concurrently.)
+12. **Build the plan in few turns**: Each turn is a model round-trip, so creating one
+   item per turn makes plan construction crawl. When writing a phase's items, emit
+   several create_plan_item calls in a single turn (then set any dependencies in a
+   follow-up). Fewer turns = a much faster plan.
 """
 
 

@@ -738,10 +738,30 @@ class ConversationManager:
             # an interactive prompt, and ordering of stateful ops is preserved.
             tool_blocks = [b for b in response_content if getattr(b, "type", None) == "tool_use"]
             _interactive = {"ask_user_choice"}
+            # Only parallelize genuinely read-only tools (independent lookups). Mutating
+            # tools (create_/update_/delete_/set_…) must stay serial — they share state
+            # (e.g. a campaign's plan file) and are order-dependent, so concurrent runs
+            # could race or corrupt it.
+            _readonly_prefixes = (
+                "search_",
+                "read_",
+                "query_",
+                "get_",
+                "list_",
+                "recall_",
+                "find_",
+                "fetch_",
+                "lookup_",
+            )
 
             def _parallel_safe(b):
                 td = self._tool_registry.get(b.name)
-                return td is not None and not td.requires_microscope and b.name not in _interactive
+                return (
+                    td is not None
+                    and not td.requires_microscope
+                    and b.name not in _interactive
+                    and b.name.startswith(_readonly_prefixes)
+                )
 
             handled_parallel = False
             if len(tool_blocks) > 1 and all(_parallel_safe(b) for b in tool_blocks):
