@@ -184,3 +184,12 @@ class TestConverters:
         assert n.body == "rings form by comma"
         assert n.status == NoteStatus.PROPOSED   # agent-drafted, awaits confirm
         assert n.confidence == Confidence.HIGH
+
+
+class TestContextStoreNotebook:
+    def test_notebook_property_rooted_under_agent_dir(self, file_context_store):
+        nb = file_context_store.notebook
+        assert nb.root == file_context_store.agent_dir / "notebook"
+
+    def test_notebook_property_is_cached(self, file_context_store):
+        assert file_context_store.notebook is file_context_store.notebook

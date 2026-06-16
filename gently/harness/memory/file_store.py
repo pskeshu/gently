@@ -2175,6 +2175,17 @@ class FileContextStore:
     # Batch Updates
     # ==================================================================
 
+    @property
+    def notebook(self):
+        """The shared lab notebook, rooted at agent_dir/notebook (lazy)."""
+        nb = getattr(self, "_notebook", None)
+        if nb is None:
+            from .notebook import NotebookStore
+
+            nb = NotebookStore(self.agent_dir / "notebook")
+            self._notebook = nb
+        return nb
+
     def apply_updates(self, updates: ContextUpdates):
         for obs in updates.new_observations:
             self.add_observation(obs)
