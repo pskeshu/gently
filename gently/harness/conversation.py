@@ -730,7 +730,74 @@ class ConversationManager:
             await asyncio.sleep(0.05)
 
             tool_results = []
+
+            # Concurrency fast-path: run a turn's tool calls in parallel when ALL of
+            # them are non-hardware and non-interactive (e.g. several strain / paper /
+            # lab-history lookups). Any microscope action or ask_user_choice in the
+            # batch falls back to the serial path below, so we never race hardware or
+            # an interactive prompt, and ordering of stateful ops is preserved.
+            tool_blocks = [b for b in response_content if getattr(b, "type", None) == "tool_use"]
+            _interactive = {"ask_user_choice"}
+
+            def _parallel_safe(b):
+                td = self._tool_registry.get(b.name)
+                return td is not None and not td.requires_microscope and b.name not in _interactive
+
+            handled_parallel = False
+            if len(tool_blocks) > 1 and all(_parallel_safe(b) for b in tool_blocks):
+                handled_parallel = True
+                starts = {b.id: time.time() for b in tool_blocks}
+                for b in tool_blocks:
+                    yield {
+                        "type": "tool_start",
+                        "tool_name": b.name,
+                        "tool_input": b.input,
+                        "tool_label": tool_label_fn(b.name, b.input),
+                    }
+                gathered = await asyncio.gather(
+                    *[self._execute_single_tool(b.name, b.input) for b in tool_blocks],
+                    return_exceptions=True,
+                )
+                for b, res in zip(tool_blocks, gathered, strict=True):
+                    if isinstance(res, BaseException):
+                        is_error_flag = True
+                        result_text = f"Error: {res}"
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": b.id,
+                                "content": result_text,
+                                "is_error": True,
+                            }
+                        )
+                    else:
+                        is_error_flag = False
+                        result_text = res if isinstance(res, str) else str(res)
+                        tool_results.append(
+                            {"type": "tool_result", "tool_use_id": b.id, "content": res}
+                        )
+                    result_summary = next(
+                        (ln.strip() for ln in (result_text or "").splitlines() if ln.strip()),
+                        "",
+                    )
+                    if len(result_summary) > 140:
+                        result_summary = result_summary[:139] + "…"
+                    result_full = result_text or ""
+                    if len(result_full) > 4000:
+                        result_full = result_full[:4000] + "\n…(truncated)"
+                    yield {
+                        "type": "tool_call",
+                        "tool_name": b.name,
+                        "tool_input": b.input,
+                        "duration": time.time() - starts[b.id],
+                        "result_summary": result_summary,
+                        "result_full": result_full,
+                        "is_error": is_error_flag,
+                    }
+
             for block in response_content:
+                if handled_parallel:
+                    break
                 if hasattr(block, "type") and block.type == "tool_use":
                     start_time = time.time()
 

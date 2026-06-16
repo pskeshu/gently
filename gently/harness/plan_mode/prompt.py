@@ -176,6 +176,10 @@ PLAN_MODE_GUIDELINES = """\
    items, search to confirm strain availability, check the literature for recent
    protocols, and attach references. Your built-in knowledge is a great starting
    point for brainstorming — the databases are where you confirm before finalizing.
+11. **Batch independent lookups**: When you need several independent reads — multiple
+   strains, several papers, or a few lab-history queries — request them together in
+   one turn so they run in parallel. Don't fetch one, wait for it, then fetch the
+   next; that's slow. (The system runs same-turn read-only lookups concurrently.)
 """
 
 
