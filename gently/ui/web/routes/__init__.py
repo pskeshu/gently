@@ -14,6 +14,7 @@ from .context import create_router as create_context_router
 from .data import create_router as create_data_router
 from .experiments import create_router as create_experiments_router
 from .images import create_router as create_images_router
+from .notebook import create_router as create_notebook_router
 from .pages import create_router as create_pages_router
 from .sessions import create_router as create_sessions_router
 from .volumes import create_router as create_volumes_router
@@ -35,6 +36,7 @@ def register_all_routes(server):
         create_agent_ws_router,
         create_chat_router,
         create_context_router,
+        create_notebook_router,
     ):
         router = factory(server)
         server.app.include_router(router)
