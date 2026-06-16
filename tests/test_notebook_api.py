@@ -90,3 +90,59 @@ class TestLimit:
         client = TestClient(_make_app(_seed(file_context_store)))
         data = client.get("/api/notebook/notes?limit=1").json()
         assert len(data["notes"]) == 1  # newest-first, capped
+
+
+class _AskBlock:
+    def __init__(self, inp):
+        self.type = "tool_use"
+        self.input = inp
+
+
+class _AskResp:
+    def __init__(self, inp):
+        self.content = [_AskBlock(inp)]
+        self.stop_reason = "tool_use"
+
+
+class _AskMessages:
+    def __init__(self, inp):
+        self._inp = inp
+
+    async def create(self, **kwargs):
+        return _AskResp(self._inp)
+
+
+class _AskClient:
+    def __init__(self, inp):
+        self.messages = _AskMessages(inp)
+
+
+def _make_app_with_client(context_store, client):
+    from gently.ui.web.routes.notebook import create_router
+
+    app = FastAPI()
+
+    class _Server:
+        pass
+
+    server = _Server()
+    server.context_store = context_store
+    server.claude_async = client
+    app.include_router(create_router(server))
+    return app
+
+
+class TestAsk:
+    def test_ask_returns_grounded_answer(self, file_context_store):
+        cs = _seed(file_context_store)
+        canned = {"answer": "A ring formed.", "points": [{"text": "ring", "note_ids": ["o1"]}],
+                  "suggested_next": [], "coverage": "covered"}
+        client = TestClient(_make_app_with_client(cs, _AskClient(canned)))
+        resp = client.post("/api/notebook/ask", json={"question": "what happened?"})
+        assert resp.status_code == 200
+        assert resp.json()["coverage"] == "covered"
+
+    def test_ask_no_store(self):
+        client = TestClient(_make_app(None))
+        resp = client.post("/api/notebook/ask", json={"question": "x"})
+        assert resp.json() == {"available": False}

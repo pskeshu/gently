@@ -4,7 +4,7 @@ Exposes the notebook's Notes for the Notebook tab + Agent's-View live edge.
 Read-only here; authoring/curation come in a later increment.
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Body, HTTPException
 
 from gently.harness.memory.notebook import Author, NoteKind, NoteStatus, note_to_dict
 
@@ -72,5 +72,28 @@ def create_router(server) -> APIRouter:
                 counts[t] = counts.get(t, 0) + 1
         threads = [{"id": t, "count": c} for t, c in sorted(counts.items())]
         return {"available": True, "threads": threads}
+
+    @router.post("/api/notebook/ask")
+    async def ask(
+        question: str = Body(..., embed=True),
+        thread: str | None = Body(None, embed=True),
+        strain: str | None = Body(None, embed=True),
+    ):
+        nb = _nb()
+        if nb is None:
+            return {"available": False}
+        from gently.harness.memory.notebook_ask import answer_question, select_notes
+        from gently.settings import settings
+
+        notes = select_notes(nb, thread=thread, strain=strain)
+        client = getattr(server, "claude_async", None)
+        if client is None:
+            import anthropic
+
+            client = anthropic.AsyncAnthropic()
+        result = await answer_question(client, settings.models.main, question, notes)
+        result["available"] = True
+        result["note_ids"] = [n.id for n in notes]
+        return result
 
     return router
