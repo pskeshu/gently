@@ -133,3 +133,24 @@ class TestNotebookQuery:
         assert len(notes) == 3
         ts = [n.created_at for n in notes]
         assert ts == sorted(ts, reverse=True)
+
+
+class TestNotebookLinkSupersede:
+    def test_link_notes_adds_typed_edge(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        a = store.write_note(Note(id="", kind=NoteKind.FINDING, body="a"))
+        b = store.write_note(Note(id="", kind=NoteKind.QUESTION, body="b"))
+        store.link_notes(a, "supports", b)
+        got = store.get_note(a)
+        assert {"rel": "supports", "to": b} in got.links
+
+    def test_supersede_marks_old_and_points_new(self, tmp_path):
+        store = NotebookStore(tmp_path / "notebook")
+        old = store.write_note(Note(id="", kind=NoteKind.FINDING, body="old claim"))
+        new = store.write_note(Note(id="", kind=NoteKind.FINDING, body="better claim"))
+        store.supersede_note(old, new)
+        old_n = store.get_note(old)
+        new_n = store.get_note(new)
+        assert old_n.status == NoteStatus.SUPERSEDED
+        assert old_n.superseded_by == new
+        assert {"rel": "refines", "to": old} in new_n.links

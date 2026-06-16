@@ -244,3 +244,25 @@ class NotebookStore:
             results.append(n)
         results.sort(key=lambda n: n.created_at, reverse=True)
         return results
+
+    # ---- links + supersession (append-only history) ----
+    def link_notes(self, from_id: str, rel: str, to_id: str) -> None:
+        """Add a typed edge from one note to another (append-only)."""
+        note = self.get_note(from_id)
+        if note is None:
+            raise KeyError(from_id)
+        edge = {"rel": rel, "to": to_id}
+        if edge not in note.links:
+            note.links.append(edge)
+            self.write_note(note)
+
+    def supersede_note(self, old_id: str, new_id: str) -> None:
+        """Mark old as superseded (kept, never deleted) and link the new note
+        back to it as a refinement — the chain is the intellectual history."""
+        old = self.get_note(old_id)
+        if old is None:
+            raise KeyError(old_id)
+        old.status = NoteStatus.SUPERSEDED
+        old.superseded_by = new_id
+        self.write_note(old)
+        self.link_notes(new_id, "refines", old_id)
