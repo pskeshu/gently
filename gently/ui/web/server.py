@@ -676,7 +676,11 @@ class VisualizationServer(Service):
             embryos.append(
                 {
                     "embryo_number": m["number"],
-                    "embryo_id": m.get("embryo_id") or f"embryo_{m['number']:03d}",
+                    # Unpadded to match the live convention used everywhere else
+                    # (detection_tools registers embryos as f"embryo_{n}"). A
+                    # zero-padded fallback here produced ids like "embryo_002"
+                    # that never matched the stored "embryo_2".
+                    "embryo_id": m.get("embryo_id") or f"embryo_{m['number']}",
                     "pixel_position": (px, py),
                     "pixel_x": px,
                     "pixel_y": py,
