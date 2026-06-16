@@ -193,3 +193,26 @@ class TestContextStoreNotebook:
 
     def test_notebook_property_is_cached(self, file_context_store):
         assert file_context_store.notebook is file_context_store.notebook
+
+
+class TestApplyUpdatesMirror:
+    def test_apply_updates_mirrors_observations_and_learnings(self, file_context_store):
+        from gently.harness.memory.model import ContextUpdates
+
+        cs = file_context_store
+        obs = Observation(id="o1", timestamp=datetime(2026, 6, 16, 9, 0, 0),
+                          type="milestone", content="ring formed", embryo_id="e1")
+        lrn = Learning(id="l1", content="rings form by comma", confidence=Confidence.HIGH)
+        cs.apply_updates(ContextUpdates(new_observations=[obs], new_learnings=[lrn]))
+
+        bodies = {n.body for n in cs.notebook.query_notes()}
+        assert "ring formed" in bodies
+        assert "rings form by comma" in bodies
+        assert cs.notebook.ids_for_embryo("e1") == ["o1"]
+
+    def test_apply_updates_empty_is_noop_for_notebook(self, file_context_store):
+        from gently.harness.memory.model import ContextUpdates
+
+        cs = file_context_store
+        cs.apply_updates(ContextUpdates())
+        assert cs.notebook.query_notes() == []

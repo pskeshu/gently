@@ -2213,6 +2213,18 @@ class FileContextStore:
         if updates.new_focus is not None:
             self.set_state("current_focus", updates.new_focus)
 
+        # Mirror new observations & learnings into the shared notebook
+        # (best-effort — a notebook failure never breaks the legacy write).
+        from .notebook import learning_to_note, observation_to_note
+
+        try:
+            for obs in updates.new_observations:
+                self.notebook.write_note(observation_to_note(obs))
+            for learning in updates.new_learnings:
+                self.notebook.write_note(learning_to_note(learning))
+        except Exception:
+            logger.warning("notebook mirror failed", exc_info=True)
+
     # ==================================================================
     # ML Pipelines
     # ==================================================================
