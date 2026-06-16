@@ -320,7 +320,13 @@ const V2Landing = (() => {
             case 'text': {
                 const chunk = act.text || '';
                 if (!chunk) break;
-                feedThinkingEl = null;   // reasoning block ends when prose begins
+                // The reasoning that immediately precedes the spoken answer is
+                // wrap-up meta ("let me wrap this up concisely and offer to
+                // export…") — drop the block entirely so the feed keeps the
+                // answer, not the narration of getting there. Reasoning that
+                // precedes a TOOL is left in place (tool_start only nulls the
+                // pointer) as the rationale for that action.
+                if (feedThinkingEl) { feedThinkingEl.remove(); feedThinkingEl = null; }
                 if (!feedTextEl) {
                     feedTextEl = document.createElement('div');
                     feedTextEl.className = 'v2-act-text';
