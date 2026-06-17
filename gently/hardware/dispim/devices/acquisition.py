@@ -84,9 +84,9 @@ class DiSPIMVolumeScanner:
         self._configured = False
 
         # Configuration cache
-        self._num_slices = None
-        self._exposure_ms = None
-        self._laser_config = None
+        self._num_slices: int | None = None
+        self._exposure_ms: float | None = None
+        self._laser_config: str | None = None
 
     def configure(
         self,

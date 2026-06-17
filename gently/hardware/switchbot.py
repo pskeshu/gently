@@ -29,6 +29,7 @@ import logging
 import threading
 import time
 from collections import OrderedDict
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -167,7 +168,7 @@ class SwitchBot:
         """
         with self._lock:
             data = asyncio.run(_send_command(self.address, _QUERY_STATUS, self.timeout))
-        info = {
+        info: dict[str, Any] = {
             "raw_hex": data.hex(),
             "battery_pct": data[_STATUS_BATTERY_IDX] if len(data) > _STATUS_BATTERY_IDX else None,
             "firmware": data[_STATUS_FIRMWARE_IDX] if len(data) > _STATUS_FIRMWARE_IDX else None,
