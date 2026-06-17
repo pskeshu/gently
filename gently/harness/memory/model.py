@@ -292,7 +292,8 @@ class PlanItem:
 
     # Linking
     planned_session_id: str | None = None  # → PlannedSession (for imaging items)
-    session_id: str | None = None  # → Actual session (once executed)
+    session_id: str | None = None  # → most recent actual session (back-compat / "primary")
+    session_ids: list[str] = field(default_factory=list)  # all sessions that ran this item (1→many)
     inherit_from: str | None = None  # PlanItem ID to inherit spec from
 
     # Scheduling — relative timeline from Day 0

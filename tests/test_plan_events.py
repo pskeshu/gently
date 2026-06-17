@@ -30,3 +30,20 @@ class TestPlanUpdatedEvent:
         finally:
             unsub()
         assert any((e.data or {}).get("campaign_id") == cid for e in seen)
+
+
+class TestLinkPlanItemSession:
+    def test_append_many_sessions(self, file_context_store):
+        cs = file_context_store
+        cid = cs.create_campaign(description="c")
+        iid = cs.create_plan_item(campaign_id=cid, type="imaging", title="x")
+        assert cs.link_plan_item_session(iid, "s1") is True
+        assert cs.link_plan_item_session(iid, "s2") is True
+        cs.link_plan_item_session(iid, "s1")  # duplicate — no-op
+        item = cs.get_plan_item(iid)
+        assert item.session_ids == ["s1", "s2"]  # appended, deduped
+        assert item.session_id == "s2"  # latest, for back-compat readers
+        assert item.status == PlanItemStatus.IN_PROGRESS  # PLANNED → IN_PROGRESS on first link
+
+    def test_missing_item_returns_false(self, file_context_store):
+        assert file_context_store.link_plan_item_session("nope", "s1") is False

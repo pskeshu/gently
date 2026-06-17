@@ -1147,6 +1147,7 @@ class FileContextStore:
             "inherit_from": inherit_from,
             "planned_session_id": planned_session_id,
             "session_id": None,
+            "session_ids": [],
             "estimated_days": estimated_days,
             "phase_order": phase_order,
             "references": references,
@@ -1352,6 +1353,33 @@ class FileContextStore:
             status=PlanItemStatus.COMPLETED,
             outcome=outcome,
         )
+
+    def link_plan_item_session(
+        self, item_id: str, session_id: str, set_in_progress: bool = True
+    ) -> bool:
+        """Attach a session to a plan item — APPENDS (an item may run several times:
+        re-runs, multi-sitting, more embryos later). Records the session as the latest
+        `session_id` (back-compat), flips a PLANNED item to IN_PROGRESS, emits PLAN_UPDATED.
+        Returns False if the item isn't found."""
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or (
+            [item["session_id"]] if item.get("session_id") else []
+        )
+        if session_id and session_id not in sids:
+            sids.append(session_id)
+        item["session_ids"] = sids
+        if sids:
+            item["session_id"] = sids[-1]  # most recent run; back-compat for older readers
+        if set_in_progress and item.get("status") == "planned":
+            item["status"] = PlanItemStatus.IN_PROGRESS.value
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
 
     def skip_plan_item(self, item_id: str, reason: str | None = None):
         self.update_plan_item(
@@ -2620,6 +2648,7 @@ class FileContextStore:
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),
             session_id=d.get("session_id"),
+            session_ids=d.get("session_ids") or ([d["session_id"]] if d.get("session_id") else []),
             inherit_from=d.get("inherit_from"),
             estimated_days=d.get("estimated_days"),
             phase_order=d.get("phase_order", 0),
