@@ -386,7 +386,7 @@ class InteractionLogger:
 
     def _sanitize_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Remove large/sensitive data from state snapshot"""
-        sanitized = {}
+        sanitized: dict[str, Any] = {}
 
         # Keep summary info
         if "embryos" in state:
@@ -403,7 +403,7 @@ class InteractionLogger:
 
     def _sanitize_tool_input(self, tool_input: dict[str, Any]) -> dict[str, Any]:
         """Remove large/binary data from tool input"""
-        sanitized = {}
+        sanitized: dict[str, Any] = {}
         for key, value in tool_input.items():
             if isinstance(value, (str, int, float, bool, type(None))):
                 if isinstance(value, str) and len(value) > 500:

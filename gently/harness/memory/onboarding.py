@@ -23,7 +23,7 @@ from .model import (
 try:
     from .file_store import FileContextStore as ContextStore
 except ImportError:
-    from .store import ContextStore
+    from .store import ContextStore  # type: ignore[assignment]  # legacy fallback
 
 
 @dataclass
@@ -430,7 +430,7 @@ def _extract_basic(
 
 
 def apply_ingestion_to_context(
-    result: "IngestionResult",  # noqa: F821
+    result: Any,  # was "IngestionResult"; that type no longer exists (dead code path)
     context_store: ContextStore,
 ) -> int:
     """
