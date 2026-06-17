@@ -40,6 +40,18 @@ const SPEC_UNITS = {
     laser_power_pct: '%', interval_s: 's', estimated_duration_h: ' hrs',
     estimated_days: ' days',
 };
+// Imaging-spec fields the inspector lets you edit/fill inline (ordered for the form).
+// Empty ones still show \u2014 that's how you fill a TBD value like laser power.
+const IMAGING_SPEC_FIELDS = [
+    'strain', 'genotype', 'reporter', 'sample_prep', 'temperature_c', 'num_embryos',
+    'num_slices', 'exposure_ms', 'laser_wavelength_nm', 'laser_power_pct', 'interval_s',
+    'target_window', 'start_stage', 'stop_condition', 'estimated_duration_h',
+    'success_criteria', 'comparison_to',
+];
+const SPEC_NUMERIC = new Set([
+    'temperature_c', 'num_embryos', 'num_slices', 'exposure_ms', 'laser_wavelength_nm',
+    'laser_power_pct', 'interval_s', 'estimated_duration_h',
+]);
 
 // ── State ────────────────────────────────────────────────
 const state = {
@@ -52,6 +64,9 @@ const state = {
     versions: [],               // snapshots list
     viewingSnapshotId: null,
     allItemsFlat: {},           // id → item for quick lookup
+    editingSpec: false,         // inspector imaging-spec edit mode
+    _inspectorData: null,       // last item-detail payload (for re-render on edit toggle)
+    _specError: '',             // inline save error in the spec editor
 };
 
 // ── DOM refs (cached on init) ────────────────────────────
@@ -123,6 +138,9 @@ function boot() {
             case 'back-to-current': backToCurrent(); break;
             case 'scroll-to': e.stopPropagation(); scrollCanvasTo(el.dataset.target); break;
             case 'toggle-phase': toggleNavPhase(el); break;
+            case 'spec-edit': e.stopPropagation(); startSpecEdit(); break;
+            case 'spec-cancel': e.stopPropagation(); cancelSpecEdit(); break;
+            case 'spec-save': e.stopPropagation(); saveSpecEdit(); break;
         }
     });
 
@@ -291,7 +309,8 @@ async function refreshActiveCampaign() {
     await loadDocument(state.activeCampaignId);
     if (!state.docData) return;
     renderAll();
-    if (keep) selectItem(keep).catch(() => {});
+    // Don't clobber an in-progress spec edit with a re-fetch.
+    if (keep && !state.editingSpec) selectItem(keep).catch(() => {});
 }
 
 // Handle browser back/forward
@@ -606,6 +625,12 @@ function renderVersionHistory() {
 // ══════════════════════════════════════════════════════════
 
 async function selectItem(itemId) {
+    // A re-fetch of the same item (e.g. after saving) keeps view mode; switching
+    // to a different item always lands in read-only.
+    if (itemId !== state.selectedItemId) {
+        state.editingSpec = false;
+        state._specError = '';
+    }
     state.selectedItemId = itemId;
 
     // Highlight in document
@@ -644,6 +669,7 @@ async function selectItem(itemId) {
 }
 
 function renderInspector(data) {
+    state._inspectorData = data;
     const item = data.item;
     const deps = data.dependencies || [];
     const dnts = data.dependents || [];
@@ -689,9 +715,20 @@ function renderInspector(data) {
         html += section('Outcome', `<div class="detail-section-content">${esc(item.outcome)}</div>`);
     }
 
-    // Imaging spec
-    if (item.imaging_spec) {
-        html += section('Imaging Specification', `<table class="spec-table">${renderSpecTable(item.imaging_spec)}</table>`);
+    // Imaging spec — view, or edit/fill inline (the laser-power loop). Shown for any
+    // imaging item even when no spec is set yet, so empty fields can be filled.
+    if (item.type === 'imaging' || item.imaging_spec) {
+        const spec = item.imaging_spec || {};
+        if (state.editingSpec) {
+            html += section('Imaging Specification', renderSpecEditor(spec));
+        } else {
+            const rows = renderSpecTable(spec);
+            const content = rows
+                ? `<table class="spec-table">${rows}</table>`
+                : '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No parameters set yet</div>';
+            const editBtn = '<button class="spec-edit-btn" data-action="spec-edit">✎ Edit</button>';
+            html += section('Imaging Specification', content, editBtn);
+        }
     }
 
     // Bench spec
@@ -765,6 +802,104 @@ function renderInspector(data) {
     }
 
     if ($inspectorBody) $inspectorBody.innerHTML = html;
+}
+
+// Editable imaging-spec form. Lists every fillable field — empty ones included,
+// flagged — so a TBD value (e.g. laser power) is obvious and one click away.
+function renderSpecEditor(spec) {
+    let rows = '';
+    for (const key of IMAGING_SPEC_FIELDS) {
+        const label = SPEC_LABELS[key] || key;
+        const val = spec[key];
+        const has = val != null && val !== '';
+        const numeric = SPEC_NUMERIC.has(key);
+        const unit = SPEC_UNITS[key]
+            ? `<span class="spec-edit-unit">${esc(SPEC_UNITS[key].trim())}</span>` : '';
+        const rowCls = has ? 'spec-edit-row' : 'spec-edit-row spec-edit-row--empty';
+        rows += `<div class="${rowCls}">
+            <label class="spec-edit-label" for="spec-${key}">${esc(label)}</label>
+            <span class="spec-edit-field">
+                <input id="spec-${key}" class="spec-edit-input" data-spec-key="${key}"
+                    type="${numeric ? 'number' : 'text'}"${numeric ? ' step="any"' : ''}
+                    value="${has ? esc(String(val)) : ''}" placeholder="not set">${unit}
+            </span>
+        </div>`;
+    }
+    const err = state._specError
+        ? `<div class="spec-edit-error">${esc(state._specError)}</div>` : '';
+    return `<div class="spec-editor">
+        ${rows}
+        ${err}
+        <div class="spec-edit-actions">
+            <button class="spec-save-btn" data-action="spec-save">Save</button>
+            <button class="spec-cancel-btn" data-action="spec-cancel">Cancel</button>
+        </div>
+    </div>`;
+}
+
+function startSpecEdit() {
+    if (!state._inspectorData) return;
+    state.editingSpec = true;
+    state._specError = '';
+    renderInspector(state._inspectorData);
+}
+
+function cancelSpecEdit() {
+    state.editingSpec = false;
+    state._specError = '';
+    if (state._inspectorData) renderInspector(state._inspectorData);
+}
+
+// Collect changed/filled fields and PATCH them. The store fires PLAN_UPDATED,
+// which live-refreshes the plan; we also re-fetch the inspector for immediacy.
+async function saveSpecEdit() {
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+
+    const orig = item.imaging_spec || {};
+    const specPatch = {};
+    document.querySelectorAll('#inspector-body [data-spec-key]').forEach(inp => {
+        const key = inp.dataset.specKey;
+        const raw = inp.value.trim();
+        const hadVal = orig[key] != null && orig[key] !== '';
+        if (raw === '') {
+            if (hadVal) specPatch[key] = '';   // cleared an existing value → unset
+            return;                            // stayed empty → skip
+        }
+        let v = raw;
+        if (SPEC_NUMERIC.has(key)) {
+            const n = Number(raw);
+            if (!Number.isNaN(n)) v = n;
+        }
+        if (String(orig[key] ?? '') !== String(v)) specPatch[key] = v;
+    });
+
+    state.editingSpec = false;
+    state._specError = '';
+    if (Object.keys(specPatch).length === 0) {
+        selectItem(item.id).catch(() => {});   // nothing changed — just leave edit mode
+        return;
+    }
+
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}`,
+            {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ spec: specPatch }),
+            },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});    // refresh inspector now; PLAN_UPDATED refreshes the plan
+    } catch (err) {
+        console.error('Failed to save spec:', err);
+        state.editingSpec = true;
+        state._specError = 'Could not save — try again.';
+        renderInspector(data);
+    }
 }
 
 // Hand a planned imaging item to the agent to execute. The agent resolves the
@@ -1069,8 +1204,10 @@ function hideLoading() {
     $canvasLoading?.classList.add('hidden');
 }
 
-function section(title, content) {
-    return `<div class="detail-section"><div class="detail-section-title">${title}</div>${content}</div>`;
+function section(title, content, headerAction) {
+    const extra = headerAction ? `<span class="detail-section-action">${headerAction}</span>` : '';
+    const titleCls = headerAction ? 'detail-section-title detail-section-title--row' : 'detail-section-title';
+    return `<div class="detail-section"><div class="${titleCls}">${title}${extra}</div>${content}</div>`;
 }
 
 function renderSpecTable(spec) {

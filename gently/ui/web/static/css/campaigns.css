@@ -1284,6 +1284,89 @@
     font-size: 0.7rem;
 }
 
+/* Section title with a right-aligned action (e.g. Edit) */
+.detail-section-title--row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.detail-section-action { display: inline-flex; }
+.spec-edit-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font: inherit;
+    font-size: 0.62rem;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+}
+.spec-edit-btn:hover { color: var(--text); border-color: var(--text-muted); }
+
+/* Editable imaging-spec form */
+.spec-editor { display: flex; flex-direction: column; gap: 6px; }
+.spec-edit-row {
+    display: grid;
+    grid-template-columns: 38% 1fr;
+    align-items: center;
+    gap: 10px;
+}
+.spec-edit-label {
+    color: var(--text-muted);
+    font-size: 0.7rem;
+}
+.spec-edit-row--empty .spec-edit-label::after {
+    content: ' • set';
+    color: var(--accent-orange, #d98324);
+    font-size: 0.6rem;
+    opacity: 0.8;
+}
+.spec-edit-field { display: flex; align-items: center; gap: 5px; }
+.spec-edit-input {
+    flex: 1;
+    min-width: 0;
+    background: var(--bg, #fff);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 7px;
+    color: var(--text);
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.7rem;
+}
+.spec-edit-input:focus {
+    outline: none;
+    border-color: var(--accent, #2f6df6);
+}
+.spec-edit-row--empty .spec-edit-input {
+    border-style: dashed;
+}
+.spec-edit-unit { color: var(--text-muted); font-size: 0.66rem; }
+.spec-edit-error {
+    color: var(--accent-orange, #d98324);
+    font-size: 0.68rem;
+    margin-top: 2px;
+}
+.spec-edit-actions { display: flex; gap: 8px; margin-top: 8px; }
+.spec-save-btn, .spec-cancel-btn {
+    border-radius: 7px;
+    padding: 5px 14px;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+.spec-save-btn {
+    background: var(--accent, #2f6df6);
+    color: #fff;
+    border: 0;
+}
+.spec-cancel-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+}
+
 /* Dependencies / Dependents chips */
 .dep-list {
     display: flex;

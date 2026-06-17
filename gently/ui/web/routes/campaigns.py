@@ -321,6 +321,58 @@ def create_router(server) -> APIRouter:
 
         return _require
 
+    @router.patch(
+        "/api/campaigns/{campaign_id}/items/{item_id}",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
+    async def update_item(campaign_id: str, item_id: str, request: Request):
+        """Edit plan-item fields and/or imaging-spec fields inline.
+
+        Send only the fields you're changing. Spec edits are *merged* into the
+        existing spec, so the UI can PATCH a single field (e.g. laser_power_pct)
+        without losing the rest. An empty string clears a spec field to null.
+        Persists via update_plan_item, which fires PLAN_UPDATED for live refresh.
+        """
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+        kwargs: dict[str, Any] = {}
+        for f in ("title", "description", "outcome"):
+            if isinstance(body.get(f), str):
+                kwargs[f] = body[f]
+        if body.get("estimated_days") is not None:
+            kwargs["estimated_days"] = body["estimated_days"]
+
+        if body.get("status"):
+            try:
+                kwargs["status"] = PlanItemStatus(body["status"])
+            except ValueError as err:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid status: {body['status']}"
+                ) from err
+
+        spec_patch = body.get("spec")
+        if isinstance(spec_patch, dict):
+            current = item.imaging_spec or item.bench_spec
+            merged = asdict(current) if current else {}
+            for k, v in spec_patch.items():
+                merged[k] = None if v == "" else v
+            kwargs["spec"] = merged
+
+        if not kwargs:
+            raise HTTPException(status_code=400, detail="No editable fields supplied")
+
+        cs.update_plan_item(item_id=item_id, **kwargs)  # fires PLAN_UPDATED
+        updated = cs.get_plan_item(item_id)
+        return {"ok": True, "item": _serialize(updated)}
+
     @router.post(
         "/api/campaigns/{campaign_id}/share",
         dependencies=[Depends(_make_campaign_auth("campaigns:admin"))],
