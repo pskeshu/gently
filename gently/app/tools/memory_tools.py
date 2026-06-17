@@ -129,3 +129,57 @@ async def recall_context(
     if not memory:
         return "No memory available (context store not connected)"
     return memory.recall_full_context(campaign_id=campaign_id)
+
+
+@tool(
+    name="record_note",
+    description=(
+        "Record a note from the researcher into the shared lab notebook. Use this when the "
+        "user says 'note that…', 'add a note…', 'remember that…'. First tidy the phrasing for "
+        "clarity — keep their meaning and any specifics (numbers, strains, stages) — then save. "
+        "The note is attributed to the human and tagged to the current session."
+    ),
+    category=ToolCategory.UTILITY,
+    examples=[
+        ToolExample(
+            user_query="Note that the 4-embryo test ran clean — 329 timepoints, system nominal.",
+            tool_input={
+                "text": "Test run on 4 calibration embryos was clean: 329 timepoints, "
+                "system behaved as expected."
+            },
+        ),
+    ],
+)
+async def record_note(
+    text: str,
+    embryos: list[str] | None = None,
+    strains: list[str] | None = None,
+    context: dict | None = None,
+) -> str:
+    """Write a human-authored note into the notebook, tagged to the current session."""
+    agent = context.get("agent") if context else None
+    cs = getattr(agent, "context_store", None) if agent else None
+    if cs is None:
+        return "No notebook available (context store not connected)"
+    from gently.harness.memory.notebook import Author, Note, NoteKind
+
+    session_id = getattr(agent, "session_id", None)
+    note = Note(
+        id="",
+        kind=NoteKind.OBSERVATION,
+        body=text,
+        author=Author.HUMAN,
+        sessions=[session_id] if session_id else [],
+        embryos=embryos or [],
+        strains=strains or [],
+    )
+    note_id = cs.notebook.write_note(note)
+    # Refresh the Notebook tab + Agent's-view live edge (both ride CONTEXT_UPDATED).
+    try:
+        from gently.core.event_bus import EventType, emit
+
+        emit(EventType.CONTEXT_UPDATED, {"kind": "note"}, source="record_note")
+    except Exception:
+        pass
+    scope = "this session" if session_id else "the notebook (no active session)"
+    return f"Noted (id {note_id}) — saved to {scope}, attributed to you."
