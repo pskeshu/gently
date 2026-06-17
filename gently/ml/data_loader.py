@@ -19,7 +19,7 @@ except ImportError:
     HAS_TORCH = False
 
     # Stub for import-time safety
-    class Dataset:
+    class Dataset:  # type: ignore[no-redef]
         pass
 
 
@@ -135,7 +135,7 @@ def create_data_splits(
         all_samples.append((full_path, label))
 
     # Stratified split
-    by_label = {}
+    by_label: dict[Any, list] = {}
     for path, label in all_samples:
         by_label.setdefault(label, []).append((path, label))
 
@@ -168,7 +168,7 @@ def build_labels_from_store(gently_store, session_ids: list[str] | None = None) 
     dict
         {"class_names": [...], "samples": [{"path": "...", "label": int}, ...]}
     """
-    stage_to_idx = {}
+    stage_to_idx: dict[Any, int] = {}
     samples = []
 
     sessions = gently_store.list_sessions()

@@ -130,7 +130,7 @@ class AdaptiveSweepState:
         self.positions.append(position)
         self.scores.append(score)
 
-        result = {
+        result: dict[str, Any] = {
             "should_stop": False,
             "reason": None,
             "confidence": 0.0,

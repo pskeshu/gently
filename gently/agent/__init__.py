@@ -16,7 +16,7 @@ from gently.harness.state import EmbryoState, ExperimentState, ImageRecord
 try:
     from gently.hardware.dispim.device_factory import create_devices_from_mmcore
 except ImportError:
-    create_devices_from_mmcore = None
+    create_devices_from_mmcore = None  # type: ignore[assignment]
 # Import tools package to register all tools
 from gently.app import tools  # noqa: F401
 from gently.app.benchmark import (

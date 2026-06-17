@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -212,7 +213,7 @@ async def _handle_ws_message(server, websocket: WebSocket, message: str):
                 if session:
                     session["markers"] = markers
                     session["complete"].set()
-                    role_summary = {}
+                    role_summary: dict[str, Any] = {}
                     for m in markers:
                         r = m.get("role", "test")
                         role_summary[r] = role_summary.get(r, 0) + 1

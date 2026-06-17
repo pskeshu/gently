@@ -18,7 +18,7 @@ from .harness.tools.registry import ToolCategory, ToolRegistry, get_tool_registr
 try:
     from .harness.memory.file_store import FileContextStore
 except ImportError:
-    FileContextStore = None
+    FileContextStore = None  # type: ignore[assignment, misc]
 # Core infrastructure
 from .core import (
     EventBus,

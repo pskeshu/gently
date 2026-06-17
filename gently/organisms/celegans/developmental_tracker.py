@@ -242,7 +242,7 @@ class DevelopmentalTracker:
             Classification result
         """
         # Build content for Claude Vision
-        content = []
+        content: list[dict[str, Any]] = []
 
         # Add temporal context if available
         if recent_images and len(recent_images) > 1:

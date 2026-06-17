@@ -34,7 +34,10 @@ Usage:
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from .ui.web.server import VisualizationServer
 
 from .analysis import (
     Pipeline,
@@ -114,7 +117,7 @@ class Gently:
         self._agent = None
 
         # Visualization server (lazy loaded)
-        self._viz_server = None
+        self._viz_server: VisualizationServer | None = None
 
         # Register standard services
         self._register_standard_services()
@@ -250,7 +253,7 @@ class Gently:
             return True
         return False
 
-    def list_sessions(self) -> list[dict]:
+    def list_sessions(self) -> list[Any]:
         """List available sessions"""
         return self._store.list_sessions()
 

@@ -518,7 +518,7 @@ class SAMStep(AnalysisStep):
         self.model_path = model_path or "sam_vit_b_01ec64.pth"
         self.min_area = min_area
         self._sam = None
-        self._predictor = None
+        self._predictor: Any = None
 
     def _load_sam(self):
         """Lazy load SAM model"""
