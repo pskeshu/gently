@@ -1366,9 +1366,7 @@ class FileContextStore:
             return False
         campaign_id, items, idx = loc
         item = items[idx]
-        sids = item.get("session_ids") or (
-            [item["session_id"]] if item.get("session_id") else []
-        )
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
         if session_id and session_id not in sids:
             sids.append(session_id)
         item["session_ids"] = sids
