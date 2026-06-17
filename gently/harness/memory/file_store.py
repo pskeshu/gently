@@ -503,6 +503,7 @@ class FileContextStore:
         data["progress"] = progress
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
+        self._notify_plan_change(campaign_id)
 
     def update_campaign_status(self, campaign_id: str, status: Status):
         folder = self._campaign_folder(campaign_id)
@@ -832,6 +833,7 @@ class FileContextStore:
             cids.append(campaign_id)
         data["campaign_ids"] = cids
         self._write_yaml(path, data)
+        self._notify_plan_change(campaign_id)
 
     def unlink_session_campaign(self, session_id: str, campaign_id: str):
         path = self.agent_dir / "session_intents" / f"{session_id}.yaml"
@@ -1156,6 +1158,7 @@ class FileContextStore:
         }
         items.append(item_data)
         self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
         logger.info(f"Created plan item {pid} [{type}] #{phase_order}: {title}")
         return pid
 
@@ -1336,10 +1339,12 @@ class FileContextStore:
             new_items = self._read_plan_items_raw(campaign_id)
             new_items.append(item)
             self._write_plan_items(campaign_id, new_items)
+            self._notify_plan_change(campaign_id)
             return
 
         item["updated_at"] = self._now()
         self._write_plan_items(old_campaign_id, items)
+        self._notify_plan_change(old_campaign_id)
 
     def complete_plan_item(self, item_id: str, outcome: str):
         self.update_plan_item(
@@ -1920,6 +1925,16 @@ class FileContextStore:
             from gently.core.event_bus import EventType, emit
 
             emit(EventType.CONTEXT_UPDATED, {"kind": kind}, source="context_store")
+        except Exception:
+            pass
+
+    def _notify_plan_change(self, campaign_id: str | None = None) -> None:
+        """Emit PLAN_UPDATED so the Plans UI refreshes live when a plan item or
+        campaign changes (status, session link, new item, progress). Best-effort."""
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.PLAN_UPDATED, {"campaign_id": campaign_id}, source="context_store")
         except Exception:
             pass
 

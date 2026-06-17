@@ -132,6 +132,13 @@ function boot() {
     // Plan view switcher
     setupPlanViewSwitcher();
 
+    // Live refresh: re-fetch the active campaign when the plan changes (item status,
+    // session link, new item, progress). The store emits PLAN_UPDATED, the server
+    // broadcasts it to /ws, and websocket.js re-emits it on the client bus.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('PLAN_UPDATED', () => scheduleCampaignRefresh());
+    }
+
     // Load campaigns — auto-selects first, or the specified one
     const initialId = window.INITIAL_CAMPAIGN_ID;
     if (initialId) {
@@ -266,6 +273,25 @@ async function openCampaign(campaignId) {
     }
 
     renderAll();
+}
+
+// Live refresh of the open campaign (debounced) — re-fetch its tree and re-render,
+// preserving the selected item so the inspector reflects the change without a reload.
+let _planRefreshTimer = null;
+function scheduleCampaignRefresh() {
+    if (_planRefreshTimer) clearTimeout(_planRefreshTimer);
+    _planRefreshTimer = setTimeout(() => {
+        _planRefreshTimer = null;
+        refreshActiveCampaign().catch(() => {});
+    }, 400);
+}
+async function refreshActiveCampaign() {
+    if (!state.activeCampaignId) return;
+    const keep = state.selectedItemId;
+    await loadDocument(state.activeCampaignId);
+    if (!state.docData) return;
+    renderAll();
+    if (keep) selectItem(keep).catch(() => {});
 }
 
 // Handle browser back/forward

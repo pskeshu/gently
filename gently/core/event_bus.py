@@ -97,6 +97,10 @@ class EventType(Enum):
     # drives the shared-visibility surface in the v2 UI.
     CONTEXT_UPDATED = auto()
 
+    # Plan/campaign mutated (item status, session link, new item, progress) —
+    # drives live refresh of the Plans UI.
+    PLAN_UPDATED = auto()
+
     # Operator-action events. Distinct from EMBRYOS_UPDATE because they
     # carry intent ("a human did this") rather than just state delta.
     # Candidate orchestrators can subscribe and reason about what the
