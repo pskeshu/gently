@@ -1077,6 +1077,9 @@ function renderSpecTable(spec) {
     let rows = '';
     for (const [key, value] of Object.entries(spec)) {
         if (value == null || key.startsWith('_')) continue;
+        // Skip nested objects (e.g. provenance metadata) — they'd render as
+        // "[object Object]". Field-level provenance isn't a spec value to show here.
+        if (typeof value === 'object' && !Array.isArray(value)) continue;
         const label = SPEC_LABELS[key] || key;
         let display = Array.isArray(value) ? value.join(', ') : String(value);
         if (SPEC_UNITS[key]) display += SPEC_UNITS[key];
