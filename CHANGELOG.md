@@ -394,6 +394,52 @@ Net: ~3,500 lines removed across P6–P7.
 
 ---
 
+## v0.22.0
+
+File-based storage, a redesigned web UI, new hardware, and the tooling to
+keep it all honest.
+
+**File-based storage (Gently3)**
+Retired the SQLite databases. All state now lives as human-browsable files
+under `D:\Gently3\` — sessions, embryos, volumes, projections, traces,
+campaigns, learnings, agent memory, all YAML/JSONL/TIFF.
+- `FileStore` replaces `GentlyStore`; `FileContextStore` replaces the
+  `agent_mind.db` `ContextStore`. Drop-in API replacements.
+- A root `gently.yaml` manifest documents the layout for humans and agents.
+- YAML parses are cached in `FileContextStore` — fixes slow Plans/campaign
+  loading.
+
+**Web UI redesign**
+- Agent chat became a docked, sliding side panel (overlay + pin-to-dock)
+  instead of owning the screen.
+- Added a Home landing tab; the chat no longer auto-runs the startup wizard.
+- Login is non-blocking — a "Continue in view-only" escape hatch.
+- Recent images aggregate across previous sessions.
+
+**Hardware**
+- Integrated the ACUITYnano temperature controller (config, web control,
+  SDKs) with a live HiveMQ cloud SIM for hardware-free testing.
+- Added the SPIM-head F-drive device, hard limits, and focus/align plans.
+- Room-light toggle and a device-layer terminal UI.
+
+**Agent + perception**
+- Integrated the agent with perception: pull tool, prompt context, event
+  bridge, wake-router.
+- Live acquisition control with observable, permissioned autonomy and a
+  refreshed prompt.
+- Retired napari from the agent; added web-chat autocomplete and pruned
+  dead tools.
+
+**Tooling and environment**
+- Added ruff lint/format tooling and fixed all violations.
+- Adopted incremental mypy typing — config, CI, pre-commit wiring, and a
+  documented policy in `CONTRIBUTING.md`; pinned mypy to 2.1.0.
+- Switched environment setup to uv with an offline/UI-only launch path;
+  pinned pymmcore to device-interface 70.
+- Relicensed and updated the author list.
+
+---
+
 ## Notes on how we think about this
 
 Things we've learned building this, roughly in order:

@@ -2,7 +2,7 @@
 
 Agentic harness for microscopy.
 
-**Status**: 0.22.0.dev0 — actively developed at Shroff Lab, Janelia.
+**Status**: 0.22.0 — actively developed at Shroff Lab, Janelia.
 
 ![Safety Architecture](docs/images/safety_architecture.png)
 

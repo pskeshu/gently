@@ -146,6 +146,6 @@ electron/
 gently/ui/tui/node_modules/
 gently/ui/tui/dist/
 
-# Stray local storage: on Linux the Windows default GENTLY_STORAGE_PATH
-# (D:\Gently3) is created literally as ./D:/ under the repo. Not data we track.
+# Stray local storage: GENTLY_STORAGE_PATH default (D:\Gently3) resolves
+# literally to ./D:/ under the repo on Linux. Not data we track.
 /D:/
