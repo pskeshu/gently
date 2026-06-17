@@ -7,6 +7,7 @@ Creates MP4 videos from max projections of timelapse volumes.
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -246,7 +247,7 @@ def create_timelapse_video(
                         return {"error": "Could not initialize video writer with any codec"}
 
                 # Ensure consistent frame size
-                if frame.shape != first_shape:
+                if first_shape is not None and frame.shape != first_shape:
                     frame = cv2.resize(frame, (first_shape[1], first_shape[0]))
 
                 writer.write(frame)
@@ -289,7 +290,7 @@ def make_session_videos(
     embryo_ids: list[str] | None = None,
     fps: int = 10,
     progress_callback=None,
-) -> dict[str, dict]:
+) -> dict[str, Any]:
     """
     Create videos for all embryos in a session.
 

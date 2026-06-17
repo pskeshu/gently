@@ -44,7 +44,7 @@ class EdgeRoiCalibration(CalibrationPipeline):
         if precomputed:
             for _eid, bb in precomputed.items():
                 if bb is not None and len(bb) == 4:
-                    bboxes.append(tuple(map(int, bb)))
+                    bboxes.append((int(bb[0]), int(bb[1]), int(bb[2]), int(bb[3])))
         else:
             for vol in source_volumes.values():
                 bb = _bbox_from_volume(vol, padding=self.padding_px)
