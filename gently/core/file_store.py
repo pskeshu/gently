@@ -444,6 +444,21 @@ class FileStore:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
 
+    def append_temperature_sample(self, session_id: str, sample: dict) -> None:
+        """Append one temperature reading to the session's temperature.jsonl."""
+        sd = self._require_session_dir(session_id)
+        _append_jsonl(sd / "temperature.jsonl", sample)
+
+    def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
+        """Return temperature samples for a session, optionally filtered to t >= since (ISO-UTC string)."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        rows = _read_jsonl(sd / "temperature.jsonl")
+        if since is not None:
+            rows = [r for r in rows if str(r.get("t", "")) >= since]
+        return rows
+
     # ------------------------------------------------------------------
     # Session lock
     # ------------------------------------------------------------------
