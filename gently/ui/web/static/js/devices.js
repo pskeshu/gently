@@ -1554,6 +1554,8 @@ const DevicesManager = (function () {
         setupCameraWiring();
         setupRoomLight();
         setupTemperature();
+        const _tgEl = document.getElementById('devices-temp-graph');
+        if (_tgEl && window.TemperatureGraph) TemperatureGraph.init(_tgEl, 'current');
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);

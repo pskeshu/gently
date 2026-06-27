@@ -9736,6 +9736,63 @@ body.modal-open {
 .devices-temp-set:hover:not(:disabled) { border-color: var(--map-accent); color: var(--map-ink); }
 .devices-temp-set:disabled { opacity: 0.5; cursor: default; }
 
+/* --- Temperature trajectory graph ------------------------------------- */
+/* SVG chart card mounted at the bottom of #devices-content.              */
+.devices-temp-graph {
+    padding: 0.6rem 1rem 0.5rem;
+    border-top: 1px solid var(--map-overlay-edge);
+    min-height: 2rem;     /* keeps the section visible even when empty    */
+}
+/* Solid line: water temperature */
+.temp-water {
+    stroke: var(--map-accent);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+/* Dashed line: setpoint (stepped) */
+.temp-setpoint {
+    stroke: #f59e0b;
+    stroke-width: 1.5;
+    stroke-dasharray: 5 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: 0.85;
+}
+/* Y-axis reference gridlines */
+.temp-grid-line {
+    stroke: var(--map-ink-faint);
+    stroke-width: 0.75;
+}
+/* Y-axis tick labels */
+.temp-grid-label {
+    fill: var(--map-ink-mute);
+    font-size: 8px;
+    font-family: ui-monospace, monospace;
+    text-anchor: end;
+    dominant-baseline: middle;
+}
+/* Calm empty state — never shows mock data */
+.temp-graph-empty {
+    padding: 1rem 0;
+    text-align: center;
+    color: var(--map-ink-mute);
+    font-size: 0.78rem;
+}
+/* Last-sample readout above the SVG */
+.temp-graph-readout {
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.2rem;
+    padding: 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* --- Containers ------------------------------------------------------- */
 .devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .devices-view-details { gap: 1rem; }
