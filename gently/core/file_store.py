@@ -450,11 +450,27 @@ class FileStore:
         _append_jsonl(sd / "temperature.jsonl", sample)
 
     def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
-        """Return temperature samples for a session, optionally filtered to t >= since (ISO-UTC string)."""
+        """Return temperature samples for a session, optionally filtered to t >= since (ISO-UTC string).
+
+        Reads lines tolerantly: a truncated trailing line (e.g. after a mid-append
+        crash) is silently skipped rather than raising a JSONDecodeError.
+        """
         sd = self._session_dir(session_id)
         if sd is None:
             return []
-        rows = _read_jsonl(sd / "temperature.jsonl")
+        path = sd / "temperature.jsonl"
+        if not path.exists():
+            return []
+        rows = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # truncated or corrupt line — skip
         if since is not None:
             rows = [r for r in rows if str(r.get("t", "")) >= since]
         return rows

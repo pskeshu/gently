@@ -70,12 +70,15 @@ class TemperatureSampler(Service):
     async def _tick(self, bus) -> None:
         session_id = self._session_id_getter()
         if not session_id:
+            self.latest = None
             return
         resp = await self._microscope.get_temperature()
         if not resp or not resp.get("success", True):
+            self.latest = None
             return
         water = resp.get("temperature_c")
         if water is None:
+            self.latest = None
             return
         sample = {
             "t": _now_iso(),

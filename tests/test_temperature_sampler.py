@@ -71,3 +71,37 @@ def test_temperature_stamp_shapes():
     assert temperature_stamp({"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}) == {
         "water_c": 28.4, "setpoint_c": 32.0, "state": "heating", "sampled_at": "2026-06-27T10:00:00+00:00",
     }
+
+
+async def test_stale_latest_cleared_when_no_active_session(file_store):
+    """After a successful tick, a subsequent tick with no active session resets latest to None."""
+    sid = file_store.create_session(str(uuid.uuid4()), name="s")
+    scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    bus = EventBus()
+
+    # Successful first tick.
+    s = TemperatureSampler(scope, file_store, lambda: sid)
+    await s._tick(bus)
+    assert s.latest is not None and s.latest["water_c"] == 28.4
+
+    # Second tick with no active session — latest must be cleared.
+    s._session_id_getter = lambda: None
+    await s._tick(bus)
+    assert s.latest is None
+
+
+async def test_stale_latest_cleared_on_poll_failure(file_store):
+    """After a successful tick, a failing poll resets latest to None."""
+    sid = file_store.create_session(str(uuid.uuid4()), name="s")
+    bus = EventBus()
+
+    # Successful first tick.
+    good_scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    s = TemperatureSampler(good_scope, file_store, lambda: sid)
+    await s._tick(bus)
+    assert s.latest is not None
+
+    # Swap to a scope that returns falsy (empty dict) — simulates device dropout.
+    s._microscope = FakeScope({})
+    await s._tick(bus)
+    assert s.latest is None
