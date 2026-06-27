@@ -210,6 +210,8 @@ class MicroscopyAgent:
 
         # Device-state monitor (bridges device-layer SSE → EventBus)
         self.device_state_monitor = None
+        # Session-scoped temperature sampler — polls device layer, persists readings.
+        self.temperature_sampler = None
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
         self.bottom_camera_monitor = None
@@ -826,6 +828,19 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to start device-state monitor: {e}")
                 self.device_state_monitor = None
 
+        if self.microscope is not None and self.temperature_sampler is None:
+            try:
+                from .temperature_sampler import TemperatureSampler
+
+                self.temperature_sampler = TemperatureSampler(
+                    self.microscope, self.store, lambda: self.session_id
+                )
+                await self.temperature_sampler.start()
+                logger.info("Temperature sampler started")
+            except Exception as e:
+                logger.warning(f"Failed to start temperature sampler: {e}")
+                self.temperature_sampler = None
+
         # Construct the bottom-camera monitor — but don't start it. Streaming
         # is opt-in and waits for an explicit operator action via the
         # /api/devices/bottom_camera/stream/start route.
@@ -853,6 +868,12 @@ class MicroscopyAgent:
             except Exception:
                 logger.exception("Failed to stop device-state monitor")
             self.device_state_monitor = None
+        if self.temperature_sampler is not None:
+            try:
+                await self.temperature_sampler.stop()
+            except Exception:
+                logger.exception("Failed to stop temperature sampler")
+            self.temperature_sampler = None
         if self.viz_server is not None:
             await self.viz_server.stop()
             self.viz_server = None
