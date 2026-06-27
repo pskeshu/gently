@@ -212,6 +212,14 @@ async def acquire_volume(
                             "piezo_center": piezo_center,
                         },
                     }
+                    from gently.app.temperature_sampler import temperature_stamp as _ts
+                    _temp_stamp = _ts(
+                        getattr(
+                            getattr(agent, "temperature_sampler", None), "latest", None
+                        )
+                    )
+                    if _temp_stamp is not None:
+                        acq_metadata["temperature"] = _temp_stamp
                     volume_path_ref = result.get("volume_path")
                     if volume_path_ref is not None:
                         saved_path = agent.store.register_volume(

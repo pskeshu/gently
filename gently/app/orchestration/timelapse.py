@@ -74,6 +74,7 @@ class TimelapseOrchestrator:
         session_id: str | None = None,
         store: Optional["FileStore"] = None,
         claude_client=None,
+        temperature_provider=None,
     ):
         """
         Parameters
@@ -101,6 +102,11 @@ class TimelapseOrchestrator:
         self.perceiver = perceiver
         self.on_volume_callback = on_volume_callback
         self.claude_client = claude_client
+
+        # Zero-arg callable returning the latest temperature sample dict (or None).
+        # Threaded from the agent's TemperatureSampler so burst frames carry a
+        # temperature block in their metadata.
+        self._temperature_provider = temperature_provider
 
         # Trace file storage (writes JSON files to disk)
         self._session_id = session_id
@@ -1974,6 +1980,7 @@ class TimelapseOrchestrator:
                         mode=op_doc.get("mode", "1hz"),
                         num_slices=int(op_doc.get("num_slices", 1)),
                         request_id=op_doc.get("request_id"),
+                        temperature_provider=self._temperature_provider,
                     )
                 )
 
@@ -2092,6 +2099,7 @@ class TimelapseOrchestrator:
             frames=frames,
             mode=mode,
             num_slices=num_slices,
+            temperature_provider=self._temperature_provider,
         )
         self._exclusive_queue.append(op)
         logger.info(

@@ -750,6 +750,16 @@ class FileStore:
             return vol_path
         return None
 
+    def get_volume_meta(self, session_id: str, embryo_id: str, timepoint: int) -> dict | None:
+        """Read the sidecar metadata YAML for a volume.  Returns None if not found."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        meta_path = (
+            sd / "embryos" / embryo_id / "volumes" / self._volume_meta_filename(timepoint)
+        )
+        return _read_yaml(meta_path)
+
     def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata by scanning sidecar YAML files on disk."""
         sd = self._session_dir(session_id)
