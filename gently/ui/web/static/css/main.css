@@ -23,6 +23,9 @@
     --accent-pink: #f472b6;
     --accent-cyan: #22d3ee;
 
+    /* Temperature graph colors */
+    --temp-setpoint-color: #f59e0b;
+
     /* Gradients for modern feel */
     --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
     --gradient-success: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
@@ -62,6 +65,9 @@
     --accent-orange: #f97316;
     --accent-pink: #ec4899;
     --accent-cyan: #06b6d4;
+
+    /* Temperature graph colors */
+    --temp-setpoint-color: #f59e0b;
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
@@ -9752,7 +9758,7 @@ body.modal-open {
 }
 /* Dashed line: setpoint (stepped) */
 .temp-setpoint {
-    stroke: #f59e0b;
+    stroke: var(--temp-setpoint-color);
     stroke-width: 1.5;
     stroke-dasharray: 5 3;
     stroke-linejoin: round;

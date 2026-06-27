@@ -21,6 +21,7 @@ const TemperatureGraph = (() => {
     let _session = "current";
 
     function init(container, sessionId) {
+        ClientEventBus.off("TEMPERATURE_UPDATE", onEvent);
         _root = container;
         _session = sessionId || "current";
         _samples = [];
@@ -102,7 +103,7 @@ const TemperatureGraph = (() => {
 
             const lbl = document.createElementNS(SVGNS, "text");
             lbl.setAttribute("x", pad.left - 3);
-            lbl.setAttribute("y", y + 3.5);
+            lbl.setAttribute("y", y);
             lbl.setAttribute("class", "temp-grid-label");
             lbl.textContent = v.toFixed(1);
             gridG.appendChild(lbl);
