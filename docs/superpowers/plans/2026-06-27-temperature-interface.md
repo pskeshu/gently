@@ -134,10 +134,10 @@ Expected: FAIL — `AttributeError: TEMPERATURE_UPDATE`
 
 - [ ] **Step 3: Write minimal implementation**
 
-In `gently/core/event_bus.py`, add the member alongside the other `EventType` values (mirror how `DEVICE_STATE_UPDATE` at `:86` is declared — match the existing value style, e.g. `TEMPERATURE_UPDATE = "TEMPERATURE_UPDATE"`):
+In `gently/core/event_bus.py`, add the member alongside the other `EventType` values, **matching the existing `auto()` style** (`DEVICE_STATE_UPDATE = auto()` at `:86`). The wire protocol serializes `event.event_type.name` (`Event.to_dict` at event_bus.py:232; server.py:377/419), so the browser receives the string `"TEMPERATURE_UPDATE"` regardless — which is what the frontend (Task 7) subscribes to. The test must assert `.name == "TEMPERATURE_UPDATE"` (NOT `.value`, which is an `auto()` int):
 
 ```python
-    TEMPERATURE_UPDATE = "TEMPERATURE_UPDATE"
+    TEMPERATURE_UPDATE = auto()  # high-volume telemetry from the temperature controller
 ```
 
 And add it to the high-volume set so it is not retained in history (next to `DEVICE_STATE_UPDATE` in `_NO_HISTORY_TYPES` near `:187`):
