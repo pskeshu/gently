@@ -12,13 +12,38 @@ const ExperimentOverview = {
     initialized: false,
     expandedMode: null,
     activeView: 'overview',  // 'overview' | 'rules'
-    activeStrategy: null,    // last fetched/loaded snapshot
-    isLive: false,           // true when activeStrategy came from the API
+    activeStrategy: null,    // last fetched strategy snapshot (rules view)
+    activePlan: null,        // last fetched/loaded operation plan (overview spine)
+    isLive: false,           // true when data came from the API
+    scenarioMode: false,     // true when ?scenario=<name> is active
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
-        const strategy = await this.loadStrategy();
+
+        // Scenario dev mode: ?scenario=<name> renders a fixture with no fetch.
+        // Guard against double-registration when the tab is clicked repeatedly.
+        const scenarioParam = new URLSearchParams(location.search).get('scenario');
+        if (scenarioParam && window.OPERATIONS_SCENARIOS &&
+            Object.prototype.hasOwnProperty.call(window.OPERATIONS_SCENARIOS, scenarioParam)) {
+            this.scenarioMode = true;
+            this.activePlan = window.OPERATIONS_SCENARIOS[scenarioParam];
+            this.activeStrategy = null;
+            this.isLive = false;
+            this.render(null);
+            this.initialized = true;
+            return;
+        }
+
+        this.scenarioMode = false;
+        // Fetch plan (overview) and strategy (rules) in parallel so tab-switching
+        // between the two views doesn't require a second round-trip.
+        const [plan, strategy] = await Promise.all([
+            this.loadPlan(),
+            this.loadStrategy()
+        ]);
+        this.activePlan = plan;
         this.activeStrategy = strategy;
+        this.isLive = plan !== null || strategy !== null;
         this.render(strategy);
         this.initialized = true;
     },
@@ -32,15 +57,30 @@ const ExperimentOverview = {
                 // No active experiment / not ready yet — show the empty state,
                 // never stubbed data.
                 console.warn('[ExperimentOverview] strategy fetch returned', resp.status);
-                this.isLive = false;
                 return null;
             }
             const data = await resp.json();
-            this.isLive = true;
             return data;
         } catch (e) {
             console.warn('[ExperimentOverview] strategy fetch error:', e);
-            this.isLive = false;
+            return null;
+        }
+    },
+
+    // Fetch the agent-authored Operation Plan for the current session.
+    // Returns the plan object (plan.tactics etc.) or null when unavailable.
+    async loadPlan() {
+        try {
+            const resp = await fetch('/api/operation_plan/current', { cache: 'no-store' });
+            if (!resp.ok) {
+                console.warn('[ExperimentOverview] plan fetch returned', resp.status);
+                return null;
+            }
+            const data = await resp.json();
+            if (!data.available) return null;
+            return data.plan || null;
+        } catch (e) {
+            console.warn('[ExperimentOverview] plan fetch error:', e);
             return null;
         }
     },
@@ -65,10 +105,12 @@ const ExperimentOverview = {
         }
         // Tear down any prior ticker before we blow away the SVG it pointed at.
         this._stopNowTicker();
-        if (!s) {
-            // No active experiment — a calm empty state, never stubbed data.
+        // Rules view requires the strategy snapshot; show an empty state when absent.
+        // Overview view uses this.activePlan — the null/empty case is handled inside
+        // _renderOperationSpine (it renders the idle state).
+        if (this.activeView === 'rules' && !s) {
             root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted,#94a3b8);font-size:13px;">' +
-                'No active experiment — the imaging tactics (cadence, reactive rules) will appear here once a run is live.</div>';
+                'No active experiment — rules and monitoring modes will appear here once a run is live.</div>';
             return;
         }
         try {
@@ -76,8 +118,9 @@ const ExperimentOverview = {
             if (this.activeView === 'rules') {
                 this._renderRulesView(root, s);
             } else {
-                this._renderOverviewView(root, s);
-                this._startNowTicker();
+                // Operation spine — data-driven tactic plan renderer.
+                // The swimlane view is retired; this renders this.activePlan.
+                this._renderOperationSpine(root, this.activePlan);
             }
             console.log('[ExperimentOverview] rendered OK, view=', this.activeView);
         } catch (err) {
@@ -1083,6 +1126,199 @@ const ExperimentOverview = {
         }, doseText));
 
         return g;
+    },
+
+    // =================================================================
+    // Operation Spine — data-driven plan renderer (replaces swimlanes)
+    // =================================================================
+
+    // Minimal HTML escaper — values in readouts may contain trusted HTML
+    // (e.g. <span class="ops-set">32.0°C</span>) so they are rendered with
+    // innerHTML; all other user/model strings go through _opsESC.
+    _opsESC(s) {
+        return String(s == null ? '' : s)
+            .replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    },
+
+    // Entry point: render the operation spine into `root`.
+    // plan = the plan object (tactics array) or null for idle/unavailable.
+    _renderOperationSpine(root, plan) {
+        const ESC = this._opsESC.bind(this);
+
+        if (!plan || !Array.isArray(plan.tactics) || plan.tactics.length === 0) {
+            root.innerHTML = `
+                <div class="ops-wrap">
+                    <div class="ops-crumb">Operations</div>
+                    <h1 class="ops-title">No operation running</h1>
+                    <div class="ops-meta">When the agent begins operating by tactic, the plan and live progress appear here.</div>
+                    <div class="ops-empty">Idle — no tactics planned or in use.</div>
+                </div>`;
+            return;
+        }
+
+        const tactics = plan.tactics;
+        const hasActive = tactics.some(t => t.state === 'active');
+        // Index of the first queued (planned) tactic — gets the "next" badge.
+        const firstPlannedIdx = tactics.findIndex(t => t.state === 'planned');
+
+        const spineNodes = tactics
+            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC))
+            .join('');
+
+        root.innerHTML = `
+            <div class="ops-wrap">
+                <div class="ops-crumb">Operations · ${hasActive ? 'live' : 'idle'}</div>
+                <h1 class="ops-title">${ESC(plan.title || '')}</h1>
+                <div class="ops-meta">${ESC(plan.session_id || '')}${plan.goal ? ' · ' + ESC(plan.goal) : ''}</div>
+                <div class="ops-legend">
+                    <span><i style="background:var(--ops-done)"></i>done</span>
+                    <span><i style="background:var(--ops-active)"></i>in use</span>
+                    <span><i style="background:var(--ops-plan)"></i>queued</span>
+                </div>
+                <div class="ops-spine">${spineNodes}</div>
+            </div>`;
+    },
+
+    // Render a single tactic node.
+    _renderOpsTactic(t, idx, firstPlannedIdx, ESC) {
+        const STATE_LABEL = { done: 'done', active: 'in use', planned: 'queued' };
+        const seq = String(t.seq || idx + 1).padStart(2, '0');
+        const stateLabel = STATE_LABEL[t.state] || t.state;
+        // First queued tactic gets a "next" badge — COCKED instrument marker.
+        const isFirstQueued = t.state === 'planned' && idx === firstPlannedIdx;
+        const nextBadge = isFirstQueued
+            ? '<span class="ops-next-badge">next</span>'
+            : '';
+
+        const live = t.live || {};
+        const target = live.target || '';
+        const summary = live.summary || '';
+        const desc = live.desc || '';
+
+        // Header row: name · target · summary
+        let inner = `
+            <div class="ops-row">
+                <span class="ops-tname">${ESC(t.name)}</span>
+                ${target ? `<span class="ops-target">${ESC(target)}</span>` : ''}
+                ${summary ? `<span class="ops-tsum">${ESC(summary)}</span>` : ''}
+            </div>
+            ${desc ? `<div class="ops-desc">${ESC(desc)}</div>` : ''}`;
+
+        // AUDIT: FLATTEN the active card — readouts on the panel face, separated by
+        // a hairline rule. No nested card-in-card boxes.
+        if (t.state === 'active' && live.readouts && live.readouts.length) {
+            inner += `<hr class="ops-rule">
+                <div class="ops-live-strip">
+                    ${live.readouts.map(r => this._renderOpsReadout(r, ESC)).join('')}
+                </div>`;
+        }
+
+        // Kind-specific structure for the active state.
+        if (t.state === 'active') {
+            inner += this._renderOpsKindActive(t, live, ESC);
+        } else if (t.state === 'planned') {
+            inner += this._renderOpsKindPlanned(t, ESC);
+        }
+
+        return `
+            <div class="ops-node ${ESC(t.state)}">
+                <div class="ops-stagelab">${seq} · ${stateLabel}${nextBadge ? ' ' + nextBadge : ''}</div>
+                <div class="ops-card">${inner}</div>
+            </div>`;
+    },
+
+    // Render a readout gauge. `r.value` may contain trusted HTML (span markup).
+    _renderOpsReadout(r, ESC) {
+        return `<div class="ops-gauge">
+            <div class="ops-gl">${ESC(r.label)}</div>
+            <div class="ops-gv">${r.value}</div>
+            ${r.bar != null
+                ? `<div class="ops-tempbar"><i style="width:${Math.max(0, Math.min(100, r.bar))}%"></i></div>`
+                : ''}
+            ${r.sub ? `<div class="ops-gsub">${ESC(r.sub)}</div>` : ''}
+        </div>`;
+    },
+
+    // Render one phase in the scripted_protocol stepper.
+    // AUDIT: the active phase is the HEADLINE — CSS makes it larger.
+    _renderOpsPhase(p, ESC) {
+        const pips = (p.pips || [])
+            .map(k => `<span class="ops-pip ${ESC(k)}"></span>`)
+            .join('');
+        const ic = p.state === 'done' ? '✓'
+                 : p.state === 'active' ? '▶'
+                 : (p.icon || '·');
+        return `<div class="ops-ph ${ESC(p.state)}">
+            <div class="ops-pht"><span class="ops-pi">${ic}</span>${ESC(p.name)}</div>
+            <div class="ops-phc">${ESC(p.count || '')}</div>
+            ${pips ? `<div class="ops-pips">${pips}</div>` : ''}
+        </div>`;
+    },
+
+    // Kind-specific structure for ACTIVE tactics.
+    _renderOpsKindActive(t, live, ESC) {
+        if (!t.kind) return '';
+
+        // scripted_protocol → before/during/after phase stepper.
+        // Prefer live.phases (may carry pip/count state); fall back to structure.phases.
+        if (t.kind === 'scripted_protocol') {
+            const phases = live.phases || (t.structure && t.structure.phases) || [];
+            if (!phases.length) return '';
+            return `<div class="ops-phases">
+                ${phases.map(p => this._renderOpsPhase(p, ESC)).join('')}
+            </div>`;
+        }
+
+        // standing_timelapse → compact per-embryo cadence strip.
+        if (t.kind === 'standing_timelapse') {
+            const perEmbryo = t.structure && t.structure.per_embryo;
+            if (!perEmbryo || !perEmbryo.length) return '';
+            const rows = perEmbryo.map(e => {
+                const intervalStr = e.interval_s != null ? `${ESC(e.interval_s)}s` : '—';
+                return `<div class="ops-cadence-embryo">
+                    <span class="ops-cadence-id">${ESC(e.embryo_id)}</span>
+                    <span class="ops-cadence-phase ${ESC(e.cadence_phase)}">${ESC(e.cadence_phase)}</span>
+                    <span class="ops-cadence-val">${intervalStr}</span>
+                </div>`;
+            }).join('');
+            return `<hr class="ops-rule"><div class="ops-cadence-strip">${rows}</div>`;
+        }
+
+        // reactive_monitor → armed/watching/fired status badge.
+        if (t.kind === 'reactive_monitor') {
+            const st = (t.structure && t.structure.status) || 'armed';
+            return `<div class="ops-monitor-status ops-monitor-${ESC(st)}">${ESC(st)}</div>`;
+        }
+
+        // exclusive_burst / oneshot / custom — readouts only (already rendered above).
+        return '';
+    },
+
+    // Kind-specific structure for PLANNED (queued) tactics — compact hints.
+    _renderOpsKindPlanned(t, ESC) {
+        if (!t.kind) return '';
+
+        if (t.kind === 'scripted_protocol') {
+            const phases = (t.structure && t.structure.phases) || [];
+            if (!phases.length) return '';
+            return `<div class="ops-phases">
+                ${phases.map(p => this._renderOpsPhase(p, ESC)).join('')}
+            </div>`;
+        }
+
+        if (t.kind === 'standing_timelapse' && t.structure && t.structure.cadence_s) {
+            return `<div class="ops-cadence-note">cadence · ${ESC(t.structure.cadence_s)}s</div>`;
+        }
+
+        if (t.kind === 'reactive_monitor' && t.structure && t.structure.watch) {
+            return `<div class="ops-monitor-watch">watch · ${ESC(t.structure.watch)}</div>`;
+        }
+
+        if ((t.kind === 'oneshot' || t.kind === 'custom') && t.structure && t.structure.note) {
+            return `<div class="ops-cadence-note">${ESC(t.structure.note)}</div>`;
+        }
+
+        return '';
     },
 
     // -----------------------------------------------------------------

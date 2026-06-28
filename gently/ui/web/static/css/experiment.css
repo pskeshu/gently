@@ -634,3 +634,443 @@
     transform: rotate(45deg);
     flex-shrink: 0;
 }
+
+/* ============================================================
+   Operation Spine — data-driven tactic plan renderer
+   All classes namespaced ops- to avoid collision.
+   ============================================================ */
+
+:root {
+    --ops-done:   #34d399;
+    --ops-active: #f5a623;
+    --ops-plan:   #5aa9e6;
+    --ops-live:   #22d3ee;
+    --ops-mono:   ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.ops-wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 8px 4px 48px;
+}
+
+.ops-crumb {
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    margin-bottom: 6px;
+}
+
+.ops-title {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0 0 4px;
+    letter-spacing: -0.01em;
+    color: var(--text);
+}
+
+.ops-meta {
+    font-family: var(--ops-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+}
+
+.ops-legend {
+    display: flex;
+    gap: 16px;
+    font-family: var(--ops-mono);
+    font-size: 10.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin: 14px 0 20px;
+}
+
+.ops-legend i {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 6px;
+    vertical-align: 1px;
+}
+
+.ops-empty {
+    font-family: var(--ops-mono);
+    color: var(--text-muted);
+    font-size: 13px;
+    border: 1px dashed var(--border);
+    border-radius: 12px;
+    padding: 30px;
+    text-align: center;
+    margin-top: 18px;
+}
+
+/* ---- Spine ------------------------------------------------- */
+
+.ops-spine {
+    position: relative;
+    margin-left: 14px;
+    padding-left: 30px;
+    border-left: 2px solid var(--border);
+}
+
+/* Tactic node */
+.ops-node {
+    position: relative;
+    margin-bottom: 14px;
+}
+
+/* Timeline dot — overlaps the spine border-left */
+.ops-node::before {
+    content: "";
+    position: absolute;
+    left: -39px;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--bg-card, #161b22);
+    border: 2px solid var(--border);
+}
+
+.ops-node.done::before {
+    border-color: var(--ops-done);
+    background: var(--ops-done);
+}
+
+.ops-node.active::before {
+    border-color: var(--ops-active);
+    background: var(--ops-active);
+    box-shadow: 0 0 0 5px rgba(245, 166, 35, 0.14);
+}
+
+/* AUDIT: queued = cocked instrument — dashed blue dot (not empty) */
+.ops-node.planned::before {
+    border-color: var(--ops-plan);
+    border-style: dashed;
+    background: var(--bg-card, #161b22);
+}
+
+/* ---- Stage label: "01 · in use" ----------------------------- */
+
+.ops-stagelab {
+    font-family: var(--ops-mono);
+    font-size: 10px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 4px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* AUDIT: active row's WHOLE LEFT COLUMN amber (dot + seq + "IN USE") */
+.ops-node.active .ops-stagelab { color: var(--ops-active); }
+.ops-node.planned .ops-stagelab { color: var(--ops-plan); }
+
+/* AUDIT: "next" badge on first queued tactic — cocked-instrument marker */
+.ops-next-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 9px;
+    background: rgba(90, 169, 230, 0.15);
+    border: 1px solid rgba(90, 169, 230, 0.45);
+    color: var(--ops-plan);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+/* ---- Card --------------------------------------------------- */
+
+.ops-card {
+    background: var(--bg-card, #161b22);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 12px;
+    padding: 13px 16px;
+}
+
+/* AUDIT: colored LEFT EDGE per state */
+/* done — green left edge, transparent bg */
+.ops-node.done .ops-card {
+    background: transparent;
+    border-color: rgba(48, 54, 61, 0.5);
+    padding: 9px 16px;
+    border-left: 3px solid var(--ops-done);
+}
+
+/* active — amber left edge + tinted gradient + FLATTENED (no card-in-card) */
+.ops-node.active .ops-card {
+    border-color: rgba(245, 166, 35, 0.3);
+    border-left: 3px solid var(--ops-active);
+    background: linear-gradient(180deg, rgba(245, 166, 35, 0.05), transparent),
+                var(--bg-card, #161b22);
+}
+
+/* planned — blue left edge, dashed border */
+.ops-node.planned .ops-card {
+    background: transparent;
+    border-style: dashed;
+    border-left: 3px solid var(--ops-plan);
+    border-left-style: solid;
+    opacity: 0.85;
+}
+
+/* Hairline rule between card header and live readouts (flattened layout) */
+.ops-rule {
+    border: none;
+    border-top: 1px solid rgba(245, 166, 35, 0.18);
+    margin: 10px 0;
+}
+
+/* ---- Card contents ----------------------------------------- */
+
+.ops-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ops-tname {
+    font-size: 14.5px;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.ops-node.done .ops-tname {
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+.ops-target {
+    font-family: var(--ops-mono);
+    font-size: 12.5px;
+    color: var(--ops-active);
+    font-weight: 600;
+}
+
+.ops-tsum {
+    font-family: var(--ops-mono);
+    font-size: 11.5px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+.ops-desc {
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.75;
+    margin: 4px 0 0;
+    line-height: 1.4;
+}
+
+/* ---- Gauge strip — AUDIT: flat on panel face, no card-in-card */
+
+.ops-live-strip {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.ops-gauge {
+    flex: 1;
+    min-width: 140px;
+    background: var(--bg-hover, #21262d);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 9px;
+    padding: 9px 11px;
+}
+
+.ops-gl {
+    font-family: var(--ops-mono);
+    font-size: 9.5px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+}
+
+/* AUDIT: mono instrument values */
+.ops-gv {
+    font-family: var(--ops-mono);
+    font-size: 18px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    margin-top: 2px;
+}
+
+.ops-set { color: var(--ops-active); font-size: 13px; }
+.ops-u   { color: var(--text-muted); font-size: 12px; }
+
+.ops-gsub {
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 6px;
+}
+
+.ops-tempbar {
+    height: 5px;
+    border-radius: 3px;
+    background: var(--bg-hover, #21262d);
+    margin-top: 8px;
+    overflow: hidden;
+}
+
+.ops-tempbar > i {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--ops-live), var(--ops-active));
+}
+
+/* ---- Scripted protocol — phase stepper --------------------- */
+
+.ops-phases {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+
+.ops-ph {
+    flex: 1;
+    min-width: 110px;
+    border: 1px solid var(--border, #30363d);
+    border-radius: 8px;
+    padding: 9px 10px;
+    background: var(--bg-hover, #21262d);
+}
+
+.ops-ph.done   { border-color: rgba(52, 211, 153, 0.35); background: rgba(52, 211, 153, 0.05); }
+.ops-ph.active { border-color: rgba(245, 166, 35, 0.45); background: rgba(245, 166, 35, 0.08); }
+.ops-ph.todo   { opacity: 0.6; }
+
+.ops-pht {
+    font-family: var(--ops-mono);
+    font-size: 10px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    color: var(--text-muted);
+}
+
+/* AUDIT: ACTIVE phase is the HEADLINE — largest in its phase */
+.ops-ph.active .ops-pht {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--ops-active);
+}
+
+.ops-pi {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    font-size: 9px;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.ops-ph.done   .ops-pi { background: var(--ops-done);   color: #062b1d; }
+.ops-ph.active .ops-pi { background: var(--ops-active); color: #3a2607; }
+.ops-ph.todo   .ops-pi { background: var(--bg-hover, #21262d); color: var(--text-muted); border: 1px solid var(--border); }
+
+.ops-phc {
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+/* AUDIT: active phase count also headline-sized */
+.ops-ph.active .ops-phc { font-size: 13px; font-weight: 600; color: var(--ops-active); }
+
+.ops-pips { display: flex; gap: 3px; margin-top: 7px; flex-wrap: wrap; }
+
+.ops-pip { width: 12px; height: 7px; border-radius: 2px; background: var(--bg-hover, #21262d); }
+.ops-pip.before  { background: var(--ops-plan); }
+.ops-pip.during  { background: var(--ops-active); }
+.ops-pip.after   { background: var(--ops-done); }
+.ops-pip.pending { border: 1px dashed var(--border); background: transparent; }
+
+/* ---- Per-embryo cadence strip — standing_timelapse --------- */
+
+.ops-cadence-strip {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    padding: 8px 10px;
+    background: var(--bg-hover, #21262d);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 8px;
+}
+
+.ops-cadence-embryo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--ops-mono);
+    font-size: 11.5px;
+}
+
+.ops-cadence-id {
+    color: var(--text);
+    font-weight: 600;
+    min-width: 32px;
+}
+
+.ops-cadence-phase {
+    padding: 2px 8px;
+    border-radius: 9px;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.ops-cadence-phase.normal { background: rgba(139, 148, 158, 0.2); color: var(--text-muted); }
+.ops-cadence-phase.fast   { background: rgba(251, 146, 60,  0.2); color: var(--accent-orange, #fb923c); }
+.ops-cadence-phase.burst  { background: rgba(239, 68,  68,  0.2); color: #f87171; }
+.ops-cadence-phase.paused { background: rgba(90, 169, 230,  0.15); color: var(--ops-plan); }
+
+.ops-cadence-val { color: var(--text-muted); margin-left: auto; }
+
+/* ---- Reactive monitor — armed/watching/fired badge --------- */
+
+.ops-monitor-status {
+    display: inline-block;
+    margin-top: 8px;
+    padding: 3px 10px;
+    border-radius: 9px;
+    font-family: var(--ops-mono);
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+}
+
+.ops-monitor-armed    { background: rgba(90, 169, 230, 0.15);  color: var(--ops-plan);   border: 1px solid rgba(90, 169, 230, 0.35); }
+.ops-monitor-watching { background: rgba(245, 166, 35, 0.12); color: var(--ops-active); border: 1px solid rgba(245, 166, 35, 0.3); }
+.ops-monitor-fired    { background: rgba(52, 211, 153, 0.12);  color: var(--ops-done);   border: 1px solid rgba(52, 211, 153, 0.3); }
+
+/* Planned kind-detail snippets (cadence note, watch hint) */
+.ops-cadence-note,
+.ops-monitor-watch {
+    display: inline-block;
+    margin-top: 6px;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.75;
+}
