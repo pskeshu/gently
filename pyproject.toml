@@ -15,18 +15,41 @@ authors = [
     {name = "Kesavan Subburam", email = "pskeshu@gmail.com"},
 ]
 classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 
 dependencies = [
+    "anthropic>=0.39.0",
+    "fastapi>=0.104.0",
+    "uvicorn[standard]>=0.24.0",
+    "aiohttp>=3.9.0",
     # numpy capped <2: pymmcore 10.1.1.70.6 is a C-extension built against the
     # numpy 1.x ABI and fails to import under numpy 2.x. The wheel declares no
     # upper bound, so we enforce it here.
+    "numpy>=1.24.0,<2",
+    "pillow>=10.0.0",
+    "tifffile>=2023.0.0",
+    "scipy>=1.10.0",
+    "scikit-image>=0.21.0",
+    "jinja2>=3.1.0",
+    "pyyaml>=6.0",
+    "matplotlib>=3.7.0",
+    "python-dotenv>=1.0.0",
     # Perception harness — installed as an editable sibling clone (see
     # [tool.uv.sources]); clone gently-project/gently-perception next to this repo.
+    "gently-perception",
     # Device control.
     # pymmcore pinned exactly: its MMCore must match the device-interface version
     # (70) of the Micro-Manager device adapters installed on the microscope PC.
     # Bumping this requires upgrading the MM adapter install in lockstep.
+    "pymmcore==10.1.1.70.6",
+    "bluesky>=1.11.0",
+    "ophyd>=1.9.0",
     # NOTE: torch / torchvision / nvidia-ml-py are NOT base deps — CUDA build is
     # machine-specific. Install via an extra: `uv sync --extra torch-gpu` (CUDA
     # 11.8) or `uv sync --extra torch-cpu`. All torch imports are lazy/guarded.
@@ -35,6 +58,7 @@ dependencies = [
 
 [project.optional-dependencies]
 sam = [
+    "segment-anything",
 ]
 # PyTorch — CUDA build is per-machine, so it lives in mutually-exclusive extras
 # wired to dedicated indexes below (see [tool.uv.sources] / [[tool.uv.index]]).
@@ -44,23 +68,36 @@ sam = [
 # and only need a recent NVIDIA driver, so the same build runs across GPU machines
 # regardless of their system CUDA version.
 torch-gpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+    "nvidia-ml-py>=12.0.0",
 ]
 torch-cpu = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
 ]
 # Device-layer accessories for the microscope computer. Core hardware-control
 # deps (pymmcore, bluesky, ophyd) are already in [project.dependencies]; these
 # are the extras the device layer needs: BLE (SwitchBot room light), serial and
 # MQTT transports (ACUITYnano thermal controller). Install: uv sync --extra device
 device = [
+    "bleak>=0.21.0",
+    "pyserial>=3.5",
+    "paho-mqtt>=1.6.0",
 ]
 
 # Test/dev tooling — installed by `uv sync` (uv enables the `dev` group by
 # default) but excluded from gently's published runtime requirements.
 [dependency-groups]
 dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.4.0",
+    "pre-commit>=3.7.0",
     # Pinned so local runs, the pre-commit hook, and CI all use the same
     # mypy. Keep in sync with the mirrors-mypy rev in .pre-commit-config.yaml
     # and the install step in .github/workflows/lint.yml.
+    "mypy==2.1.0",
 ]
 
 [project.scripts]
