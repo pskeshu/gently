@@ -25,10 +25,43 @@ jobs:
       - name: ruff format check
         run: ruff format --check .
 
+      # Fast baseline mypy without project deps. With ignore_missing_imports,
+      # third-party imports fall back to Any, so this is the weaker check — kept
+      # as the required gate because it needs no heavy install and stays green.
+      # The stronger, deps-installed run lives in the mypy-strict job below.
       # Pin to match the pre-commit mirrors-mypy rev and the pyproject dev
       # group so CI, local commits, and `uv sync` never run different mypys.
       - name: Install mypy
         run: pip install mypy==2.1.0
 
-      - name: mypy
+      - name: mypy (deps-less)
         run: mypy .
+
+  # Deps-installed mypy: with the real third-party packages present (numpy,
+  # anthropic, …) mypy resolves their actual types instead of Any, surfacing
+  # genuine mismatches the deps-less run above cannot see. This is what a
+  # contributor gets from `uv run mypy .` after `uv sync` (see CONTRIBUTING.md).
+  # Non-blocking for now (continue-on-error) while the remaining deps-only
+  # errors are worked through — flip this to a required gate once it is clean.
+  mypy-strict:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      # gently-perception is not on PyPI; it is installed editable from a sibling
+      # clone (see [tool.uv.sources]), so `uv sync` fails without it.
+      - name: Clone gently-perception sibling
+        run: git clone --depth 1 https://github.com/gently-project/gently-perception.git ../gently-perception
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+          enable-cache: true
+
+      - name: uv sync
+        run: uv sync
+
+      - name: mypy (deps-installed)
+        run: uv run mypy .
