@@ -23,8 +23,12 @@
     --accent-pink: #f472b6;
     --accent-cyan: #22d3ee;
 
-    /* Temperature graph colors */
+    /* Temperature graph colors (root-level so the graph is portable outside
+       .devices-container-map — e.g. when reused in manual mode) */
     --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #22d3ee;
+    --temp-grid-line-color: rgba(212, 221, 232, 0.20);
+    --temp-grid-label-color: #6a778a;
 
     /* Gradients for modern feel */
     --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
@@ -66,8 +70,11 @@
     --accent-pink: #ec4899;
     --accent-cyan: #06b6d4;
 
-    /* Temperature graph colors */
+    /* Temperature graph colors (root-level; see dark block) */
     --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #0e7490;
+    --temp-grid-line-color: rgba(29, 43, 58, 0.22);
+    --temp-grid-label-color: #6b7280;
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
@@ -9751,7 +9758,7 @@ body.modal-open {
 }
 /* Solid line: water temperature */
 .temp-water {
-    stroke: var(--map-accent);
+    stroke: var(--temp-water-color);
     stroke-width: 1.5;
     stroke-linejoin: round;
     stroke-linecap: round;
@@ -9767,12 +9774,12 @@ body.modal-open {
 }
 /* Y-axis reference gridlines */
 .temp-grid-line {
-    stroke: var(--map-ink-faint);
+    stroke: var(--temp-grid-line-color);
     stroke-width: 0.75;
 }
 /* Y-axis tick labels */
 .temp-grid-label {
-    fill: var(--map-ink-mute);
+    fill: var(--temp-grid-label-color);
     font-size: 8px;
     font-family: ui-monospace, monospace;
     text-anchor: end;
