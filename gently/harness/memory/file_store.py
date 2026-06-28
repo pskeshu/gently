@@ -1794,6 +1794,94 @@ class FileContextStore:
         return False
 
     # ==================================================================
+    # Tactic Library
+    # ==================================================================
+
+    def save_tactic(self, tactic: dict, name: str | None = None) -> str:
+        """Persist a tactic as a reusable template in agent/tactic_library/.
+
+        Strips runtime state (live, state, original id) and assigns a new
+        template id + slug. Fires CONTEXT_UPDATED. Returns the template id.
+        """
+        name = name or tactic.get("name") or "unnamed"
+        slug = self._slugify(name)
+        tid = self._gen_id()
+        now = self._now()
+
+        template = {
+            "id": tid,
+            "name": name,
+            "slug": slug,
+            "kind": tactic.get("kind", "unknown"),
+            "structure": copy.deepcopy(tactic.get("structure") or {}),
+            "scope_hint": copy.deepcopy(tactic.get("scope")),
+            "description": tactic.get("description") or tactic.get("rationale"),
+            "params": copy.deepcopy(tactic.get("params")),
+            "relations": copy.deepcopy(tactic.get("relations") or {}),
+            "live_bind": list(tactic.get("live_bind") or []),
+            "created_at": now,
+            "created_by": tactic.get("created_by", "agent"),
+        }
+
+        path = self.agent_dir / "tactic_library" / f"{tid}_{slug}.yaml"
+        self._write_yaml(path, template)
+        self._notify_context_change("tactic_library")
+        logger.info(f"Saved tactic template '{name}' ({tid})")
+        return tid
+
+    def list_tactics(self) -> list[dict]:
+        """List all saved tactic templates, ordered by created_at descending."""
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return []
+        tactics: list[dict] = []
+        for f in tl_dir.iterdir():
+            if f.suffix in (".yaml", ".yml"):
+                data = self._read_yaml(f)
+                if data:
+                    tactics.append(data)
+        tactics.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+        return tactics
+
+    def get_tactic(self, id_or_name: str) -> dict | None:
+        """Return a tactic template by id or name, or None if not found."""
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return None
+        for f in tl_dir.iterdir():
+            if f.suffix in (".yaml", ".yml"):
+                data = self._read_yaml(f)
+                if data and (data.get("id") == id_or_name or data.get("name") == id_or_name):
+                    return data
+        return None
+
+    def apply_tactic(self, id_or_name: str) -> dict | None:
+        """Return a fresh planned tactic from a saved template.
+
+        The returned dict has a new run id (distinct from the template id),
+        state="planned", and no live/runtime state. Returns None if the
+        template is not found.
+        """
+        tmpl = self.get_tactic(id_or_name)
+        if tmpl is None:
+            return None
+        tactic = copy.deepcopy(tmpl)
+        # Assign a new run id — must differ from the template id
+        tactic["id"] = self._gen_id()
+        tactic["state"] = "planned"
+        # Promote scope_hint back to scope for the tactic
+        scope_hint = tactic.pop("scope_hint", None)
+        if scope_hint is not None:
+            tactic["scope"] = scope_hint
+        # Strip template-internal metadata
+        tactic.pop("slug", None)
+        tactic.pop("created_at", None)
+        tactic.pop("created_by", None)
+        # Strip runtime state (should not exist in a template, but guard anyway)
+        tactic.pop("live", None)
+        return tactic
+
+    # ==================================================================
     # Plan Snapshots
     # ==================================================================
 
