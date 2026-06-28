@@ -127,6 +127,11 @@ class EventType(Enum):
     BURST_FRAME = auto()  # {embryo_id, request_id, frame_idx, total_frames}
     BURST_COMPLETE = auto()  # {embryo_id, request_id, mp4_path, sustained_hz, frames_captured}
 
+    # Temperature protocol events (Phase X / 10) — temp-change burst tactic
+    TEMPERATURE_SETPOINT_CHANGED = auto()  # {embryo_id, old_temp, new_temp}
+    TEMP_PROTOCOL_STARTED = auto()  # {embryo_id, protocol_name}
+    TEMP_PROTOCOL_COMPLETED = auto()  # {embryo_id, protocol_name, success}
+
     # Reactive control telemetry (Phase 5 / 10)
     POWER_RAMP_STEP = auto()  # {embryo_id, rule, wavelength, old_pct, new_pct, direction}
 
