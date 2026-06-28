@@ -149,3 +149,4 @@ gently/ui/tui/dist/
 # Stray local storage: GENTLY_STORAGE_PATH default (D:\Gently3) resolves
 # literally to ./D:/ under the repo on Linux. Not data we track.
 /D:/
+.superpowers/
