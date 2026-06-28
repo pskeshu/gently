@@ -212,6 +212,8 @@ class MicroscopyAgent:
         self.device_state_monitor = None
         # Session-scoped temperature sampler — polls device layer, persists readings.
         self.temperature_sampler = None
+        # Bus-subscriber that transitions plan tactics when execution events fire.
+        self.operation_plan_updater = None
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
         self.bottom_camera_monitor = None
@@ -848,6 +850,19 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to start temperature sampler: {e}")
                 self.temperature_sampler = None
 
+        if self.operation_plan_updater is None and self.context_store is not None:
+            try:
+                from .operation_plan_updater import OperationPlanUpdater
+
+                self.operation_plan_updater = OperationPlanUpdater(
+                    self.context_store, lambda: self.session_id
+                )
+                await self.operation_plan_updater.start()
+                logger.info("Operation-plan updater started")
+            except Exception as e:
+                logger.warning(f"Failed to start operation-plan updater: {e}")
+                self.operation_plan_updater = None
+
         # Construct the bottom-camera monitor — but don't start it. Streaming
         # is opt-in and waits for an explicit operator action via the
         # /api/devices/bottom_camera/stream/start route.
@@ -897,6 +912,12 @@ class MicroscopyAgent:
             except Exception:
                 logger.exception("Failed to stop temperature sampler")
             self.temperature_sampler = None
+        if self.operation_plan_updater is not None:
+            try:
+                await self.operation_plan_updater.stop()
+            except Exception:
+                logger.exception("Failed to stop operation-plan updater")
+            self.operation_plan_updater = None
         if self.viz_server is not None:
             await self.viz_server.stop()
             self.viz_server = None
