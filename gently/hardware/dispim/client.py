@@ -954,6 +954,56 @@ class DiSPIMMicroscope(Microscope):
                     except Exception as exc:
                         logger.warning("Malformed bottom-camera SSE payload skipped: %s", exc)
 
+    async def stream_lightsheet(self, timeout: float | None = None):
+        """Async generator yielding JPEG frames from the lightsheet live SSE stream.
+
+        Mirrors :meth:`stream_bottom_camera`; subscriber-gated on the device layer.
+        """
+        self._ensure_connected()
+        client_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=timeout,
+            sock_connect=10.0,
+        )
+        url = f"{self.http_url}/api/lightsheet/stream"
+        async with self._session.get(url, timeout=client_timeout) as resp:
+            resp.raise_for_status()
+            buf = b""
+            async for chunk in resp.content.iter_any():
+                if not chunk:
+                    continue
+                buf += chunk
+                while b"\n\n" in buf:
+                    event_block, buf = buf.split(b"\n\n", 1)
+                    data_lines = []
+                    for line in event_block.splitlines():
+                        if not line or line.startswith(b":"):
+                            continue
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                    if not data_lines:
+                        continue
+                    raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
+                    try:
+                        import json as _json
+
+                        yield _json.loads(raw)
+                    except Exception as exc:
+                        logger.warning("Malformed lightsheet SSE payload skipped: %s", exc)
+
+    async def set_lightsheet_live_params(
+        self, galvo=None, piezo=None, exposure=None
+    ) -> dict:
+        """POST live galvo/piezo/exposure to the device-layer lightsheet streamer."""
+        body = {}
+        if galvo is not None:
+            body["galvo"] = float(galvo)
+        if piezo is not None:
+            body["piezo"] = float(piezo)
+        if exposure is not None:
+            body["exposure"] = float(exposure)
+        return await self._api_post("/api/lightsheet/live/params", body)
+
     async def set_camera_led_mode(self, use_led: bool = False) -> dict:
         """Enable/disable automatic LED for bottom camera captures."""
         return await self._api_post("/api/camera/led_mode", {"use_led": use_led})
