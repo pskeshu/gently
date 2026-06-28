@@ -687,6 +687,7 @@ def create_router(server) -> APIRouter:
                         "x": float(x),
                         "y": float(y),
                         "role": emb.get("role", "test"),
+                        "strain": emb.get("strain"),
                         "user_label": emb.get("user_label"),
                         "confidence": emb.get("confidence"),
                         "cadence_phase": emb.get("cadence_phase"),

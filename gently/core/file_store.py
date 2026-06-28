@@ -516,12 +516,17 @@ class FileStore:
         position_fine: dict | None = None,
         calibration: dict | None = None,
         role: str | None = None,
+        strain: str | None = None,
     ) -> None:
         """Register or update an embryo in a session.
 
         ``role`` is the experimental role key from gently.harness.roles.REGISTRY
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Persisted in
         embryo.yaml. None preserves the existing value on update.
+
+        ``strain`` is a free-form biological sample descriptor (e.g.
+        ``"pan-nuclear GFP"``). Orthogonal to role. None preserves the existing
+        value on update.
 
         Position has two stages: coarse (bottom-camera / manual map placement)
         and fine (future SPIM-objective alignment). New callers should pass
@@ -562,6 +567,7 @@ class FileStore:
                 if calibration is not None
                 else existing.get("calibration"),
                 "role": role if role is not None else existing.get("role", "test"),
+                "strain": strain if strain is not None else existing.get("strain"),
                 "created_at": existing.get("created_at", _now()),
             }
         else:
@@ -574,6 +580,7 @@ class FileStore:
                 "position_fine": position_fine,
                 "calibration": calibration,
                 "role": role if role is not None else "test",
+                "strain": strain,
                 "created_at": _now(),
             }
 

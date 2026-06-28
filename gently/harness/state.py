@@ -136,6 +136,9 @@ class EmbryoState:
     # is the safe choice — accidental Calibration→Test only over-protects;
     # accidental Test→Calibration would burn extra dose on the precious sample.
     role: str = "test"
+    # Free-form biological sample descriptor (orthogonal to role). Examples:
+    # "pan-nuclear GFP", "H2B-mCherry", "wild-type". None = unspecified.
+    strain: str | None = None
 
     # Position — two-stage: coarse (bottom-camera detection or manual map
     # placement, always present once an embryo exists) and fine (populated

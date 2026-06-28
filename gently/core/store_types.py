@@ -32,6 +32,7 @@ class EmbryoInfo(TypedDict, total=False):
     position_y: float | None
     calibration: dict | None
     role: str | None  # key into gently.harness.roles.REGISTRY
+    strain: str | None  # free-form biological sample descriptor, e.g. "pan-nuclear GFP"
     created_at: str
 
 
