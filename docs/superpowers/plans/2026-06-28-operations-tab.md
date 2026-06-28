@@ -48,3 +48,18 @@
 - Store→Task1; tool→Task2; route→Task3; renderer+scenarios→Task4 (audit fixes); live binding→Task5. ✓
 - Open confirmations: FileContextStore domain pattern (T1), the forced-tool/@tool pattern (T2), the route store-resolution (T3), the Overview render seam + harness renderer (T4), the live telemetry sources (T5).
 - Type consistency: the plan/tactic schema is identical across store (T1), tool (T2), route (T3), fixtures+renderer (T4), binding (T5).
+
+---
+## Execution-linkage tasks (added after recon — close the planning→execution loop)
+
+### Task 6: `transition_tactic` store helper
+**Files:** Modify `gently/harness/memory/file_store.py` (add `transition_tactic(session_id, tactic_id, state=None, **bind)` next to `set/get_operation_plan` ~:818 — read the plan, find the tactic by `id`, set `state` and merge `bind` into its `live`/`structure`, write back, fire `CONTEXT_UPDATED`; no-op if plan/tactic absent). Test: `tests/test_transition_tactic.py`.
+- [ ] TDD: declare a plan, transition a tactic planned→active with a `request_id` bind → get shows the new state + bound value; unknown tactic_id → no-op (no crash). Commit `feat(operations): transition_tactic store helper`.
+
+### Task 7: tactic_id threading + start-edge marking in execution tools
+**Files:** Modify `gently/app/tools/timelapse_tools.py` (`enable_monitoring_mode`, `queue_burst`, stop/pause), `gently/app/tools/temperature_protocol_tools.py`, and the burst/protocol event payloads (`exclusive.py` BURST_*, `temperature_protocol.py` TEMP_PROTOCOL_*) to carry an optional `tactic_id`. On execute, the tool calls `cs.transition_tactic(session, tactic_id, 'active')`; on stop/pause → 'done'/'paused'. Test: `tests/test_tool_tactic_linkage.py`.
+- [ ] Add optional `tactic_id` param; thread into event `data`; flip the plan tactic active on execute (guard: only if a plan + tactic_id exist). TDD with a fake context store capturing transitions. Commit `feat(operations): link execution tools to plan tactics via tactic_id`.
+
+### Task 8: `OperationPlanUpdater` service (completion edges via the bus)
+**Files:** Create `gently/app/operation_plan_updater.py` (a `Service` modeled on `gently/app/temperature_sampler.py` / `TimelineManager`); wire in `gently/app/agent.py` beside the temperature sampler (~:838-849). Test: `tests/test_operation_plan_updater.py`.
+- [ ] Subscribe `BURST_COMPLETE`, `TEMP_PROTOCOL_COMPLETED`, `EMBRYO_CADENCE_CHANGED`, `TRIGGER_FIRED`; on each, resolve the tactic (by `tactic_id` in payload, else by kind+embryo) and `cs.transition_tactic(session, tactic_id, 'done', **bind)` binding live values (request_id/mp4_path/setpoint/cadence). Mirror the sampler's start/stop lifecycle + session_id getter. TDD against a fake bus + store. Commit `feat(operations): OperationPlanUpdater — execution events transition plan tactics`.
