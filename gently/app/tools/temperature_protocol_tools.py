@@ -43,6 +43,7 @@ async def run_temp_change_burst_protocol_tool(
     frames: int = 60,
     bursts_before: int = 1,
     bursts_after: int = 1,
+    tactic_id: str | None = None,
     context: dict | None = None,
 ) -> str:
     """Launch the temp-change burst driver as a background asyncio task.
@@ -83,6 +84,14 @@ async def run_temp_change_burst_protocol_tool(
             "(would contend for the RunEngine). Stop the timelapse first."
         )
 
+    # Flip the matching plan tactic to active before launching the background driver
+    # (guarded no-op when tactic_id or context store are absent).
+    if tactic_id:
+        cs = getattr(agent, "context_store", None)
+        session = getattr(agent, "session_id", None)
+        if cs and session:
+            cs.transition_tactic(session, tactic_id, "active")
+
     asyncio.create_task(
         _driver(
             orchestrator,
@@ -91,6 +100,7 @@ async def run_temp_change_burst_protocol_tool(
             frames=frames,
             bursts_before=bursts_before,
             bursts_after=bursts_after,
+            tactic_id=tactic_id,
         )
     )
 

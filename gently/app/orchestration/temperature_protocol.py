@@ -21,7 +21,7 @@ async def wait_for_temperature_lock(client, timeout_s: float, poll_s: float = 2.
 
 async def run_temp_change_burst_protocol(orchestrator, embryo_id, target_setpoint_c, *,
         frames=60, mode="1hz", num_slices=1, bursts_before=1, bursts_after=1,
-        lock_timeout_s=600.0, poll_s=2.0, burst_runner=None):
+        lock_timeout_s=600.0, poll_s=2.0, burst_runner=None, tactic_id=None):
     """Scripted temp-change burst protocol: brightfield before/during/after a setpoint change."""
     client = orchestrator.client
     if burst_runner is None:
@@ -40,7 +40,8 @@ async def run_temp_change_burst_protocol(orchestrator, embryo_id, target_setpoin
         await client.set_led("Open")
         orchestrator._emit_event(EventType.TEMP_PROTOCOL_STARTED,
             {"embryo_id": embryo_id, "target_setpoint_c": target_setpoint_c,
-             "frames": frames, "bursts_before": bursts_before, "bursts_after": bursts_after})
+             "frames": frames, "bursts_before": bursts_before, "bursts_after": bursts_after,
+             "tactic_id": tactic_id})
         for _ in range(bursts_before):
             await one_burst("before")
         await client.set_temperature(target_setpoint_c)
@@ -65,5 +66,6 @@ async def run_temp_change_burst_protocol(orchestrator, embryo_id, target_setpoin
         error = str(exc); logger.exception("temp-change burst protocol failed")
     finally:
         orchestrator._emit_event(EventType.TEMP_PROTOCOL_COMPLETED,
-            {"embryo_id": embryo_id, "locked": locked, "cancelled": cancelled, "error": error})
+            {"embryo_id": embryo_id, "locked": locked, "cancelled": cancelled, "error": error,
+             "tactic_id": tactic_id})
     return {"locked": locked, "cancelled": cancelled, "error": error}

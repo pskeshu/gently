@@ -102,6 +102,7 @@ class BurstAcquisition(ExclusiveAcquisition):
         request_id: str | None = None,
         temperature_provider=None,
         laser_config: str | None = None,
+        tactic_id: str | None = None,
     ):
         super().__init__(target_embryo_id=target_embryo_id, request_id=request_id)
         self.frames = frames
@@ -109,6 +110,7 @@ class BurstAcquisition(ExclusiveAcquisition):
         self.num_slices = num_slices
         self._temperature_provider = temperature_provider
         self._laser_config = laser_config
+        self._tactic_id = tactic_id
 
     async def run(self, orchestrator) -> ExclusiveResult:
         from gently.core import EventType
@@ -132,6 +134,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 "frames": self.frames,
                 "mode": self.mode,
                 "phase": getattr(self, "_phase", None),
+                "tactic_id": self._tactic_id,
             },
         )
 
@@ -234,6 +237,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 "duration_s": duration_s,
                 "sustained_hz": sustained_hz,
                 "mp4_path": mp4_path,
+                "tactic_id": self._tactic_id,
             },
         )
 
