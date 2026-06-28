@@ -367,8 +367,22 @@ const ExperimentOverview = {
         const TOP_AXIS_H   = 36;      // top axis area (time labels + wall-clock)
         const BOTTOM_PAD   = 8;
 
+        const TACTIC_BAND_H = 28;           // session-level tactic band height
+
+        // Aggregate tactic protocol from embryos (first embryo with one wins)
+        let tacticProto = null;
+        let tacticSetpointChanges = [];
+        for (const emb of s.embryos) {
+            if (emb.temp_protocol) {
+                tacticProto = emb.temp_protocol;
+                tacticSetpointChanges = emb.setpoint_changes || [];
+                break;
+            }
+        }
+        const bandShift = tacticProto ? TACTIC_BAND_H : 0;
+
         const rows = s.embryos.length;
-        const H = TOP_AXIS_H + rows * ROW_H + BOTTOM_PAD;
+        const H = TOP_AXIS_H + bandShift + rows * ROW_H + BOTTOM_PAD;
 
         const svg = svgEl('svg', {
             class: 'expov-swimlanes-svg',
@@ -426,6 +440,67 @@ const ExperimentOverview = {
         nowMarker.appendChild(chipText);
         svg.appendChild(nowMarker);
 
+        // ----- tactic band: session-level protocol pill + setpoint markers
+        if (tacticProto) {
+            const bandY = TOP_AXIS_H + 2;
+            const bandContentH = TACTIC_BAND_H - 4;
+            const bandMidY = bandY + bandContentH / 2;
+            const bandG = svgEl('g', { class: 'expov-tactic-band-g' });
+
+            // Background strip spanning the full lane area
+            bandG.appendChild(svgEl('rect', {
+                x: LEFT, y: bandY, width: LANE_W, height: bandContentH, rx: 3,
+                class: 'expov-svg-tactic-band-bg'
+            }));
+
+            // Tactic pill: spans protocol start → end (or now if still running)
+            const pillX0 = xForT(tacticProto.start);
+            const pillX1 = xForT(tacticProto.end != null ? tacticProto.end : s.now_offset_s);
+            const pillW = Math.max(4, pillX1 - pillX0);
+            const pillLabel = `Temp-change burst → ${tacticProto.target_setpoint_c}°C`;
+            bandG.appendChild(svgEl('rect', {
+                x: pillX0, y: bandY + 2, width: pillW, height: bandContentH - 4, rx: 4,
+                class: 'expov-svg-tactic-pill'
+            }));
+            if (pillW > 24) {
+                bandG.appendChild(svgEl('text', {
+                    x: pillX0 + 7, y: bandMidY + 3.5,
+                    class: 'expov-svg-tactic-pill-label'
+                }, pillLabel));
+            }
+
+            // Setpoint markers: vertical line + "→ N°C" chip (reuses chip idiom)
+            tacticSetpointChanges.forEach(sc => {
+                const scX = xForT(sc.t);
+                const markerLabel = `→ ${sc.to}°C`;
+                const chipW = markerLabel.length * 5.6 + 10;
+                const chipY = bandY + 2;
+                bandG.appendChild(svgEl('line', {
+                    x1: scX, x2: scX, y1: bandY, y2: bandY + bandContentH,
+                    class: 'expov-svg-tactic-setpoint-line'
+                }));
+                bandG.appendChild(svgEl('rect', {
+                    x: scX - chipW / 2, y: chipY,
+                    width: chipW, height: 12, rx: 3,
+                    class: 'expov-svg-tactic-setpoint-chip-bg'
+                }));
+                bandG.appendChild(svgEl('text', {
+                    x: scX, y: chipY + 9,
+                    'text-anchor': 'middle',
+                    class: 'expov-svg-tactic-setpoint-chip'
+                }, markerLabel));
+            });
+
+            // Gutter label
+            bandG.appendChild(svgEl('text', {
+                x: LEFT - 8, y: bandMidY + 3.5,
+                'text-anchor': 'end',
+                class: 'expov-svg-tactic-band-label'
+            }, 'tactic'));
+
+            svg.appendChild(bandG);
+        }
+
         // Stash the bits the ticker needs to update without re-rendering.
         this._nowTickerCtx = {
             marker: nowMarker,
@@ -444,7 +519,7 @@ const ExperimentOverview = {
 
         // ----- one group per embryo
         s.embryos.forEach((emb, i) => {
-            const rowTop = TOP_AXIS_H + i * ROW_H;
+            const rowTop = TOP_AXIS_H + bandShift + i * ROW_H;
             const rowG = svgEl('g');
             rowG.appendChild(this._renderLaneRow(s, emb, {
                 LEFT, LANE_W, RIGHT, W, ROW_H, LANE_H, POWER_H, DOSE_H, ROW_PAD,
@@ -537,7 +612,9 @@ const ExperimentOverview = {
             const x1Raw = xForT(ph.end);
             const x1 = Math.max(x1Raw, x0 + 4);
             const width = x1 - x0;
-            const cls = `expov-svg-phase-${ph.mode}`;
+            const cls = (ph.mode === 'burst' && ph.phase)
+                ? `expov-svg-phase-${ph.mode} expov-burst-phase-${ph.phase}`
+                : `expov-svg-phase-${ph.mode}`;
             g.appendChild(svgEl('rect', {
                 x: x0, y: laneY, width, height: LANE_H, rx: 2,
                 class: cls
@@ -559,9 +636,12 @@ const ExperimentOverview = {
                 const bx = (xForT(ph.start) + xForT(ph.end)) / 2;
                 const balloonY = laneY - 12;
                 const halfW = 30;
+                const balloonCls = ph.phase
+                    ? `expov-svg-burst-balloon-bg expov-burst-phase-${ph.phase}`
+                    : 'expov-svg-burst-balloon-bg';
                 g.appendChild(svgEl('rect', {
                     x: bx - halfW, y: balloonY - 10, width: halfW * 2, height: 12, rx: 3,
-                    class: 'expov-svg-burst-balloon-bg'
+                    class: balloonCls
                 }));
                 g.appendChild(svgEl('text', {
                     x: bx, y: balloonY - 1,

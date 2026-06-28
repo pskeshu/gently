@@ -626,6 +626,72 @@
     color: var(--accent-cyan);
 }
 
+/* ---- Tactic band — session-level protocol strip above embryo rows ------- */
+/* Background strip */
+.expov-svg-tactic-band-bg {
+    fill: rgba(245, 158, 11, 0.06);
+    stroke: rgba(245, 158, 11, 0.14);
+    stroke-width: 1;
+}
+
+/* Tactic pill: spans the protocol window */
+.expov-svg-tactic-pill {
+    fill: rgba(245, 158, 11, 0.18);
+    stroke: rgba(245, 158, 11, 0.60);
+    stroke-width: 1;
+}
+.expov-svg-tactic-pill-label {
+    fill: #fbbf24;
+    font-size: 9.5px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Gutter label ("tactic") */
+.expov-svg-tactic-band-label {
+    fill: var(--text-muted);
+    font-size: 9px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    opacity: 0.7;
+}
+
+/* Setpoint marker — vertical line + "→ N°C" chip */
+.expov-svg-tactic-setpoint-line {
+    stroke: rgba(245, 158, 11, 0.55);
+    stroke-width: 1;
+    stroke-dasharray: 3 2;
+}
+.expov-svg-tactic-setpoint-chip-bg {
+    fill: rgba(30, 20, 0, 0.88);
+    stroke: rgba(245, 158, 11, 0.55);
+    stroke-width: 1;
+}
+.expov-svg-tactic-setpoint-chip {
+    fill: #fbbf24;
+    font-size: 9px;
+    font-weight: 600;
+    font-family: 'JetBrains Mono', monospace;
+}
+
+/* Burst phase tints — override fill on the burst lane rect + balloon bg.
+   before = cool blue (pre-stimulus), during = warm amber (active),
+   after = soft green (recovery). null phase renders as the default red. */
+.expov-burst-phase-before {
+    fill: #3b82f6;
+    opacity: 0.80;
+}
+.expov-burst-phase-during {
+    fill: #f59e0b;
+    opacity: 0.90;
+}
+.expov-burst-phase-after {
+    fill: #22c55e;
+    opacity: 0.80;
+}
+
 .expov-trigger-diamond-inline {
     display: inline-block;
     width: 8px;
