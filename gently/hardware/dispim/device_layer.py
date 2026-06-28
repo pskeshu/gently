@@ -168,6 +168,16 @@ class DeviceLayerServer(Service):
         self._cam_target_max_dim: int = 360  # ~360px thumbnail
         self._cam_jpeg_quality: int = 55
 
+        # Lightsheet (SPIM) live stream — continuous sequence acquisition.
+        self._ls_subscribers: list[asyncio.Queue] = []
+        self._ls_task: asyncio.Task | None = None
+        self._ls_interval_sec: float = 0.0          # peek as fast as exposure allows
+        self._ls_target_max_dim: int = 512
+        self._ls_jpeg_quality: int = 70
+        self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0}
+        self._ls_seq_started: bool = False
+        self._ls_applied: dict = {}                  # last-applied galvo/piezo/exposure
+
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
         self._heavy_plans = frozenset(
@@ -845,7 +855,9 @@ class DeviceLayerServer(Service):
             logger.debug("Bottom-camera grab failed: %s", exc)
             return None
 
-    def _encode_frame_for_stream(self, img: np.ndarray) -> dict[str, Any] | None:
+    def _encode_frame_for_stream(
+        self, img: np.ndarray, max_dim: int | None = None, quality: int | None = None
+    ) -> dict[str, Any] | None:
         """Downsample + auto-contrast + JPEG-encode a uint16 frame for SSE.
 
         Optimised for streaming throughput:
@@ -854,6 +866,10 @@ class DeviceLayerServer(Service):
             full image — np.partition on the subsample is O(n) and avoids
             sorting ~120K pixels every frame
           * JPEG quality 55 (visually fine at thumbnail size)
+
+        ``max_dim`` and ``quality`` default to the ``_cam_*`` instance values,
+        allowing callers (e.g. the lightsheet streamer) to pass different
+        settings without duplicating the encoder.
         """
         if img is None or img.size == 0:
             return None
@@ -865,9 +881,12 @@ class DeviceLayerServer(Service):
             logger.warning("Cannot encode frame — OpenCV unavailable: %s", exc)
             return None
 
+        target_max_dim = max_dim if max_dim is not None else self._cam_target_max_dim
+        jpeg_quality = quality if quality is not None else self._cam_jpeg_quality
+
         h, w = img.shape[:2]
         # Stride slicing — no interpolation, just take every Nth pixel.
-        factor = max(1, max(h, w) // self._cam_target_max_dim)
+        factor = max(1, max(h, w) // target_max_dim)
         small = img[::factor, ::factor]
 
         # Auto-contrast off a small random sample. Robust to hot pixels
@@ -889,7 +908,7 @@ class DeviceLayerServer(Service):
             scale = 255.0 / (hi - lo)
             small = np.clip((small.astype(np.float32) - lo) * scale, 0, 255).astype(np.uint8)
 
-        ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self._cam_jpeg_quality])
+        ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ok:
             return None
         b64 = base64.b64encode(jpeg.tobytes()).decode("ascii")
@@ -952,6 +971,187 @@ class DeviceLayerServer(Service):
                 self._cam_subscribers.remove(q)
             except ValueError:
                 pass
+
+    # =========================================================================
+    # Lightsheet (SPIM) Live Streamer — continuous sequence acquisition
+    # =========================================================================
+
+    def _park_lightsheet_sync(self) -> None:
+        """Park scanner galvo + imaging piezo at the current live params (static sheet)."""
+        p = self._ls_params
+        scanner = self.devices.get("scanner")
+        piezo = self.devices.get("piezo")
+        if scanner is not None:
+            try:
+                scanner.set_spim_state("Idle")
+            except Exception:
+                pass
+            scanner.sa_offset_y.setPosition(float(p["galvo"]))
+        if piezo is not None:
+            try:
+                piezo.set_spim_state("Idle")
+            except Exception:
+                pass
+            piezo.setPosition(float(p["piezo"]))
+
+    def _ensure_lightsheet_sequence_sync(self) -> None:
+        """Start (or restart on exposure change) the continuous sequence on the SPIM camera."""
+        core = self.system.core
+        cam = self.devices.get("camera")
+        if cam is None:
+            raise RuntimeError("No lightsheet camera configured")
+        p = self._ls_params
+        need_restart = (
+            not self._ls_seq_started
+            or self._ls_applied.get("exposure") != p["exposure"]
+        )
+        if need_restart:
+            if core.isSequenceRunning():
+                core.stopSequenceAcquisition()
+            if core.getCameraDevice() != cam.name:
+                core.setCameraDevice(cam.name)
+            core.setExposure(cam.name, float(p["exposure"]))
+            core.startContinuousSequenceAcquisition(self._ls_interval_sec * 1000.0)
+            self._ls_seq_started = True
+            self._ls_applied["exposure"] = p["exposure"]
+
+    def _grab_lightsheet_frame_sync(self):
+        """Park → ensure sequence running → peek the latest frame (never drain)."""
+        try:
+            self._park_lightsheet_sync()                  # galvo/piezo applied live
+            self._ensure_lightsheet_sequence_sync()       # start / restart on exposure
+            try:
+                from gently.hardware.dispim.devices.acquisition import _safe_obtain
+            except (ImportError, AttributeError):
+                _safe_obtain = None
+            core = self.system.core
+            img = core.getLastImage()
+            if _safe_obtain is not None:
+                try:
+                    img = _safe_obtain(img)
+                except Exception:
+                    pass
+            return np.asarray(img)
+        except Exception as exc:
+            logger.debug("Lightsheet grab failed: %s", exc)
+            return None
+
+    def _stop_lightsheet_sequence_sync(self) -> None:
+        try:
+            if self.system.core.isSequenceRunning():
+                self.system.core.stopSequenceAcquisition()
+        except Exception:
+            logger.debug("stop lightsheet sequence failed", exc_info=True)
+        self._ls_seq_started = False
+        self._ls_applied = {}
+
+    async def _lightsheet_streamer(self):
+        logger.info("Lightsheet streamer started")
+        try:
+            while self._ls_subscribers:
+                if self._state_pause_counter > 0:
+                    # Heavy plan owns MMCore: release the sequence and back off.
+                    if self._ls_seq_started:
+                        await asyncio.to_thread(self._stop_lightsheet_sequence_sync)
+                    await asyncio.sleep(0.1)
+                    continue
+                tick = time.monotonic()
+                img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
+                payload = (
+                    self._encode_frame_for_stream(img, self._ls_target_max_dim, self._ls_jpeg_quality)
+                    if img is not None
+                    else None
+                )
+                if payload is not None:
+                    await self._broadcast_lightsheet(payload)
+                elapsed = time.monotonic() - tick
+                # Pace to at least the exposure; peek-rate caps near the camera rate.
+                floor = max(self._ls_interval_sec, self._ls_params["exposure"] / 1000.0)
+                await asyncio.sleep(max(0.0, floor - elapsed))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Lightsheet streamer crashed")
+        finally:
+            await asyncio.to_thread(self._stop_lightsheet_sequence_sync)
+            logger.info("Lightsheet streamer exiting")
+
+    async def _broadcast_lightsheet(self, payload: dict[str, Any]):
+        if not self._ls_subscribers:
+            return
+        dead: list[asyncio.Queue] = []
+        for q in self._ls_subscribers:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    _ = q.get_nowait()
+                    q.put_nowait(payload)
+                except Exception:
+                    dead.append(q)
+        for q in dead:
+            try:
+                self._ls_subscribers.remove(q)
+            except ValueError:
+                pass
+
+    async def handle_lightsheet_stream(self, request):
+        """GET /api/lightsheet/stream — SSE of base64-JPEG frames from SPIM camera.
+
+        The streamer task spins up on first connect and exits when the last
+        subscriber leaves. Uses continuous sequence acquisition for best FPS.
+        """
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+        self._ls_subscribers.append(queue)
+        if len(self._ls_subscribers) == 1 and (self._ls_task is None or self._ls_task.done()):
+            self._ls_task = asyncio.create_task(
+                self._lightsheet_streamer(), name="lightsheet-streamer"
+            )
+        try:
+            await response.write(b": connected\n\n")
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                if payload is None:
+                    break
+                await response.write(f"data: {json.dumps(payload)}\n\n".encode())
+        except (asyncio.CancelledError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except Exception:
+            logger.exception("Lightsheet SSE writer failed")
+        finally:
+            try:
+                self._ls_subscribers.remove(queue)
+            except ValueError:
+                pass
+        return response
+
+    async def handle_lightsheet_params(self, request):
+        """POST /api/lightsheet/live/params — update live galvo/piezo/exposure.
+
+        Body: {"galvo": float, "piezo": float, "exposure": float} (all optional).
+        Galvo/piezo apply on the next grab; exposure change triggers sequence restart.
+        """
+        body = await request.json()
+        for k in ("galvo", "piezo", "exposure"):
+            if k in body and body[k] is not None:
+                self._ls_params[k] = float(body[k])
+        return web.json_response({"params": self._ls_params})
 
     # =========================================================================
     # MMCore Push Callbacks
@@ -2805,6 +3005,10 @@ class DeviceLayerServer(Service):
 
         # Bottom-camera live stream (subscriber-gated, off when nobody listens)
         self._app.router.add_get("/api/bottom_camera/stream", self.handle_bottom_camera_stream)
+
+        # Lightsheet (SPIM) live stream — continuous sequence acquisition
+        self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
+        self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())
