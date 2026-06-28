@@ -210,6 +210,7 @@ def test_stage_move_missing_xy_400():
 # ---------------------------------------------------------------------------
 
 def test_acquire_burst_forwards():
+    """Basic burst forwards without optional params — no laser_config/piezo/galvo in body."""
     client = MagicMock()
     client.acquire_burst = AsyncMock(return_value={"success": True, "request_id": "b1"})
     r = _app(client=client).post(
@@ -222,11 +223,29 @@ def test_acquire_burst_forwards():
     )
 
 
+def test_acquire_burst_forwards_laser_config_and_focal_plane():
+    """acquire/burst forwards laser_config, piezo_center, galvo_center when present."""
+    client = MagicMock()
+    client.acquire_burst = AsyncMock(return_value={"success": True})
+    r = _app(client=client).post(
+        "/api/devices/acquire/burst",
+        json={"frames": 10, "mode": "brightfield", "num_slices": 50,
+              "exposure_ms": 20.0, "laser_config": "ALL OFF",
+              "piezo_center": 55.0, "galvo_center": 1.5},
+    )
+    assert r.status_code == 200
+    client.acquire_burst.assert_awaited_once_with(
+        frames=10, mode="brightfield", num_slices=50, exposure_ms=20.0,
+        laser_config="ALL OFF", piezo_center=55.0, galvo_center=1.5,
+    )
+
+
 # ---------------------------------------------------------------------------
 # acquire/volume
 # ---------------------------------------------------------------------------
 
 def test_acquire_volume_forwards():
+    """Basic volume forwards without optional params."""
     client = MagicMock()
     client.acquire_volume = AsyncMock(return_value={"success": True, "request_id": "v1"})
     r = _app(client=client).post(
@@ -235,6 +254,22 @@ def test_acquire_volume_forwards():
     )
     assert r.status_code == 200
     client.acquire_volume.assert_awaited_once_with(num_slices=50, exposure_ms=10.0)
+
+
+def test_acquire_volume_forwards_laser_config_and_focal_plane():
+    """acquire/volume forwards laser_config, piezo_center, galvo_center when present."""
+    client = MagicMock()
+    client.acquire_volume = AsyncMock(return_value={"success": True})
+    r = _app(client=client).post(
+        "/api/devices/acquire/volume",
+        json={"num_slices": 50, "exposure_ms": 20.0,
+              "laser_config": "ALL OFF", "piezo_center": 55.0, "galvo_center": 1.5},
+    )
+    assert r.status_code == 200
+    client.acquire_volume.assert_awaited_once_with(
+        num_slices=50, exposure_ms=20.0,
+        laser_config="ALL OFF", piezo_center=55.0, galvo_center=1.5,
+    )
 
 
 # ---------------------------------------------------------------------------

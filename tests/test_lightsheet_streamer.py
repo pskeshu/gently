@@ -53,6 +53,9 @@ def _make_dl():
         "scanner": FakeScanner(),
         "piezo": FakePiezo(),
     }
+    # Park-guard state (park-guard fix: these are checked by _park_lightsheet_sync)
+    dl._ls_parked = {}
+    dl._ls_spim_idle = False
     return dl
 
 

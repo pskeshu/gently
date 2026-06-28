@@ -575,16 +575,31 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/acquire/burst", dependencies=[Depends(require_control)])
     async def acquire_burst(payload: dict = Body(...)):  # noqa: B008
-        """Trigger a burst acquisition. Body: {frames, mode, num_slices, exposure_ms}."""
+        """Trigger a burst acquisition.
+
+        Body: {frames, mode, num_slices, exposure_ms,
+               laser_config?, piezo_center?, galvo_center?}.
+        laser_config is forwarded directly to the device client so callers
+        can send "ALL OFF" for brightfield-safe Manual-view captures.
+        piezo_center and galvo_center capture at the dialled focal plane.
+        """
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
+            kw: dict = {}
+            if payload.get("laser_config") is not None:
+                kw["laser_config"] = str(payload["laser_config"])
+            if payload.get("piezo_center") is not None:
+                kw["piezo_center"] = float(payload["piezo_center"])
+            if payload.get("galvo_center") is not None:
+                kw["galvo_center"] = float(payload["galvo_center"])
             return await client.acquire_burst(
                 frames=int(payload.get("frames", 60)),
                 mode=str(payload.get("mode", "1hz")),
                 num_slices=int(payload.get("num_slices", 1)),
                 exposure_ms=float(payload.get("exposure_ms", 5.0)),
+                **kw,
             )
         except Exception as exc:
             logger.exception("Burst acquisition failed")
@@ -592,14 +607,29 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/acquire/volume", dependencies=[Depends(require_control)])
     async def acquire_volume(payload: dict = Body(...)):  # noqa: B008
-        """Trigger a volume acquisition. Body: {num_slices, exposure_ms}."""
+        """Trigger a volume acquisition.
+
+        Body: {num_slices, exposure_ms,
+               laser_config?, piezo_center?, galvo_center?}.
+        laser_config is forwarded directly to the device client so callers
+        can send "ALL OFF" for brightfield-safe Manual-view captures.
+        piezo_center and galvo_center capture at the dialled focal plane.
+        """
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
+            kw: dict = {}
+            if payload.get("laser_config") is not None:
+                kw["laser_config"] = str(payload["laser_config"])
+            if payload.get("piezo_center") is not None:
+                kw["piezo_center"] = float(payload["piezo_center"])
+            if payload.get("galvo_center") is not None:
+                kw["galvo_center"] = float(payload["galvo_center"])
             return await client.acquire_volume(
                 num_slices=int(payload.get("num_slices", 50)),
                 exposure_ms=float(payload.get("exposure_ms", 10.0)),
+                **kw,
             )
         except Exception as exc:
             logger.exception("Volume acquisition failed")

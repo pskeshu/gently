@@ -177,6 +177,8 @@ class DeviceLayerServer(Service):
         self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0}
         self._ls_seq_started: bool = False
         self._ls_applied: dict = {}                  # last-applied galvo/piezo/exposure
+        self._ls_parked: dict = {}                   # last-parked galvo/piezo setPosition values
+        self._ls_spim_idle: bool = False             # whether SPIM state machine was set Idle this session
 
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
@@ -977,22 +979,41 @@ class DeviceLayerServer(Service):
     # =========================================================================
 
     def _park_lightsheet_sync(self) -> None:
-        """Park scanner galvo + imaging piezo at the current live params (static sheet)."""
+        """Park scanner galvo + imaging piezo at the current live params (static sheet).
+
+        Guards:
+        - set_spim_state("Idle") fires once per stream session, not per frame
+          (4 serial round-trips on first call → 0 on every subsequent frame).
+        - setPosition fires only when the commanded value differs from the
+          last-applied value (no-op on steady-state frames).
+        """
         p = self._ls_params
         scanner = self.devices.get("scanner")
         piezo = self.devices.get("piezo")
+        # SPIM Idle state machine: drive both devices Idle once per session.
+        if not self._ls_spim_idle:
+            if scanner is not None:
+                try:
+                    scanner.set_spim_state("Idle")
+                except Exception:
+                    pass
+            if piezo is not None:
+                try:
+                    piezo.set_spim_state("Idle")
+                except Exception:
+                    pass
+            self._ls_spim_idle = True
+        # setPosition only when the value changed from last-applied.
         if scanner is not None:
-            try:
-                scanner.set_spim_state("Idle")
-            except Exception:
-                pass
-            scanner.sa_offset_y.setPosition(float(p["galvo"]))
+            want = float(p["galvo"])
+            if self._ls_parked.get("galvo") != want:
+                scanner.sa_offset_y.setPosition(want)
+                self._ls_parked["galvo"] = want
         if piezo is not None:
-            try:
-                piezo.set_spim_state("Idle")
-            except Exception:
-                pass
-            piezo.setPosition(float(p["piezo"]))
+            want = float(p["piezo"])
+            if self._ls_parked.get("piezo") != want:
+                piezo.setPosition(want)
+                self._ls_parked["piezo"] = want
 
     def _ensure_lightsheet_sequence_sync(self) -> None:
         """Start (or restart on exposure change) the continuous sequence on the SPIM camera."""
@@ -1044,6 +1065,10 @@ class DeviceLayerServer(Service):
             logger.debug("stop lightsheet sequence failed", exc_info=True)
         self._ls_seq_started = False
         self._ls_applied = {}
+        # Reset park guard so the next stream session re-idles the state
+        # machine and re-parks the axes (hardware may have moved).
+        self._ls_spim_idle = False
+        self._ls_parked = {}
 
     async def _lightsheet_streamer(self):
         logger.info("Lightsheet streamer started")

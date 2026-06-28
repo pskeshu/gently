@@ -90,7 +90,7 @@ const DevicesManager = (function () {
     // Lightsheet live params — debounced POST to /api/devices/lightsheet/live/params
     let _lsGalvo = 0;
     let _lsPiezo = 50;
-    let _lsExposure = 50;
+    let _lsExposure = 20;  // matches device-layer _ls_params default (20 ms)
     let _lsParamTimer = null;
 
     // Lightsheet control inputs (rail)
@@ -98,6 +98,7 @@ const DevicesManager = (function () {
     let _lsLedOpen, _lsLedClosed, _lsCamLed, _lsRoomLightBtn;
     let _lsCamLedOn = false;
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
+    let _lsLaserStatus;  // span inside .ls-laser-indicator — driven by actual laser/off calls
     let _lsTempInput, _lsTempSet;
 
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
@@ -199,6 +200,7 @@ const DevicesManager = (function () {
         _lsBurstBtn      = document.getElementById('devices-ls-burst');
         _lsLastcap       = document.getElementById('devices-ls-lastcap');
         _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
+        _lsLaserStatus   = document.getElementById('devices-ls-laser-status');
         _lsTempInput     = document.getElementById('devices-ls-temp-input');
         _lsTempSet       = document.getElementById('devices-ls-temp-set');
 
@@ -1347,10 +1349,27 @@ const DevicesManager = (function () {
     // Lightsheet live panel (Manual view)
     // =====================================================================
 
+    /** Gate ALL lasers off via the Laser "ALL OFF" config-group preset.
+     *  Updates the indicator span from the actual API result (not a static label).
+     *  Fire-and-forget safe — failure shows a warning, never throws. */
+    async function setLaserOff() {
+        cacheDom();
+        try {
+            const res = await fetch('/api/devices/laser/off', { method: 'POST' });
+            if (_lsLaserStatus) {
+                _lsLaserStatus.textContent = res.ok ? 'OFF (brightfield)' : 'warning: state unknown';
+            }
+        } catch (err) {
+            if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
+            console.debug('laser off call failed:', err);
+        }
+    }
+
     async function toggleLightsheetStream() {
         if (!_lsToggle) return;
         _lsToggle.disabled = true;
         try {
+            const starting = !_lsStreaming;
             const endpoint = _lsStreaming
                 ? '/api/devices/lightsheet/live/stop'
                 : '/api/devices/lightsheet/live/start';
@@ -1363,6 +1382,8 @@ const DevicesManager = (function () {
             }
             const data = await res.json();
             applyLightsheetState(!!data.streaming);
+            // Gate lasers off whenever live starts — brightfield-safe by default.
+            if (starting && data.streaming) setLaserOff();
         } catch (err) {
             console.error('Lightsheet toggle failed:', err);
             if (_lsMeta) _lsMeta.textContent = `error: ${err}`;
@@ -1627,13 +1648,19 @@ const DevicesManager = (function () {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ frames: 10, mode: 'brightfield',
-                                          num_slices: 50, exposure_ms: _lsExposure }),
+                                          num_slices: 50, exposure_ms: _lsExposure,
+                                          laser_config: 'ALL OFF',
+                                          piezo_center: _lsPiezo,
+                                          galvo_center: _lsGalvo }),
                 });
             } else {
                 res = await fetch('/api/devices/acquire/volume', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ num_slices: 50, exposure_ms: _lsExposure }),
+                    body: JSON.stringify({ num_slices: 50, exposure_ms: _lsExposure,
+                                          laser_config: 'ALL OFF',
+                                          piezo_center: _lsPiezo,
+                                          galvo_center: _lsGalvo }),
                 });
             }
             if (!res.ok) {
@@ -1944,6 +1971,8 @@ const DevicesManager = (function () {
                 if (el) TemperatureGraph.init(el, 'current');
             }
         }
+        // Entering Manual view — gate lasers off immediately (brightfield-safe).
+        if (viewName === 'manual') setLaserOff();
     }
 
     function setupViewSwitcher() {
