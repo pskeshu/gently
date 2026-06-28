@@ -150,7 +150,8 @@ async def run(
             if t >= _effective_tp(paths, max_timepoints):
                 continue
 
-            projection = project_volume(paths[t])
+            # paths[t] is a (timestamp, path) tuple from _discover_volumes
+            projection = project_volume(paths[t][1])
 
             proj_uid = f"proj_{session_id}_{eid}_t{t:04d}"
             vol_uid = f"volume_{session_id}_{eid}_t{t:04d}"

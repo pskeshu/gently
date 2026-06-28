@@ -36,7 +36,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -311,7 +311,7 @@ class GentlyStore:
             return None
         d = dict(row)
         self._parse_json_field(d, "metadata")
-        return d
+        return d  # type: ignore[return-value]  # dict matches TypedDict shape
 
     def list_sessions(self) -> list[SessionInfo]:
         """Return all sessions ordered by last_active descending."""
@@ -321,7 +321,7 @@ class GentlyStore:
             d = dict(row)
             self._parse_json_field(d, "metadata")
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     def touch_session(self, session_id: str):
         """Update last_active timestamp."""
@@ -397,7 +397,7 @@ class GentlyStore:
             return None
         d = dict(row)
         self._parse_json_field(d, "calibration")
-        return d
+        return d  # type: ignore[return-value]  # dict matches TypedDict shape
 
     def list_embryos(self, session_id: str) -> list[EmbryoInfo]:
         rows = self._conn.execute(
@@ -409,7 +409,7 @@ class GentlyStore:
             d = dict(row)
             self._parse_json_field(d, "calibration")
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     # ==================================================================
     # Volumes
@@ -726,7 +726,7 @@ class GentlyStore:
             if d.get("metadata"):
                 d["metadata"] = json.loads(d["metadata"])
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     def get_acquisition_params(self, session_id: str, embryo_id: str | None = None) -> dict | None:
         """
@@ -876,7 +876,7 @@ class GentlyStore:
             "SELECT * FROM projections WHERE session_id = ? AND embryo_id = ? ORDER BY timepoint",
             (session_id, embryo_id),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows]  # type: ignore[misc]  # dict matches TypedDict shape
 
     # ==================================================================
     # Perception Runs & Predictions
@@ -911,7 +911,7 @@ class GentlyStore:
                     now,
                 ),
             )
-            return cursor.lastrowid
+            return cast("int", cursor.lastrowid)
 
     def store_prediction(
         self,
@@ -978,7 +978,7 @@ class GentlyStore:
                     now,
                 ),
             )
-            return cursor.lastrowid
+            return cast("int", cursor.lastrowid)
 
     def complete_perception_run(
         self, run_id: int, status: str = "completed", error_message: str | None = None
@@ -1021,7 +1021,7 @@ class GentlyStore:
             if d.get("observed_features"):
                 d["observed_features"] = json.loads(d["observed_features"])
             result.append(d)
-        return result
+        return result  # type: ignore[return-value]  # dict matches TypedDict shape
 
     # ==================================================================
     # Ground Truth
@@ -1066,7 +1066,7 @@ class GentlyStore:
             "WHERE session_id = ? AND embryo_id = ? ORDER BY start_timepoint",
             (session_id, embryo_id),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(r) for r in rows]  # type: ignore[misc]  # dict matches TypedDict shape
 
     # ==================================================================
     # Utility
@@ -1098,7 +1098,7 @@ class GentlyStore:
 
         counts["disk_usage_mb"] = round(total_bytes / (1024 * 1024), 1)
         counts["db_size_mb"] = round(self._db_path.stat().st_size / (1024 * 1024), 2)
-        return counts
+        return counts  # type: ignore[return-value]  # dict matches TypedDict shape
 
     @property
     def db_path(self) -> Path:

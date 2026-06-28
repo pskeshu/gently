@@ -119,33 +119,3 @@ ignore_missing_imports = true
 explicit_package_bases = true
 mypy_path = "."
 
-# Modules with pre-existing mypy errors, exempted while the codebase is
-# incrementally annotated (see issue #46). New modules should not be added
-# here; PRs that substantively touch a listed module should fix its errors
-# and remove it from this list as part of that change.
-[[tool.mypy.overrides]]
-module = [
-    "benchmarks.perception.live_viewer",
-    "benchmarks.perception.metrics",
-    "benchmarks.perception.testset",
-    "diagnostics.benchmark_gentlystore_fps",
-    "diagnostics.benchmark_volume_fps",
-    "diagnostics.plot_benchmark_results",
-    "diagnostics.switchbot_webgui",
-    "examples.example_dispim_workflows",
-    "gently.core.store",
-    "gently.dataset.aggregator",
-    "gently.dataset.embryo_dataset",
-    "gently.dataset.explorer_server",
-    "scripts.auto_label_examples",
-    "scripts.extract_stage_examples",
-    "scripts.gemini_stage_test",
-    "scripts.launch_viz_server",
-    "scripts.projection_explorer",
-    "scripts.replay_session",
-    "scripts.stage_annotator",
-    "tests.test_campaign_coordination",
-    "tests.test_text_tool_call_extraction",
-    "tests.validate_recursive_autofocus",
-]
-ignore_errors = true

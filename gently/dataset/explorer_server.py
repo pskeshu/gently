@@ -18,6 +18,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -41,8 +42,8 @@ from .schema import DEFAULT_DB_PATH, get_connection, get_database_stats
 
 logger = logging.getLogger(__name__)
 # Lazy imports for explorer-specific projection functions
-tifffile = None
-PIL_Image = None
+tifffile: Any = None
+PIL_Image: Any = None
 
 
 def ensure_projection_deps():
@@ -447,7 +448,7 @@ def projection_spin_3d(
     return grid, "6 perspective views rotating around volume"
 
 
-PROJECTION_METHODS = {
+PROJECTION_METHODS: dict[str, Any] = {
     "dual_view": projection_dual_view,
     "depth_colored": projection_depth_colored,
     "multi_slice": projection_multi_slice,
@@ -912,7 +913,7 @@ class DatasetExplorer:
                 SELECT * FROM predictions
                 WHERE perception_run_id = ?
             """
-            params = [run_id]
+            params: list[Any] = [run_id]
 
             if embryo_id:
                 query += " AND embryo_id = ?"
@@ -1069,7 +1070,8 @@ class DatasetExplorer:
             # Build unified image list with ground truth based on row index
             # within each session/embryo
             images = []
-            session_embryo_counts = {}  # Track row index within each session/embryo
+            # keyed by (session_id, embryo_id); value is the row index within that group
+            session_embryo_counts: dict[tuple[Any, Any], int] = {}
 
             for idx, r in enumerate(rows):
                 session_id = r[1]

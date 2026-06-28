@@ -487,7 +487,7 @@ def print_overhead_analysis(results: list[BenchmarkResult]):
     """Print overhead analysis comparing FileStore to raw TIFF."""
     from collections import defaultdict
 
-    groups = defaultdict(dict)
+    groups: dict = defaultdict(dict)
     for r in results:
         groups[r.num_slices][r.approach] = r
 

@@ -98,7 +98,7 @@ def plot_throughput(data: dict, output_dir: Path):
             approaches.append(r["approach"])
 
     # Build matrix
-    vps = defaultdict(dict)
+    vps: dict = defaultdict(dict)
     for r in summary:
         if r["vol_per_sec"] is not None:
             vps[r["slices"]][r["approach"]] = r["vol_per_sec"]
@@ -191,7 +191,7 @@ def plot_overhead(data: dict, output_dir: Path):
         "reconfig_wfd": "Reconfig (waitForDevice)",
     }
 
-    overhead = defaultdict(dict)
+    overhead: dict = defaultdict(dict)
     for r in summary:
         if r["approach"] in compare and r["mean_s"] is not None:
             s = r["slices"]
@@ -253,7 +253,7 @@ def plot_wfd_savings(data: dict, output_dir: Path):
     summary = data["summary"]
 
     slices_set = sorted(set(r["slices"] for r in summary))
-    means = defaultdict(dict)
+    means: dict = defaultdict(dict)
     raw_means = {}
     for r in summary:
         if r["mean_s"] is not None:

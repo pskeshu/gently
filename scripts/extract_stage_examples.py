@@ -32,6 +32,7 @@ import json
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -41,8 +42,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from gently.harness.perception.stages import STAGES
 
 # Lazy imports
-tifffile = None
-PIL_Image = None
+tifffile: Any = None
+PIL_Image: Any = None
 
 
 def ensure_dependencies():
@@ -77,7 +78,7 @@ def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict[st
 
     tif_files = list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
 
-    embryo_volumes = {}
+    embryo_volumes: dict = {}
 
     for f in tif_files:
         parts = f.stem.split("_")
