@@ -412,6 +412,181 @@ def create_router(server) -> APIRouter:
             "waited": res.get("waited", False),
         }
 
+    # ------------------------------------------------------------------
+    # Lightsheet live stream
+    # ------------------------------------------------------------------
+
+    @router.get("/api/devices/lightsheet/live/status")
+    async def get_lightsheet_live_status():
+        """Return whether the lightsheet live stream bridge is running."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        monitor = getattr(agent, "lightsheet_monitor", None) if agent else None
+        return {
+            "available": monitor is not None,
+            "streaming": bool(monitor and monitor.running),
+            "last_frame_ts": getattr(monitor, "_last_frame_ts", None) if monitor else None,
+        }
+
+    @router.post(
+        "/api/devices/lightsheet/live/start",
+        dependencies=[Depends(require_control)],
+    )
+    async def start_lightsheet_live_stream():
+        """Start the lightsheet live stream bridge.
+
+        Idempotent — calling start() while already running is a no-op.
+        """
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        monitor = getattr(agent, "lightsheet_monitor", None) if agent else None
+        if monitor is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Lightsheet monitor not initialised (agent or microscope not ready)",
+            )
+        try:
+            await monitor.start()
+        except Exception as exc:
+            logger.exception("Failed to start lightsheet monitor")
+            raise HTTPException(status_code=500, detail=f"start failed: {exc}") from exc
+        return {"streaming": monitor.running}
+
+    @router.post(
+        "/api/devices/lightsheet/live/stop",
+        dependencies=[Depends(require_control)],
+    )
+    async def stop_lightsheet_live_stream():
+        """Stop the lightsheet live stream bridge. Idempotent."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        monitor = getattr(agent, "lightsheet_monitor", None) if agent else None
+        if monitor is None:
+            return {"streaming": False}
+        try:
+            await monitor.stop()
+        except Exception as exc:
+            logger.exception("Failed to stop lightsheet monitor")
+            raise HTTPException(status_code=500, detail=f"stop failed: {exc}") from exc
+        return {"streaming": False}
+
+    # ------------------------------------------------------------------
+    # Lightsheet live params
+    # ------------------------------------------------------------------
+
+    @router.post("/api/devices/lightsheet/live/params", dependencies=[Depends(require_control)])
+    async def lightsheet_live_params(payload: dict = Body(...)):  # noqa: B008
+        """Forward galvo/piezo/exposure params to the device-layer lightsheet streamer."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            res = await client.set_lightsheet_live_params(
+                galvo=payload.get("galvo"), piezo=payload.get("piezo"),
+                exposure=payload.get("exposure"))
+        except Exception as exc:
+            logger.exception("lightsheet live params failed")
+            raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
+        return res
+
+    # ------------------------------------------------------------------
+    # LED / laser / camera
+    # ------------------------------------------------------------------
+
+    @router.post("/api/devices/led/set", dependencies=[Depends(require_control)])
+    async def led_set(payload: dict = Body(...)):  # noqa: B008
+        """Set the LED shutter state. Body: {"state": "Open"|"Closed"}."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_led(str(payload.get("state", "Closed")))
+        except Exception as exc:
+            logger.exception("LED set command failed")
+            raise HTTPException(status_code=502, detail=f"led failed: {exc}") from exc
+
+    @router.post("/api/devices/laser/off", dependencies=[Depends(require_control)])
+    async def laser_off():
+        """Force the 488 nm laser off.
+
+        Confirmed signature: set_laser_power(wavelength: int, pct: float).
+        Calls set_laser_power(488, 0) to drive the 488 nm line to 0 %.
+        """
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_laser_power(488, 0)
+        except Exception as exc:
+            logger.exception("Laser off command failed")
+            raise HTTPException(status_code=502, detail=f"laser off failed: {exc}") from exc
+
+    @router.post("/api/devices/camera/led_mode", dependencies=[Depends(require_control)])
+    async def camera_led_mode(payload: dict = Body(...)):  # noqa: B008
+        """Enable/disable automatic LED for bottom-camera captures. Body: {"use_led": bool}."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_camera_led_mode(bool(payload.get("use_led", False)))
+        except Exception as exc:
+            logger.exception("Camera LED mode command failed")
+            raise HTTPException(status_code=502, detail=f"camera led mode failed: {exc}") from exc
+
+    # ------------------------------------------------------------------
+    # Stage
+    # ------------------------------------------------------------------
+
+    @router.post("/api/devices/stage/move", dependencies=[Depends(require_control)])
+    async def stage_move(payload: dict = Body(...)):  # noqa: B008
+        """Move the stage to an absolute XY position. Body: {"x": float, "y": float}."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.move_to_position(float(payload["x"]), float(payload["y"]))
+        except KeyError:
+            raise HTTPException(status_code=400, detail="x and y required")
+        except Exception as exc:
+            logger.exception("Stage move command failed")
+            raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
+
+    # ------------------------------------------------------------------
+    # Acquisition
+    # ------------------------------------------------------------------
+
+    @router.post("/api/devices/acquire/burst", dependencies=[Depends(require_control)])
+    async def acquire_burst(payload: dict = Body(...)):  # noqa: B008
+        """Trigger a burst acquisition. Body: {frames, mode, num_slices, exposure_ms}."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.acquire_burst(
+                frames=int(payload.get("frames", 60)),
+                mode=str(payload.get("mode", "1hz")),
+                num_slices=int(payload.get("num_slices", 1)),
+                exposure_ms=float(payload.get("exposure_ms", 5.0)),
+            )
+        except Exception as exc:
+            logger.exception("Burst acquisition failed")
+            raise HTTPException(status_code=502, detail=f"burst failed: {exc}") from exc
+
+    @router.post("/api/devices/acquire/volume", dependencies=[Depends(require_control)])
+    async def acquire_volume(payload: dict = Body(...)):  # noqa: B008
+        """Trigger a volume acquisition. Body: {num_slices, exposure_ms}."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.acquire_volume(
+                num_slices=int(payload.get("num_slices", 50)),
+                exposure_ms=float(payload.get("exposure_ms", 10.0)),
+            )
+        except Exception as exc:
+            logger.exception("Volume acquisition failed")
+            raise HTTPException(status_code=502, detail=f"volume failed: {exc}") from exc
+
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: str | None = None):
         """Get calibration images"""
