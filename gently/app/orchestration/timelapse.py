@@ -2061,6 +2061,7 @@ class TimelapseOrchestrator:
         mode: str = "1hz",
         num_slices: int = 1,
         force: bool = False,
+        laser_config: str | None = None,
     ) -> str:
         """Queue a burst acquisition for ``embryo_id``.
 
@@ -2100,6 +2101,7 @@ class TimelapseOrchestrator:
             mode=mode,
             num_slices=num_slices,
             temperature_provider=self._temperature_provider,
+            laser_config=laser_config,
         )
         self._exclusive_queue.append(op)
         logger.info(
