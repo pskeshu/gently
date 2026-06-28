@@ -1,105 +1,118 @@
-# Design: Operations tab — the operation spine (sub-project D, redesigned)
+# Design: Operations — the agent-authored Operation Plan (sub-project D, v3)
 
-Status: redesigned 2026-06-28 after a from-scratch design analysis + audit (user directive:
-"start from no assumptions of legacy design… rethink completely new"). Supersedes the earlier
-swimlane-band approach (discarded).
-Base branch: `feature/operations-tab` (off C). Keep: the Experiment→Operations rename and the
-burst-`phase` event. **Discard: the swimlane tactic-band rendering.**
+Status: **DRAFT for review.** Redesigned 2026-06-28 after two from-scratch iterations (swimlane →
+operation-spine) and a foundational rethink the user prompted: tactics are richer than a linear plan,
+and the tactical picture should be a **typed output the agent authors per experiment**, not a backend
+reconstruction. Grounded by an architecture recon (every piece needed already exists).
+Base branch: `feature/operations-tab` (off C). Keep: Experiment→Operations rename + the burst-`phase`
+event. Discarded: the swimlane band (reverted) and the single-linear-spine assumption.
 
-## 0. The directive
+## 0. The two decisions this encodes (pending user confirm)
+1. **Source of truth = the agent.** The agent emits a typed **Operation Plan** (the tactics it has
+   planned / is running / has run, each typed) via forced `tool_choice` — gently's existing house
+   pattern (Ask-the-notebook, hatching detector, verifier, classifier all do this; `@tool`
+   auto-generates schemas). The UI renders the agent's plan **⊕ live telemetry binding**. We do NOT
+   keep extending `strategy_snapshot`'s timeline-replay *reconstruction* to guess tactics — the agent
+   owns tactic identity; the backend supplies live values.
+2. **Open, grounded ontology.** A tactic is far broader than a phased protocol; the schema covers the
+   real operational modes (below). No round-robin primitive (the scheduler is priority-queue
+   "most-overdue"; "round" is legacy naming).
 
-Operations must present **tactics in three states — planned ("queued"), in use, and used** — so a
-scientist reads at a glance what the agent decided, what it's doing now, and what's next. It must be
-**testable against realistic experiments** and render **different tactic cases** (monitor, burst,
-temp-change protocol, transmission, …). It is **mission-control for an autonomous instrument**, not
-a timeline and not a SaaS dashboard.
-
-## 1. The model — a generic tactic plan
-
-Operations renders one data structure, the **operation view**:
+## 1. The Operation Plan (typed agent output)
 
 ```
-operation = { title, session, tactics: [ tactic ] }
-tactic = {
-  seq, state: 'used'|'active'|'queued', name, kind,
-  target?,            # e.g. "→ 32.0 °C"
-  summary?,           # collapsed line (used/queued): "22 min · ended on signal"
-  desc?,              # one-line sub-description
-  trigger?,           # queued: the condition that starts it, e.g. "when temp locks"
-  live?: {            # active (or any with live data)
-    readouts: [{ label, value, sub?, bar? }],   # temp gauge, current burst, signal, cadence…
-    phases?:  [{ name, state:'done'|'active'|'todo', count, pips:[...] }]  # before/during/after (protocols)
-  }
+operation_plan = {
+  session_id, title, goal,                 # the agent's framing of the run
+  tactics: [ tactic ],
+  updated_at, updated_reason               # patched on each tactic transition
 }
+tactic = {
+  id, name, kind, state, scope,
+  rationale,                               # the agent's WHY (no self-rated confidence)
+  structure, live_bind, relations
+}
+kind      : 'standing_timelapse' | 'reactive_monitor' | 'scripted_protocol' | 'exclusive_burst' | 'oneshot' | 'custom'
+state     : 'planned' | 'active' | 'done'
+scope     : { mode:'global'|'embryos', embryo_ids?:[...] }
+structure :   # by kind
+  standing_timelapse → { cadence_s, per_embryo:[{embryo_id, cadence_phase:'normal'|'fast'|'burst'|'paused', interval_s}] }
+  reactive_monitor   → { watch, reaction, status:'armed'|'watching'|'fired' }   # onset, saturation, burst-on-structure, hatching-detect
+  scripted_protocol  → { phases:[{name, state:'done'|'active'|'todo', count}] }  # before/during/after
+  exclusive_burst    → { frames, mode, phase? }
+  oneshot|custom     → { note }
+live_bind : [ 'temperature' | 'current_burst' | 'cadence' | 'signal' | ... ]    # which telemetry fills readouts/progress
+relations : { after?:[tactic_id], layered_on?:[tactic_id], triggers?:[tactic_id] }   # concurrency + composition
 ```
 
-This single model renders **any** tactic kind: a phased protocol (temp-change → phases + temp
-gauge), a reactive monitor (expression-onset → readouts, no phases), a one-shot (transmission burst
-→ readouts), or a purely queued plan (all tactics `state:'queued'`).
+This single typed object expresses a regular timelapse (standing), an async per-embryo run (standing
+with per-embryo cadence — *real* in the orchestrator), a reactive monitor incl. **hatching detection**
+(reactive), a temp-change protocol (scripted, phased), an exclusive burst, and arbitrary `custom`
+tactics — because the **agent declares each one's kind/structure**.
 
-## 2. Architecture (four units)
+## 2. Architecture (producer → model → consumer, all reusing existing paths)
 
-### 2.1 Backend transform — `build_operation_view(snapshot)`
-A new function (in `gently/ui/web/strategy_snapshot.py` or a sibling) that maps the existing
-strategy snapshot into the operation model: the per-embryo `temp_protocol` band + `setpoint_changes`
-+ phased bursts (from C) become a temp-change **tactic** with before/during/after **phases**; active
-`monitoring_modes` become monitor **tactics** with **readouts** (cadence, power, signal); completed
-bursts/phases become **used** tactics; not-yet-started planned items become **queued** tactics.
-Served via the existing `/api/experiments/{session}/strategy` route (extend its payload with
-`operation`) or a new `GET /api/operations/{session}` — reuse `/strategy` to avoid a new route.
+### 2.1 Producer — the `operation_plan` typed tool (agent)
+A new agent tool `declare_operation_plan(...)` (or `update_operation_plan`) in `gently/app/tools/`,
+schema auto-generated by the `@tool` decorator (or a forced literal schema like `notebook_ask.ASK_TOOL`).
+The agent calls it at experiment planning and **patches it on each tactic transition** (begin / end /
+phase-change). Prompt guidance (in `harness/prompts/templates.py`, beside the monitoring-mode decision
+table) tells the agent to keep its Operation Plan current as it operates.
 
-### 2.2 The renderer — rewrite `experiment-overview.js`
-Replace the swimlane Overview with the **operation spine** (data-driven from §1): a vertical thread
-of tactic nodes; **used** = solid green dot + collapsed one-line summary; **in use** = amber node,
-the *whole left column amber* (dot + seq + "IN USE"), card bloomed open with live internals; **queued**
-= blue dashed dot + dimmed card + trigger condition. The spine connector is **state-colored**
-(green used → amber active → blue-dashed queued); the first queued node is marked **next**. (The
-Rules view can remain as-is or be folded in later — out of scope here.)
+### 2.2 Model — store the plan in `FileContextStore`
+A new domain beside `session_intents`/`active/`: `agent/operation_plans/{session_id}.yaml`. Add
+`set_operation_plan` / `get_operation_plan` to `FileContextStore` and fire the existing
+`CONTEXT_UPDATED` (the store's `_notify_*` already broadcasts to `/ws`). The plan is an agent-authored
+typed artifact exactly like campaigns/plan-items already are.
 
-**Audit fixes baked in** (from the design audit):
-1. Queued/decided-plan state reads as a *cocked* instrument: colored blue queued thread + "next" marker.
-2. The **active phase dominates** the stepper; **"awaiting lock" is the headline** of the active phase.
-3. **Flatten** the active card — no card-in-card; values sit on the panel face, separated by a hairline.
-4. Active row's **entire left column amber**; colored left edge per state (green/amber/blue).
-5. Copy: **"queued"** (not "going to be used"); replace "first/second/last" with the **trigger**;
-   keep mono instrument values + domain copy ("ended on signal", "awaiting lock"); show rate-of-change
-   deltas ("+14% over 6 min") and promote the decision-driving readout per tactic kind.
+### 2.3 Consumer — Operations renders plan ⊕ live binding
+- Route `GET /api/operation_plan/{session_id}` (mirror `routes/context.py`) returns the plan.
+- The renderer (the **operation spine**, generalized): one node per tactic in used/active/queued state.
+  The active node blooms open and **binds live telemetry** by `live_bind` keys — temperature gauge,
+  current burst, phase progress, cadence — sourced from the orchestrator `get_status` /
+  `strategy_snapshot` / the tactic events C emits. Per-embryo cadence (standing/async) shows as a
+  compact strip in the standing-tactic node. Reactive monitors render watch+reaction+status; scripted
+  protocols render the before/during/after stepper.
+- Live refresh: subscribe to `CONTEXT_UPDATED` (plan changed) + the tactic telemetry events
+  (`TEMP_PROTOCOL_*`, `BURST_*`, `EMBRYO_CADENCE_CHANGED`, `POWER_RAMP_STEP`, `TEMPERATURE_SETPOINT_CHANGED`)
+  → debounced refetch+render. (Mirrors `experiment-strip.js` / `context-surface.js`.)
+- **Audit fixes** (from the design audit) baked into the renderer: queued reads as a cocked instrument
+  (blue thread + "next" marker), the active phase/status is the headline, flatten the card (no
+  card-in-card), the active row's whole left column is amber + colored left edge per state, copy =
+  "queued", keep mono instrument values + domain copy.
 
-### 2.3 Scenario test mode (the "test it for real experiments" requirement)
-The renderer accepts an operation model from either the live endpoint **or** a **scenario fixture**.
-A small dev affordance — `?scenario=<name>` URL param (and/or a dev-only scenario `<select>`) — loads
-a named fixture from a **scenario library** (`gently/ui/web/static/js/operations-scenarios.js`):
-`temp_strain`, `expression_onset`, `pre_hatching`, `transmission_survey`, `decided_plan`, `idle`.
-This makes Operations developable/verifiable **offline against any tactic case**, with no rig. The
-fixtures are the prototyped harness fixtures, promoted into the repo as test data + a Chrome-MCP
-audit target. (Scenario mode is dev-gated; live mode is default.)
-
-### 2.4 Live refresh
-The tab subscribes (via `ClientEventBus.on`, mirroring `experiment-strip.js`) to
-`TEMP_PROTOCOL_STARTED/COMPLETED`, `TEMPERATURE_SETPOINT_CHANGED`, `BURST_START/COMPLETE`,
-`EMBRYO_CADENCE_CHANGED`, `POWER_RAMP_STEP`, each triggering a debounced (~500 ms) refetch+render. The
-websocket relay already emits all of these by `.name`; no backend change.
+### 2.4 Scenario test mode (your "test it for real experiments" + "different tactic cases")
+A repo scenario library of **Operation Plan fixtures** (the prototyped six cases, now as plan objects):
+temp-strain, expression-onset, pre-hatching/hatching-detect, transmission survey, decided-plan, idle —
+plus async-multi-embryo. `?scenario=<name>` (dev-gated) renders a fixture with no agent/fetch, so
+Operations is developable/auditable offline against any tactic case. The fixtures double as the test
+corpus + a Chrome-MCP audit target.
 
 ## 3. Data flow
-events → EventBus → websocket → `ClientEventBus` → debounced refetch → `/strategy` (now with
-`operation`) → `build_operation_view` → spine renderer. In scenario mode: `?scenario=` → fixture →
-same renderer (no fetch).
+agent → `declare_operation_plan` (forced typed) → `FileContextStore` → `CONTEXT_UPDATED` → `/ws` →
+Operations refetch → `/api/operation_plan` (the plan) **⊕** live telemetry (`get_status` /
+`strategy_snapshot` / events) bound by `live_bind` → spine renderer. Scenario mode: `?scenario=` →
+fixture plan → same renderer.
 
-## 4. Error/empty
-- No active operation / no tactics → calm **idle** state ("When the agent begins operating by tactic,
-  the plan and live progress appear here"), not a dead screen.
-- Snapshot lacks `operation` (older session) → renderer falls back to a minimal "no tactic data" note.
-- Unknown tactic `kind` → renders generically from `name`/`summary`/`readouts` (the model is kind-agnostic).
+## 4. Why agent-authored over backend reconstruction
+`strategy_snapshot.py` already reconstructs the picture by replaying `timeline.jsonl` and re-instantiating
+modes — but every new tactic kind needs new reconstruction heuristics, and it can only ever *infer*
+intent. The agent *is* the composer; it should *declare* its tactics (authoritative, open-ontology,
+self-describing). The backend keeps providing **live values** (what it's good at), not tactic identity.
 
-## 5. Testing
-- Backend: `build_operation_view` over a hand-written snapshot → asserts the tactic list states +
-  the temp-protocol tactic's phases + a queued tactic's trigger.
-- Frontend: `node --check`; the **scenario library** doubles as the test corpus — a Chrome-MCP audit
-  across all six fixtures (the harness, promoted); UI audit per the audit fixes. Live rig verification deferred.
-- Scenario mode itself is the regression harness: any tactic case can be loaded and visually checked.
+## 5. Convergence with G (tactics library)
+Once tactics are typed, agent-authored objects, **G is "save/reuse these typed tactics"** and D is
+"render the active plan of them." This spec is the shared substrate for both — settling it unblocks
+both sub-projects.
 
-## 6. Out of scope
-- A general user-/agent-authored persisted tactic *library* (G) — D presents tactics; G lets users
-  define/save them.
-- The Rules view rework; multi-embryo concurrent-operation layout (single active operation for now,
-  though the model + spine extend to a stack of operations later).
+## 6. Testing
+- Store: `set/get_operation_plan` round-trip + `CONTEXT_UPDATED` fired.
+- Tool: the forced `declare_operation_plan` returns a schema-valid plan (mirror the notebook_ask test).
+- Route: `/api/operation_plan/{session}` returns the stored plan; 404/empty handled.
+- Renderer: `node --check` + Chrome-MCP audit across the scenario fixtures (all tactic kinds render).
+- Live binding: a unit test that telemetry maps onto a tactic's `live_bind` keys.
+- Rig-deferred: the real agent emitting a live plan during an experiment.
+
+## 7. Out of scope (v3)
+- Full multi-embryo concurrent lanes (v1 = one standing mode + layered tactics + a per-embryo strip).
+- G's authoring/save UI (this spec defines the tactic object G will reuse).
+- Migrating away from `strategy_snapshot` for the legacy swimlane consumers (Operations is the new view).
