@@ -14,6 +14,7 @@ from .context import create_router as create_context_router
 from .data import create_router as create_data_router
 from .experiments import create_router as create_experiments_router
 from .operation_plan import create_router as create_operation_plan_router
+from .tactic_library import create_router as create_tactic_library_router
 from .temperature import create_router as create_temperature_router
 from .images import create_router as create_images_router
 from .notebook import create_router as create_notebook_router
@@ -41,6 +42,7 @@ def register_all_routes(server):
         create_notebook_router,
         create_temperature_router,
         create_operation_plan_router,
+        create_tactic_library_router,
     ):
         router = factory(server)
         server.app.include_router(router)
