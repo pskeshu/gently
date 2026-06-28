@@ -127,16 +127,51 @@ def test_led_set_forwards():
 
 
 # ---------------------------------------------------------------------------
-# laser/off  — confirmed signature: set_laser_power(wavelength: int, pct: float)
+# laser/off  — spec §2.7: must use Laser ALL OFF config, not power setpoint
 # ---------------------------------------------------------------------------
 
-def test_laser_off_calls_set_laser_power_488_0():
-    """laser/off must call set_laser_power(488, 0) to force 488 nm line off."""
+def test_laser_off_calls_set_laser_config_all_off():
+    """laser/off must call set_laser_config("ALL OFF") to gate every line off."""
     client = MagicMock()
-    client.set_laser_power = AsyncMock(return_value={"success": True})
+    client.set_laser_config = AsyncMock(return_value={"success": True})
     r = _app(client=client).post("/api/devices/laser/off")
     assert r.status_code == 200
-    client.set_laser_power.assert_awaited_once_with(488, 0)
+    client.set_laser_config.assert_awaited_once_with("ALL OFF")
+
+
+# ---------------------------------------------------------------------------
+# laser/configs  — unguarded GET, no require_control
+# ---------------------------------------------------------------------------
+
+def test_laser_configs_forwards_to_client():
+    """GET laser/configs must forward to client.get_laser_configs."""
+    client = MagicMock()
+    client.get_laser_configs = AsyncMock(
+        return_value={"configs": ["488 only", "561 only", "ALL OFF", "ALL ON"]}
+    )
+    r = _app(client=client).get("/api/devices/laser/configs")
+    assert r.status_code == 200
+    assert r.json()["configs"] == ["488 only", "561 only", "ALL OFF", "ALL ON"]
+    client.get_laser_configs.assert_awaited_once()
+
+
+def test_laser_configs_no_require_control():
+    """GET laser/configs is unguarded — available even without control override."""
+    from fastapi import FastAPI
+    from gently.ui.web.routes.data import create_router
+
+    server = MagicMock()
+    client_mock = MagicMock()
+    client_mock.get_laser_configs = AsyncMock(return_value={"configs": ["ALL OFF"]})
+    server.agent_bridge.agent.client = client_mock
+    server.agent_bridge.agent.lightsheet_monitor = None
+    app = FastAPI()
+    app.include_router(create_router(server))
+    # Deliberately do NOT override require_control — route must not need it
+    from fastapi.testclient import TestClient
+
+    r = TestClient(app).get("/api/devices/laser/configs")
+    assert r.status_code == 200
 
 
 # ---------------------------------------------------------------------------

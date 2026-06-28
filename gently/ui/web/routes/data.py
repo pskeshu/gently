@@ -507,19 +507,37 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/laser/off", dependencies=[Depends(require_control)])
     async def laser_off():
-        """Force the 488 nm laser off.
+        """Gate ALL laser lines off via the Laser config group "ALL OFF" preset.
 
-        Confirmed signature: set_laser_power(wavelength: int, pct: float).
-        Calls set_laser_power(488, 0) to drive the 488 nm line to 0 %.
+        Uses setConfig("Laser", "ALL OFF") which drives the PLogic
+        OutputChannel to "none of outputs 5-8" — this gates every line
+        (488, 561, 405, 637) off, not just the 488 nm setpoint.
+        Required for safe brightfield live-view (spec §2.7).
         """
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
-            return await client.set_laser_power(488, 0)
+            return await client.set_laser_config("ALL OFF")
         except Exception as exc:
             logger.exception("Laser off command failed")
             raise HTTPException(status_code=502, detail=f"laser off failed: {exc}") from exc
+
+    @router.get("/api/devices/laser/configs")
+    async def laser_configs():
+        """Return the available Laser config-group presets from the device layer.
+
+        No require_control — read-only status route, mirrors GET status
+        routes like room_light/status and temperature/status.
+        """
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_laser_configs()
+        except Exception as exc:
+            logger.exception("Laser configs fetch failed")
+            raise HTTPException(status_code=502, detail=f"laser configs failed: {exc}") from exc
 
     @router.post("/api/devices/camera/led_mode", dependencies=[Depends(require_control)])
     async def camera_led_mode(payload: dict = Body(...)):  # noqa: B008

@@ -1995,6 +1995,70 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    async def handle_set_laser_config(self, request):
+        """POST /api/laser/config — apply a Laser config-group preset.
+
+        Body: {"config": <preset_name>}
+        Calls light_source.set(config_name) which maps to
+        core.setConfig(group_name, config_name) + waitForConfig.
+        """
+        try:
+            data = await request.json()
+            config_name = data.get("config")
+            if not config_name:
+                return web.json_response(
+                    {"success": False, "error": "missing 'config' field"},
+                    status=400,
+                )
+            light_source = self.devices.get("light_source") or self.devices.get("laser_control")
+            if light_source is None:
+                return web.json_response(
+                    {"success": False, "error": "Light source device not found"},
+                    status=503,
+                )
+            try:
+                light_source.set(config_name)
+            except Exception as e:
+                return web.json_response(
+                    {"success": False, "error": str(e)},
+                    status=400,
+                )
+            return web.json_response({"success": True, "config": config_name})
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+
+    async def handle_get_laser_configs(self, request):
+        """GET /api/laser/configs — list available Laser config-group presets."""
+        try:
+            light_source = self.devices.get("light_source") or self.devices.get("laser_control")
+            if light_source is None:
+                return web.json_response(
+                    {"success": False, "error": "Light source device not found"},
+                    status=503,
+                )
+            configs = light_source._get_available_configs()
+            return web.json_response({"configs": configs})
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+
     async def handle_get_camera_exposure(self, request):
         """GET /api/camera/exposure - Get bottom camera exposure time"""
         try:
@@ -2987,6 +3051,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_get("/api/camera/exposure", self.handle_get_camera_exposure)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
+        self._app.router.add_post("/api/laser/config", self.handle_set_laser_config)
+        self._app.router.add_get("/api/laser/configs", self.handle_get_laser_configs)
         self._app.router.add_get("/api/plan_log", self.handle_get_plan_log)
         self._app.router.add_post("/session/configure", self.handle_session_configure)
 

@@ -811,6 +811,29 @@ class DiSPIMMicroscope(Microscope):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def set_laser_config(self, config_name: str) -> dict:
+        """Apply a Laser config-group preset (e.g. "ALL OFF").
+
+        Hits ``POST /api/laser/config`` — direct, no Bluesky queue.
+        Use ``"ALL OFF"`` to gate every laser line off via the PLogic
+        OutputChannel; other presets from the MM config group are also
+        accepted (e.g. ``"488 only"``, ``"561 only"``).
+
+        Parameters
+        ----------
+        config_name : str
+            Exact preset name from the Laser config group.
+        """
+        return await self._api_post("/api/laser/config", {"config": config_name})
+
+    async def get_laser_configs(self) -> dict:
+        """List available Laser config-group presets.
+
+        Hits ``GET /api/laser/configs`` — returns ``{"configs": [...]}``
+        with the preset names from the MM Laser config group.
+        """
+        return await self._api_get("/api/laser/configs")
+
     async def get_led_status(self) -> dict:
         """Get current LED status."""
         return await self._api_get("/api/led/status")
