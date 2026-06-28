@@ -774,6 +774,7 @@ def _replay_timeline(
                     "end": None,
                     "frames": int(data.get("frames") or 0),
                     "hz": hz,
+                    "phase": data.get("phase"),
                 }
             )
 

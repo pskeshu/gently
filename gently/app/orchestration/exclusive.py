@@ -131,6 +131,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 "request_id": self.request_id,
                 "frames": self.frames,
                 "mode": self.mode,
+                "phase": getattr(self, "_phase", None),
             },
         )
 
