@@ -552,6 +552,9 @@ def _build_embryos_static(
                 ],
                 "trigger_events": [],
                 "power_history_488": [{"at": 0.0, "pct": float(laser_488)}],
+                # Filled in by _replay_timeline when temperature-tactic events arrive.
+                "temp_protocol": None,
+                "setpoint_changes": [],
                 # Filled in by _project_forward.
                 "projected_cadence_s": initial_cadence,
                 "projected_end_s": None,
@@ -781,6 +784,28 @@ def _replay_timeline(
             # legacy data without that event will get its open phase
             # closed at now_offset_s by the tail pass below.
             _close_open_phase(emb, at_s)
+
+        elif subtype == "temp_protocol_started" and embryo_id in by_id:
+            emb = by_id[embryo_id]
+            emb["temp_protocol"] = {
+                "start": at_s,
+                "end": None,
+                "target_setpoint_c": data.get("target_setpoint_c"),
+                "frames": data.get("frames"),
+                "bursts_before": data.get("bursts_before"),
+                "bursts_after": data.get("bursts_after"),
+            }
+
+        elif subtype == "temp_protocol_completed" and embryo_id in by_id:
+            emb = by_id[embryo_id]
+            tp = emb.get("temp_protocol")
+            if tp is not None:
+                tp["end"] = at_s
+
+        elif subtype == "setpoint_changed" and embryo_id in by_id:
+            emb = by_id[embryo_id]
+            to_val = data.get("to")
+            emb["setpoint_changes"].append({"t": at_s, "to": to_val})
 
         elif subtype == "stopped":
             # Session-level stop: close every open phase at this time.
