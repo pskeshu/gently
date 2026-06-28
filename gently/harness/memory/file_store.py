@@ -830,6 +830,41 @@ class FileContextStore:
         path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
         return self._read_yaml(path)
 
+    def transition_tactic(
+        self, session_id: str, tactic_id: str, state: str | None = None, **bind
+    ) -> bool:
+        """Atomically update a tactic's state and/or bind live values onto it.
+
+        Reads the plan via get_operation_plan, locates the tactic by id,
+        sets its state (if provided), merges bind kwargs into its live dict
+        (creating it if absent), stamps updated_at/updated_reason, and writes
+        back via set_operation_plan so CONTEXT_UPDATED fires exactly once.
+
+        Returns True on success, False if the plan is absent or the tactic id
+        is not found (no-op, no crash).
+        """
+        plan = self.get_operation_plan(session_id)
+        if plan is None:
+            return False
+
+        tactics = plan.get("tactics", [])
+        tactic = next((t for t in tactics if t.get("id") == tactic_id), None)
+        if tactic is None:
+            return False
+
+        if state is not None:
+            tactic["state"] = state
+
+        if bind:
+            live = tactic.setdefault("live", {})
+            live.update(bind)
+
+        plan["updated_at"] = self._now()
+        plan["updated_reason"] = f"tactic {tactic_id} transitioned"
+
+        self.set_operation_plan(session_id, plan)
+        return True
+
     # ==================================================================
     # Session <-> Campaign (many-to-many)
     # ==================================================================
