@@ -63,3 +63,14 @@
 ### Task 8: `OperationPlanUpdater` service (completion edges via the bus)
 **Files:** Create `gently/app/operation_plan_updater.py` (a `Service` modeled on `gently/app/temperature_sampler.py` / `TimelineManager`); wire in `gently/app/agent.py` beside the temperature sampler (~:838-849). Test: `tests/test_operation_plan_updater.py`.
 - [ ] Subscribe `BURST_COMPLETE`, `TEMP_PROTOCOL_COMPLETED`, `EMBRYO_CADENCE_CHANGED`, `TRIGGER_FIRED`; on each, resolve the tactic (by `tactic_id` in payload, else by kind+embryo) and `cs.transition_tactic(session, tactic_id, 'done', **bind)` binding live values (request_id/mp4_path/setpoint/cadence). Mirror the sampler's start/stop lifecycle + session_id getter. TDD against a fake bus + store. Commit `feat(operations): OperationPlanUpdater — execution events transition plan tactics`.
+
+---
+## Plan-item ↔ operation linkage tasks (added — tactics planned at plan time)
+
+### Task 9: PlanItem/ImagingSpec tactical outline
+**Files:** Modify `gently/harness/memory/model.py` (`ImagingSpec` ~:200 / `PlanItem` ~:265 — add optional `tactics: list[dict]` outline field: each entry a lightweight tactic `{kind, name, target?, scope?, structure?}`). Ensure the plan-mode planning tools (`gently/harness/plan_mode/tools/planning.py` create_plan_item/update_plan_item) accept/persist it. Test: extend the plan-item model/store tests.
+- [ ] Confirm the real ImagingSpec/PlanItem dataclass + how planning tools set the spec. Add the optional `tactics` outline (default empty), persisted in the campaign plan YAML. TDD: a plan item round-trips its tactics outline. Commit `feat(operations): plan-item tactical outline (plan tactics with the imaging spec)`.
+
+### Task 10: Operation Plan goal/plan_item linkage + seeding
+**Files:** Modify `gently/app/tools/operation_plan_tools.py` (or a small seeding helper / the agent): resolve the current session's `plan_item_id`/`campaign_id`/goal from the `session_intent` (`get_current_session_intent` ~file_store.py:788) → set them on the Operation Plan top-level; when a session linked to a plan item with a `tactics` outline begins (or on first declare), SEED the Operation Plan's `planned` tactics from the outline. Test: `tests/test_operation_plan_seeding.py`.
+- [ ] Confirm the session_intent→plan_item linkage accessors. On declare/seed, populate `plan_item_id`/`campaign_id`/`goal` from the linked plan item and seed `planned` tactics from its outline (idempotent — don't clobber tactics already active/done). TDD with a fake store: a session linked to a plan item with an outline produces a seeded Operation Plan. Commit `feat(operations): seed Operation Plan goal + planned tactics from the linked plan item`.
