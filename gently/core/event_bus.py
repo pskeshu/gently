@@ -86,6 +86,7 @@ class EventType(Enum):
     DEVICE_STATE_UPDATE = auto()  # Periodic device-state snapshot from device layer
     TEMPERATURE_UPDATE = auto()  # Temperature reading from device layer
     BOTTOM_CAMERA_FRAME = auto()  # Live JPEG frame from the bottom camera stream
+    LIGHTSHEET_FRAME = auto()  # Live JPEG frame from the SPIM lightsheet live stream
     EMBRYOS_UPDATE = auto()  # Full embryo list snapshot from agent.experiment
     SCAN_GEOMETRY_UPDATE = auto()  # Scan cuboid + light-sheet mode for the 3D optical-space view
 
@@ -188,6 +189,7 @@ _NO_HISTORY_TYPES = frozenset(
         EventType.DEVICE_STATE_UPDATE,
         EventType.TEMPERATURE_UPDATE,  # High-volume telemetry from temperature controller
         EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
+        EventType.LIGHTSHEET_FRAME,  # High-volume live frames — keep out of history
         EventType.LOG_RECORD,  # log lines can hit hundreds/min during
         # calibration; durable copy is in the
         # gently_*.log file already
