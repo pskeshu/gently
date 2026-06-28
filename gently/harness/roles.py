@@ -15,8 +15,16 @@ Built-in roles:
 - ``test``: the biological subject (precious sample). Custom ad-hoc detector.
 - ``calibration``: reference embryo used for staging/calibration. Absorbs
   more photodose. Standard perception pipeline.
+- ``lineaging``: lineage-tracing reference — tracks nuclei/divisions. Often
+  a pan-nuclear strain, but the strain is separate from this use.
 - ``unassigned``: explicit "not yet classified" state. Treated like ``test``
   for safety until the user resolves the assignment.
+
+Role classes
+------------
+``role_class`` distinguishes how Operations foregrounds embryos:
+- ``"subject"`` — the primary biological subjects of the experiment.
+- ``"reference"`` — reference embryos (staging, calibration, lineaging).
 """
 
 from dataclasses import dataclass
@@ -44,6 +52,9 @@ class EmbryoRole:
     # a short threshold. Test embryos can occasionally pop out and
     # back, so they get a longer one.
     no_object_consecutive_terminal: int | None = None
+    # 'subject' | 'reference' — used by Operations to foreground subjects
+    # vs references in multi-embryo layouts and scheduling decisions.
+    role_class: str = "subject"
 
 
 REGISTRY: dict[str, EmbryoRole] = {
@@ -56,6 +67,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         ui_color="#888888",
         ui_icon="circle",
         no_object_consecutive_terminal=None,
+        role_class="subject",  # safe default: protect like a subject
     ),
     "test": EmbryoRole(
         name="test",
@@ -71,6 +83,7 @@ REGISTRY: dict[str, EmbryoRole] = {
         ui_color="#ff66cc",  # magenta
         ui_icon="star",
         no_object_consecutive_terminal=5,  # forgiving — they might drift back
+        role_class="subject",
     ),
     "calibration": EmbryoRole(
         name="calibration",
@@ -85,6 +98,21 @@ REGISTRY: dict[str, EmbryoRole] = {
         ui_color="#00cccc",  # cyan
         ui_icon="diamond",
         no_object_consecutive_terminal=2,  # they don't drift back; gone == gone
+        role_class="reference",
+    ),
+    "lineaging": EmbryoRole(
+        name="lineaging",
+        description=(
+            "Lineage-tracing reference — tracks nuclei/divisions; often a "
+            "pan-nuclear strain but the strain is separate from this use."
+        ),
+        default_cadence_seconds=300.0,
+        detector_name="perception",  # nuclear pipeline, same as calibration
+        photodose_budget_multiplier=5.0,
+        ui_color="#33cc88",  # teal-green — distinct from cyan (calibration) and magenta (test)
+        ui_icon="triangle",
+        no_object_consecutive_terminal=2,  # reference embryos don't drift back
+        role_class="reference",
     ),
 }
 
