@@ -812,6 +812,25 @@ class FileContextStore:
         self._write_yaml(path, data)
 
     # ==================================================================
+    # Operation Plans
+    # ==================================================================
+
+    def set_operation_plan(self, session_id: str, plan: dict) -> None:
+        """Persist the agent-authored Operation Plan for a session.
+
+        The plan dict is stored verbatim (agent is the source of truth).
+        Fires CONTEXT_UPDATED so the Operations UI refreshes live.
+        """
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        self._write_yaml(path, plan)
+        self._notify_context_change("operation_plan")
+
+    def get_operation_plan(self, session_id: str) -> dict | None:
+        """Return the stored Operation Plan for a session, or None if absent."""
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        return self._read_yaml(path)
+
+    # ==================================================================
     # Session <-> Campaign (many-to-many)
     # ==================================================================
 
