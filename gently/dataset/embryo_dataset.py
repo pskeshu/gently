@@ -32,7 +32,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, cast
 
 import numpy as np
 
@@ -375,7 +375,7 @@ class EmbryoDataset:
                     AND i.timepoint = v.timepoint
                 WHERE v.embryo_id = ?
             """
-        params = [embryo_id]
+        params: list[Any] = [embryo_id]
 
         if session_id:
             query += " AND v.session_id = ?"
@@ -766,7 +766,7 @@ class EmbryoDataset:
                 ),
             )
         self.conn.commit()
-        return cursor.lastrowid
+        return cast("int", cursor.lastrowid)
 
     def store_prediction(
         self,
@@ -832,7 +832,7 @@ class EmbryoDataset:
                     datetime.now().isoformat(),
                 ),
             )
-            prediction_id = cursor.lastrowid
+            prediction_id = cast("int", cursor.lastrowid)
         else:
             # Legacy schema: separate observed_features + reasoning_traces tables
             confidence_level = None
@@ -869,7 +869,7 @@ class EmbryoDataset:
                 ),
             )
 
-            prediction_id = cursor.lastrowid
+            prediction_id = cast("int", cursor.lastrowid)
 
             # Store observed features if provided
             if observed_features:
@@ -986,7 +986,7 @@ class EmbryoDataset:
         accuracy = correct / total if total > 0 else 0
 
         # Build confusion matrix
-        confusion = {}
+        confusion: dict[str, Any] = {}
         for pred_stage, gt_stage, _, _ in rows:
             if gt_stage not in confusion:
                 confusion[gt_stage] = {}
@@ -1396,7 +1396,7 @@ class EmbryoDataset:
                 LEFT JOIN reasoning_traces rt ON p.id = rt.prediction_id
                 WHERE p.perception_run_id = ?
             """
-        params = [run_id]
+        params: list[Any] = [run_id]
 
         if embryo_id:
             query += " AND p.embryo_id = ?"

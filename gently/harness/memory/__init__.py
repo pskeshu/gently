@@ -49,7 +49,7 @@ from .store import (
 try:
     from .file_store import FileContextStore
 except ImportError:
-    FileContextStore = None
+    FileContextStore = None  # type: ignore[assignment, misc]
 from .gap_assessment import ContextGapReport, Gap, GapLayer, GapSeverity, assess_gaps
 from .onboarding import (
     OnboardingMessage,

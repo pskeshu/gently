@@ -129,7 +129,7 @@ class DecisionLog:
 
     def __init__(self, path: Path):
         self.path = Path(path)
-        self._fp = None
+        self._fp: Any = None
         self._lock = threading.Lock()
         self._count = 0
 

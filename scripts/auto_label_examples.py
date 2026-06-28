@@ -18,6 +18,7 @@ import io
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 import anthropic
 import numpy as np
@@ -229,7 +230,7 @@ async def auto_label_batch(
 
     # Save results for review
     output_file = output_file or Path("labeled_results.json")
-    save_data = {
+    save_data: dict[str, Any] = {
         stage: [{k: v for k, v in r.items() if k != "image_b64"} for r in results]
         for stage, results in results_by_stage.items()
     }
@@ -350,7 +351,7 @@ async def interactive_review(results_file: Path, examples_dir: Path):
         elif choice == "p":
             # Just populate from saved file - need to reload images
             print("Reloading images...")
-            results_with_images = {}
+            results_with_images: dict = {}
             for stage, items in data.items():
                 if stage.startswith("_"):
                     continue

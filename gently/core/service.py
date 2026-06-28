@@ -369,6 +369,8 @@ class ServiceClient:
         conn = await self.connect(service_name)
 
         info = self._registry.get_info(service_name)
+        if info is None:
+            raise ValueError(f"Unknown service: {service_name}")
 
         if info.service_type == "rpc":
             # RPC call

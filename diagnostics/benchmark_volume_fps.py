@@ -281,7 +281,7 @@ def acquire_volume_raw(
     t0 = time.perf_counter()
     core.setProperty(GALVO_DEVICE, "SPIMState", "Running")
 
-    images = [] if save_dir else None
+    images: list | None = [] if save_dir else None
     count = 0
     timeout_s = max(num_slices * 0.05 * 2, 10.0)  # generous timeout
     t_start = time.time()
@@ -1010,7 +1010,7 @@ def print_summary(results: list[BenchmarkResult]):
     """Print overhead analysis comparing ophyd and ophyd_burst vs raw."""
     from collections import defaultdict
 
-    groups = defaultdict(dict)
+    groups: dict = defaultdict(dict)
     for r in results:
         groups[(r.num_slices, r.exposure_ms)][r.approach] = r
 

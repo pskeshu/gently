@@ -371,7 +371,7 @@ class FileContextStore:
         (folder / "plan" / "history").mkdir(exist_ok=True)
         (folder / "templates").mkdir(exist_ok=True)
 
-        data = {
+        data: dict[str, Any] = {
             "id": cid,
             "description": description,
             "shorthand": shorthand,
@@ -1803,7 +1803,7 @@ class FileContextStore:
                     "created_at": s.get("created_at"),
                 }
             )
-        result.sort(key=lambda s: s.get("version_number", 0), reverse=True)
+        result.sort(key=lambda s: s.get("version_number", 0) or 0, reverse=True)
         return result[:limit]
 
     def get_plan_snapshot(self, version_id: str) -> dict | None:
@@ -2214,7 +2214,9 @@ class FileContextStore:
             self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml",
             data,
         )
-        return self.get_ml_pipeline(pipeline_id)
+        created = self.get_ml_pipeline(pipeline_id)
+        assert created is not None  # just written above
+        return created
 
     def get_ml_pipeline(self, pipeline_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "pipelines" / f"{pipeline_id}.yaml"
@@ -2315,7 +2317,9 @@ class FileContextStore:
             self.agent_dir / "ml" / "runs" / f"{run_id}.yaml",
             data,
         )
-        return self.get_training_run(run_id)
+        created = self.get_training_run(run_id)
+        assert created is not None  # just written above
+        return created
 
     def get_training_run(self, run_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "runs" / f"{run_id}.yaml"
@@ -2418,7 +2422,9 @@ class FileContextStore:
             self.agent_dir / "ml" / "assessments" / f"{assessment_id}.yaml",
             data,
         )
-        return self.get_data_assessment(assessment_id)
+        created = self.get_data_assessment(assessment_id)
+        assert created is not None  # just written above
+        return created
 
     def get_data_assessment(self, assessment_id: str) -> dict[str, Any] | None:
         path = self.agent_dir / "ml" / "assessments" / f"{assessment_id}.yaml"

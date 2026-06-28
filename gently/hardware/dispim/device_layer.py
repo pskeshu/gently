@@ -77,10 +77,11 @@ class DeviceLayerServer(Service):
         super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
         self.config = None
-        self.system = None  # DiSPIMSystem facade — only place this process touches MMCore directly
+        # DiSPIMSystem facade — only place this process touches MMCore directly
+        self.system: Any = None
         self.RE = None
-        self.devices = {}
-        self.plans = {}
+        self.devices: dict[str, Any] = {}
+        self.plans: dict[str, Any] = {}
 
         # SAM configuration
         self._sam_device = sam_device
@@ -93,11 +94,11 @@ class DeviceLayerServer(Service):
         self._running = False
 
         # Results storage (simple in-memory)
-        self._run_history = []
-        self._last_documents = {}
+        self._run_history: list[Any] = []
+        self._last_documents: dict[str, Any] = {}
 
         # Plan execution timing log
-        self._plan_execution_log = []
+        self._plan_execution_log: list[Any] = []
 
         # Volume staging directory - set via POST /session/configure
         # When set, large numpy arrays are written as TIFF files instead of
@@ -2361,7 +2362,7 @@ class DeviceLayerServer(Service):
     def _extract_volume(self, documents: dict, params: dict) -> dict:
         val = self._extract_from_events(documents, ["volume_scanner", "camera", "camera_image"])
         if val is not None:
-            result = {"success": True}
+            result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
                 result["volume"] = val  # file ref — client resolves
                 result["shape"] = val.get("shape")
@@ -2385,7 +2386,7 @@ class DeviceLayerServer(Service):
             ],
         )
         if val is not None:
-            result = {"success": True}
+            result: dict[str, Any] = {"success": True}
             if isinstance(val, dict) and val.get("__file_ref__"):
                 result["image"] = val
                 result["shape"] = val.get("shape")

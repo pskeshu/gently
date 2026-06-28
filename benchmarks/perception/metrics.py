@@ -124,8 +124,8 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
     metrics.adjacent_accuracy = adjacent_correct / len(all_preds)
 
     # Per-stage accuracy
-    stage_correct = defaultdict(int)
-    stage_total = defaultdict(int)
+    stage_correct: dict = defaultdict(int)
+    stage_total: dict = defaultdict(int)
 
     for p in all_preds:
         gt = p.ground_truth_stage
@@ -138,7 +138,7 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
         metrics.stage_accuracy[stage] = stage_correct[stage] / stage_total[stage]
 
     # Confusion matrix
-    confusion = defaultdict(lambda: defaultdict(int))
+    confusion: dict = defaultdict(lambda: defaultdict(int))
     for p in all_preds:
         confusion[p.ground_truth_stage][p.predicted_stage] += 1
 
@@ -201,6 +201,8 @@ def compute_metrics(report: "BenchmarkReport") -> PerceptionMetrics:
         stage_tool_calls[p.ground_truth_stage].append(p.tool_calls)
 
     for stage, calls in stage_tool_calls.items():
+        if stage is None:
+            continue
         metrics.tool_use_by_stage[stage] = sum(calls) / len(calls)
 
     # Accuracy with vs without tools

@@ -93,7 +93,7 @@ class ToolDefinition:
         required = []
 
         for param in self.parameters:
-            prop = {
+            prop: dict[str, Any] = {
                 "type": param.type,
                 "description": param.description,
             }

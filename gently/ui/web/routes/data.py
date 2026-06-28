@@ -97,8 +97,8 @@ def create_router(server) -> APIRouter:
         if emb is None:
             raise HTTPException(status_code=404, detail=f"Embryo {embryo_id} not found")
         try:
-            x = float(body.get("x"))
-            y = float(body.get("y"))
+            x = float(body.get("x"))  # type: ignore[arg-type]  # None -> TypeError caught below
+            y = float(body.get("y"))  # type: ignore[arg-type]
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="Body needs numeric x and y") from None
         old_coarse = dict(emb.position_coarse) if emb.position_coarse else None
@@ -344,7 +344,7 @@ def create_router(server) -> APIRouter:
         (and the SYSTEM LOCKED state once it stabilizes).
         """
         try:
-            target = float(payload.get("target_c"))
+            target = float(payload.get("target_c"))  # type: ignore[arg-type]  # None -> caught
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="target_c must be a number") from None
         if not (0.0 <= target <= 99.9):

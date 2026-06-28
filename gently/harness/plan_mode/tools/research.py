@@ -1258,7 +1258,7 @@ async def read_paper(
                 f"Try providing a PMID, DOI, or more specific citation."
             )
 
-    if ref_type == "doi" and not pmid:
+    if ref_type == "doi" and not pmid and doi:
         status_lines.append(f"Resolving DOI: {doi}")
         pmid = await _doi_to_pmid(doi)
         if pmid:
@@ -1269,7 +1269,7 @@ async def read_paper(
 
     # --- Step 2: Try local PDF first if file path ---
 
-    if ref_type == "file":
+    if ref_type == "file" and path:
         status_lines.append(f"Reading local PDF: {path}")
         text = _read_pdf_file(path)
         if text:

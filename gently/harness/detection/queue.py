@@ -5,6 +5,7 @@ Detection queue - executes all enabled detectors on volumes
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
+from typing import Any
 
 import anthropic
 
@@ -287,11 +288,11 @@ class DetectionQueue:
         dict
             Summary of detections
         """
-        summary = {"detectors": {}, "embryos": {}}
+        summary: dict[str, Any] = {"detectors": {}, "embryos": {}}
 
         # Per-detector summary
         for detector in self.registry.list_all():
-            detector_summary = {
+            detector_summary: dict[str, Any] = {
                 "name": detector.name,
                 "description": detector.description,
                 "enabled": detector.enabled,
@@ -303,19 +304,20 @@ class DetectionQueue:
             for embryo_id, embryo_state in embryo_states.items():
                 if embryo_state.was_detected(detector.name):
                     latest = embryo_state.get_latest_detection(detector.name)
-                    detector_summary["embryos_detected"].append(
-                        {
-                            "embryo_id": embryo_id,
-                            "timepoint": latest.get("timepoint"),
-                            "confidence": latest.get("confidence"),
-                        }
-                    )
+                    if latest is not None:
+                        detector_summary["embryos_detected"].append(
+                            {
+                                "embryo_id": embryo_id,
+                                "timepoint": latest.get("timepoint"),
+                                "confidence": latest.get("confidence"),
+                            }
+                        )
 
             summary["detectors"][detector.name] = detector_summary
 
         # Per-embryo summary
         for embryo_id, embryo_state in embryo_states.items():
-            embryo_summary = {"embryo_id": embryo_id, "detections": {}}
+            embryo_summary: dict[str, Any] = {"embryo_id": embryo_id, "detections": {}}
 
             for detector_name in embryo_state.detection_results.keys():
                 latest = embryo_state.get_latest_detection(detector_name)

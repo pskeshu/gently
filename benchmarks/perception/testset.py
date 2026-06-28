@@ -10,14 +10,15 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
 from .ground_truth import GroundTruth
 
 # Lazy imports
-tifffile = None
-PIL_Image = None
+tifffile: Any = None
+PIL_Image: Any = None
 
 
 def _ensure_dependencies():
@@ -64,7 +65,7 @@ def _discover_volumes(
     )
     # Deduplicate (flat + recursive may overlap)
     tif_files = list({f.resolve(): f for f in tif_files}.values())
-    embryo_volumes = {}
+    embryo_volumes: dict = {}
 
     for f in tif_files:
         parts = f.stem.split("_")

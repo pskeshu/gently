@@ -148,12 +148,12 @@ def save_example(img: np.ndarray, stage: str, source_name: str) -> str:
 
 # Global state
 class AppState:
-    images = []  # List of (path, projection) tuples
+    images: list = []  # List of (path, projection) tuples
     current_idx = 0
     session_id = ""
-    embryos = {}  # embryo_name -> [(path, proj), ...]
+    embryos: dict = {}  # embryo_name -> [(path, proj), ...]
     current_embryo = None
-    embryo_list = []
+    embryo_list: list = []
 
 
 state = AppState()
@@ -708,7 +708,7 @@ class AnnotatorHandler(BaseHTTPRequestHandler):
         saved = 0
 
         # Group paths by stage
-        stage_paths = {}
+        stage_paths: dict = {}
         for path_str, stage in labels.items():
             if stage not in STAGES:
                 continue

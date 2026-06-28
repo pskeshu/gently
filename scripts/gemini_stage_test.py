@@ -21,6 +21,7 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -28,9 +29,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import numpy as np
 
 # Lazy imports for optional dependencies
-cv2 = None
-tifffile = None
-genai = None
+cv2: Any = None
+tifffile: Any = None
+genai: Any = None
 
 
 def ensure_dependencies():
@@ -74,7 +75,7 @@ def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict:
 
     tif_files = list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
 
-    embryo_volumes = {}
+    embryo_volumes: dict = {}
 
     for f in tif_files:
         parts = f.stem.split("_")
@@ -288,7 +289,7 @@ def create_embryo_video(
     # Create video
     writer = None
     frame_count = 0
-    first_shape = None
+    first_shape: Any = None
 
     try:
         for i, vol_path in enumerate(volume_paths):
@@ -494,7 +495,7 @@ Be precise with frame numbers. Watch the ENTIRE video to capture all stage trans
 
 
 def analyze_with_gemini(
-    video_path: str,
+    video_path: str | Path,
     model: str = "gemini-3-pro-preview",
     api_key: str | None = None,
     frame_count: int = 100,
@@ -633,7 +634,7 @@ def timestamp_to_seconds(timestamp: str) -> float:
 
 
 def create_annotated_video(
-    source_video: str, stage_data: dict, output_path: str, fps: int = 10
+    source_video: str, stage_data: dict, output_path: str | Path, fps: int = 10
 ) -> dict:
     """
     Create annotated video with stage labels overlaid.
@@ -667,7 +668,7 @@ def create_annotated_video(
         if i + 1 < len(stages):
             next_stage = stages[i + 1]
             if "frame" in next_stage:
-                end_frame = int(next_stage["frame"])
+                end_frame: float = int(next_stage["frame"])
             elif "timestamp" in next_stage:
                 end_seconds = timestamp_to_seconds(next_stage["timestamp"])
                 end_frame = int(end_seconds * fps)
