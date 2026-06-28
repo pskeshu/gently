@@ -215,6 +215,8 @@ class MicroscopyAgent:
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
         self.bottom_camera_monitor = None
+        # Opt-in lightsheet stream bridge — same lifecycle as bottom_camera_monitor.
+        self.lightsheet_monitor = None
 
         # ===== Create delegate managers =====
 
@@ -859,6 +861,16 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to construct bottom-camera monitor: {e}")
                 self.bottom_camera_monitor = None
 
+        if self.microscope is not None and self.lightsheet_monitor is None:
+            try:
+                from .lightsheet_monitor import LightSheetStreamMonitor
+
+                self.lightsheet_monitor = LightSheetStreamMonitor(self.microscope)
+                logger.info("Lightsheet monitor ready (not started)")
+            except Exception as e:
+                logger.warning(f"Failed to construct lightsheet monitor: {e}")
+                self.lightsheet_monitor = None
+
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
         if self.bottom_camera_monitor is not None:
@@ -867,6 +879,12 @@ class MicroscopyAgent:
             except Exception:
                 logger.exception("Failed to stop bottom-camera monitor")
             self.bottom_camera_monitor = None
+        if self.lightsheet_monitor is not None:
+            try:
+                await self.lightsheet_monitor.stop()
+            except Exception:
+                logger.exception("Failed to stop lightsheet monitor")
+            self.lightsheet_monitor = None
         if self.device_state_monitor is not None:
             try:
                 await self.device_state_monitor.stop()
