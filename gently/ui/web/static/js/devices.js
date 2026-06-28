@@ -1714,12 +1714,6 @@ const DevicesManager = (function () {
             ClientEventBus.on('LIGHTSHEET_FRAME', handleLightsheetFrame);
         }
 
-        // Embed temperature graph in the rail
-        const _lsTgEl = document.getElementById('devices-ls-tempgraph');
-        if (_lsTgEl && window.TemperatureGraph) {
-            TemperatureGraph.init(_lsTgEl, 'current');
-        }
-
         syncInitialLightsheetState();
     }
 
@@ -1937,6 +1931,19 @@ const DevicesManager = (function () {
         if (viewName === 'optical3d' && typeof Occupancy3DManager !== 'undefined') {
             Occupancy3DManager.init();
         }
+        // Initialize temperature graph for the active view. The TemperatureGraph
+        // is a singleton; reinit on view switch ensures only one graph target
+        // is live at a time. ClientEventBus.off/on in TemperatureGraph.init
+        // makes re-init safe (idempotent).
+        if (window.TemperatureGraph) {
+            if (viewName === 'manual') {
+                const el = document.getElementById('devices-ls-tempgraph');
+                if (el) TemperatureGraph.init(el, 'current');
+            } else {
+                const el = document.getElementById('devices-temp-graph');
+                if (el) TemperatureGraph.init(el, 'current');
+            }
+        }
     }
 
     function setupViewSwitcher() {
@@ -1986,8 +1993,6 @@ const DevicesManager = (function () {
         setupManualWiring();
         setupRoomLight();
         setupTemperature();
-        const _tgEl = document.getElementById('devices-temp-graph');
-        if (_tgEl && window.TemperatureGraph) TemperatureGraph.init(_tgEl, 'current');
         loadCoverslip();
         loadEmbryosSnapshot();
         switchView(_currentView);
