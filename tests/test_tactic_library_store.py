@@ -251,3 +251,68 @@ class TestApplyTactic:
         tid = file_context_store.save_tactic(_fresh_tactic())
         applied = file_context_store.apply_tactic(tid)
         assert "created_at" not in applied
+
+
+# ---------------------------------------------------------------------------
+# Fix 1 — scope round-trip
+# ---------------------------------------------------------------------------
+
+
+class TestScopeRoundTrip:
+    def test_applied_scope_matches_source(self, file_context_store):
+        """scope from source tactic must survive the save→apply round-trip."""
+        tid = file_context_store.save_tactic(_fresh_tactic())
+        applied = file_context_store.apply_tactic(tid)
+        assert applied["scope"] == {"mode": "global"}
+
+    def test_applied_no_scope_when_source_has_none(self, file_context_store):
+        """If source tactic has no scope, applied tactic must not gain a scope key."""
+        tactic = _fresh_tactic()
+        tactic.pop("scope")
+        tid = file_context_store.save_tactic(tactic)
+        applied = file_context_store.apply_tactic(tid)
+        assert "scope" not in applied
+
+
+# ---------------------------------------------------------------------------
+# Fix 2 — rationale preservation
+# ---------------------------------------------------------------------------
+
+
+class TestRationalePreservation:
+    def test_rationale_survives_save_apply(self, file_context_store):
+        """rationale from source tactic must survive the save→apply round-trip."""
+        tid = file_context_store.save_tactic(_fresh_tactic())
+        applied = file_context_store.apply_tactic(tid)
+        assert applied.get("rationale") == "Establish pre-ramp cadence"
+
+    def test_rationale_in_template(self, file_context_store):
+        """rationale must be stored in the saved template, not only in description."""
+        tid = file_context_store.save_tactic(_fresh_tactic())
+        tmpl = file_context_store.get_tactic(tid)
+        assert tmpl.get("rationale") == "Establish pre-ramp cadence"
+
+
+# ---------------------------------------------------------------------------
+# Fix 3 — deterministic name lookup (newest-wins on collision)
+# ---------------------------------------------------------------------------
+
+
+class TestGetTacticDeterministic:
+    def test_name_collision_returns_newest(self, file_context_store):
+        """When two tactics share a name, get_tactic(name) must return the newest."""
+        import time
+
+        t1 = _fresh_tactic()
+        t1["structure"] = {"cadence_s": 60}
+        file_context_store.save_tactic(t1, name="Shared Name")
+        # Small pause to guarantee distinct created_at timestamps
+        time.sleep(0.002)
+        t2 = _fresh_tactic()
+        t2["structure"] = {"cadence_s": 120}
+        file_context_store.save_tactic(t2, name="Shared Name")
+
+        result = file_context_store.get_tactic("Shared Name")
+        assert result is not None
+        # Newest entry (cadence_s=120) must win
+        assert result["structure"]["cadence_s"] == 120

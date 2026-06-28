@@ -1816,6 +1816,7 @@ class FileContextStore:
             "structure": copy.deepcopy(tactic.get("structure") or {}),
             "scope_hint": copy.deepcopy(tactic.get("scope")),
             "description": tactic.get("description") or tactic.get("rationale"),
+            "rationale": tactic.get("rationale"),
             "params": copy.deepcopy(tactic.get("params")),
             "relations": copy.deepcopy(tactic.get("relations") or {}),
             "live_bind": list(tactic.get("live_bind") or []),
@@ -1844,15 +1845,18 @@ class FileContextStore:
         return tactics
 
     def get_tactic(self, id_or_name: str) -> dict | None:
-        """Return a tactic template by id or name, or None if not found."""
+        """Return a tactic template by id or name, or None if not found.
+
+        Uses list_tactics() (sorted newest-first by created_at) so that name
+        lookups are deterministic: on a name collision, the newest entry wins.
+        id lookups are unique by construction so order does not matter.
+        """
         tl_dir = self.agent_dir / "tactic_library"
         if not tl_dir.exists():
             return None
-        for f in tl_dir.iterdir():
-            if f.suffix in (".yaml", ".yml"):
-                data = self._read_yaml(f)
-                if data and (data.get("id") == id_or_name or data.get("name") == id_or_name):
-                    return data
+        for tactic in self.list_tactics():
+            if tactic.get("id") == id_or_name or tactic.get("name") == id_or_name:
+                return tactic
         return None
 
     def apply_tactic(self, id_or_name: str) -> dict | None:
