@@ -188,3 +188,31 @@ defer live/FPS verification to the microscope — as with A.
 ## 6. Out of scope (B2)
 Laser channel-preset browser; full timelapse/volume configuration form; side-by-side dual view;
 richer camera selection.
+
+## 7. Appendix: ASIdiSPIM two-camera model (B2 reference)
+
+From the MM ASIdiSPIM plugin (`../micro-manager/plugins/ASIdiSPIM`), for when B2 adds side A/B:
+
+- **Camera roles** (`data/Devices.java:93-121`): `CAMERAA` (side-A imaging), `CAMERAB`
+  (side-B imaging), `CAMERALOWER` (bottom), `MULTICAMERA` (the MMCore *Utilities* "Multi Camera"
+  fusion adapter). `SPIM_CAMERAS = {CAMERAA, CAMERAB}`; a `Sides` enum (A/B/NONE).
+- **Live / single-side select** (`data/Cameras.java:163-186`, `setCamera`): `core.setCameraDevice(
+  mmDevice)` bracketed by stop/start-live; `getCurrentCamera` (`:193-210`) treats the Core as the
+  source of truth. Live can target one side **or** `MULTICAMERA` (dual live via the Utilities
+  Multi-Camera device).
+- **Multi-Camera discovery** (`DevicesPanel.java:167-180`): auto-detected by
+  `getDeviceLibrary=="Utilities"` AND `getDeviceDescription=="Combine multiple physical cameras
+  into a single logical camera"`.
+- **Acquisition does NOT use the fusion device** (`AcquisitionPanel.java:2668-2671`): it runs
+  **two parallel `startSequenceAcquisition`** on the physical side cameras into one shared buffer
+  (equal ROI required) and **demuxes by the per-image `"Camera"` tag** (`:2736-2772`; side A → even
+  channel indices, side B → odd). The Utilities Multi-Camera is reserved for **dual live**.
+
+**Implication for gently:** B1's streamer already does `core.setCameraDevice(cam.name)` before the
+continuous sequence — that IS the MM side-select point. To add side A/B in **B2**: register
+`CAMERAA`/`CAMERAB` (and auto-discover the Utilities "Multi Camera") in `device_factory.py`; add a
+camera-role selector that sets the device before starting the live sequence; for dual **live**,
+point the sequence at the Multi-Camera device; for dual **acquisition**, either use the
+Multi-Camera or replicate the two-sequence + `"Camera"`-tag demux. Correction to the working
+assumption: ASIdiSPIM acquisition is **two independent sequences demuxed by tag**, not the
+multicamera fusion — the fusion device is a live-only convenience.
