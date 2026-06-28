@@ -1074,3 +1074,63 @@
     color: var(--text-muted);
     opacity: 0.75;
 }
+
+/* ---- Fix #1: bound live.* telemetry facts strip --------------- */
+/* Compact monospace key:value row rendered for active + done tactics
+   when the live object carries flat keys beyond readouts/phases/target.
+   Subtle instrument aesthetic — matches the ops-mono system, sits below
+   the structured readout strip without visual weight. */
+
+.ops-livefacts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: var(--bg-hover, #21262d);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 7px;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.ops-lf-pair {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+}
+
+.ops-lf-k {
+    color: var(--text-muted);
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: lowercase;
+}
+
+.ops-lf-v {
+    color: var(--text);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+}
+
+/* ---- Fix #5: paused tactic state ----------------------------- */
+/* Muted grey dot + solid grey left edge — visually distinct from
+   done (green), active (amber), and queued (dashed blue). */
+
+.ops-node.paused::before {
+    border-color: var(--text-muted, #8b949e);
+    background: var(--bg-card, #161b22);
+    opacity: 0.7;
+}
+
+.ops-node.paused .ops-stagelab {
+    color: var(--text-muted, #8b949e);
+}
+
+.ops-node.paused .ops-card {
+    background: transparent;
+    border-color: rgba(139, 148, 158, 0.3);
+    border-left: 3px solid var(--text-muted, #8b949e);
+    opacity: 0.8;
+}
