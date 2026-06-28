@@ -70,6 +70,7 @@ window.OPERATIONS_SCENARIOS = {
           readouts: [
             {
               label: 'stage temp',
+              bind: 'temperature',
               value: '29.4<span class="ops-u">→</span><span class="ops-set">32.0°C</span>',
               bar: 62
             },

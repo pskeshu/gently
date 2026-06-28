@@ -16,6 +16,9 @@ const ExperimentOverview = {
     activePlan: null,        // last fetched/loaded operation plan (overview spine)
     isLive: false,           // true when data came from the API
     scenarioMode: false,     // true when ?scenario=<name> is active
+    _subscribed: false,      // guard: prevents double-registration across tab re-clicks
+    _planRefreshTimer: null, // debounce handle for tactic-event-driven refetch
+    _tempUpdateHandler: null,// stored handler ref so it can be off()'d if needed
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
@@ -46,6 +49,32 @@ const ExperimentOverview = {
         this.isLive = plan !== null || strategy !== null;
         this.render(strategy);
         this.initialized = true;
+
+        // Subscribe to tactic-state events once per page load.
+        // Guard: _subscribed prevents double-registration across tab re-clicks.
+        // Skip entirely in scenario mode — no live backend, no websocket.
+        if (!this._subscribed) {
+            this._subscribed = true;
+            const refresh = () => this._debouncedRefresh();
+            // Plan-changing events: re-fetch the whole plan after debounce.
+            // CONTEXT_UPDATED fires when OperationPlanUpdater patches the plan.
+            // The tactic-lifecycle events fire on transitions the updater also
+            // reacts to, so they all funnel into the same debounced refetch.
+            const TACTIC_EVENTS = [
+                'CONTEXT_UPDATED',
+                'TEMP_PROTOCOL_STARTED', 'TEMP_PROTOCOL_COMPLETED',
+                'BURST_START', 'BURST_COMPLETE',
+                'EMBRYO_CADENCE_CHANGED', 'TEMPERATURE_SETPOINT_CHANGED',
+                'POWER_RAMP_STEP',
+            ];
+            TACTIC_EVENTS.forEach(ev => ClientEventBus.on(ev, refresh));
+
+            // High-frequency temperature binding (~1 Hz).
+            // Updates the active scripted_protocol tactic's temperature gauge
+            // IN PLACE — no plan refetch, no full re-render.
+            this._tempUpdateHandler = (data) => this._handleTempUpdate(data);
+            ClientEventBus.on('TEMPERATURE_UPDATE', this._tempUpdateHandler);
+        }
     },
 
     async loadStrategy() {
@@ -83,6 +112,57 @@ const ExperimentOverview = {
             console.warn('[ExperimentOverview] plan fetch error:', e);
             return null;
         }
+    },
+
+    // Debounced plan refetch — coalesces rapid tactic-event bursts into a single
+    // fetch+render.  500 ms window matches experiment-strip.js convention.
+    _debouncedRefresh() {
+        if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);
+        this._planRefreshTimer = setTimeout(async () => {
+            this._planRefreshTimer = null;
+            const plan = await this.loadPlan();
+            this.activePlan = plan;
+            this.isLive = plan !== null;
+            this.render(this.activeStrategy);
+        }, 500);
+    },
+
+    // In-place temperature gauge update — called at ~1 Hz by TEMPERATURE_UPDATE.
+    // Finds the active scripted_protocol tactic's temperature readout in the DOM
+    // and rewrites only that element's value, never refetching the plan.
+    // No-op when there is no active scripted_protocol tactic with temperature binding.
+    _handleTempUpdate(data) {
+        if (!data || !data.sample) return;
+        const plan = this.activePlan;
+        if (!plan || !Array.isArray(plan.tactics)) return;
+        // Only act when an active scripted_protocol tactic declares temperature binding.
+        const activeTactic = plan.tactics.find(
+            t => t.state === 'active'
+                && t.kind === 'scripted_protocol'
+                && Array.isArray(t.live_bind)
+                && t.live_bind.includes('temperature')
+        );
+        if (!activeTactic) return;
+
+        const root = document.getElementById('experiment-overview-root');
+        if (!root) return;
+        // _renderOpsReadout stamps data-livebind="temperature" on the gauge div
+        // when the readout label normalises to "temperature".
+        const gauge = root.querySelector('.ops-node.active .ops-gauge[data-livebind="temperature"]');
+        if (!gauge) return;
+        const gv = gauge.querySelector('.ops-gv');
+        if (!gv) return;
+
+        const s = data.sample;
+        const water = s.water_c != null
+            ? parseFloat(s.water_c).toFixed(1) + '°C'
+            : '—';
+        const sp = s.setpoint_c != null
+            ? ' → <span class="ops-set">'
+                + parseFloat(s.setpoint_c).toFixed(1)
+                + '°C</span>'
+            : '';
+        gv.innerHTML = water + sp;
     },
 
     setView(view) {
@@ -1228,8 +1308,17 @@ const ExperimentOverview = {
     },
 
     // Render a readout gauge. `r.value` may contain trusted HTML (span markup).
+    // Stamps data-livebind on the outer div so _handleTempUpdate (and future
+    // live-binding) can find the gauge in-place without a full re-render.
+    // Priority: r.bind (explicit semantic key) > normalised r.label.
     _renderOpsReadout(r, ESC) {
-        return `<div class="ops-gauge">
+        const bindKey = r.bind
+            ? r.bind
+            : (r.label
+                ? r.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+                : '');
+        const bindAttr = bindKey ? ` data-livebind="${ESC(bindKey)}"` : '';
+        return `<div class="ops-gauge"${bindAttr}>
             <div class="ops-gl">${ESC(r.label)}</div>
             <div class="ops-gv">${r.value}</div>
             ${r.bar != null
