@@ -172,3 +172,33 @@ def test_tool_is_registered():
     assert "run_temp_change_burst_protocol" in tool_names, (
         f"Tool not found in registry. Registered tools: {tool_names}"
     )
+
+
+@pytest.mark.asyncio
+async def test_tool_refuses_during_active_timelapse():
+    """If orchestrator._status == RUNNING, refuse without creating a task."""
+    from gently.app.tools.temperature_protocol_tools import run_temp_change_burst_protocol_tool
+    from gently.app.orchestration.timelapse_models import TimelapseStatus
+
+    context = _make_context(with_client=True, with_orchestrator=True)
+    # Simulate an active timelapse
+    context["agent"].timelapse_orchestrator._status = TimelapseStatus.RUNNING
+
+    created_tasks = []
+
+    def fake_create_task(coro, **kwargs):
+        coro.close()
+        mock_task = MagicMock()
+        created_tasks.append(mock_task)
+        return mock_task
+
+    with patch("asyncio.create_task", side_effect=fake_create_task):
+        result = await run_temp_change_burst_protocol_tool(
+            embryo_id="emb1",
+            target_setpoint_c=25.0,
+            context=context,
+        )
+
+    assert len(created_tasks) == 0, "No task should be created when timelapse is running"
+    assert "refusing" in result.lower(), f"Expected refusal message, got: {result!r}"
+    assert "timelapse" in result.lower(), f"Expected 'timelapse' in refusal message, got: {result!r}"

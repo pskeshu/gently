@@ -37,3 +37,15 @@ async def test_phase_order_and_brightfield(monkeypatch):
     assert EventType.TEMPERATURE_SETPOINT_CHANGED in ets
     assert EventType.TEMP_PROTOCOL_COMPLETED in ets
     assert res["locked"] is True
+
+    # Phase order: first burst must be "before", last must be "after"
+    phases = [b["phase"] for b in bursts]
+    assert phases[0] == "before", f"Expected first burst phase 'before', got {phases[0]!r}"
+    assert phases[-1] == "after", f"Expected last burst phase 'after', got {phases[-1]!r}"
+
+    # Event order: STARTED < SETPOINT_CHANGED < COMPLETED
+    idx_started = ets.index(EventType.TEMP_PROTOCOL_STARTED)
+    idx_changed = ets.index(EventType.TEMPERATURE_SETPOINT_CHANGED)
+    idx_completed = ets.index(EventType.TEMP_PROTOCOL_COMPLETED)
+    assert idx_started < idx_changed, "TEMP_PROTOCOL_STARTED must precede TEMPERATURE_SETPOINT_CHANGED"
+    assert idx_changed < idx_completed, "TEMPERATURE_SETPOINT_CHANGED must precede TEMP_PROTOCOL_COMPLETED"

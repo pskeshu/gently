@@ -75,6 +75,13 @@ async def run_temp_change_burst_protocol_tool(
     from gently.app.orchestration.temperature_protocol import (
         run_temp_change_burst_protocol as _driver,
     )
+    from gently.app.orchestration.timelapse_models import TimelapseStatus
+
+    if getattr(orchestrator, "_status", None) == TimelapseStatus.RUNNING:
+        return (
+            "Refusing to start temp-change protocol: a timelapse is currently running "
+            "(would contend for the RunEngine). Stop the timelapse first."
+        )
 
     asyncio.create_task(
         _driver(
