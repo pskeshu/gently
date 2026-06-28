@@ -14,7 +14,7 @@
  */
 const DevicesManager = (function () {
     const STALE_AFTER_MS = 4000;
-    const VIEWS = ['map', 'details', 'optical3d'];
+    const VIEWS = ['map', 'details', 'optical3d', 'manual'];
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     // Status / details DOM
@@ -71,6 +71,34 @@ const DevicesManager = (function () {
     const _CAM_ZOOM_MIN = 1;
     const _CAM_ZOOM_MAX = 8;
     const _CAM_ZOOM_STEP = 1.15;  // multiplicative per wheel notch
+
+    // Lightsheet live panel DOM + state (Manual view)
+    let _lsToggle, _lsImg, _lsPlaceholder, _lsLed, _lsMeta, _lsStage;
+    let _lsStreaming = false;
+    let _lsLastFrameTs = 0;
+    let _lsHasFrame = false;
+    let _lsStaleTimer = null;
+    const _LS_FPS_WINDOW = 12;
+    let _lsFrameTimes = [];
+
+    // Lightsheet zoom / pan (mirrors camera zoom/pan)
+    let _lsZoom = 1;
+    let _lsTx = 0;
+    let _lsTy = 0;
+    let _lsPanLast = null;
+
+    // Lightsheet live params — debounced POST to /api/devices/lightsheet/live/params
+    let _lsGalvo = 0;
+    let _lsPiezo = 50;
+    let _lsExposure = 50;
+    let _lsParamTimer = null;
+
+    // Lightsheet control inputs (rail)
+    let _lsGalvoSlider, _lsGalvoNum, _lsPiezoSlider, _lsPiezoNum, _lsExposureNum;
+    let _lsLedOpen, _lsLedClosed, _lsCamLed, _lsRoomLightBtn;
+    let _lsCamLedOn = false;
+    let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
+    let _lsTempInput, _lsTempSet;
 
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
     // diSPIM room light. State is the bot's cached on/off; hidden until the
@@ -150,6 +178,29 @@ const DevicesManager = (function () {
         _camCrosshairGroup = document.getElementById('devices-camera-crosshair-group');
         _camLed          = document.getElementById('devices-camera-led');
         _camMeta         = document.getElementById('devices-camera-meta');
+
+        // Manual / lightsheet panel
+        _lsToggle        = document.getElementById('devices-ls-toggle');
+        _lsImg           = document.getElementById('devices-ls-img');
+        _lsPlaceholder   = document.getElementById('devices-ls-placeholder');
+        _lsStage         = document.getElementById('devices-ls-stage');
+        _lsLed           = document.getElementById('devices-ls-led');
+        _lsMeta          = document.getElementById('devices-ls-meta');
+        _lsGalvoSlider   = document.getElementById('devices-ls-galvo-slider');
+        _lsGalvoNum      = document.getElementById('devices-ls-galvo');
+        _lsPiezoSlider   = document.getElementById('devices-ls-piezo-slider');
+        _lsPiezoNum      = document.getElementById('devices-ls-piezo');
+        _lsExposureNum   = document.getElementById('devices-ls-exposure');
+        _lsLedOpen       = document.getElementById('devices-ls-led-open');
+        _lsLedClosed     = document.getElementById('devices-ls-led-closed');
+        _lsCamLed        = document.getElementById('devices-ls-cam-led');
+        _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
+        _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
+        _lsBurstBtn      = document.getElementById('devices-ls-burst');
+        _lsLastcap       = document.getElementById('devices-ls-lastcap');
+        _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
+        _lsTempInput     = document.getElementById('devices-ls-temp-input');
+        _lsTempSet       = document.getElementById('devices-ls-temp-set');
 
         _roomLightToggle = document.getElementById('devices-room-light-toggle');
         _roomLightLabel  = document.getElementById('devices-room-light-label');
@@ -1293,6 +1344,386 @@ const DevicesManager = (function () {
     }
 
     // =====================================================================
+    // Lightsheet live panel (Manual view)
+    // =====================================================================
+
+    async function toggleLightsheetStream() {
+        if (!_lsToggle) return;
+        _lsToggle.disabled = true;
+        try {
+            const endpoint = _lsStreaming
+                ? '/api/devices/lightsheet/live/stop'
+                : '/api/devices/lightsheet/live/start';
+            const res = await fetch(endpoint, { method: 'POST' });
+            if (!res.ok) {
+                const detail = await res.text();
+                console.error('Lightsheet toggle failed:', detail);
+                if (_lsMeta) _lsMeta.textContent = `error: ${res.status}`;
+                return;
+            }
+            const data = await res.json();
+            applyLightsheetState(!!data.streaming);
+        } catch (err) {
+            console.error('Lightsheet toggle failed:', err);
+            if (_lsMeta) _lsMeta.textContent = `error: ${err}`;
+        } finally {
+            _lsToggle.disabled = false;
+        }
+    }
+
+    function applyLightsheetState(streaming) {
+        _lsStreaming = streaming;
+        if (_lsToggle) {
+            _lsToggle.textContent = streaming ? 'Stop' : 'Start';
+            _lsToggle.classList.toggle('active', streaming);
+        }
+        if (_lsLed) {
+            _lsLed.classList.toggle('live', streaming);
+            _lsLed.classList.remove('stale');
+        }
+        if (!streaming) {
+            _lsHasFrame = false;
+            _lsFrameTimes = [];
+            if (_lsImg) _lsImg.classList.remove('has-frame');
+            if (_lsPlaceholder) _lsPlaceholder.hidden = false;
+            if (_lsMeta) _lsMeta.textContent = 'stream off';
+            if (_lsStaleTimer) { clearTimeout(_lsStaleTimer); _lsStaleTimer = null; }
+            resetLightsheetZoom();
+        } else {
+            _lsFrameTimes = [];
+            if (_lsMeta) _lsMeta.textContent = 'waiting…';
+        }
+    }
+
+    function handleLightsheetFrame(payload) {
+        if (!payload || !payload.jpeg_b64 || !_lsImg) return;
+        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
+        if (!_lsHasFrame) {
+            _lsHasFrame = true;
+            _lsImg.classList.add('has-frame');
+            if (_lsPlaceholder) _lsPlaceholder.hidden = true;
+        }
+        const now = performance.now();
+        _lsLastFrameTs = Date.now();
+        _lsFrameTimes.push(now);
+        if (_lsFrameTimes.length > _LS_FPS_WINDOW) _lsFrameTimes.shift();
+        if (_lsLed) {
+            _lsLed.classList.add('live');
+            _lsLed.classList.remove('stale');
+        }
+        if (_lsMeta) {
+            const shape = payload.shape || [];
+            const dims = shape.length === 2 ? `${shape[1]}×${shape[0]}` : '';
+            const fps = computeLightsheetFps();
+            _lsMeta.textContent = dims
+                ? `${dims}  ·  ${fps != null ? fps.toFixed(1) + ' fps' : '…'}`
+                : (fps != null ? `${fps.toFixed(1)} fps` : 'live');
+        }
+        scheduleLightsheetStaleCheck();
+    }
+
+    function computeLightsheetFps() {
+        const n = _lsFrameTimes.length;
+        if (n < 2) return null;
+        const span = _lsFrameTimes[n - 1] - _lsFrameTimes[0];
+        if (span <= 0) return null;
+        return ((n - 1) * 1000) / span;
+    }
+
+    function scheduleLightsheetStaleCheck() {
+        if (_lsStaleTimer) clearTimeout(_lsStaleTimer);
+        _lsStaleTimer = setTimeout(() => {
+            const age = (Date.now() - _lsLastFrameTs) / 1000;
+            if (_lsMeta) _lsMeta.textContent = `last frame ${age.toFixed(1)}s ago`;
+            if (_lsLed) _lsLed.classList.add('stale');
+        }, 1500);
+    }
+
+    async function syncInitialLightsheetState() {
+        try {
+            const res = await fetch('/api/devices/lightsheet/live/status');
+            if (!res.ok) return;
+            const data = await res.json();
+            applyLightsheetState(!!data.streaming);
+        } catch (err) {
+            console.debug('lightsheet status check failed:', err);
+        }
+    }
+
+    // ---- Lightsheet zoom / pan (mirrors camera zoom/pan) ----------------
+    function applyLightsheetTransform() {
+        if (!_lsImg) return;
+        _lsImg.style.transform =
+            `translate(${_lsTx}px, ${_lsTy}px) scale(${_lsZoom})`;
+    }
+
+    function resetLightsheetZoom() {
+        _lsZoom = 1;
+        _lsTx = 0;
+        _lsTy = 0;
+        applyLightsheetTransform();
+        if (_lsStage) _lsStage.classList.remove('camera-zoomed', 'camera-panning');
+    }
+
+    function clampLightsheetPan() {
+        if (!_lsStage) return;
+        const rect = _lsStage.getBoundingClientRect();
+        const maxX = (rect.width  * (_lsZoom - 1)) / 2;
+        const maxY = (rect.height * (_lsZoom - 1)) / 2;
+        _lsTx = Math.max(-maxX, Math.min(maxX, _lsTx));
+        _lsTy = Math.max(-maxY, Math.min(maxY, _lsTy));
+    }
+
+    function onLightsheetWheel(event) {
+        if (!_lsStage) return;
+        event.preventDefault();
+        const rect = _lsStage.getBoundingClientRect();
+        const cx = event.clientX - rect.left - rect.width  / 2;
+        const cy = event.clientY - rect.top  - rect.height / 2;
+        const oldZoom = _lsZoom;
+        const factor = event.deltaY < 0 ? _CAM_ZOOM_STEP : 1 / _CAM_ZOOM_STEP;
+        const newZoom = Math.max(_CAM_ZOOM_MIN, Math.min(_CAM_ZOOM_MAX, oldZoom * factor));
+        if (newZoom === oldZoom) return;
+        const ratio = newZoom / oldZoom;
+        _lsTx = cx - (cx - _lsTx) * ratio;
+        _lsTy = cy - (cy - _lsTy) * ratio;
+        _lsZoom = newZoom;
+        if (Math.abs(_lsZoom - 1) < 0.001) { resetLightsheetZoom(); return; }
+        clampLightsheetPan();
+        applyLightsheetTransform();
+        _lsStage.classList.add('camera-zoomed');
+    }
+
+    function onLightsheetPointerDown(event) {
+        if (event.button !== 0) return;
+        if (_lsZoom <= 1) return;
+        _lsPanLast = { x: event.clientX, y: event.clientY };
+        try { _lsStage.setPointerCapture(event.pointerId); } catch (_) {}
+        _lsStage.classList.add('camera-panning');
+        event.preventDefault();
+    }
+
+    function onLightsheetPointerMove(event) {
+        if (!_lsPanLast) return;
+        _lsTx += event.clientX - _lsPanLast.x;
+        _lsTy += event.clientY - _lsPanLast.y;
+        _lsPanLast = { x: event.clientX, y: event.clientY };
+        clampLightsheetPan();
+        applyLightsheetTransform();
+    }
+
+    function onLightsheetPointerEnd(event) {
+        if (!_lsPanLast) return;
+        _lsPanLast = null;
+        try { _lsStage.releasePointerCapture(event.pointerId); } catch (_) {}
+        if (_lsStage) _lsStage.classList.remove('camera-panning');
+    }
+
+    function onLightsheetDoubleClick(event) {
+        if (_lsZoom !== 1 || _lsTx !== 0 || _lsTy !== 0) {
+            event.preventDefault();
+            resetLightsheetZoom();
+        }
+    }
+
+    // ---- Lightsheet live params (debounced) -----------------------------
+    function postLightsheetParams() {
+        fetch('/api/devices/lightsheet/live/params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ galvo: _lsGalvo, piezo: _lsPiezo, exposure: _lsExposure }),
+        }).catch(err => console.debug('lightsheet params post failed:', err));
+    }
+
+    function scheduleLightsheetParamPost() {
+        if (_lsParamTimer) clearTimeout(_lsParamTimer);
+        _lsParamTimer = setTimeout(postLightsheetParams, 120);
+    }
+
+    function onGalvoInput(src) {
+        const v = parseFloat(src.value);
+        if (isNaN(v)) return;
+        _lsGalvo = v;
+        // Sync the sibling control
+        if (src === _lsGalvoSlider && _lsGalvoNum) _lsGalvoNum.value = v;
+        if (src === _lsGalvoNum   && _lsGalvoSlider) _lsGalvoSlider.value = v;
+        scheduleLightsheetParamPost();
+    }
+
+    function onPiezoInput(src) {
+        const v = parseFloat(src.value);
+        if (isNaN(v)) return;
+        _lsPiezo = v;
+        if (src === _lsPiezoSlider && _lsPiezoNum) _lsPiezoNum.value = v;
+        if (src === _lsPiezoNum   && _lsPiezoSlider) _lsPiezoSlider.value = v;
+        scheduleLightsheetParamPost();
+    }
+
+    function onExposureInput() {
+        const v = parseFloat(_lsExposureNum && _lsExposureNum.value);
+        if (isNaN(v) || v < 1) return;
+        _lsExposure = v;
+        scheduleLightsheetParamPost();
+    }
+
+    // ---- Illumination toggles -------------------------------------------
+    async function postLedPreset(preset) {
+        try {
+            await fetch('/api/devices/led/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: preset }),
+            });
+        } catch (err) { console.debug('LED preset failed:', err); }
+    }
+
+    async function toggleCamLedMode() {
+        _lsCamLedOn = !_lsCamLedOn;
+        if (_lsCamLed) {
+            _lsCamLed.classList.toggle('ls-illum-btn--active', _lsCamLedOn);
+            _lsCamLed.setAttribute('aria-pressed', _lsCamLedOn ? 'true' : 'false');
+        }
+        try {
+            await fetch('/api/devices/camera/led_mode', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ use_led: _lsCamLedOn }),
+            });
+        } catch (err) { console.debug('cam LED mode failed:', err); }
+    }
+
+    async function toggleManualRoomLight() {
+        const nextState = _roomLightState === 'on' ? 'off' : 'on';
+        if (_lsRoomLightBtn) {
+            _lsRoomLightBtn.classList.toggle('ls-illum-btn--active', nextState === 'on');
+            _lsRoomLightBtn.setAttribute('aria-pressed', nextState === 'on' ? 'true' : 'false');
+        }
+        try {
+            const res = await fetch('/api/devices/room_light/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ state: nextState }),
+            });
+            if (res.ok) {
+                const data = await res.json();
+                _roomLightState = data.state || nextState;
+                if (_lsRoomLightBtn) {
+                    const on = _roomLightState === 'on';
+                    _lsRoomLightBtn.classList.toggle('ls-illum-btn--active', on);
+                    _lsRoomLightBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+                }
+            }
+        } catch (err) { console.debug('manual room light toggle failed:', err); }
+    }
+
+    // ---- Acquire --------------------------------------------------------
+    async function runLightsheetAcquire(mode) {
+        const btn = mode === 'burst' ? _lsBurstBtn : _lsSnapVolBtn;
+        if (btn) { btn.disabled = true; btn.textContent = 'acquiring…'; }
+        try {
+            let res;
+            if (mode === 'burst') {
+                res = await fetch('/api/devices/acquire/burst', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ frames: 10, mode: 'brightfield',
+                                          num_slices: 50, exposure_ms: _lsExposure }),
+                });
+            } else {
+                res = await fetch('/api/devices/acquire/volume', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ num_slices: 50, exposure_ms: _lsExposure }),
+                });
+            }
+            if (!res.ok) {
+                console.error('acquire failed:', res.status, await res.text());
+                return;
+            }
+            const data = await res.json();
+            if (_lsLastcap) _lsLastcap.hidden = false;
+            if (_lsLastcapRef) {
+                _lsLastcapRef.textContent = data.volume_path || data.path || data.id || 'done';
+            }
+        } catch (err) {
+            console.error('acquire error:', err);
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = mode === 'burst' ? 'Burst' : 'Snap Volume';
+            }
+        }
+    }
+
+    // ---- Temperature set (rail copy, delegates to same API) -------------
+    async function setLightsheetTemperature() {
+        if (!_lsTempInput) return;
+        const target = parseFloat(_lsTempInput.value);
+        if (isNaN(target) || target < 0 || target > 99.9) return;
+        try {
+            await fetch('/api/devices/temperature/set', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ target_c: target }),
+            });
+        } catch (err) { console.debug('ls temp set failed:', err); }
+    }
+
+    function setupManualWiring() {
+        if (!_lsToggle) return;
+        _lsToggle.addEventListener('click', toggleLightsheetStream);
+        applyLightsheetState(false);
+
+        // Param controls — slider ↔ number sync + debounced POST
+        if (_lsGalvoSlider) _lsGalvoSlider.addEventListener('input', () => onGalvoInput(_lsGalvoSlider));
+        if (_lsGalvoNum)    _lsGalvoNum.addEventListener('input',    () => onGalvoInput(_lsGalvoNum));
+        if (_lsPiezoSlider) _lsPiezoSlider.addEventListener('input', () => onPiezoInput(_lsPiezoSlider));
+        if (_lsPiezoNum)    _lsPiezoNum.addEventListener('input',    () => onPiezoInput(_lsPiezoNum));
+        if (_lsExposureNum) _lsExposureNum.addEventListener('input', onExposureInput);
+
+        // Illumination
+        if (_lsLedOpen)    _lsLedOpen.addEventListener('click',    () => postLedPreset('Open'));
+        if (_lsLedClosed)  _lsLedClosed.addEventListener('click',  () => postLedPreset('Closed'));
+        if (_lsCamLed)     _lsCamLed.addEventListener('click',     toggleCamLedMode);
+        if (_lsRoomLightBtn) _lsRoomLightBtn.addEventListener('click', toggleManualRoomLight);
+
+        // Acquire
+        if (_lsSnapVolBtn) _lsSnapVolBtn.addEventListener('click', () => runLightsheetAcquire('volume'));
+        if (_lsBurstBtn)   _lsBurstBtn.addEventListener('click',   () => runLightsheetAcquire('burst'));
+
+        // Temperature
+        if (_lsTempSet) _lsTempSet.addEventListener('click', setLightsheetTemperature);
+        if (_lsTempInput) {
+            _lsTempInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); setLightsheetTemperature(); }
+            });
+        }
+
+        // Zoom / pan
+        if (_lsStage) {
+            _lsStage.addEventListener('wheel', onLightsheetWheel, { passive: false });
+            _lsStage.addEventListener('pointerdown', onLightsheetPointerDown);
+            _lsStage.addEventListener('pointermove', onLightsheetPointerMove);
+            _lsStage.addEventListener('pointerup', onLightsheetPointerEnd);
+            _lsStage.addEventListener('pointercancel', onLightsheetPointerEnd);
+            _lsStage.addEventListener('dblclick', onLightsheetDoubleClick);
+        }
+
+        // Subscribe to LIGHTSHEET_FRAME events
+        if (typeof ClientEventBus !== 'undefined') {
+            ClientEventBus.on('LIGHTSHEET_FRAME', handleLightsheetFrame);
+        }
+
+        // Embed temperature graph in the rail
+        const _lsTgEl = document.getElementById('devices-ls-tempgraph');
+        if (_lsTgEl && window.TemperatureGraph) {
+            TemperatureGraph.init(_lsTgEl, 'current');
+        }
+
+        syncInitialLightsheetState();
+    }
+
+    // =====================================================================
     // Room-light toggle
     // =====================================================================
 
@@ -1552,6 +1983,7 @@ const DevicesManager = (function () {
         cacheDom();
         setupViewSwitcher();
         setupCameraWiring();
+        setupManualWiring();
         setupRoomLight();
         setupTemperature();
         const _tgEl = document.getElementById('devices-temp-graph');
@@ -1577,13 +2009,14 @@ const DevicesManager = (function () {
         document.addEventListener('keydown', onMapKeyDown);
         setStatus('stale', 'waiting', 'no payload yet');
         syncInitialCameraState();
-        // Stop the camera stream if the tab is closed while it's running,
-        // so MMCore isn't held by a disconnected browser.
+        // Stop the camera and lightsheet streams if the tab is closed while
+        // running, so MMCore isn't held by a disconnected browser.
         window.addEventListener('beforeunload', () => {
             if (_camStreaming) {
-                try {
-                    navigator.sendBeacon('/api/devices/bottom_camera/stream/stop');
-                } catch (_) {}
+                try { navigator.sendBeacon('/api/devices/bottom_camera/stream/stop'); } catch (_) {}
+            }
+            if (_lsStreaming) {
+                try { navigator.sendBeacon('/api/devices/lightsheet/live/stop'); } catch (_) {}
             }
         });
     }

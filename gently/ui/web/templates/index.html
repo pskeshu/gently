@@ -446,6 +446,7 @@
                         <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
                         <button class="view-btn" data-view="details" title="Details (d)">Details</button>
                         <button class="view-btn" data-view="optical3d" title="3D volume (v)">3D</button>
+                        <button class="view-btn" data-view="manual" title="Manual control">Manual</button>
                     </div>
                 </div>
                 <div class="devices-status">
@@ -714,6 +715,124 @@
 
             <!-- Temperature trajectory graph: backfill + live SVG chart -->
             <section class="devices-temp-graph" id="devices-temp-graph" aria-label="Temperature trajectory"></section>
+
+            <!-- Manual view: SPIM brightfield live-view + controls -->
+            <div class="devices-view devices-view-manual" id="devices-view-manual" style="display:none">
+                <div class="ls-layout">
+
+                    <!-- LEFT: live image stage -->
+                    <div class="ls-image-col">
+                        <div class="ls-stage-head">
+                            <span class="devices-camera-title">
+                                <span class="devices-camera-led" id="devices-ls-led"></span>
+                                <span>Lightsheet</span>
+                            </span>
+                            <span class="devices-camera-meta" id="devices-ls-meta">—</span>
+                            <button class="devices-camera-toggle" id="devices-ls-toggle" type="button">Start</button>
+                        </div>
+                        <div class="devices-camera-stage ls-stage" id="devices-ls-stage">
+                            <img class="devices-camera-img" id="devices-ls-img" alt="lightsheet live frame">
+                            <div class="devices-camera-placeholder" id="devices-ls-placeholder">
+                                <div class="devices-camera-placeholder-icon">
+                                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>
+                                </div>
+                                <div class="devices-camera-placeholder-text">Stream off</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT: control rail -->
+                    <div class="ls-rail">
+
+                        <!-- Exposure -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-exposure">Exposure</label>
+                            <div class="ls-row">
+                                <input class="ls-number" id="devices-ls-exposure" type="number"
+                                       min="1" max="5000" step="1" value="50"
+                                       inputmode="numeric" aria-label="Exposure time in milliseconds">
+                                <span class="ls-unit">ms</span>
+                            </div>
+                        </div>
+
+                        <!-- Galvo -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-galvo">Galvo</label>
+                            <div class="ls-slider-row">
+                                <input class="ls-slider" id="devices-ls-galvo-slider" type="range"
+                                       min="-5" max="5" step="0.05" value="0" aria-label="Galvo angle">
+                                <input class="ls-number ls-number-sm" id="devices-ls-galvo" type="number"
+                                       min="-5" max="5" step="0.05" value="0" inputmode="decimal">
+                                <span class="ls-unit">°</span>
+                            </div>
+                        </div>
+
+                        <!-- Piezo -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-piezo">Piezo Z</label>
+                            <div class="ls-slider-row">
+                                <input class="ls-slider" id="devices-ls-piezo-slider" type="range"
+                                       min="0" max="200" step="0.5" value="50" aria-label="Piezo Z position">
+                                <input class="ls-number ls-number-sm" id="devices-ls-piezo" type="number"
+                                       min="0" max="200" step="0.5" value="50" inputmode="decimal">
+                                <span class="ls-unit">µm</span>
+                            </div>
+                        </div>
+
+                        <!-- Illumination -->
+                        <div class="ls-group">
+                            <span class="ls-label">Illumination</span>
+                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-led-open" type="button"
+                                        title="LED group preset: Open">LED Open</button>
+                                <button class="ls-illum-btn" id="devices-ls-led-closed" type="button"
+                                        title="LED group preset: Closed">LED Closed</button>
+                            </div>
+                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-cam-led" type="button"
+                                        title="Toggle camera LED mode" aria-pressed="false">Cam LED</button>
+                                <button class="ls-illum-btn" id="devices-ls-room-light-btn" type="button"
+                                        title="Toggle room light" aria-pressed="false">Room Light</button>
+                            </div>
+                            <div class="ls-laser-indicator">
+                                <span class="ls-laser-dot"></span>
+                                Laser: <span>OFF (brightfield)</span>
+                            </div>
+                        </div>
+
+                        <!-- Temperature -->
+                        <div class="ls-group">
+                            <label class="ls-label">Temperature</label>
+                            <div class="ls-row">
+                                <input class="ls-number" id="devices-ls-temp-input" type="number"
+                                       min="0" max="99.9" step="0.1" inputmode="decimal"
+                                       placeholder="°C" aria-label="Temperature setpoint">
+                                <button class="ls-set-btn" id="devices-ls-temp-set" type="button">Set</button>
+                            </div>
+                            <div id="devices-ls-tempgraph" class="ls-tempgraph"></div>
+                        </div>
+
+                        <!-- Acquire -->
+                        <div class="ls-group">
+                            <span class="ls-label">Acquire</span>
+                            <div class="ls-btn-row">
+                                <button class="ls-acquire-btn" id="devices-ls-snap-volume"
+                                        type="button" title="Acquire a single volume">Snap Volume</button>
+                                <button class="ls-acquire-btn" id="devices-ls-burst"
+                                        type="button" title="Acquire a burst of frames">Burst</button>
+                            </div>
+                            <div class="ls-lastcap" id="devices-ls-lastcap" hidden>
+                                <span class="ls-lastcap-label">Last acquired</span>
+                                <span class="ls-lastcap-ref" id="devices-ls-lastcap-ref">—</span>
+                            </div>
+                        </div>
+
+                    </div><!-- /.ls-rail -->
+                </div><!-- /.ls-layout -->
+            </div><!-- /#devices-view-manual -->
         </div>
     </div>
 
