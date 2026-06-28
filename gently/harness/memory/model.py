@@ -245,6 +245,14 @@ class ImagingSpec:
     # Lets the UI tag each value with where it came from and what to confirm.
     provenance: dict[str, dict[str, str]] = field(default_factory=dict)
 
+    # Tactical outline — intended Operations for this imaging session.
+    # Each entry is a lightweight tactic descriptor:
+    #   {kind, name, target?, scope?, structure?}
+    # kind ∈ standing_timelapse | reactive_monitor | scripted_protocol |
+    #         exclusive_burst | oneshot | custom
+    # Populated at plan time; later seeds the session's Operation Plan.
+    tactics: list[dict] = field(default_factory=list)
+
 
 @dataclass
 class BenchSpec:
