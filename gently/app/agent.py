@@ -467,6 +467,16 @@ class MicroscopyAgent:
                         )
                     except Exception:
                         pass
+
+                # Seed the Operation Plan from the plan item's tactics outline
+                # (idempotent: no-op if plan already has active/done tactics).
+                try:
+                    from gently.app.tools.operation_plan_seed import (
+                        seed_operation_plan_from_plan_item,
+                    )
+                    seed_operation_plan_from_plan_item(self.context_store, self.session_id)
+                except Exception:
+                    logger.exception("operation-plan seeding failed")
             elif candidates:
                 titles = [c[0].title for c in candidates]
                 listing = ", ".join(titles[:5])

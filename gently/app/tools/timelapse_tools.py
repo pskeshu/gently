@@ -1201,8 +1201,12 @@ def queue_burst(
             force=force,
             tactic_id=tactic_id,
         )
-        # Flip the matching plan tactic to active on enqueue (guarded no-op when absent).
-        if tactic_id:
+        # Flip the matching plan tactic to active only when the burst was actually queued.
+        # orchestrator.queue_burst returns "Burst queued for ..." on success and a
+        # human-readable rejection sentence on soft-reject (embryo absent, already had
+        # a burst, already has a queued burst).  Gate on the success prefix so a
+        # soft-reject does NOT phantom-flip the tactic to active.
+        if tactic_id and isinstance(result, str) and result.startswith("Burst queued for "):
             cs = getattr(agent, "context_store", None)
             session = getattr(agent, "session_id", None)
             if cs and session:

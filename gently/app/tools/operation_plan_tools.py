@@ -26,7 +26,7 @@ _VALID_KINDS = frozenset(
         "custom",
     }
 )
-_VALID_STATES = frozenset({"planned", "active", "done"})
+_VALID_STATES = frozenset({"planned", "active", "done", "paused"})
 
 
 def _validate_tactics(tactics: list) -> list[dict]:

@@ -842,6 +842,10 @@ class FileContextStore:
 
         Returns True on success, False if the plan is absent or the tactic id
         is not found (no-op, no crash).
+
+        Note: read-modify-write with no lock; safe because all subscribed event
+        emissions run on the single asyncio loop thread — revisit if a
+        worker-thread emitter is ever added.
         """
         plan = self.get_operation_plan(session_id)
         if plan is None:

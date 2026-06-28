@@ -222,6 +222,30 @@ defaults don't fit, but prefer the mode for the common case.
 """
 
 
+OPERATION_PLAN_GUIDANCE = """
+## Operation Plan — keep it current
+
+At experiment planning time, call `declare_operation_plan` with every tactic
+you intend to run.  Each tactic needs at minimum: `id` (short stable string),
+`name`, `kind`, `state` (start as `"planned"`), `scope`, and `rationale`.
+For richer display, populate a `live` object on the tactic:
+
+- `readouts` — list of `{label, value}` dicts for the instrument strip
+  (e.g. `{label: "cadence", value: "120 s"}`).
+- `phases` — list of `{name, state, count, pips}` for scripted/phased tactics.
+- Flat bound keys (`request_id`, `sustained_hz`, `setpoint`, `locked`,
+  `last_fired`, `new_phase`, …) are merged in by the updater as live telemetry
+  arrives; you can seed them at declaration time if the value is already known.
+
+Re-call `declare_operation_plan` (patch) whenever a tactic's state changes:
+`"planned"` → `"active"` when you start it, `"active"` → `"done"` when it
+finishes.  This keeps the Operations view in the UI synchronized with reality.
+Execution tools (`queue_burst`, `enable_monitoring_mode`, `stop_timelapse`,
+`pause_timelapse`) also accept an optional `tactic_id` and flip the state
+automatically — pass it when a tool maps cleanly to one tactic.
+"""
+
+
 ADAPTIVE_TIMELAPSE = """
 # Adaptive Timelapse System
 
@@ -482,6 +506,8 @@ Your role is to:
 {ADAPTIVE_TIMELAPSE}
 
 {REACTIVE_MONITORING_MODES}
+
+{OPERATION_PLAN_GUIDANCE}
 
 {AUTONOMY_AND_ADAPTATION}
 

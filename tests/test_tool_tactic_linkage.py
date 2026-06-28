@@ -185,6 +185,34 @@ async def test_queue_burst_passes_tactic_id_to_orchestrator():
     assert orch.bursts_queued[0]["tactic_id"] == "t2"
 
 
+@pytest.mark.asyncio
+async def test_queue_burst_soft_reject_does_not_transition():
+    """queue_burst (tool) must NOT flip the tactic to active on a soft-reject.
+
+    orchestrator.queue_burst returns a rejection sentence (not starting with
+    "Burst queued for") when the embryo already has a queued burst, already
+    had a burst this session, or is not in the active timelapse.  The tool
+    must treat those as non-events and leave transition_tactic uncalled.
+    """
+    from gently.app.tools.timelapse_tools import queue_burst
+
+    class RejectingOrchestrator(FakeOrchestrator):
+        def queue_burst(self, embryo_id, *, frames=60, mode="1hz", num_slices=1,
+                        force=False, laser_config=None, tactic_id=None) -> str:
+            # Simulates "already has a queued burst" soft-reject
+            return f"Embryo '{embryo_id}' already has a queued burst."
+
+    cs = FakeContextStore()
+    orch = RejectingOrchestrator()
+    agent = FakeAgent(cs=cs, orchestrator=orch)
+
+    await queue_burst(embryo_id="emb1", tactic_id="t2", context=_ctx(agent, with_client=True))
+
+    assert cs.transitions == [], (
+        f"transition_tactic must not be called on soft-reject; got {cs.transitions}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # stop_timelapse — mark done
 # ---------------------------------------------------------------------------

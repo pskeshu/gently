@@ -42,7 +42,15 @@ structure :   # by kind
   oneshot|custom     → { note }
 live_bind : [ 'temperature' | 'current_burst' | 'cadence' | 'signal' | ... ]    # which telemetry fills readouts/progress
 relations : { after?:[tactic_id], layered_on?:[tactic_id], triggers?:[tactic_id] }   # concurrency + composition
+live      : {                                                                         # agent-authored display hints + updater-merged telemetry
+  readouts : [{label, value, sub?, bar?, bind?}]                                      # instrument strip entries (e.g. {label:"cadence", value:"120 s"})
+  phases   : [{name, state:'done'|'active'|'todo', count, pips}]                     # phase stepper for scripted_protocol / exclusive_burst
+  # flat bound keys merged in by the updater as telemetry arrives:
+  # request_id, sustained_hz, setpoint, locked, last_fired, new_phase, ...
+}
 ```
+
+The `live` object has two agent-authored sub-keys: `readouts` (a list of instrument-strip rows the agent populates at declaration time) and `phases` (a phase stepper list for scripted or burst tactics). The operation-plan updater additionally merges flat keys (`request_id`, `sustained_hz`, `setpoint`, `locked`, `last_fired`, `new_phase`, and any other telemetry bound via `live_bind`) directly onto `live` as events arrive — the agent seeds these at declaration if the value is already known, or leaves them absent for the updater to fill in.
 
 This single typed object expresses a regular timelapse (standing), an async per-embryo run (standing
 with per-embryo cadence — *real* in the orchestrator), a reactive monitor incl. **hatching detection**
