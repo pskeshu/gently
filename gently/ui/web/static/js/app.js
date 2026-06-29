@@ -105,6 +105,11 @@ function switchTab(tabName) {
         NotebookApp.init();
     }
 
+    // Lazy-init Gallery tab
+    if (tabName === TABS.GALLERY && typeof GalleryTab !== 'undefined') {
+        GalleryTab.init();
+    }
+
     // Update statusbar for context
     updateStatusbar();
 }
@@ -656,7 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK) {
+        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY) {
             switchTab(tab);
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);

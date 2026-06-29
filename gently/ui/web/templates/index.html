@@ -124,6 +124,7 @@
           <button class="v2-nav-item" data-tab="plans">Plans</button>
           <button class="v2-nav-item" data-tab="sessions">Sessions</button>
           <button class="v2-nav-item" data-tab="notebook">Notebook</button>
+          <button class="v2-nav-item" data-tab="gallery">Gallery</button>
         </div>
         <div class="v2-nav-group">
           <div class="v2-nav-label">System</div>
@@ -1003,6 +1004,30 @@
                     </div><!-- /.ls-rail -->
                 </div><!-- /.ls-layout -->
             </div><!-- /#devices-view-manual -->
+        </div>
+    </div>
+
+    <!-- Gallery Tab -->
+    <div id="gallery-content" class="tab-content">
+        <div class="gallery-tab-container">
+            <div class="gallery-tab-header">
+                <h2 class="gallery-tab-title"><span class="gallery-tab-title-script">Acquired</span> <em class="gallery-tab-title-em">images</em></h2>
+                <div class="gallery-tab-controls">
+                    <select id="gallery-embryo-filter" class="gallery-filter-select">
+                        <option value="">All embryos</option>
+                    </select>
+                    <select id="gallery-type-filter" class="gallery-filter-select">
+                        <option value="">All types</option>
+                        <option value="volume">Volume</option>
+                        <option value="volume_projection">Projection</option>
+                        <option value="snapshot">Snapshot</option>
+                    </select>
+                    <button id="gallery-refresh-btn" class="gallery-refresh-btn" title="Refresh">&#x21BB;</button>
+                </div>
+            </div>
+            <div class="gallery-tab-body" id="gallery-tab-body">
+                <div class="gallery-tab-empty">No images yet — snap a volume or take a snapshot to see it here.</div>
+            </div>
         </div>
     </div>
 

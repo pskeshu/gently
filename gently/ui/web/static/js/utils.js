@@ -3,7 +3,7 @@
 // ══════════════════════════════════════════════════════════
 
 // Tab and view name constants
-const TABS = { HOME: 'home', EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions', DEVICES: 'devices', EXPERIMENT: 'experiment', NOTEBOOK: 'notebook' };
+const TABS = { HOME: 'home', EMBRYOS: 'embryos', CALIBRATION: 'calibration', EVENTS: 'events', PLANS: 'plans', SESSIONS: 'sessions', DEVICES: 'devices', EXPERIMENT: 'experiment', NOTEBOOK: 'notebook', GALLERY: 'gallery' };
 
 /**
  * Extract the XY firmware fence (the addressable stage box) from a device-state

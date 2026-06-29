@@ -2066,6 +2066,15 @@ const DevicesManager = (function () {
             if (_lsLastcapRef) {
                 _lsLastcapRef.textContent = data.volume_path || data.path || data.id || 'done';
             }
+            // Show confirmation toast — no inline preview to keep manual mode uncluttered
+            if (typeof showGentlyToast === 'function') {
+                const label = mode === 'burst' ? 'Burst acquired' : 'Volume acquired';
+                showGentlyToast(label, 'View in Gallery', () => {
+                    if (typeof switchTab === 'function' && typeof TABS !== 'undefined') {
+                        switchTab(TABS.GALLERY);
+                    }
+                });
+            }
         } catch (err) {
             console.error('acquire error:', err);
         } finally {

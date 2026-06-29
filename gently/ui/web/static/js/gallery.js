@@ -1631,3 +1631,173 @@ function filterByEmbryo(list) {
     if (!state.embryoFilter) return list;
     return list.filter(img => img.metadata?.embryo_id === state.embryoFilter);
 }
+
+// ==========================================
+// GalleryTab — top-level Gallery tab controller
+// ==========================================
+
+const GalleryTab = {
+    _allItems: [],
+    _embryoFilter: '',
+    _typeFilter: '',
+
+    async init() {
+        const panel = document.getElementById('gallery-tab-body');
+        if (!panel) return;
+
+        // Wire filter controls (idempotent)
+        const embryoSel = document.getElementById('gallery-embryo-filter');
+        const typeSel   = document.getElementById('gallery-type-filter');
+        const refreshBtn = document.getElementById('gallery-refresh-btn');
+        if (embryoSel && !embryoSel._gtWired) {
+            embryoSel._gtWired = true;
+            embryoSel.addEventListener('change', () => {
+                this._embryoFilter = embryoSel.value;
+                this._renderGrid();
+            });
+        }
+        if (typeSel && !typeSel._gtWired) {
+            typeSel._gtWired = true;
+            typeSel.addEventListener('change', () => {
+                this._typeFilter = typeSel.value;
+                this._renderGrid();
+            });
+        }
+        if (refreshBtn && !refreshBtn._gtWired) {
+            refreshBtn._gtWired = true;
+            refreshBtn.addEventListener('click', () => this._load());
+        }
+
+        await this._load();
+    },
+
+    async _load() {
+        const panel = document.getElementById('gallery-tab-body');
+        if (!panel) return;
+        panel.innerHTML = '<div class="gallery-tab-loading">Loading…</div>';
+        try {
+            const data = await fetch('/api/snapshots').then(r => r.json());
+            const items = data.snapshots || [];
+            // Sort newest first
+            items.sort((a, b) => (b.timestamp || '').localeCompare(a.timestamp || ''));
+            this._allItems = items;
+            this._populateEmbroyFilter(items);
+            this._renderGrid();
+        } catch (err) {
+            panel.innerHTML = '<div class="gallery-tab-error">Failed to load gallery — check connection.</div>';
+        }
+    },
+
+    _populateEmbroyFilter(items) {
+        const sel = document.getElementById('gallery-embryo-filter');
+        if (!sel) return;
+        const embryos = [...new Set(items.map(i => i.metadata?.embryo_id).filter(Boolean))].sort();
+        const cur = sel.value;
+        // Rebuild options beyond the "All embryos" placeholder
+        while (sel.options.length > 1) sel.remove(1);
+        embryos.forEach(eid => {
+            const opt = document.createElement('option');
+            opt.value = eid;
+            opt.textContent = eid;
+            sel.appendChild(opt);
+        });
+        if (cur && embryos.includes(cur)) sel.value = cur;
+    },
+
+    _renderGrid() {
+        const panel = document.getElementById('gallery-tab-body');
+        if (!panel) return;
+
+        let items = this._allItems;
+        if (this._embryoFilter) {
+            items = items.filter(i => (i.metadata?.embryo_id || '') === this._embryoFilter);
+        }
+        if (this._typeFilter) {
+            items = items.filter(i => i.data_type === this._typeFilter);
+        }
+
+        if (items.length === 0) {
+            panel.innerHTML = '<div class="gallery-tab-empty">No images match the current filter.</div>';
+            return;
+        }
+
+        const html = `<div class="gallery-tab-grid">${items.map((img, idx) => this._itemHtml(img, idx)).join('')}</div>`;
+        panel.innerHTML = html;
+
+        // Wire click handlers
+        panel.querySelectorAll('.gallery-tab-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const idx = parseInt(el.dataset.idx, 10);
+                Lightbox.open(items, idx, 'gallery');
+            });
+        });
+    },
+
+    _itemHtml(img, idx) {
+        const embryo = img.metadata?.embryo_id || '';
+        const ts = img.timestamp ? img.timestamp.slice(0, 19).replace('T', ' ') : '';
+        const typeLabel = img.data_type || 'image';
+        const thumb = img.base64_png
+            ? `<img class="gallery-tab-thumb" src="data:image/png;base64,${img.base64_png}" alt="${typeLabel}">`
+            : `<div class="gallery-tab-thumb-placeholder">${typeLabel}</div>`;
+        return `
+            <div class="gallery-tab-item" data-idx="${idx}" title="${typeLabel}${embryo ? ' · ' + embryo : ''}">
+                ${thumb}
+                <div class="gallery-tab-item-info">
+                    <div class="gallery-tab-item-type">${typeLabel}</div>
+                    ${embryo ? `<div class="gallery-tab-item-embryo">${embryo}</div>` : ''}
+                    ${ts ? `<div class="gallery-tab-item-ts">${ts}</div>` : ''}
+                </div>
+            </div>
+        `;
+    },
+};
+
+// ==========================================
+// showGentlyToast — lightweight global toast (volume acquired, etc.)
+// ==========================================
+
+/**
+ * Show a brief toast notification with an optional action link.
+ * @param {string} message - Primary message text
+ * @param {string|null} actionLabel - Label for the action button (null = no button)
+ * @param {Function|null} actionFn - Callback invoked when the action is clicked
+ * @param {number} [duration=6000] - Auto-dismiss delay in ms
+ */
+function showGentlyToast(message, actionLabel, actionFn, duration = 6000) {
+    // Remove any existing gently-toast
+    document.querySelectorAll('.gently-toast').forEach(t => t.remove());
+
+    const toast = document.createElement('div');
+    toast.className = 'gently-toast';
+
+    const msgSpan = document.createElement('span');
+    msgSpan.className = 'gently-toast-msg';
+    msgSpan.textContent = message;
+    toast.appendChild(msgSpan);
+
+    if (actionLabel && actionFn) {
+        const actionBtn = document.createElement('button');
+        actionBtn.className = 'gently-toast-action';
+        actionBtn.textContent = actionLabel;
+        actionBtn.addEventListener('click', () => {
+            actionFn();
+            toast.remove();
+        });
+        toast.appendChild(actionBtn);
+    }
+
+    const dismiss = document.createElement('button');
+    dismiss.className = 'gently-toast-dismiss';
+    dismiss.setAttribute('aria-label', 'Dismiss');
+    dismiss.textContent = '×';
+    dismiss.addEventListener('click', () => toast.remove());
+    toast.appendChild(dismiss);
+
+    document.body.appendChild(toast);
+    // Trigger transition
+    requestAnimationFrame(() => toast.classList.add('visible'));
+
+    const timer = setTimeout(() => toast.remove(), duration);
+    dismiss.addEventListener('click', () => clearTimeout(timer));
+}
