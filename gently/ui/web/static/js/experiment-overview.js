@@ -19,6 +19,8 @@ const ExperimentOverview = {
     _subscribed: false,      // guard: prevents double-registration across tab re-clicks
     _planRefreshTimer: null, // debounce handle for tactic-event-driven refetch
     _tempUpdateHandler: null,// stored handler ref so it can be off()'d if needed
+    _rosterEmbyros: [],      // embryos from /api/embryos/positions (D2 roster lens)
+    _rolesMap: null,         // Map(role name → registry obj) from /api/roles (D2 roster lens)
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
@@ -40,12 +42,17 @@ const ExperimentOverview = {
         this.scenarioMode = false;
         // Fetch plan (overview) and strategy (rules) in parallel so tab-switching
         // between the two views doesn't require a second round-trip.
-        const [plan, strategy] = await Promise.all([
+        // D2: also fetch roster + roles for the roster lens.
+        const [plan, strategy, rosterEmbyros, rolesMap] = await Promise.all([
             this.loadPlan(),
-            this.loadStrategy()
+            this.loadStrategy(),
+            this._loadRoster(),
+            this._loadRolesMap(),
         ]);
         this.activePlan = plan;
         this.activeStrategy = strategy;
+        this._rosterEmbyros = rosterEmbyros;
+        this._rolesMap = rolesMap;
         this.isLive = plan !== null || strategy !== null;
         this.render(strategy);
         this.initialized = true;
@@ -116,12 +123,17 @@ const ExperimentOverview = {
 
     // Debounced plan refetch — coalesces rapid tactic-event bursts into a single
     // fetch+render.  500 ms window matches experiment-strip.js convention.
+    // D2: also re-fetches the embryo roster so the lens stays current.
     _debouncedRefresh() {
         if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);
         this._planRefreshTimer = setTimeout(async () => {
             this._planRefreshTimer = null;
-            const plan = await this.loadPlan();
+            const [plan, rosterEmbyros] = await Promise.all([
+                this.loadPlan(),
+                this._loadRoster(),
+            ]);
             this.activePlan = plan;
+            this._rosterEmbyros = rosterEmbyros;
             this.isLive = plan !== null;
             this.render(this.activeStrategy);
         }, 500);
@@ -338,8 +350,24 @@ const ExperimentOverview = {
         // Index of the first queued (planned) tactic — gets the "next" badge.
         const firstPlannedIdx = tactics.findIndex(t => t.state === 'planned');
 
+        // Roster lens: visible when embryos + role metadata are both available.
+        // Gracefully absent if either fetch failed or returned nothing (backward compat
+        // with plans that pre-date D2 — spine renders exactly as before).
+        const rosterEmbyros = this._rosterEmbyros || [];
+        const rolesMap = this._rolesMap;
+        const rosterCtx = (rosterEmbyros.length > 0 && rolesMap && rolesMap.size > 0)
+            ? { embryos: rosterEmbyros, rolesMap }
+            : null;
+        const rosterHtml = rosterCtx
+            ? `<div class="ops-section-label">Population roster — by class &amp; role</div>
+               ${this._renderRosterLens(rosterEmbyros, rolesMap, plan, ESC)}`
+            : '';
+        const spineLabel = rosterCtx
+            ? '<div class="ops-section-label">Tactic spine — role-scoped</div>'
+            : '';
+
         const spineNodes = tactics
-            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC))
+            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx))
             .join('');
 
         root.innerHTML = `
@@ -352,12 +380,15 @@ const ExperimentOverview = {
                     <span><i style="background:var(--ops-active)"></i>in use</span>
                     <span><i style="background:var(--ops-plan)"></i>queued</span>
                 </div>
+                ${rosterHtml}
+                ${spineLabel}
                 <div class="ops-spine">${spineNodes}</div>
             </div>`;
     },
 
     // Render a single tactic node.
-    _renderOpsTactic(t, idx, firstPlannedIdx, ESC) {
+    // rosterCtx = { embryos, rolesMap } | null — when present, adds role-scope badge (D2).
+    _renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx = null) {
         const STATE_LABEL = { done: 'done', active: 'in use', planned: 'queued', paused: 'paused' };
         const seq = String(t.seq || idx + 1).padStart(2, '0');
         const stateLabel = STATE_LABEL[t.state] || t.state;
@@ -372,11 +403,17 @@ const ExperimentOverview = {
         const summary = live.summary || '';
         const desc = live.desc || '';
 
-        // Header row: name · target · summary
+        // Scope badge — D2: shows role → embryo-ids when roster context is available.
+        const scopeBadge = rosterCtx
+            ? this._renderOpsScopeBadge(t.scope, rosterCtx.embryos, rosterCtx.rolesMap, ESC)
+            : '';
+
+        // Header row: name · target · scope badge · summary
         let inner = `
             <div class="ops-row">
                 <span class="ops-tname">${ESC(t.name)}</span>
                 ${target ? `<span class="ops-target">${ESC(target)}</span>` : ''}
+                ${scopeBadge}
                 ${summary ? `<span class="ops-tsum">${ESC(summary)}</span>` : ''}
             </div>
             ${desc ? `<div class="ops-desc">${ESC(desc)}</div>` : ''}`;
@@ -522,6 +559,210 @@ const ExperimentOverview = {
         }
 
         return '';
+    },
+
+    // =================================================================
+    // D2 — Roster Lens: embryo population by role class + role
+    // =================================================================
+
+    // Fetch the current embryo roster from /api/embryos/positions.
+    // Returns [] on failure or when no embryos have positions yet.
+    async _loadRoster() {
+        try {
+            const resp = await fetch('/api/embryos/positions', { cache: 'no-store' });
+            if (!resp.ok) return [];
+            const data = await resp.json();
+            return Array.isArray(data.embryos) ? data.embryos : [];
+        } catch (e) {
+            console.warn('[ExperimentOverview] roster fetch error:', e);
+            return [];
+        }
+    },
+
+    // Fetch the roles registry from /api/roles.
+    // Returns a Map(name → {ui_color, ui_icon, role_class, default_cadence_seconds}).
+    // Returns empty Map on failure.
+    async _loadRolesMap() {
+        try {
+            const resp = await fetch('/api/roles', { cache: 'no-store' });
+            if (!resp.ok) return new Map();
+            const data = await resp.json();
+            const map = new Map();
+            if (Array.isArray(data.roles)) {
+                for (const r of data.roles) {
+                    map.set(r.name, r);
+                }
+            }
+            return map;
+        } catch (e) {
+            console.warn('[ExperimentOverview] roles fetch error:', e);
+            return new Map();
+        }
+    },
+
+    // Convert a hex color (#rrggbb) to rgba(r,g,b,alpha) for inline styles.
+    _hexToRgba(hex, alpha) {
+        const h = (hex || '#888888').replace('#', '');
+        const r = parseInt(h.slice(0, 2), 16) || 0;
+        const g = parseInt(h.slice(2, 4), 16) || 0;
+        const b = parseInt(h.slice(4, 6), 16) || 0;
+        return `rgba(${r},${g},${b},${alpha})`;
+    },
+
+    // Cross-reference: find the name of the active (or most recently done) tactic
+    // that covers a given embryo (by embryo_id + role).
+    // Scope resolution: global → covers all; role → covers matching role;
+    // embryos → covers listed ids. Returns '' when no tactic found.
+    _resolveCurrentTactic(embryoId, role, plan) {
+        if (!plan || !Array.isArray(plan.tactics)) return '';
+        const covers = (t) => {
+            const scope = t.scope || { mode: 'global' };
+            if (scope.mode === 'global') return true;
+            if (scope.mode === 'role') return scope.role === role;
+            if (scope.mode === 'embryos') {
+                return Array.isArray(scope.embryo_ids) && scope.embryo_ids.includes(embryoId);
+            }
+            return false;
+        };
+        // Prefer the active tactic covering this embryo.
+        const active = plan.tactics.find(t => t.state === 'active' && covers(t));
+        if (active) return active.name;
+        // Fall back to the most recently done tactic (last in array order).
+        for (let i = plan.tactics.length - 1; i >= 0; i--) {
+            if (plan.tactics[i].state === 'done' && covers(plan.tactics[i])) {
+                return plan.tactics[i].name;
+            }
+        }
+        return '';
+    },
+
+    // Render a scope badge for a tactic node in the spine.
+    // Colors for role-scoped badges come from the roles registry (API), not CSS.
+    // Global and explicit-embryos scopes use the static `.ops-scope-global` class.
+    _renderOpsScopeBadge(scope, embryos, rolesMap, ESC) {
+        if (!scope || scope.mode === 'global') {
+            return '<span class="ops-scope-badge ops-scope-global">→ all embryos</span>';
+        }
+        if (scope.mode === 'role') {
+            const role = scope.role || '';
+            const roleInfo = rolesMap ? rolesMap.get(role) : null;
+            const color = (roleInfo && roleInfo.ui_color) || '#8b949e';
+            const matchIds = embryos
+                .filter(e => e.role === role)
+                .map(e => e.embryo_id)
+                .join(', ');
+            const label = matchIds
+                ? `→ ${ESC(role)} · ${ESC(matchIds)}`
+                : `→ ${ESC(role)}`;
+            const bg = this._hexToRgba(color, 0.12);
+            const border = this._hexToRgba(color, 0.35);
+            return `<span class="ops-scope-badge" style="color:${ESC(color)};background:${bg};border-color:${border}">${label}</span>`;
+        }
+        if (scope.mode === 'embryos') {
+            const ids = ESC((scope.embryo_ids || []).join(', '));
+            return `<span class="ops-scope-badge ops-scope-global">→ ${ids}</span>`;
+        }
+        return '';
+    },
+
+    // Render the D2 roster lens: embryos grouped by role class then by role.
+    // SUBJECTS section is foregrounded; REFERENCES section is compact/muted.
+    // Role colors/icons come from the rolesMap (API data), not from CSS constants.
+    // Returns empty string when embryos array is empty (backward compat).
+    _renderRosterLens(embryos, rolesMap, plan, ESC) {
+        if (!embryos || embryos.length === 0) return '';
+
+        // Group embryos by role_class then by role, preserving first-seen order.
+        const CLASS_ORDER_PREF = ['subject', 'reference'];
+        const classOrder = [];
+        const byClass = {};
+
+        for (const emb of embryos) {
+            const roleInfo = rolesMap.get(emb.role);
+            const cls = (roleInfo && roleInfo.role_class) || 'subject';
+            if (!byClass[cls]) {
+                byClass[cls] = { roleOrder: [], byRole: {} };
+                classOrder.push(cls);
+            }
+            const section = byClass[cls];
+            if (!section.byRole[emb.role]) {
+                section.byRole[emb.role] = [];
+                section.roleOrder.push(emb.role);
+            }
+            section.byRole[emb.role].push(emb);
+        }
+
+        // Canonical class order: subjects first.
+        classOrder.sort((a, b) => {
+            const ai = CLASS_ORDER_PREF.indexOf(a);
+            const bi = CLASS_ORDER_PREF.indexOf(b);
+            return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
+        });
+
+        const totalCount = embryos.length;
+        const totalRoles = classOrder.reduce((n, cls) => n + byClass[cls].roleOrder.length, 0);
+
+        const classSections = classOrder.map(cls => {
+            const { roleOrder, byRole } = byClass[cls];
+            const isSubject = cls === 'subject';
+
+            const classHeaderInner = isSubject
+                ? `<span class="ops-class-live-dot"></span><span class="ops-class-label">Subjects</span><span class="ops-class-desc">— adaptive tactics / scenarios</span>`
+                : `<span class="ops-class-label">References</span><span class="ops-class-desc">— steady acquisition</span>`;
+
+            const roleGroups = roleOrder.map(role => {
+                const roleEmbyros = byRole[role];
+                const roleInfo = rolesMap.get(role);
+                const uiColor = (roleInfo && roleInfo.ui_color) || '#8b949e';
+                const uiIcon  = (roleInfo && roleInfo.ui_icon)  || '';
+                const bgRgba  = this._hexToRgba(uiColor, 0.08);
+                const ids = roleEmbyros.map(e => e.embryo_id).join(', ');
+
+                const embryoRows = roleEmbyros.map(emb => {
+                    const cadencePhase = emb.cadence_phase || 'normal';
+                    const strain = emb.strain || '—';
+                    const label  = emb.user_label || emb.embryo_id;
+                    const tacticName = this._resolveCurrentTactic(emb.embryo_id, emb.role, plan);
+                    const stateStr = emb.is_complete ? 'done'
+                                   : cadencePhase === 'paused' ? 'paused'
+                                   : 'active';
+                    const compact = isSubject ? '' : ' compact';
+                    const chipBg     = this._hexToRgba(uiColor, 0.15);
+                    const chipBorder = this._hexToRgba(uiColor, 0.4);
+                    return `<div class="ops-roster-embryo${compact}">
+                        <span class="ops-rem-id">${ESC(label)}</span>
+                        <span class="ops-rem-role-chip" style="background:${chipBg};color:${ESC(uiColor)};border-color:${chipBorder}">${uiIcon ? ESC(uiIcon) + ' ' : ''}${ESC(role)}</span>
+                        <span class="ops-rem-strain">${ESC(strain)}</span>
+                        <span class="ops-rem-phase ${ESC(cadencePhase)}">${ESC(cadencePhase)}</span>
+                        <span class="ops-rem-tactic">${ESC(tacticName || '—')}</span>
+                        <span class="ops-rem-state ${ESC(stateStr)}">${ESC(stateStr)}</span>
+                    </div>`;
+                }).join('');
+
+                return `<div class="ops-role-group">
+                    <div class="ops-role-header" style="border-left-color:${ESC(uiColor)};background:${bgRgba}">
+                        <span class="ops-role-name" style="color:${ESC(uiColor)}">${ESC(role.toUpperCase())}</span>
+                        <span class="ops-role-sep">·</span>
+                        <span class="ops-role-count">${roleEmbyros.length} embryo${roleEmbyros.length !== 1 ? 's' : ''}</span>
+                        <span class="ops-role-ids">${ESC(ids)}</span>
+                    </div>
+                    ${embryoRows}
+                </div>`;
+            }).join('');
+
+            return `<div class="ops-class-section">
+                <div class="ops-class-header ${ESC(cls)}">${classHeaderInner}</div>
+                ${roleGroups}
+            </div>`;
+        }).join('');
+
+        return `<div class="ops-roster">
+            <div class="ops-roster-head">
+                <span class="ops-roster-title">Population roster</span>
+                <span class="ops-roster-count">${totalCount} embryo${totalCount !== 1 ? 's' : ''} · ${totalRoles} role${totalRoles !== 1 ? 's' : ''}</span>
+            </div>
+            ${classSections}
+        </div>`;
     },
 
     // -----------------------------------------------------------------
