@@ -167,6 +167,9 @@ uv run python launch_gently.py --no-api
 # Don't auto-open a browser — open the printed URL yourself
 uv run python launch_gently.py --no-browser
 
+# Skip login — disable accounts (localhost-control mode; same as GENTLY_NO_AUTH=1)
+uv run python launch_gently.py --no-auth
+
 # Resume a previous session
 uv run python launch_gently.py --resume            # interactive picker
 uv run python launch_gently.py --resume latest     # most recent session
@@ -203,8 +206,9 @@ First-run admin account created — sign in at the URL above:
 - **Lost it?** There's no reset command yet — delete
   `<GENTLY_STORAGE_PATH>/auth/users.yaml` and restart to bootstrap a fresh
   `admin` (this clears all accounts).
-- **Just trying it locally?** `GENTLY_NO_AUTH=1` disables accounts entirely
-  (legacy mode: localhost gets control, remote callers need `X-Gently-Token`).
+- **Just trying it locally?** Launch with `--no-auth` (or set `GENTLY_NO_AUTH=1`)
+  to disable accounts entirely (localhost gets control, remote callers need
+  `X-Gently-Token`). Handy if you've lost the admin password.
 
 Accounts live under `<GENTLY_STORAGE_PATH>/auth/` (`users.yaml` + `secret.key`),
 outside the repo.
