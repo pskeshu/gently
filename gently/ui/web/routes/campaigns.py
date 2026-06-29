@@ -254,6 +254,38 @@ def create_router(server) -> APIRouter:
             "sessions": [_serialize(s) for s in sessions],
         }
 
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/sessions")
+    async def link_session_to_item(campaign_id: str, item_id: str, request: Request):
+        """Link a session to a plan item (appends) and record it against the campaign."""
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        body = await request.json()
+        session_id = body.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id required")
+
+        cs.link_plan_item_session(item_id, session_id)
+        cs.link_session_campaign(session_id, campaign.id)
+
+        sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        return {"sessions": [_serialize(s) for s in sessions]}
+
+    @router.delete("/api/campaigns/{campaign_id}/items/{item_id}/sessions/{session_id}")
+    async def unlink_session_from_item(campaign_id: str, item_id: str, session_id: str):
+        """Remove a session link from a plan item. Returns {unlinked: bool}."""
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        unlinked = cs.unlink_plan_item_session(item_id, session_id)
+        return {"unlinked": unlinked}
+
     @router.get("/api/campaigns/{campaign_id}/planned-sessions")
     async def get_planned_sessions(campaign_id: str):
         """Planned sessions linked to a campaign."""

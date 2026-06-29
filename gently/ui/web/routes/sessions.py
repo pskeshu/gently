@@ -204,6 +204,29 @@ def create_router(server) -> APIRouter:
             "rehydrated_projections": rehydrated,
         }
 
+    @router.get("/api/sessions/{session_id}/plans")
+    async def get_session_plans(session_id: str):
+        """Plan items linked to a session, via the context store."""
+        cs = getattr(server, "context_store", None)
+        if cs is None:
+            return {"plans": []}
+        try:
+            items = cs.get_plan_items_for_session(session_id)
+        except Exception as e:
+            logger.warning("get_plan_items_for_session failed for %s: %s", session_id, e)
+            return {"plans": []}
+        return {
+            "plans": [
+                {
+                    "id": item.id,
+                    "title": item.title,
+                    "campaign_id": item.campaign_id,
+                    "status": item.status.value,
+                }
+                for item in items
+            ]
+        }
+
     @router.get("/api/sessions/{session_id}")
     async def get_session(session_id: str):
         """Get session state for review, from the live FileStore.
