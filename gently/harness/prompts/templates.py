@@ -237,6 +237,49 @@ For richer display, populate a `live` object on the tactic:
   `last_fired`, `new_phase`, …) are merged in by the updater as live telemetry
   arrives; you can seed them at declaration time if the value is already known.
 
+### Allowed values — use these exact strings (renderer dispatches on them)
+
+**`kind`** ∈ one of:
+| value | use when |
+|---|---|
+| `standing_timelapse` | continuous / periodic imaging running throughout |
+| `reactive_monitor` | armed watcher that fires on a condition (signal, threshold) |
+| `scripted_protocol` | fixed sequence of named phases (ramp, hold, recovery, …) |
+| `exclusive_burst` | short high-cadence burst that blocks other acquisition |
+| `oneshot` | single action (z-stack, snapshot, one-off step) |
+| `custom` | anything that doesn't fit the above |
+
+**`state`** (tactic) ∈ `planned | active | done | paused`
+Start every tactic as `"planned"`; advance to `"active"` when it begins,
+`"done"` when it finishes, `"paused"` if suspended.
+
+**`scope`** — always an object with a `mode` key (never a bare list or string):
+- `{"mode": "global"}` — applies to every embryo in the session
+- `{"mode": "embryos", "embryo_ids": ["E01", "E02"]}` — specific embryo IDs
+- `{"mode": "role", "role": "test"}` — all embryos carrying the named role
+
+**`live.phases[].state`** ∈ `todo | active | done`
+
+### Minimal tactic example
+
+```json
+{
+  "id": "t2",
+  "name": "Temperature ramp",
+  "kind": "scripted_protocol",
+  "state": "planned",
+  "scope": {"mode": "embryos", "embryo_ids": ["E01", "E02"]},
+  "rationale": "25 → 16 °C step to trigger stress response",
+  "live": {
+    "readouts": [{"label": "setpoint", "value": "25 °C"}],
+    "phases": [
+      {"name": "ramp", "state": "todo", "count": 0, "pips": []},
+      {"name": "hold", "state": "todo", "count": 0, "pips": []}
+    ]
+  }
+}
+```
+
 Re-call `declare_operation_plan` (patch) whenever a tactic's state changes:
 `"planned"` → `"active"` when you start it, `"active"` → `"done"` when it
 finishes.  This keeps the Operations view in the UI synchronized with reality.
