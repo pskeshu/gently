@@ -280,6 +280,37 @@ Start every tactic as `"planned"`; advance to `"active"` when it begins,
 }
 ```
 
+### Plan the whole roster — subjects AND references
+
+Experiments often require both subjects and references. Declare tactics for all
+roster classes in the same `declare_operation_plan` call.
+
+| Roster class | Role value(s) | Planning note |
+|---|---|---|
+| Subjects | `test` | adaptive protocol + reactive tactics apply |
+| References | `calibration`, `lineaging` | steady acquisition only; no adaptive protocol |
+
+**Reference tactic**: when the assay needs calibration or stage-clock embryos, declare
+a `standing_timelapse` scoped to that role alongside the subject tactics:
+
+```json
+{
+  "id": "ref_acq",
+  "name": "Reference steady acquisition",
+  "kind": "standing_timelapse",
+  "state": "planned",
+  "scope": {"mode": "role", "role": "calibration"},
+  "rationale": "Steady 5-min imaging of calibration embryos — stage timing + normalization"
+}
+```
+
+**Surface role requirements** in the plan `goal` or a tactic `rationale`: state which
+roles the run needs and roughly how many (e.g. *"needs ≥2 test subjects + ≥1 calibration
+reference"*) so the operator knows what embryos to assign before the run begins. Never
+plan only for `test` when the assay depends on reference embryos.
+
+Valid `scope.role` strings: `test` / `calibration` / `lineaging` / `unassigned`.
+
 Re-call `declare_operation_plan` (patch) whenever a tactic's state changes:
 `"planned"` → `"active"` when you start it, `"active"` → `"done"` when it
 finishes.  This keeps the Operations view in the UI synchronized with reality.
