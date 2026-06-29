@@ -9641,6 +9641,15 @@ body.modal-open {
 .devices-status-led.paused::before{ background: var(--map-accent); }
 .devices-status-led.stale::before { background: var(--map-warm); }
 .devices-status-led.error::before { background: #f87171; }
+/* Status sub-label (e.g. the live "Δt 0.20s"). The value updates every frame;
+   tabular figures + a reserved, right-aligned width keep its box from changing
+   size, so the rapidly-changing digits can't reflow and jitter the LIVE badge
+   and room-light button beside it (the cluster is right-anchored in the bar). */
+.devices-status-meta {
+    font-variant-numeric: tabular-nums;
+    min-width: 3.4rem;
+    text-align: right;
+}
 
 /* --- Room-light toggle (header) -------------------------------------- */
 .devices-room-light {
