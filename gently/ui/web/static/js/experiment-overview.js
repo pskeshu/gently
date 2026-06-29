@@ -599,9 +599,29 @@ const ExperimentOverview = {
                 <div class="ops-wrap">
                     <div class="ops-crumb">Operations</div>
                     <h1 class="ops-title">No operation running</h1>
-                    <div class="ops-meta">When the agent begins operating by tactic, the plan and live progress appear here.</div>
-                    <div class="ops-empty">Idle — no tactics planned or in use.</div>
+                    <div class="ops-meta">Brief the agent — it will declare a tactic plan and the spine renders live.</div>
+                    <div class="ops-setup-cta">
+                        <button class="ops-brief-btn" data-ops-brief>Brief the agent</button>
+                        <div class="ops-chips-label">— or start from a template</div>
+                        <div class="ops-chips">
+                            <button class="ops-chip" data-ops-prompt="Set up a temperature-strain operation: baseline monitoring, a temperature-change protocol on the test subjects, then recovery monitoring.">Temperature-strain run</button>
+                            <button class="ops-chip" data-ops-prompt="Set up a standing timelapse on all embryos at 120 s cadence.">Standing timelapse</button>
+                            <button class="ops-chip" data-ops-prompt="Arm a reactive monitor that watches for hatching on the most advanced embryos.">Watch for hatching</button>
+                        </div>
+                    </div>
                 </div>`;
+
+            // Wire CTA buttons — same open+send pattern as landing.js sendFreeform.
+            function _opsOpenAgent(prompt) {
+                if (typeof AgentChat === 'undefined' || !AgentChat.togglePanel) return;
+                AgentChat.togglePanel(true);
+                if (prompt && AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
+            }
+            const briefBtn = root.querySelector('[data-ops-brief]');
+            if (briefBtn) briefBtn.addEventListener('click', () => _opsOpenAgent(''));
+            root.querySelectorAll('[data-ops-prompt]').forEach(chip => {
+                chip.addEventListener('click', () => _opsOpenAgent(chip.dataset.opsPrompt));
+            });
             return;
         }
 
