@@ -539,6 +539,27 @@ def create_router(server) -> APIRouter:
             logger.exception("Laser configs fetch failed")
             raise HTTPException(status_code=502, detail=f"laser configs failed: {exc}") from exc
 
+    @router.post("/api/devices/laser/config", dependencies=[Depends(require_control)])
+    async def laser_config_set(payload: dict = Body(...)):  # noqa: B008
+        """Apply a named Laser config-group preset (e.g. "ALL OFF", "488 only").
+
+        Body: {"config": "<preset name>"}
+
+        Returns the device layer response.  400 if config is missing/empty;
+        503 if the microscope is not connected; 502 on device error.
+        """
+        config = payload.get("config")
+        if not config or not isinstance(config, str):
+            raise HTTPException(status_code=400, detail="config must be a non-empty string")
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.set_laser_config(config)
+        except Exception as exc:
+            logger.exception("Laser config set command failed")
+            raise HTTPException(status_code=502, detail=f"laser config failed: {exc}") from exc
+
     @router.post("/api/devices/camera/led_mode", dependencies=[Depends(require_control)])
     async def camera_led_mode(payload: dict = Body(...)):  # noqa: B008
         """Enable/disable automatic LED for bottom-camera captures. Body: {"use_led": bool}."""

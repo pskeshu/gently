@@ -98,7 +98,8 @@ const DevicesManager = (function () {
     let _lsLedOpen, _lsLedClosed, _lsCamLed, _lsRoomLightBtn;
     let _lsCamLedOn = false;
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
-    let _lsLaserStatus;  // span inside .ls-laser-indicator — driven by actual laser/off calls
+    let _lsLaserStatus;   // span inside .ls-laser-indicator — driven by actual laser/off calls
+    let _lsLaserPreset;   // <select id="devices-laser-preset"> — populated on manual-view entry
     let _lsTempInput, _lsTempSet;
 
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
@@ -201,6 +202,7 @@ const DevicesManager = (function () {
         _lsLastcap       = document.getElementById('devices-ls-lastcap');
         _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
         _lsLaserStatus   = document.getElementById('devices-ls-laser-status');
+        _lsLaserPreset   = document.getElementById('devices-laser-preset');
         _lsTempInput     = document.getElementById('devices-ls-temp-input');
         _lsTempSet       = document.getElementById('devices-ls-temp-set');
 
@@ -1365,6 +1367,59 @@ const DevicesManager = (function () {
         }
     }
 
+    /** Fetch laser config-group presets and populate the #devices-laser-preset select.
+     *  Selects "ALL OFF" by default (entry safety preset).
+     *  Wires the change handler to POST the selected preset.
+     *  Fire-and-forget safe — failure leaves the fallback "ALL OFF" option in place. */
+    async function populateLaserPresets() {
+        cacheDom();
+        if (!_lsLaserPreset) return;
+        try {
+            const res = await fetch('/api/devices/laser/configs');
+            if (!res.ok) return;
+            const data = await res.json();
+            // data may be an array of preset names or {configs: [...]}
+            const presets = Array.isArray(data) ? data : (data.configs || []);
+            if (!presets.length) return;
+            // Rebuild option list
+            _lsLaserPreset.innerHTML = '';
+            for (const name of presets) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                _lsLaserPreset.appendChild(opt);
+            }
+            // Default to "ALL OFF" — entry safety state
+            if (presets.includes('ALL OFF')) _lsLaserPreset.value = 'ALL OFF';
+            // Wire change handler (idempotent — replace via re-assignment)
+            _lsLaserPreset.onchange = () => setLaserPreset(_lsLaserPreset.value);
+        } catch (err) {
+            console.debug('laser preset fetch failed:', err);
+        }
+    }
+
+    /** POST a named laser preset to the device layer.
+     *  Updates the status indicator on success.
+     *  Fire-and-forget safe — failure shows a warning, never throws. */
+    async function setLaserPreset(config) {
+        cacheDom();
+        if (!config) return;
+        try {
+            const res = await fetch('/api/devices/laser/config', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ config }),
+            });
+            if (_lsLaserStatus) {
+                _lsLaserStatus.textContent = res.ok ? config : 'warning: state unknown';
+            }
+            if (!res.ok) console.debug('laser preset set failed:', await res.text());
+        } catch (err) {
+            if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
+            console.debug('laser preset set failed:', err);
+        }
+    }
+
     async function toggleLightsheetStream() {
         if (!_lsToggle) return;
         _lsToggle.disabled = true;
@@ -1972,7 +2027,9 @@ const DevicesManager = (function () {
             }
         }
         // Entering Manual view — gate lasers off immediately (brightfield-safe).
-        if (viewName === 'manual') setLaserOff();
+        // populateLaserPresets() runs after setLaserOff() so the select is always
+        // seeded with the entry-safety state first.
+        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); }
     }
 
     function setupViewSwitcher() {

@@ -10725,6 +10725,42 @@ body.modal-open {
     flex-shrink: 0;
 }
 
+/* Laser preset row (B2) */
+.ls-laser-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+}
+
+.ls-laser-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+.ls-laser-select {
+    flex: 1;
+    min-width: 0;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    border-radius: 4px;
+    padding: 0.18rem 0.3rem;
+    cursor: pointer;
+    transition: border-color 0.12s;
+}
+
+.ls-laser-select:focus {
+    outline: none;
+    border-color: var(--map-accent);
+}
+
 /* Temperature setpoint button */
 .ls-set-btn {
     background: transparent;
