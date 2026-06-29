@@ -105,3 +105,59 @@ def test_camera_b_absent_on_empty_device_list():
     devices = create_devices_from_mmcore(core)
     assert "camera_b" not in devices
     assert "camera" in devices
+
+
+# ---------------------------------------------------------------------------
+# Side-B optics: scanner_b / piezo_b defensive registration
+# ---------------------------------------------------------------------------
+
+
+def test_scanner_b_created_when_present():
+    """Scanner:CD:33 in getLoadedDevices → devices['scanner_b'] with that name."""
+    core = FakeCore(loaded_devices=["HamCam1", "Scanner:CD:33"])
+    devices = create_devices_from_mmcore(core)
+    assert "scanner_b" in devices, "scanner_b must be registered when Scanner:CD:33 is loaded"
+    assert devices["scanner_b"].name == "Scanner:CD:33"
+
+
+def test_scanner_b_absent_when_not_loaded():
+    """Scanner:CD:33 NOT loaded → scanner_b absent, no crash."""
+    core = FakeCore(loaded_devices=["HamCam1"])
+    devices = create_devices_from_mmcore(core)
+    assert "scanner_b" not in devices
+
+
+def test_piezo_b_created_when_present():
+    """PiezoStage:Q:35 in getLoadedDevices → devices['piezo_b'] with that name."""
+    core = FakeCore(loaded_devices=["HamCam1", "PiezoStage:Q:35"])
+    devices = create_devices_from_mmcore(core)
+    assert "piezo_b" in devices, "piezo_b must be registered when PiezoStage:Q:35 is loaded"
+    assert devices["piezo_b"].name == "PiezoStage:Q:35"
+
+
+def test_piezo_b_absent_when_not_loaded():
+    """PiezoStage:Q:35 NOT loaded → piezo_b absent, no crash."""
+    core = FakeCore(loaded_devices=["HamCam1"])
+    devices = create_devices_from_mmcore(core)
+    assert "piezo_b" not in devices
+
+
+def test_scanner_b_piezo_b_both_present_on_dual_side_rig():
+    """Full dual-side rig: both scanner_b and piezo_b created; side A unchanged."""
+    core = FakeCore(loaded_devices=["HamCam1", "HamCam2", "Scanner:CD:33", "PiezoStage:Q:35"])
+    devices = create_devices_from_mmcore(core)
+    assert "scanner_b" in devices
+    assert "piezo_b" in devices
+    # Side-A optics must still be present
+    assert "scanner" in devices
+    assert "piezo" in devices
+
+
+def test_scanner_b_piezo_b_both_absent_on_single_side_rig():
+    """Single-side rig: neither scanner_b nor piezo_b created; A-side and camera OK."""
+    core = FakeCore(loaded_devices=["HamCam1"])
+    devices = create_devices_from_mmcore(core)
+    assert "scanner_b" not in devices
+    assert "piezo_b" not in devices
+    assert "scanner" in devices
+    assert "piezo" in devices

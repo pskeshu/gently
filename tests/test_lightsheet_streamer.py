@@ -64,7 +64,8 @@ async def test_grab_parks_and_peeks(monkeypatch):
     dl = _make_dl()
     dl._state_pause_counter = 0
     dl._ls_target_max_dim = 512; dl._ls_jpeg_quality = 70
-    dl._ls_params = {"galvo": 1.5, "piezo": 40.0, "exposure": 20.0}
+    # Explicit continuous mode: this test verifies the sequence-start + getLastImage path.
+    dl._ls_params = {"galvo": 1.5, "piezo": 40.0, "exposure": 20.0, "mode": "continuous"}
     dl._ls_seq_started = False; dl._ls_applied = {}
     dl._ls_interval_sec = 0.0
     img = await asyncio.to_thread(dl._grab_lightsheet_frame_sync)
@@ -79,7 +80,8 @@ async def test_exposure_change_restarts_sequence():
     dl = _make_dl()
     dl._state_pause_counter = 0
     dl._ls_target_max_dim = 512; dl._ls_jpeg_quality = 70
-    dl._ls_params = {"galvo": 0.0, "piezo": 50.0, "exposure": 10.0}
+    # Explicit continuous mode: this test verifies restart on exposure change.
+    dl._ls_params = {"galvo": 0.0, "piezo": 50.0, "exposure": 10.0, "mode": "continuous"}
     dl._ls_seq_started = False; dl._ls_applied = {}
     dl._ls_interval_sec = 0.0
     await asyncio.to_thread(dl._grab_lightsheet_frame_sync)

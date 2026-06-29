@@ -67,6 +67,9 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
         "camera_b_name": "HamCam2",
         "scanner_name": "Scanner:AB:33",
         "piezo_name": "PiezoStage:P:34",
+        # Side-B optics: registered defensively (absent on single-side rigs)
+        "scanner_b_name": "Scanner:CD:33",
+        "piezo_b_name": "PiezoStage:Q:35",
         "fdrive_name": "ZStage:V:37",
         "bottom_camera_name": "Bottom PCO",
         "led_name": "LED:X:31",
@@ -128,6 +131,40 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
             )
     except Exception as e:
         logger.warning("Could not create camera_b: %s", e)
+
+    # Defensively register the side-B galvo scanner (Scanner:CD:33).
+    # Absent on single-side rigs — skip + log, do not crash.
+    try:
+        scanner_b_name = cfg.get("scanner_b_name", "Scanner:CD:33")
+        loaded_devices = list(core.getLoadedDevices())
+        if scanner_b_name in loaded_devices:
+            scanner_b = DiSPIMScanner(name=scanner_b_name, core=core)
+            devices["scanner_b"] = scanner_b
+            logger.info("Created scanner_b (side B): %s", scanner_b_name)
+        else:
+            logger.warning(
+                "scanner_b (%s) not in loaded devices — single-side rig or device absent; skipping",
+                scanner_b_name,
+            )
+    except Exception as e:
+        logger.warning("Could not create scanner_b: %s", e)
+
+    # Defensively register the side-B imaging piezo (PiezoStage:Q:35).
+    # Absent on single-side rigs — skip + log, do not crash.
+    try:
+        piezo_b_name = cfg.get("piezo_b_name", "PiezoStage:Q:35")
+        loaded_devices = list(core.getLoadedDevices())
+        if piezo_b_name in loaded_devices:
+            piezo_b = DiSPIMPiezo(name=piezo_b_name, core=core)
+            devices["piezo_b"] = piezo_b
+            logger.info("Created piezo_b (side B): %s", piezo_b_name)
+        else:
+            logger.warning(
+                "piezo_b (%s) not in loaded devices — single-side rig or device absent; skipping",
+                piezo_b_name,
+            )
+    except Exception as e:
+        logger.warning("Could not create piezo_b: %s", e)
 
     try:
         from .devices import DiSPIMLightSource

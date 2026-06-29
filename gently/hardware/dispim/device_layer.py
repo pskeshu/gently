@@ -174,7 +174,15 @@ class DeviceLayerServer(Service):
         self._ls_interval_sec: float = 0.0          # peek as fast as exposure allows
         self._ls_target_max_dim: int = 512
         self._ls_jpeg_quality: int = 70
-        self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0, "side": "A"}
+        self._ls_params: dict = {
+            "galvo": 0.0,
+            "piezo": 50.0,
+            "exposure": 20.0,
+            "side": "A",
+            # "snap"  → per-frame snapImage()+getImage() — hard memory ceiling, safe default.
+            # "continuous" → startContinuousSequenceAcquisition (opt-in, higher FPS).
+            "mode": "snap",
+        }
         self._ls_seq_started: bool = False
         self._ls_applied: dict = {}                  # last-applied galvo/piezo/exposure
         self._ls_parked: dict = {}                   # last-parked galvo/piezo setPosition values
@@ -981,6 +989,11 @@ class DeviceLayerServer(Service):
     def _park_lightsheet_sync(self) -> None:
         """Park scanner galvo + imaging piezo at the current live params (static sheet).
 
+        Side 'A' drives devices["scanner"] / devices["piezo"] (Scanner:AB:33 /
+        PiezoStage:P:34).  Side 'B' drives devices["scanner_b"] / devices["piezo_b"]
+        (Scanner:CD:33 / PiezoStage:Q:35) when registered.  Falls back to side A
+        with a warning on single-side rigs so they are never broken.
+
         Guards:
         - set_spim_state("Idle") fires once per stream session, not per frame
           (4 serial round-trips on first call → 0 on every subsequent frame).
@@ -988,8 +1001,32 @@ class DeviceLayerServer(Service):
           last-applied value (no-op on steady-state frames).
         """
         p = self._ls_params
-        scanner = self.devices.get("scanner")
-        piezo = self.devices.get("piezo")
+        side = p.get("side", "A")
+
+        # Resolve scanner for the requested side (with fallback to A).
+        if side == "B":
+            if "scanner_b" in self.devices:
+                scanner = self.devices["scanner_b"]
+            else:
+                logger.warning(
+                    "Side B requested but scanner_b not registered; falling back to side A for scanner"
+                )
+                scanner = self.devices.get("scanner")
+        else:
+            scanner = self.devices.get("scanner")
+
+        # Resolve piezo for the requested side (with fallback to A).
+        if side == "B":
+            if "piezo_b" in self.devices:
+                piezo = self.devices["piezo_b"]
+            else:
+                logger.warning(
+                    "Side B requested but piezo_b not registered; falling back to side A for piezo"
+                )
+                piezo = self.devices.get("piezo")
+        else:
+            piezo = self.devices.get("piezo")
+
         # SPIM Idle state machine: drive both devices Idle once per session.
         if not self._ls_spim_idle:
             if scanner is not None:
@@ -1016,7 +1053,18 @@ class DeviceLayerServer(Service):
                 self._ls_parked["piezo"] = want
 
     def _ensure_lightsheet_sequence_sync(self) -> None:
-        """Start (or restart on exposure/side change) the continuous sequence on the SPIM camera.
+        """Configure (or reconfigure on exposure/side change) the SPIM camera.
+
+        Two modes gated by ``_ls_params["mode"]``:
+
+        "snap" (default, safe) — per-frame snapImage()+getImage().  No circular
+            buffer at all; memory is bounded to one frame.  Sets camera device
+            and exposure only when a reconfiguration is needed; never calls
+            startContinuousSequenceAcquisition.
+
+        "continuous" (opt-in) — startContinuousSequenceAcquisition with a hard
+            footprint cap (256 MB) so the buffer can't balloon on a production
+            box.  The grab loop drains with clearCircularBuffer() after each peek.
 
         Side 'A' uses devices["camera"] (HamCam1); side 'B' uses devices["camera_b"]
         (HamCam2) when registered.  If side B is requested but camera_b is absent,
@@ -1025,10 +1073,11 @@ class DeviceLayerServer(Service):
         core = self.system.core
         p = self._ls_params
         side = p.get("side", "A")
+        mode = p.get("mode", "snap")
 
         # Resolve the camera for the requested side
         if side == "B" and "camera_b" in self.devices:
-            cam = self.devices.get("camera_b")
+            cam = self.devices["camera_b"]
         else:
             if side == "B":
                 logger.warning(
@@ -1039,33 +1088,76 @@ class DeviceLayerServer(Service):
         if cam is None:
             raise RuntimeError("No lightsheet camera configured")
 
-        need_restart = (
+        need_reconfigure = (
             not self._ls_seq_started
             or self._ls_applied.get("exposure") != p["exposure"]
             or self._ls_applied.get("side") != side
         )
-        if need_restart:
-            if core.isSequenceRunning():
-                core.stopSequenceAcquisition()
-            if core.getCameraDevice() != cam.name:
-                core.setCameraDevice(cam.name)
-            core.setExposure(cam.name, float(p["exposure"]))
-            core.startContinuousSequenceAcquisition(self._ls_interval_sec * 1000.0)
-            self._ls_seq_started = True
-            self._ls_applied["exposure"] = p["exposure"]
-            self._ls_applied["side"] = side
+
+        if mode == "snap":
+            # Snap mode: configure camera/exposure on change; no continuous sequence.
+            if need_reconfigure:
+                # Stop any lingering continuous sequence before snap takes over.
+                if core.isSequenceRunning():
+                    core.stopSequenceAcquisition()
+                    try:
+                        core.clearCircularBuffer()
+                    except Exception:
+                        pass
+                if core.getCameraDevice() != cam.name:
+                    core.setCameraDevice(cam.name)
+                core.setExposure(cam.name, float(p["exposure"]))
+                self._ls_seq_started = True  # "camera configured" flag; no sequence running
+                self._ls_applied["exposure"] = p["exposure"]
+                self._ls_applied["side"] = side
+        else:
+            # Continuous mode: cap buffer footprint then start sequence.
+            if need_reconfigure:
+                if core.isSequenceRunning():
+                    core.stopSequenceAcquisition()
+                if core.getCameraDevice() != cam.name:
+                    core.setCameraDevice(cam.name)
+                core.setExposure(cam.name, float(p["exposure"]))
+                # Hard cap: prevent buffer balloon that crashed the production box.
+                try:
+                    core.setCircularBufferMemoryFootprint(256)
+                except Exception:
+                    logger.debug(
+                        "setCircularBufferMemoryFootprint not available on this core",
+                        exc_info=True,
+                    )
+                core.startContinuousSequenceAcquisition(self._ls_interval_sec * 1000.0)
+                self._ls_seq_started = True
+                self._ls_applied["exposure"] = p["exposure"]
+                self._ls_applied["side"] = side
 
     def _grab_lightsheet_frame_sync(self):
-        """Park → ensure sequence running → peek the latest frame (never drain)."""
+        """Park → configure camera → grab one frame.
+
+        Snap mode (default): snapImage()+getImage() — no circular buffer,
+        hard memory ceiling, safe for long live-view sessions.
+
+        Continuous mode (opt-in): peeks via getLastImage() then drains the
+        buffer with clearCircularBuffer() to prevent it sitting full.
+        """
         try:
-            self._park_lightsheet_sync()                  # galvo/piezo applied live
-            self._ensure_lightsheet_sequence_sync()       # start / restart on exposure
+            self._park_lightsheet_sync()
+            self._ensure_lightsheet_sequence_sync()
             try:
                 from gently.hardware.dispim.devices.acquisition import _safe_obtain
             except (ImportError, AttributeError):
                 _safe_obtain = None
             core = self.system.core
-            img = core.getLastImage()
+            mode = self._ls_params.get("mode", "snap")
+            if mode == "snap":
+                core.snapImage()
+                img = core.getImage()
+            else:
+                img = core.getLastImage()
+                try:
+                    core.clearCircularBuffer()
+                except Exception:
+                    pass
             if _safe_obtain is not None:
                 try:
                     img = _safe_obtain(img)
@@ -1082,6 +1174,11 @@ class DeviceLayerServer(Service):
                 self.system.core.stopSequenceAcquisition()
         except Exception:
             logger.debug("stop lightsheet sequence failed", exc_info=True)
+        # Drain the buffer on every stop path (snap mode: no-op; continuous: release memory).
+        try:
+            self.system.core.clearCircularBuffer()
+        except Exception:
+            pass
         self._ls_seq_started = False
         self._ls_applied = {}
         # Reset park guard so the next stream session re-idles the state
