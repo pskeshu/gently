@@ -19,7 +19,7 @@ const ExperimentOverview = {
     _subscribed: false,      // guard: prevents double-registration across tab re-clicks
     _planRefreshTimer: null, // debounce handle for tactic-event-driven refetch
     _tempUpdateHandler: null,// stored handler ref so it can be off()'d if needed
-    _rosterEmbyros: [],      // embryos from /api/embryos/positions (D2 roster lens)
+    _rosterEmbryos: [],      // embryos from /api/embryos/positions (D2 roster lens)
     _rolesMap: null,         // Map(role name → registry obj) from /api/roles (D2 roster lens)
 
     async init() {
@@ -43,7 +43,7 @@ const ExperimentOverview = {
         // Fetch plan (overview) and strategy (rules) in parallel so tab-switching
         // between the two views doesn't require a second round-trip.
         // D2: also fetch roster + roles for the roster lens.
-        const [plan, strategy, rosterEmbyros, rolesMap] = await Promise.all([
+        const [plan, strategy, rosterEmbryos, rolesMap] = await Promise.all([
             this.loadPlan(),
             this.loadStrategy(),
             this._loadRoster(),
@@ -51,7 +51,7 @@ const ExperimentOverview = {
         ]);
         this.activePlan = plan;
         this.activeStrategy = strategy;
-        this._rosterEmbyros = rosterEmbyros;
+        this._rosterEmbryos = rosterEmbryos;
         this._rolesMap = rolesMap;
         this.isLive = plan !== null || strategy !== null;
         this.render(strategy);
@@ -128,12 +128,12 @@ const ExperimentOverview = {
         if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);
         this._planRefreshTimer = setTimeout(async () => {
             this._planRefreshTimer = null;
-            const [plan, rosterEmbyros] = await Promise.all([
+            const [plan, rosterEmbryos] = await Promise.all([
                 this.loadPlan(),
                 this._loadRoster(),
             ]);
             this.activePlan = plan;
-            this._rosterEmbyros = rosterEmbyros;
+            this._rosterEmbryos = rosterEmbryos;
             this.isLive = plan !== null;
             this.render(this.activeStrategy);
         }, 500);
@@ -353,14 +353,14 @@ const ExperimentOverview = {
         // Roster lens: visible when embryos + role metadata are both available.
         // Gracefully absent if either fetch failed or returned nothing (backward compat
         // with plans that pre-date D2 — spine renders exactly as before).
-        const rosterEmbyros = this._rosterEmbyros || [];
+        const rosterEmbryos = this._rosterEmbryos || [];
         const rolesMap = this._rolesMap;
-        const rosterCtx = (rosterEmbyros.length > 0 && rolesMap && rolesMap.size > 0)
-            ? { embryos: rosterEmbyros, rolesMap }
+        const rosterCtx = (rosterEmbryos.length > 0 && rolesMap && rolesMap.size > 0)
+            ? { embryos: rosterEmbryos, rolesMap }
             : null;
         const rosterHtml = rosterCtx
             ? `<div class="ops-section-label">Population roster — by class &amp; role</div>
-               ${this._renderRosterLens(rosterEmbyros, rolesMap, plan, ESC)}`
+               ${this._renderRosterLens(rosterEmbryos, rolesMap, plan, ESC)}`
             : '';
         const spineLabel = rosterCtx
             ? '<div class="ops-section-label">Tactic spine — role-scoped</div>'
@@ -613,6 +613,7 @@ const ExperimentOverview = {
     // that covers a given embryo (by embryo_id + role).
     // Scope resolution: global → covers all; role → covers matching role;
     // embryos → covers listed ids. Returns '' when no tactic found.
+    // NOTE: mirrors resolve_scope_embryos() in gently/app/orchestration/role_scope.py — keep in sync if a new scope mode is added.
     _resolveCurrentTactic(embryoId, role, plan) {
         if (!plan || !Array.isArray(plan.tactics)) return '';
         const covers = (t) => {

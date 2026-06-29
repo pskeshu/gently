@@ -216,6 +216,8 @@ class TimelapseStateTracker:
                     emb["stage_y_um"] = data["y"]
                 if data.get("role"):
                     emb["role"] = data["role"]
+                if "strain" in data:
+                    emb["strain"] = data.get("strain")
                 if data.get("uid"):
                     emb["uid"] = data["uid"]
                 if data.get("user_label"):
@@ -486,6 +488,7 @@ class TimelapseStateTracker:
                     "x": x,
                     "y": y,
                     "role": getattr(emb, "role", "test"),
+                    "strain": getattr(emb, "strain", None),
                     "user_label": getattr(emb, "user_label", None),
                     "confidence": getattr(emb, "detection_confidence", None),
                 },

@@ -143,3 +143,92 @@ def test_positions_endpoint_strain_none_when_absent():
     point = resp.json()["embryos"][0]
     assert "strain" in point
     assert point["strain"] is None
+
+
+# ===========================================================================
+# TimelapseStateTracker – Fix 1 (strain surfaces through tracker)
+# ===========================================================================
+
+
+def test_tracker_embryo_detected_sets_strain():
+    """EMBRYO_DETECTED with strain populates the tracker embryo dict."""
+    from gently.ui.web.timelapse_tracker import TimelapseStateTracker
+
+    tracker = TimelapseStateTracker()
+    tracker.handle_event(
+        "EMBRYO_DETECTED",
+        {
+            "embryo_id": "e1",
+            "x": 100.0,
+            "y": 200.0,
+            "role": "test",
+            "strain": "pan-nuclear GFP",
+            "uid": "abc",
+        },
+    )
+    assert tracker.embryos["e1"]["strain"] == "pan-nuclear GFP"
+
+
+def test_tracker_embryo_detected_strain_none_propagates():
+    """EMBRYO_DETECTED with explicit strain=None still writes the key."""
+    from gently.ui.web.timelapse_tracker import TimelapseStateTracker
+
+    tracker = TimelapseStateTracker()
+    tracker.handle_event(
+        "EMBRYO_DETECTED",
+        {
+            "embryo_id": "e2",
+            "x": 0.0,
+            "y": 0.0,
+            "role": "test",
+            "strain": None,
+        },
+    )
+    assert "strain" in tracker.embryos["e2"]
+    assert tracker.embryos["e2"]["strain"] is None
+
+
+def test_tracker_seed_from_experiment_includes_strain():
+    """seed_from_experiment copies strain from EmbryoState into tracker."""
+    from types import SimpleNamespace
+
+    from gently.ui.web.timelapse_tracker import TimelapseStateTracker
+
+    emb = SimpleNamespace(
+        stage_position={"x": 50.0, "y": 60.0},
+        uid="u1",
+        role="test",
+        strain="H2B-mCherry",
+        user_label=None,
+        detection_confidence=0.95,
+    )
+    experiment = SimpleNamespace(embryos={"e3": emb})
+
+    tracker = TimelapseStateTracker()
+    seeded = tracker.seed_from_experiment(experiment)
+
+    assert seeded == 1
+    assert tracker.embryos["e3"]["strain"] == "H2B-mCherry"
+
+
+def test_tracker_seed_from_experiment_strain_absent_is_none():
+    """seed_from_experiment with no strain attribute → tracker strain is None."""
+    from types import SimpleNamespace
+
+    from gently.ui.web.timelapse_tracker import TimelapseStateTracker
+
+    emb = SimpleNamespace(
+        stage_position={"x": 10.0, "y": 20.0},
+        uid="u2",
+        role="control",
+        # no .strain attribute
+        user_label=None,
+        detection_confidence=None,
+    )
+    experiment = SimpleNamespace(embryos={"e4": emb})
+
+    tracker = TimelapseStateTracker()
+    tracker.seed_from_experiment(experiment)
+
+    assert "strain" in tracker.embryos["e4"]
+    assert tracker.embryos["e4"]["strain"] is None
