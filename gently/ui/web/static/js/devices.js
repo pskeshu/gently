@@ -97,7 +97,7 @@ const DevicesManager = (function () {
 
     // Lightsheet live params — debounced POST to /api/devices/lightsheet/live/params
     let _lsGalvo = 0;
-    let _lsPiezo = 50;
+    let _lsPiezo = 0;
     let _lsExposure = 20;  // matches device-layer _ls_params default (20 ms)
     let _lsSide = 'A';     // SPIM side — 'A' (HamCam1) or 'B' (HamCam2 if present)
     let _lsParamTimer = null;
@@ -1749,7 +1749,9 @@ const DevicesManager = (function () {
     function applyLightsheetState(streaming) {
         _lsStreaming = streaming;
         if (_lsToggle) {
-            _lsToggle.textContent = streaming ? 'Stop' : 'Start';
+            // Constant "Live" label; the .active class + status dot show whether
+            // the stream is currently running (muted = off, green glow = live).
+            _lsToggle.textContent = 'Live';
             _lsToggle.classList.toggle('active', streaming);
         }
         if (_lsLed) {

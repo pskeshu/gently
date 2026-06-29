@@ -714,9 +714,6 @@
               </div>
             </div>
 
-            <!-- Temperature trajectory graph: backfill + live SVG chart -->
-            <section class="devices-temp-graph" id="devices-temp-graph" aria-label="Temperature trajectory"></section>
-
             <!-- Manual view: SPIM brightfield live-view + controls -->
             <div class="devices-view devices-view-manual" id="devices-view-manual" style="display:none">
                 <div class="ls-layout">
@@ -729,7 +726,6 @@
                                 <span>Lightsheet</span>
                             </span>
                             <span class="devices-camera-meta" id="devices-ls-meta">—</span>
-                            <button class="devices-camera-toggle" id="devices-ls-toggle" type="button">Start</button>
                         </div>
                         <div class="devices-camera-stage ls-stage" id="devices-ls-stage">
                             <img class="devices-camera-img" id="devices-ls-img" alt="lightsheet live frame">
@@ -747,6 +743,11 @@
 
                     <!-- RIGHT: control rail -->
                     <div class="ls-rail">
+
+                        <!-- Live stream toggle (relocated out of the viewer header) -->
+                        <div class="ls-group ls-group-stream">
+                            <button class="ls-stream-btn" id="devices-ls-toggle" type="button">Live</button>
+                        </div>
 
                         <!-- Exposure -->
                         <div class="ls-group">
@@ -786,9 +787,9 @@
                             <label class="ls-label" for="devices-ls-piezo">Piezo Z</label>
                             <div class="ls-slider-row">
                                 <input class="ls-slider" id="devices-ls-piezo-slider" type="range"
-                                       min="0" max="200" step="0.5" value="50" aria-label="Piezo Z position">
+                                       min="0" max="200" step="0.5" value="0" aria-label="Piezo Z position">
                                 <input class="ls-number ls-number-sm" id="devices-ls-piezo" type="number"
-                                       min="0" max="200" step="0.5" value="50" inputmode="decimal">
+                                       min="0" max="200" step="0.5" value="0" inputmode="decimal">
                                 <span class="ls-unit">µm</span>
                             </div>
                         </div>
@@ -823,18 +824,6 @@
                             </div>
                         </div>
 
-                        <!-- Temperature -->
-                        <div class="ls-group">
-                            <label class="ls-label">Temperature</label>
-                            <div class="ls-row">
-                                <input class="ls-number" id="devices-ls-temp-input" type="number"
-                                       min="0" max="99.9" step="0.1" inputmode="decimal"
-                                       placeholder="°C" aria-label="Temperature setpoint">
-                                <button class="ls-set-btn" id="devices-ls-temp-set" type="button">Set</button>
-                            </div>
-                            <div id="devices-ls-tempgraph" class="ls-tempgraph"></div>
-                        </div>
-
                         <!-- Acquire -->
                         <div class="ls-group">
                             <span class="ls-label">Acquire</span>
@@ -848,6 +837,18 @@
                                 <span class="ls-lastcap-label">Last acquired</span>
                                 <span class="ls-lastcap-ref" id="devices-ls-lastcap-ref">—</span>
                             </div>
+                        </div>
+
+                        <!-- Temperature -->
+                        <div class="ls-group">
+                            <label class="ls-label">Temperature</label>
+                            <div class="ls-row">
+                                <input class="ls-number" id="devices-ls-temp-input" type="number"
+                                       min="0" max="99.9" step="0.1" inputmode="decimal"
+                                       placeholder="°C" aria-label="Temperature setpoint">
+                                <button class="ls-set-btn" id="devices-ls-temp-set" type="button">Set</button>
+                            </div>
+                            <div id="devices-ls-tempgraph" class="ls-tempgraph"></div>
                         </div>
 
                         <!-- Timelapse (collapsible panel → accordion of 3 sections) -->
@@ -1004,6 +1005,12 @@
                     </div><!-- /.ls-rail -->
                 </div><!-- /.ls-layout -->
             </div><!-- /#devices-view-manual -->
+
+            <!-- Temperature trajectory graph: backfill + live SVG chart.
+                 Shared across device tabs; placed last so it sits at the
+                 bottom (was between 3D and Manual, which put it at the top
+                 of the Manual view). -->
+            <section class="devices-temp-graph" id="devices-temp-graph" aria-label="Temperature trajectory"></section>
         </div>
     </div>
 

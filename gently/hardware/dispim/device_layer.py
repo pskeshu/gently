@@ -181,7 +181,7 @@ class DeviceLayerServer(Service):
         self._ls_jpeg_quality: int = 70
         self._ls_params: dict = {
             "galvo": 0.0,
-            "piezo": 50.0,
+            "piezo": 0.0,
             "exposure": 20.0,
             "side": "A",
             # "snap"  → per-frame snapImage()+getImage() — hard memory ceiling, safe default.
