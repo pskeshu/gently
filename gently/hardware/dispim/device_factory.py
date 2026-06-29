@@ -64,6 +64,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
     default_config = {
         "xy_stage_name": "XYStage:XY:31",
         "camera_name": "HamCam1",
+        "camera_b_name": "HamCam2",
         "scanner_name": "Scanner:AB:33",
         "piezo_name": "PiezoStage:P:34",
         "fdrive_name": "ZStage:V:37",
@@ -107,6 +108,26 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
         logger.info("Created camera: %s", cfg["camera_name"])
     except Exception as e:
         logger.warning("Could not create camera: %s", e)
+
+    # Defensively register the second SPIM camera (side B) only when present
+    # in the core's loaded-device list.  Single-camera rigs that lack HamCam2
+    # continue to start normally; camera_b is simply absent from devices.
+    try:
+        from .devices import DiSPIMCamera as _DiSPIMCamera
+
+        cam_b_name = cfg.get("camera_b_name", "HamCam2")
+        loaded_devices = list(core.getLoadedDevices())
+        if cam_b_name in loaded_devices:
+            camera_b = _DiSPIMCamera(device_name=cam_b_name, core=core)
+            devices["camera_b"] = camera_b
+            logger.info("Created camera_b (side B): %s", cam_b_name)
+        else:
+            logger.warning(
+                "camera_b (%s) not in loaded devices — single-camera rig or device absent; skipping",
+                cam_b_name,
+            )
+    except Exception as e:
+        logger.warning("Could not create camera_b: %s", e)
 
     try:
         from .devices import DiSPIMLightSource

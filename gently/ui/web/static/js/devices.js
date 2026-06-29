@@ -91,6 +91,7 @@ const DevicesManager = (function () {
     let _lsGalvo = 0;
     let _lsPiezo = 50;
     let _lsExposure = 20;  // matches device-layer _ls_params default (20 ms)
+    let _lsSide = 'A';     // SPIM side — 'A' (HamCam1) or 'B' (HamCam2 if present)
     let _lsParamTimer = null;
 
     // Lightsheet control inputs (rail)
@@ -100,6 +101,7 @@ const DevicesManager = (function () {
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
     let _lsLaserStatus;   // span inside .ls-laser-indicator — driven by actual laser/off calls
     let _lsLaserPreset;   // <select id="devices-laser-preset"> — populated on manual-view entry
+    let _lsSideSelect;    // <select id="devices-ls-side"> — shown only when camera_b present
     let _lsTempInput, _lsTempSet;
 
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
@@ -203,6 +205,7 @@ const DevicesManager = (function () {
         _lsLastcapRef    = document.getElementById('devices-ls-lastcap-ref');
         _lsLaserStatus   = document.getElementById('devices-ls-laser-status');
         _lsLaserPreset   = document.getElementById('devices-laser-preset');
+        _lsSideSelect    = document.getElementById('devices-ls-side');
         _lsTempInput     = document.getElementById('devices-ls-temp-input');
         _lsTempSet       = document.getElementById('devices-ls-temp-set');
 
@@ -1398,6 +1401,31 @@ const DevicesManager = (function () {
         }
     }
 
+    /** Fetch SPIM camera roles and show the Side A/B selector if camera_b is present.
+     *  Called on manual-view entry.  Hides the selector on single-camera rigs.
+     *  Fire-and-forget safe — failure leaves the selector hidden (safe default). */
+    async function populateCameraRoles() {
+        cacheDom();
+        const group = document.getElementById('devices-ls-side-group');
+        try {
+            const res = await fetch('/api/devices/cameras');
+            if (!res.ok) return;
+            const data = await res.json();
+            // data may be {cameras: [...]} or a raw array
+            const cameras = Array.isArray(data) ? data : (data.cameras || []);
+            const hasSideB = cameras.includes('B');
+            if (group) group.style.display = hasSideB ? '' : 'none';
+            if (_lsSideSelect && hasSideB) {
+                _lsSideSelect.onchange = () => {
+                    _lsSide = _lsSideSelect.value;
+                    postLightsheetParams();
+                };
+            }
+        } catch (err) {
+            console.debug('camera roles fetch failed:', err);
+        }
+    }
+
     /** POST a named laser preset to the device layer.
      *  Updates the status indicator on success.
      *  Fire-and-forget safe — failure shows a warning, never throws. */
@@ -1607,7 +1635,7 @@ const DevicesManager = (function () {
         fetch('/api/devices/lightsheet/live/params', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ galvo: _lsGalvo, piezo: _lsPiezo, exposure: _lsExposure }),
+            body: JSON.stringify({ galvo: _lsGalvo, piezo: _lsPiezo, exposure: _lsExposure, side: _lsSide }),
         }).catch(err => console.debug('lightsheet params post failed:', err));
     }
 
@@ -2029,7 +2057,7 @@ const DevicesManager = (function () {
         // Entering Manual view — gate lasers off immediately (brightfield-safe).
         // populateLaserPresets() runs after setLaserOff() so the select is always
         // seeded with the entry-safety state first.
-        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); }
+        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); }
     }
 
     function setupViewSwitcher() {

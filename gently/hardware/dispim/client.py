@@ -834,6 +834,15 @@ class DiSPIMMicroscope(Microscope):
         """
         return await self._api_get("/api/laser/configs")
 
+    async def get_cameras(self) -> dict:
+        """List available SPIM camera roles.
+
+        Hits ``GET /api/cameras`` — returns ``{"cameras": ["A"]}`` on
+        single-camera rigs or ``{"cameras": ["A", "B"]}`` when HamCam2 is
+        registered as camera_b in the device layer.
+        """
+        return await self._api_get("/api/cameras")
+
     async def get_led_status(self) -> dict:
         """Get current LED status."""
         return await self._api_get("/api/led/status")
@@ -1015,9 +1024,9 @@ class DiSPIMMicroscope(Microscope):
                         logger.warning("Malformed lightsheet SSE payload skipped: %s", exc)
 
     async def set_lightsheet_live_params(
-        self, galvo=None, piezo=None, exposure=None
+        self, galvo=None, piezo=None, exposure=None, side=None
     ) -> dict:
-        """POST live galvo/piezo/exposure to the device-layer lightsheet streamer."""
+        """POST live galvo/piezo/exposure/side to the device-layer lightsheet streamer."""
         body = {}
         if galvo is not None:
             body["galvo"] = float(galvo)
@@ -1025,6 +1034,8 @@ class DiSPIMMicroscope(Microscope):
             body["piezo"] = float(piezo)
         if exposure is not None:
             body["exposure"] = float(exposure)
+        if side is not None:
+            body["side"] = str(side)
         return await self._api_post("/api/lightsheet/live/params", body)
 
     async def set_camera_led_mode(self, use_led: bool = False) -> dict:

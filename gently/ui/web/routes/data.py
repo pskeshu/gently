@@ -476,14 +476,14 @@ def create_router(server) -> APIRouter:
 
     @router.post("/api/devices/lightsheet/live/params", dependencies=[Depends(require_control)])
     async def lightsheet_live_params(payload: dict = Body(...)):  # noqa: B008
-        """Forward galvo/piezo/exposure params to the device-layer lightsheet streamer."""
+        """Forward galvo/piezo/exposure/side params to the device-layer lightsheet streamer."""
         client = _resolve_client()
         if client is None:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
             res = await client.set_lightsheet_live_params(
                 galvo=payload.get("galvo"), piezo=payload.get("piezo"),
-                exposure=payload.get("exposure"))
+                exposure=payload.get("exposure"), side=payload.get("side"))
         except Exception as exc:
             logger.exception("lightsheet live params failed")
             raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
@@ -559,6 +559,21 @@ def create_router(server) -> APIRouter:
         except Exception as exc:
             logger.exception("Laser config set command failed")
             raise HTTPException(status_code=502, detail=f"laser config failed: {exc}") from exc
+
+    @router.get("/api/devices/cameras")
+    async def cameras_list():
+        """Return the available SPIM camera roles (A always; B if camera_b registered).
+
+        No require_control — read-only status route, mirrors GET /api/devices/laser/configs.
+        """
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_cameras()
+        except Exception as exc:
+            logger.exception("Cameras list fetch failed")
+            raise HTTPException(status_code=502, detail=f"cameras failed: {exc}") from exc
 
     @router.post("/api/devices/camera/led_mode", dependencies=[Depends(require_control)])
     async def camera_led_mode(payload: dict = Body(...)):  # noqa: B008

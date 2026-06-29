@@ -758,6 +758,16 @@
                             </div>
                         </div>
 
+                        <!-- SPIM Side selector — hidden on single-camera rigs, shown when camera_b is present -->
+                        <div class="ls-group" id="devices-ls-side-group" style="display:none">
+                            <label class="ls-label" for="devices-ls-side">SPIM Side</label>
+                            <select id="devices-ls-side" class="ls-laser-select"
+                                    aria-label="Select SPIM side A or B">
+                                <option value="A" selected>Side A</option>
+                                <option value="B">Side B</option>
+                            </select>
+                        </div>
+
                         <!-- Galvo -->
                         <div class="ls-group">
                             <label class="ls-label" for="devices-ls-galvo">Galvo</label>

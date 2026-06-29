@@ -174,7 +174,7 @@ class DeviceLayerServer(Service):
         self._ls_interval_sec: float = 0.0          # peek as fast as exposure allows
         self._ls_target_max_dim: int = 512
         self._ls_jpeg_quality: int = 70
-        self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0}
+        self._ls_params: dict = {"galvo": 0.0, "piezo": 50.0, "exposure": 20.0, "side": "A"}
         self._ls_seq_started: bool = False
         self._ls_applied: dict = {}                  # last-applied galvo/piezo/exposure
         self._ls_parked: dict = {}                   # last-parked galvo/piezo setPosition values
@@ -1016,15 +1016,33 @@ class DeviceLayerServer(Service):
                 self._ls_parked["piezo"] = want
 
     def _ensure_lightsheet_sequence_sync(self) -> None:
-        """Start (or restart on exposure change) the continuous sequence on the SPIM camera."""
+        """Start (or restart on exposure/side change) the continuous sequence on the SPIM camera.
+
+        Side 'A' uses devices["camera"] (HamCam1); side 'B' uses devices["camera_b"]
+        (HamCam2) when registered.  If side B is requested but camera_b is absent,
+        falls back to side A and logs a warning — single-camera rigs are unaffected.
+        """
         core = self.system.core
-        cam = self.devices.get("camera")
+        p = self._ls_params
+        side = p.get("side", "A")
+
+        # Resolve the camera for the requested side
+        if side == "B" and "camera_b" in self.devices:
+            cam = self.devices.get("camera_b")
+        else:
+            if side == "B":
+                logger.warning(
+                    "Side B requested but camera_b not registered; falling back to side A"
+                )
+            cam = self.devices.get("camera")
+
         if cam is None:
             raise RuntimeError("No lightsheet camera configured")
-        p = self._ls_params
+
         need_restart = (
             not self._ls_seq_started
             or self._ls_applied.get("exposure") != p["exposure"]
+            or self._ls_applied.get("side") != side
         )
         if need_restart:
             if core.isSequenceRunning():
@@ -1035,6 +1053,7 @@ class DeviceLayerServer(Service):
             core.startContinuousSequenceAcquisition(self._ls_interval_sec * 1000.0)
             self._ls_seq_started = True
             self._ls_applied["exposure"] = p["exposure"]
+            self._ls_applied["side"] = side
 
     def _grab_lightsheet_frame_sync(self):
         """Park → ensure sequence running → peek the latest frame (never drain)."""
@@ -1167,15 +1186,17 @@ class DeviceLayerServer(Service):
         return response
 
     async def handle_lightsheet_params(self, request):
-        """POST /api/lightsheet/live/params — update live galvo/piezo/exposure.
+        """POST /api/lightsheet/live/params — update live galvo/piezo/exposure/side.
 
-        Body: {"galvo": float, "piezo": float, "exposure": float} (all optional).
-        Galvo/piezo apply on the next grab; exposure change triggers sequence restart.
+        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"} (all optional).
+        Galvo/piezo apply on the next grab; exposure or side change triggers sequence restart.
         """
         body = await request.json()
         for k in ("galvo", "piezo", "exposure"):
             if k in body and body[k] is not None:
                 self._ls_params[k] = float(body[k])
+        if "side" in body and body["side"] in ("A", "B"):
+            self._ls_params["side"] = body["side"]
         return web.json_response({"params": self._ls_params})
 
     # =========================================================================
@@ -2083,6 +2104,17 @@ class DeviceLayerServer(Service):
                 },
                 status=500,
             )
+
+    async def handle_get_cameras(self, request):
+        """GET /api/cameras — list available SPIM camera roles.
+
+        Returns ``{"cameras": ["A"]}`` on single-camera rigs, or
+        ``{"cameras": ["A", "B"]}`` when camera_b (HamCam2) is registered.
+        """
+        cameras = ["A"]
+        if "camera_b" in self.devices:
+            cameras.append("B")
+        return web.json_response({"cameras": cameras})
 
     async def handle_get_camera_exposure(self, request):
         """GET /api/camera/exposure - Get bottom camera exposure time"""
@@ -3100,6 +3132,7 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition
         self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
         self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
+        self._app.router.add_get("/api/cameras", self.handle_get_cameras)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())
