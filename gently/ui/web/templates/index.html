@@ -796,19 +796,21 @@
                         <div class="ls-group">
                             <span class="ls-label">Illumination</span>
                             <div class="ls-btn-row">
-                                <button class="ls-illum-btn" id="devices-ls-led-open" type="button"
-                                        title="LED group preset: Open">LED Open</button>
-                                <button class="ls-illum-btn" id="devices-ls-led-closed" type="button"
-                                        title="LED group preset: Closed">LED Closed</button>
-                            </div>
-                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-led-toggle" type="button"
+                                        title="Toggle LED preset (Open/Closed)"
+                                        aria-pressed="false">LED: Closed</button>
                                 <button class="ls-illum-btn" id="devices-ls-cam-led" type="button"
                                         title="Toggle camera LED mode" aria-pressed="false">Cam LED</button>
                                 <button class="ls-illum-btn" id="devices-ls-room-light-btn" type="button"
                                         title="Toggle room light" aria-pressed="false">Room Light</button>
                             </div>
+                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-laser-toggle" type="button"
+                                        title="Toggle laser on/off"
+                                        aria-pressed="false">Laser: OFF</button>
+                            </div>
                             <div class="ls-laser-row">
-                                <label class="ls-laser-label" for="devices-laser-preset">Laser preset</label>
+                                <label class="ls-laser-label" for="devices-laser-preset">Preset</label>
                                 <select id="devices-laser-preset" class="ls-laser-select"
                                         aria-label="Laser preset">
                                     <option value="ALL OFF">ALL OFF</option>

@@ -96,8 +96,11 @@ const DevicesManager = (function () {
 
     // Lightsheet control inputs (rail)
     let _lsGalvoSlider, _lsGalvoNum, _lsPiezoSlider, _lsPiezoNum, _lsExposureNum;
-    let _lsLedOpen, _lsLedClosed, _lsCamLed, _lsRoomLightBtn;
+    let _lsLedToggle, _lsCamLed, _lsRoomLightBtn;
+    let _lsLedIsOpen = false;  // LED toggle state: false = Closed (safe default)
     let _lsCamLedOn = false;
+    let _lsLaserToggle;
+    let _lsLaserOn = false;    // Laser toggle state: false = OFF (entry-safe default)
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
     let _lsLaserStatus;   // span inside .ls-laser-indicator — driven by actual laser/off calls
     let _lsLaserPreset;   // <select id="devices-laser-preset"> — populated on manual-view entry
@@ -202,10 +205,10 @@ const DevicesManager = (function () {
         _lsPiezoSlider   = document.getElementById('devices-ls-piezo-slider');
         _lsPiezoNum      = document.getElementById('devices-ls-piezo');
         _lsExposureNum   = document.getElementById('devices-ls-exposure');
-        _lsLedOpen       = document.getElementById('devices-ls-led-open');
-        _lsLedClosed     = document.getElementById('devices-ls-led-closed');
+        _lsLedToggle     = document.getElementById('devices-ls-led-toggle');
         _lsCamLed        = document.getElementById('devices-ls-cam-led');
         _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
+        _lsLaserToggle   = document.getElementById('devices-ls-laser-toggle');
         _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
         _lsBurstBtn      = document.getElementById('devices-ls-burst');
         _lsLastcap       = document.getElementById('devices-ls-lastcap');
@@ -1392,6 +1395,7 @@ const DevicesManager = (function () {
             if (_lsLaserStatus) {
                 _lsLaserStatus.textContent = res.ok ? 'OFF (brightfield)' : 'warning: state unknown';
             }
+            if (res.ok) _setLaserToggleState(false);
         } catch (err) {
             if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
             console.debug('laser off call failed:', err);
@@ -1422,8 +1426,9 @@ const DevicesManager = (function () {
             }
             // Default to "ALL OFF" — entry safety state
             if (presets.includes('ALL OFF')) _lsLaserPreset.value = 'ALL OFF';
-            // Wire change handler (idempotent — replace via re-assignment)
-            _lsLaserPreset.onchange = () => setLaserPreset(_lsLaserPreset.value);
+            // Wire change handler — only POST if laser is currently ON; if OFF, it's
+            // just a selection that will be activated when the toggle is pressed.
+            _lsLaserPreset.onchange = () => { if (_lsLaserOn) setLaserPreset(_lsLaserPreset.value); };
         } catch (err) {
             console.debug('laser preset fetch failed:', err);
         }
@@ -1469,6 +1474,7 @@ const DevicesManager = (function () {
             if (_lsLaserStatus) {
                 _lsLaserStatus.textContent = res.ok ? config : 'warning: state unknown';
             }
+            if (res.ok) _setLaserToggleState(config !== 'ALL OFF');
             if (!res.ok) console.debug('laser preset set failed:', await res.text());
         } catch (err) {
             if (_lsLaserStatus) _lsLaserStatus.textContent = 'warning: state unknown';
@@ -1847,6 +1853,54 @@ const DevicesManager = (function () {
         } catch (err) { console.debug('LED preset failed:', err); }
     }
 
+    /** Single LED toggle — mirrors Cam LED / Room Light aria-pressed pattern.
+     *  Flips between Open (active) and Closed (inactive/safe default). */
+    async function toggleLedPreset() {
+        _lsLedIsOpen = !_lsLedIsOpen;
+        if (_lsLedToggle) {
+            _lsLedToggle.classList.toggle('ls-illum-btn--active', _lsLedIsOpen);
+            _lsLedToggle.setAttribute('aria-pressed', _lsLedIsOpen ? 'true' : 'false');
+            _lsLedToggle.textContent = _lsLedIsOpen ? 'LED: Open' : 'LED: Closed';
+        }
+        await postLedPreset(_lsLedIsOpen ? 'Open' : 'Closed');
+    }
+
+    /** Update laser toggle button + dot to reflect on/off state.
+     *  Called by setLaserOff() and setLaserPreset() after a successful API call. */
+    function _setLaserToggleState(on) {
+        _lsLaserOn = on;
+        if (_lsLaserToggle) {
+            _lsLaserToggle.classList.toggle('ls-illum-btn--active', on);
+            _lsLaserToggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+            _lsLaserToggle.textContent = on ? 'Laser: ON' : 'Laser: OFF';
+        }
+        const dot = document.querySelector('.ls-laser-dot');
+        if (dot) dot.classList.toggle('ls-laser-dot--on', on);
+    }
+
+    /** Laser on/off toggle — OFF fires laser/off; ON applies the selected preset.
+     *  If selected preset is "ALL OFF", picks the first non-"ALL OFF" option.
+     *  Entry safety: starts OFF (setLaserOff fires on manual-view entry). */
+    async function toggleLaser() {
+        if (_lsLaserOn) {
+            await setLaserOff();
+        } else {
+            let config = _lsLaserPreset ? _lsLaserPreset.value : null;
+            if (!config || config === 'ALL OFF') {
+                const opts = _lsLaserPreset ? Array.from(_lsLaserPreset.options) : [];
+                const first = opts.find(o => o.value !== 'ALL OFF');
+                if (first) {
+                    config = first.value;
+                    _lsLaserPreset.value = config;
+                } else {
+                    if (_lsLaserStatus) _lsLaserStatus.textContent = 'select a laser line first';
+                    return;
+                }
+            }
+            await setLaserPreset(config);
+        }
+    }
+
     async function toggleCamLedMode() {
         _lsCamLedOn = !_lsCamLedOn;
         if (_lsCamLed) {
@@ -1958,10 +2012,10 @@ const DevicesManager = (function () {
         if (_lsExposureNum) _lsExposureNum.addEventListener('input', onExposureInput);
 
         // Illumination
-        if (_lsLedOpen)    _lsLedOpen.addEventListener('click',    () => postLedPreset('Open'));
-        if (_lsLedClosed)  _lsLedClosed.addEventListener('click',  () => postLedPreset('Closed'));
-        if (_lsCamLed)     _lsCamLed.addEventListener('click',     toggleCamLedMode);
+        if (_lsLedToggle)    _lsLedToggle.addEventListener('click',    toggleLedPreset);
+        if (_lsCamLed)       _lsCamLed.addEventListener('click',       toggleCamLedMode);
         if (_lsRoomLightBtn) _lsRoomLightBtn.addEventListener('click', toggleManualRoomLight);
+        if (_lsLaserToggle)  _lsLaserToggle.addEventListener('click',  toggleLaser);
 
         // Acquire
         if (_lsSnapVolBtn) _lsSnapVolBtn.addEventListener('click', () => runLightsheetAcquire('volume'));

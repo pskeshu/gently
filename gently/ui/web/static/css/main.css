@@ -10725,6 +10725,10 @@ body.modal-open {
     flex-shrink: 0;
 }
 
+.ls-laser-dot--on {
+    background: var(--map-accent);
+}
+
 /* Laser preset row (B2) */
 .ls-laser-row {
     display: flex;
