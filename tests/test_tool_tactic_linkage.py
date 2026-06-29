@@ -30,7 +30,7 @@ class FakeContextStore:
     def __init__(self):
         self.transitions: list[tuple] = []
 
-    def transition_tactic(self, session_id: str, tactic_id: str, state: str = None, **bind):
+    def transition_tactic(self, session_id: str, tactic_id: str, state: str | None = None, **bind):
         self.transitions.append((session_id, tactic_id, state))
         return True
 

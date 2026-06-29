@@ -91,7 +91,7 @@ class FakeScanner:
     def __init__(self, name: str):
         self.name = name
         self.sa_offset_y = FakeAxisOffset()
-        self.spim_state = None
+        self.spim_state: str | None = None
 
     def set_spim_state(self, state: str) -> None:
         self.spim_state = state
@@ -102,8 +102,8 @@ class FakePiezo:
 
     def __init__(self, name: str):
         self.name = name
-        self.last_pos = None
-        self.spim_state = None
+        self.last_pos: float | None = None
+        self.spim_state: str | None = None
 
     def setPosition(self, val: float) -> None:
         self.last_pos = val
