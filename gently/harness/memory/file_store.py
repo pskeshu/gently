@@ -1437,6 +1437,51 @@ class FileContextStore:
         self._notify_plan_change(campaign_id)
         return True
 
+    def unlink_plan_item_session(self, item_id: str, session_id: str) -> bool:
+        """Remove a session from a plan item's session_ids list.
+
+        Mirrors the load/persist/notify pattern of link_plan_item_session.
+        Clears the back-compat scalar session_id when it matched the removed
+        session (sets it to the most-recent remaining session_id, or None).
+        Idempotent: returns False without writing if the session isn't linked.
+        Returns True on successful removal.
+        """
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
+        if session_id not in sids:
+            return False
+        sids = [s for s in sids if s != session_id]
+        item["session_ids"] = sids
+        item["session_id"] = sids[-1] if sids else None  # back-compat: most recent remaining
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
+
+    def get_plan_items_for_session(self, session_id: str) -> list["PlanItem"]:
+        """Return all plan items linked to a session.
+
+        Iterates active campaigns only (mirrors the normal read path).
+        Back-compat: matches items whose scalar session_id equals the query even
+        when session_ids is empty (old items written before the list field existed).
+        Deduplicates by item id.
+        """
+        seen: set[str] = set()
+        result: list[PlanItem] = []
+        for campaign in self.get_active_campaigns():
+            for item in self.get_plan_items(campaign.id):
+                if item.id in seen:
+                    continue
+                # session_ids is already populated from back-compat in _dict_to_plan_item
+                if session_id in (item.session_ids or []) or item.session_id == session_id:
+                    seen.add(item.id)
+                    result.append(item)
+        return result
+
     def skip_plan_item(self, item_id: str, reason: str | None = None):
         self.update_plan_item(
             item_id,
