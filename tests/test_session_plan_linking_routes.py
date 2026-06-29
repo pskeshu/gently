@@ -103,7 +103,17 @@ class TestPostLinkSession:
         assert isinstance(body["sessions"], list)
 
     def test_returns_serialized_session_intents(self):
-        item = _make_item("i1", "c1", "Step A")
+        # Item must have session_ids=["s1"] to simulate the post-link state
+        # (mock link_plan_item_session doesn't mutate the item; we configure
+        # get_plan_item to return the post-link view so the item-scoped filter works).
+        item = PlanItem(
+            id="i1",
+            campaign_id="c1",
+            type=PlanItemType.BENCH,
+            title="Step A",
+            status=PlanItemStatus.PLANNED,
+            session_ids=["s1"],
+        )
         si = SessionIntent(
             session_id="s1",
             campaign_ids=["c1"],

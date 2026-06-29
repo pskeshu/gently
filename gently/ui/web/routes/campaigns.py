@@ -275,7 +275,12 @@ def create_router(server) -> APIRouter:
         cs.link_plan_item_session(item_id, session_id)
         cs.link_session_campaign(session_id, campaign.id)
 
-        sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        # Re-fetch item so session_ids reflects the just-added link; then filter
+        # exactly as get_item_detail does — POST and GET return the same scope.
+        item = cs.get_plan_item(item_id)
+        item_sids = set(item.session_ids or [])
+        all_sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        sessions = [s for s in all_sessions if s.session_id in item_sids]
         return {"sessions": [_serialize(s) for s in sessions]}
 
     @router.delete("/api/campaigns/{campaign_id}/items/{item_id}/sessions/{session_id}")

@@ -434,7 +434,7 @@ const ExperimentOverview = {
         const select = panelEl.querySelector('#ops-lp-picker-sel');
         const value  = select && select.value;
         if (!value || !value.includes('::')) return;
-        const [campaignId, itemId] = value.split('::');
+        const [campaignId, itemId] = value.split('::', 2);
         if (!campaignId || !itemId) return;
 
         this._planPickerOpen = false;

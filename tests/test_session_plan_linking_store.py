@@ -165,3 +165,46 @@ class TestBackCompatSessionId:
         assert sid2 in item.session_ids
         assert item.session_id == sid2  # most recent remaining
         assert sid1 not in item.session_ids
+
+
+class TestBackCompatLegacyScalar:
+    """Back-compat path: items written before session_ids list existed (scalar only)."""
+
+    def _inject_legacy_item(self, store, campaign_id: str, item_id: str, session_id: str):
+        """Overwrite a plan item's YAML record to simulate legacy format:
+        session_id set but session_ids absent/empty — as written by pre-list code."""
+        loc = store._find_plan_item_location(item_id)
+        assert loc is not None, "item must exist before injecting legacy format"
+        cid, items, idx = loc
+        items[idx]["session_id"] = session_id
+        items[idx]["session_ids"] = []  # empty list = pre-list legacy state
+        store._write_plan_items(cid, items)
+
+    def test_legacy_scalar_found_by_reverse_query(self, two_campaigns):
+        """get_plan_items_for_session finds an item with only scalar session_id set."""
+        store, cid1, _cid2, item1, _item2 = two_campaigns
+        session_id = "sess_legacy"
+
+        # Inject legacy-format record (scalar session_id, empty session_ids)
+        self._inject_legacy_item(store, cid1, item1, session_id)
+
+        items = store.get_plan_items_for_session(session_id)
+        assert any(it.id == item1 for it in items), (
+            "expected item1 in results for legacy scalar session_id"
+        )
+
+    def test_legacy_scalar_unlinked_by_unlink(self, two_campaigns):
+        """unlink_plan_item_session removes a legacy-scalar item and returns True."""
+        store, cid1, _cid2, item1, _item2 = two_campaigns
+        session_id = "sess_legacy2"
+
+        self._inject_legacy_item(store, cid1, item1, session_id)
+
+        result = store.unlink_plan_item_session(item1, session_id)
+        assert result is True
+
+        # Must no longer appear in reverse query
+        remaining = store.get_plan_items_for_session(session_id)
+        assert not any(it.id == item1 for it in remaining), (
+            "item1 should be removed after unlinking legacy scalar session"
+        )

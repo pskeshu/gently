@@ -1016,6 +1016,7 @@ async function handleSessionDelink(sessionId) {
         selectItem(item.id).catch(() => {});
     } catch (err) {
         console.error('Failed to delink session:', err);
+        renderInspector(state._inspectorData);
     }
 }
 
