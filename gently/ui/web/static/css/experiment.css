@@ -1401,3 +1401,228 @@
     border-color: rgba(139, 148, 158, 0.3);
 }
 /* Role-scoped badges use inline style (color/bg/border from /api/roles) */
+
+/* ============================================================
+   Linked-plans panel (ops-lp-*) — F / Task 4
+   Session ↔ plan-item link/delink from the Operations view.
+   Appended below the tactic spine + roster; matches ops-* aesthetic.
+   ============================================================ */
+
+.ops-lp {
+    margin-top: 28px;
+    border: 1px solid var(--border, #30363d);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+/* Section header row: "Linked plans" label + "+ link to a plan" button */
+.ops-lp-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 16px;
+    background: var(--bg-hover, #21262d);
+    border-bottom: 1px solid var(--border, #30363d);
+}
+
+.ops-lp-title {
+    font-family: var(--ops-mono);
+    font-size: 10px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    flex: 1;
+}
+
+/* "+ link to a plan" button — ghost style matching session-link-btn */
+.ops-lp-link-btn {
+    border: 1px solid var(--border, #30363d);
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 2px 9px;
+    font: inherit;
+    font-family: var(--ops-mono);
+    font-size: 10px;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+}
+.ops-lp-link-btn:hover {
+    color: var(--text);
+    border-color: var(--ops-plan, #5aa9e6);
+}
+
+/* Empty state */
+.ops-lp-empty {
+    padding: 14px 16px;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* Loading / transient state */
+.ops-lp-loading {
+    padding: 12px 16px;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+/* List of linked plan-item rows */
+.ops-lp-list {
+    padding: 6px 0;
+}
+
+/* Single linked plan row: title · campaign · status · delink */
+.ops-lp-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 14px;
+    border-bottom: 1px solid rgba(48, 54, 61, 0.5);
+    font-family: var(--ops-mono);
+    font-size: 11.5px;
+    transition: background 0.1s;
+}
+.ops-lp-row:last-child { border-bottom: none; }
+.ops-lp-row:hover { background: var(--bg-hover, #21262d); }
+
+.ops-lp-row-title {
+    font-size: 12px;
+    color: var(--text);
+    font-weight: 500;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ops-lp-row-campaign {
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0.8;
+    flex-shrink: 0;
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ops-lp-row-status {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    padding: 2px 7px;
+    border-radius: 9px;
+    flex-shrink: 0;
+}
+
+/* Status colour variants mirroring ops- state palette */
+.ops-lp-status-planned {
+    background: rgba(90, 169, 230, 0.12);
+    color: var(--ops-plan, #5aa9e6);
+    border: 1px solid rgba(90, 169, 230, 0.3);
+}
+.ops-lp-status-active {
+    background: rgba(245, 166, 35, 0.12);
+    color: var(--ops-active, #f5a623);
+    border: 1px solid rgba(245, 166, 35, 0.3);
+}
+.ops-lp-status-done {
+    background: rgba(52, 211, 153, 0.1);
+    color: var(--ops-done, #34d399);
+    border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+/* Per-row delink (×) button */
+.ops-lp-delink {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 1px 4px;
+    border-radius: 4px;
+    opacity: 0.4;
+    flex-shrink: 0;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.ops-lp-delink:hover {
+    opacity: 1;
+    color: var(--accent-orange, #f97316);
+    background: rgba(249, 115, 22, 0.12);
+}
+
+/* Inline plan-item picker */
+.ops-lp-picker {
+    margin: 8px 14px 12px;
+    padding: 10px;
+    background: rgba(0, 0, 0, 0.18);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 8px;
+}
+.ops-lp-picker--loading {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-style: italic;
+    font-family: var(--ops-mono);
+    background: none;
+    border: none;
+    padding: 10px 14px 12px;
+    margin: 0;
+}
+
+.ops-lp-picker-sel {
+    width: 100%;
+    background: var(--bg-dark, #0f172a);
+    color: var(--text);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 11.5px;
+    font-family: var(--ops-mono);
+    margin-bottom: 8px;
+    box-sizing: border-box;
+}
+
+.ops-lp-picker-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.ops-lp-picker-link-btn {
+    flex: 1;
+    background: var(--ops-plan, #5aa9e6);
+    color: #05101e;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font: inherit;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.ops-lp-picker-link-btn:hover { opacity: 0.85; }
+
+.ops-lp-picker-cancel-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border, #30363d);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font: inherit;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.ops-lp-picker-cancel-btn:hover { color: var(--text); }

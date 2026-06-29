@@ -21,6 +21,9 @@ const ExperimentOverview = {
     _tempUpdateHandler: null,// stored handler ref so it can be off()'d if needed
     _rosterEmbryos: [],      // embryos from /api/embryos/positions (D2 roster lens)
     _rolesMap: null,         // Map(role name → registry obj) from /api/roles (D2 roster lens)
+    _currentSessionId: null, // session_id from /api/operation_plan/current (always, even idle)
+    _planPickerOpen: false,  // whether the plan-link picker is visible
+    _pickerItems: null,      // flat plan items for the picker (null=not loaded)
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
@@ -105,6 +108,8 @@ const ExperimentOverview = {
 
     // Fetch the agent-authored Operation Plan for the current session.
     // Returns the plan object (plan.tactics etc.) or null when unavailable.
+    // Always captures data.session_id in _currentSessionId so the Linked-plans
+    // panel can work even when no operation plan is active.
     async loadPlan() {
         try {
             const resp = await fetch('/api/operation_plan/current', { cache: 'no-store' });
@@ -113,6 +118,9 @@ const ExperimentOverview = {
                 return null;
             }
             const data = await resp.json();
+            // Capture session_id regardless of plan availability — used by the
+            // Linked-plans panel which is session-scoped, not plan-scoped.
+            this._currentSessionId = data.session_id || null;
             if (!data.available) return null;
             return data.plan || null;
         } catch (e) {
@@ -197,6 +205,10 @@ const ExperimentOverview = {
         }
         // Tear down any prior ticker before we blow away the SVG it pointed at.
         this._stopNowTicker();
+        // Reset plan-picker state on each full render so the picker doesn't persist
+        // across tactic-event-driven re-renders.
+        this._planPickerOpen = false;
+        this._pickerItems = null;
         // Rules view requires the strategy snapshot; show an empty state when absent.
         // Overview view uses this.activePlan — the null/empty case is handled inside
         // _renderOperationSpine (it renders the idle state).
@@ -214,6 +226,12 @@ const ExperimentOverview = {
                 // The swimlane view is retired; this renders this.activePlan.
                 this._renderOperationSpine(root, this.activePlan);
             }
+            // Kick off the async Linked-plans panel (overview tab only).
+            // Fire-and-forget: appends a placeholder immediately, fills after fetch.
+            if (this.activeView === 'overview') {
+                this._initLinkedPlansPanel(root).catch(e =>
+                    console.warn('[ExperimentOverview] linked-plans panel error:', e));
+            }
             console.log('[ExperimentOverview] rendered OK, view=', this.activeView);
         } catch (err) {
             console.error('[ExperimentOverview] render failed:', err);
@@ -229,6 +247,248 @@ const ExperimentOverview = {
         if (this._nowTickerHandle) {
             clearTimeout(this._nowTickerHandle);
             this._nowTickerHandle = null;
+        }
+    },
+
+
+    // =================================================================
+    // Linked-plans panel — session ↔ plan items (F / Task 4)
+    // Symmetric with the Plans-tab Sessions section (campaigns.js).
+    // Endpoints: GET /api/sessions/{id}/plans
+    //            POST /api/campaigns/{cid}/items/{iid}/sessions
+    //            DELETE .../sessions/{session_id}
+    // =================================================================
+
+    // Initialise and append the Linked-plans panel to the ops-wrap in root.
+    // Async: appends a loading placeholder immediately, fills after fetch.
+    // No-op when no session_id is known (e.g. store not yet initialised).
+    async _initLinkedPlansPanel(root) {
+        if (!this._currentSessionId) return;
+        const wrap = root.querySelector('.ops-wrap');
+        if (!wrap) return;
+
+        // Append placeholder before the async fetch so layout is stable.
+        const panelEl = document.createElement('div');
+        panelEl.className = 'ops-lp';
+        panelEl.innerHTML = '<div class="ops-lp-loading">Loading linked plans…</div>';
+        wrap.appendChild(panelEl);
+
+        const sid = this._currentSessionId;
+        try {
+            const [linkedData, campaignsData] = await Promise.all([
+                fetch(`/api/sessions/${encodeURIComponent(sid)}/plans`, { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { plans: [] })
+                    .catch(() => ({ plans: [] })),
+                fetch('/api/campaigns', { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { campaigns: [] })
+                    .catch(() => ({ campaigns: [] })),
+            ]);
+            const plans = linkedData.plans || [];
+            const campaignNameMap = {};
+            this._flattenCampaignNames(campaignsData.campaigns || [], campaignNameMap);
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sid);
+        } catch (e) {
+            console.warn('[ExperimentOverview] linked-plans init error:', e);
+            panelEl.innerHTML = '<div class="ops-lp-loading">Could not load linked plans.</div>';
+        }
+    },
+
+    // Build a map of campaign_id → display name from the /api/campaigns tree.
+    _flattenCampaignNames(trees, map) {
+        const walk = (tree) => {
+            const c = tree.campaign;
+            if (c && c.id) map[c.id] = c.description || c.shorthand || c.id;
+            for (const child of (tree.children || [])) walk(child);
+        };
+        for (const tree of (trees || [])) walk(tree);
+    },
+
+    // Build a flat list of {id, title, status, campaign_id, campaign_name}
+    // from the /api/campaigns tree, for the plan-item picker.
+    _flattenCampaignItems(trees, campaignNameMap) {
+        const items = [];
+        const walk = (tree, inheritedCid, inheritedName) => {
+            const c = tree.campaign;
+            const cid  = (c && c.id)  || inheritedCid;
+            const name = (c && (c.description || c.shorthand)) || inheritedName || cid;
+            for (const item of (tree.items || [])) {
+                items.push({
+                    id:            item.id,
+                    title:         item.title || item.id,
+                    status:        typeof item.status === 'string' ? item.status
+                                   : (item.status && item.status.value) || 'planned',
+                    campaign_id:   cid,
+                    campaign_name: name,
+                });
+            }
+            for (const child of (tree.children || [])) walk(child, cid, name);
+        };
+        for (const tree of (trees || [])) walk(tree, null, null);
+        return items;
+    },
+
+    // Render the linked-plans panel HTML into panelEl and wire button events.
+    _fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId) {
+        const ESC = this._opsESC.bind(this);
+
+        // Header: section label + "+ link to a plan" button
+        let html = `<div class="ops-lp-head">
+            <span class="ops-lp-title">Linked plans</span>
+            <button class="ops-lp-link-btn" id="ops-lp-link-btn">+ link to a plan</button>
+        </div>`;
+
+        // Linked plan-item rows (title · campaign · status · delink)
+        if (plans.length > 0) {
+            html += '<div class="ops-lp-list">';
+            for (const p of plans) {
+                const cname = campaignNameMap[p.campaign_id] || p.campaign_id || '—';
+                const sCls = p.status === 'completed' ? 'done'
+                    : p.status === 'in_progress'       ? 'active' : 'planned';
+                html += `<div class="ops-lp-row">
+                    <span class="ops-lp-row-title">${ESC(p.title || p.id)}</span>
+                    <span class="ops-lp-row-campaign">${ESC(cname)}</span>
+                    <span class="ops-lp-row-status ops-lp-status-${sCls}">${ESC(p.status || 'planned')}</span>
+                    <button class="ops-lp-delink"
+                        data-item-id="${ESC(p.id)}"
+                        data-campaign-id="${ESC(p.campaign_id)}"
+                        title="Delink this plan item">×</button>
+                </div>`;
+            }
+            html += '</div>';
+        } else {
+            html += '<div class="ops-lp-empty">Not linked to any plan</div>';
+        }
+
+        // Inline picker — shown when _planPickerOpen is set
+        if (this._planPickerOpen) {
+            if (this._pickerItems === null) {
+                // Still fetching — show loading state
+                html += '<div class="ops-lp-picker ops-lp-picker--loading">Loading plan items…</div>';
+            } else {
+                const linkedIds = new Set(plans.map(p => p.id));
+                const available = this._pickerItems.filter(it => !linkedIds.has(it.id));
+                const opts = available.length === 0
+                    ? '<option value="">No other plan items available</option>'
+                    : available.map(it =>
+                        `<option value="${ESC(it.campaign_id)}::${ESC(it.id)}">${ESC(it.campaign_name)}: ${ESC(it.title)}</option>`
+                      ).join('');
+                html += `<div class="ops-lp-picker">
+                    <select class="ops-lp-picker-sel" id="ops-lp-picker-sel">${opts}</select>
+                    <div class="ops-lp-picker-actions">
+                        <button class="ops-lp-picker-link-btn" id="ops-lp-picker-link">Link</button>
+                        <button class="ops-lp-picker-cancel-btn" id="ops-lp-picker-cancel">Cancel</button>
+                    </div>
+                </div>`;
+            }
+        }
+
+        panelEl.innerHTML = html;
+
+        // Wire events directly on the rendered buttons.
+        const sid = sessionId;
+        const linkBtn = panelEl.querySelector('#ops-lp-link-btn');
+        if (linkBtn) {
+            linkBtn.addEventListener('click', () =>
+                this._openPlanPickerInPanel(panelEl, plans, campaignNameMap, sid));
+        }
+        panelEl.querySelectorAll('.ops-lp-delink').forEach(btn => {
+            btn.addEventListener('click', () =>
+                this._delinkPlanItem(panelEl, btn.dataset.itemId, btn.dataset.campaignId, sid));
+        });
+        const submitBtn = panelEl.querySelector('#ops-lp-picker-link');
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this._submitPlanLink(panelEl, sid));
+        }
+        const cancelBtn = panelEl.querySelector('#ops-lp-picker-cancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                this._planPickerOpen = false;
+                this._pickerItems = null;
+                this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sid);
+            });
+        }
+    },
+
+    // Open the inline plan-item picker: set loading state, fetch /api/campaigns,
+    // flatten to items, re-render with the picker populated.
+    async _openPlanPickerInPanel(panelEl, plans, campaignNameMap, sessionId) {
+        this._planPickerOpen = true;
+        this._pickerItems = null;  // show loading
+        this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        try {
+            const res = await fetch('/api/campaigns', { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this._pickerItems = this._flattenCampaignItems(data.campaigns || [], campaignNameMap);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan picker fetch error:', err);
+            this._pickerItems = [];
+        }
+        if (this._planPickerOpen) {
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        }
+    },
+
+    // POST the selected plan item → session link, then refetch and re-render.
+    async _submitPlanLink(panelEl, sessionId) {
+        const select = panelEl.querySelector('#ops-lp-picker-sel');
+        const value  = select && select.value;
+        if (!value || !value.includes('::')) return;
+        const [campaignId, itemId] = value.split('::');
+        if (!campaignId || !itemId) return;
+
+        this._planPickerOpen = false;
+        this._pickerItems = null;
+        panelEl.innerHTML = '<div class="ops-lp-loading">Linking…</div>';
+        try {
+            const res = await fetch(
+                `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(itemId)}/sessions`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId }),
+                },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan link error:', err);
+        }
+        await this._refetchLinkedPlans(panelEl, sessionId);
+    },
+
+    // DELETE the plan-item → session edge, then refetch and re-render.
+    async _delinkPlanItem(panelEl, itemId, campaignId, sessionId) {
+        panelEl.innerHTML = '<div class="ops-lp-loading">Unlinking…</div>';
+        try {
+            const res = await fetch(
+                `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(itemId)}/sessions/${encodeURIComponent(sessionId)}`,
+                { method: 'DELETE' },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan delink error:', err);
+        }
+        await this._refetchLinkedPlans(panelEl, sessionId);
+    },
+
+    // Refetch linked plans + campaigns after a link/delink op, then re-render.
+    async _refetchLinkedPlans(panelEl, sessionId) {
+        try {
+            const [linkedData, campaignsData] = await Promise.all([
+                fetch(`/api/sessions/${encodeURIComponent(sessionId)}/plans`, { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { plans: [] })
+                    .catch(() => ({ plans: [] })),
+                fetch('/api/campaigns', { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { campaigns: [] })
+                    .catch(() => ({ campaigns: [] })),
+            ]);
+            const plans = linkedData.plans || [];
+            const campaignNameMap = {};
+            this._flattenCampaignNames(campaignsData.campaigns || [], campaignNameMap);
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        } catch (e) {
+            console.warn('[ExperimentOverview] linked-plans refetch error:', e);
+            panelEl.innerHTML = '<div class="ops-lp-loading">Could not reload linked plans.</div>';
         }
     },
 
