@@ -104,9 +104,8 @@ const DevicesManager = (function () {
 
     // Lightsheet control inputs (rail)
     let _lsGalvoSlider, _lsGalvoNum, _lsPiezoSlider, _lsPiezoNum, _lsExposureNum;
-    let _lsLedToggle, _lsCamLed, _lsRoomLightBtn;
+    let _lsLedToggle, _lsRoomLightBtn;
     let _lsLedIsOpen = false;  // LED toggle state: false = Closed (safe default)
-    let _lsCamLedOn = false;
     let _lsLaserToggle;
     let _lsLaserOn = false;    // Laser toggle state: false = OFF (entry-safe default)
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
@@ -216,7 +215,6 @@ const DevicesManager = (function () {
         _lsPiezoNum      = document.getElementById('devices-ls-piezo');
         _lsExposureNum   = document.getElementById('devices-ls-exposure');
         _lsLedToggle     = document.getElementById('devices-ls-led-toggle');
-        _lsCamLed        = document.getElementById('devices-ls-cam-led');
         _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
         _lsLaserToggle   = document.getElementById('devices-ls-laser-toggle');
         _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
@@ -2044,21 +2042,6 @@ const DevicesManager = (function () {
         }
     }
 
-    async function toggleCamLedMode() {
-        _lsCamLedOn = !_lsCamLedOn;
-        if (_lsCamLed) {
-            _lsCamLed.classList.toggle('ls-illum-btn--active', _lsCamLedOn);
-            _lsCamLed.setAttribute('aria-pressed', _lsCamLedOn ? 'true' : 'false');
-        }
-        try {
-            await fetch('/api/devices/camera/led_mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ use_led: _lsCamLedOn }),
-            });
-        } catch (err) { console.debug('cam LED mode failed:', err); }
-    }
-
     async function toggleManualRoomLight() {
         const nextState = _roomLightState === 'on' ? 'off' : 'on';
         if (_lsRoomLightBtn) {
@@ -2165,7 +2148,6 @@ const DevicesManager = (function () {
 
         // Illumination
         if (_lsLedToggle)    _lsLedToggle.addEventListener('click',    toggleLedPreset);
-        if (_lsCamLed)       _lsCamLed.addEventListener('click',       toggleCamLedMode);
         if (_lsRoomLightBtn) _lsRoomLightBtn.addEventListener('click', toggleManualRoomLight);
         if (_lsLaserToggle)  _lsLaserToggle.addEventListener('click',  toggleLaser);
 
