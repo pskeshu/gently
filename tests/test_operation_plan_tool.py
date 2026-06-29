@@ -9,7 +9,6 @@ TDD — three concerns:
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fakes
 # ---------------------------------------------------------------------------
@@ -554,9 +553,7 @@ def test_normalize_tactic_state_synonyms():
         # Override state directly
         tactics[0]["state"] = raw_state
         result = _validate_tactics(tactics)
-        assert result[0]["state"] == expected, (
-            f"state '{raw_state}' should map to '{expected}'"
-        )
+        assert result[0]["state"] == expected, f"state '{raw_state}' should map to '{expected}'"
 
 
 def test_normalize_full_scenario():

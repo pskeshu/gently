@@ -16,8 +16,8 @@ Verifies:
 """
 
 import asyncio
-import pytest
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -82,6 +82,7 @@ class FakeAgent:
 
 class FakeMicroscope:
     """Satisfies the requires_microscope client check in the tool registry."""
+
     pass
 
 
@@ -115,9 +116,9 @@ async def test_enable_monitoring_mode_with_tactic_id_calls_transition():
     )
 
     assert cs is not None
-    assert any(
-        t == ("sess_t7", "t1", "active") for t in cs.transitions
-    ), f"Expected transition ('sess_t7', 't1', 'active'), got {cs.transitions}"
+    assert any(t == ("sess_t7", "t1", "active") for t in cs.transitions), (
+        f"Expected transition ('sess_t7', 't1', 'active'), got {cs.transitions}"
+    )
 
 
 @pytest.mark.asyncio
@@ -157,9 +158,9 @@ async def test_queue_burst_with_tactic_id_calls_transition():
     agent, cs, _orch = _make_agent()
     await queue_burst(embryo_id="emb1", tactic_id="t2", context=_ctx(agent, with_client=True))
 
-    assert any(
-        t == ("sess_t7", "t2", "active") for t in cs.transitions
-    ), f"Expected transition ('sess_t7', 't2', 'active'), got {cs.transitions}"
+    assert any(t == ("sess_t7", "t2", "active") for t in cs.transitions), (
+        f"Expected transition ('sess_t7', 't2', 'active'), got {cs.transitions}"
+    )
 
 
 @pytest.mark.asyncio
@@ -197,8 +198,17 @@ async def test_queue_burst_soft_reject_does_not_transition():
     from gently.app.tools.timelapse_tools import queue_burst
 
     class RejectingOrchestrator(FakeOrchestrator):
-        def queue_burst(self, embryo_id, *, frames=60, mode="1hz", num_slices=1,
-                        force=False, laser_config=None, tactic_id=None) -> str:
+        def queue_burst(
+            self,
+            embryo_id,
+            *,
+            frames=60,
+            mode="1hz",
+            num_slices=1,
+            force=False,
+            laser_config=None,
+            tactic_id=None,
+        ) -> str:
             # Simulates "already has a queued burst" soft-reject
             return f"Embryo '{embryo_id}' already has a queued burst."
 
@@ -226,9 +236,9 @@ async def test_stop_timelapse_with_tactic_id_calls_done():
     agent, cs, _orch = _make_agent()
     await stop_timelapse(tactic_id="t1", context=_ctx(agent, with_client=True))
 
-    assert any(
-        t == ("sess_t7", "t1", "done") for t in cs.transitions
-    ), f"Expected transition to done, got {cs.transitions}"
+    assert any(t == ("sess_t7", "t1", "done") for t in cs.transitions), (
+        f"Expected transition to done, got {cs.transitions}"
+    )
 
 
 @pytest.mark.asyncio
@@ -255,9 +265,9 @@ async def test_pause_timelapse_with_tactic_id_calls_paused():
     agent, cs, _orch = _make_agent()
     await pause_timelapse(tactic_id="t1", context=_ctx(agent, with_client=True))
 
-    assert any(
-        t == ("sess_t7", "t1", "paused") for t in cs.transitions
-    ), f"Expected transition to paused, got {cs.transitions}"
+    assert any(t == ("sess_t7", "t1", "paused") for t in cs.transitions), (
+        f"Expected transition to paused, got {cs.transitions}"
+    )
 
 
 @pytest.mark.asyncio
@@ -295,7 +305,6 @@ def test_burst_acquisition_default_tactic_id_none():
 def test_burst_start_event_data_contains_tactic_id():
     """The BURST_START event data dict includes tactic_id."""
     from gently.app.orchestration.exclusive import BurstAcquisition
-    from gently.core import EventType
 
     emitted: list[dict] = []
 
@@ -356,7 +365,7 @@ def test_burst_start_event_data_dict_includes_tactic_id_key():
         loop.close()
 
     burst_starts = [(et, d) for et, d in emitted if et == EventType.BURST_START]
-    assert burst_starts, f"BURST_START not emitted; all events: {[et for et,_ in emitted]}"
+    assert burst_starts, f"BURST_START not emitted; all events: {[et for et, _ in emitted]}"
     _et, data = burst_starts[0]
     assert "tactic_id" in data, f"tactic_id not in BURST_START data: {data}"
     assert data["tactic_id"] == "t3"
@@ -395,7 +404,7 @@ def test_burst_complete_event_data_includes_tactic_id():
         loop.close()
 
     burst_completes = [(et, d) for et, d in emitted if et == EventType.BURST_COMPLETE]
-    assert burst_completes, f"BURST_COMPLETE not emitted; all events: {[et for et,_ in emitted]}"
+    assert burst_completes, f"BURST_COMPLETE not emitted; all events: {[et for et, _ in emitted]}"
     _et, data = burst_completes[0]
     assert "tactic_id" in data, f"tactic_id not in BURST_COMPLETE data: {data}"
     assert data["tactic_id"] == "t3"
@@ -436,9 +445,9 @@ async def test_temp_protocol_tool_with_tactic_id_calls_transition(monkeypatch):
         context=ctx,
     )
 
-    assert any(
-        t == ("sess_t7", "t4", "active") for t in cs.transitions
-    ), f"Expected active transition, got {cs.transitions}"
+    assert any(t == ("sess_t7", "t4", "active") for t in cs.transitions), (
+        f"Expected active transition, got {cs.transitions}"
+    )
 
 
 @pytest.mark.asyncio
@@ -486,9 +495,15 @@ async def test_temp_protocol_started_event_carries_tactic_id():
     emitted: list[tuple] = []
 
     class FakeClient:
-        async def set_laser_config(self, cfg): pass
-        async def set_led(self, s): pass
-        async def set_temperature(self, t): pass
+        async def set_laser_config(self, cfg):
+            pass
+
+        async def set_led(self, s):
+            pass
+
+        async def set_temperature(self, t):
+            pass
+
         async def get_temperature(self):
             return {"state": "LOCKED"}
 
@@ -504,8 +519,11 @@ async def test_temp_protocol_started_event_carries_tactic_id():
         bursts_run.append(b._phase)
 
     await run_temp_change_burst_protocol(
-        FakeOrc(), "emb1", 25.0,
-        bursts_before=0, bursts_after=0,
+        FakeOrc(),
+        "emb1",
+        25.0,
+        bursts_before=0,
+        bursts_after=0,
         burst_runner=fake_burst_runner,
         tactic_id="t5",
     )
@@ -524,9 +542,15 @@ async def test_temp_protocol_completed_event_carries_tactic_id():
     emitted: list[tuple] = []
 
     class FakeClient:
-        async def set_laser_config(self, cfg): pass
-        async def set_led(self, s): pass
-        async def set_temperature(self, t): pass
+        async def set_laser_config(self, cfg):
+            pass
+
+        async def set_led(self, s):
+            pass
+
+        async def set_temperature(self, t):
+            pass
+
         async def get_temperature(self):
             return {"state": "LOCKED"}
 
@@ -537,8 +561,11 @@ async def test_temp_protocol_completed_event_carries_tactic_id():
             emitted.append((event_type, data))
 
     await run_temp_change_burst_protocol(
-        FakeOrc(), "emb1", 25.0,
-        bursts_before=0, bursts_after=0,
+        FakeOrc(),
+        "emb1",
+        25.0,
+        bursts_before=0,
+        bursts_after=0,
         burst_runner=lambda b: asyncio.sleep(0),
         tactic_id="t5",
     )
@@ -557,9 +584,15 @@ async def test_temp_protocol_tactic_id_none_when_absent():
     emitted: list[tuple] = []
 
     class FakeClient:
-        async def set_laser_config(self, cfg): pass
-        async def set_led(self, s): pass
-        async def set_temperature(self, t): pass
+        async def set_laser_config(self, cfg):
+            pass
+
+        async def set_led(self, s):
+            pass
+
+        async def set_temperature(self, t):
+            pass
+
         async def get_temperature(self):
             return {"state": "LOCKED"}
 
@@ -570,8 +603,11 @@ async def test_temp_protocol_tactic_id_none_when_absent():
             emitted.append((event_type, data))
 
     await run_temp_change_burst_protocol(
-        FakeOrc(), "emb1", 25.0,
-        bursts_before=0, bursts_after=0,
+        FakeOrc(),
+        "emb1",
+        25.0,
+        bursts_before=0,
+        bursts_after=0,
         burst_runner=lambda b: asyncio.sleep(0),
     )
 

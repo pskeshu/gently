@@ -8,6 +8,7 @@ Verifies:
   - side B without camera_b falls back to A + no crash
   - handle_get_cameras returns ["A"] or ["A","B"] based on devices dict
 """
+
 import json
 import sys
 from unittest.mock import AsyncMock, MagicMock
@@ -31,7 +32,6 @@ import bluesky as _bs  # noqa: E402
 _bs.RunEngine = MagicMock(name="RunEngine")
 
 from gently.hardware.dispim.device_layer import DeviceLayerServer  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Helpers

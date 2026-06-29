@@ -450,7 +450,8 @@ class FileStore:
         _append_jsonl(sd / "temperature.jsonl", sample)
 
     def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
-        """Return temperature samples for a session, optionally filtered to t >= since (ISO-UTC string).
+        """Return temperature samples for a session, optionally filtered to
+        t >= since (ISO-UTC string).
 
         Reads lines tolerantly: a truncated trailing line (e.g. after a mid-append
         crash) is silently skipped rather than raising a JSONDecodeError.
@@ -778,9 +779,7 @@ class FileStore:
         sd = self._session_dir(session_id)
         if sd is None:
             return None
-        meta_path = (
-            sd / "embryos" / embryo_id / "volumes" / self._volume_meta_filename(timepoint)
-        )
+        meta_path = sd / "embryos" / embryo_id / "volumes" / self._volume_meta_filename(timepoint)
         return _read_yaml(meta_path)
 
     def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:

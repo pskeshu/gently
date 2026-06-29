@@ -8,7 +8,11 @@ returns immediately with a "started" confirmation.
 
 import asyncio
 
-from gently.harness.tools.helpers import ctx_get, require_agent, require_microscope, require_timelapse_orchestrator
+from gently.harness.tools.helpers import (
+    require_agent,
+    require_microscope,
+    require_timelapse_orchestrator,
+)
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 
@@ -33,7 +37,12 @@ from gently.harness.tools.registry import ToolCategory, ToolExample, tool
         ),
         ToolExample(
             "Cold-shock embryo_2 to 15 C with 2 bursts before and after",
-            {"embryo_id": "embryo_2", "target_setpoint_c": 15.0, "bursts_before": 2, "bursts_after": 2},
+            {
+                "embryo_id": "embryo_2",
+                "target_setpoint_c": 15.0,
+                "bursts_before": 2,
+                "bursts_after": 2,
+            },
         ),
     ],
 )

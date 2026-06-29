@@ -1,4 +1,3 @@
-import pytest
 from gently.hardware.dispim.client import DiSPIMMicroscope
 
 
@@ -28,6 +27,7 @@ def test_stream_lightsheet_is_async_generator():
 # ---------------------------------------------------------------------------
 # set_laser_config / get_laser_configs
 # ---------------------------------------------------------------------------
+
 
 async def test_set_laser_config_posts_correct_path_and_body():
     """set_laser_config posts to /api/laser/config with {"config": <name>}."""

@@ -474,6 +474,7 @@ class MicroscopyAgent:
                     from gently.app.tools.operation_plan_seed import (
                         seed_operation_plan_from_plan_item,
                     )
+
                     seed_operation_plan_from_plan_item(self.context_store, self.session_id)
                 except Exception:
                     logger.exception("operation-plan seeding failed")
@@ -650,9 +651,7 @@ class MicroscopyAgent:
                 store=self.store,
                 claude_client=self.claude,
                 temperature_provider=lambda: (
-                    self.temperature_sampler.latest
-                    if self.temperature_sampler
-                    else None
+                    self.temperature_sampler.latest if self.temperature_sampler else None
                 ),
             )
         except Exception as e:

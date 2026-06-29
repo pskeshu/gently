@@ -482,8 +482,11 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
             res = await client.set_lightsheet_live_params(
-                galvo=payload.get("galvo"), piezo=payload.get("piezo"),
-                exposure=payload.get("exposure"), side=payload.get("side"))
+                galvo=payload.get("galvo"),
+                piezo=payload.get("piezo"),
+                exposure=payload.get("exposure"),
+                side=payload.get("side"),
+            )
         except Exception as exc:
             logger.exception("lightsheet live params failed")
             raise HTTPException(status_code=502, detail=f"params failed: {exc}") from exc
@@ -600,7 +603,7 @@ def create_router(server) -> APIRouter:
         try:
             return await client.move_to_position(float(payload["x"]), float(payload["y"]))
         except KeyError:
-            raise HTTPException(status_code=400, detail="x and y required")
+            raise HTTPException(status_code=400, detail="x and y required") from None
         except Exception as exc:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
@@ -706,7 +709,9 @@ def create_router(server) -> APIRouter:
         try:
             interval_seconds = float(raw_interval)
         except (TypeError, ValueError):
-            raise HTTPException(status_code=400, detail="interval_seconds must be a number")
+            raise HTTPException(  # B904
+                status_code=400, detail="interval_seconds must be a number"
+            ) from None
         if interval_seconds <= 0:
             raise HTTPException(status_code=400, detail="interval_seconds must be > 0")
 
@@ -715,7 +720,9 @@ def create_router(server) -> APIRouter:
             try:
                 num_slices = int(raw_slices)
             except (TypeError, ValueError):
-                raise HTTPException(status_code=400, detail="num_slices must be an integer")
+                raise HTTPException(  # B904
+                    status_code=400, detail="num_slices must be an integer"
+                ) from None
             if num_slices < 1:
                 raise HTTPException(status_code=400, detail="num_slices must be >= 1")
         else:

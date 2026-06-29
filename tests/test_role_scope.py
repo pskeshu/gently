@@ -16,7 +16,6 @@ Scope validation in declare_operation_plan:
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -139,7 +138,8 @@ class _FakeAgent:
 
 @pytest.mark.asyncio
 async def test_role_scoped_tactic_passes_declare_validation():
-    """A tactic with scope.mode='role' and a valid role key is accepted by declare_operation_plan."""
+    """A tactic with scope.mode='role' and a valid role key is accepted by
+    declare_operation_plan."""
     from gently.app.tools.operation_plan_tools import declare_operation_plan
 
     role_scoped_tactic = {

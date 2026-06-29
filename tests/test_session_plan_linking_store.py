@@ -12,8 +12,7 @@ Tests:
 
 import pytest
 
-from gently.harness.memory.model import PlanItemStatus, PlanItemType
-
+from gently.harness.memory.model import PlanItemType
 
 # ---------------------------------------------------------------------------
 # Helpers

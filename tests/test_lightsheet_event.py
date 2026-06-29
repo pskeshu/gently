@@ -1,6 +1,6 @@
 """Tests for LIGHTSHEET_FRAME event type"""
 
-from gently.core.event_bus import EventType, EventBus, _NO_HISTORY_TYPES
+from gently.core.event_bus import _NO_HISTORY_TYPES, EventBus, EventType
 
 
 def test_lightsheet_frame_event_exists():

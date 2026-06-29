@@ -45,9 +45,7 @@ def _write_session(session_dir: Path) -> None:
             EMBRYO_ID: {"interval_seconds": 120},
         },
     }
-    (session_dir / "timelapse.yaml").write_text(
-        yaml.dump(timelapse), encoding="utf-8"
-    )
+    (session_dir / "timelapse.yaml").write_text(yaml.dump(timelapse), encoding="utf-8")
 
     # timeline.jsonl — the sequence under test
     events = [

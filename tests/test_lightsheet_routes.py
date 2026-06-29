@@ -7,13 +7,14 @@ Verifies:
   - acquire/burst, acquire/volume
   - require_control gate (403 without override)
 """
-from unittest.mock import MagicMock, AsyncMock
+
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gently.ui.web.routes.data import create_router
 import gently.ui.web.auth as auth
+from gently.ui.web.routes.data import create_router
 
 
 def _app(client=None, monitor=None):
@@ -35,6 +36,7 @@ def _app(client=None, monitor=None):
 # ---------------------------------------------------------------------------
 # live start / stop / status
 # ---------------------------------------------------------------------------
+
 
 def test_live_status_no_monitor():
     """GET status returns available=False when monitor is None."""
@@ -88,6 +90,7 @@ def test_live_stop_calls_monitor_stop():
 # live/params
 # ---------------------------------------------------------------------------
 
+
 def test_live_params_forwards():
     client = MagicMock()
     client.set_lightsheet_live_params = AsyncMock(return_value={"params": {}})
@@ -96,9 +99,7 @@ def test_live_params_forwards():
         json={"galvo": 1.0, "piezo": 40.0, "exposure": 20.0},
     )
     assert r.status_code == 200
-    client.set_lightsheet_live_params.assert_awaited_once_with(
-        galvo=1.0, piezo=40.0, exposure=20.0
-    )
+    client.set_lightsheet_live_params.assert_awaited_once_with(galvo=1.0, piezo=40.0, exposure=20.0)
 
 
 def test_live_params_no_client_503():
@@ -118,6 +119,7 @@ def test_live_params_no_client_503():
 # led/set
 # ---------------------------------------------------------------------------
 
+
 def test_led_set_forwards():
     client = MagicMock()
     client.set_led = AsyncMock(return_value={"success": True})
@@ -129,6 +131,7 @@ def test_led_set_forwards():
 # ---------------------------------------------------------------------------
 # laser/off  — spec §2.7: must use Laser ALL OFF config, not power setpoint
 # ---------------------------------------------------------------------------
+
 
 def test_laser_off_calls_set_laser_config_all_off():
     """laser/off must call set_laser_config("ALL OFF") to gate every line off."""
@@ -142,6 +145,7 @@ def test_laser_off_calls_set_laser_config_all_off():
 # ---------------------------------------------------------------------------
 # laser/configs  — unguarded GET, no require_control
 # ---------------------------------------------------------------------------
+
 
 def test_laser_configs_forwards_to_client():
     """GET laser/configs must forward to client.get_laser_configs."""
@@ -158,6 +162,7 @@ def test_laser_configs_forwards_to_client():
 def test_laser_configs_no_require_control():
     """GET laser/configs is unguarded — available even without control override."""
     from fastapi import FastAPI
+
     from gently.ui.web.routes.data import create_router
 
     server = MagicMock()
@@ -178,6 +183,7 @@ def test_laser_configs_no_require_control():
 # camera/led_mode
 # ---------------------------------------------------------------------------
 
+
 def test_camera_led_mode_forwards():
     client = MagicMock()
     client.set_camera_led_mode = AsyncMock(return_value={"success": True})
@@ -189,6 +195,7 @@ def test_camera_led_mode_forwards():
 # ---------------------------------------------------------------------------
 # stage/move
 # ---------------------------------------------------------------------------
+
 
 def test_stage_move_forwards():
     client = MagicMock()
@@ -208,6 +215,7 @@ def test_stage_move_missing_xy_400():
 # ---------------------------------------------------------------------------
 # acquire/burst
 # ---------------------------------------------------------------------------
+
 
 def test_acquire_burst_forwards():
     """Basic burst forwards without optional params — no laser_config/piezo/galvo in body."""
@@ -229,20 +237,32 @@ def test_acquire_burst_forwards_laser_config_and_focal_plane():
     client.acquire_burst = AsyncMock(return_value={"success": True})
     r = _app(client=client).post(
         "/api/devices/acquire/burst",
-        json={"frames": 10, "mode": "brightfield", "num_slices": 50,
-              "exposure_ms": 20.0, "laser_config": "ALL OFF",
-              "piezo_center": 55.0, "galvo_center": 1.5},
+        json={
+            "frames": 10,
+            "mode": "brightfield",
+            "num_slices": 50,
+            "exposure_ms": 20.0,
+            "laser_config": "ALL OFF",
+            "piezo_center": 55.0,
+            "galvo_center": 1.5,
+        },
     )
     assert r.status_code == 200
     client.acquire_burst.assert_awaited_once_with(
-        frames=10, mode="brightfield", num_slices=50, exposure_ms=20.0,
-        laser_config="ALL OFF", piezo_center=55.0, galvo_center=1.5,
+        frames=10,
+        mode="brightfield",
+        num_slices=50,
+        exposure_ms=20.0,
+        laser_config="ALL OFF",
+        piezo_center=55.0,
+        galvo_center=1.5,
     )
 
 
 # ---------------------------------------------------------------------------
 # acquire/volume
 # ---------------------------------------------------------------------------
+
 
 def test_acquire_volume_forwards():
     """Basic volume forwards without optional params."""
@@ -262,19 +282,28 @@ def test_acquire_volume_forwards_laser_config_and_focal_plane():
     client.acquire_volume = AsyncMock(return_value={"success": True})
     r = _app(client=client).post(
         "/api/devices/acquire/volume",
-        json={"num_slices": 50, "exposure_ms": 20.0,
-              "laser_config": "ALL OFF", "piezo_center": 55.0, "galvo_center": 1.5},
+        json={
+            "num_slices": 50,
+            "exposure_ms": 20.0,
+            "laser_config": "ALL OFF",
+            "piezo_center": 55.0,
+            "galvo_center": 1.5,
+        },
     )
     assert r.status_code == 200
     client.acquire_volume.assert_awaited_once_with(
-        num_slices=50, exposure_ms=20.0,
-        laser_config="ALL OFF", piezo_center=55.0, galvo_center=1.5,
+        num_slices=50,
+        exposure_ms=20.0,
+        laser_config="ALL OFF",
+        piezo_center=55.0,
+        galvo_center=1.5,
     )
 
 
 # ---------------------------------------------------------------------------
 # require_control gate — 403 WITHOUT override
 # ---------------------------------------------------------------------------
+
 
 def test_require_control_gate_403():
     """Without the dependency override, TestClient host is not loopback → 403."""

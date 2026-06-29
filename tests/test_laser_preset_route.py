@@ -7,13 +7,14 @@ Verifies:
   - No client (microscope not connected) → 503
   - require_control gate (403 without override)
 """
-from unittest.mock import MagicMock, AsyncMock
+
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gently.ui.web.routes.data import create_router
 import gently.ui.web.auth as auth
+from gently.ui.web.routes.data import create_router
 
 
 def _app(client=None):
@@ -34,6 +35,7 @@ def _app(client=None):
 # ---------------------------------------------------------------------------
 # Happy path
 # ---------------------------------------------------------------------------
+
 
 def test_set_laser_config_calls_client():
     """POST /api/devices/laser/config must call client.set_laser_config(config)."""
@@ -62,6 +64,7 @@ def test_set_laser_config_all_off():
 # ---------------------------------------------------------------------------
 # 400 — missing / invalid config
 # ---------------------------------------------------------------------------
+
 
 def test_set_laser_config_missing_key_returns_400():
     """POST without 'config' key in body → 400."""
@@ -97,6 +100,7 @@ def test_set_laser_config_null_returns_400():
 # 503 — no client
 # ---------------------------------------------------------------------------
 
+
 def test_set_laser_config_no_client_returns_503():
     """POST when microscope not connected → 503."""
     r = _app(client=None).post(
@@ -109,6 +113,7 @@ def test_set_laser_config_no_client_returns_503():
 # ---------------------------------------------------------------------------
 # require_control gate
 # ---------------------------------------------------------------------------
+
 
 def test_set_laser_config_requires_control():
     """POST /api/devices/laser/config is gated by require_control."""

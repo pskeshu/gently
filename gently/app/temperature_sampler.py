@@ -6,14 +6,15 @@ session's temperature.jsonl, holds the latest reading (for acquisition stamping)
 and publishes TEMPERATURE_UPDATE for the live graph. A failed poll is a gap, not a
 crash; with no active session the loop idles.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 from datetime import datetime, timezone
 
+from gently.core.event_bus import EventType, get_event_bus
 from gently.core.service import Service
-from gently.core.event_bus import get_event_bus, EventType
 
 logger = logging.getLogger(__name__)
 

@@ -6,10 +6,11 @@ three synthetic frames so the test never touches the device layer.
 """
 
 import asyncio
+
 import pytest
 
-from gently.core.event_bus import EventType, get_event_bus
 from gently.app.lightsheet_monitor import LightSheetStreamMonitor
+from gently.core.event_bus import EventType, get_event_bus
 
 
 class FakeScope:

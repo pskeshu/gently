@@ -124,7 +124,9 @@ async def list_tactics(
 
     lines = [f"Tactic Library ({len(tactics)} template{'s' if len(tactics) != 1 else ''}):"]
     for t in tactics:
-        lines.append(f"  [{t.get('id', '?')}] {t.get('name', '(unnamed)')} — kind: {t.get('kind', '?')}")
+        lines.append(
+            f"  [{t.get('id', '?')}] {t.get('name', '(unnamed)')} — kind: {t.get('kind', '?')}"
+        )
     return "\n".join(lines)
 
 

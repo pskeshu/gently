@@ -9,7 +9,6 @@ import json
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import pytest
 import yaml
 
 from gently.ui.web.strategy_snapshot import build_strategy_snapshot
@@ -39,9 +38,7 @@ def _write_session(session_dir: Path) -> None:
             EMBRYO_ID: {"interval_seconds": 120},
         },
     }
-    (session_dir / "timelapse.yaml").write_text(
-        yaml.dump(timelapse), encoding="utf-8"
-    )
+    (session_dir / "timelapse.yaml").write_text(yaml.dump(timelapse), encoding="utf-8")
 
     # timeline.jsonl
     events = [

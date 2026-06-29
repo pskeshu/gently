@@ -2,12 +2,12 @@
 Test suite for TEMPERATURE_UPDATE event type
 """
 
-from gently.core.event_bus import EventType, EventBus
+from gently.core.event_bus import EventBus, EventType
 
 
 def test_temperature_update_event_exists():
     """Verify TEMPERATURE_UPDATE enum member exists with correct name"""
-    assert hasattr(EventType, 'TEMPERATURE_UPDATE')
+    assert hasattr(EventType, "TEMPERATURE_UPDATE")
     event_type = EventType.TEMPERATURE_UPDATE
     assert event_type.name == "TEMPERATURE_UPDATE"
 

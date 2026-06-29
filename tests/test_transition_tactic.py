@@ -5,9 +5,7 @@ Verifies: state flip, live bind merge, updated_at stamp,
 True/False return values, no-op on missing plan or tactic.
 """
 
-import pytest
 from gently.core.event_bus import EventType, on
-
 
 # ---------------------------------------------------------------------------
 # Plan fixture shared across tests
@@ -49,6 +47,7 @@ _PLAN = {
 def _fresh_plan():
     """Deep-copy the fixture so mutations don't bleed between tests."""
     import copy
+
     return copy.deepcopy(_PLAN)
 
 

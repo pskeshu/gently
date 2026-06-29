@@ -4,11 +4,9 @@ Tests for the run_temp_change_burst_protocol agent tool (Task 5).
 TDD: write failing tests first, then implement the tool.
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Fakes
@@ -17,6 +15,7 @@ import pytest
 
 class FakeClient:
     """Minimal fake microscope client."""
+
     async def set_temperature(self, t):
         return {"success": True, "temperature_c": t, "state": "[ HEATING ]"}
 
@@ -26,6 +25,7 @@ class FakeClient:
 
 class FakeOrchestrator:
     """Minimal fake timelapse orchestrator with a client attribute."""
+
     def __init__(self, client):
         self.client = client
 
@@ -35,6 +35,7 @@ class FakeOrchestrator:
 
 class FakeAgent:
     """Minimal fake agent — carries timelapse_orchestrator."""
+
     def __init__(self, orchestrator):
         self.timelapse_orchestrator = orchestrator
 
@@ -177,8 +178,8 @@ def test_tool_is_registered():
 @pytest.mark.asyncio
 async def test_tool_refuses_during_active_timelapse():
     """If orchestrator._status == RUNNING, refuse without creating a task."""
-    from gently.app.tools.temperature_protocol_tools import run_temp_change_burst_protocol_tool
     from gently.app.orchestration.timelapse_models import TimelapseStatus
+    from gently.app.tools.temperature_protocol_tools import run_temp_change_burst_protocol_tool
 
     context = _make_context(with_client=True, with_orchestrator=True)
     # Simulate an active timelapse
@@ -201,4 +202,6 @@ async def test_tool_refuses_during_active_timelapse():
 
     assert len(created_tasks) == 0, "No task should be created when timelapse is running"
     assert "refusing" in result.lower(), f"Expected refusal message, got: {result!r}"
-    assert "timelapse" in result.lower(), f"Expected 'timelapse' in refusal message, got: {result!r}"
+    assert "timelapse" in result.lower(), (
+        f"Expected 'timelapse' in refusal message, got: {result!r}"
+    )

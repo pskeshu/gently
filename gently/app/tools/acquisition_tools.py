@@ -213,10 +213,9 @@ async def acquire_volume(
                         },
                     }
                     from gently.app.temperature_sampler import temperature_stamp as _ts
+
                     _temp_stamp = _ts(
-                        getattr(
-                            getattr(agent, "temperature_sampler", None), "latest", None
-                        )
+                        getattr(getattr(agent, "temperature_sampler", None), "latest", None)
                     )
                     if _temp_stamp is not None:
                         acq_metadata["temperature"] = _temp_stamp

@@ -16,7 +16,9 @@ def create_router(server) -> APIRouter:
         if session_id == "current":
             store = getattr(server, "gently_store", None)
             if store is None:
-                raise HTTPException(status_code=503, detail="FileStore not configured on viz server")
+                raise HTTPException(
+                    status_code=503, detail="FileStore not configured on viz server"
+                )
             sessions = store.list_sessions()
             if not sessions:
                 raise HTTPException(status_code=404, detail="No sessions in store")

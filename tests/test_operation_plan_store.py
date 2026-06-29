@@ -7,7 +7,6 @@ Methods: set_operation_plan / get_operation_plan
 
 from gently.core.event_bus import EventType, on
 
-
 # ---------------------------------------------------------------------------
 # Fixture helpers
 # ---------------------------------------------------------------------------
@@ -26,9 +25,7 @@ _PLAN = {
             "rationale": "Establish pre-ramp cadence",
             "structure": {
                 "cadence_s": 120,
-                "per_embryo": [
-                    {"embryo_id": "e1", "cadence_phase": "normal", "interval_s": 120}
-                ],
+                "per_embryo": [{"embryo_id": "e1", "cadence_phase": "normal", "interval_s": 120}],
             },
             "live_bind": ["cadence"],
             "relations": {},

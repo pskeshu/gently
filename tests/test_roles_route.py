@@ -5,6 +5,7 @@ Verifies:
 - Each entry has the expected fields.
 - Never raises a 500 (graceful).
 """
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -47,7 +48,14 @@ def test_roles_include_lineaging():
 
 def test_roles_entry_has_all_required_fields():
     """Every role entry exposes the required fields."""
-    required = {"name", "description", "role_class", "ui_color", "ui_icon", "default_cadence_seconds"}
+    required = {
+        "name",
+        "description",
+        "role_class",
+        "ui_color",
+        "ui_icon",
+        "default_cadence_seconds",
+    }
     roles = _client().get("/api/roles").json()["roles"]
     for role in roles:
         missing = required - role.keys()

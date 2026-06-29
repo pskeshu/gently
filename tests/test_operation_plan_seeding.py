@@ -20,10 +20,7 @@ Scenarios
 6. Plan item linked but imaging_spec.tactics is empty → returns None, no write
 """
 
-import pytest
-
 from gently.app.tools.operation_plan_seed import seed_operation_plan_from_plan_item
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -328,8 +325,18 @@ class TestIdempotency:
             "title": "Full plan",
             "goal": "full goal",
             "tactics": [
-                {"id": "t1", "name": "Baseline timelapse", "kind": "standing_timelapse", "state": "planned"},
-                {"id": "t2", "name": "Hatching monitor", "kind": "reactive_monitor", "state": "planned"},
+                {
+                    "id": "t1",
+                    "name": "Baseline timelapse",
+                    "kind": "standing_timelapse",
+                    "state": "planned",
+                },
+                {
+                    "id": "t2",
+                    "name": "Hatching monitor",
+                    "kind": "reactive_monitor",
+                    "state": "planned",
+                },
             ],
             "updated_at": "2026-06-28T09:00:00Z",
             "updated_reason": "already seeded",

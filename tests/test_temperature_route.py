@@ -1,26 +1,41 @@
-from unittest.mock import MagicMock
 from pathlib import Path
+from unittest.mock import MagicMock
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+
 from gently.ui.web.routes.temperature import create_router
 
 
 def _server(samples, sessions=(("sess-1", True),)):
     store = MagicMock()
     store.list_sessions.return_value = [{"session_id": sid} for sid, _ in sessions]
-    store._session_dir.side_effect = lambda sid: Path("/x") if any(sid == s for s, _ in sessions) else None
+    store._session_dir.side_effect = lambda sid: (
+        Path("/x") if any(sid == s for s, _ in sessions) else None
+    )
     store.read_temperature_log.return_value = samples
-    srv = MagicMock(); srv.gently_store = store
+    srv = MagicMock()
+    srv.gently_store = store
     return srv, store
 
 
 def _client(server):
-    app = FastAPI(); app.include_router(create_router(server))
+    app = FastAPI()
+    app.include_router(create_router(server))
     return TestClient(app)
 
 
 def test_history_returns_samples():
-    srv, store = _server([{"t": "2026-06-27T10:00:00+00:00", "water_c": 28.0, "setpoint_c": 32.0, "state": "heating"}])
+    srv, store = _server(
+        [
+            {
+                "t": "2026-06-27T10:00:00+00:00",
+                "water_c": 28.0,
+                "setpoint_c": 32.0,
+                "state": "heating",
+            }
+        ]
+    )
     r = _client(srv).get("/api/temperature/sess-1/history")
     assert r.status_code == 200
     body = r.json()

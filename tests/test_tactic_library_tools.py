@@ -11,8 +11,8 @@ Tests:
 """
 
 import copy
-import pytest
 
+import pytest
 
 # ---------------------------------------------------------------------------
 # Shared tactic fixture
@@ -86,7 +86,9 @@ class FakeContextStore:
 
     def set_operation_plan(self, session_id: str, plan: dict) -> None:
         self._plans[session_id] = copy.deepcopy(plan)
-        self.set_operation_plan_calls.append({"session_id": session_id, "plan": copy.deepcopy(plan)})
+        self.set_operation_plan_calls.append(
+            {"session_id": session_id, "plan": copy.deepcopy(plan)}
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -109,12 +111,11 @@ def _make_context(agent):
 # ---------------------------------------------------------------------------
 
 
-from gently.app.tools.tactic_library_tools import (
+from gently.app.tools.tactic_library_tools import (  # noqa: E402
     apply_tactic,
     list_tactics,
     save_tactic,
 )
-
 
 # ---------------------------------------------------------------------------
 # save_tactic tests
@@ -250,7 +251,7 @@ class TestApplyTactic:
             "tactics": [],
         }
 
-        result = await apply_tactic(id_or_name="Baseline timelapse", context=_make_context(agent))
+        await apply_tactic(id_or_name="Baseline timelapse", context=_make_context(agent))
 
         assert len(cs.set_operation_plan_calls) == 1
         saved_plan = cs.set_operation_plan_calls[0]["plan"]
@@ -281,7 +282,9 @@ class TestApplyTactic:
             "session_id": "sess_001",
             "title": "",
             "goal": "",
-            "tactics": [{"id": "existing_t", "name": "Prior tactic", "kind": "oneshot", "state": "done"}],
+            "tactics": [
+                {"id": "existing_t", "name": "Prior tactic", "kind": "oneshot", "state": "done"}
+            ],
         }
 
         await apply_tactic(id_or_name="Baseline timelapse", context=_make_context(agent))

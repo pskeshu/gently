@@ -14,7 +14,6 @@ from fastapi.testclient import TestClient
 
 from gently.harness.memory.model import PlanItem, PlanItemStatus, PlanItemType, SessionIntent
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

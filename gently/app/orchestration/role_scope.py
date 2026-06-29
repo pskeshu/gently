@@ -52,9 +52,7 @@ def resolve_scope_embryos(scope: dict | None, embryos: list[dict]) -> list[str]:
     if mode == "role":
         target_role = scope.get("role")
         return [
-            e["embryo_id"]
-            for e in embryos
-            if "embryo_id" in e and e.get("role") == target_role
+            e["embryo_id"] for e in embryos if "embryo_id" in e and e.get("role") == target_role
         ]
 
     return []

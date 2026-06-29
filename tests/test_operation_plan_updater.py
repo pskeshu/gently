@@ -9,20 +9,20 @@ Covers:
 - Handler exception doesn't propagate to the caller
 - on_stop unsubscribes (no further calls after stop)
 """
+
 from __future__ import annotations
 
-import asyncio
 from unittest.mock import MagicMock
 
 import pytest
 
-from gently.core.event_bus import EventBus, EventType
 from gently.app.operation_plan_updater import OperationPlanUpdater
-
+from gently.core.event_bus import EventBus, EventType
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 class FakeContextStore:
     """Records all transition_tactic calls."""
@@ -52,6 +52,7 @@ def make_event(event_type: EventType, data: dict):
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 def bus():
     """A fresh EventBus for each test (avoids cross-test leakage)."""
@@ -77,12 +78,11 @@ def updater(store, session_id):
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.asyncio
 async def test_burst_complete_transitions_tactic_to_done(updater, store, bus, monkeypatch):
     """BURST_COMPLETE fires → tactic transitions to done with bind values."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     await updater.start()
 
     bus.publish(
@@ -113,9 +113,7 @@ async def test_burst_complete_transitions_tactic_to_done(updater, store, bus, mo
 @pytest.mark.asyncio
 async def test_temp_protocol_completed_transitions_to_done(updater, store, bus, monkeypatch):
     """TEMP_PROTOCOL_COMPLETED fires → tactic done with locked/cancelled/error."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     await updater.start()
 
     bus.publish(
@@ -143,9 +141,7 @@ async def test_temp_protocol_completed_transitions_to_done(updater, store, bus, 
 @pytest.mark.asyncio
 async def test_embryo_cadence_changed_bind_only(updater, store, bus, monkeypatch):
     """EMBRYO_CADENCE_CHANGED → bind-only (state=None), cadence values bound."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     await updater.start()
 
     bus.publish(
@@ -165,7 +161,7 @@ async def test_embryo_cadence_changed_bind_only(updater, store, bus, monkeypatch
     assert len(store.calls) == 1
     call = store.calls[0]
     assert call["tactic_id"] == "t3"
-    assert call["state"] is None          # bind-only
+    assert call["state"] is None  # bind-only
     assert call["new_phase"] == "dense"
     assert call["new_interval_s"] == 30
 
@@ -175,9 +171,7 @@ async def test_embryo_cadence_changed_bind_only(updater, store, bus, monkeypatch
 @pytest.mark.asyncio
 async def test_trigger_fired_bind_only_with_last_fired(updater, store, bus, monkeypatch):
     """TRIGGER_FIRED → bind-only with last_fired timestamp injected."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     await updater.start()
 
     bus.publish(
@@ -195,7 +189,7 @@ async def test_trigger_fired_bind_only_with_last_fired(updater, store, bus, monk
     call = store.calls[0]
     assert call["tactic_id"] == "t4"
     assert call["state"] is None
-    assert "last_fired" in call           # timestamp injected by updater
+    assert "last_fired" in call  # timestamp injected by updater
 
     await updater.stop()
 
@@ -203,9 +197,7 @@ async def test_trigger_fired_bind_only_with_last_fired(updater, store, bus, monk
 @pytest.mark.asyncio
 async def test_event_without_tactic_id_is_skipped(updater, store, bus, monkeypatch):
     """An event with no tactic_id must not call transition_tactic."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     await updater.start()
 
     bus.publish(
@@ -226,9 +218,7 @@ async def test_event_without_tactic_id_is_skipped(updater, store, bus, monkeypat
 @pytest.mark.asyncio
 async def test_handler_exception_does_not_propagate(updater, bus, monkeypatch):
     """An exception inside _handle must be swallowed — bus caller not affected."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
 
     class BrokenStore:
         def transition_tactic(self, *a, **kw):
@@ -250,9 +240,7 @@ async def test_handler_exception_does_not_propagate(updater, bus, monkeypatch):
 @pytest.mark.asyncio
 async def test_no_session_skips_transition(store, bus, monkeypatch):
     """If session_id_getter returns None, no transition_tactic call is made."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     no_session_updater = OperationPlanUpdater(store, lambda: None)
     await no_session_updater.start()
 
@@ -270,9 +258,7 @@ async def test_no_session_skips_transition(store, bus, monkeypatch):
 @pytest.mark.asyncio
 async def test_stop_unsubscribes_from_bus(store, bus, monkeypatch):
     """After stop(), further bus events produce no transition_tactic calls."""
-    monkeypatch.setattr(
-        "gently.app.operation_plan_updater.get_event_bus", lambda: bus
-    )
+    monkeypatch.setattr("gently.app.operation_plan_updater.get_event_bus", lambda: bus)
     up = OperationPlanUpdater(store, lambda: "sess_z")
     await up.start()
     await up.stop()

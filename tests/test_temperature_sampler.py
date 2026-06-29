@@ -5,11 +5,11 @@ argument (confirmed from file_store.py:328). The brief's
 `file_store.create_session(name="s")` is adapted to
 `file_store.create_session(str(uuid.uuid4()), name="s")` to match the real API.
 """
-import asyncio
+
 import uuid
 
-from gently.core.event_bus import EventBus, EventType
 from gently.app.temperature_sampler import TemperatureSampler, temperature_stamp
+from gently.core.event_bus import EventBus, EventType
 
 
 class FakeScope:
@@ -32,7 +32,9 @@ def _capture(bus):
 
 async def test_tick_appends_emits_and_sets_latest(file_store):
     sid = file_store.create_session(str(uuid.uuid4()), name="s")
-    scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    scope = FakeScope(
+        {"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    )
     bus = EventBus()
     seen = _capture(bus)
     s = TemperatureSampler(scope, file_store, lambda: sid)
@@ -68,15 +70,22 @@ async def test_tick_poll_failure_is_a_gap_not_a_crash(file_store):
 
 def test_temperature_stamp_shapes():
     assert temperature_stamp(None) is None
-    assert temperature_stamp({"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}) == {
-        "water_c": 28.4, "setpoint_c": 32.0, "state": "heating", "sampled_at": "2026-06-27T10:00:00+00:00",
+    assert temperature_stamp(
+        {"t": "2026-06-27T10:00:00+00:00", "water_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    ) == {
+        "water_c": 28.4,
+        "setpoint_c": 32.0,
+        "state": "heating",
+        "sampled_at": "2026-06-27T10:00:00+00:00",
     }
 
 
 async def test_stale_latest_cleared_when_no_active_session(file_store):
     """After a successful tick, a subsequent tick with no active session resets latest to None."""
     sid = file_store.create_session(str(uuid.uuid4()), name="s")
-    scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    scope = FakeScope(
+        {"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    )
     bus = EventBus()
 
     # Successful first tick.
@@ -96,7 +105,9 @@ async def test_stale_latest_cleared_on_poll_failure(file_store):
     bus = EventBus()
 
     # Successful first tick.
-    good_scope = FakeScope({"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"})
+    good_scope = FakeScope(
+        {"success": True, "temperature_c": 28.4, "setpoint_c": 32.0, "state": "heating"}
+    )
     s = TemperatureSampler(good_scope, file_store, lambda: sid)
     await s._tick(bus)
     assert s.latest is not None

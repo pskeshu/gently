@@ -52,7 +52,9 @@ def test_volume_metadata_carries_temperature(file_store):
     tifffile_mock = MagicMock()
     with patch.dict(sys.modules, {"tifffile": tifffile_mock}):
         with patch.object(file_store, "_generate_projection", return_value=None):
-            file_store.put_volume(sid, emb, timepoint=0, volume=vol, metadata={"temperature": stamp})
+            file_store.put_volume(
+                sid, emb, timepoint=0, volume=vol, metadata={"temperature": stamp}
+            )
 
     meta = file_store.get_volume_meta(sid, emb, 0)
     assert meta["metadata"]["temperature"]["water_c"] == 28.4
@@ -77,9 +79,7 @@ def test_burst_stamp_writes_temperature(file_store):
     embryo.num_slices = 2
     embryo.exposure_ms = 50.0
 
-    frames_data = [
-        {"volume": np.zeros((2, 4, 4), dtype="uint16"), "acquired_at_epoch": None}
-    ]
+    frames_data = [{"volume": np.zeros((2, 4, 4), dtype="uint16"), "acquired_at_epoch": None}]
 
     tifffile_mock = MagicMock()
     with patch.dict(sys.modules, {"tifffile": tifffile_mock}):

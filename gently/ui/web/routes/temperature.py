@@ -3,6 +3,7 @@
 Live updates ride the TEMPERATURE_UPDATE event channel; this route is backfill only.
 Mirrors routes/experiments.py session resolution.
 """
+
 import urllib.parse
 
 from fastapi import APIRouter, HTTPException, Request

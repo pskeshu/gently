@@ -1,6 +1,5 @@
 """Task 2: BurstAcquisition laser_config threading tests."""
-import asyncio
-import pytest
+
 from gently.app.orchestration.exclusive import BurstAcquisition
 
 

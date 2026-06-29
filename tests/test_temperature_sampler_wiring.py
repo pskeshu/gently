@@ -4,7 +4,6 @@ This is an intentionally lightweight source-text guard — a full agent boot is 
 heavy integration concern verified end-to-end in a later task.  DeviceStateMonitor's
 own wiring is likewise not unit-tested at this level.
 """
-from gently.app.temperature_sampler import TemperatureSampler
 
 
 def test_agent_initializes_temperature_sampler_attribute():
@@ -22,9 +21,5 @@ def test_agent_initializes_temperature_sampler_attribute():
         "Could not locate gently/app/agent.py via importlib"
     )
     text = Path(spec.origin).read_text(encoding="utf-8")
-    assert "temperature_sampler" in text, (
-        "agent.py has no 'temperature_sampler' attribute"
-    )
-    assert "TemperatureSampler(" in text, (
-        "agent.py never constructs a TemperatureSampler"
-    )
+    assert "temperature_sampler" in text, "agent.py has no 'temperature_sampler' attribute"
+    assert "TemperatureSampler(" in text, "agent.py never constructs a TemperatureSampler"

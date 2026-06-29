@@ -5,6 +5,7 @@ Verifies:
   - FakeCore without "HamCam2" → camera_b absent, no crash, devices["camera"] still created
   - camera_b registration uses core.getLoadedDevices() as the presence check
 """
+
 import sys
 from unittest.mock import MagicMock
 

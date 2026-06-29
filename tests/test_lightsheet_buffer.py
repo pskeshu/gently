@@ -7,11 +7,11 @@ Verifies:
   - continuous mode calls clearCircularBuffer() after each getLastImage()
   - _stop_lightsheet_sequence_sync calls clearCircularBuffer() in both modes
 """
+
 import sys
 from unittest.mock import MagicMock
 
 import numpy as np
-import pytest
 
 # Patch heavy hardware deps before importing device_layer
 for _mod in (
@@ -30,7 +30,6 @@ import bluesky as _bs  # noqa: E402
 _bs.RunEngine = MagicMock(name="RunEngine")
 
 from gently.hardware.dispim.device_layer import DeviceLayerServer  # noqa: E402
-
 
 # ---------------------------------------------------------------------------
 # Full-featured FakeCore tracking every buffer-related call
@@ -195,9 +194,7 @@ def test_continuous_mode_sets_circular_buffer_footprint():
     assert core.footprint_set is not None, (
         "setCircularBufferMemoryFootprint must be called in continuous mode"
     )
-    assert core.footprint_set == 256, (
-        f"footprint must be 256 MB, got {core.footprint_set}"
-    )
+    assert core.footprint_set == 256, f"footprint must be 256 MB, got {core.footprint_set}"
 
 
 def test_continuous_mode_calls_clear_after_grab():

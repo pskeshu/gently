@@ -14,7 +14,7 @@ Orchestrator access path:
   (mirroring the `require_timelapse_orchestrator(agent)` helper in harness/tools/helpers.py)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -22,10 +22,10 @@ from fastapi.testclient import TestClient
 import gently.ui.web.auth as auth
 from gently.ui.web.routes.data import create_router
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _app(orchestrator=None):
     """Build a TestClient wired with the data routes.
@@ -56,6 +56,7 @@ def _make_orchestrator(start_return="Timelapse started."):
 # Happy path — minimal valid payload
 # ---------------------------------------------------------------------------
 
+
 def test_timelapse_start_minimal():
     """POST with just interval_seconds calls orchestrator.start; returns 200 with started=True."""
     orch = _make_orchestrator()
@@ -70,7 +71,8 @@ def test_timelapse_start_minimal():
 
 
 def test_timelapse_start_calls_start_with_correct_args():
-    """orchestrator.start receives the right interval, stop_condition, embryo_ids, condition_value."""
+    """orchestrator.start receives the right interval, stop_condition, embryo_ids,
+    condition_value."""
     orch = _make_orchestrator()
     _app(orch).post(
         "/api/devices/timelapse/start",
@@ -115,6 +117,7 @@ def test_timelapse_start_result_in_response():
 # Monitoring mode
 # ---------------------------------------------------------------------------
 
+
 def test_timelapse_start_enables_monitoring_mode():
     """monitoring_mode != 'idle' triggers enable_monitoring_mode on the orchestrator."""
     orch = _make_orchestrator()
@@ -149,6 +152,7 @@ def test_timelapse_start_no_mode_skips_enable():
 # Volume geometry passed through in response config
 # ---------------------------------------------------------------------------
 
+
 def test_timelapse_start_volume_geometry_in_config():
     """Volume geometry fields appear in response['config']['volume_geometry']."""
     orch = _make_orchestrator()
@@ -175,6 +179,7 @@ def test_timelapse_start_volume_geometry_in_config():
 # ---------------------------------------------------------------------------
 # 400 — validation failures
 # ---------------------------------------------------------------------------
+
 
 def test_timelapse_start_interval_zero_returns_400():
     """interval_seconds = 0 → 400."""
@@ -232,6 +237,7 @@ def test_timelapse_start_non_numeric_interval_returns_400():
 # 503 — orchestrator not reachable
 # ---------------------------------------------------------------------------
 
+
 def test_timelapse_start_no_orchestrator_returns_503():
     """orchestrator is None (agent not running / no session) → 503."""
     r = _app(orchestrator=None).post(
@@ -257,6 +263,7 @@ def test_timelapse_start_no_agent_bridge_returns_503():
 # ---------------------------------------------------------------------------
 # require_control gate
 # ---------------------------------------------------------------------------
+
 
 def test_timelapse_start_requires_control():
     """POST /api/devices/timelapse/start is gated by require_control (403 without override)."""

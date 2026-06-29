@@ -9,8 +9,6 @@ get/apply unknown → None.
 """
 
 import copy
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared tactic fixture

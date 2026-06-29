@@ -11,14 +11,13 @@ Covers:
 import pytest
 
 from gently.harness.roles import (
+    DEFAULT_ROLE,
     REGISTRY,
     EmbryoRole,
-    DEFAULT_ROLE,
     get_role,
     is_valid_role,
     list_roles,
 )
-
 
 # ---------------------------------------------------------------------------
 # role_class field — all existing roles
@@ -159,7 +158,7 @@ def test_default_role_is_test():
 
 def test_embryo_role_is_frozen():
     role = REGISTRY["test"]
-    with pytest.raises(Exception):
+    with pytest.raises(AttributeError):
         role.name = "mutated"  # type: ignore[misc]
 
 

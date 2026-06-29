@@ -126,7 +126,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
             logger.info("Created camera_b (side B): %s", cam_b_name)
         else:
             logger.warning(
-                "camera_b (%s) not in loaded devices — single-camera rig or device absent; skipping",
+                "camera_b (%s) not in loaded devices — single-camera rig or device absent; skipping",  # noqa: E501
                 cam_b_name,
             )
     except Exception as e:

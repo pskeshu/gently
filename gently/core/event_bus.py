@@ -129,7 +129,9 @@ class EventType(Enum):
 
     # Temperature protocol events (Phase X / 10) — temp-change burst tactic
     TEMPERATURE_SETPOINT_CHANGED = auto()  # {embryo_id, to}
-    TEMP_PROTOCOL_STARTED = auto()  # {embryo_id, target_setpoint_c, frames, bursts_before, bursts_after}
+    TEMP_PROTOCOL_STARTED = (
+        auto()
+    )  # {embryo_id, target_setpoint_c, frames, bursts_before, bursts_after}
     TEMP_PROTOCOL_COMPLETED = auto()  # {embryo_id, locked, cancelled, error}
 
     # Reactive control telemetry (Phase 5 / 10)

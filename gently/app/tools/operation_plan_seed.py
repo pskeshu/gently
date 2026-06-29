@@ -50,9 +50,7 @@ def _resolve_plan_item_with_tactics(context_store, session_id: str):
         items = context_store.get_plan_items(campaign_id=cid)
         for item in items:
             # Match items that list this session
-            session_ids = item.session_ids or (
-                [item.session_id] if item.session_id else []
-            )
+            session_ids = item.session_ids or ([item.session_id] if item.session_id else [])
             if session_id not in session_ids and item.session_id != session_id:
                 continue
             # Must carry an imaging_spec with at least one tactic outline entry

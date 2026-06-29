@@ -12,13 +12,14 @@ state, **bind)` to stamp live values and advance the tactic state.  Missing
 `tactic_id` or session → skip.  Handler exceptions are caught so a bad event
 never crashes the bus.
 """
+
 from __future__ import annotations
 
 import logging
-from typing import Callable
+from collections.abc import Callable
 
+from gently.core.event_bus import EventType, get_event_bus
 from gently.core.service import Service
-from gently.core.event_bus import get_event_bus, EventType
 
 logger = logging.getLogger(__name__)
 

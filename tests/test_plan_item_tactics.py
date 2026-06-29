@@ -7,9 +7,7 @@ and through the SQLite-backed ContextStore path.
 
 import dataclasses
 
-import pytest
-
-from gently.harness.memory.model import ImagingSpec, PlanItem, PlanItemType
+from gently.harness.memory.model import ImagingSpec
 
 TACTICS_OUTLINE = [
     {
