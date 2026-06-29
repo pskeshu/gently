@@ -59,14 +59,28 @@ class TemperatureSampler(Service):
 
     async def _run(self) -> None:
         bus = get_event_bus()
+        fail_streak = 0
         while True:
             try:
                 await self._tick(bus)
+                if fail_streak:
+                    logger.info(
+                        "temperature sampler recovered after %d quiet failure(s)", fail_streak
+                    )
+                    fail_streak = 0
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # a gap, never a crash
-                logger.warning("temperature sampler tick failed: %s", exc)
-            await asyncio.sleep(self._interval)
+                fail_streak += 1
+                if fail_streak == 1:
+                    # Log once, then stay quiet (e.g. device layer not connected yet).
+                    logger.warning(
+                        "temperature sampler paused — %s (retrying quietly until connected)", exc
+                    )
+            # Back off while failing so we neither spam logs nor hammer a disconnected server.
+            await asyncio.sleep(
+                self._interval if fail_streak == 0 else min(self._interval * 10, 30.0)
+            )
 
     async def _tick(self, bus) -> None:
         session_id = self._session_id_getter()
