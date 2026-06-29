@@ -10843,3 +10843,93 @@ body.modal-open {
     color: var(--map-ink);
     word-break: break-all;
 }
+
+/* ── Timelapse collapsible panel (B2 Task 3) ─────────────────────────────── */
+
+/* Clickable header button (also carries .ls-label for font/color) */
+.ls-collapsible-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+/* ▶/▼ caret — rotates when expanded */
+.ls-collapsible-arrow {
+    font-size: 0.5rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.ls-collapsible-head[aria-expanded="true"] .ls-collapsible-arrow {
+    transform: rotate(90deg);
+}
+
+/* Collapsible body — hidden via [hidden] attribute; explicit rule prevents
+   display overrides from fighting the attribute (mirrors .ls-lastcap[hidden]) */
+.ls-collapsible-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    margin-top: 0.35rem;
+}
+
+.ls-collapsible-body[hidden] { display: none; }
+
+/* Sub-rows: like .ls-row but slightly indented for the body interior */
+.ls-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-left: 0.25rem;
+}
+
+/* Sub-label: like .ls-label but fixed-width to align inputs column */
+.ls-sub-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    min-width: 4.5rem;
+    flex-shrink: 0;
+}
+
+/* Volume-Geometry inset sub-group */
+.ls-sub-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    padding: 0.4rem 0.5rem;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    margin: 0.15rem 0;
+}
+
+/* "VOLUME GEOMETRY" sub-header */
+.ls-sub-section-label {
+    font-size: 0.52rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.1rem;
+}
+
+/* Start-result / status line — mono, muted */
+.ls-tl-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--map-ink-mute);
+    padding: 0.2rem 0.25rem;
+    word-break: break-all;
+}
+
+.ls-tl-status[hidden] { display: none; }

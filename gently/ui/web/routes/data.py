@@ -750,6 +750,8 @@ def create_router(server) -> APIRouter:
             )
 
         # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
+        # TODO: UI-initiated timelapses skip the agent tool's plan auto-linking;
+        #       this is intentional — the agent path wires the plan, this route does not.
         try:
             result = await orchestrator.start(
                 embryo_ids=embryo_ids,
