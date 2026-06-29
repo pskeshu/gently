@@ -244,8 +244,12 @@ def create_router(server) -> APIRouter:
                 }
             )
 
-        # Sessions linked to this campaign
-        sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        # Sessions — return only those linked to this specific item (item.session_ids),
+        # not all campaign sessions. The frontend uses item.session_ids as the canonical
+        # list and this pool as metadata (name, created_at) for display.
+        item_sids = set(item.session_ids or [])
+        all_sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        sessions = [s for s in all_sessions if s.session_id in item_sids]
 
         return {
             "item": _serialize(item),

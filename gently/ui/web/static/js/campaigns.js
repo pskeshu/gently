@@ -67,6 +67,8 @@ const state = {
     editingSpec: false,         // inspector imaging-spec edit mode
     _inspectorData: null,       // last item-detail payload (for re-render on edit toggle)
     _specError: '',             // inline save error in the spec editor
+    _sessionPickerOpen: false,  // whether the session link picker is visible
+    _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
 };
 
 // ── DOM refs (cached on init) ────────────────────────────
@@ -141,6 +143,10 @@ function boot() {
             case 'spec-edit': e.stopPropagation(); startSpecEdit(); break;
             case 'spec-cancel': e.stopPropagation(); cancelSpecEdit(); break;
             case 'spec-save': e.stopPropagation(); saveSpecEdit(); break;
+            case 'session-picker-open': e.stopPropagation(); openSessionPicker(); break;
+            case 'session-picker-cancel': e.stopPropagation(); cancelSessionPicker(); break;
+            case 'session-picker-link': e.stopPropagation(); submitSessionLink(); break;
+            case 'session-delink': e.stopPropagation(); handleSessionDelink(el.dataset.sessionId); break;
         }
     });
 
@@ -630,6 +636,8 @@ async function selectItem(itemId) {
     if (itemId !== state.selectedItemId) {
         state.editingSpec = false;
         state._specError = '';
+        state._sessionPickerOpen = false;
+        state._availableSessions = null;
     }
     state.selectedItemId = itemId;
 
@@ -673,7 +681,13 @@ function renderInspector(data) {
     const item = data.item;
     const deps = data.dependencies || [];
     const dnts = data.dependents || [];
-    const sessions = data.sessions || [];
+    // Build a metadata map from the campaign-level sessions included in the payload,
+    // then derive the per-item sessions list from item.session_ids (the true source
+    // of truth). data.sessions is the campaign pool; we only show sessions that are
+    // actually linked to THIS item.
+    const _sessionMeta = {};
+    (data.sessions || []).forEach(s => { _sessionMeta[s.session_id || s.id] = s; });
+    const sessions = (item.session_ids || []).map(sid => _sessionMeta[sid] || { session_id: sid, id: sid });
 
     if ($inspectorTitle) $inspectorTitle.textContent = item.title;
     if ($inspectorStatus) {
@@ -786,20 +800,46 @@ function renderInspector(data) {
         html += section('References', refHtml);
     }
 
-    // Sessions
+    // Sessions — item-scoped (item.session_ids), with link/delink controls.
+    const _linkBtn = `<button class="session-link-btn" data-action="session-picker-open">+ link session</button>`;
+    let sessHtml = '';
     if (sessions.length > 0) {
-        let sessHtml = '';
         sessions.forEach(s => {
+            const sid = s.session_id || s.id || '';
+            const name = s.name || s.planned_intent || sid || 'Session';
             sessHtml += `<div class="detail-session">
-                <span class="detail-session-title">${esc(s.planned_intent || s.id || 'Session')}</span>
-                ${s.created_at ? `<span class="detail-session-date">${formatDate(s.created_at)}</span>` : ''}
+                <span class="detail-session-title">${esc(name)}</span>
+                <span class="detail-session-right">
+                    ${s.created_at ? `<span class="detail-session-date">${formatDate(s.created_at)}</span>` : ''}
+                    <button class="session-delink-btn" data-action="session-delink"
+                        data-session-id="${esc(sid)}" title="Delink session">×</button>
+                </span>
             </div>`;
         });
-        html += section('Sessions', sessHtml);
     } else {
-        html += section('Sessions',
-            '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No linked sessions</div>');
+        sessHtml = '<div class="detail-session-empty">No linked sessions</div>';
     }
+    // Inline link picker — rendered when openSessionPicker() has set state flag + loaded data.
+    if (state._sessionPickerOpen) {
+        if (state._availableSessions === null) {
+            // Still loading — show spinner text; will re-render once fetch completes.
+            sessHtml += `<div class="session-picker session-picker--loading">Loading sessions…</div>`;
+        } else {
+            const _linkedIds = new Set(item.session_ids || []);
+            const _available = state._availableSessions.filter(s => !_linkedIds.has(s.session_id));
+            const _opts = _available.length === 0
+                ? `<option value="">No other sessions available</option>`
+                : _available.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.session_id)}</option>`).join('');
+            sessHtml += `<div class="session-picker">
+                <select class="session-picker-select" id="session-picker-select">${_opts}</select>
+                <div class="session-picker-actions">
+                    <button class="session-picker-link-btn" data-action="session-picker-link">Link</button>
+                    <button class="session-picker-cancel-btn" data-action="session-picker-cancel">Cancel</button>
+                </div>
+            </div>`;
+        }
+    }
+    html += section('Sessions', sessHtml, _linkBtn);
 
     if ($inspectorBody) $inspectorBody.innerHTML = html;
 }
@@ -899,6 +939,83 @@ async function saveSpecEdit() {
         state.editingSpec = true;
         state._specError = 'Could not save — try again.';
         renderInspector(data);
+    }
+}
+
+// ── Session link / delink ─────────────────────────────────────────────────────
+
+// Open the inline session picker. Fetches /api/sessions and re-renders with the
+// picker shown. Two-phase: immediate re-render with loading state, then again
+// once the fetch resolves (mirrors the pattern of selectItem loading state).
+async function openSessionPicker() {
+    state._sessionPickerOpen = true;
+    state._availableSessions = null;   // triggers loading display
+    if (state._inspectorData) renderInspector(state._inspectorData);
+    try {
+        const res = await fetch('/api/sessions');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        state._availableSessions = body.sessions || [];
+    } catch (err) {
+        console.error('Failed to load sessions for picker:', err);
+        state._availableSessions = [];
+    }
+    if (state._sessionPickerOpen && state._inspectorData) {
+        renderInspector(state._inspectorData);
+    }
+}
+
+function cancelSessionPicker() {
+    state._sessionPickerOpen = false;
+    state._availableSessions = null;
+    if (state._inspectorData) renderInspector(state._inspectorData);
+}
+
+// Read the picker <select>, POST to the link endpoint, then refresh the inspector.
+async function submitSessionLink() {
+    const select = document.getElementById('session-picker-select');
+    const sessionId = select && select.value;
+    if (!sessionId) return;
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+    // Close picker before the async call so a re-render doesn't reopen it.
+    state._sessionPickerOpen = false;
+    state._availableSessions = null;
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}/sessions`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId }),
+            },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});   // re-fetch → re-render with updated session_ids
+    } catch (err) {
+        console.error('Failed to link session:', err);
+        if (state._inspectorData) renderInspector(state._inspectorData);
+    }
+}
+
+// DELETE the session→item edge then refresh the inspector.
+async function handleSessionDelink(sessionId) {
+    if (!sessionId) return;
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}/sessions/${encodeURIComponent(sessionId)}`,
+            { method: 'DELETE' },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});
+    } catch (err) {
+        console.error('Failed to delink session:', err);
     }
 }
 

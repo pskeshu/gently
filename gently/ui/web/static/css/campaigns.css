@@ -1435,6 +1435,109 @@
     font-size: 0.62rem;
     color: var(--text-muted);
 }
+.detail-session-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+.detail-session-empty {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    font-style: italic;
+}
+
+/* Session link button (header action) */
+.session-link-btn {
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font: inherit;
+    font-size: 0.65rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: color 0.15s, border-color 0.15s;
+}
+.session-link-btn:hover {
+    color: var(--text);
+    border-color: var(--accent, #2f6df6);
+}
+
+/* Per-session delink button */
+.session-delink-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 1px 4px;
+    border-radius: 4px;
+    opacity: 0.45;
+    transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.session-delink-btn:hover {
+    opacity: 1;
+    color: var(--accent-orange, #f97316);
+    background: rgba(249,115,22,0.12);
+}
+
+/* Inline session picker */
+.session-picker {
+    margin-top: 8px;
+    padding: 10px;
+    background: rgba(0,0,0,0.18);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.session-picker--loading {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    font-style: italic;
+}
+.session-picker-select {
+    width: 100%;
+    background: var(--bg-dark, #0f172a);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 0.75rem;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+}
+.session-picker-actions {
+    display: flex;
+    gap: 6px;
+}
+.session-picker-link-btn {
+    flex: 1;
+    background: var(--accent, #2f6df6);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.session-picker-link-btn:hover { opacity: 0.85; }
+.session-picker-cancel-btn {
+    background: transparent;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 5px 12px;
+    font: inherit;
+    font-size: 0.72rem;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.session-picker-cancel-btn:hover { color: var(--text); }
 
 /* ================================================================
    SHARED COMPONENTS
