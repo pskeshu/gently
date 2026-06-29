@@ -847,6 +847,136 @@
                             </div>
                         </div>
 
+                        <!-- Timelapse (collapsible) -->
+                        <div class="ls-group" id="devices-tl-group">
+                            <button class="ls-label ls-collapsible-head" id="devices-tl-toggle"
+                                    type="button" aria-expanded="false"
+                                    aria-controls="devices-tl-body">
+                                Timelapse
+                                <span class="ls-collapsible-arrow" aria-hidden="true">▶</span>
+                            </button>
+                            <div class="ls-collapsible-body" id="devices-tl-body" hidden>
+
+                                <!-- Cadence -->
+                                <div class="ls-sub-row">
+                                    <label class="ls-sub-label" for="devices-tl-interval">Interval</label>
+                                    <input class="ls-number ls-number-sm" id="devices-tl-interval"
+                                           type="number" min="1" step="1" value="120"
+                                           inputmode="numeric" aria-label="Timelapse interval in seconds">
+                                    <span class="ls-unit">s</span>
+                                </div>
+
+                                <!-- Stop condition -->
+                                <div class="ls-sub-row">
+                                    <label class="ls-sub-label" for="devices-tl-stop">Stop when</label>
+                                    <select id="devices-tl-stop" class="ls-laser-select"
+                                            aria-label="Timelapse stop condition">
+                                        <option value="manual" selected>Manual</option>
+                                        <option value="timepoints">Timepoints</option>
+                                        <option value="duration">Duration (h)</option>
+                                    </select>
+                                </div>
+
+                                <!-- Conditional value (timepoints / duration) -->
+                                <div class="ls-sub-row" id="devices-tl-cond-row" hidden>
+                                    <label class="ls-sub-label" for="devices-tl-cond-val" id="devices-tl-cond-label">Count</label>
+                                    <input class="ls-number ls-number-sm" id="devices-tl-cond-val"
+                                           type="number" min="1" step="1" value="10"
+                                           inputmode="numeric" aria-label="Stop condition value">
+                                </div>
+
+                                <!-- Embryo IDs (comma-separated, optional) -->
+                                <div class="ls-sub-row">
+                                    <label class="ls-sub-label" for="devices-tl-embryos">Embryos</label>
+                                    <input class="ls-number" id="devices-tl-embryos"
+                                           type="text" placeholder="all"
+                                           aria-label="Embryo IDs comma-separated (blank = all)">
+                                </div>
+
+                                <!-- Monitoring mode -->
+                                <div class="ls-sub-row">
+                                    <label class="ls-sub-label" for="devices-tl-mode">Mode</label>
+                                    <select id="devices-tl-mode" class="ls-laser-select"
+                                            aria-label="Monitoring mode">
+                                        <option value="">— none —</option>
+                                        <option value="idle">Idle (plain imaging)</option>
+                                        <option value="expression_monitoring">Expression monitoring</option>
+                                        <option value="pre_terminal_monitoring">Pre-terminal</option>
+                                    </select>
+                                </div>
+
+                                <!-- Volume geometry (sub-group) -->
+                                <div class="ls-sub-section">
+                                    <span class="ls-sub-section-label">Volume geometry</span>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-slices">Slices</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-slices"
+                                               type="number" min="1" max="500" step="1" value="50"
+                                               inputmode="numeric" aria-label="Number of slices">
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-exposure">Exposure</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-exposure"
+                                               type="number" min="1" max="5000" step="1" value="10"
+                                               inputmode="numeric" aria-label="Exposure time in ms">
+                                        <span class="ls-unit">ms</span>
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-galvo-amp">Galvo amp</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-galvo-amp"
+                                               type="number" min="0" max="5" step="0.05" value="0.5"
+                                               inputmode="decimal" aria-label="Galvo amplitude in degrees">
+                                        <span class="ls-unit">°</span>
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-galvo-ctr">Galvo ctr</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-galvo-ctr"
+                                               type="number" min="-5" max="5" step="0.05" value="0"
+                                               inputmode="decimal" aria-label="Galvo center in degrees">
+                                        <span class="ls-unit">°</span>
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-piezo-amp">Piezo amp</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-piezo-amp"
+                                               type="number" min="0" max="100" step="0.5" value="25"
+                                               inputmode="decimal" aria-label="Piezo amplitude in µm">
+                                        <span class="ls-unit">µm</span>
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-piezo-ctr">Piezo ctr</label>
+                                        <input class="ls-number ls-number-sm" id="devices-tl-piezo-ctr"
+                                               type="number" min="0" max="200" step="0.5" value="50"
+                                               inputmode="decimal" aria-label="Piezo center in µm">
+                                        <span class="ls-unit">µm</span>
+                                    </div>
+
+                                    <div class="ls-sub-row">
+                                        <label class="ls-sub-label" for="devices-tl-laser">Laser</label>
+                                        <select id="devices-tl-laser" class="ls-laser-select"
+                                                aria-label="Laser preset for timelapse">
+                                            <option value="ALL OFF">ALL OFF</option>
+                                        </select>
+                                    </div>
+                                </div><!-- /.ls-sub-section -->
+
+                                <!-- Submit + status -->
+                                <div class="ls-sub-row">
+                                    <button class="ls-acquire-btn" id="devices-tl-start"
+                                            type="button">Start timelapse</button>
+                                </div>
+                                <div class="ls-tl-status" id="devices-tl-status" hidden>
+                                    <span id="devices-tl-status-text"></span>
+                                </div>
+
+                            </div><!-- /#devices-tl-body -->
+                        </div><!-- /#devices-tl-group -->
+
                     </div><!-- /.ls-rail -->
                 </div><!-- /.ls-layout -->
             </div><!-- /#devices-view-manual -->

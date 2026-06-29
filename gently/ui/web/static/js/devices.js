@@ -104,6 +104,13 @@ const DevicesManager = (function () {
     let _lsSideSelect;    // <select id="devices-ls-side"> — shown only when camera_b present
     let _lsTempInput, _lsTempSet;
 
+    // Timelapse form DOM refs (Manual view — #devices-tl-group)
+    let _tlToggle, _tlBody;
+    let _tlInterval, _tlStop, _tlCondRow, _tlCondLabel, _tlCondVal;
+    let _tlEmbryos, _tlMode;
+    let _tlSlices, _tlExposure, _tlGalvoAmp, _tlGalvoCtr, _tlPiezoAmp, _tlPiezoCtr, _tlLaser;
+    let _tlStart, _tlStatus, _tlStatusText;
+
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
     // diSPIM room light. State is the bot's cached on/off; hidden until the
     // device layer reports the accessory is configured.
@@ -208,6 +215,27 @@ const DevicesManager = (function () {
         _lsSideSelect    = document.getElementById('devices-ls-side');
         _lsTempInput     = document.getElementById('devices-ls-temp-input');
         _lsTempSet       = document.getElementById('devices-ls-temp-set');
+
+        // Timelapse form
+        _tlToggle     = document.getElementById('devices-tl-toggle');
+        _tlBody       = document.getElementById('devices-tl-body');
+        _tlInterval   = document.getElementById('devices-tl-interval');
+        _tlStop       = document.getElementById('devices-tl-stop');
+        _tlCondRow    = document.getElementById('devices-tl-cond-row');
+        _tlCondLabel  = document.getElementById('devices-tl-cond-label');
+        _tlCondVal    = document.getElementById('devices-tl-cond-val');
+        _tlEmbryos    = document.getElementById('devices-tl-embryos');
+        _tlMode       = document.getElementById('devices-tl-mode');
+        _tlSlices     = document.getElementById('devices-tl-slices');
+        _tlExposure   = document.getElementById('devices-tl-exposure');
+        _tlGalvoAmp   = document.getElementById('devices-tl-galvo-amp');
+        _tlGalvoCtr   = document.getElementById('devices-tl-galvo-ctr');
+        _tlPiezoAmp   = document.getElementById('devices-tl-piezo-amp');
+        _tlPiezoCtr   = document.getElementById('devices-tl-piezo-ctr');
+        _tlLaser      = document.getElementById('devices-tl-laser');
+        _tlStart      = document.getElementById('devices-tl-start');
+        _tlStatus     = document.getElementById('devices-tl-status');
+        _tlStatusText = document.getElementById('devices-tl-status-text');
 
         _roomLightToggle = document.getElementById('devices-room-light-toggle');
         _roomLightLabel  = document.getElementById('devices-room-light-label');
@@ -1448,6 +1476,144 @@ const DevicesManager = (function () {
         }
     }
 
+    // =====================================================================
+    // Timelapse config form (Manual view)
+    // =====================================================================
+
+    /** Wire the timelapse panel's collapsible toggle and stop-condition selector.
+     *  Safe to call multiple times (idempotent via re-assignment of event handlers). */
+    function initTlForm() {
+        cacheDom();
+
+        // Collapsible head
+        if (_tlToggle && _tlBody) {
+            _tlToggle.onclick = () => {
+                const open = _tlBody.hidden;
+                _tlBody.hidden = !open;
+                _tlToggle.setAttribute('aria-expanded', String(open));
+                const arrow = _tlToggle.querySelector('.ls-collapsible-arrow');
+                if (arrow) arrow.textContent = open ? '▼' : '▶';
+            };
+        }
+
+        // Conditional stop-value row: show for timepoints / duration, hide for manual
+        if (_tlStop && _tlCondRow) {
+            _tlStop.onchange = () => {
+                const v = _tlStop.value;
+                const show = v === 'timepoints' || v === 'duration';
+                _tlCondRow.hidden = !show;
+                if (_tlCondLabel) {
+                    _tlCondLabel.textContent = v === 'duration' ? 'Hours' : 'Count';
+                }
+            };
+        }
+
+        // Submit button
+        if (_tlStart) {
+            _tlStart.onclick = startTimelapse;
+        }
+    }
+
+    /** Populate timelapse volume-geometry defaults from GET /api/devices/scan_geometry,
+     *  and populate the laser preset select from GET /api/devices/laser/configs.
+     *  Fire-and-forget safe — failure leaves form-coded defaults in place. */
+    async function populateTlDefaults() {
+        cacheDom();
+        // Geometry defaults
+        try {
+            const res = await fetch('/api/devices/scan_geometry');
+            if (res.ok) {
+                const data = await res.json();
+                const scan = data.scan || {};
+                if (_tlSlices    && scan.num_slices    != null) _tlSlices.value    = scan.num_slices;
+                if (_tlExposure  && scan.exposure_ms   != null) _tlExposure.value  = scan.exposure_ms;
+                if (_tlGalvoAmp  && scan.galvo_amplitude_deg != null) _tlGalvoAmp.value = scan.galvo_amplitude_deg;
+                if (_tlGalvoCtr  && scan.galvo_center_deg    != null) _tlGalvoCtr.value = scan.galvo_center_deg;
+                if (_tlPiezoAmp  && scan.piezo_amplitude_um  != null) _tlPiezoAmp.value = scan.piezo_amplitude_um;
+                if (_tlPiezoCtr  && scan.piezo_center_um     != null) _tlPiezoCtr.value = scan.piezo_center_um;
+            }
+        } catch (err) {
+            console.debug('tl scan_geometry fetch failed:', err);
+        }
+        // Laser presets — reuse the shared endpoint; mirror populateLaserPresets()
+        if (!_tlLaser) return;
+        try {
+            const res = await fetch('/api/devices/laser/configs');
+            if (!res.ok) return;
+            const data = await res.json();
+            const presets = Array.isArray(data) ? data : (data.configs || []);
+            if (!presets.length) return;
+            _tlLaser.innerHTML = '';
+            for (const name of presets) {
+                const opt = document.createElement('option');
+                opt.value = name;
+                opt.textContent = name;
+                _tlLaser.appendChild(opt);
+            }
+            if (presets.includes('ALL OFF')) _tlLaser.value = 'ALL OFF';
+        } catch (err) {
+            console.debug('tl laser configs fetch failed:', err);
+        }
+    }
+
+    /** Gather form values, POST to /api/devices/timelapse/start, show result. */
+    async function startTimelapse() {
+        cacheDom();
+        if (!_tlStart) return;
+        _tlStart.disabled = true;
+
+        // Build payload
+        const interval = parseFloat(_tlInterval ? _tlInterval.value : '120') || 120;
+        const stop_condition = _tlStop ? _tlStop.value : 'manual';
+        const condRaw = _tlCondVal ? _tlCondVal.value : '';
+        const condition_value = condRaw ? parseInt(condRaw, 10) : null;
+        const embryoRaw = _tlEmbryos ? _tlEmbryos.value.trim() : '';
+        const embryo_ids = embryoRaw
+            ? embryoRaw.split(',').map(s => s.trim()).filter(Boolean)
+            : null;
+        const monitoring_mode = _tlMode ? (_tlMode.value || null) : null;
+
+        const payload = {
+            interval_seconds: interval,
+            stop_condition,
+            embryo_ids,
+            condition_value,
+            monitoring_mode,
+            num_slices:      _tlSlices    ? parseInt(_tlSlices.value,    10) : 50,
+            exposure_ms:     _tlExposure  ? parseFloat(_tlExposure.value)    : 10.0,
+            galvo_amplitude: _tlGalvoAmp  ? parseFloat(_tlGalvoAmp.value)    : 0.5,
+            galvo_center:    _tlGalvoCtr  ? parseFloat(_tlGalvoCtr.value)    : 0.0,
+            piezo_amplitude: _tlPiezoAmp  ? parseFloat(_tlPiezoAmp.value)    : 25.0,
+            piezo_center:    _tlPiezoCtr  ? parseFloat(_tlPiezoCtr.value)    : 50.0,
+            laser_config:    _tlLaser     ? (_tlLaser.value || null)          : null,
+        };
+
+        if (_tlStatus)     _tlStatus.hidden = false;
+        if (_tlStatusText) _tlStatusText.textContent = 'Starting…';
+
+        try {
+            const res = await fetch('/api/devices/timelapse/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (res.ok) {
+                const msg = body.result || 'Timelapse started.';
+                if (_tlStatusText) _tlStatusText.textContent = msg;
+            } else {
+                const detail = body.detail || `error ${res.status}`;
+                if (_tlStatusText) _tlStatusText.textContent = `Error: ${detail}`;
+                console.debug('timelapse start failed:', body);
+            }
+        } catch (err) {
+            if (_tlStatusText) _tlStatusText.textContent = `Network error: ${err.message}`;
+            console.debug('timelapse start failed:', err);
+        } finally {
+            if (_tlStart) _tlStart.disabled = false;
+        }
+    }
+
     async function toggleLightsheetStream() {
         if (!_lsToggle) return;
         _lsToggle.disabled = true;
@@ -2057,7 +2223,7 @@ const DevicesManager = (function () {
         // Entering Manual view — gate lasers off immediately (brightfield-safe).
         // populateLaserPresets() runs after setLaserOff() so the select is always
         // seeded with the entry-safety state first.
-        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); }
+        if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
     }
 
     function setupViewSwitcher() {

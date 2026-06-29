@@ -671,6 +671,118 @@ def create_router(server) -> APIRouter:
             logger.exception("Volume acquisition failed")
             raise HTTPException(status_code=502, detail=f"volume failed: {exc}") from exc
 
+    # ------------------------------------------------------------------
+    # Timelapse
+    # ------------------------------------------------------------------
+
+    @router.post("/api/devices/timelapse/start", dependencies=[Depends(require_control)])
+    async def timelapse_start(payload: dict = Body(...)):  # noqa: B008
+        """Start an adaptive timelapse from the manual UI.
+
+        Body fields (all optional except interval_seconds has a default):
+          interval_seconds (float, default 120) — cadence; must be > 0
+          stop_condition   (str, default "manual") — "manual", "timepoints", "duration"
+          embryo_ids       (list[str] | null) — null = all active embryos
+          condition_value  (int | null) — timepoints count or duration hours
+          monitoring_mode  (str | null) — "idle" / "expression_monitoring" /
+                                          "pre_terminal_monitoring"
+          num_slices       (int, default 50) — must be >= 1 if provided
+          exposure_ms      (float, default 10.0)
+          galvo_amplitude  (float, default 0.5)
+          galvo_center     (float, default 0.0)
+          piezo_amplitude  (float, default 25.0)
+          piezo_center     (float, default 50.0)
+          laser_config     (str | null)
+
+        Validation:
+          - interval_seconds must be > 0
+          - num_slices must be >= 1
+
+        Orchestrator access: server.agent_bridge.agent.timelapse_orchestrator
+        RIG-DEFERRED: the actual acquisition + galvo/piezo motion.
+        """
+        # --- Validate ---
+        raw_interval = payload.get("interval_seconds", 120.0)
+        try:
+            interval_seconds = float(raw_interval)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=400, detail="interval_seconds must be a number")
+        if interval_seconds <= 0:
+            raise HTTPException(status_code=400, detail="interval_seconds must be > 0")
+
+        raw_slices = payload.get("num_slices")
+        if raw_slices is not None:
+            try:
+                num_slices = int(raw_slices)
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400, detail="num_slices must be an integer")
+            if num_slices < 1:
+                raise HTTPException(status_code=400, detail="num_slices must be >= 1")
+        else:
+            num_slices = 50
+
+        stop_condition = str(payload.get("stop_condition") or "manual")
+        embryo_ids = payload.get("embryo_ids") or None
+        condition_value = payload.get("condition_value")
+        monitoring_mode = payload.get("monitoring_mode") or None
+
+        # Volume geometry — passed through for context / future calibration write;
+        # not forwarded to orchestrator.start (which owns its own geometry via the
+        # per-embryo calibration). RIG-DEFERRED: real acquisition uses these.
+        volume_geometry = {
+            "num_slices": num_slices,
+            "exposure_ms": float(payload.get("exposure_ms", 10.0)),
+            "galvo_amplitude": float(payload.get("galvo_amplitude", 0.5)),
+            "galvo_center": float(payload.get("galvo_center", 0.0)),
+            "piezo_amplitude": float(payload.get("piezo_amplitude", 25.0)),
+            "piezo_center": float(payload.get("piezo_center", 50.0)),
+            "laser_config": payload.get("laser_config") or None,
+        }
+
+        # --- Resolve orchestrator ---
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        orchestrator = getattr(agent, "timelapse_orchestrator", None) if agent else None
+        if orchestrator is None:
+            raise HTTPException(
+                status_code=503,
+                detail="Timelapse orchestrator not initialised (agent not running or no session)",
+            )
+
+        # --- Start timelapse (RIG-DEFERRED: real acquisition) ---
+        try:
+            result = await orchestrator.start(
+                embryo_ids=embryo_ids,
+                stop_condition=stop_condition,
+                base_interval_seconds=interval_seconds,
+                condition_value=condition_value,
+            )
+        except Exception as exc:
+            logger.exception("Timelapse start failed")
+            raise HTTPException(status_code=502, detail=f"timelapse start failed: {exc}") from exc
+
+        # Optionally install a monitoring mode at startup (mirrors start_adaptive_timelapse)
+        mode_result = None
+        if monitoring_mode and monitoring_mode != "idle":
+            try:
+                mode_result = orchestrator.enable_monitoring_mode(monitoring_mode)
+            except Exception as exc:
+                mode_result = f"warning: failed to enable monitoring mode: {exc}"
+
+        return {
+            "started": True,
+            "result": result,
+            "monitoring_mode_result": mode_result,
+            "config": {
+                "interval_seconds": interval_seconds,
+                "stop_condition": stop_condition,
+                "embryo_ids": embryo_ids,
+                "condition_value": condition_value,
+                "monitoring_mode": monitoring_mode,
+                "volume_geometry": volume_geometry,
+            },
+        }
+
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: str | None = None):
         """Get calibration images"""
