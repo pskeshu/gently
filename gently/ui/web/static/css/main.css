@@ -10937,3 +10937,135 @@ body.modal-open {
 }
 
 .ls-tl-status[hidden] { display: none; }
+
+/* ── Timelapse accordion (active/inactive section states — B3 UX) ─────────── */
+
+/* Wrapper for each accordion section */
+.ls-acc-section {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--map-rule-soft);
+    padding-bottom: 0.12rem;
+    margin-bottom: 0.08rem;
+}
+.ls-acc-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Section header button */
+.ls-acc-head {
+    display: flex;
+    align-items: center;
+    gap: 0.32rem;
+    background: transparent;
+    border: none;
+    padding: 0.26rem 0;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+}
+
+/* Status dot — hollow/muted when inactive */
+.ls-acc-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid var(--map-ink-mute);
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+/* Section label */
+.ls-acc-title {
+    font-size: 0.575rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+
+/* One-line summary — shown only when section is touched */
+.ls-acc-summary {
+    flex: 1;
+    font-size: 0.57rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    color: var(--map-ink-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.ls-acc-summary[hidden] { display: none; }
+
+/* Caret arrow */
+.ls-acc-arrow {
+    font-size: 0.44rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: transform 0.15s, color 0.15s;
+}
+.ls-acc-head[aria-expanded="true"] .ls-acc-arrow {
+    transform: rotate(90deg);
+}
+
+/* ── Active / touched state ────────────────────────────────────────────────── */
+.ls-acc-head.is-active .ls-acc-dot {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-title {
+    color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-summary {
+    color: var(--map-accent);
+    opacity: 0.85;
+}
+.ls-acc-head.is-active .ls-acc-arrow {
+    color: var(--map-accent);
+}
+
+/* Section body */
+.ls-acc-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.26rem;
+    padding: 0.18rem 0 0.32rem 0.5rem;
+}
+.ls-acc-body[hidden] { display: none; }
+
+/* Outer timelapse panel header dot — signals any section is set */
+.ls-tl-outer-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ls-tl-outer-dot.is-active {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+
+/* Start button reads "ready" (accent) once any section is configured */
+.ls-tl-start-btn {
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.ls-tl-start-btn.is-ready {
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+    background: rgba(34, 211, 238, 0.08);
+}
+
+/* Submit row — give the button its full row width */
+.ls-tl-submit-row {
+    margin-top: 0.3rem;
+}

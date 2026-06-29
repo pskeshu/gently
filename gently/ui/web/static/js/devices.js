@@ -113,6 +113,8 @@ const DevicesManager = (function () {
     let _tlEmbryos, _tlMode;
     let _tlSlices, _tlExposure, _tlGalvoAmp, _tlGalvoCtr, _tlPiezoAmp, _tlPiezoCtr, _tlLaser;
     let _tlStart, _tlStatus, _tlStatusText;
+    // Accordion active-state per section: { sched, targets, geom }
+    let _tlTouched = { sched: false, targets: false, geom: false };
 
     // Room-light toggle (header). Drives the SwitchBot Bot that switches the
     // diSPIM room light. State is the bot's cached on/off; hidden until the
@@ -1486,12 +1488,71 @@ const DevicesManager = (function () {
     // Timelapse config form (Manual view)
     // =====================================================================
 
-    /** Wire the timelapse panel's collapsible toggle and stop-condition selector.
-     *  Safe to call multiple times (idempotent via re-assignment of event handlers). */
+    // ── Accordion section summary builders ───────────────────────────────────
+
+    function _tlSchedSummary() {
+        const interval = (_tlInterval && _tlInterval.value) ? _tlInterval.value : '120';
+        const stop     = (_tlStop    && _tlStop.value)     ? _tlStop.value     : 'manual';
+        const condVal  = (_tlCondVal && _tlCondVal.value)  ? _tlCondVal.value  : '10';
+        if (stop === 'timepoints') return `${interval} s · ${condVal} frames`;
+        if (stop === 'duration')   return `${interval} s · ${condVal} h`;
+        return `${interval} s · manual`;
+    }
+
+    function _tlTargetsSummary() {
+        const embryos  = (_tlEmbryos && _tlEmbryos.value.trim())
+            ? _tlEmbryos.value.trim()
+            : 'all';
+        const modeEl   = _tlMode;
+        const modeText = (modeEl && modeEl.value)
+            ? modeEl.options[modeEl.selectedIndex].text
+            : 'none';
+        return `${embryos} · ${modeText}`;
+    }
+
+    function _tlGeomSummary() {
+        const slices   = (_tlSlices   && _tlSlices.value)   ? _tlSlices.value   : '50';
+        const exposure = (_tlExposure && _tlExposure.value) ? _tlExposure.value : '10';
+        const laser    = (_tlLaser    && _tlLaser.value)    ? _tlLaser.value    : 'ALL OFF';
+        return `${slices} sl · ${exposure} ms · ${laser}`;
+    }
+
+    /** Update a section's header active state and summary text, then sync the
+     *  outer panel dot and the start button.  sec = 'sched'|'targets'|'geom'. */
+    function _tlUpdateSection(sec) {
+        const head    = document.getElementById(`devices-tlacc-${sec}-head`);
+        const summary = document.getElementById(`devices-tlacc-${sec}-sum`);
+        const touched = _tlTouched[sec];
+
+        if (head)    head.classList.toggle('is-active', touched);
+        if (summary) {
+            summary.hidden = !touched;
+            if (touched) {
+                if      (sec === 'sched')   summary.textContent = _tlSchedSummary();
+                else if (sec === 'targets') summary.textContent = _tlTargetsSummary();
+                else if (sec === 'geom')    summary.textContent = _tlGeomSummary();
+            }
+        }
+
+        // Outer panel dot + start button "ready" state
+        const anyActive = Object.values(_tlTouched).some(Boolean);
+        const outerDot  = document.getElementById('devices-tl-outer-dot');
+        if (outerDot) outerDot.classList.toggle('is-active', anyActive);
+        if (_tlStart) _tlStart.classList.toggle('is-ready', anyActive);
+    }
+
+    /** Wire the timelapse panel: outer collapsible toggle, accordion section
+     *  toggles, touch listeners, and the submit button.
+     *  Safe to call multiple times (re-assigns handlers idempotently). */
     function initTlForm() {
         cacheDom();
 
-        // Collapsible head
+        // Reset touched state on each init (re-entering the manual view = fresh)
+        _tlTouched = { sched: false, targets: false, geom: false };
+        // Clear any leftover active-state visuals from a previous visit
+        ['sched', 'targets', 'geom'].forEach(sec => _tlUpdateSection(sec));
+
+        // ── Outer collapsible toggle ──────────────────────────────────────────
         if (_tlToggle && _tlBody) {
             _tlToggle.onclick = () => {
                 const open = _tlBody.hidden;
@@ -1502,22 +1563,52 @@ const DevicesManager = (function () {
             };
         }
 
-        // Conditional stop-value row: show for timepoints / duration, hide for manual
-        if (_tlStop && _tlCondRow) {
-            _tlStop.onchange = () => {
+        // ── Accordion section toggles ─────────────────────────────────────────
+        ['sched', 'targets', 'geom'].forEach(sec => {
+            const head = document.getElementById(`devices-tlacc-${sec}-head`);
+            const body = document.getElementById(`devices-tlacc-${sec}-body`);
+            if (!head || !body) return;
+            head.onclick = () => {
+                const open = body.hidden;
+                body.hidden = !open;
+                head.setAttribute('aria-expanded', String(open));
+                const arrow = head.querySelector('.ls-acc-arrow');
+                if (arrow) arrow.textContent = open ? '▼' : '▶';
+            };
+        });
+
+        // ── Touch listeners ───────────────────────────────────────────────────
+        const markTouched = sec => {
+            _tlTouched[sec] = true;
+            _tlUpdateSection(sec);
+        };
+
+        // Schedule — interval and stop condition drive summary; cond-row visibility unchanged
+        [_tlInterval, _tlCondVal].forEach(el => {
+            if (el) el.addEventListener('input', () => markTouched('sched'));
+        });
+        if (_tlStop) {
+            _tlStop.addEventListener('change', () => {
                 const v = _tlStop.value;
                 const show = v === 'timepoints' || v === 'duration';
-                _tlCondRow.hidden = !show;
-                if (_tlCondLabel) {
-                    _tlCondLabel.textContent = v === 'duration' ? 'Hours' : 'Count';
-                }
-            };
+                if (_tlCondRow)   _tlCondRow.hidden = !show;
+                if (_tlCondLabel) _tlCondLabel.textContent = v === 'duration' ? 'Hours' : 'Count';
+                markTouched('sched');
+            });
         }
 
-        // Submit button
-        if (_tlStart) {
-            _tlStart.onclick = startTimelapse;
-        }
+        // Targets
+        if (_tlEmbryos) _tlEmbryos.addEventListener('input',  () => markTouched('targets'));
+        if (_tlMode)    _tlMode.addEventListener('change',    () => markTouched('targets'));
+
+        // Volume geometry
+        [_tlSlices, _tlExposure, _tlGalvoAmp, _tlGalvoCtr, _tlPiezoAmp, _tlPiezoCtr].forEach(el => {
+            if (el) el.addEventListener('input', () => markTouched('geom'));
+        });
+        if (_tlLaser) _tlLaser.addEventListener('change', () => markTouched('geom'));
+
+        // ── Submit ────────────────────────────────────────────────────────────
+        if (_tlStart) _tlStart.onclick = startTimelapse;
     }
 
     /** Populate timelapse volume-geometry defaults from GET /api/devices/scan_geometry,
