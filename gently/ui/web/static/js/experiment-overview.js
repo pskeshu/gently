@@ -24,6 +24,7 @@ const ExperimentOverview = {
     _currentSessionId: null, // session_id from /api/operation_plan/current (always, even idle)
     _planPickerOpen: false,  // whether the plan-link picker is visible
     _pickerItems: null,      // flat plan items for the picker (null=not loaded)
+    _expandedTacticIds: new Set(), // tactic expand-keys for click-to-expand (survives refresh)
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
@@ -647,7 +648,7 @@ const ExperimentOverview = {
             : '';
 
         const spineNodes = tactics
-            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx))
+            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx, tactics))
             .join('');
 
         root.innerHTML = `
@@ -664,11 +665,13 @@ const ExperimentOverview = {
                 ${spineLabel}
                 <div class="ops-spine">${spineNodes}</div>
             </div>`;
+        this._wireSpineExpand(root);
     },
 
     // Render a single tactic node.
     // rosterCtx = { embryos, rolesMap } | null — when present, adds role-scope badge (D2).
-    _renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx = null) {
+    // tactics = full tactics array — used to resolve relation ids to names.
+    _renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx = null, tactics = []) {
         const STATE_LABEL = { done: 'done', active: 'in use', planned: 'queued', paused: 'paused' };
         const seq = String(t.seq || idx + 1).padStart(2, '0');
         const stateLabel = STATE_LABEL[t.state] || t.state;
@@ -683,18 +686,27 @@ const ExperimentOverview = {
         const summary = live.summary || '';
         const desc = live.desc || '';
 
-        // Scope badge — D2: shows role → embryo-ids when roster context is available.
-        const scopeBadge = rosterCtx
-            ? this._renderOpsScopeBadge(t.scope, rosterCtx.embryos, rosterCtx.rolesMap, ESC)
+        // Scope chip/badge — compact chip for planned/done/paused (always visible, no embryo
+        // list needed); full badge with embryo resolution for active state (D2 roster lens).
+        const isExpandable = (t.state === 'planned' || t.state === 'done' || t.state === 'paused');
+        const expandKey    = this._tacticExpandKey(t);
+        const scopeBadge = isExpandable
+            ? this._renderOpsScopeChip(t.scope, ESC)
+            : (rosterCtx ? this._renderOpsScopeBadge(t.scope, rosterCtx.embryos, rosterCtx.rolesMap, ESC) : '');
+
+        // Chevron toggle — only for expandable (planned / done / paused) tactics.
+        const chevron = isExpandable
+            ? `<button class="ops-expand-chevron${this._expandedTacticIds.has(expandKey) ? ' open' : ''}" aria-label="Toggle tactic details" title="Toggle details">›</button>`
             : '';
 
-        // Header row: name · target · scope badge · summary
+        // Header row: name · target · scope badge · summary · chevron
         let inner = `
             <div class="ops-row">
                 <span class="ops-tname">${ESC(t.name)}</span>
                 ${target ? `<span class="ops-target">${ESC(target)}</span>` : ''}
                 ${scopeBadge}
                 ${summary ? `<span class="ops-tsum">${ESC(summary)}</span>` : ''}
+                ${chevron}
             </div>
             ${desc ? `<div class="ops-desc">${ESC(desc)}</div>` : ''}`;
 
@@ -712,6 +724,7 @@ const ExperimentOverview = {
             inner += this._renderOpsKindActive(t, live, ESC);
         } else if (t.state === 'planned') {
             inner += this._renderOpsKindPlanned(t, ESC);
+            inner += this._renderOpsExpandBody(t, ESC, tactics);
         }
 
         // Fix #1: surface flat live.* telemetry keys not covered by structured
@@ -731,11 +744,178 @@ const ExperimentOverview = {
             }
         }
 
+        // Expand body for done + paused tactics (appended after live-facts).
+        if (t.state === 'done' || t.state === 'paused') {
+            inner += this._renderOpsExpandBody(t, ESC, tactics);
+        }
+
+        const cardExpandAttr = isExpandable
+            ? ` data-tactic-expand-id="${ESC(expandKey)}"`
+            : '';
+
         return `
             <div class="ops-node ${ESC(t.state)}">
                 <div class="ops-stagelab">${seq} · ${stateLabel}${nextBadge ? ' ' + nextBadge : ''}</div>
-                <div class="ops-card">${inner}</div>
+                <div class="ops-card"${cardExpandAttr}>${inner}</div>
             </div>`;
+    },
+
+    // -----------------------------------------------------------------
+    // Expandable tactic detail — click-to-expand for queued/done/paused
+    // -----------------------------------------------------------------
+
+    // Stable key used to persist expand state across re-renders.
+    _tacticExpandKey(t) {
+        return String(t.id || t.seq || t.name || '');
+    },
+
+    // Compact inline scope chip — always shown in the collapsed header.
+    // Works without embryo list; uses this._rolesMap for role color if available.
+    _renderOpsScopeChip(scope, ESC) {
+        const rolesMap = this._rolesMap;
+        if (!scope || scope.mode === 'global') {
+            return '<span class="ops-scope-chip ops-scope-global">global</span>';
+        }
+        if (scope.mode === 'role') {
+            const role = scope.role || '';
+            const roleInfo = rolesMap ? rolesMap.get(role) : null;
+            const color  = (roleInfo && roleInfo.ui_color) || '#8b949e';
+            const bg     = this._hexToRgba(color, 0.12);
+            const border = this._hexToRgba(color, 0.35);
+            return `<span class="ops-scope-chip" style="color:${ESC(color)};background:${bg};border-color:${border}">role: ${ESC(role)}</span>`;
+        }
+        if (scope.mode === 'embryos') {
+            const ids = (scope.embryo_ids || []).join(', ');
+            return `<span class="ops-scope-chip ops-scope-global">${ESC(ids) || '—'}</span>`;
+        }
+        return '';
+    },
+
+    // Expanded detail body — rationale, scope, structure, relations, live.readouts.
+    // Rendered hidden by default; _wireSpineExpand toggles the `hidden` class.
+    _renderOpsExpandBody(t, ESC, tactics) {
+        const rows = [];
+
+        // Rationale
+        if (t.rationale) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">rationale</span>
+                <span class="ops-expand-val">${ESC(t.rationale)}</span>
+            </div>`);
+        }
+
+        // Scope — resolved readable form
+        const scope = t.scope;
+        if (scope) {
+            let scopeText = 'all embryos';
+            if (scope.mode === 'role') {
+                scopeText = `role: ${scope.role || ''}`;
+            } else if (scope.mode === 'embryos') {
+                scopeText = (scope.embryo_ids || []).join(', ') || '—';
+            }
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">scope</span>
+                <span class="ops-expand-val">${ESC(scopeText)}</span>
+            </div>`);
+        }
+
+        // Structure — kind-specific
+        const struct = t.structure || {};
+        if (t.kind === 'standing_timelapse' && struct.cadence_s != null) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">cadence</span>
+                <span class="ops-expand-val ops-expand-mono">${ESC(struct.cadence_s)}s</span>
+            </div>`);
+        }
+        if (t.kind === 'scripted_protocol') {
+            const phases = (struct.phases || []);
+            if (phases.length) {
+                const pHtml = phases.map(p =>
+                    `<span class="ops-expand-phase">${ESC(p.name || p.state || '?')}</span>`
+                ).join('<span class="ops-expand-arrow">→</span>');
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">phases</span>
+                    <span class="ops-expand-val ops-expand-phases">${pHtml}</span>
+                </div>`);
+            }
+        }
+        if (t.kind === 'exclusive_burst' || t.kind === 'burst') {
+            if (struct.frames != null) {
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">frames</span>
+                    <span class="ops-expand-val ops-expand-mono">${ESC(struct.frames)}</span>
+                </div>`);
+            }
+            if (struct.mode) {
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">mode</span>
+                    <span class="ops-expand-val">${ESC(struct.mode)}</span>
+                </div>`);
+            }
+        }
+        if (t.kind === 'reactive_monitor' && struct.watch) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">watch</span>
+                <span class="ops-expand-val">${ESC(struct.watch)}</span>
+            </div>`);
+        }
+
+        // Relations — resolve tactic IDs to names
+        const relations = t.relations || {};
+        const afterIds = Array.isArray(relations.after) ? relations.after : [];
+        if (afterIds.length) {
+            const tacticIdMap = {};
+            for (const tac of (tactics || [])) {
+                if (tac.id) tacticIdMap[tac.id] = tac.name || tac.id;
+            }
+            const names = afterIds.map(id => tacticIdMap[id] || id);
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">runs after</span>
+                <span class="ops-expand-val">${ESC(names.join(', '))}</span>
+            </div>`);
+        }
+
+        // Live readouts (queued/done tactics may carry pre-set readout definitions)
+        const live = t.live || {};
+        if (live.readouts && live.readouts.length) {
+            rows.push(`<div class="ops-expand-readouts">
+                ${live.readouts.map(r => this._renderOpsReadout(r, ESC)).join('')}
+            </div>`);
+        }
+
+        if (!rows.length) return '';
+
+        const isOpen = this._expandedTacticIds.has(this._tacticExpandKey(t));
+        return `<div class="ops-expand-body${isOpen ? '' : ' hidden'}">
+            <hr class="ops-expand-rule">
+            ${rows.join('\n')}
+        </div>`;
+    },
+
+    // Wire click-to-expand on all expandable tactic cards in root after innerHTML is set.
+    // Persist expand state in _expandedTacticIds so it survives debounced re-renders.
+    _wireSpineExpand(root) {
+        root.querySelectorAll('.ops-card[data-tactic-expand-id]').forEach(card => {
+            const expandId = card.dataset.tacticExpandId;
+            const body    = card.querySelector('.ops-expand-body');
+            const chevron = card.querySelector('.ops-expand-chevron');
+            if (!body) return;
+
+            card.addEventListener('click', (e) => {
+                // Let clicks on interactive elements inside the body bubble freely.
+                if (e.target.closest('a, button:not(.ops-expand-chevron)')) return;
+                const isExpanded = !body.classList.contains('hidden');
+                if (isExpanded) {
+                    body.classList.add('hidden');
+                    if (chevron) chevron.classList.remove('open');
+                    this._expandedTacticIds.delete(expandId);
+                } else {
+                    body.classList.remove('hidden');
+                    if (chevron) chevron.classList.add('open');
+                    this._expandedTacticIds.add(expandId);
+                }
+            });
+        });
     },
 
     // Render a readout gauge. `r.value` may contain trusted HTML (span markup).

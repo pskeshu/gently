@@ -1459,6 +1459,160 @@
 /* Role-scoped badges use inline style (color/bg/border from /api/roles) */
 
 /* ============================================================
+   Expandable tactic detail — click-to-expand for queued/done/paused
+   (G — spine-cards)
+   ============================================================ */
+
+/* Compact inline scope chip — always visible in collapsed header.
+   Distinct from .ops-scope-badge (which resolves embryo ids and is full-width).
+   Role-scoped chips use inline style for color/bg/border from /api/roles. */
+.ops-scope-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 1px 7px;
+    border-radius: 9px;
+    font-family: var(--ops-mono);
+    font-size: 9.5px;
+    font-weight: 600;
+    border: 1px solid transparent;
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+/* Neutral global/embryos variant */
+.ops-scope-chip.ops-scope-global {
+    background: rgba(139, 148, 158, 0.12);
+    color: var(--text-muted);
+    border-color: rgba(139, 148, 158, 0.25);
+}
+
+/* Cursor affordance on the card itself */
+.ops-card[data-tactic-expand-id] {
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+.ops-node.planned .ops-card[data-tactic-expand-id]:hover {
+    border-color: rgba(90, 169, 230, 0.5);
+}
+.ops-node.done .ops-card[data-tactic-expand-id]:hover {
+    border-color: rgba(52, 211, 153, 0.4);
+}
+.ops-node.paused .ops-card[data-tactic-expand-id]:hover {
+    border-color: rgba(139, 148, 158, 0.45);
+}
+
+/* Chevron toggle — pushes to the right edge of the header row */
+.ops-expand-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    margin-left: auto;
+    flex-shrink: 0;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 15px;
+    cursor: pointer;
+    transition: transform 0.2s ease, color 0.15s;
+    padding: 0;
+    line-height: 1;
+    opacity: 0.6;
+}
+.ops-expand-chevron.open {
+    transform: rotate(90deg);
+    color: var(--text);
+    opacity: 1;
+}
+.ops-card[data-tactic-expand-id]:hover .ops-expand-chevron {
+    opacity: 1;
+}
+
+/* Expand body — hidden/visible via JS toggling .hidden */
+.ops-expand-body {
+    margin-top: 10px;
+}
+.ops-expand-body.hidden {
+    display: none;
+}
+
+/* Hairline rule separating header from expand detail */
+.ops-expand-rule {
+    border: none;
+    border-top: 1px solid rgba(139, 148, 158, 0.15);
+    margin: 8px 0 10px;
+}
+
+/* Key/value rows */
+.ops-expand-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    margin-bottom: 6px;
+    font-family: var(--ops-mono);
+    font-size: 11px;
+    line-height: 1.45;
+}
+
+.ops-expand-key {
+    flex: 0 0 76px;
+    text-transform: uppercase;
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-top: 1px;
+    opacity: 0.7;
+}
+
+.ops-expand-val {
+    flex: 1;
+    color: var(--text);
+    word-break: break-word;
+}
+
+.ops-expand-mono {
+    font-variant-numeric: tabular-nums;
+}
+
+/* Phase chain: ramp → hold */
+.ops-expand-phases {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.ops-expand-phase {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 6px;
+    background: rgba(139, 148, 158, 0.1);
+    border: 1px solid rgba(139, 148, 158, 0.2);
+    color: var(--text-muted);
+    font-size: 10px;
+    text-transform: lowercase;
+}
+
+.ops-expand-arrow {
+    color: var(--text-muted);
+    font-size: 10px;
+    opacity: 0.45;
+}
+
+/* Readouts strip inside the expand body — inherits ops-gauge, slightly muted */
+.ops-expand-readouts {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+}
+.ops-expand-readouts .ops-gauge {
+    opacity: 0.85;
+}
+
+/* ============================================================
    Linked-plans panel (ops-lp-*) — F / Task 4
    Session ↔ plan-item link/delink from the Operations view.
    Appended below the tactic spine + roster; matches ops-* aesthetic.
