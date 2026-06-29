@@ -171,7 +171,12 @@ class DeviceLayerServer(Service):
         # Lightsheet (SPIM) live stream — continuous sequence acquisition.
         self._ls_subscribers: list[asyncio.Queue] = []
         self._ls_task: asyncio.Task | None = None
-        self._ls_interval_sec: float = 0.0  # peek as fast as exposure allows
+        # Min interval between streamed frames. A floor (not 0) caps the live
+        # FPS so short exposures don't flood the browser at 100+ fps, which
+        # churns GPU texture uploads in the <img> renderer and can TDR an
+        # older display driver. ~15 fps is plenty for live focus/centering;
+        # long exposures still dominate via max(interval, exposure) below.
+        self._ls_interval_sec: float = 1.0 / 15.0  # cap live stream at ~15 fps
         self._ls_target_max_dim: int = 512
         self._ls_jpeg_quality: int = 70
         self._ls_params: dict = {

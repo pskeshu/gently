@@ -80,6 +80,14 @@ const DevicesManager = (function () {
     let _lsStaleTimer = null;
     const _LS_FPS_WINDOW = 12;
     let _lsFrameTimes = [];
+    // Render throttle: decouple paint rate from frame-arrival rate. We keep
+    // only the latest frame, coalesce paints to one per animation frame, and
+    // hold a single decode in flight at a time. This stops a fast stream from
+    // swapping <img>.src 100+ times/sec, which churns GPU texture uploads and
+    // can hang an older display driver (Video TDR). See handleLightsheetFrame.
+    let _lsPendingPayload = null;
+    let _lsRenderScheduled = false;
+    let _lsDecoding = false;
 
     // Lightsheet zoom / pan (mirrors camera zoom/pan)
     let _lsZoom = 1;
@@ -1751,6 +1759,8 @@ const DevicesManager = (function () {
         if (!streaming) {
             _lsHasFrame = false;
             _lsFrameTimes = [];
+            _lsPendingPayload = null;
+            _lsRenderScheduled = false;
             if (_lsImg) _lsImg.classList.remove('has-frame');
             if (_lsPlaceholder) _lsPlaceholder.hidden = false;
             if (_lsMeta) _lsMeta.textContent = 'stream off';
@@ -1764,12 +1774,9 @@ const DevicesManager = (function () {
 
     function handleLightsheetFrame(payload) {
         if (!payload || !payload.jpeg_b64 || !_lsImg) return;
-        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
-        if (!_lsHasFrame) {
-            _lsHasFrame = true;
-            _lsImg.classList.add('has-frame');
-            if (_lsPlaceholder) _lsPlaceholder.hidden = true;
-        }
+
+        // Lightweight bookkeeping runs per arriving frame so the FPS / live
+        // indicator reflects the true incoming rate.
         const now = performance.now();
         _lsLastFrameTs = Date.now();
         _lsFrameTimes.push(now);
@@ -1787,6 +1794,49 @@ const DevicesManager = (function () {
                 : (fps != null ? `${fps.toFixed(1)} fps` : 'live');
         }
         scheduleLightsheetStaleCheck();
+
+        // Expensive path (decode + GPU texture upload) is throttled: keep only
+        // the newest frame and coalesce paints to one per animation frame.
+        _lsPendingPayload = payload;
+        if (!_lsRenderScheduled) {
+            _lsRenderScheduled = true;
+            requestAnimationFrame(renderLightsheetFrame);
+        }
+    }
+
+    function renderLightsheetFrame() {
+        _lsRenderScheduled = false;
+        // One decode in flight at a time; a frame mid-decode means we skip this
+        // paint and let the decode's completion reschedule if newer data exists.
+        if (_lsDecoding) return;
+        const payload = _lsPendingPayload;
+        _lsPendingPayload = null;
+        if (!payload || !_lsImg) return;
+
+        _lsDecoding = true;
+        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
+
+        const done = () => {
+            _lsDecoding = false;
+            if (!_lsHasFrame) {
+                _lsHasFrame = true;
+                _lsImg.classList.add('has-frame');
+                if (_lsPlaceholder) _lsPlaceholder.hidden = true;
+            }
+            // A newer frame may have landed during decode — paint it next frame.
+            if (_lsPendingPayload && !_lsRenderScheduled) {
+                _lsRenderScheduled = true;
+                requestAnimationFrame(renderLightsheetFrame);
+            }
+        };
+
+        // img.decode() resolves once the bitmap is ready (off the main thread),
+        // giving real backpressure. Fall back to a direct apply if unsupported.
+        if (typeof _lsImg.decode === 'function') {
+            _lsImg.decode().then(done).catch(done);
+        } else {
+            done();
+        }
     }
 
     function computeLightsheetFps() {
