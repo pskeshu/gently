@@ -1,258 +1,187 @@
 /**
- * Operate view — guided bottom-cam → SPIM operator surface.
+ * Operate view — "The Operator Spine".
  *
- * Three zones, mirroring the physical workflow:
- *   1. Survey & mark  — live bottom cam, fenced bottom-Z focus nudge, Detect /
- *                       click-to-mark all embryos on a frozen frame, Confirm.
- *   2. Embryos        — the single canonical experiment.embryos list (EMBRYOS_UPDATE),
- *                       each row a per-embryo state chip + select.
- *   3. Acquire        — for the selected embryo: Center → lower SPIM head (F-drive,
- *                       fenced) → focus SPIM (live + galvo/piezo/LED nudge) → Acquire.
+ * One guided surface for the bottom-cam → SPIM workflow. A single state driver
+ * (`renderStep`) reads the selected embryo + its progress and sets EVERYTHING in
+ * lockstep: the header stepper ("you are here"), the always-on safety status
+ * strip, the left worklist + dish mini-map, the one live viewport (its camera
+ * source + on-image overlays), and which single control group the right rail
+ * shows. Exactly one camera and one step are live at a time.
  *
- * Single source of truth: marking confirms into experiment.embryos via the
- * agent-free /api/devices/embryos/confirm endpoint; the list refreshes from the
- * canonical EMBRYOS_UPDATE event. No autonomous Z moves — every focus move is a
- * bounded, server-fenced nudge.
+ * Phase A (no embryo selected): A1 focus bottom objective → A2 mark all (one
+ * frozen FOV, positions only) → Confirm into the canonical list.
+ * Phase B (per selected embryo): B1 center → B2 lower SPIM head (fenced, floor) →
+ * B3 focus SPIM (LED) → B4 acquire → B5 retract & advance.
+ *
+ * Safety: manual fenced nudges only (no autofocus); F-drive floor honored and
+ * down-nudges auto-grey near it; XY centering blocked while the head is lowered;
+ * 'focused' is earned at B3 (never on a stray F-drive nudge); LED is force-closed
+ * on step-leave and view-leave.
  */
 const OperateManager = (function () {
-    // Camera transform constants (match gently/core/coordinates.py defaults).
-    const BASE_UM_PER_PX = 6.5 / 10.0;  // pixel_size_um / objective_mag
-    const MARK_HIT_PX = 14;             // click-to-remove radius (canvas px)
+    const BASE_UM_PER_PX = 6.5 / 10.0;   // pixel_size_um / objective_mag
+    const MARK_HIT_PX = 14;
+    const SVG_NS = 'http://www.w3.org/2000/svg';
+    const ROLE_NEUTRAL = '#8a8f98';
+    const STATE_RANK = { marked: 0, centered: 1, lowering: 2, focused: 3, imaged: 4 };
 
-    let _wired = false;
-    let _active = false;
+    let _wired = false, _active = false;
 
-    // DOM
-    let _camImg, _camPh, _camStage, _markCanvas, _camToggle;
-    let _bzPos, _bzScore, _bzNudge;
-    let _detectBtn, _confirmBtn, _clearBtn, _markCount, _markHint;
-    let _embryoList, _embryoCount;
-    let _selLabel, _spimImg, _spimPh, _spimToggle, _ledBtn;
-    let _fdPos, _fdFloor, _fdNudge, _centerBtn, _acquireBtn;
-    let _gvVal, _pzVal, _spimScore;
-
-    // State
-    let _camOn = false, _spimOn = false;
-    let _lastFrame = null;        // last live bottom-cam payload {jpeg_b64, shape, downsample, focus_score}
+    // workflow state
+    let _selected = null;            // embryo id, or null = Phase A (survey)
+    let _step = null;                // explicit B-step for the selected embryo
     let _marking = false;
-    let _frozenSrc = null;        // frozen image data URL
-    let _frozenFrame = null;      // {w, h, downsample} of the frozen frame (frame-space)
-    let _captureStage = [0, 0];   // stage XY at freeze time (µm)
-    let _markers = [];            // [{fx, fy, stageX, stageY, source}] fx/fy in frame-space px
-    let _embryos = [];            // canonical list (EMBRYOS_UPDATE shape)
-    let _selected = null;         // selected embryo id
-    const _states = {};           // embryo_id -> 'marked'|'centered'|'focused'|'imaged'
-    let _lastXY = null;           // {X, Y} from DEVICE_STATE_UPDATE
+    const _states = {};              // id -> marked|centered|lowering|focused|imaged
+    let _embryos = [];               // canonical EMBRYOS_UPDATE list
+    let _headLowered = false;        // global: is the SPIM head below safe travel?
+    let _acquiring = false;
+
+    // viewport / streams
+    let _camOn = false, _spimOn = false;
+    let _lastFrame = null;           // last live bottom-cam payload
+    let _lastSpimFrame = null;
+    let _bzScore = null, _spimScore = null;
+
+    // marking
+    let _frozenSrc = null, _frozenFrame = null, _captureStage = [0, 0], _markers = [];
+
+    // device telemetry
+    let _lastXY = null;              // {X,Y}
+    let _fdPos = null, _fdFloor = null;
     let _galvo = 0.0, _piezo = 50.0, _ledOn = false;
 
-    const _ROLE_COLOR = { test: '#ff66cc', calibration: '#00cccc', unassigned: '#8a8f98' };
-    const _STATE_LABEL = { marked: 'marked', centered: 'centered', focused: 'focused', imaged: 'imaged' };
+    // DOM (cached on wire)
+    const D = {};
 
     function $(id) { return document.getElementById(id); }
-    function toast(msg) { if (typeof showGentlyToast === 'function') showGentlyToast(msg); }
+    function toast(m) { if (typeof showGentlyToast === 'function') showGentlyToast(m); }
 
     async function postJSON(url, body) {
-        const res = await fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body || {}),
-        });
-        if (!res.ok) {
-            const detail = await res.text().catch(() => '');
-            const err = new Error(`${res.status} ${detail}`);
-            err.status = res.status;
-            throw err;
-        }
+        const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+        if (!res.ok) { const t = await res.text().catch(() => ''); const e = new Error(`${res.status} ${t}`); e.status = res.status; throw e; }
         return res.json().catch(() => ({}));
     }
-    async function getJSON(url) {
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(String(res.status));
-        return res.json();
-    }
+    async function getJSON(url) { const r = await fetch(url); if (!r.ok) throw new Error(String(r.status)); return r.json(); }
 
     function cacheDom() {
-        _camImg = $('op-cam-img'); _camPh = $('op-cam-ph'); _camStage = $('op-cam-stage');
-        _markCanvas = $('op-mark-canvas'); _camToggle = $('op-cam-toggle');
-        _bzPos = $('op-bz-pos'); _bzScore = $('op-bz-score'); _bzNudge = $('op-bz-nudge');
-        _detectBtn = $('op-detect'); _confirmBtn = $('op-confirm'); _clearBtn = $('op-clear');
-        _markCount = $('op-mark-count'); _markHint = $('op-mark-hint');
-        _embryoList = $('op-embryo-list'); _embryoCount = $('op-embryo-count');
-        _selLabel = $('op-sel-label'); _spimImg = $('op-spim-img'); _spimPh = $('op-spim-ph');
-        _spimToggle = $('op-spim-toggle'); _ledBtn = $('op-led');
-        _fdPos = $('op-fd-pos'); _fdFloor = $('op-fd-floor'); _fdNudge = $('op-fd-nudge');
-        _centerBtn = $('op-center'); _acquireBtn = $('op-acquire');
-        _gvVal = $('op-gv'); _pzVal = $('op-pz'); _spimScore = $('op-spim-score');
+        [
+            'op-stepper', 'op-loop-emb', 'op-st-head', 'op-st-floor', 'op-st-led', 'op-st-led-wrap',
+            'op-st-laser', 'op-st-laser-wrap', 'op-st-cam', 'op-minimap', 'op-board', 'op-board-count',
+            'op-survey-btn', 'op-badge', 'op-cam-stage', 'op-cam-img', 'op-mark-canvas', 'op-cam-ph',
+            'op-rail', 'op-rail-head', 'op-cam-toggle', 'op-bz-pos', 'op-bz-score', 'op-bz-nudge',
+            'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
+            'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
+            'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus', 'op-acquire', 'op-retract',
+        ].forEach(id => { D[id] = $(id); });
     }
 
-    // ---- Bottom-camera survey -------------------------------------------
-    async function toggleCamera() {
-        _camToggle.disabled = true;
-        try {
-            const ep = _camOn ? '/api/devices/bottom_camera/stream/stop'
-                              : '/api/devices/bottom_camera/stream/start';
-            const data = await postJSON(ep, {});
-            applyCameraState(!!data.streaming);
-        } catch (err) {
-            toast(`Camera toggle failed (${err.status || err.message})`);
-        } finally {
-            _camToggle.disabled = false;
+    // ── step model ───────────────────────────────────────────────────────
+    function stepForState(st) {
+        return { marked: 'b1', centered: 'b2', lowering: 'b2', focused: 'b4', imaged: 'b5' }[st] || 'b1';
+    }
+    function effectiveStep() {
+        if (!_selected) return _marking ? 'a2' : 'a1';
+        return _step || 'b1';
+    }
+    function cameraForStep(step) {
+        return (step === 'a1' || step === 'a2' || step === 'b1') ? 'bottom' : 'spim';
+    }
+
+    const RAIL_HEADS = {
+        a1: 'Focus the bottom objective', a2: 'Mark all embryos',
+        b1: 'Center the embryo', b2: 'Lower the SPIM head', b3: 'Focus the SPIM objective',
+        b4: 'Acquire the volume', b5: 'Retract & advance',
+    };
+    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', b4: 'b4', b5: 'b4' };
+
+    function setStep(s) { _step = s; renderStep(); }
+
+    // The single driver — every state change routes through here.
+    function renderStep() {
+        const step = effectiveStep();
+        const cam = cameraForStep(step);
+
+        // rail group + head
+        if (D['op-rail']) D['op-rail'].dataset.active = step;
+        if (D['op-rail-head']) {
+            const emb = _embryos.find(e => e.id === _selected);
+            D['op-rail-head'].textContent = emb
+                ? `Embryo ${labelFor(emb)} · ${RAIL_HEADS[step]}`
+                : RAIL_HEADS[step];
         }
-    }
-    function applyCameraState(on) {
-        _camOn = on;
-        _camToggle.textContent = on ? 'Stop camera' : 'Start camera';
-        _camToggle.classList.toggle('op-btn-on', on);
-        if (!on && !_marking) { _camImg.classList.remove('has-frame'); _camPh.style.display = ''; _camPh.textContent = 'Camera off'; }
-        else if (on && !_marking) { _camPh.textContent = 'waiting…'; }
-    }
-    function onBottomFrame(p) {
-        if (!p || !p.jpeg_b64) return;
-        _lastFrame = p;
-        if (p.focus_score != null) _bzScore.textContent = Number(p.focus_score).toFixed(3);
-        if (_marking) return;  // keep the frozen frame visible while marking
-        _camImg.src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
-        if (!_camImg.classList.contains('has-frame')) { _camImg.classList.add('has-frame'); _camPh.style.display = 'none'; }
-    }
 
-    // ---- Marking --------------------------------------------------------
-    function umPerPxDisplay() {
-        const ds = (_frozenFrame && _frozenFrame.downsample) || 1;
-        return BASE_UM_PER_PX * ds;
-    }
-    // frame-space (downsampled px) -> stage µm, using the frozen capture pose.
-    function frameToStage(fx, fy) {
-        const u = umPerPxDisplay();
-        const cx = _frozenFrame.w / 2, cy = _frozenFrame.h / 2;
-        return [_captureStage[0] + (fx - cx) * u, _captureStage[1] - (fy - cy) * u];
-    }
-    function enterMarking(candidates) {
-        if (!_lastFrame) { toast('Start the camera first'); return false; }
-        _marking = true;
-        _frozenFrame = { w: _lastFrame.shape[1], h: _lastFrame.shape[0], downsample: _lastFrame.downsample || 1 };
-        _captureStage = _lastFrame.stage_position || (_lastXY ? [_lastXY.X, _lastXY.Y] : [0, 0]);
-        _frozenSrc = `data:${_lastFrame.mime || 'image/jpeg'};base64,${_lastFrame.jpeg_b64}`;
-        _camImg.src = _frozenSrc; _camImg.classList.add('has-frame'); _camPh.style.display = 'none';
-        _markers = [];
-        (candidates || []).forEach(c => {
-            const ds = _frozenFrame.downsample;
-            const fx = (c.pixel_x != null) ? c.pixel_x / ds : _frozenFrame.w / 2;
-            const fy = (c.pixel_y != null) ? c.pixel_y / ds : _frozenFrame.h / 2;
-            const stage = (c.stage_x_um != null && c.stage_y_um != null)
-                ? [c.stage_x_um, c.stage_y_um] : frameToStage(fx, fy);
-            _markers.push({ fx, fy, stageX: stage[0], stageY: stage[1], source: 'sam' });
-        });
-        _camStage.classList.add('op-marking');
-        _markHint.textContent = 'Click to add an embryo · click a marker to remove · Confirm when done.';
-        drawMarkers(); updateMarkActions();
-        return true;
-    }
-    function exitMarking() {
-        _marking = false; _markers = []; _frozenSrc = null; _frozenFrame = null;
-        _camStage.classList.remove('op-marking');
-        clearCanvas();
-        updateMarkActions();
-        _markHint.textContent = 'Start the camera, then Detect — or click the image to mark embryos.';
-        if (_camOn && _lastFrame) onBottomFrame(_lastFrame);
-    }
-    // rendered image rect (object-fit: contain) within the stage box.
-    function renderedRect() {
-        const sb = _camStage.getBoundingClientRect();
-        const fw = _frozenFrame ? _frozenFrame.w : (_lastFrame ? _lastFrame.shape[1] : sb.width);
-        const fh = _frozenFrame ? _frozenFrame.h : (_lastFrame ? _lastFrame.shape[0] : sb.height);
-        const ar = fw / fh, sar = sb.width / sb.height;
-        let w, h;
-        if (ar > sar) { w = sb.width; h = sb.width / ar; } else { h = sb.height; w = sb.height * ar; }
-        return { x: (sb.width - w) / 2, y: (sb.height - h) / 2, w, h, fw, fh, sb };
-    }
-    function clearCanvas() {
-        if (!_markCanvas) return;
-        const ctx = _markCanvas.getContext('2d');
-        ctx && ctx.clearRect(0, 0, _markCanvas.width, _markCanvas.height);
-    }
-    function drawMarkers() {
-        if (!_markCanvas || !_marking) return;
-        const r = renderedRect();
-        _markCanvas.width = Math.round(r.sb.width); _markCanvas.height = Math.round(r.sb.height);
-        const ctx = _markCanvas.getContext('2d');
-        ctx.clearRect(0, 0, _markCanvas.width, _markCanvas.height);
-        _markers.forEach((m, i) => {
-            const cx = r.x + (m.fx / r.fw) * r.w;
-            const cy = r.y + (m.fy / r.fh) * r.h;
-            ctx.beginPath(); ctx.arc(cx, cy, 11, 0, 7);
-            ctx.lineWidth = 2; ctx.strokeStyle = '#34d399'; ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy);
-            ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
-            ctx.fillStyle = '#34d399'; ctx.font = '600 11px Inter Tight, system-ui, sans-serif';
-            ctx.fillText(String(i + 1), cx + 13, cy - 8);
-        });
-    }
-    function onCanvasClick(e) {
-        if (!_marking) return;
-        const r = renderedRect();
-        const rect = _markCanvas.getBoundingClientRect();
-        const cxv = e.clientX - rect.left, cyv = e.clientY - rect.top;
-        // hit-test existing markers (remove)
-        for (let i = 0; i < _markers.length; i++) {
-            const mx = r.x + (_markers[i].fx / r.fw) * r.w;
-            const my = r.y + (_markers[i].fy / r.fh) * r.h;
-            if (Math.hypot(cxv - mx, cyv - my) <= MARK_HIT_PX) {
-                _markers.splice(i, 1); drawMarkers(); updateMarkActions(); return;
+        // stepper nodes (done/active/locked) driven by selected embryo's state
+        const st = _selected ? (_states[_selected] || 'marked') : null;
+        const rank = st ? STATE_RANK[st] : -1;
+        const order = { b1: 0, b2: 1, b3: 2, b4: 3 };
+        D['op-stepper'].querySelectorAll('.op-node').forEach(n => {
+            const node = n.dataset.node;
+            n.classList.remove('is-active', 'is-done', 'is-locked');
+            const active = STEP_NODE[step] === node;
+            if (node === 'a1' || node === 'a2') {
+                if (active && !_selected) n.classList.add('is-active');
+                else if (_embryos.length) n.classList.add('is-done');
+            } else {
+                const oi = order[node];
+                if (active) n.classList.add('is-active');
+                else if (rank > oi) n.classList.add('is-done');
+                else if (!_selected || rank < oi) n.classList.add('is-locked');
             }
+        });
+        if (D['op-loop-emb']) {
+            const emb = _embryos.find(e => e.id === _selected);
+            const idx = emb ? _embryos.indexOf(emb) + 1 : 0;
+            D['op-loop-emb'].textContent = emb ? ` · ${idx}/${_embryos.length}` : '';
         }
-        // add — convert canvas px -> frame-space px -> stage µm
-        if (cxv < r.x || cxv > r.x + r.w || cyv < r.y || cyv > r.y + r.h) return;
-        const fx = ((cxv - r.x) / r.w) * r.fw;
-        const fy = ((cyv - r.y) / r.h) * r.fh;
-        const stage = frameToStage(fx, fy);
-        _markers.push({ fx, fy, stageX: stage[0], stageY: stage[1], source: 'manual' });
-        drawMarkers(); updateMarkActions();
-    }
-    function updateMarkActions() {
-        const n = _markers.length;
-        _markCount.textContent = `(${n})`;
-        _confirmBtn.disabled = !_marking || n === 0;
-        _clearBtn.disabled = !_marking || n === 0;
-    }
-    async function runDetect() {
-        _detectBtn.disabled = true; _detectBtn.textContent = 'Detecting…';
-        try {
-            const data = await postJSON('/api/devices/detect_embryos', {});
-            const cands = Array.isArray(data.embryos) ? data.embryos : [];
-            if (_lastFrame && data.stage_position) _lastFrame.stage_position = data.stage_position;
-            if (enterMarking(cands)) toast(`Detected ${cands.length} candidate${cands.length === 1 ? '' : 's'} — review & confirm`);
-        } catch (err) {
-            toast(`Detect failed (${err.status || err.message})`);
-        } finally {
-            _detectBtn.disabled = false; _detectBtn.textContent = 'Detect';
+
+        // viewport: badge + stop the inactive camera
+        if (D['op-badge']) D['op-badge'].textContent =
+            (cam === 'bottom' ? 'Bottom cam' : 'SPIM · side A') + ' — ' + RAIL_HEADS[step].toLowerCase();
+        ensureInactiveCameraStopped(cam);
+        // show the right frame
+        if (cam === 'bottom' && !_marking && _lastFrame) setImg(_lastFrame);
+        else if (cam === 'spim' && _lastSpimFrame) setImg(_lastSpimFrame);
+        else if (cam === 'spim' && !_spimOn) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'SPIM view off'; }
+        else if (cam === 'bottom' && !_camOn && !_marking) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'Camera off'; }
+
+        // gating
+        if (D['op-center']) {
+            if (_headLowered) { D['op-center'].textContent = 'Retract head first'; D['op-center'].disabled = true; }
+            else { D['op-center'].textContent = 'Center stage on embryo'; D['op-center'].disabled = false; }
         }
-    }
-    async function confirmMarks() {
-        if (!_markers.length) return;
-        _confirmBtn.disabled = true;
-        try {
-            // Stage coords register the embryos; pixel coords + the frozen frame
-            // are persisted as localization labels (sub-project B) server-side.
-            const markers = _markers.map(m => ({
-                stage_x_um: m.stageX, stage_y_um: m.stageY,
-                pixel_x: m.fx, pixel_y: m.fy, source: m.source,
-            }));
-            const data = await postJSON('/api/devices/embryos/confirm', {
-                markers,
-                image_b64: _frozenSrc ? _frozenSrc.split(',')[1] : undefined,
-                frame: _frozenFrame ? { w: _frozenFrame.w, h: _frozenFrame.h, downsample: _frozenFrame.downsample } : undefined,
-                stage_position: _captureStage,
-            });
-            const n = (data.registered || []).length;
-            toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
-            exitMarking();  // list refreshes via EMBRYOS_UPDATE
-        } catch (err) {
-            toast(`Confirm failed (${err.status || err.message})`);
-            _confirmBtn.disabled = false;
-        }
+        gateFdriveNudges();
+
+        drawOverlay(step);
+        renderStatus();
+        renderBoard();
+        renderMiniMap();
     }
 
-    // ---- Embryo list (single source of truth) ---------------------------
+    function ensureInactiveCameraStopped(cam) {
+        if (cam !== 'bottom' && _camOn) { fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {}); applyCam(false); }
+        if (cam !== 'spim' && _spimOn) { fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {}); _spimOn = false; D['op-spim-toggle'].textContent = 'Start view'; D['op-spim-toggle'].classList.remove('op-btn-on'); }
+    }
+    function setImg(p) {
+        if (!p || !p.jpeg_b64) return;
+        D['op-cam-img'].src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
+        if (!D['op-cam-img'].classList.contains('has-frame')) { D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none'; }
+    }
+
+    // ── status strip ──────────────────────────────────────────────────────
+    function renderStatus() {
+        D['op-st-head'].textContent = _headLowered ? '▼ lowered' : '▲ up';
+        D['op-st-head'].parentElement.classList.toggle('is-down', _headLowered);
+        D['op-st-floor'].textContent = _fdFloor != null ? `${Math.round(_fdFloor)} µm` : '—';
+        D['op-st-led'].textContent = _ledOn ? 'EMITTING' : 'OFF';
+        D['op-st-led-wrap'].classList.toggle('is-emitting', _ledOn);
+        D['op-st-laser'].textContent = _acquiring ? 'EMITTING' : 'OFF';
+        D['op-st-laser-wrap'].classList.toggle('is-emitting', _acquiring);
+        const cam = cameraForStep(effectiveStep());
+        const on = cam === 'bottom' ? _camOn : _spimOn;
+        D['op-st-cam'].textContent = `${cam === 'bottom' ? 'bottom' : 'SPIM'} ${on ? '● live' : '○ off'}`;
+    }
+
+    // ── left spine: worklist + mini-map ────────────────────────────────────
     function resolveXY(emb) {
         const f = emb && emb.position_fine;
         if (f && Number.isFinite(f.x) && Number.isFinite(f.y)) return { x: f.x, y: f.y };
@@ -260,200 +189,425 @@ const OperateManager = (function () {
         if (c && Number.isFinite(c.x) && Number.isFinite(c.y)) return { x: c.x, y: c.y };
         return null;
     }
-    function labelFor(emb, i) {
-        const m = emb.id && String(emb.id).match(/(\d+)/);
-        return m ? m[1] : String(i + 1);
-    }
-    function onEmbryosUpdate(p) {
-        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
-        // prune state for embryos that no longer exist
-        const ids = new Set(_embryos.map(e => e.id));
-        Object.keys(_states).forEach(id => { if (!ids.has(id)) delete _states[id]; });
-        _embryos.forEach(e => { if (!_states[e.id]) _states[e.id] = 'marked'; });
-        if (_selected && !ids.has(_selected)) selectEmbryo(null);
-        renderList();
-    }
-    function renderList() {
-        if (!_embryoList) return;
-        _embryoCount.textContent = _embryos.length ? `(${_embryos.length})` : '';
-        _embryoList.innerHTML = '';
-        if (!_embryos.length) {
-            const e = document.createElement('div'); e.className = 'op-empty';
-            e.textContent = 'No embryos yet — mark some in step 1.';
-            _embryoList.appendChild(e); return;
-        }
-        _embryos.forEach((emb, i) => {
+    function labelFor(emb) { const m = emb && emb.id && String(emb.id).match(/(\d+)/); return m ? m[1] : '?'; }
+
+    function renderBoard() {
+        if (!D['op-board']) return;
+        const imaged = _embryos.filter(e => _states[e.id] === 'imaged').length;
+        D['op-board-count'].textContent = `${imaged} / ${_embryos.length} imaged`;
+        D['op-board'].innerHTML = '';
+        if (!_embryos.length) { const e = document.createElement('div'); e.className = 'op-empty'; e.textContent = 'No embryos yet'; D['op-board'].appendChild(e); return; }
+        _embryos.forEach(emb => {
+            const st = _states[emb.id] || 'marked';
+            const rank = STATE_RANK[st];
             const xy = resolveXY(emb);
             const row = document.createElement('div');
-            row.className = 'op-erow' + (emb.id === _selected ? ' op-erow-sel' : '');
+            row.className = 'op-brow' + (emb.id === _selected ? ' is-sel' : '');
             row.addEventListener('click', () => selectEmbryo(emb.id));
 
             const dot = document.createElement('span');
-            dot.className = 'op-edot'; dot.textContent = labelFor(emb, i);
-            dot.style.background = _ROLE_COLOR[emb.role] || _ROLE_COLOR.unassigned;
+            dot.className = 'op-bdot'; dot.textContent = labelFor(emb);
+            if (st === 'imaged') dot.style.background = 'var(--accent-green)';
             row.appendChild(dot);
 
-            const coord = document.createElement('span');
-            coord.className = 'op-ecoord';
-            coord.textContent = xy ? `(${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}) µm` : 'no position';
-            row.appendChild(coord);
+            const meta = document.createElement('span'); meta.className = 'op-bmeta';
+            const lab = document.createElement('span'); lab.className = 'op-blabel';
+            lab.textContent = xy ? `(${xy.x.toFixed(0)}, ${xy.y.toFixed(0)})` : `embryo ${labelFor(emb)}`;
+            meta.appendChild(lab);
+            const track = document.createElement('span'); track.className = 'op-track';
+            ['centered', 'lowering', 'focused', 'imaged'].forEach((k, i) => {
+                const t = document.createElement('span'); t.className = 'op-tnode';
+                if (rank >= STATE_RANK[k]) t.classList.add('on-' + k);
+                track.appendChild(t);
+            });
+            meta.appendChild(track);
+            row.appendChild(meta);
 
-            const chip = document.createElement('span');
-            const st = _states[emb.id] || 'marked';
-            chip.className = `op-echip op-echip-${st}`;
-            chip.textContent = _STATE_LABEL[st] || st;
-            row.appendChild(chip);
-
-            _embryoList.appendChild(row);
+            const sc = document.createElement('span'); sc.className = 'op-bstate'; sc.textContent = st;
+            row.appendChild(sc);
+            D['op-board'].appendChild(row);
         });
     }
-    function setState(id, st) { if (id) { _states[id] = st; renderList(); } }
 
-    // ---- Acquire (selected embryo) --------------------------------------
-    function selectEmbryo(id) {
-        _selected = id;
-        const emb = _embryos.find(e => e.id === id);
-        _selLabel.textContent = emb ? `— embryo ${labelFor(emb, _embryos.indexOf(emb))}` : '— select an embryo';
-        _centerBtn.disabled = !emb;
-        _acquireBtn.disabled = !emb || (_states[id] !== 'focused' && _states[id] !== 'imaged');
-        renderList();
-    }
-    async function centerOnSelected() {
-        const emb = _embryos.find(e => e.id === _selected);
-        const xy = emb ? resolveXY(emb) : null;
-        if (!xy) return;
-        _centerBtn.disabled = true; _centerBtn.textContent = 'Centering…';
-        try {
-            await postJSON('/api/devices/stage/move', { x: xy.x, y: xy.y });
-            setState(_selected, 'centered');
-            toast(`Centred on embryo ${labelFor(emb, _embryos.indexOf(emb))}`);
-        } catch (err) {
-            toast(`Center failed (${err.status || err.message})`);
-        } finally {
-            _centerBtn.disabled = false; _centerBtn.textContent = 'Center stage on embryo';
-        }
-    }
-    async function acquireSelected() {
-        if (!_selected) return;
-        _acquireBtn.disabled = true; _acquireBtn.textContent = 'Acquiring…';
-        try {
-            await postJSON('/api/devices/acquire/volume', { num_slices: 50, exposure_ms: 10.0 });
-            setState(_selected, 'imaged');
-            toast('Volume acquired');
-        } catch (err) {
-            toast(`Acquire failed (${err.status || err.message})`);
-        } finally {
-            _acquireBtn.disabled = false; _acquireBtn.textContent = 'Acquire volume';
+    function renderMiniMap() {
+        const svg = D['op-minimap']; if (!svg) return;
+        while (svg.firstChild) svg.removeChild(svg.firstChild);
+        const pts = _embryos.map(e => resolveXY(e)).filter(Boolean);
+        if (_lastXY) pts.push({ x: _lastXY.X, y: _lastXY.Y });
+        if (!pts.length) return;
+        let xMin = Math.min(...pts.map(p => p.x)), xMax = Math.max(...pts.map(p => p.x));
+        let yMin = Math.min(...pts.map(p => p.y)), yMax = Math.max(...pts.map(p => p.y));
+        const span = Math.max(xMax - xMin, yMax - yMin, 100), padf = span * 0.18;
+        const cx = (xMin + xMax) / 2, cy = (yMin + yMax) / 2, half = span / 2 + padf;
+        const toX = x => ((x - (cx - half)) / (2 * half)) * 100;
+        const toY = y => 100 - ((y - (cy - half)) / (2 * half)) * 100;  // flip Y (stage +Y up)
+        const r = 2.4;
+        _embryos.forEach(emb => {
+            const xy = resolveXY(emb); if (!xy) return;
+            const st = _states[emb.id] || 'marked';
+            const c = document.createElementNS(SVG_NS, 'circle');
+            c.setAttribute('cx', toX(xy.x)); c.setAttribute('cy', toY(xy.y)); c.setAttribute('r', r);
+            const col = st === 'imaged' ? 'var(--accent-green)' : st === 'focused' ? 'var(--accent-orange)'
+                : (st === 'centered' || st === 'lowering') ? 'var(--accent)' : ROLE_NEUTRAL;
+            c.setAttribute('fill', col);
+            if (emb.id === _selected) { c.setAttribute('stroke', 'var(--text)'); c.setAttribute('stroke-width', '1.2'); }
+            svg.appendChild(c);
+        });
+        if (_lastXY) {  // stage crosshair
+            const X = toX(_lastXY.X), Y = toY(_lastXY.Y);
+            [[X - 4, Y, X + 4, Y], [X, Y - 4, X, Y + 4]].forEach(([x1, y1, x2, y2]) => {
+                const l = document.createElementNS(SVG_NS, 'line');
+                l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
+                l.setAttribute('stroke', 'var(--accent-cyan)'); l.setAttribute('stroke-width', '0.8');
+                svg.appendChild(l);
+            });
         }
     }
 
-    // ---- Focus Z nudges (fenced) ----------------------------------------
-    async function nudgeBottomZ(delta) {
-        try {
-            const d = await postJSON('/api/devices/stage/bottom_z/nudge', { delta });
-            if (d.position != null) _bzPos.textContent = Number(d.position).toFixed(1);
-        } catch (err) { toast(`Bottom-Z nudge blocked (${err.status || err.message})`); }
+    // ── viewport overlays ──────────────────────────────────────────────────
+    function renderedRect() {
+        const sb = D['op-cam-stage'].getBoundingClientRect();
+        const fw = _frozenFrame ? _frozenFrame.w : (_lastFrame ? _lastFrame.shape[1] : sb.width);
+        const fh = _frozenFrame ? _frozenFrame.h : (_lastFrame ? _lastFrame.shape[0] : sb.height);
+        const ar = fw / fh, sar = sb.width / sb.height;
+        let w, h;
+        if (ar > sar) { w = sb.width; h = sb.width / ar; } else { h = sb.height; w = sb.height * ar; }
+        return { x: (sb.width - w) / 2, y: (sb.height - h) / 2, w, h, fw, fh, sb };
     }
-    async function nudgeFdrive(delta) {
-        try {
-            const d = await postJSON('/api/devices/spim/fdrive/nudge', { delta });
-            if (d.position != null) _fdPos.textContent = Number(d.position).toFixed(1);
-            if (d.distance_to_floor != null) _fdFloor.textContent = Number(d.distance_to_floor).toFixed(0);
-            if (_selected) setState(_selected, 'focused');
-            selectEmbryo(_selected);  // re-eval acquire enable
-        } catch (err) { toast(`F-drive nudge blocked (${err.status || err.message})`); }
+    function canvasCtx() {
+        const sb = D['op-cam-stage'].getBoundingClientRect();
+        D['op-mark-canvas'].width = Math.round(sb.width); D['op-mark-canvas'].height = Math.round(sb.height);
+        const ctx = D['op-mark-canvas'].getContext('2d');
+        ctx.clearRect(0, 0, D['op-mark-canvas'].width, D['op-mark-canvas'].height);
+        return ctx;
     }
-    async function refreshZReadouts() {
-        try { const b = await getJSON('/api/devices/stage/bottom_z'); if (b.position != null) _bzPos.textContent = Number(b.position).toFixed(1); } catch (_) {}
-        try {
-            const f = await getJSON('/api/devices/spim/fdrive');
-            if (f.position != null) _fdPos.textContent = Number(f.position).toFixed(1);
-            if (f.distance_to_floor != null) _fdFloor.textContent = Number(f.distance_to_floor).toFixed(0);
-        } catch (_) {}
+    function drawOverlay(step) {
+        if (!D['op-mark-canvas']) return;
+        if (step === 'a2') return drawMarkers();
+        const ctx = canvasCtx();
+        if (step === 'b1') drawReticle(ctx);
+        else if (step === 'b2') drawFloorGauge(ctx);
+    }
+    function drawMarkers() {
+        const r = renderedRect(); const ctx = canvasCtx();
+        _markers.forEach((m, i) => {
+            const cx = r.x + (m.fx / r.fw) * r.w, cy = r.y + (m.fy / r.fh) * r.h;
+            ctx.beginPath(); ctx.arc(cx, cy, 11, 0, 7); ctx.lineWidth = 2; ctx.strokeStyle = '#34d399'; ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(cx - 6, cy); ctx.lineTo(cx + 6, cy); ctx.moveTo(cx, cy - 6); ctx.lineTo(cx, cy + 6); ctx.stroke();
+            ctx.fillStyle = '#34d399'; ctx.font = '600 11px Inter Tight, sans-serif'; ctx.fillText(String(i + 1), cx + 13, cy - 8);
+        });
+    }
+    function drawReticle(ctx) {
+        const sb = D['op-mark-canvas']; const cx = sb.width / 2, cy = sb.height / 2;
+        ctx.strokeStyle = 'rgba(96,165,250,0.85)'; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.moveTo(cx - 22, cy); ctx.lineTo(cx + 22, cy); ctx.moveTo(cx, cy - 22); ctx.lineTo(cx, cy + 22); ctx.stroke();
+        ctx.beginPath(); ctx.arc(cx, cy, 10, 0, 7); ctx.stroke();
+        // SPIM-FOV footprint box (light-sheet FOV << bottom FOV)
+        const r = renderedRect(); const bw = r.w * 0.22, bh = r.h * 0.22;
+        ctx.setLineDash([5, 3]); ctx.strokeStyle = 'rgba(34,211,238,0.7)';
+        ctx.strokeRect(cx - bw / 2, cy - bh / 2, bw, bh); ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(34,211,238,0.85)'; ctx.font = '600 10px Inter Tight, sans-serif';
+        ctx.fillText('SPIM FOV', cx - bw / 2, cy - bh / 2 - 4);
+    }
+    function drawFloorGauge(ctx) {
+        const sb = D['op-mark-canvas']; const pad = 24, h = 26, y = sb.height - pad - h, w = sb.width - 2 * pad, x = pad;
+        const floor = _fdFloor;
+        ctx.fillStyle = 'rgba(0,0,0,0.45)'; ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1; ctx.strokeRect(x, y, w, h);
+        // fill: full when far from floor, shrinks toward floor
+        const MAXD = 500;
+        const frac = floor == null ? 0 : Math.max(0, Math.min(1, floor / MAXD));
+        const col = floor == null ? '#555' : floor <= 30 ? '#ef4444' : floor < 150 ? '#fb923c' : '#4ade80';
+        ctx.fillStyle = col; ctx.fillRect(x + 2, y + 2, (w - 4) * frac, h - 4);
+        ctx.fillStyle = '#fff'; ctx.font = '700 13px Inter Tight, sans-serif';
+        ctx.fillText(floor == null ? 'distance to floor —' : `${Math.round(floor)} µm to floor (30 µm hard floor)`, x + 8, y + h - 8);
     }
 
-    // ---- SPIM focus -----------------------------------------------------
-    async function toggleSpim() {
-        _spimToggle.disabled = true;
-        try {
-            const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
-            const data = await postJSON(ep, {});
-            _spimOn = !!data.streaming;
-            _spimToggle.textContent = _spimOn ? 'Stop view' : 'Start view';
-            _spimToggle.classList.toggle('op-btn-on', _spimOn);
-            if (!_spimOn) { _spimImg.classList.remove('has-frame'); _spimPh.style.display = ''; }
-            else _spimPh.textContent = 'waiting…';
-        } catch (err) { toast(`SPIM view toggle failed (${err.status || err.message})`); }
-        finally { _spimToggle.disabled = false; }
+    // ── bottom-cam frames ──────────────────────────────────────────────────
+    function onBottomFrame(p) {
+        if (!p || !p.jpeg_b64) return;
+        _lastFrame = p;
+        if (p.focus_score != null) { _bzScore = p.focus_score; if (D['op-bz-score']) D['op-bz-score'].textContent = Number(p.focus_score).toFixed(3); }
+        const cam = cameraForStep(effectiveStep());
+        if (cam === 'bottom' && !_marking) setImg(p);
     }
     function onLightsheetFrame(p) {
         if (!p || !p.jpeg_b64) return;
-        _spimImg.src = `data:${p.mime || 'image/jpeg'};base64,${p.jpeg_b64}`;
-        if (!_spimImg.classList.contains('has-frame')) { _spimImg.classList.add('has-frame'); _spimPh.style.display = 'none'; }
-        if (p.focus_score != null) _spimScore.textContent = Number(p.focus_score).toFixed(3);
+        _lastSpimFrame = p;
+        if (p.focus_score != null) { _spimScore = p.focus_score; if (D['op-spim-score']) D['op-spim-score'].textContent = Number(p.focus_score).toFixed(3); }
+        if (cameraForStep(effectiveStep()) === 'spim') setImg(p);
+    }
+
+    // ── A1 focus bottom ────────────────────────────────────────────────────
+    async function toggleCamera() {
+        D['op-cam-toggle'].disabled = true;
+        try {
+            const ep = _camOn ? '/api/devices/bottom_camera/stream/stop' : '/api/devices/bottom_camera/stream/start';
+            const d = await postJSON(ep, {}); applyCam(!!d.streaming);
+        } catch (e) { toast(`Camera toggle failed (${e.status || e.message})`); }
+        finally { D['op-cam-toggle'].disabled = false; }
+    }
+    function applyCam(on) {
+        _camOn = on;
+        D['op-cam-toggle'].textContent = on ? 'Stop camera' : 'Start camera';
+        D['op-cam-toggle'].classList.toggle('op-btn-on', on);
+        if (!on && !_marking) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'Camera off'; }
+        renderStatus();
+    }
+    async function nudgeBottomZ(delta) {
+        if (_marking) { toast('Finish marking first'); return; }
+        try { const d = await postJSON('/api/devices/stage/bottom_z/nudge', { delta }); if (d.position != null) D['op-bz-pos'].textContent = Number(d.position).toFixed(1); }
+        catch (e) { toast(`Bottom-Z nudge blocked (${e.status || e.message})`); }
+    }
+
+    // ── A2 mark ────────────────────────────────────────────────────────────
+    function umPerPxDisplay() { return BASE_UM_PER_PX * ((_frozenFrame && _frozenFrame.downsample) || 1); }
+    function frameToStage(fx, fy) {
+        const u = umPerPxDisplay(), cx = _frozenFrame.w / 2, cy = _frozenFrame.h / 2;
+        return [_captureStage[0] + (fx - cx) * u, _captureStage[1] - (fy - cy) * u];
+    }
+    function enterMarking(cands) {
+        if (!_lastFrame) { toast('Start the camera first'); return false; }
+        _marking = true;
+        _frozenFrame = { w: _lastFrame.shape[1], h: _lastFrame.shape[0], downsample: _lastFrame.downsample || 1 };
+        _captureStage = _lastFrame.stage_position || (_lastXY ? [_lastXY.X, _lastXY.Y] : [0, 0]);
+        _frozenSrc = `data:${_lastFrame.mime || 'image/jpeg'};base64,${_lastFrame.jpeg_b64}`;
+        D['op-cam-img'].src = _frozenSrc; D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none';
+        _markers = [];
+        (cands || []).forEach(c => {
+            const ds = _frozenFrame.downsample;
+            const fx = c.pixel_x != null ? c.pixel_x / ds : _frozenFrame.w / 2;
+            const fy = c.pixel_y != null ? c.pixel_y / ds : _frozenFrame.h / 2;
+            const s = (c.stage_x_um != null && c.stage_y_um != null) ? [c.stage_x_um, c.stage_y_um] : frameToStage(fx, fy);
+            _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'sam' });
+        });
+        D['op-cam-stage'].classList.add('is-marking');
+        renderStep(); updateMarkCount();
+        return true;
+    }
+    function exitMarking() {
+        _marking = false; _markers = []; _frozenSrc = null; _frozenFrame = null;
+        D['op-cam-stage'].classList.remove('is-marking');
+    }
+    function updateMarkCount() {
+        const n = _markers.length;
+        if (D['op-mark-count']) D['op-mark-count'].textContent = `(${n})`;
+        if (D['op-confirm']) D['op-confirm'].disabled = n === 0;
+        if (D['op-clear']) D['op-clear'].disabled = n === 0;
+    }
+    function onCanvasClick(e) {
+        if (!_marking) return;
+        const r = renderedRect(), rect = D['op-mark-canvas'].getBoundingClientRect();
+        const cxv = e.clientX - rect.left, cyv = e.clientY - rect.top;
+        for (let i = 0; i < _markers.length; i++) {
+            const mx = r.x + (_markers[i].fx / r.fw) * r.w, my = r.y + (_markers[i].fy / r.fh) * r.h;
+            if (Math.hypot(cxv - mx, cyv - my) <= MARK_HIT_PX) { _markers.splice(i, 1); drawMarkers(); updateMarkCount(); return; }
+        }
+        if (cxv < r.x || cxv > r.x + r.w || cyv < r.y || cyv > r.y + r.h) return;
+        const fx = ((cxv - r.x) / r.w) * r.fw, fy = ((cyv - r.y) / r.h) * r.fh, s = frameToStage(fx, fy);
+        _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'manual' });
+        drawMarkers(); updateMarkCount();
+    }
+    async function runDetect() {
+        if (!_marking && !enterMarking([])) return;
+        D['op-detect'].disabled = true; D['op-detect'].textContent = 'Detecting…';
+        try {
+            const d = await postJSON('/api/devices/detect_embryos', {});
+            const cands = Array.isArray(d.embryos) ? d.embryos : [];
+            if (_lastFrame && d.stage_position) { _lastFrame.stage_position = d.stage_position; _captureStage = d.stage_position; }
+            cands.forEach(c => {
+                const ds = _frozenFrame.downsample;
+                const fx = c.pixel_x != null ? c.pixel_x / ds : _frozenFrame.w / 2;
+                const fy = c.pixel_y != null ? c.pixel_y / ds : _frozenFrame.h / 2;
+                const s = (c.stage_x_um != null && c.stage_y_um != null) ? [c.stage_x_um, c.stage_y_um] : frameToStage(fx, fy);
+                _markers.push({ fx, fy, stageX: s[0], stageY: s[1], source: 'sam' });
+            });
+            drawMarkers(); updateMarkCount();
+            toast(`Detected ${cands.length} candidate${cands.length === 1 ? '' : 's'}`);
+        } catch (e) { toast(`Detect failed (${e.status || e.message})`); }
+        finally { D['op-detect'].disabled = false; D['op-detect'].textContent = 'Detect (SAM)'; }
+    }
+    async function confirmMarks() {
+        if (!_markers.length) return;
+        D['op-confirm'].disabled = true;
+        try {
+            const markers = _markers.map(m => ({ stage_x_um: m.stageX, stage_y_um: m.stageY, pixel_x: m.fx, pixel_y: m.fy, source: m.source }));
+            const d = await postJSON('/api/devices/embryos/confirm', {
+                markers, image_b64: _frozenSrc ? _frozenSrc.split(',')[1] : undefined,
+                frame: _frozenFrame ? { w: _frozenFrame.w, h: _frozenFrame.h, downsample: _frozenFrame.downsample } : undefined,
+                stage_position: _captureStage,
+            });
+            toast(`Registered ${(d.registered || []).length} embryo${(d.registered || []).length === 1 ? '' : 's'}`);
+            exitMarking();  // EMBRYOS_UPDATE refreshes the board, then auto-select first
+        } catch (e) { toast(`Confirm failed (${e.status || e.message})`); D['op-confirm'].disabled = false; }
+    }
+
+    // ── B1 center ──────────────────────────────────────────────────────────
+    function selectEmbryo(id) {
+        _selected = id;
+        if (id) _step = stepForState(_states[id] || 'marked');
+        renderStep();
+    }
+    async function centerOnSelected() {
+        if (_headLowered) { toast('Retract the SPIM head first'); return; }
+        const emb = _embryos.find(e => e.id === _selected), xy = emb ? resolveXY(emb) : null;
+        if (!xy) return;
+        D['op-center'].disabled = true; D['op-center'].textContent = 'Centering…';
+        try {
+            await postJSON('/api/devices/stage/move', { x: xy.x, y: xy.y });
+            advanceState(_selected, 'centered'); setStep('b2');
+            toast(`Centred on embryo ${labelFor(emb)}`);
+        } catch (e) { toast(`Center failed (${e.status || e.message})`); D['op-center'].disabled = false; D['op-center'].textContent = 'Center stage on embryo'; }
+    }
+    function advanceState(id, st) {
+        if (!id) return;
+        if (STATE_RANK[st] > STATE_RANK[_states[id] || 'marked']) _states[id] = st;
+        renderStep();
+    }
+
+    // ── B2 lower (F-drive, fenced) ─────────────────────────────────────────
+    function gateFdriveNudges() {
+        // auto-grey down-nudges that would exceed remaining distance-to-floor
+        if (D['op-fd-d100']) D['op-fd-d100'].disabled = _fdFloor != null && _fdFloor < 100;
+        if (D['op-fd-d10']) D['op-fd-d10'].disabled = _fdFloor != null && _fdFloor < 10;
+    }
+    async function nudgeFdrive(delta) {
+        if (delta < 0 && _fdFloor != null && Math.abs(delta) > _fdFloor) { toast('Too close to the floor for that step'); return; }
+        try {
+            const d = await postJSON('/api/devices/spim/fdrive/nudge', { delta });
+            if (d.position != null) { _fdPos = d.position; D['op-fd-pos'].textContent = Number(d.position).toFixed(1); }
+            if (d.distance_to_floor != null) { _fdFloor = d.distance_to_floor; D['op-fd-floor'].textContent = Number(d.distance_to_floor).toFixed(0); }
+            if (delta < 0) { _headLowered = true; if (_selected) advanceState(_selected, 'lowering'); }
+            renderStep();  // refresh gauge + gates + status
+        } catch (e) { toast(`F-drive nudge blocked (${e.status || e.message})`); }
+    }
+
+    // ── B3 focus SPIM ──────────────────────────────────────────────────────
+    async function toggleSpim() {
+        D['op-spim-toggle'].disabled = true;
+        try {
+            const ep = _spimOn ? '/api/devices/lightsheet/live/stop' : '/api/devices/lightsheet/live/start';
+            const d = await postJSON(ep, {}); _spimOn = !!d.streaming;
+            D['op-spim-toggle'].textContent = _spimOn ? 'Stop view' : 'Start view';
+            D['op-spim-toggle'].classList.toggle('op-btn-on', _spimOn);
+            if (!_spimOn) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; }
+            renderStatus();
+        } catch (e) { toast(`SPIM view toggle failed (${e.status || e.message})`); }
+        finally { D['op-spim-toggle'].disabled = false; }
     }
     let _lsTimer = null;
     function postLsParams() {
         if (_lsTimer) clearTimeout(_lsTimer);
-        _lsTimer = setTimeout(() => {
-            postJSON('/api/devices/lightsheet/live/params',
-                { galvo: _galvo, piezo: _piezo, exposure: 20, side: 'A' }).catch(() => {});
-        }, 120);
+        _lsTimer = setTimeout(() => { postJSON('/api/devices/lightsheet/live/params', { galvo: _galvo, piezo: _piezo, exposure: 20, side: 'A' }).catch(() => {}); }, 120);
     }
-    function nudgeGalvo(d) { _galvo = Math.max(-5, Math.min(5, _galvo + d)); _gvVal.textContent = _galvo.toFixed(1); postLsParams(); }
-    function nudgePiezo(d) { _piezo = Math.max(0, Math.min(200, _piezo + d)); _pzVal.textContent = _piezo.toFixed(0); postLsParams(); }
+    function nudgeGalvo(d) { _galvo = Math.max(-5, Math.min(5, _galvo + d)); D['op-gv'].textContent = _galvo.toFixed(1); postLsParams(); }
+    function nudgePiezo(d) { _piezo = Math.max(0, Math.min(200, _piezo + d)); D['op-pz'].textContent = _piezo.toFixed(0); postLsParams(); }
     async function toggleLed() {
         _ledOn = !_ledOn;
-        _ledBtn.classList.toggle('op-btn-on', _ledOn); _ledBtn.setAttribute('aria-pressed', _ledOn ? 'true' : 'false');
-        try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); }
-        catch (err) { toast(`LED failed (${err.status || err.message})`); }
+        D['op-led'].classList.toggle('op-btn-toggle', true); D['op-led'].setAttribute('aria-pressed', _ledOn ? 'true' : 'false');
+        D['op-led'].classList.toggle('op-btn-on', _ledOn);
+        try { await postJSON('/api/devices/led/set', { state: _ledOn ? 'Open' : 'Closed' }); } catch (e) { toast(`LED failed (${e.status || e.message})`); }
+        renderStatus();
+    }
+    async function forceLedOff() {
+        if (!_ledOn) return;
+        _ledOn = false; D['op-led'].setAttribute('aria-pressed', 'false'); D['op-led'].classList.remove('op-btn-on');
+        try { await postJSON('/api/devices/led/set', { state: 'Closed' }); } catch (_) {}
+        renderStatus();
+    }
+    function markInFocus() {
+        if (!_selected) return;
+        advanceState(_selected, 'focused'); forceLedOff(); setStep('b4');
+        toast(`Embryo ${labelFor(_embryos.find(e => e.id === _selected))} in focus`);
     }
 
-    // ---- Wiring / lifecycle --------------------------------------------
+    // ── B4 acquire ─────────────────────────────────────────────────────────
+    async function acquireSelected() {
+        if (!_selected || _states[_selected] !== 'focused') { toast('Focus the embryo first'); return; }
+        D['op-acquire'].disabled = true; D['op-acquire'].textContent = 'Acquiring…'; _acquiring = true; renderStatus();
+        try {
+            await postJSON('/api/devices/acquire/volume', { num_slices: 50, exposure_ms: 10.0 });
+            advanceState(_selected, 'imaged'); setStep('b5');
+            toast('Volume acquired');
+        } catch (e) { toast(`Acquire failed (${e.status || e.message})`); }
+        finally { _acquiring = false; D['op-acquire'].disabled = false; D['op-acquire'].textContent = 'Acquire volume'; await forceLedOff(); renderStatus(); }
+    }
+
+    // ── B5 retract & advance ───────────────────────────────────────────────
+    async function retractAndAdvance() {
+        D['op-retract'].disabled = true;
+        try {
+            await postJSON('/api/devices/spim/fdrive/nudge', { delta: 100 }).catch(() => {});
+            _headLowered = false; _fdFloor = null;
+            const next = _embryos.find(e => _states[e.id] !== 'imaged');
+            if (next) { selectEmbryo(next.id); toast(`Next: embryo ${labelFor(next)}`); }
+            else { _selected = null; _step = null; renderStep(); toast('All embryos imaged'); }
+        } finally { D['op-retract'].disabled = false; }
+    }
+
+    // ── embryo SSOT ────────────────────────────────────────────────────────
+    function onEmbryosUpdate(p) {
+        const wasEmpty = _embryos.length === 0;
+        _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
+        const ids = new Set(_embryos.map(e => e.id));
+        Object.keys(_states).forEach(id => { if (!ids.has(id)) delete _states[id]; });
+        _embryos.forEach(e => { if (!_states[e.id]) _states[e.id] = 'marked'; });
+        if (_selected && !ids.has(_selected)) { _selected = null; _step = null; }
+        // After the first marking confirm, flow into Phase B on the first embryo.
+        if (wasEmpty && _embryos.length && !_selected && !_marking) selectEmbryo(_embryos[0].id);
+        else renderStep();
+    }
+
+    // ── lifecycle ──────────────────────────────────────────────────────────
+    function surveyMore() { _selected = null; _step = null; if (_marking) exitMarking(); renderStep(); }
+
     function wire() {
         if (_wired) return; _wired = true;
         cacheDom();
-        _camToggle.addEventListener('click', toggleCamera);
-        _markCanvas.addEventListener('click', onCanvasClick);
-        _detectBtn.addEventListener('click', runDetect);
-        _confirmBtn.addEventListener('click', confirmMarks);
-        _clearBtn.addEventListener('click', () => { _markers = []; drawMarkers(); updateMarkActions(); });
-        _bzNudge.addEventListener('click', e => { const b = e.target.closest('[data-bz]'); if (b) nudgeBottomZ(Number(b.dataset.bz)); });
-        _fdNudge.addEventListener('click', e => { const b = e.target.closest('[data-fd]'); if (b) nudgeFdrive(Number(b.dataset.fd)); });
-        _centerBtn.addEventListener('click', centerOnSelected);
-        _acquireBtn.addEventListener('click', acquireSelected);
-        _spimToggle.addEventListener('click', toggleSpim);
-        _ledBtn.addEventListener('click', toggleLed);
+        D['op-cam-toggle'].addEventListener('click', toggleCamera);
+        D['op-mark-canvas'].addEventListener('click', onCanvasClick);
+        D['op-bz-nudge'].addEventListener('click', e => { const b = e.target.closest('[data-bz]'); if (b) nudgeBottomZ(Number(b.dataset.bz)); });
+        D['op-tomark'].addEventListener('click', () => { if (enterMarking([])) renderStep(); });
+        D['op-detect'].addEventListener('click', runDetect);
+        D['op-confirm'].addEventListener('click', confirmMarks);
+        D['op-clear'].addEventListener('click', () => { _markers = []; drawMarkers(); updateMarkCount(); });
+        D['op-center'].addEventListener('click', centerOnSelected);
+        D['op-fd-nudge'].addEventListener('click', e => { const b = e.target.closest('[data-fd]'); if (b) nudgeFdrive(Number(b.dataset.fd)); });
+        D['op-tofocus'].addEventListener('click', () => setStep('b3'));
+        D['op-spim-toggle'].addEventListener('click', toggleSpim);
+        D['op-led'].addEventListener('click', toggleLed);
         document.querySelectorAll('[data-gv]').forEach(b => b.addEventListener('click', () => nudgeGalvo(Number(b.dataset.gv))));
         document.querySelectorAll('[data-pz]').forEach(b => b.addEventListener('click', () => nudgePiezo(Number(b.dataset.pz))));
-        window.addEventListener('resize', () => { if (_marking) drawMarkers(); });
+        D['op-infocus'].addEventListener('click', markInFocus);
+        D['op-acquire'].addEventListener('click', acquireSelected);
+        D['op-retract'].addEventListener('click', retractAndAdvance);
+        D['op-survey-btn'].addEventListener('click', surveyMore);
+        window.addEventListener('resize', () => { if (_active) drawOverlay(effectiveStep()); });
 
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', onBottomFrame);
             ClientEventBus.on('LIGHTSHEET_FRAME', onLightsheetFrame);
             ClientEventBus.on('EMBRYOS_UPDATE', onEmbryosUpdate);
-            ClientEventBus.on('EMBRYO_DETECTED', () => {});  // bulk EMBRYOS_UPDATE covers it
             ClientEventBus.on('DEVICE_STATE_UPDATE', p => {
-                const pos = p && p.positions;
-                if (pos && pos.xy_stage && Array.isArray(pos.xy_stage)) _lastXY = { X: pos.xy_stage[0], Y: pos.xy_stage[1] };
+                const pos = p && p.positions; if (!pos) return;
+                if (pos.xy_stage && Array.isArray(pos.xy_stage)) { _lastXY = { X: pos.xy_stage[0], Y: pos.xy_stage[1] }; if (_active) renderMiniMap(); }
             });
         }
     }
 
     async function activate() {
         wire();
-        if (_active) return;
-        _active = true;
-        // Bootstrap the canonical list (mid-session open).
-        try { const s = await getJSON('/api/embryos/current'); onEmbryosUpdate(s); } catch (_) {}
-        refreshZReadouts();
+        if (_active) return; _active = true;
+        try { const s = await getJSON('/api/embryos/current'); onEmbryosUpdate(s); } catch (_) { renderStep(); }
+        try { const b = await getJSON('/api/devices/stage/bottom_z'); if (b.position != null) D['op-bz-pos'].textContent = Number(b.position).toFixed(1); } catch (_) {}
+        try { const f = await getJSON('/api/devices/spim/fdrive'); if (f.position != null) { _fdPos = f.position; D['op-fd-pos'].textContent = Number(f.position).toFixed(1); } if (f.distance_to_floor != null) { _fdFloor = f.distance_to_floor; D['op-fd-floor'].textContent = Number(f.distance_to_floor).toFixed(0); } } catch (_) {}
+        renderStep();
     }
     function deactivate() {
-        if (!_active) return;
-        _active = false;
-        // Stop streams so they don't run while the view is hidden.
-        if (_camOn) { fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {}); applyCameraState(false); }
-        if (_spimOn) { fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {}); _spimOn = false; _spimToggle.textContent = 'Start view'; _spimToggle.classList.remove('op-btn-on'); }
+        if (!_active) return; _active = false;
+        if (_camOn) { fetch('/api/devices/bottom_camera/stream/stop', { method: 'POST' }).catch(() => {}); applyCam(false); }
+        if (_spimOn) { fetch('/api/devices/lightsheet/live/stop', { method: 'POST' }).catch(() => {}); _spimOn = false; D['op-spim-toggle'].textContent = 'Start view'; D['op-spim-toggle'].classList.remove('op-btn-on'); }
+        forceLedOff();
         if (_marking) exitMarking();
     }
 
