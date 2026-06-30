@@ -50,6 +50,17 @@ const OperateManager = (function () {
     let _fdPos = null, _fdFloor = null;
     let _galvo = 0.0, _piezo = 50.0, _ledOn = false;
 
+    // Phase C "Run": _runState null = not in Run; 'choose' = chooser; 'running' = live.
+    // Every Run mode emits one tactic scoped to the marked set. _roles maps each
+    // embryo to a role ('test'=subject default, 'calibration'=reference).
+    let _runState = null;
+    let _runMode = 'adaptive';
+    const _roles = {};
+    let _runMeta = null;             // summary of the active run (for the run-spine)
+    let _runPlan = null;             // operation plan {tactics:[]} for the run-spine
+    let _runPaused = false;
+    let _selectedLib = null, _selectedPlan = null;
+
     // DOM (cached on wire)
     const D = {};
 
@@ -72,6 +83,9 @@ const OperateManager = (function () {
             'op-tomark', 'op-detect', 'op-confirm', 'op-mark-count', 'op-clear', 'op-center', 'op-center-hint',
             'op-fd-pos', 'op-fd-floor', 'op-fd-nudge', 'op-fd-d100', 'op-fd-d10', 'op-tofocus',
             'op-spim-toggle', 'op-led', 'op-gv', 'op-pz', 'op-spim-score', 'op-infocus', 'op-acquire', 'op-retract',
+            'op-rolechips', 'op-modes', 'op-panel-adaptive', 'op-panel-library', 'op-panel-plan', 'op-panel-agent',
+            'op-tl-interval', 'op-tl-stop', 'op-tl-condval', 'op-tl-monitor', 'op-lib-list', 'op-plan-list',
+            'op-run-start', 'op-runspine', 'op-run-pause', 'op-run-stop', 'op-run-open',
         ].forEach(id => { D[id] = $(id); });
     }
 
@@ -80,19 +94,25 @@ const OperateManager = (function () {
         return { marked: 'b1', centered: 'b2', lowering: 'b2', focused: 'b4', imaged: 'b5' }[st] || 'b1';
     }
     function effectiveStep() {
-        if (!_selected) return _marking ? 'a2' : 'a1';
-        return _step || 'b1';
+        if (_marking) return 'a2';
+        if (_runState === 'running') return 'running';
+        if (_runState === 'choose') return 'c0';
+        if (_selected) return _step || 'b1';
+        return 'a1';
     }
     function cameraForStep(step) {
-        return (step === 'a1' || step === 'a2' || step === 'b1') ? 'bottom' : 'spim';
+        if (step === 'a1' || step === 'a2' || step === 'b1') return 'bottom';
+        if (step === 'b2' || step === 'b3' || step === 'b4' || step === 'b5') return 'spim';
+        return 'none';  // c0 / running are non-camera (the dish map carries context)
     }
 
     const RAIL_HEADS = {
         a1: 'Focus the bottom objective', a2: 'Mark all embryos',
         b1: 'Center the embryo', b2: 'Lower the SPIM head', b3: 'Focus the SPIM objective',
         b4: 'Acquire the volume', b5: 'Retract & advance',
+        c0: 'Run — choose how to image', running: 'Run — live',
     };
-    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', b4: 'b4', b5: 'b4' };
+    const STEP_NODE = { a1: 'a1', a2: 'a2', b1: 'b1', b2: 'b2', b3: 'b3', b4: 'b4', b5: 'b4', c0: 'run', running: 'run' };
 
     function setStep(s) { _step = s; renderStep(); }
 
@@ -119,8 +139,12 @@ const OperateManager = (function () {
             n.classList.remove('is-active', 'is-done', 'is-locked');
             const active = STEP_NODE[step] === node;
             if (node === 'a1' || node === 'a2') {
-                if (active && !_selected) n.classList.add('is-active');
+                if (active) n.classList.add('is-active');
                 else if (_embryos.length) n.classList.add('is-done');
+            } else if (node === 'run') {
+                if (active) n.classList.add('is-active');
+                else if (_embryos.length && _selected) n.classList.add('is-done');
+                else if (!_embryos.length) n.classList.add('is-locked');
             } else {
                 const oi = order[node];
                 if (active) n.classList.add('is-active');
@@ -135,14 +159,23 @@ const OperateManager = (function () {
         }
 
         // viewport: badge + stop the inactive camera
-        if (D['op-badge']) D['op-badge'].textContent =
-            (cam === 'bottom' ? 'Bottom cam' : 'SPIM · side A') + ' — ' + RAIL_HEADS[step].toLowerCase();
+        if (D['op-badge']) {
+            D['op-badge'].textContent = cam === 'none'
+                ? RAIL_HEADS[step]
+                : (cam === 'bottom' ? 'Bottom cam' : 'SPIM · side A') + ' — ' + RAIL_HEADS[step].toLowerCase();
+        }
         ensureInactiveCameraStopped(cam);
         // show the right frame
         if (cam === 'bottom' && !_marking && _lastFrame) setImg(_lastFrame);
         else if (cam === 'spim' && _lastSpimFrame) setImg(_lastSpimFrame);
         else if (cam === 'spim' && !_spimOn) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'SPIM view off'; }
         else if (cam === 'bottom' && !_camOn && !_marking) { D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = ''; D['op-cam-ph'].textContent = 'Camera off'; }
+        else if (cam === 'none') {
+            D['op-cam-img'].classList.remove('has-frame'); D['op-cam-ph'].style.display = '';
+            D['op-cam-ph'].textContent = step === 'running'
+                ? `Run live — ${_embryos.length} embryo${_embryos.length === 1 ? '' : 's'} (see the dish map)`
+                : `${_embryos.length} embryo${_embryos.length === 1 ? '' : 's'} marked — choose how to image`;
+        }
 
         // gating
         if (D['op-center']) {
@@ -155,6 +188,8 @@ const OperateManager = (function () {
         renderStatus();
         renderBoard();
         renderMiniMap();
+        if (step === 'c0') renderChooser();
+        else if (step === 'running') renderRunSpine();
     }
 
     function ensureInactiveCameraStopped(cam) {
@@ -551,15 +586,185 @@ const OperateManager = (function () {
         _embryos = (p && Array.isArray(p.embryos)) ? p.embryos : [];
         const ids = new Set(_embryos.map(e => e.id));
         Object.keys(_states).forEach(id => { if (!ids.has(id)) delete _states[id]; });
-        _embryos.forEach(e => { if (!_states[e.id]) _states[e.id] = 'marked'; });
+        Object.keys(_roles).forEach(id => { if (!ids.has(id)) delete _roles[id]; });
+        _embryos.forEach(e => {
+            if (!_states[e.id]) _states[e.id] = 'marked';
+            // seed role from the embryo if present, else default to subject ('test')
+            if (!_roles[e.id]) _roles[e.id] = (e.role && e.role !== 'unassigned') ? e.role : 'test';
+        });
         if (_selected && !ids.has(_selected)) { _selected = null; _step = null; }
-        // After the first marking confirm, flow into Phase B on the first embryo.
-        if (wasEmpty && _embryos.length && !_selected && !_marking) selectEmbryo(_embryos[0].id);
-        else renderStep();
+        // After the first marking confirm, enter the Phase C Run chooser
+        // (NOT the old auto-dive into the manual loop).
+        if (wasEmpty && _embryos.length && !_selected && !_marking && _runState === null) {
+            _runState = 'choose';
+        }
+        renderStep();
+    }
+
+    // ── Phase C: Run chooser + run-spine ───────────────────────────────────
+    function escapeHtml(s) {
+        return String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    }
+
+    function renderChooser() {
+        if (D['op-rolechips']) {
+            D['op-rolechips'].innerHTML = '';
+            _embryos.forEach(emb => {
+                const role = _roles[emb.id] || 'test';
+                const chip = document.createElement('button');
+                chip.type = 'button';
+                chip.className = 'op-rolechip' + (role === 'calibration' ? ' is-reference' : '');
+                chip.textContent = `${labelFor(emb)} · ${role === 'calibration' ? 'ref' : 'subj'}`;
+                chip.title = 'Click to toggle subject / reference';
+                chip.addEventListener('click', () => {
+                    _roles[emb.id] = (_roles[emb.id] === 'calibration') ? 'test' : 'calibration';
+                    renderChooser();
+                });
+                D['op-rolechips'].appendChild(chip);
+            });
+        }
+        document.querySelectorAll('.op-modepanel').forEach(p => p.classList.toggle('is-shown', p.dataset.mode === _runMode));
+        if (D['op-tl-stop'] && D['op-tl-condval']) {
+            const s = D['op-tl-stop'].value;
+            D['op-tl-condval'].style.display = (s === 'timepoints' || s === 'duration') ? '' : 'none';
+        }
+        if (_runMode === 'library') loadLibrary();
+        if (_runMode === 'plan') loadPlanItems();
+    }
+
+    async function loadLibrary() {
+        if (!D['op-lib-list']) return;
+        try {
+            const d = await getJSON('/api/tactic_library');
+            const items = (d && d.tactics) || [];
+            if (!items.length) { D['op-lib-list'].innerHTML = '<div class="op-empty">No saved tactics</div>'; return; }
+            D['op-lib-list'].innerHTML = '';
+            items.forEach(t => {
+                const b = document.createElement('button');
+                b.type = 'button';
+                b.className = 'op-libitem' + (t.id === _selectedLib ? ' is-sel' : '');
+                b.innerHTML = `${escapeHtml(t.name || t.id)}<small>${escapeHtml(t.kind || '')}</small>`;
+                b.addEventListener('click', () => { _selectedLib = t.id; loadLibrary(); });
+                D['op-lib-list'].appendChild(b);
+            });
+        } catch (_) { D['op-lib-list'].innerHTML = '<div class="op-empty">Library unavailable</div>'; }
+    }
+    function loadPlanItems() {
+        // Phase 3 wires the resume_plan candidate list.
+        if (D['op-plan-list']) D['op-plan-list'].innerHTML = '<div class="op-empty">Plan linking — coming in the tactics phase</div>';
+    }
+
+    async function applyRoles() {
+        const roles = {};
+        _embryos.forEach(e => { roles[e.id] = _roles[e.id] || 'test'; });
+        try { await postJSON('/api/embryos/roles', { roles }); } catch (e) { toast(`Roles failed (${e.status || e.message})`); }
+    }
+
+    async function startRun() {
+        if (_runMode === 'manual') {
+            _runState = null;
+            if (_embryos.length) selectEmbryo(_embryos[0].id);
+            return;
+        }
+        await applyRoles();
+        const subjects = _embryos.filter(e => (_roles[e.id] || 'test') !== 'calibration').map(e => e.id);
+        const embryo_ids = subjects.length ? subjects : _embryos.map(e => e.id);
+        if (_runMode === 'adaptive') {
+            const interval = Math.max(1, Number(D['op-tl-interval'].value) || 120);
+            const stop = D['op-tl-stop'].value;
+            const monitoring = D['op-tl-monitor'].value;
+            const body = { embryo_ids, interval_seconds: interval, stop_condition: stop, monitoring_mode: monitoring };
+            if (stop === 'timepoints' || stop === 'duration') body.condition_value = Math.max(1, Number(D['op-tl-condval'].value) || 1);
+            D['op-run-start'].disabled = true; D['op-run-start'].textContent = 'Starting…';
+            try {
+                await postJSON('/api/devices/timelapse/start', body);
+                _runMeta = { mode: 'adaptive', interval, stop, monitoring, n: embryo_ids.length };
+                _runState = 'running'; _runPaused = false;
+                toast(`Adaptive timelapse started — ${embryo_ids.length} subject${embryo_ids.length === 1 ? '' : 's'}`);
+                renderStep();
+            } catch (e) {
+                toast(`Start failed (${e.status || e.message})`);
+            } finally { D['op-run-start'].disabled = false; D['op-run-start'].textContent = 'Start run'; }
+            return;
+        }
+        if (_runMode === 'agent') {
+            const roster = _embryos.map(e => {
+                const xy = resolveXY(e);
+                const r = _roles[e.id] === 'calibration' ? 'reference' : 'subject';
+                return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
+            }).join(', ');
+            if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
+                AgentChat.togglePanel(true);
+                if (AgentChat.runCommand) {
+                    setTimeout(() => AgentChat.runCommand(
+                        `I marked ${_embryos.length} embryos: ${roster}. Propose and start an Operation Plan to image them.`), 300);
+                }
+            } else { toast('Agent chat unavailable'); }
+            _runState = 'running'; renderStep();
+            return;
+        }
+        if (_runMode === 'library' || _runMode === 'plan') {
+            toast('Library / plan run — wired in the tactics phase');  // Phase 3
+        }
+    }
+
+    async function renderRunSpine() {
+        if (!D['op-runspine']) return;
+        let tactics = [];
+        try { const d = await getJSON('/api/operation_plan'); tactics = (d && d.plan && d.plan.tactics) || []; } catch (_) {}
+        D['op-runspine'].innerHTML = '';
+        if (tactics.length) {
+            tactics.forEach(t => D['op-runspine'].appendChild(tacticCard(t)));
+        } else if (_runMeta) {
+            const stopTxt = _runMeta.stop === 'manual' ? 'until stopped' : _runMeta.stop;
+            const card = document.createElement('div');
+            card.className = 'op-tcard st-active';
+            card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Adaptive timelapse</span><span class="op-tcard-state">active</span></div>'
+                + `<div class="op-tcard-kind">standing_timelapse · ${escapeHtml(_runMeta.monitoring)}</div>`
+                + `<div class="op-tcard-meta">${_runMeta.interval}s · ${_runMeta.n} subject${_runMeta.n === 1 ? '' : 's'} · ${escapeHtml(stopTxt)}</div>`;
+            D['op-runspine'].appendChild(card);
+        } else {
+            D['op-runspine'].innerHTML = '<div class="op-empty">Run active.</div>';
+        }
+        if (D['op-run-pause']) D['op-run-pause'].textContent = _runPaused ? 'Resume' : 'Pause';
+    }
+    function tacticCard(t) {
+        const card = document.createElement('div');
+        const state = t.state || 'planned';
+        card.className = 'op-tcard st-' + state;
+        const struct = t.structure || {};
+        const meta = [];
+        if (struct.cadence_s != null) meta.push(`${struct.cadence_s}s`);
+        if (struct.interval != null) meta.push(`${struct.interval}s`);
+        if (struct.status) meta.push(struct.status);
+        if (t.live && t.live.signal != null) meta.push(`signal ${t.live.signal}`);
+        card.innerHTML = `<div class="op-tcard-head"><span class="op-tcard-name">${escapeHtml(t.name || t.id)}</span><span class="op-tcard-state">${escapeHtml(state)}</span></div>`
+            + `<div class="op-tcard-kind">${escapeHtml(t.kind || '')}</div>`
+            + (meta.length ? `<div class="op-tcard-meta">${escapeHtml(meta.join(' · '))}</div>` : '')
+            + (t.rationale ? `<div class="op-tcard-meta">${escapeHtml(t.rationale)}</div>` : '');
+        return card;
+    }
+
+    async function pauseRun() {
+        try {
+            if (_runPaused) { await postJSON('/api/devices/timelapse/resume', {}); _runPaused = false; toast('Resumed'); }
+            else { await postJSON('/api/devices/timelapse/pause', {}); _runPaused = true; toast('Paused'); }
+            renderRunSpine();
+        } catch (e) { toast(`Pause/resume failed (${e.status || e.message})`); }
+    }
+    async function stopRun() {
+        if (!window.confirm('Stop the run?')) return;
+        try { await postJSON('/api/devices/timelapse/stop', { reason: 'operator' }); } catch (e) { toast(`Stop failed (${e.status || e.message})`); }
+        _runState = 'choose'; _runMeta = null; _runPaused = false;
+        toast('Run stopped'); renderStep();
+    }
+    function openInOperations() {
+        const nav = [...document.querySelectorAll('[data-tab]')].find(n => /operations/i.test(n.textContent || ''));
+        if (nav) nav.click(); else toast('Operations tab not found');
     }
 
     // ── lifecycle ──────────────────────────────────────────────────────────
-    function surveyMore() { _selected = null; _step = null; if (_marking) exitMarking(); renderStep(); }
+    function surveyMore() { _selected = null; _step = null; _runState = null; if (_marking) exitMarking(); renderStep(); }
 
     function wire() {
         if (_wired) return; _wired = true;
@@ -582,6 +787,14 @@ const OperateManager = (function () {
         D['op-acquire'].addEventListener('click', acquireSelected);
         D['op-retract'].addEventListener('click', retractAndAdvance);
         D['op-survey-btn'].addEventListener('click', surveyMore);
+        // Phase C: Run chooser + run-spine
+        document.querySelectorAll('input[name="op-mode"]').forEach(r =>
+            r.addEventListener('change', () => { _runMode = r.value; renderChooser(); }));
+        if (D['op-tl-stop']) D['op-tl-stop'].addEventListener('change', renderChooser);
+        if (D['op-run-start']) D['op-run-start'].addEventListener('click', startRun);
+        if (D['op-run-pause']) D['op-run-pause'].addEventListener('click', pauseRun);
+        if (D['op-run-stop']) D['op-run-stop'].addEventListener('click', stopRun);
+        if (D['op-run-open']) D['op-run-open'].addEventListener('click', openInOperations);
         window.addEventListener('resize', () => { if (_active) drawOverlay(effectiveStep()); });
 
         if (typeof ClientEventBus !== 'undefined') {

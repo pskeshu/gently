@@ -497,6 +497,9 @@
                     <span class="op-arrow">→</span>
                     <span class="op-node" data-node="a2">Mark</span>
                     <span class="op-phase-div"></span>
+                    <span class="op-phase">Run</span>
+                    <span class="op-node" data-node="run">Choose</span>
+                    <span class="op-phase-div"></span>
                     <span class="op-phase">Acquire<b id="op-loop-emb"></b></span>
                     <span class="op-node" data-node="b1">Center</span>
                     <span class="op-arrow">→</span>
@@ -608,6 +611,64 @@
                   <div class="op-group" data-step="b5">
                     <div class="op-hint">Imaged ✓ — raise the head to safe travel, then advance.</div>
                     <button class="op-btn op-btn-primary" id="op-retract" type="button">Raise head ▲ &amp; next</button>
+                  </div>
+
+                  <!-- ③ RUN chooser: pick how to image the marked set (every mode emits one tactic) -->
+                  <div class="op-group" data-step="c0">
+                    <div class="op-field">
+                      <label class="op-label">Roles <span class="op-cap">(marked → subject)</span></label>
+                      <div class="op-rolechips" id="op-rolechips"></div>
+                    </div>
+                    <div class="op-field">
+                      <label class="op-label">Run mode</label>
+                      <div class="op-modes" id="op-modes">
+                        <label class="op-mode"><input type="radio" name="op-mode" value="manual"><span>Manual one-by-one</span><small>volumes, the B-loop</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="adaptive" checked><span>Adaptive timelapse</span><small>ongoing, cadence</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="library"><span>From library</span><small>a saved tactic</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="plan"><span>Continue a plan</span><small>a campaign item</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="agent"><span>Hand to agent</span><small>let it compose</small></label>
+                      </div>
+                    </div>
+                    <!-- adaptive sub-form -->
+                    <div class="op-modepanel" data-mode="adaptive" id="op-panel-adaptive">
+                      <div class="op-tl-row"><label>Interval</label><input class="op-num" id="op-tl-interval" type="number" min="1" value="120"><span class="op-cap">s</span></div>
+                      <div class="op-tl-row"><label>Stop</label>
+                        <select class="op-sel-s" id="op-tl-stop">
+                          <option value="manual">manual</option>
+                          <option value="timepoints">after N timepoints</option>
+                          <option value="duration">after N hours</option>
+                          <option value="hatching">at hatching</option>
+                        </select>
+                        <input class="op-num" id="op-tl-condval" type="number" min="1" value="10" style="display:none">
+                      </div>
+                      <div class="op-tl-row"><label>Monitor</label>
+                        <select class="op-sel-s" id="op-tl-monitor">
+                          <option value="idle" selected>idle (fixed cadence)</option>
+                          <option value="expression_monitoring">expression</option>
+                          <option value="pre_terminal_monitoring">pre-terminal</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="op-modepanel" data-mode="library" id="op-panel-library">
+                      <div class="op-lib-list" id="op-lib-list"><div class="op-empty">No saved tactics</div></div>
+                    </div>
+                    <div class="op-modepanel" data-mode="plan" id="op-panel-plan">
+                      <div class="op-plan-list" id="op-plan-list"><div class="op-empty">No linkable plan items</div></div>
+                    </div>
+                    <div class="op-modepanel" data-mode="agent" id="op-panel-agent">
+                      <div class="op-hint">Opens the agent with the marked roster to propose &amp; start an Operation Plan.</div>
+                    </div>
+                    <button class="op-btn op-btn-primary" id="op-run-start" type="button">Start run</button>
+                  </div>
+
+                  <!-- Run live: the rail becomes a read-only run-spine -->
+                  <div class="op-group" data-step="running">
+                    <div class="op-runspine" id="op-runspine"></div>
+                    <div class="op-run-actions">
+                      <button class="op-btn op-btn-toggle" id="op-run-pause" type="button">Pause</button>
+                      <button class="op-btn" id="op-run-stop" type="button">Stop run</button>
+                    </div>
+                    <button class="op-btn op-btn-ghost" id="op-run-open" type="button">Open in Operations →</button>
                   </div>
                 </div>
 

@@ -794,6 +794,84 @@ def create_router(server) -> APIRouter:
         labelled = _persist_detection_labels(agent, payload, markers)
         return {"success": True, "registered": registered, "labelled": labelled}
 
+    @router.post("/api/embryos/roles", dependencies=[Depends(require_control)])
+    async def set_embryo_roles(payload: dict = Body(...)):  # noqa: B008
+        """Assign experimental roles to embryos — the Operate "Run" step.
+
+        Body: {roles: {embryo_id: role_name}} where role_name is a key in
+        gently.harness.roles.REGISTRY (subject=='test', reference=='calibration',
+        plus 'lineaging'/'unassigned'). Sets EmbryoState.role and fires one
+        EMBRYOS_UPDATE (+ per-embryo STATUS_CHANGED) so every consumer refreshes.
+        Marking stays positions-only; roles are assigned here, not at marking.
+        Load-bearing: expression_monitoring scopes to role=='test', so the marked
+        set must be given roles before role-scoped monitoring matches anything.
+        """
+        from gently.harness.roles import is_valid_role
+
+        agent = _require_agent_with_experiment()
+        roles = payload.get("roles") or {}
+        if not isinstance(roles, dict) or not roles:
+            raise HTTPException(status_code=400, detail="roles map required")
+        embryos = agent.experiment.embryos
+        for eid, role in roles.items():
+            if eid not in embryos:
+                raise HTTPException(status_code=400, detail=f"unknown embryo {eid}")
+            if not is_valid_role(str(role)):
+                raise HTTPException(status_code=400, detail=f"invalid role {role}")
+
+        store = getattr(agent, "store", None)
+        sid = getattr(agent, "session_id", None)
+        bus = getattr(agent, "_event_bus", None)
+        updated: list[str] = []
+        for eid, role in roles.items():
+            emb = embryos[eid]
+            old = getattr(emb, "role", None)
+            emb.role = str(role)
+            if store is not None and sid:
+                try:
+                    pos = getattr(emb, "position_coarse", {}) or {}
+                    store.register_embryo(
+                        sid, eid,
+                        position_x=pos.get("x"), position_y=pos.get("y"),
+                        calibration=getattr(emb, "calibration", {}) or {}, role=str(role),
+                    )
+                except Exception:
+                    logger.debug("role persist failed for %s", eid, exc_info=True)
+            if bus is not None:
+                try:
+                    from gently.core.event_bus import EventType
+
+                    bus.publish(
+                        event_type=EventType.STATUS_CHANGED,
+                        data={"embryo_id": eid, "change": "role_assigned",
+                              "old_role": old, "new_role": str(role)},
+                        source="operate_roles",
+                    )
+                except Exception:
+                    logger.debug("STATUS_CHANGED publish failed", exc_info=True)
+            updated.append(eid)
+        try:
+            agent.experiment.notify_embryos_changed()  # fires EMBRYOS_UPDATE
+        except Exception:
+            logger.debug("notify_embryos_changed failed", exc_info=True)
+        return {"success": True, "updated": updated}
+
+    @router.get("/api/operation_plan")
+    async def get_operation_plan_route():
+        """Current session's Operation Plan (the tactics document), for the
+        Operate run-spine. Returns {plan: {...}|null}. Never errors."""
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        cs = getattr(agent, "context_store", None) if agent else None
+        sid = getattr(agent, "session_id", None) if agent else None
+        if cs is None or not sid:
+            return {"plan": None}
+        try:
+            return {"plan": cs.get_operation_plan(sid)}
+        except Exception:
+            logger.debug("get_operation_plan failed", exc_info=True)
+            return {"plan": None}
+
     # ------------------------------------------------------------------
     # Focus Z axes (Operate view) — fenced read + nudge
     # ------------------------------------------------------------------
@@ -1035,6 +1113,47 @@ def create_router(server) -> APIRouter:
                 "volume_geometry": volume_geometry,
             },
         }
+
+    def _resolve_orchestrator():
+        bridge = getattr(server, "agent_bridge", None)
+        agent = bridge.agent if bridge is not None else None
+        return getattr(agent, "timelapse_orchestrator", None) if agent else None
+
+    @router.post("/api/devices/timelapse/stop", dependencies=[Depends(require_control)])
+    async def timelapse_stop(payload: dict = Body(default={})):  # noqa: B008
+        """Stop the running timelapse (Operate run-spine). Body: {reason?}."""
+        orch = _resolve_orchestrator()
+        if orch is None:
+            raise HTTPException(status_code=503, detail="No timelapse orchestrator")
+        try:
+            return {"stopped": True, "result": await orch.stop(reason=str(payload.get("reason", "user_request")))}
+        except Exception as exc:
+            logger.exception("Timelapse stop failed")
+            raise HTTPException(status_code=502, detail=f"timelapse stop failed: {exc}") from exc
+
+    @router.post("/api/devices/timelapse/pause", dependencies=[Depends(require_control)])
+    async def timelapse_pause():
+        """Pause the running timelapse."""
+        orch = _resolve_orchestrator()
+        if orch is None:
+            raise HTTPException(status_code=503, detail="No timelapse orchestrator")
+        try:
+            return {"paused": True, "result": await orch.pause()}
+        except Exception as exc:
+            logger.exception("Timelapse pause failed")
+            raise HTTPException(status_code=502, detail=f"timelapse pause failed: {exc}") from exc
+
+    @router.post("/api/devices/timelapse/resume", dependencies=[Depends(require_control)])
+    async def timelapse_resume():
+        """Resume a paused timelapse."""
+        orch = _resolve_orchestrator()
+        if orch is None:
+            raise HTTPException(status_code=503, detail="No timelapse orchestrator")
+        try:
+            return {"resumed": True, "result": await orch.resume()}
+        except Exception as exc:
+            logger.exception("Timelapse resume failed")
+            raise HTTPException(status_code=502, detail=f"timelapse resume failed: {exc}") from exc
 
     @router.get("/api/calibration")
     async def list_calibration(embryo_id: str | None = None):
