@@ -1,0 +1,194 @@
+/* Operate view — guided bottom-cam → SPIM operator surface.
+   Theme-aware via the global tokens (--bg-card, --border, --text, --accent …). */
+
+.operate {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+    padding: 0.25rem 0.1rem 1.5rem;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    color: var(--text);
+}
+
+.op-zone {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 0.85rem 1rem 1rem;
+}
+.op-zone-head {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    margin-bottom: 0.85rem;
+    color: var(--text);
+}
+.op-step {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-size: 0.74rem;
+    font-weight: 700;
+}
+.op-count, .op-sel {
+    font-size: 0.8rem;
+    font-weight: 500;
+    color: var(--text-muted);
+}
+
+/* survey + acquire share a camera|rail two-column body.
+   Fixed body height keeps all three zones on screen; the camera fills it and
+   the image letterboxes (object-fit: contain) so any frame aspect fits. */
+.op-survey-body, .op-acquire-body {
+    display: flex;
+    gap: 1rem;
+    align-items: stretch;
+    height: 340px;
+}
+.op-cam {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    background: var(--img-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.op-cam-img {
+    width: 100%; height: 100%;
+    object-fit: contain;
+    display: block;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+.op-cam-img.has-frame { opacity: 1; }
+.op-mark-canvas {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+}
+.op-cam.op-marking { cursor: crosshair; box-shadow: inset 0 0 0 2px var(--accent-green); }
+.op-cam.op-marking .op-mark-canvas { pointer-events: auto; }
+.op-cam-ph {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    letter-spacing: 0.04em;
+}
+
+/* control rail */
+.op-rail {
+    flex: 0 0 248px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.op-field { display: flex; flex-direction: column; gap: 0.4rem; }
+.op-label {
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+}
+.op-readout {
+    font-size: 0.82rem;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+.op-readout b { font-weight: 600; }
+.op-sep { color: var(--text-muted); margin: 0 0.4rem; }
+
+/* buttons */
+.op-btn {
+    appearance: none;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font: 600 0.8rem/1 'Inter Tight', system-ui, sans-serif;
+    padding: 0.5rem 0.75rem;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.13s, border-color 0.13s, color 0.13s, opacity 0.13s;
+}
+.op-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.op-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.op-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.op-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.op-btn-ghost { background: transparent; }
+.op-btn-on, .op-btn-toggle[aria-pressed="true"] { background: var(--accent-green); border-color: var(--accent-green); color: #06281a; }
+
+.op-mark-actions, .op-spim-controls { display: flex; gap: 0.5rem; }
+.op-mark-actions .op-btn, .op-spim-controls .op-btn { flex: 1; }
+.op-hint { font-size: 0.72rem; color: var(--text-muted); line-height: 1.4; }
+
+/* nudge clusters */
+.op-nudge { display: flex; gap: 0.35rem; }
+.op-nbtn {
+    flex: 1;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font: 600 0.74rem/1 'Inter Tight', system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    padding: 0.4rem 0.3rem;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.op-nbtn:hover { border-color: var(--accent); color: var(--accent); }
+.op-micro {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.74rem; color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.op-micro b { color: var(--text); min-width: 2.2em; text-align: center; }
+.op-micro .op-nbtn { flex: 0 0 auto; width: 26px; }
+
+/* embryo list */
+.op-embryo-list { display: flex; flex-direction: column; gap: 0.3rem; max-height: 220px; overflow-y: auto; }
+.op-empty { color: var(--text-muted); font-size: 0.82rem; padding: 0.4rem 0.1rem; }
+.op-erow {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.45rem 0.55rem;
+    border: 1px solid transparent;
+    border-radius: 7px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+.op-erow:hover { background: var(--bg-hover); }
+.op-erow-sel { background: var(--bg-hover); border-color: var(--accent); }
+.op-edot {
+    flex: 0 0 auto;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #fff; font-size: 0.7rem; font-weight: 700;
+}
+.op-ecoord { flex: 1 1 auto; font-size: 0.8rem; font-variant-numeric: tabular-nums; color: var(--text); }
+.op-echip {
+    flex: 0 0 auto;
+    font-size: 0.64rem; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    padding: 0.16rem 0.5rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+}
+.op-echip-centered { color: var(--accent); border-color: var(--accent); }
+.op-echip-focused { color: var(--accent-orange); border-color: var(--accent-orange); }
+.op-echip-imaged { color: var(--accent-green); border-color: var(--accent-green); }
+
+@media (max-width: 920px) {
+    .op-survey-body, .op-acquire-body { flex-direction: column; }
+    .op-rail { flex-basis: auto; }
+}

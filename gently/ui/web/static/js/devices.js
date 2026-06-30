@@ -14,7 +14,7 @@
  */
 const DevicesManager = (function () {
     const STALE_AFTER_MS = 4000;
-    const VIEWS = ['map', 'details', 'optical3d', 'manual'];
+    const VIEWS = ['operate', 'map', 'details', 'optical3d', 'manual'];
     const SVG_NS = 'http://www.w3.org/2000/svg';
 
     // Status / details DOM
@@ -2403,6 +2403,12 @@ const DevicesManager = (function () {
         // populateLaserPresets() runs after setLaserOff() so the select is always
         // seeded with the entry-safety state first.
         if (viewName === 'manual') { setLaserOff(); populateLaserPresets(); populateCameraRoles(); initTlForm(); populateTlDefaults(); }
+        // The Operate view owns its own module; activate/deactivate it so its
+        // camera + SPIM streams only run while it's the visible view.
+        if (typeof OperateManager !== 'undefined') {
+            if (viewName === 'operate') OperateManager.activate();
+            else OperateManager.deactivate();
+        }
     }
 
     function setupViewSwitcher() {
@@ -2412,7 +2418,8 @@ const DevicesManager = (function () {
         document.addEventListener('keydown', (e) => {
             if (typeof state !== 'undefined' && typeof TABS !== 'undefined' && state.tab !== TABS.DEVICES) return;
             if (e.target.matches('input, textarea, select, [contenteditable]')) return;
-            if (e.key === 'm') { e.preventDefault(); switchView('map'); }
+            if (e.key === 'o') { e.preventDefault(); switchView('operate'); }
+            else if (e.key === 'm') { e.preventDefault(); switchView('map'); }
             else if (e.key === 'd') { e.preventDefault(); switchView('details'); }
             else if (e.key === 'v') { e.preventDefault(); switchView('optical3d'); }
         });

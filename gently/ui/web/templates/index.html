@@ -19,6 +19,7 @@
     <link rel="stylesheet" href="/static/css/shell.css">
     <link rel="stylesheet" href="/static/css/landing.css">
     <link rel="stylesheet" href="/static/css/notebook.css">
+    <link rel="stylesheet" href="/static/css/operate.css">
 </head>
 <body class="{% if ux_v2 %}ux-v2{% endif %}">
     {% if ux_v2 %}
@@ -444,6 +445,7 @@
                 <div class="devices-header-left">
                     <h2 class="devices-title"><span class="devices-title-script">Device</span> <em class="devices-title-em">state</em></h2>
                     <div class="view-switcher" id="devices-view-switcher">
+                        <button class="view-btn" data-view="operate" title="Operate (o)">Operate</button>
                         <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
                         <button class="view-btn" data-view="details" title="Details (d)">Details</button>
                         <button class="view-btn" data-view="optical3d" title="3D volume (v)">3D</button>
@@ -480,6 +482,100 @@
                     <span class="devices-status-led" id="devices-stream-pill">disconnected</span>
                     <span class="devices-status-meta" id="devices-status-meta">no data</span>
                 </div>
+            </div>
+
+            <!-- Operate view: guided bottom-cam → SPIM operator surface.
+                 Survey & mark all → per-embryo center → lower SPIM → focus → acquire. -->
+            <div class="devices-view devices-view-operate" id="devices-view-operate" style="display:none">
+              <div class="operate">
+
+                <!-- ZONE 1 — SURVEY & MARK -->
+                <section class="op-zone op-zone-survey">
+                  <header class="op-zone-head"><span class="op-step">1</span> Survey &amp; mark</header>
+                  <div class="op-survey-body">
+                    <div class="op-cam" id="op-cam-stage">
+                      <img class="op-cam-img" id="op-cam-img" alt="bottom camera live frame">
+                      <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
+                      <div class="op-cam-ph" id="op-cam-ph">Camera off</div>
+                    </div>
+                    <div class="op-rail">
+                      <button class="op-btn" id="op-cam-toggle" type="button">Start camera</button>
+                      <div class="op-field">
+                        <label class="op-label">Bottom focus Z</label>
+                        <div class="op-readout"><b id="op-bz-pos">—</b> µm<span class="op-sep">·</span>focus <b id="op-bz-score">—</b></div>
+                        <div class="op-nudge" id="op-bz-nudge">
+                          <button class="op-nbtn" data-bz="-10" type="button">−10</button>
+                          <button class="op-nbtn" data-bz="-1" type="button">−1</button>
+                          <button class="op-nbtn" data-bz="1" type="button">+1</button>
+                          <button class="op-nbtn" data-bz="10" type="button">+10</button>
+                        </div>
+                      </div>
+                      <div class="op-field">
+                        <label class="op-label">Mark embryos</label>
+                        <div class="op-mark-actions">
+                          <button class="op-btn" id="op-detect" type="button">Detect</button>
+                          <button class="op-btn op-btn-primary" id="op-confirm" type="button" disabled>Confirm <span id="op-mark-count">(0)</span></button>
+                        </div>
+                        <button class="op-btn op-btn-ghost" id="op-clear" type="button" disabled>Clear marks</button>
+                        <div class="op-hint" id="op-mark-hint">Start the camera, then Detect — or click the image to mark embryos.</div>
+                      </div>
+                    </div>
+                  </div>
+                </section>
+
+                <!-- ZONE 2 — EMBRYOS (single source of truth) -->
+                <section class="op-zone op-zone-embryos">
+                  <header class="op-zone-head"><span class="op-step">2</span> Embryos <span class="op-count" id="op-embryo-count"></span></header>
+                  <div class="op-embryo-list" id="op-embryo-list">
+                    <div class="op-empty">No embryos yet — mark some in step 1.</div>
+                  </div>
+                </section>
+
+                <!-- ZONE 3 — ACQUIRE (selected embryo) -->
+                <section class="op-zone op-zone-acquire">
+                  <header class="op-zone-head"><span class="op-step">3</span> Acquire <span class="op-sel" id="op-sel-label">— select an embryo</span></header>
+                  <div class="op-acquire-body">
+                    <div class="op-cam op-cam-spim" id="op-spim-stage">
+                      <img class="op-cam-img" id="op-spim-img" alt="lightsheet live frame">
+                      <div class="op-cam-ph" id="op-spim-ph">SPIM view off</div>
+                    </div>
+                    <div class="op-rail">
+                      <button class="op-btn op-btn-primary" id="op-center" type="button" disabled>Center stage on embryo</button>
+                      <div class="op-field">
+                        <label class="op-label">SPIM head — F-drive</label>
+                        <div class="op-readout"><b id="op-fd-pos">—</b> µm<span class="op-sep">·</span>floor <b id="op-fd-floor">—</b></div>
+                        <div class="op-nudge" id="op-fd-nudge">
+                          <button class="op-nbtn" data-fd="-100" type="button">−100</button>
+                          <button class="op-nbtn" data-fd="-10" type="button">−10</button>
+                          <button class="op-nbtn" data-fd="10" type="button">+10</button>
+                          <button class="op-nbtn" data-fd="100" type="button">+100</button>
+                        </div>
+                      </div>
+                      <div class="op-field">
+                        <label class="op-label">SPIM focus</label>
+                        <div class="op-spim-controls">
+                          <button class="op-btn" id="op-spim-toggle" type="button">Start view</button>
+                          <button class="op-btn op-btn-toggle" id="op-led" type="button" aria-pressed="false">LED</button>
+                        </div>
+                        <div class="op-micro">
+                          <span>Galvo</span>
+                          <button class="op-nbtn" data-gv="-0.2" type="button">−</button>
+                          <b id="op-gv">0.0</b>
+                          <button class="op-nbtn" data-gv="0.2" type="button">+</button>
+                          <span class="op-sep">·</span>
+                          <span>Piezo</span>
+                          <button class="op-nbtn" data-pz="-1" type="button">−</button>
+                          <b id="op-pz">50</b>
+                          <button class="op-nbtn" data-pz="1" type="button">+</button>
+                        </div>
+                        <div class="op-readout">SPIM focus <b id="op-spim-score">—</b></div>
+                      </div>
+                      <button class="op-btn op-btn-primary" id="op-acquire" type="button" disabled>Acquire volume</button>
+                    </div>
+                  </div>
+                </section>
+
+              </div>
             </div>
 
             <!-- Map view: graphical XY position over safe/caution/forbidden zones -->
@@ -1152,6 +1248,7 @@
     <script src="/static/js/marking.js"></script>
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
+    <script src="/static/js/operate.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
