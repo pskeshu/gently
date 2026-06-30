@@ -608,24 +608,26 @@ def create_router(server) -> APIRouter:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
 
+    def _num(v):
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
     @router.post("/api/devices/detect_embryos", dependencies=[Depends(require_control)])
     async def detect_embryos(payload: dict = Body(default={})):  # noqa: B008
-        """Run bottom-camera embryo detection and register the hits into the
-        canonical experiment embryo list — the single source of truth.
-
-        Registration goes through ExperimentState.add_embryo(), which fires
-        EMBRYOS_UPDATE (and EMBRYO_DETECTED), so the device-tab Map view and
-        every other embryo consumer refresh automatically — there is no second
-        list. Raw SAM hits are added as role 'unassigned'; the operator prunes
-        false positives from the same list (DELETE /api/embryos/{id}). Each
-        Detect run appends fresh hits with new ids.
+        """Run bottom-camera embryo detection and RETURN the candidates for the
+        Operate-view marking canvas. Does NOT register — the operator confirms
+        (add/remove/relocate) on a frozen frame, then POSTs /api/devices/embryos/
+        confirm. This keeps the human in the loop and the canonical embryo list
+        clean (a marking step, not a blind auto-register).
 
         Body (all optional): {exposure_ms, min_confidence, brightness_percentile,
-        min_area, max_area, use_claude_review}. Claude review defaults OFF so the
-        manual flow is fast and needs no API key; brightness+SAM detections
-        already carry stage coordinates.
+        min_area, max_area, use_claude_review}. Claude review defaults OFF.
 
-        Returns: {success, detected, registered: [embryo_id, ...]}.
+        Returns: {success, count, stage_position: [x, y] | null,
+                  embryos: [{embryo_id, pixel_x, pixel_y, stage_x_um, stage_y_um,
+                             confidence, area_pixels, bbox_pixel}]}.
         """
         client = _resolve_client()
         if client is None:
@@ -634,7 +636,6 @@ def create_router(server) -> APIRouter:
             raise HTTPException(
                 status_code=503, detail="SAM detection not available on device layer"
             )
-        agent = _require_agent_with_experiment()
 
         kw: dict = {"use_claude_review": bool(payload.get("use_claude_review", False))}
         for key, cast in (
@@ -653,44 +654,133 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=502, detail=f"detection failed: {exc}") from exc
 
         if not result.get("success"):
-            detail = result.get("error", "detection failed")
-            raise HTTPException(status_code=502, detail=str(detail))
+            raise HTTPException(
+                status_code=502, detail=str(result.get("error", "detection failed"))
+            )
 
-        import uuid
+        embryos = []
+        for emb in result.get("embryos", []) or []:
+            bbox = emb.get("bbox_pixel")
+            embryos.append(
+                {
+                    "embryo_id": emb.get("embryo_id"),
+                    "pixel_x": _num(emb.get("pixel_x")),
+                    "pixel_y": _num(emb.get("pixel_y")),
+                    "stage_x_um": _num(emb.get("stage_x_um")),
+                    "stage_y_um": _num(emb.get("stage_y_um")),
+                    "confidence": _num(emb.get("confidence")),
+                    "area_pixels": emb.get("area_pixels"),
+                    "bbox_pixel": list(bbox) if bbox is not None else None,
+                }
+            )
+        pos = result.get("stage_position")
+        return {
+            "success": True,
+            "count": len(embryos),
+            "stage_position": list(pos) if pos is not None else None,
+            "embryos": embryos,
+        }
 
-        def _num(v):
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return None
+    @router.post("/api/devices/embryos/confirm", dependencies=[Depends(require_control)])
+    async def confirm_embryos(payload: dict = Body(...)):  # noqa: B008
+        """Register operator-confirmed markers into the canonical embryo list.
 
-        def _next_embryo_id() -> str:
+        Agent-free commit step for the Operate-view marking canvas. The client
+        computes each marker's stage XY from the frozen frame (SAM candidates
+        carry server-computed stage coords; clicked markers are converted with
+        the frame's downsample-aware transform), so the server just registers
+        via ExperimentState.add_embryo(role='unassigned'), firing EMBRYOS_UPDATE.
+
+        Body: {markers: [{stage_x_um, stage_y_um, confidence?}]}.
+        Returns {success, registered: [embryo_id, ...]}.
+        """
+        agent = _require_agent_with_experiment()
+        markers = payload.get("markers") or []
+
+        def _next_embryo_id(taken: set) -> str:
             n = 1
-            while f"embryo_{n}" in agent.experiment.embryos:
+            while f"embryo_{n}" in agent.experiment.embryos or f"embryo_{n}" in taken:
                 n += 1
             return f"embryo_{n}"
 
-        detections = result.get("embryos", []) or []
+        import uuid
+
         registered: list[str] = []
-        for emb in detections:
-            sx, sy = _num(emb.get("stage_x_um")), _num(emb.get("stage_y_um"))
+        taken: set = set()
+        for m in markers:
+            sx, sy = _num(m.get("stage_x_um")), _num(m.get("stage_y_um"))
             if sx is None or sy is None:
                 continue
-            emb_id = _next_embryo_id()
+            emb_id = _next_embryo_id(taken)
+            taken.add(emb_id)
             agent.experiment.add_embryo(
                 embryo_id=emb_id,
                 position={"x": sx, "y": sy},
-                confidence=_num(emb.get("confidence")) or 0.0,
+                confidence=_num(m.get("confidence")) or 0.0,
                 uid=str(uuid.uuid4()),
                 role="unassigned",
             )
             registered.append(emb_id)
 
-        return {
-            "success": True,
-            "detected": len(detections),
-            "registered": registered,
-        }
+        return {"success": True, "registered": registered}
+
+    # ------------------------------------------------------------------
+    # Focus Z axes (Operate view) — fenced read + nudge
+    # ------------------------------------------------------------------
+
+    @router.get("/api/devices/stage/bottom_z")
+    async def get_bottom_z():
+        """Bottom-camera focus Z position + limits (read-only)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_bottom_z()
+        except Exception as exc:
+            logger.debug("bottom_z read failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"bottom_z read failed: {exc}") from exc
+
+    @router.post("/api/devices/stage/bottom_z/nudge", dependencies=[Depends(require_control)])
+    async def nudge_bottom_z(payload: dict = Body(...)):  # noqa: B008
+        """Nudge the bottom-camera focus Z by {delta} µm (fenced to its limits)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        delta = _num(payload.get("delta"))
+        if delta is None:
+            raise HTTPException(status_code=400, detail="delta required")
+        try:
+            return await client.nudge_bottom_z(delta)
+        except Exception as exc:
+            logger.exception("bottom_z nudge failed")
+            raise HTTPException(status_code=502, detail=f"bottom_z nudge failed: {exc}") from exc
+
+    @router.get("/api/devices/spim/fdrive")
+    async def get_fdrive():
+        """SPIM-head F-drive position + limits + distance-to-floor (read-only)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            return await client.get_fdrive()
+        except Exception as exc:
+            logger.debug("fdrive read failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"fdrive read failed: {exc}") from exc
+
+    @router.post("/api/devices/spim/fdrive/nudge", dependencies=[Depends(require_control)])
+    async def nudge_fdrive(payload: dict = Body(...)):  # noqa: B008
+        """Nudge the SPIM-head F-drive by {delta} µm (fenced; never below floor)."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        delta = _num(payload.get("delta"))
+        if delta is None:
+            raise HTTPException(status_code=400, detail="delta required")
+        try:
+            return await client.nudge_fdrive(delta)
+        except Exception as exc:
+            logger.exception("fdrive nudge failed")
+            raise HTTPException(status_code=502, detail=f"fdrive nudge failed: {exc}") from exc
 
     # ------------------------------------------------------------------
     # Acquisition

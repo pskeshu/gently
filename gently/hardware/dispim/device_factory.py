@@ -71,6 +71,9 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
         "scanner_b_name": "Scanner:CD:33",
         "piezo_b_name": "PiezoStage:Q:35",
         "fdrive_name": "ZStage:V:37",
+        # Bottom-camera focus Z (sample Z). ASI Tiger "ZStage:Z:32" — distinct
+        # from the SPIM-head F-drive (ZStage:V:37). Registered defensively below.
+        "z_stage_name": "ZStage:Z:32",
         "bottom_camera_name": "Bottom PCO",
         "led_name": "LED:X:31",
     }
@@ -194,6 +197,24 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
         logger.info("Created F-drive (SPIM head): %s", cfg["fdrive_name"])
     except Exception as e:
         logger.warning("Could not create F-drive (SPIM head): %s", e)
+
+    # Bottom-camera focus Z (sample Z). Registered defensively: rigs that don't
+    # expose the axis under z_stage_name simply skip it (focus stays manual).
+    try:
+        from .devices import DiSPIMZstage
+
+        z_stage_name = cfg.get("z_stage_name", "ZStage:Z:32")
+        loaded_devices = list(core.getLoadedDevices())
+        if z_stage_name in loaded_devices:
+            devices["z_stage"] = DiSPIMZstage(name=z_stage_name, core=core)
+            logger.info("Created bottom-camera focus Z (z_stage): %s", z_stage_name)
+        else:
+            logger.warning(
+                "z_stage (%s) not in loaded devices — bottom-cam focus Z absent; skipping",
+                z_stage_name,
+            )
+    except Exception as e:
+        logger.warning("Could not create z_stage (bottom-cam focus Z): %s", e)
 
     try:
         if cfg.get("led_name"):

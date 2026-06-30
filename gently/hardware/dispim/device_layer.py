@@ -621,6 +621,31 @@ class DeviceLayerServer(Service):
             except Exception as exc:
                 logger.debug("Galvo position read failed: %s", exc)
 
+        # SPIM-head F-drive — not on its own knob loop, so 1 Hz is plenty.
+        # Streamed so the Operate view can show head height + distance-to-floor.
+        fdrive = self.devices.get("fdrive")
+        if fdrive is not None:
+            try:
+                data = fdrive.read()
+                out[fdrive.name] = {
+                    "Position": float(data[fdrive.name]["value"]),
+                    "kind": "fdrive",
+                }
+            except Exception as exc:
+                logger.debug("F-drive position read failed: %s", exc)
+
+        # Bottom-camera focus Z (sample Z) — present only on rigs that expose it.
+        z_stage = self.devices.get("z_stage")
+        if z_stage is not None:
+            try:
+                data = z_stage.read()
+                out[z_stage.name] = {
+                    "Position": float(data[z_stage.name]["value"]),
+                    "kind": "bottom_z",
+                }
+            except Exception as exc:
+                logger.debug("Bottom-Z position read failed: %s", exc)
+
         return out
 
     def _read_full_state(self) -> dict[str, dict[str, str]]:
@@ -894,6 +919,18 @@ class DeviceLayerServer(Service):
         target_max_dim = max_dim if max_dim is not None else self._cam_target_max_dim
         jpeg_quality = quality if quality is not None else self._cam_jpeg_quality
 
+        # Focus score on the FULL frame (before downsampling) so the Operate
+        # view's focus readout reflects true sharpness, not the JPEG thumbnail.
+        # Best-effort: any failure just omits the field.
+        focus_score: float | None = None
+        try:
+            from gently.analysis.core import calculate_focus_score
+
+            focus_score = float(calculate_focus_score(img, algorithm="volath"))
+        except Exception as exc:
+            logger.debug("Focus score computation failed: %s", exc)
+            focus_score = None
+
         h, w = img.shape[:2]
         # Stride slicing — no interpolation, just take every Nth pixel.
         factor = max(1, max(h, w) // target_max_dim)
@@ -922,13 +959,16 @@ class DeviceLayerServer(Service):
         if not ok:
             return None
         b64 = base64.b64encode(jpeg.tobytes()).decode("ascii")
-        return {
+        payload: dict[str, Any] = {
             "t": time.time(),
             "shape": [int(small.shape[0]), int(small.shape[1])],
             "downsample": factor,
             "mime": "image/jpeg",
             "jpeg_b64": b64,
         }
+        if focus_score is not None:
+            payload["focus_score"] = focus_score
+        return payload
 
     async def _bottom_camera_streamer(self):
         """Continuous grab/encode/broadcast loop. Runs while a subscriber lives.
@@ -2239,6 +2279,119 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    # ------------------------------------------------------------------
+    # Fenced focus axes — bottom-camera focus Z (z_stage) + SPIM-head F-drive.
+    # Read + relative nudge only; the device classes enforce hard limits, and
+    # the handlers reject out-of-range targets with 400. No autofocus.
+    # ------------------------------------------------------------------
+
+    def _nudge_axis_blocking(self, device, target: float) -> float:
+        """Blocking: move a fenced ophyd positioner to ``target`` and return the
+        new position. ``device.set()`` enforces the hardware limits."""
+        status = device.set(target)
+        try:
+            status.wait()
+        except Exception:
+            logger.exception("Axis move to %.2f did not complete cleanly", target)
+        return float(device.read()[device.name]["value"])
+
+    def _axis_status_response(self, device_key: str, label: str):
+        device = self.devices.get(device_key)
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": f"{label} device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            pos = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        return web.json_response(
+            {
+                "success": True,
+                "position": pos,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": pos - float(lo),
+            }
+        )
+
+    async def _handle_axis_nudge(self, request, device_key: str, label: str):
+        try:
+            data = await request.json()
+            delta = float(data.get("delta", 0.0))
+        except Exception:
+            return web.json_response(
+                {"success": False, "error": "numeric 'delta' required"}, status=400
+            )
+        device = self.devices.get(device_key)
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": f"{label} device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            cur = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        target = round(cur + delta, 2)
+        if not (float(lo) <= target <= float(hi)):
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": f"target {target} outside limits [{lo}, {hi}]",
+                    "position": cur,
+                    "min": float(lo),
+                    "max": float(hi),
+                },
+                status=400,
+            )
+        try:
+            async with self.pause_state_updates():
+                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+        except ValueError as exc:  # device-level fence (defensive)
+            return web.json_response({"success": False, "error": str(exc)}, status=400)
+        except Exception as exc:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+        return web.json_response(
+            {
+                "success": True,
+                "position": new_pos,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": new_pos - float(lo),
+            }
+        )
+
+    async def handle_get_bottom_z(self, request):
+        """GET /api/stage/bottom_z — bottom-camera focus Z position + limits."""
+        return self._axis_status_response("z_stage", "Bottom-Z (z_stage)")
+
+    async def handle_nudge_bottom_z(self, request):
+        """POST /api/stage/bottom_z/nudge — fenced relative move of the bottom-camera focus Z."""
+        return await self._handle_axis_nudge(request, "z_stage", "Bottom-Z (z_stage)")
+
+    async def handle_get_fdrive(self, request):
+        """GET /api/spim/fdrive — SPIM-head F-drive position + limits + distance to floor."""
+        return self._axis_status_response("fdrive", "F-drive")
+
+    async def handle_nudge_fdrive(self, request):
+        """POST /api/spim/fdrive/nudge — fenced relative move of the SPIM-head F-drive."""
+        return await self._handle_axis_nudge(request, "fdrive", "F-drive")
+
     async def handle_get_plan_log(self, request):
         """GET /api/plan_log - Get recent plan execution log with timing"""
         try:
@@ -3205,6 +3358,11 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/camera/led_mode", self.handle_set_camera_led_mode)
         self._app.router.add_post("/api/camera/exposure", self.handle_set_camera_exposure)
         self._app.router.add_get("/api/camera/exposure", self.handle_get_camera_exposure)
+        # Fenced focus axes (read + relative nudge; no autofocus)
+        self._app.router.add_get("/api/stage/bottom_z", self.handle_get_bottom_z)
+        self._app.router.add_post("/api/stage/bottom_z/nudge", self.handle_nudge_bottom_z)
+        self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
+        self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
         self._app.router.add_post("/api/laser/config", self.handle_set_laser_config)

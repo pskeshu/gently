@@ -1050,6 +1050,28 @@ class DiSPIMMicroscope(Microscope):
         """Get current bottom camera exposure time."""
         return await self._api_get("/api/camera/exposure")
 
+    # ------------------------------------------------------------------
+    # Fenced focus axes — bottom-camera focus Z and SPIM-head F-drive.
+    # Read + relative nudge only (no autofocus). Out-of-range nudges come
+    # back as a non-success dict (the device layer returns 400).
+    # ------------------------------------------------------------------
+
+    async def get_bottom_z(self) -> dict:
+        """Current bottom-camera focus Z position + limits."""
+        return await self._api_get("/api/stage/bottom_z")
+
+    async def nudge_bottom_z(self, delta: float) -> dict:
+        """Fenced relative move of the bottom-camera focus Z by ``delta`` µm."""
+        return await self._api_post("/api/stage/bottom_z/nudge", {"delta": float(delta)})
+
+    async def get_fdrive(self) -> dict:
+        """Current SPIM-head F-drive position + limits + distance to floor."""
+        return await self._api_get("/api/spim/fdrive")
+
+    async def nudge_fdrive(self, delta: float) -> dict:
+        """Fenced relative move of the SPIM-head F-drive by ``delta`` µm."""
+        return await self._api_post("/api/spim/fdrive/nudge", {"delta": float(delta)})
+
     async def capture_bottom_image(
         self, use_led: bool = False, exposure_ms: float | None = None
     ) -> dict:
