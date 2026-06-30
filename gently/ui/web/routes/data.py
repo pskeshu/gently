@@ -888,7 +888,10 @@ def create_router(server) -> APIRouter:
             tactic = dict(tactic)
             tactic["scope"] = {"mode": "embryos", "embryo_ids": list(eids)}
 
-        stored = append_tactic_to_plan(agent, tactic)
+        try:
+            stored = append_tactic_to_plan(agent, tactic)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"invalid tactic: {exc}") from exc
         if stored is None:
             raise HTTPException(status_code=503, detail="No session to attach the tactic to")
         try:
@@ -1150,45 +1153,62 @@ def create_router(server) -> APIRouter:
         seeded_tactics: list[str] = []
         cs = getattr(agent, "context_store", None)
         sid = getattr(agent, "session_id", None)
-        if cs is not None and sid:
+        # Skip seeding when start was a no-op ("already running") — don't append a
+        # phantom active tactic for a run we didn't start.
+        already_running = isinstance(result, str) and result.startswith("Timelapse already running")
+        if cs is not None and sid and not already_running:
             try:
                 import uuid as _uuid
 
                 from gently.app.tools.operation_plan_tools import _validate_tactics
 
+                # Scope mirrors what orchestrator.start actually does: an omitted
+                # embryo_ids images ALL active embryos → record global, not [].
                 eids = list(embryo_ids or [])
+                seed_scope = {"mode": "embryos", "embryo_ids": eids} if eids else {"mode": "global"}
                 st_id = f"op_{_uuid.uuid4().hex[:8]}"
                 new_tactics = [
                     {
                         "id": st_id, "name": "Adaptive timelapse",
                         "kind": "standing_timelapse", "state": "active",
-                        "scope": {"mode": "embryos", "embryo_ids": eids},
+                        "scope": dict(seed_scope),
                         "structure": {
                             "cadence_s": interval_seconds, "interval": interval_seconds,
                             "stop_condition": stop_condition, "condition_value": condition_value,
                             "monitoring_mode": monitoring_mode or "idle",
                         },
                         "rationale": "Started from the Operate Run step.",
-                        "live_bind": ["cadence"], "relations": {}, "live": {},
+                        "live_bind": ["cadence"], "relations": {}, "live": {}, "source": "operate",
                     }
                 ]
                 if monitoring_mode and monitoring_mode != "idle":
                     new_tactics.append({
                         "id": f"op_{_uuid.uuid4().hex[:8]}", "name": "Monitor",
                         "kind": "reactive_monitor", "state": "active",
-                        "scope": {"mode": "embryos", "embryo_ids": eids},
+                        "scope": dict(seed_scope),
                         "structure": {"monitoring_mode": monitoring_mode, "status": "armed"},
                         "rationale": f"{monitoring_mode} on the marked subjects.",
-                        "live_bind": ["signal"], "relations": {"layered_on": [st_id]}, "live": {},
+                        "live_bind": ["signal"], "relations": {"layered_on": [st_id]},
+                        "live": {}, "source": "operate",
                     })
                 new_tactics = _validate_tactics(new_tactics)
                 plan = cs.get_operation_plan(sid) or {
                     "session_id": sid, "title": "Operate session", "goal": "", "tactics": []
                 }
-                plan.setdefault("tactics", []).extend(new_tactics)
+                # Reconcile: retire any prior still-'active' operate-seeded tactics
+                # so repeated Start clicks don't accumulate stale active timelapses.
+                for t in plan.setdefault("tactics", []):
+                    if t.get("source") == "operate" and t.get("state") == "active":
+                        t["state"] = "done"
+                plan["tactics"].extend(new_tactics)
                 plan["updated_reason"] = "operate adaptive timelapse"
                 cs.set_operation_plan(sid, plan)
                 seeded_tactics = [t["id"] for t in new_tactics]
+                # Link the run to its tactics so stop/pause/resume can reconcile them.
+                try:
+                    orchestrator._operate_tactic_ids = list(seeded_tactics)
+                except Exception:
+                    pass
             except Exception:
                 logger.debug("timelapse tactic seeding skipped", exc_info=True)
 
@@ -1207,20 +1227,41 @@ def create_router(server) -> APIRouter:
             },
         }
 
-    def _resolve_orchestrator():
+    def _resolve_orch_and_agent():
         bridge = getattr(server, "agent_bridge", None)
         agent = bridge.agent if bridge is not None else None
-        return getattr(agent, "timelapse_orchestrator", None) if agent else None
+        orch = getattr(agent, "timelapse_orchestrator", None) if agent else None
+        return orch, agent
+
+    def _reconcile_operate_tactics(orch, agent, state: str, clear: bool):
+        """Transition the run's operate-seeded tactics to ``state`` so the
+        Operation Plan / run-spine reflect stop/pause/resume. Best-effort."""
+        cs = getattr(agent, "context_store", None)
+        sid = getattr(agent, "session_id", None)
+        ids = list(getattr(orch, "_operate_tactic_ids", []) or [])
+        if cs is not None and sid and ids:
+            for tid in ids:
+                try:
+                    cs.transition_tactic(sid, tid, state)
+                except Exception:
+                    logger.debug("transition_tactic %s failed", tid, exc_info=True)
+        if clear:
+            try:
+                orch._operate_tactic_ids = []
+            except Exception:
+                pass
 
     @router.post("/api/devices/timelapse/stop", dependencies=[Depends(require_control)])
     async def timelapse_stop(payload: dict = Body(default={})):  # noqa: B008
         """Stop the running timelapse (Operate run-spine). Body: {reason?}."""
-        orch = _resolve_orchestrator()
+        orch, agent = _resolve_orch_and_agent()
         if orch is None:
             raise HTTPException(status_code=503, detail="No timelapse orchestrator")
         try:
             reason = str(payload.get("reason", "user_request"))
-            return {"stopped": True, "result": await orch.stop(reason=reason)}
+            res = await orch.stop(reason=reason)
+            _reconcile_operate_tactics(orch, agent, "done", clear=True)
+            return {"stopped": True, "result": res}
         except Exception as exc:
             logger.exception("Timelapse stop failed")
             raise HTTPException(status_code=502, detail=f"timelapse stop failed: {exc}") from exc
@@ -1228,11 +1269,13 @@ def create_router(server) -> APIRouter:
     @router.post("/api/devices/timelapse/pause", dependencies=[Depends(require_control)])
     async def timelapse_pause():
         """Pause the running timelapse."""
-        orch = _resolve_orchestrator()
+        orch, agent = _resolve_orch_and_agent()
         if orch is None:
             raise HTTPException(status_code=503, detail="No timelapse orchestrator")
         try:
-            return {"paused": True, "result": await orch.pause()}
+            res = await orch.pause()
+            _reconcile_operate_tactics(orch, agent, "paused", clear=False)
+            return {"paused": True, "result": res}
         except Exception as exc:
             logger.exception("Timelapse pause failed")
             raise HTTPException(status_code=502, detail=f"timelapse pause failed: {exc}") from exc
@@ -1240,11 +1283,13 @@ def create_router(server) -> APIRouter:
     @router.post("/api/devices/timelapse/resume", dependencies=[Depends(require_control)])
     async def timelapse_resume():
         """Resume a paused timelapse."""
-        orch = _resolve_orchestrator()
+        orch, agent = _resolve_orch_and_agent()
         if orch is None:
             raise HTTPException(status_code=503, detail="No timelapse orchestrator")
         try:
-            return {"resumed": True, "result": await orch.resume()}
+            res = await orch.resume()
+            _reconcile_operate_tactics(orch, agent, "active", clear=False)
+            return {"resumed": True, "result": res}
         except Exception as exc:
             logger.exception("Timelapse resume failed")
             raise HTTPException(status_code=502, detail=f"timelapse resume failed: {exc}") from exc

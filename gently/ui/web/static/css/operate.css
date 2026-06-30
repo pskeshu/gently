@@ -60,6 +60,9 @@
 .op-node.is-done::before { content: "✓ "; }
 .op-node.is-active { color: var(--text); border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent); }
 .op-node.is-locked { opacity: 0.4; }
+/* the Run node is a re-entry point to the chooser once embryos are marked */
+.op-stepper .op-node[data-node="run"]:not(.is-locked) { cursor: pointer; }
+.op-stepper .op-node[data-node="run"]:not(.is-locked):hover { color: var(--accent); }
 
 .op-status {
     display: flex;

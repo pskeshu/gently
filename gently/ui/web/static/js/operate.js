@@ -37,7 +37,7 @@ const OperateManager = (function () {
     let _acquiring = false;
 
     // viewport / streams
-    let _camOn = false, _spimOn = false;
+    let _camOn = false, _spimOn = false, _camStarting = false;
     let _lastFrame = null;           // last live bottom-cam payload
     let _lastSpimFrame = null;
     let _bzScore = null, _spimScore = null;
@@ -165,6 +165,14 @@ const OperateManager = (function () {
                 : (cam === 'bottom' ? 'Bottom cam' : 'SPIM · side A') + ' — ' + RAIL_HEADS[step].toLowerCase();
         }
         ensureInactiveCameraStopped(cam);
+        // B1 (Center) needs a live bottom view but has no Start button (the
+        // chooser stops all cameras) — auto-start it so centering has feedback.
+        if (step === 'b1' && !_camOn && !_camStarting && !_marking) {
+            _camStarting = true;
+            fetch('/api/devices/bottom_camera/stream/start', { method: 'POST' })
+                .then(r => r.json()).then(d => { _camStarting = false; applyCam(!!d.streaming); })
+                .catch(() => { _camStarting = false; });
+        }
         // show the right frame
         if (cam === 'bottom' && !_marking && _lastFrame) setImg(_lastFrame);
         else if (cam === 'spim' && _lastSpimFrame) setImg(_lastSpimFrame);
@@ -576,7 +584,12 @@ const OperateManager = (function () {
             _headLowered = false; _fdFloor = null;
             const next = _embryos.find(e => _states[e.id] !== 'imaged');
             if (next) { selectEmbryo(next.id); toast(`Next: embryo ${labelFor(next)}`); }
-            else { _selected = null; _step = null; renderStep(); toast('All embryos imaged'); }
+            else {
+                // Done imaging — return to the Run chooser (not Focus) so another
+                // run mode can be chosen for the same marked set.
+                _selected = null; _step = null; _runState = 'choose'; renderStep();
+                toast('All embryos imaged');
+            }
         } finally { D['op-retract'].disabled = false; }
     }
 
@@ -664,6 +677,8 @@ const OperateManager = (function () {
     }
 
     async function startRun() {
+        // Persist the chooser's role toggles for EVERY mode (manual included).
+        await applyRoles();
         if (_runMode === 'manual') {
             // record a cosmetic oneshot tactic so even a manual sweep shows on the spine
             postJSON('/api/operate/run-tactic', {
@@ -674,19 +689,23 @@ const OperateManager = (function () {
             if (_embryos.length) selectEmbryo(_embryos[0].id);
             return;
         }
-        await applyRoles();
         const subjects = _embryos.filter(e => (_roles[e.id] || 'test') !== 'calibration').map(e => e.id);
         const embryo_ids = subjects.length ? subjects : _embryos.map(e => e.id);
         if (_runMode === 'adaptive') {
             const interval = Math.max(1, Number(D['op-tl-interval'].value) || 120);
-            const stop = D['op-tl-stop'].value;
+            const stopSel = D['op-tl-stop'].value;
             const monitoring = D['op-tl-monitor'].value;
-            const body = { embryo_ids, interval_seconds: interval, stop_condition: stop, monitoring_mode: monitoring };
-            if (stop === 'timepoints' || stop === 'duration') body.condition_value = Math.max(1, Number(D['op-tl-condval'].value) || 1);
+            // Send the combined stop form the orchestrator parser understands
+            // ('timepoints:N' / 'duration:Xh'); a bare 'timepoints' silently
+            // degrades to manual (never stops).
+            let stop_condition = stopSel;
+            if (stopSel === 'timepoints') stop_condition = `timepoints:${Math.max(1, Number(D['op-tl-condval'].value) || 1)}`;
+            else if (stopSel === 'duration') stop_condition = `duration:${Math.max(1, Number(D['op-tl-condval'].value) || 1)}h`;
+            const body = { embryo_ids, interval_seconds: interval, stop_condition, monitoring_mode: monitoring };
             D['op-run-start'].disabled = true; D['op-run-start'].textContent = 'Starting…';
             try {
                 await postJSON('/api/devices/timelapse/start', body);
-                _runMeta = { mode: 'adaptive', interval, stop, monitoring, n: embryo_ids.length };
+                _runMeta = { mode: 'adaptive', interval, stop: stop_condition, monitoring, n: embryo_ids.length };
                 _runState = 'running'; _runPaused = false;
                 toast(`Adaptive timelapse started — ${embryo_ids.length} subject${embryo_ids.length === 1 ? '' : 's'}`);
                 renderStep();
@@ -736,12 +755,22 @@ const OperateManager = (function () {
         if (tactics.length) {
             tactics.forEach(t => D['op-runspine'].appendChild(tacticCard(t)));
         } else if (_runMeta) {
-            const stopTxt = _runMeta.stop === 'manual' ? 'until stopped' : _runMeta.stop;
+            // Fallback card when the plan fetch is empty/failed — shaped per mode
+            // (a library run carries no interval/stop/monitoring).
+            const n = _runMeta.n || 0;
+            const subj = `${n} subject${n === 1 ? '' : 's'}`;
             const card = document.createElement('div');
             card.className = 'op-tcard st-active';
-            card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Adaptive timelapse</span><span class="op-tcard-state">active</span></div>'
-                + `<div class="op-tcard-kind">standing_timelapse · ${escapeHtml(_runMeta.monitoring)}</div>`
-                + `<div class="op-tcard-meta">${_runMeta.interval}s · ${_runMeta.n} subject${_runMeta.n === 1 ? '' : 's'} · ${escapeHtml(stopTxt)}</div>`;
+            if (_runMeta.mode === 'adaptive') {
+                const stopTxt = (_runMeta.stop === 'manual' || _runMeta.stop == null) ? 'until stopped' : _runMeta.stop;
+                const ivl = _runMeta.interval != null ? `${escapeHtml(String(_runMeta.interval))}s · ` : '';
+                card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Adaptive timelapse</span><span class="op-tcard-state">active</span></div>'
+                    + `<div class="op-tcard-kind">standing_timelapse · ${escapeHtml(_runMeta.monitoring || 'idle')}</div>`
+                    + `<div class="op-tcard-meta">${ivl}${subj} · ${escapeHtml(stopTxt)}</div>`;
+            } else {
+                card.innerHTML = '<div class="op-tcard-head"><span class="op-tcard-name">Tactic</span><span class="op-tcard-state">active</span></div>'
+                    + `<div class="op-tcard-meta">${subj}</div>`;
+            }
             D['op-runspine'].appendChild(card);
         } else {
             D['op-runspine'].innerHTML = '<div class="op-empty">Run active.</div>';
@@ -807,6 +836,15 @@ const OperateManager = (function () {
         D['op-acquire'].addEventListener('click', acquireSelected);
         D['op-retract'].addEventListener('click', retractAndAdvance);
         D['op-survey-btn'].addEventListener('click', surveyMore);
+        // Re-enter the Run chooser by clicking the "Run" stepper node — so a
+        // different run mode can be chosen for an already-marked set (e.g. after
+        // a manual sweep). Without this the chooser is a one-time gate.
+        if (D['op-stepper']) D['op-stepper'].addEventListener('click', e => {
+            const n = e.target.closest('.op-node');
+            if (n && n.dataset.node === 'run' && _embryos.length && !_marking && _runState !== 'running') {
+                _selected = null; _step = null; _runState = 'choose'; renderStep();
+            }
+        });
         // Phase C: Run chooser + run-spine
         document.querySelectorAll('input[name="op-mode"]').forEach(r =>
             r.addEventListener('change', () => { _runMode = r.value; renderChooser(); }));

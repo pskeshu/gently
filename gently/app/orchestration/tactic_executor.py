@@ -133,6 +133,7 @@ def append_tactic_to_plan(agent, tactic: dict) -> dict | None:
         return None
     t = dict(tactic)
     t.setdefault("id", f"op_{uuid.uuid4().hex[:8]}")
+    t.setdefault("kind", "custom")
     t.setdefault("state", "planned")
     t.setdefault("name", t.get("kind", "tactic"))
     (validated,) = _validate_tactics([t])
