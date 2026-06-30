@@ -650,8 +650,11 @@ const OperateManager = (function () {
         } catch (_) { D['op-lib-list'].innerHTML = '<div class="op-empty">Library unavailable</div>'; }
     }
     function loadPlanItems() {
-        // Phase 3 wires the resume_plan candidate list.
-        if (D['op-plan-list']) D['op-plan-list'].innerHTML = '<div class="op-empty">Plan linking — coming in the tactics phase</div>';
+        // Plan resolution lives in the agent (resume_plan + execute_plan_item);
+        // Start hands the roster to the agent to attach + continue the right item.
+        if (D['op-plan-list']) {
+            D['op-plan-list'].innerHTML = '<div class="op-empty">Start hands these embryos to the agent to attach a plan item and continue imaging.</div>';
+        }
     }
 
     async function applyRoles() {
@@ -662,6 +665,11 @@ const OperateManager = (function () {
 
     async function startRun() {
         if (_runMode === 'manual') {
+            // record a cosmetic oneshot tactic so even a manual sweep shows on the spine
+            postJSON('/api/operate/run-tactic', {
+                tactic: { kind: 'oneshot', name: 'Manual sweep', structure: { note: 'manual one-by-one' } },
+                embryo_ids: _embryos.map(e => e.id),
+            }).catch(() => {});
             _runState = null;
             if (_embryos.length) selectEmbryo(_embryos[0].id);
             return;
@@ -687,24 +695,36 @@ const OperateManager = (function () {
             } finally { D['op-run-start'].disabled = false; D['op-run-start'].textContent = 'Start run'; }
             return;
         }
-        if (_runMode === 'agent') {
-            const roster = _embryos.map(e => {
-                const xy = resolveXY(e);
-                const r = _roles[e.id] === 'calibration' ? 'reference' : 'subject';
-                return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
-            }).join(', ');
+        const roster = _embryos.map(e => {
+            const xy = resolveXY(e);
+            const r = _roles[e.id] === 'calibration' ? 'reference' : 'subject';
+            return `${labelFor(e)}${xy ? ` (${xy.x.toFixed(0)},${xy.y.toFixed(0)})` : ''} [${r}]`;
+        }).join(', ');
+
+        if (_runMode === 'library') {
+            if (!_selectedLib) { toast('Pick a saved tactic'); return; }
+            D['op-run-start'].disabled = true; D['op-run-start'].textContent = 'Starting…';
+            try {
+                const d = await postJSON('/api/operate/run-tactic', { library_id: _selectedLib, embryo_ids });
+                if (d.success) {
+                    _runMeta = { mode: 'library', n: embryo_ids.length };
+                    _runState = 'running'; _runPaused = false; toast('Tactic started'); renderStep();
+                } else { toast(`Run failed: ${(d.result && d.result.message) || '?'}`); }
+            } catch (e) { toast(`Start failed (${e.status || e.message})`); }
+            finally { D['op-run-start'].disabled = false; D['op-run-start'].textContent = 'Start run'; }
+            return;
+        }
+        if (_runMode === 'plan' || _runMode === 'agent') {
+            // The agent owns plan resolution + composed tactics; hand off the roster.
+            const prompt = _runMode === 'plan'
+                ? `Continue a plan on these ${_embryos.length} marked embryos — attach this session to the right plan item and start imaging: ${roster}.`
+                : `I marked ${_embryos.length} embryos: ${roster}. Propose and start an Operation Plan to image them.`;
             if (typeof AgentChat !== 'undefined' && AgentChat.togglePanel) {
                 AgentChat.togglePanel(true);
-                if (AgentChat.runCommand) {
-                    setTimeout(() => AgentChat.runCommand(
-                        `I marked ${_embryos.length} embryos: ${roster}. Propose and start an Operation Plan to image them.`), 300);
-                }
+                if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
             } else { toast('Agent chat unavailable'); }
             _runState = 'running'; renderStep();
             return;
-        }
-        if (_runMode === 'library' || _runMode === 'plan') {
-            toast('Library / plan run — wired in the tactics phase');  // Phase 3
         }
     }
 

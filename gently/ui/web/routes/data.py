@@ -856,6 +856,48 @@ def create_router(server) -> APIRouter:
             logger.debug("notify_embryos_changed failed", exc_info=True)
         return {"success": True, "updated": updated}
 
+    @router.post("/api/operate/run-tactic", dependencies=[Depends(require_control)])
+    async def operate_run_tactic(payload: dict = Body(...)):  # noqa: B008
+        """Append a tactic to the session Operation Plan and execute it via the
+        Tactic Executor (resolve scope → dispatch by kind to the orchestrator).
+
+        Body: {tactic: {...}} OR {library_id: "..."} (instantiate a saved tactic);
+        optional {embryo_ids: [...]} to re-scope it to the marked set.
+        Returns {success, tactic_id, result}.
+        """
+        from gently.app.orchestration.tactic_executor import (
+            append_tactic_to_plan,
+            execute_tactic,
+        )
+
+        agent = _require_agent_with_experiment()
+        tactic = payload.get("tactic")
+        lib_id = payload.get("library_id")
+        if tactic is None and lib_id:
+            cs = getattr(agent, "context_store", None)
+            if cs is None:
+                raise HTTPException(status_code=503, detail="No context store")
+            tactic = cs.apply_tactic(lib_id)
+            if tactic is None:
+                raise HTTPException(status_code=404, detail=f"tactic '{lib_id}' not found")
+        if not isinstance(tactic, dict):
+            raise HTTPException(status_code=400, detail="tactic or library_id required")
+
+        eids = payload.get("embryo_ids")
+        if eids:
+            tactic = dict(tactic)
+            tactic["scope"] = {"mode": "embryos", "embryo_ids": list(eids)}
+
+        stored = append_tactic_to_plan(agent, tactic)
+        if stored is None:
+            raise HTTPException(status_code=503, detail="No session to attach the tactic to")
+        try:
+            result = await execute_tactic(agent, stored)
+        except Exception as exc:
+            logger.exception("run-tactic execution failed")
+            raise HTTPException(status_code=502, detail=f"tactic execution failed: {exc}") from exc
+        return {"success": bool(result.get("ok")), "tactic_id": stored.get("id"), "result": result}
+
     @router.get("/api/operation_plan")
     async def get_operation_plan_route():
         """Current session's Operation Plan (the tactics document), for the
