@@ -614,6 +614,71 @@ def create_router(server) -> APIRouter:
         except (TypeError, ValueError):
             return None
 
+    def _persist_detection_labels(agent, payload: dict, markers: list) -> bool:
+        """Persist the annotated bottom-cam frame + per-marker pixel/stage coords
+        as a labelled snapshot — localization training data (sub-project B).
+
+        Best-effort: requires a client-supplied image and an active session; any
+        failure (no session, missing deps) is swallowed so it never blocks the
+        embryo registration. Reuses FileStore.register_snapshot so labels live in
+        the standard snapshots/ sidecar, not a bespoke store.
+        """
+        image_b64 = payload.get("image_b64")
+        store = getattr(agent, "store", None)
+        session_id = getattr(agent, "session_id", None)
+        if not image_b64 or store is None or not session_id:
+            return False
+        try:
+            import base64
+            import io
+            import tempfile
+            import uuid as _uuid
+
+            import numpy as np
+            import tifffile
+            from PIL import Image
+
+            from gently.core.coordinates import (
+                DEFAULT_OBJECTIVE_MAG,
+                DEFAULT_PIXEL_SIZE_UM,
+            )
+
+            raw = base64.b64decode(image_b64.split(",")[-1])
+            img = np.asarray(Image.open(io.BytesIO(raw)))
+            tmp = Path(tempfile.gettempdir()) / f"operate_{_uuid.uuid4().hex[:12]}.tif"
+            tifffile.imwrite(str(tmp), img)
+
+            frame = payload.get("frame") or {}
+            pos = payload.get("stage_position") or [None, None]
+            meta = {
+                "kind": "operate_marking",
+                "stage_position": list(pos),
+                "frame": {
+                    "width": _num(frame.get("w")),
+                    "height": _num(frame.get("h")),
+                    "downsample": _num(frame.get("downsample")),
+                },
+                "transform": {
+                    "pixel_size_um": DEFAULT_PIXEL_SIZE_UM,
+                    "objective_mag": DEFAULT_OBJECTIVE_MAG,
+                },
+                "embryos": [
+                    {
+                        "pixel_x": _num(m.get("pixel_x")),
+                        "pixel_y": _num(m.get("pixel_y")),
+                        "stage_x_um": _num(m.get("stage_x_um")),
+                        "stage_y_um": _num(m.get("stage_y_um")),
+                        "source": m.get("source", "manual"),
+                    }
+                    for m in markers
+                ],
+            }
+            store.register_snapshot(session_id, "operate_marked", tmp, metadata=meta)
+            return True
+        except Exception:
+            logger.debug("detection-label persistence skipped", exc_info=True)
+            return False
+
     @router.post("/api/devices/detect_embryos", dependencies=[Depends(require_control)])
     async def detect_embryos(payload: dict = Body(default={})):  # noqa: B008
         """Run bottom-camera embryo detection and RETURN the candidates for the
@@ -691,8 +756,12 @@ def create_router(server) -> APIRouter:
         the frame's downsample-aware transform), so the server just registers
         via ExperimentState.add_embryo(role='unassigned'), firing EMBRYOS_UPDATE.
 
-        Body: {markers: [{stage_x_um, stage_y_um, confidence?}]}.
-        Returns {success, registered: [embryo_id, ...]}.
+        Body: {markers: [{stage_x_um, stage_y_um, pixel_x?, pixel_y?, source?,
+               confidence?}], image_b64?, frame? {w,h,downsample}, stage_position?}.
+        When image_b64 is present the annotated frame + per-marker pixel/stage
+        coords are persisted as a labelled snapshot (sub-project B: localization
+        training data) — best-effort, never blocks registration.
+        Returns {success, registered: [embryo_id, ...], labelled: bool}.
         """
         agent = _require_agent_with_experiment()
         markers = payload.get("markers") or []
@@ -722,7 +791,8 @@ def create_router(server) -> APIRouter:
             )
             registered.append(emb_id)
 
-        return {"success": True, "registered": registered}
+        labelled = _persist_detection_labels(agent, payload, markers)
+        return {"success": True, "registered": registered, "labelled": labelled}
 
     # ------------------------------------------------------------------
     # Focus Z axes (Operate view) — fenced read + nudge

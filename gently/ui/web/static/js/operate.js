@@ -231,8 +231,18 @@ const OperateManager = (function () {
         if (!_markers.length) return;
         _confirmBtn.disabled = true;
         try {
-            const markers = _markers.map(m => ({ stage_x_um: m.stageX, stage_y_um: m.stageY }));
-            const data = await postJSON('/api/devices/embryos/confirm', { markers });
+            // Stage coords register the embryos; pixel coords + the frozen frame
+            // are persisted as localization labels (sub-project B) server-side.
+            const markers = _markers.map(m => ({
+                stage_x_um: m.stageX, stage_y_um: m.stageY,
+                pixel_x: m.fx, pixel_y: m.fy, source: m.source,
+            }));
+            const data = await postJSON('/api/devices/embryos/confirm', {
+                markers,
+                image_b64: _frozenSrc ? _frozenSrc.split(',')[1] : undefined,
+                frame: _frozenFrame ? { w: _frozenFrame.w, h: _frozenFrame.h, downsample: _frozenFrame.downsample } : undefined,
+                stage_position: _captureStage,
+            });
             const n = (data.registered || []).length;
             toast(`Registered ${n} embryo${n === 1 ? '' : 's'}`);
             exitMarking();  // list refreshes via EMBRYOS_UPDATE
