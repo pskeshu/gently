@@ -52,8 +52,16 @@ const DevicesManager = (function () {
     // Backspace removes it (with a confirm), Escape clears the selection.
     let _selectedEmbryoId = null;
 
+    // Bottom-camera detection (Map view). Detection registers hits into the
+    // canonical _embryos list (server-side, via the experiment) — there is no
+    // separate detected list. The Embryos card renders _embryos and centres the
+    // stage on each via /api/devices/stage/move. _detecting only gates the
+    // Detect button while a run is in flight.
+    let _detecting = false;
+    let _detectBtn, _detectList;
+
     // Bottom-camera panel DOM + state
-    let _camPanel, _camToggle, _camImg, _camPlaceholder, _camLed, _camMeta;
+    let _camPanel, _camToggle, _camExpand, _camImg, _camPlaceholder, _camLed, _camMeta;
     let _camStage, _camCrosshair, _camCrosshairGroup;
     let _camStreaming = false;
     let _camLastFrameTs = 0;
@@ -176,6 +184,8 @@ const DevicesManager = (function () {
         _mapOrigin        = document.getElementById('devices-map-origin');
         _mapAxes          = document.getElementById('devices-map-axes');
         _mapEmbryos       = document.getElementById('devices-map-embryos');
+        _detectBtn        = document.getElementById('devices-detect-btn');
+        _detectList       = document.getElementById('devices-detect-list');
         _mapMarker        = document.getElementById('devices-map-marker');
         _mapMarkerPulse   = document.getElementById('devices-map-marker-pulse');
         _mapMarkerRing    = document.getElementById('devices-map-marker-ring');
@@ -187,6 +197,7 @@ const DevicesManager = (function () {
 
         _camPanel        = document.getElementById('devices-camera-panel');
         _camToggle       = document.getElementById('devices-camera-toggle');
+        _camExpand       = document.getElementById('devices-camera-expand');
         _camImg          = document.getElementById('devices-camera-img');
         _camPlaceholder  = document.getElementById('devices-camera-placeholder');
         _camStage        = _camPanel ? _camPanel.querySelector('.devices-camera-stage') : null;
@@ -416,6 +427,7 @@ const DevicesManager = (function () {
         } else {
             renderEmbryos();
         }
+        renderEmbryoListPanel();
     }
 
     // =====================================================================
@@ -646,7 +658,7 @@ const DevicesManager = (function () {
     }
 
     function handleEmbryoDetected(payload) {
-        if (_upsertEmbryo(payload)) renderEmbryos();
+        if (_upsertEmbryo(payload)) { renderEmbryos(); renderEmbryoListPanel(); }
     }
 
     function handleStatusChanged(payload) {
@@ -659,6 +671,7 @@ const DevicesManager = (function () {
         if (idx >= 0) {
             _embryos[idx] = Object.assign({}, _embryos[idx], { role: newRole });
             renderEmbryos();
+            renderEmbryoListPanel();
         } else {
             // Embryo we haven't seen yet — refetch to be safe.
             loadEmbryos();
@@ -1364,9 +1377,21 @@ const DevicesManager = (function () {
         }
     }
 
+    function toggleCameraExpand() {
+        if (!_camPanel) return;
+        const expanded = _camPanel.classList.toggle('expanded');
+        if (_camExpand) {
+            _camExpand.classList.toggle('active', expanded);
+            _camExpand.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+            _camExpand.title = expanded ? 'Shrink view' : 'Enlarge view';
+            _camExpand.textContent = expanded ? '⤡' : '⤢';
+        }
+    }
+
     function setupCameraWiring() {
         if (!_camToggle) return;
         _camToggle.addEventListener('click', toggleCameraStream);
+        if (_camExpand) _camExpand.addEventListener('click', toggleCameraExpand);
         applyCameraState(false);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('BOTTOM_CAMERA_FRAME', handleCameraFrame);
@@ -2420,11 +2445,179 @@ const DevicesManager = (function () {
         scheduleStaleCheck();
     }
 
+    // =====================================================================
+    // Embryo detection + per-embryo stage centring (Map view)
+    // =====================================================================
+    // Single source of truth: the canonical _embryos list (fed by
+    // EMBRYOS_UPDATE / /api/embryos/current). Detect registers hits server-side
+    // into the experiment, which broadcasts EMBRYOS_UPDATE back here — the same
+    // list that imported / timelapse / manually-marked embryos live in. The
+    // panel below renders that one list with a Centre + remove action per row.
+
+    // Render the Embryos card list from _embryos. Called from renderEmbryos()
+    // so the card and the map dots always reflect the same canonical state.
+    function renderEmbryoListPanel() {
+        if (!_detectList) return;
+        _detectList.innerHTML = '';
+        if (!_embryos || !_embryos.length) {
+            const empty = document.createElement('div');
+            empty.className = 'devices-detect-empty';
+            empty.textContent = _detecting
+                ? 'Detecting…'
+                : 'No embryos yet — press Detect';
+            _detectList.appendChild(empty);
+            return;
+        }
+        _embryos.forEach((emb, i) => {
+            const xy = embryoResolvedXY(emb);
+            const row = document.createElement('div');
+            row.className = 'devices-detect-row';
+            row.setAttribute('data-embryo-id', emb.id || '');
+
+            const dot = document.createElement('span');
+            dot.className = 'devices-detect-dot';
+            dot.style.background = _ROLE_COLOR[emb.role] || _ROLE_COLOR.unassigned;
+            dot.textContent = embryoLabelText(emb.id, i);
+            row.appendChild(dot);
+
+            const coord = document.createElement('span');
+            coord.className = 'devices-detect-coord';
+            coord.textContent = xy
+                ? `(${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}) µm`
+                : 'no position';
+            row.appendChild(coord);
+
+            const center = document.createElement('button');
+            center.className = 'devices-detect-center';
+            center.type = 'button';
+            center.textContent = 'Center';
+            center.disabled = !xy;
+            center.addEventListener('click', () => centerOnEmbryo(emb, center));
+            row.appendChild(center);
+
+            const remove = document.createElement('button');
+            remove.className = 'devices-detect-remove';
+            remove.type = 'button';
+            remove.title = 'Remove this embryo';
+            remove.setAttribute('aria-label', 'Remove embryo');
+            remove.textContent = '✕';
+            remove.addEventListener('click', () => removeEmbryo(emb, remove));
+            row.appendChild(remove);
+
+            _detectList.appendChild(row);
+        });
+    }
+
+    async function runDetection() {
+        if (_detecting || !_detectBtn) return;
+        _detecting = true;
+        _detectBtn.disabled = true;
+        _detectBtn.textContent = 'Detecting…';
+        renderEmbryoListPanel();
+        try {
+            const res = await fetch('/api/devices/detect_embryos', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}),
+            });
+            if (!res.ok) {
+                const detail = await res.text();
+                console.error('Embryo detection failed:', detail);
+                if (typeof showGentlyToast === 'function') {
+                    showGentlyToast(`Detection failed (${res.status})`);
+                }
+                return;
+            }
+            const data = await res.json();
+            // The canonical list refreshes via EMBRYOS_UPDATE; just report.
+            if (typeof showGentlyToast === 'function') {
+                const n = Array.isArray(data.registered) ? data.registered.length : 0;
+                showGentlyToast(`Detected ${n} embryo${n === 1 ? '' : 's'}`);
+            }
+        } catch (err) {
+            console.error('Detection request failed:', err);
+            if (typeof showGentlyToast === 'function') {
+                showGentlyToast(`Detection error: ${err.message}`);
+            }
+        } finally {
+            _detecting = false;
+            _detectBtn.disabled = false;
+            _detectBtn.textContent = 'Detect';
+            renderEmbryoListPanel();
+        }
+    }
+
+    async function centerOnEmbryo(emb, btn) {
+        const xy = emb ? embryoResolvedXY(emb) : null;
+        if (!xy) return;
+        const num = embryoNumberFor(emb);
+        if (btn) { btn.disabled = true; btn.textContent = '…'; }
+        try {
+            const res = await fetch('/api/devices/stage/move', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ x: xy.x, y: xy.y }),
+            });
+            if (!res.ok) {
+                console.error('Centre failed:', await res.text());
+                if (typeof showGentlyToast === 'function') {
+                    showGentlyToast(`Centre failed (${res.status})`);
+                }
+                return;
+            }
+            if (typeof showGentlyToast === 'function') {
+                showGentlyToast(
+                    `Centred on embryo ${num} — (${xy.x.toFixed(0)}, ${xy.y.toFixed(0)}) µm`
+                );
+            }
+        } catch (err) {
+            console.error('Centre request failed:', err);
+            if (typeof showGentlyToast === 'function') {
+                showGentlyToast(`Centre error: ${err.message}`);
+            }
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Center'; }
+        }
+    }
+
+    async function removeEmbryo(emb, btn) {
+        if (!emb || !emb.id) return;
+        const num = embryoNumberFor(emb);
+        if (!window.confirm(`Remove embryo ${num}?`)) return;
+        if (btn) btn.disabled = true;
+        try {
+            const res = await fetch(`/api/embryos/${encodeURIComponent(emb.id)}`, {
+                method: 'DELETE',
+            });
+            if (!res.ok) {
+                console.error('Remove failed:', await res.text());
+                if (typeof showGentlyToast === 'function') {
+                    showGentlyToast(`Remove failed (${res.status})`);
+                }
+                if (btn) btn.disabled = false;
+                return;
+            }
+            // EMBRYOS_UPDATE refreshes the list + map dots.
+        } catch (err) {
+            console.error('Remove request failed:', err);
+            if (typeof showGentlyToast === 'function') {
+                showGentlyToast(`Remove error: ${err.message}`);
+            }
+            if (btn) btn.disabled = false;
+        }
+    }
+
+    function setupDetectWiring() {
+        if (_detectBtn) _detectBtn.addEventListener('click', runDetection);
+        renderEmbryoListPanel();
+    }
+
     function init() {
         cacheDom();
         setupViewSwitcher();
         setupCameraWiring();
         setupManualWiring();
+        setupDetectWiring();
         setupRoomLight();
         setupTemperature();
         loadCoverslip();

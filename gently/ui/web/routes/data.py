@@ -608,6 +608,90 @@ def create_router(server) -> APIRouter:
             logger.exception("Stage move command failed")
             raise HTTPException(status_code=502, detail=f"stage move failed: {exc}") from exc
 
+    @router.post("/api/devices/detect_embryos", dependencies=[Depends(require_control)])
+    async def detect_embryos(payload: dict = Body(default={})):  # noqa: B008
+        """Run bottom-camera embryo detection and register the hits into the
+        canonical experiment embryo list — the single source of truth.
+
+        Registration goes through ExperimentState.add_embryo(), which fires
+        EMBRYOS_UPDATE (and EMBRYO_DETECTED), so the device-tab Map view and
+        every other embryo consumer refresh automatically — there is no second
+        list. Raw SAM hits are added as role 'unassigned'; the operator prunes
+        false positives from the same list (DELETE /api/embryos/{id}). Each
+        Detect run appends fresh hits with new ids.
+
+        Body (all optional): {exposure_ms, min_confidence, brightness_percentile,
+        min_area, max_area, use_claude_review}. Claude review defaults OFF so the
+        manual flow is fast and needs no API key; brightness+SAM detections
+        already carry stage coordinates.
+
+        Returns: {success, detected, registered: [embryo_id, ...]}.
+        """
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        if not getattr(client, "has_sam", False):
+            raise HTTPException(
+                status_code=503, detail="SAM detection not available on device layer"
+            )
+        agent = _require_agent_with_experiment()
+
+        kw: dict = {"use_claude_review": bool(payload.get("use_claude_review", False))}
+        for key, cast in (
+            ("exposure_ms", float),
+            ("min_confidence", float),
+            ("brightness_percentile", float),
+            ("min_area", int),
+            ("max_area", int),
+        ):
+            if payload.get(key) is not None:
+                kw[key] = cast(payload[key])
+        try:
+            result = await client.detect_embryos(**kw)
+        except Exception as exc:
+            logger.exception("Embryo detection failed")
+            raise HTTPException(status_code=502, detail=f"detection failed: {exc}") from exc
+
+        if not result.get("success"):
+            detail = result.get("error", "detection failed")
+            raise HTTPException(status_code=502, detail=str(detail))
+
+        import uuid
+
+        def _num(v):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return None
+
+        def _next_embryo_id() -> str:
+            n = 1
+            while f"embryo_{n}" in agent.experiment.embryos:
+                n += 1
+            return f"embryo_{n}"
+
+        detections = result.get("embryos", []) or []
+        registered: list[str] = []
+        for emb in detections:
+            sx, sy = _num(emb.get("stage_x_um")), _num(emb.get("stage_y_um"))
+            if sx is None or sy is None:
+                continue
+            emb_id = _next_embryo_id()
+            agent.experiment.add_embryo(
+                embryo_id=emb_id,
+                position={"x": sx, "y": sy},
+                confidence=_num(emb.get("confidence")) or 0.0,
+                uid=str(uuid.uuid4()),
+                role="unassigned",
+            )
+            registered.append(emb_id)
+
+        return {
+            "success": True,
+            "detected": len(detections),
+            "registered": registered,
+        }
+
     # ------------------------------------------------------------------
     # Acquisition
     # ------------------------------------------------------------------

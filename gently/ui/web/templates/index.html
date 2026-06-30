@@ -533,7 +533,10 @@
                         </svg>
                     </div>
 
-                    <!-- TOP RIGHT: station readout -->
+                    <!-- TOP RIGHT: station readout + detected-embryo rail.
+                         Stacked in one column so they share width and keep a
+                         consistent gap regardless of the readout's height. -->
+                    <div class="devices-map-rail" id="devices-map-rail">
                     <div class="devices-map-readout" id="devices-map-readout">
                         <div class="devices-readout-head">
                             <span class="devices-readout-led" id="devices-readout-led"></span>
@@ -550,6 +553,24 @@
                                 <span class="devices-readout-value" id="devices-map-y">—</span>
                             </div>
                         </div>
+                    </div>
+
+                    <!-- Detected-embryo list + bottom-cam detect trigger.
+                         Standalone manual workflow: run SAM detection on the
+                         bottom camera, then centre the stage on each embryo. -->
+                    <div class="devices-detect-panel" id="devices-detect-panel">
+                        <div class="devices-detect-head">
+                            <span class="devices-detect-title">Embryos</span>
+                            <button class="devices-detect-btn" id="devices-detect-btn" type="button"
+                                    title="Detect embryos on the bottom camera">Detect</button>
+                        </div>
+                        <div class="devices-detect-list" id="devices-detect-list">
+                            <div class="devices-detect-empty" id="devices-detect-empty">
+                                No embryos yet — press Detect
+                            </div>
+                        </div>
+                        <div class="devices-detect-foot" id="devices-detect-foot" hidden></div>
+                    </div>
                     </div>
 
                     <!-- BOTTOM LEFT: scale bar -->
@@ -575,7 +596,12 @@
                                 <span class="devices-camera-led" id="devices-camera-led"></span>
                                 <span>Bottom camera</span>
                             </span>
-                            <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
+                            <div class="devices-camera-head-btns">
+                                <button class="devices-camera-expand" id="devices-camera-expand" type="button"
+                                        title="Enlarge view" aria-label="Enlarge bottom-camera view"
+                                        aria-pressed="false">⤢</button>
+                                <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
+                            </div>
                         </div>
                         <div class="devices-camera-stage">
                             <img class="devices-camera-img" id="devices-camera-img" alt="bottom camera live frame">
