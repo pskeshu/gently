@@ -64,9 +64,15 @@ async def start_adaptive_timelapse(
     interval_seconds: float = 120.0,
     condition_value: int | None = None,
     monitoring_mode: str | None = None,
+    tactic_id: str | None = None,
     context: dict | None = None,
 ) -> str:
-    """Start adaptive timelapse in background"""
+    """Start adaptive timelapse in background.
+
+    ``tactic_id`` (optional) links this start to a tactic in the session
+    Operation Plan: on success the tactic is transitioned to 'active', giving
+    lifecycle symmetry with stop/pause/enable_monitoring_mode/queue_burst.
+    """
     agent, err = require_agent(context)
     if err:
         return err
@@ -111,6 +117,16 @@ async def start_adaptive_timelapse(
                 result += f"\n{mode_result}"
             except Exception as e:
                 result += f"\n(Failed to enable monitoring mode '{monitoring_mode}': {e})"
+
+        # Lifecycle symmetry: mark the linked tactic active (best-effort).
+        if tactic_id:
+            try:
+                cs = getattr(agent, "context_store", None)
+                session_id = getattr(agent, "session_id", None)
+                if cs and session_id:
+                    cs.transition_tactic(session_id, tactic_id, "active")
+            except Exception:
+                pass  # never block the timelapse
 
         return result
     except Exception as e:

@@ -1100,9 +1100,60 @@ def create_router(server) -> APIRouter:
             except Exception as exc:
                 mode_result = f"warning: failed to enable monitoring mode: {exc}"
 
+        # Seed the session Operation Plan with a standing_timelapse tactic (+ a
+        # reactive_monitor when a monitoring mode is active) scoped to the marked
+        # set. Closes the historical "UI timelapses skip plan linking" gap so the
+        # Operate run-spine and the Operations tab show a real tactic. Best-effort:
+        # needs a live session + context store; never blocks the start.
+        seeded_tactics: list[str] = []
+        cs = getattr(agent, "context_store", None)
+        sid = getattr(agent, "session_id", None)
+        if cs is not None and sid:
+            try:
+                import uuid as _uuid
+
+                from gently.app.tools.operation_plan_tools import _validate_tactics
+
+                eids = list(embryo_ids or [])
+                st_id = f"op_{_uuid.uuid4().hex[:8]}"
+                new_tactics = [
+                    {
+                        "id": st_id, "name": "Adaptive timelapse",
+                        "kind": "standing_timelapse", "state": "active",
+                        "scope": {"mode": "embryos", "embryo_ids": eids},
+                        "structure": {
+                            "cadence_s": interval_seconds, "interval": interval_seconds,
+                            "stop_condition": stop_condition, "condition_value": condition_value,
+                            "monitoring_mode": monitoring_mode or "idle",
+                        },
+                        "rationale": "Started from the Operate Run step.",
+                        "live_bind": ["cadence"], "relations": {}, "live": {},
+                    }
+                ]
+                if monitoring_mode and monitoring_mode != "idle":
+                    new_tactics.append({
+                        "id": f"op_{_uuid.uuid4().hex[:8]}", "name": "Monitor",
+                        "kind": "reactive_monitor", "state": "active",
+                        "scope": {"mode": "embryos", "embryo_ids": eids},
+                        "structure": {"monitoring_mode": monitoring_mode, "status": "armed"},
+                        "rationale": f"{monitoring_mode} on the marked subjects.",
+                        "live_bind": ["signal"], "relations": {"layered_on": [st_id]}, "live": {},
+                    })
+                new_tactics = _validate_tactics(new_tactics)
+                plan = cs.get_operation_plan(sid) or {
+                    "session_id": sid, "title": "Operate session", "goal": "", "tactics": []
+                }
+                plan.setdefault("tactics", []).extend(new_tactics)
+                plan["updated_reason"] = "operate adaptive timelapse"
+                cs.set_operation_plan(sid, plan)
+                seeded_tactics = [t["id"] for t in new_tactics]
+            except Exception:
+                logger.debug("timelapse tactic seeding skipped", exc_info=True)
+
         return {
             "started": True,
             "result": result,
+            "tactics": seeded_tactics,
             "monitoring_mode_result": mode_result,
             "config": {
                 "interval_seconds": interval_seconds,
@@ -1126,7 +1177,8 @@ def create_router(server) -> APIRouter:
         if orch is None:
             raise HTTPException(status_code=503, detail="No timelapse orchestrator")
         try:
-            return {"stopped": True, "result": await orch.stop(reason=str(payload.get("reason", "user_request")))}
+            reason = str(payload.get("reason", "user_request"))
+            return {"stopped": True, "result": await orch.stop(reason=reason)}
         except Exception as exc:
             logger.exception("Timelapse stop failed")
             raise HTTPException(status_code=502, detail=f"timelapse stop failed: {exc}") from exc
