@@ -81,7 +81,7 @@ try:
 except ImportError:
     _VISUALIZATION_AVAILABLE = False
 
-__version__ = "0.22.0.dev0"
+__version__ = "0.22.0"
 __all__ = [
     # Main entry point
     "Gently",
