@@ -1001,7 +1001,40 @@ class DeviceLayerServer(Service):
         finally:
             logger.info("Bottom-camera streamer exiting")
 
+    def _log_focus_trace(self, source: str, payload: dict[str, Any]) -> None:
+        """Append a passive (z, focus_score) focus-trace sample (sub-project C).
+
+        Captures the operator's *manual* focusing as validation data — the human's
+        resting Z is ground-truth best focus, replayed offline by
+        ``gently.analysis.focus_validation``. Best-effort: only when a session
+        volume dir is set and the frame carries a focus score; never raises into
+        the broadcast path, never moves hardware.
+        """
+        score = payload.get("focus_score")
+        if score is None or not self._volume_dir:
+            return
+        try:
+            import json as _json
+
+            zvals: dict[str, Any] = {}
+            for v in (self._state_latest.get("positions") or {}).values():
+                if isinstance(v, dict) and "kind" in v and "Position" in v:
+                    zvals[v["kind"]] = v["Position"]
+            rec = {
+                "t": payload.get("t"),
+                "source": source,
+                "focus_score": float(score),
+                "bottom_z": zvals.get("bottom_z"),
+                "fdrive": zvals.get("fdrive"),
+                "piezo": zvals.get("piezo"),
+            }
+            with open(Path(self._volume_dir) / "focus_traces.jsonl", "a") as f:
+                f.write(_json.dumps(rec) + "\n")
+        except Exception:
+            logger.debug("focus-trace log skipped", exc_info=True)
+
     async def _broadcast_camera(self, payload: dict[str, Any]):
+        self._log_focus_trace("bottom", payload)
         if not self._cam_subscribers:
             return
         dead: list[asyncio.Queue] = []
@@ -1260,6 +1293,7 @@ class DeviceLayerServer(Service):
             logger.info("Lightsheet streamer exiting")
 
     async def _broadcast_lightsheet(self, payload: dict[str, Any]):
+        self._log_focus_trace("spim", payload)
         if not self._ls_subscribers:
             return
         dead: list[asyncio.Queue] = []
