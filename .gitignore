@@ -158,3 +158,4 @@ config/dashboard_defaults.json
 
 # UI crawler generated output
 tools/ui_crawler/out*/
+

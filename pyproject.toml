@@ -103,9 +103,11 @@ dev = [
     # mypy. Keep in sync with the mirrors-mypy rev in .pre-commit-config.yaml
     # and the install step in .github/workflows/lint.yml.
     "mypy==2.1.0",
-    # UI-crawler / simulator toolkit (tools/ui_crawler) — headless browser
-    # driving for the web UI. After `uv sync`, run `playwright install chromium`
-    # once to fetch the browser. Dev-only; never in the published runtime.
+    # UI-crawler / simulator + per-story UX-audit toolkit (tools/ui_crawler).
+    # Headless browser driving for the web UI; a baseline-diff over per-story
+    # verdicts is the audit + regression spine (not pytest — it's a 4-state
+    # audit, not pass/fail). After `uv sync`, run `playwright install chromium`
+    # once. Dev-only; never in the published runtime.
     "playwright>=1.44.0",
 ]
 

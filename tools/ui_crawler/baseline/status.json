@@ -1,0 +1,14 @@
+{
+  "US-01": {
+    "status": "works",
+    "title": "First-run landing shows the entry choices"
+  },
+  "US-06": {
+    "status": "gap",
+    "title": "Start a new plan from the workspace"
+  },
+  "US-25": {
+    "status": "works",
+    "title": "Configure the thermalizer (serial/MQTT) in Settings"
+  }
+}

@@ -127,6 +127,40 @@ answer-silently-queued, autonomous-turn stop) are listed in `index.json` as
 NOT headless-reproducible. Scenarios whose selectors don't yet trigger the exact
 control are flagged so their traces aren't mistaken for clean reproductions.
 
+## Per-story UX audit + regression (`run_stories.py`) — the spine
+
+The audit + "did a change break a UX" gate. Each documented user story has its own
+flow in `stories/US-XX-*.py` (a plain `async flow(page, url, rec)` that drives the
+story's *intended* path and records a **4-state verdict** — works / partial / gap /
+blocked). The runner executes every flow in its own trace and emits a status report:
+
+```bash
+python launch_gently.py --no-api --no-auth --no-browser                 # control shim
+GENTLY_VIZ_PORT=8081 GENTLY_STORAGE_PATH=/tmp/gently_acct python launch_gently.py --no-api --no-browser  # account (view-only)
+uv run python tools/ui_crawler/run_stories.py --url http://localhost:8080 --account-url http://localhost:8081
+```
+
+**Audit:** `out/stories/STATUS.md` + `status.json` + a trace per story. That report
+is the audit — reviewable, with a scrubbing trace for every story.
+
+**Regression:** the report is committed as `baseline/status.json`. A later run
+**diffs against it** — a story that FLIPS (e.g. `works → gap`) is a break. The runner
+prints regressions (⬇) vs improvements (⬆) and exits non-zero on any regression, so
+it can gate a pipeline. `--update-baseline` re-baselines; `--docs-status` refreshes
+`docs/user-stories/STATUS.md`.
+
+**Triage on a flip** (this is the point): the baseline **+ the story doc** is the
+contract. Never silently re-baseline —
+- same intent, only selectors moved → fix the flow;
+- intent broken, unintended → **regression, fix the UX**;
+- intent deliberately changed → **edit the story doc, then re-baseline** (the doc edit
+  makes the paradigm shift explicit + reviewable in the PR).
+
+Assert *intent* (story goal reachable), not brittle selectors, so a flip means
+something. Rig/agent-gated stories declare `mode: "rig"`/`"agent"` and record
+`blocked` rather than faking a pass. `_harness.py` provides the shared helpers
+(`goto`, `tab`, `view`, `count_text`, `exists`, `present`, `dom_count`, `Rec`).
+
 ## Relationship to the docs
 
 The crawler verifies the [`docs/user-stories/`](../../docs/user-stories/) flows
