@@ -14,11 +14,22 @@ import asyncio
 
 
 class Rec:
-    """A story verdict. A flow calls exactly one of ok/partial/gap/blocked."""
+    """A story verdict + agent-readable artifacts.
+
+    A flow calls exactly one of ok/partial/gap/blocked, and may call
+    `await rec.shot(name)` at key moments to save a full-page PNG. The runner
+    always captures a final screenshot + the final visible text, so every story
+    produces images AND text an agent (not just show-trace) can read.
+    """
 
     def __init__(self):
         self.status = None      # works | partial | gap | blocked
         self.observed = ""
+        self.console = []       # console errors seen during the flow
+        self.shots = []         # PNG filenames captured for this story
+        self._page = None       # set by the runner
+        self._dir = None        # shots dir (Path), set by the runner
+        self._id = None         # story id, set by the runner
 
     def ok(self, msg):
         self.status, self.observed = "works", msg
@@ -33,6 +44,17 @@ class Rec:
     def blocked(self, msg):
         """Can't be judged headless — needs a device, a live agent turn, etc."""
         self.status, self.observed = "blocked", msg
+
+    async def shot(self, name):
+        """Save a full-page PNG at a named step (agent-readable via the Read tool)."""
+        if self._page is None or self._dir is None:
+            return
+        fn = f"{self._id}-{name}.png"
+        try:
+            await self._page.screenshot(path=str(self._dir / fn), full_page=True)
+            self.shots.append(fn)
+        except Exception:
+            pass
 
 
 async def goto(page, url, path="/"):

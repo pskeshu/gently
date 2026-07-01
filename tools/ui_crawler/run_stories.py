@@ -53,7 +53,9 @@ async def run(args):
     files = sorted(STORIES_DIR.glob("US-*.py"))
     out = Path(args.out)
     tdir = out / "traces"
+    sdir = out / "shots"
     tdir.mkdir(parents=True, exist_ok=True)
+    sdir.mkdir(parents=True, exist_ok=True)
     results = []
     async with async_playwright() as p:
         browser = await p.chromium.launch(
@@ -65,23 +67,39 @@ async def run(args):
             rec = Rec()
             target = args.account_url if meta.get("needs_account") else args.url
             if meta.get("needs_account") and not args.account_url:
-                results.append({**_slim(meta), "status": "blocked", "observed": "needs --account-url", "trace": None})
+                results.append({**_slim(meta), "status": "blocked", "observed": "needs --account-url",
+                                "trace": None, "shots": [], "console_errors": [], "screen_text": ""})
                 print(f"  [blocked] {meta['id']:6} {meta['title'][:44]:44} (needs account server)", flush=True)
                 continue
             context = await browser.new_context(viewport={"width": 1440, "height": 900})
             await context.tracing.start(screenshots=True, snapshots=True, sources=True, title=meta["id"])
             page = await context.new_page()
             page.set_default_timeout(12000)
+            page.on("console", lambda m, _r=rec: (_r.console.append(m.text[:160]) if m.type == "error" else None))
+            rec._page, rec._dir, rec._id = page, sdir, meta["id"]
             try:
                 await mod.flow(page, target, rec)
             except Exception as e:
                 rec.blocked(f"flow error: {e}")
+            try:
+                await rec.shot("final")   # always capture where the story ended (agent-readable PNG)
+            except Exception:
+                pass
+            try:
+                screen_text = await page.evaluate(
+                    "() => (document.body.innerText || '').replace(/\\n{2,}/g, '\\n').trim().slice(0, 1200)")
+            except Exception:
+                screen_text = ""
             zip_name = f"{f.stem}.zip"
             await context.tracing.stop(path=str(tdir / zip_name))
             await context.close()
             st = rec.status or "unknown"
-            results.append({**_slim(meta), "status": st, "observed": rec.observed, "trace": f"traces/{zip_name}"})
-            print(f"  [{st:7}] {meta['id']:6} {meta['title'][:44]:44} {ICON.get(st, '')}", flush=True)
+            results.append({**_slim(meta), "status": st, "observed": rec.observed,
+                            "trace": f"traces/{zip_name}",
+                            "shots": [f"shots/{s}" for s in rec.shots],
+                            "console_errors": sorted(set(rec.console))[:8],
+                            "screen_text": screen_text})
+            print(f"  [{st:7}] {meta['id']:6} {meta['title'][:42]:42} {ICON.get(st, '')}  ({len(rec.shots)} shot)", flush=True)
         await browser.close()
 
     out.mkdir(parents=True, exist_ok=True)
@@ -132,11 +150,15 @@ def _status_md(results):
     for cluster, rows in by_cluster.items():
         lines.append(f"### {cluster}")
         lines.append("")
-        lines.append("| Story | Status | Observed |")
-        lines.append("|---|---|---|")
+        lines.append("| Story | Status | Observed | Screenshot | Console |")
+        lines.append("|---|---|---|---|---|")
         for r in rows:
-            lines.append(f"| {r['id']} {r['title']} | {ICON.get(r['status'], '')} {r['status']} | {r['observed']} |")
+            shot = f"`{r['shots'][0]}`" if r.get("shots") else "—"
+            cons = f"{len(r['console_errors'])} err" if r.get("console_errors") else "—"
+            lines.append(f"| {r['id']} {r['title']} | {ICON.get(r['status'], '')} {r['status']} | {r['observed']} | {shot} | {cons} |")
         lines.append("")
+    lines.append("_Per-story PNG screenshots in `out/stories/shots/`; full per-step trace in `out/stories/traces/` "
+                 "(`playwright show-trace`); final screen text + console in `status.json`._")
     return "\n".join(lines)
 
 
