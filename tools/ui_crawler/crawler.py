@@ -147,6 +147,9 @@ class Crawler:
         self.max_elems = args.max_elements
         self.timeout = args.timeout
         self.headed = args.headed
+        self.slow_mo = args.slow_mo
+        self.trace = args.trace
+        self.video = args.video
         self.out = Path(args.out)
         self.states: dict[str, dict] = {}   # hash -> {hash, path, fp, elements}
         self.edges: list[dict] = []
@@ -254,8 +257,14 @@ class Crawler:
             # --disable-dev-shm-usage avoids the /dev/shm exhaustion (EPIPE / tab
             # crashes) that headless Chromium hits under concurrent pages.
             launch_args = ["--disable-dev-shm-usage", "--no-sandbox"] if self.browser_name == "chromium" else []
-            browser = await engine.launch(headless=not self.headed, args=launch_args)
-            context = await browser.new_context(viewport={"width": 1440, "height": 900})
+            browser = await engine.launch(headless=not self.headed, slow_mo=self.slow_mo, args=launch_args)
+            ctx_kwargs = {"viewport": {"width": 1440, "height": 900}}
+            if self.video:
+                (self.out / "videos").mkdir(parents=True, exist_ok=True)
+                ctx_kwargs["record_video_dir"] = str(self.out / "videos")
+            context = await browser.new_context(**ctx_kwargs)
+            if self.trace:
+                await context.tracing.start(screenshots=True, snapshots=True, sources=True)
 
             # seed state
             page = await self._new_page(context)
@@ -282,6 +291,12 @@ class Crawler:
                     if new_state and new_state["hash"] not in self.states and len(self.states) < self.max_states:
                         self.states[new_state["hash"]] = new_state
                         frontier.append(new_state["hash"])
+            if self.trace:
+                self.out.mkdir(parents=True, exist_ok=True)
+                await context.tracing.stop(path=str(self.out / "trace.zip"))
+                print(f"[trace] {self.out}/trace.zip — view with: uv run playwright show-trace {self.out}/trace.zip",
+                      flush=True)
+            await context.close()  # flush videos
             await browser.close()
 
     # --- outputs -----------------------------------------------------------
@@ -361,7 +376,11 @@ def main():
     ap.add_argument("--max-states", type=int, default=50)
     ap.add_argument("--max-elements", type=int, default=30)
     ap.add_argument("--timeout", type=int, default=8000, help="per-action timeout (ms)")
-    ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--headed", action="store_true", help="show a real browser window (watch it live)")
+    ap.add_argument("--slow-mo", type=int, default=0, help="delay each action by N ms (watchable)")
+    ap.add_argument("--trace", action="store_true",
+                    help="record a Playwright trace (screenshots+DOM+network) -> out/trace.zip")
+    ap.add_argument("--video", action="store_true", help="record .webm video of each page -> out/videos/")
     ap.add_argument("--out", default="tools/ui_crawler/out")
     args = ap.parse_args()
 

@@ -157,4 +157,4 @@ config/settings.local.yml
 config/dashboard_defaults.json
 
 # UI crawler generated output
-tools/ui_crawler/out/
+tools/ui_crawler/out*/

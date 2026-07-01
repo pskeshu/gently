@@ -50,9 +50,28 @@ uv run python tools/ui_crawler/crawler.py --url http://localhost:8080 \
 ```
 
 Key flags: `--browser {chromium,firefox,webkit}` · `--workers N` · `--max-depth` ·
-`--max-states` · `--max-elements` · `--timeout` (ms) · `--headed` (watch it) ·
+`--max-states` · `--max-elements` · `--timeout` (ms) ·
 `--url` (crawl account-mode by pointing at a logged-out server to catch the
 view-only experience).
+
+### Watch it work
+
+Three ways to make the crawl visible:
+
+```bash
+# 1. Live window — a real browser doing the clicks, slowed down
+uv run python tools/ui_crawler/crawler.py --headed --slow-mo 500 --workers 1
+
+# 2. Trace viewer — record everything, then scrub every action (screenshots +
+#    DOM snapshots + network + console). Best for review; works headless.
+uv run python tools/ui_crawler/crawler.py --trace
+uv run playwright show-trace tools/ui_crawler/out/trace.zip
+
+# 3. Video — a .webm recording of each page
+uv run python tools/ui_crawler/crawler.py --video    # -> out/videos/
+```
+
+Use `--workers 1` with `--headed` so it's a single, followable window.
 
 ## Output (`out/`, git-ignored)
 
