@@ -80,6 +80,14 @@ const DevicesManager = (function () {
     let _lsStaleTimer = null;
     const _LS_FPS_WINDOW = 12;
     let _lsFrameTimes = [];
+    // Render throttle: decouple paint rate from frame-arrival rate. We keep
+    // only the latest frame, coalesce paints to one per animation frame, and
+    // hold a single decode in flight at a time. This stops a fast stream from
+    // swapping <img>.src 100+ times/sec, which churns GPU texture uploads and
+    // can hang an older display driver (Video TDR). See handleLightsheetFrame.
+    let _lsPendingPayload = null;
+    let _lsRenderScheduled = false;
+    let _lsDecoding = false;
 
     // Lightsheet zoom / pan (mirrors camera zoom/pan)
     let _lsZoom = 1;
@@ -89,16 +97,15 @@ const DevicesManager = (function () {
 
     // Lightsheet live params — debounced POST to /api/devices/lightsheet/live/params
     let _lsGalvo = 0;
-    let _lsPiezo = 50;
+    let _lsPiezo = 0;
     let _lsExposure = 20;  // matches device-layer _ls_params default (20 ms)
     let _lsSide = 'A';     // SPIM side — 'A' (HamCam1) or 'B' (HamCam2 if present)
     let _lsParamTimer = null;
 
     // Lightsheet control inputs (rail)
     let _lsGalvoSlider, _lsGalvoNum, _lsPiezoSlider, _lsPiezoNum, _lsExposureNum;
-    let _lsLedToggle, _lsCamLed, _lsRoomLightBtn;
+    let _lsLedToggle, _lsRoomLightBtn;
     let _lsLedIsOpen = false;  // LED toggle state: false = Closed (safe default)
-    let _lsCamLedOn = false;
     let _lsLaserToggle;
     let _lsLaserOn = false;    // Laser toggle state: false = OFF (entry-safe default)
     let _lsSnapVolBtn, _lsBurstBtn, _lsLastcap, _lsLastcapRef;
@@ -209,7 +216,6 @@ const DevicesManager = (function () {
         _lsPiezoNum      = document.getElementById('devices-ls-piezo');
         _lsExposureNum   = document.getElementById('devices-ls-exposure');
         _lsLedToggle     = document.getElementById('devices-ls-led-toggle');
-        _lsCamLed        = document.getElementById('devices-ls-cam-led');
         _lsRoomLightBtn  = document.getElementById('devices-ls-room-light-btn');
         _lsLaserToggle   = document.getElementById('devices-ls-laser-toggle');
         _lsSnapVolBtn    = document.getElementById('devices-ls-snap-volume');
@@ -1754,7 +1760,9 @@ const DevicesManager = (function () {
     function applyLightsheetState(streaming) {
         _lsStreaming = streaming;
         if (_lsToggle) {
-            _lsToggle.textContent = streaming ? 'Stop' : 'Start';
+            // Constant "Live" label; the .active class + status dot show whether
+            // the stream is currently running (muted = off, green glow = live).
+            _lsToggle.textContent = 'Live';
             _lsToggle.classList.toggle('active', streaming);
         }
         if (_lsLed) {
@@ -1764,6 +1772,8 @@ const DevicesManager = (function () {
         if (!streaming) {
             _lsHasFrame = false;
             _lsFrameTimes = [];
+            _lsPendingPayload = null;
+            _lsRenderScheduled = false;
             if (_lsImg) _lsImg.classList.remove('has-frame');
             if (_lsPlaceholder) _lsPlaceholder.hidden = false;
             if (_lsMeta) _lsMeta.textContent = 'stream off';
@@ -1777,12 +1787,9 @@ const DevicesManager = (function () {
 
     function handleLightsheetFrame(payload) {
         if (!payload || !payload.jpeg_b64 || !_lsImg) return;
-        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
-        if (!_lsHasFrame) {
-            _lsHasFrame = true;
-            _lsImg.classList.add('has-frame');
-            if (_lsPlaceholder) _lsPlaceholder.hidden = true;
-        }
+
+        // Lightweight bookkeeping runs per arriving frame so the FPS / live
+        // indicator reflects the true incoming rate.
         const now = performance.now();
         _lsLastFrameTs = Date.now();
         _lsFrameTimes.push(now);
@@ -1800,6 +1807,49 @@ const DevicesManager = (function () {
                 : (fps != null ? `${fps.toFixed(1)} fps` : 'live');
         }
         scheduleLightsheetStaleCheck();
+
+        // Expensive path (decode + GPU texture upload) is throttled: keep only
+        // the newest frame and coalesce paints to one per animation frame.
+        _lsPendingPayload = payload;
+        if (!_lsRenderScheduled) {
+            _lsRenderScheduled = true;
+            requestAnimationFrame(renderLightsheetFrame);
+        }
+    }
+
+    function renderLightsheetFrame() {
+        _lsRenderScheduled = false;
+        // One decode in flight at a time; a frame mid-decode means we skip this
+        // paint and let the decode's completion reschedule if newer data exists.
+        if (_lsDecoding) return;
+        const payload = _lsPendingPayload;
+        _lsPendingPayload = null;
+        if (!payload || !_lsImg) return;
+
+        _lsDecoding = true;
+        _lsImg.src = `data:${payload.mime || 'image/jpeg'};base64,${payload.jpeg_b64}`;
+
+        const done = () => {
+            _lsDecoding = false;
+            if (!_lsHasFrame) {
+                _lsHasFrame = true;
+                _lsImg.classList.add('has-frame');
+                if (_lsPlaceholder) _lsPlaceholder.hidden = true;
+            }
+            // A newer frame may have landed during decode — paint it next frame.
+            if (_lsPendingPayload && !_lsRenderScheduled) {
+                _lsRenderScheduled = true;
+                requestAnimationFrame(renderLightsheetFrame);
+            }
+        };
+
+        // img.decode() resolves once the bitmap is ready (off the main thread),
+        // giving real backpressure. Fall back to a direct apply if unsupported.
+        if (typeof _lsImg.decode === 'function') {
+            _lsImg.decode().then(done).catch(done);
+        } else {
+            done();
+        }
     }
 
     function computeLightsheetFps() {
@@ -2005,21 +2055,6 @@ const DevicesManager = (function () {
         }
     }
 
-    async function toggleCamLedMode() {
-        _lsCamLedOn = !_lsCamLedOn;
-        if (_lsCamLed) {
-            _lsCamLed.classList.toggle('ls-illum-btn--active', _lsCamLedOn);
-            _lsCamLed.setAttribute('aria-pressed', _lsCamLedOn ? 'true' : 'false');
-        }
-        try {
-            await fetch('/api/devices/camera/led_mode', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ use_led: _lsCamLedOn }),
-            });
-        } catch (err) { console.debug('cam LED mode failed:', err); }
-    }
-
     async function toggleManualRoomLight() {
         const nextState = _roomLightState === 'on' ? 'off' : 'on';
         if (_lsRoomLightBtn) {
@@ -2126,7 +2161,6 @@ const DevicesManager = (function () {
 
         // Illumination
         if (_lsLedToggle)    _lsLedToggle.addEventListener('click',    toggleLedPreset);
-        if (_lsCamLed)       _lsCamLed.addEventListener('click',       toggleCamLedMode);
         if (_lsRoomLightBtn) _lsRoomLightBtn.addEventListener('click', toggleManualRoomLight);
         if (_lsLaserToggle)  _lsLaserToggle.addEventListener('click',  toggleLaser);
 

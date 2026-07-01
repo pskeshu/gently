@@ -16,6 +16,30 @@ logger = logging.getLogger(__name__)
 _HARDWARE_CONFIG_PATH = Path(__file__).resolve().parents[4] / "config" / "hardware.yaml"
 
 
+def _json_safe(obj):
+    """Make an acquisition result JSON-encodable for FastAPI.
+
+    ``client.acquire_volume``/``acquire_burst`` return the pixel data under
+    ``volume``/``image`` as numpy arrays (internal callers like the timelapse
+    orchestrator need them). FastAPI's ``jsonable_encoder`` can't serialize a
+    raw ndarray — it tries ``dict(arr)`` and blows up — and the web UI only
+    needs paths + metadata anyway. Replace arrays with a small shape/dtype
+    hint and coerce numpy scalars to native types; recurse so the burst
+    ``frames`` list is covered too.
+    """
+    import numpy as np
+
+    if isinstance(obj, np.ndarray):
+        return {"shape": list(obj.shape), "dtype": str(obj.dtype)}
+    if isinstance(obj, np.generic):
+        return obj.item()
+    if isinstance(obj, dict):
+        return {k: _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
 def create_router(server) -> APIRouter:
     router = APIRouter()
 
@@ -1000,13 +1024,14 @@ def create_router(server) -> APIRouter:
                 kw["piezo_center"] = float(payload["piezo_center"])
             if payload.get("galvo_center") is not None:
                 kw["galvo_center"] = float(payload["galvo_center"])
-            return await client.acquire_burst(
+            result = await client.acquire_burst(
                 frames=int(payload.get("frames", 60)),
                 mode=str(payload.get("mode", "1hz")),
                 num_slices=int(payload.get("num_slices", 1)),
                 exposure_ms=float(payload.get("exposure_ms", 5.0)),
                 **kw,
             )
+            return _json_safe(result)
         except Exception as exc:
             logger.exception("Burst acquisition failed")
             raise HTTPException(status_code=502, detail=f"burst failed: {exc}") from exc
@@ -1032,11 +1057,12 @@ def create_router(server) -> APIRouter:
                 kw["piezo_center"] = float(payload["piezo_center"])
             if payload.get("galvo_center") is not None:
                 kw["galvo_center"] = float(payload["galvo_center"])
-            return await client.acquire_volume(
+            result = await client.acquire_volume(
                 num_slices=int(payload.get("num_slices", 50)),
                 exposure_ms=float(payload.get("exposure_ms", 10.0)),
                 **kw,
             )
+            return _json_safe(result)
         except Exception as exc:
             logger.exception("Volume acquisition failed")
             raise HTTPException(status_code=502, detail=f"volume failed: {exc}") from exc
