@@ -73,6 +73,31 @@ uv run python tools/ui_crawler/crawler.py --video    # -> out/videos/
 
 Use `--workers 1` with `--headed` so it's a single, followable window.
 
+### The trace viewer (recommended way to review findings)
+
+`playwright show-trace <trace.zip>` opens an interactive, time-travel viewer — the
+best way to see *exactly* what happened in a run without watching it live:
+
+```bash
+uv run playwright show-trace tools/ui_crawler/out/traces/00-return-to-landing-gently-microscopy.zip
+```
+
+What you get in the window:
+- **Timeline + filmstrip** — every action as a screenshot thumbnail; scrub across
+  it to watch the UI change.
+- **Actions list** (left) — click any action to jump to it.
+- Per action: the **before/after screenshot**, an inspectable **DOM snapshot**, and
+  the **Console**, **Network** (e.g. the `GET /` that reset a state, or a 502), and
+  **Source** (the Playwright call) tabs.
+
+It needs a display (`DISPLAY`) and the full Chromium build (`playwright install
+chromium` provides both the headless shell and the headed browser show-trace uses).
+The viewer runs until you close its window.
+
+Per-finding traces (`--trace-findings`) and scenario traces are named by finding,
+so `out/traces/` and `out/scenarios/` are a browsable catalogue — open the one you
+want to inspect. `out/*/index.json` maps each trace to its finding + observation.
+
 ## Output (`out/`, git-ignored)
 
 - **`graph.json`** — every state (with reach-path) and every probed edge.
