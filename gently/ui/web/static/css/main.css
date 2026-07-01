@@ -9236,6 +9236,12 @@ body.modal-open {
     max-height: 460px; overflow-y: auto;
 }
 .settings-defaults-bar { display: flex; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+.settings-subhead {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted); margin: 1.4rem 0 0.6rem; padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+}
+.settings-subhead:first-child { margin-top: 0.2rem; }
 .settings-pre code, .settings-hint code {
     font: 0.85em ui-monospace, SFMono-Regular, monospace;
     background: var(--bg-hover); padding: 0.05rem 0.3rem; border-radius: 4px;

@@ -505,7 +505,6 @@ def create_router(server) -> APIRouter:
             "storage": {"base_path": str(S.storage.base_path)},
             "timeouts": {
                 "plan_execution": S.timeouts.plan_execution,
-                "rpc_call": S.timeouts.rpc_call,
                 "volume_acquisition": S.timeouts.volume_acquisition,
                 "api_call": S.timeouts.api_call,
             },
@@ -558,29 +557,28 @@ def create_router(server) -> APIRouter:
         return {"saved": True}
 
     # --- Restart-required settings.py editors (persisted to config/settings.local.yml) ---
-    # (env var, label, type, current-value getter). Allowlist only — never expose
-    # ports/hosts/model-IDs/storage-path/secrets here.
+    # Allowlist of knobs that are ACTUALLY consumed by the runtime (verified live
+    # readers) + grouped for the UI. Never expose ports/hosts/model-IDs/storage/
+    # secrets. Deliberately omitted: timeouts.rpc_call (removed — RPyC-era dead),
+    # timeouts.plan_execution and ml.* defaults (currently 0 readers — editing
+    # would be a silent no-op).
     _override_keys = [
-        ("GENTLY_TIMEOUT_PLAN", "Plan execution timeout (s)", "int",
-         lambda S: S.timeouts.plan_execution),
-        ("GENTLY_TIMEOUT_RPC", "RPC call timeout (s)", "int",
-         lambda S: S.timeouts.rpc_call),
-        ("GENTLY_TIMEOUT_VOLUME", "Volume acquisition timeout (s)", "int",
-         lambda S: S.timeouts.volume_acquisition),
-        ("GENTLY_TIMEOUT_API", "API call timeout (s)", "int",
-         lambda S: S.timeouts.api_call),
-        ("GENTLY_MESH_BROADCAST_INTERVAL", "Mesh broadcast interval (s)", "float",
-         lambda S: S.mesh.broadcast_interval_s),
-        ("GENTLY_MESH_STALE_THRESHOLD", "Mesh stale threshold (s)", "float",
-         lambda S: S.mesh.stale_threshold_s),
-        ("GENTLY_MESH_DEAD_THRESHOLD", "Mesh dead threshold (s)", "float",
-         lambda S: S.mesh.dead_threshold_s),
-        ("GENTLY_ML_BATCH_SIZE", "ML batch size", "int", lambda S: S.ml.default_batch_size),
-        ("GENTLY_ML_EPOCHS", "ML epochs", "int", lambda S: S.ml.default_epochs),
-        ("GENTLY_ML_LR", "ML learning rate", "float", lambda S: S.ml.default_lr),
-        ("GENTLY_UX_V2", "UX v2 dashboard", "bool", lambda S: S.ui.ux_v2),
-        ("GENTLY_NCBI_TOOL", "NCBI tool name", "str", lambda S: S.api.ncbi_tool),
-        ("GENTLY_NCBI_EMAIL", "NCBI email", "str", lambda S: S.api.ncbi_email),
+        {"env": "GENTLY_TIMEOUT_VOLUME", "label": "Volume acquisition (s)", "type": "int",
+         "group": "Timeouts", "get": lambda S: S.timeouts.volume_acquisition},
+        {"env": "GENTLY_TIMEOUT_API", "label": "External API call (s)", "type": "int",
+         "group": "Timeouts", "get": lambda S: S.timeouts.api_call},
+        {"env": "GENTLY_MESH_BROADCAST_INTERVAL", "label": "Broadcast interval (s)",
+         "type": "float", "group": "Mesh network", "get": lambda S: S.mesh.broadcast_interval_s},
+        {"env": "GENTLY_MESH_STALE_THRESHOLD", "label": "Stale threshold (s)", "type": "float",
+         "group": "Mesh network", "get": lambda S: S.mesh.stale_threshold_s},
+        {"env": "GENTLY_MESH_DEAD_THRESHOLD", "label": "Dead threshold (s)", "type": "float",
+         "group": "Mesh network", "get": lambda S: S.mesh.dead_threshold_s},
+        {"env": "GENTLY_UX_V2", "label": "UX v2 dashboard", "type": "bool",
+         "group": "Interface", "get": lambda S: S.ui.ux_v2},
+        {"env": "GENTLY_NCBI_TOOL", "label": "Tool name", "type": "str",
+         "group": "NCBI (Entrez)", "get": lambda S: S.api.ncbi_tool},
+        {"env": "GENTLY_NCBI_EMAIL", "label": "Contact email", "type": "str",
+         "group": "NCBI (Entrez)", "get": lambda S: S.api.ncbi_email},
     ]
     _settings_local_path = _HARDWARE_CONFIG_PATH.parent / "settings.local.yml"
 
@@ -609,9 +607,9 @@ def create_router(server) -> APIRouter:
 
         file_over = _read_settings_local()
         items = [
-            {"env": env, "label": label, "type": typ,
-             "current": getter(S), "overridden": env in file_over}
-            for (env, label, typ, getter) in _override_keys
+            {"env": k["env"], "label": k["label"], "type": k["type"], "group": k["group"],
+             "current": k["get"](S), "overridden": k["env"] in file_over}
+            for k in _override_keys
         ]
         return {"note": "changes take effect on the next process restart", "items": items}
 
@@ -619,7 +617,7 @@ def create_router(server) -> APIRouter:
     async def put_settings_overrides(payload: dict = Body(...)):  # noqa: B008
         """Persist restart-required overrides to config/settings.local.yml. Only
         allowlisted keys; never mutates the frozen settings singleton live."""
-        allowed = {env: typ for (env, _lbl, typ, _g) in _override_keys}
+        allowed = {k["env"]: k["type"] for k in _override_keys}
         updates = {}
         for k, v in (payload or {}).items():
             if k not in allowed:

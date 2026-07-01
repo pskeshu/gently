@@ -134,7 +134,6 @@ class TimeoutSettings:
     """Timeout values in seconds."""
 
     plan_execution: int = field(default_factory=lambda: _env("TIMEOUT_PLAN", 300))
-    rpc_call: int = field(default_factory=lambda: _env("TIMEOUT_RPC", 60))
     volume_acquisition: int = field(default_factory=lambda: _env("TIMEOUT_VOLUME", 15))
     api_call: int = field(default_factory=lambda: _env("TIMEOUT_API", 10))
 

@@ -461,6 +461,31 @@ const AdvancedSettings = {
         await this.load();
     },
 
+    renderField(it) {
+        const field = document.createElement('div');
+        field.className = 'settings-field';
+        const tag = it.overridden ? ' <span class="th-ro">(override set)</span>' : '';
+        if (it.type === 'bool') {
+            const lab = document.createElement('label');
+            lab.className = 'settings-checkbox';
+            lab.innerHTML = `<input type="checkbox" data-env="${it.env}"> ${it.label}${tag}`;
+            lab.querySelector('input').checked = !!it.current;
+            field.appendChild(lab);
+        } else {
+            const lab = document.createElement('label');
+            lab.className = 'settings-label';
+            lab.innerHTML = it.label + tag;
+            const inp = document.createElement('input');
+            inp.className = 'settings-input';
+            inp.dataset.env = it.env;
+            inp.type = it.type === 'str' ? 'text' : 'number';
+            if (it.type === 'float') inp.step = 'any';
+            if (it.current != null) inp.value = it.current;
+            field.appendChild(lab); field.appendChild(inp);
+        }
+        return field;
+    },
+
     async load() {
         const wrap = this.el('adv-fields'); if (!wrap) return;
         try {
@@ -469,29 +494,20 @@ const AdvancedSettings = {
             const d = await res.json();
             const items = d.items || [];
             wrap.innerHTML = '';
+            // Group items by their `group`, preserving first-seen order.
+            const groups = [];
+            const byName = {};
             items.forEach(it => {
-                const field = document.createElement('div');
-                field.className = 'settings-field';
-                const tag = it.overridden ? ' <span class="th-ro">(override set)</span>' : '';
-                if (it.type === 'bool') {
-                    const lab = document.createElement('label');
-                    lab.className = 'settings-checkbox';
-                    lab.innerHTML = `<input type="checkbox" data-env="${it.env}"> ${it.label}${tag}`;
-                    lab.querySelector('input').checked = !!it.current;
-                    field.appendChild(lab);
-                } else {
-                    const lab = document.createElement('label');
-                    lab.className = 'settings-label';
-                    lab.innerHTML = it.label + tag;
-                    const inp = document.createElement('input');
-                    inp.className = 'settings-input';
-                    inp.dataset.env = it.env;
-                    inp.type = it.type === 'str' ? 'text' : 'number';
-                    if (it.type === 'float') inp.step = 'any';
-                    if (it.current != null) inp.value = it.current;
-                    field.appendChild(lab); field.appendChild(inp);
-                }
-                wrap.appendChild(field);
+                const g = it.group || 'Other';
+                if (!byName[g]) { byName[g] = []; groups.push(g); }
+                byName[g].push(it);
+            });
+            groups.forEach(g => {
+                const head = document.createElement('div');
+                head.className = 'settings-subhead';
+                head.textContent = g;
+                wrap.appendChild(head);
+                byName[g].forEach(it => wrap.appendChild(this.renderField(it)));
             });
         } catch (e) { wrap.textContent = 'Unavailable.'; }
     },
