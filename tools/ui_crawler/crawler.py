@@ -372,10 +372,14 @@ class Crawler:
         """Replay each notable finding edge in its OWN Playwright trace, so every
         deficiency can be scrubbed action-by-action in `playwright show-trace`."""
         def kind_of(e):
-            if e.get("returned_to_landing"): return "return-to-landing"
-            if e.get("console_errors"): return "console-error"
-            if e.get("http_errors"): return "http-error"
-            if e.get("spinner_after"): return "spinner"
+            if e.get("returned_to_landing"):
+                return "return-to-landing"
+            if e.get("console_errors"):
+                return "console-error"
+            if e.get("http_errors"):
+                return "http-error"
+            if e.get("spinner_after"):
+                return "spinner"
             return "dead-control"
 
         def notable(e):
