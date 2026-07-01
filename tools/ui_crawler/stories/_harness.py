@@ -63,18 +63,34 @@ async def goto(page, url, path="/"):
 
 
 async def skip_landing(page):
-    """Dismiss the landing overlay to reach the workspace."""
+    """Dismiss the landing overlay and WAIT until it's actually gone.
+
+    The dismiss has a CSS transition (adds `.dismissed`, fades opacity, then
+    display:none), so a fixed short sleep can race it and leave the overlay
+    reading as 'still visible'. Poll until it's dismissed/hidden."""
     try:
         await page.evaluate("() => { const s=document.getElementById('v2-landing-skip'); if (s) s.click(); }")
-        await asyncio.sleep(0.4)
+        for _ in range(25):
+            gone = await page.evaluate(
+                "() => { const l=document.getElementById('v2-landing'); if (!l) return true;"
+                " const cs=getComputedStyle(l);"
+                " return l.classList.contains('dismissed') || cs.display==='none' || parseFloat(cs.opacity||'1')===0; }")
+            if gone:
+                break
+            await asyncio.sleep(0.1)
+        await asyncio.sleep(0.2)
     except Exception:
         pass
 
 
 async def tab(page, name):
-    """Switch to a top-level tab (data-tab). Returns True if it activated."""
+    """Switch to a top-level tab (data-tab). Returns True if it activated.
+
+    A legacy hidden navbar (_navbar.html) carries duplicate data-tab elements
+    that precede the visible v2 nav, so target the :visible match, not the first.
+    """
     try:
-        await page.click(f'[data-tab="{name}"]', timeout=6000)
+        await page.locator(f'[data-tab="{name}"]:visible').first.click(timeout=6000)
         await asyncio.sleep(0.6)
         return True
     except Exception:
@@ -82,9 +98,13 @@ async def tab(page, name):
 
 
 async def view(page, name):
-    """Switch a sub-view (data-view, e.g. devices operate/manual). True if clicked."""
+    """Switch a sub-view (data-view, e.g. devices operate/manual). True if clicked.
+
+    Some data-view names (e.g. board) appear in more than one view-switcher, so
+    target the :visible match on the active tab, not merely the first in the DOM.
+    """
     try:
-        await page.click(f'[data-view="{name}"]', timeout=6000)
+        await page.locator(f'[data-view="{name}"]:visible').first.click(timeout=6000)
         await asyncio.sleep(0.6)
         return True
     except Exception:
@@ -116,7 +136,7 @@ async def exists(page, selector):
     """True if a selector matches a VISIBLE element (has a rendered box)."""
     return await page.evaluate(
         """(sel) => { const el=document.querySelector(sel); if (!el) return false;
-          const cs=getComputedStyle(el); if (cs.display==='none'||cs.visibility==='hidden') return false;
+          const cs=getComputedStyle(el); if (cs.display==='none'||cs.visibility==='hidden'||parseFloat(cs.opacity||'1')===0) return false;
           const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; }""", selector)
 
 
