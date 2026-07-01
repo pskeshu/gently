@@ -758,7 +758,9 @@ def create_router(server) -> APIRouter:
         routes like room_light/status and temperature/status.
         """
         client = _resolve_client()
-        if client is None:
+        if client is None or not client.is_connected:
+            # Device layer offline is an expected state (e.g. UI open without the
+            # device process) — a quiet 503, not an ERROR traceback per poll.
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
             return await client.get_laser_configs()
@@ -794,7 +796,8 @@ def create_router(server) -> APIRouter:
         No require_control — read-only status route, mirrors GET /api/devices/laser/configs.
         """
         client = _resolve_client()
-        if client is None:
+        if client is None or not client.is_connected:
+            # Device layer offline is expected — quiet 503, no ERROR traceback.
             raise HTTPException(status_code=503, detail="Microscope not connected")
         try:
             return await client.get_cameras()
