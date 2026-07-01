@@ -81,6 +81,27 @@ Use `--workers 1` with `--headed` so it's a single, followable window.
   HTTP 4xx/5xx, spinners, dead controls, unreachable tabs — each with the
   reach-path for reproduction.
 
+## Reproducing static-audit findings (`scenarios.py`)
+
+The crawler finds deficiencies by *walking* the app. The **static code-audit**
+findings (missing export, no ground-truth annotation, the dead notebook Questions
+tab, the view-only plan wizard that spins) aren't reachable by blind crawling —
+`scenarios.py` navigates to each surface deliberately and captures a trace of
+what's absent/broken:
+
+```bash
+# optional account-mode server for the view-only scenario:
+GENTLY_VIZ_PORT=8081 GENTLY_STORAGE_PATH=/tmp/gently_acct python launch_gently.py --no-api --no-browser
+uv run python tools/ui_crawler/scenarios.py --url http://localhost:8080 \
+    --account-url http://localhost:8081        # -> out/scenarios/<name>.zip + index.json
+```
+
+Each scenario records an `observed` line (e.g. "export controls: 0") and a trace.
+Rig/agent-only findings (LED force-close, scripted_protocol false success,
+answer-silently-queued, autonomous-turn stop) are listed in `index.json` as
+NOT headless-reproducible. Scenarios whose selectors don't yet trigger the exact
+control are flagged so their traces aren't mistaken for clean reproductions.
+
 ## Relationship to the docs
 
 The crawler verifies the [`docs/user-stories/`](../../docs/user-stories/) flows

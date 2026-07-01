@@ -29,6 +29,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections import deque
 from pathlib import Path
@@ -149,6 +150,7 @@ class Crawler:
         self.headed = args.headed
         self.slow_mo = args.slow_mo
         self.trace = args.trace
+        self.trace_findings = args.trace_findings
         self.video = args.video
         self.out = Path(args.out)
         self.states: dict[str, dict] = {}   # hash -> {hash, path, fp, elements}
@@ -366,6 +368,70 @@ class Crawler:
         (self.out / "report.md").write_text("\n".join(rep))
         return a
 
+    async def replay_findings(self):
+        """Replay each notable finding edge in its OWN Playwright trace, so every
+        deficiency can be scrubbed action-by-action in `playwright show-trace`."""
+        def kind_of(e):
+            if e.get("returned_to_landing"): return "return-to-landing"
+            if e.get("console_errors"): return "console-error"
+            if e.get("http_errors"): return "http-error"
+            if e.get("spinner_after"): return "spinner"
+            return "dead-control"
+
+        def notable(e):
+            return e.get("result") == "ok" and (
+                e.get("returned_to_landing") or e.get("console_errors")
+                or e.get("http_errors") or e.get("spinner_after"))
+
+        picks = [e for e in self.edges if notable(e)]
+        dead = [e for e in self.edges if e.get("result") == "ok" and not e.get("changed")
+                and not e.get("toast") and not e.get("console_errors") and not e.get("http_errors")]
+        picks += dead[:4]
+        seen, uniq = set(), []
+        for e in picks:
+            k = (e["from"], e["via"])
+            if k not in seen:
+                seen.add(k)
+                uniq.append(e)
+
+        tdir = self.out / "traces"
+        tdir.mkdir(parents=True, exist_ok=True)
+        manifest = []
+        async with async_playwright() as p:
+            engine = {"chromium": p.chromium, "firefox": p.firefox, "webkit": p.webkit}[self.browser_name]
+            args = ["--disable-dev-shm-usage", "--no-sandbox"] if self.browser_name == "chromium" else []
+            browser = await engine.launch(headless=not self.headed, slow_mo=self.slow_mo, args=args)
+            context = await browser.new_context(viewport={"width": 1440, "height": 900})
+            for i, e in enumerate(uniq):
+                state = self.states.get(e["from"])
+                if not state:
+                    continue
+                kind = kind_of(e)
+                label = e.get("via_text") or e.get("via_kind") or "click"
+                slug = f"{i:02d}-{kind}-" + (re.sub(r'[^a-z0-9]+', '-', label.lower()).strip('-')[:28] or "action")
+                await context.tracing.start(screenshots=True, snapshots=True, sources=True,
+                                            title=f"{kind}: {label}")
+                page = await self._new_page(context)
+                try:
+                    if await self._reach(page, state["path"]):
+                        try:
+                            await self._do_action(page, e["via"])
+                        except Exception:
+                            pass
+                finally:
+                    await page.close()
+                await context.tracing.stop(path=str(tdir / f"{slug}.zip"))
+                manifest.append({"trace": f"{slug}.zip", "kind": kind, "from": e["from_label"],
+                                 "action": label, "via": e["via"],
+                                 "detail": e.get("console_errors") or e.get("http_errors") or ""})
+                print(f"  [trace] {kind:17} from {e['from_label']:15} '{label[:28]}' → {slug}.zip", flush=True)
+            await context.close()
+            await browser.close()
+        (tdir / "index.json").write_text(json.dumps(manifest, indent=2))
+        print(f"\n[traces] {len(manifest)} finding traces → {tdir}/")
+        print(f"  scrub one:  uv run playwright show-trace {tdir}/<name>.zip")
+        return manifest
+
 
 def main():
     ap = argparse.ArgumentParser(description="Gently UI crawler / simulator")
@@ -381,6 +447,8 @@ def main():
     ap.add_argument("--trace", action="store_true",
                     help="record a Playwright trace (screenshots+DOM+network) -> out/trace.zip")
     ap.add_argument("--video", action="store_true", help="record .webm video of each page -> out/videos/")
+    ap.add_argument("--trace-findings", action="store_true",
+                    help="after crawling, replay each found deficiency into its own out/traces/<name>.zip")
     ap.add_argument("--out", default="tools/ui_crawler/out")
     args = ap.parse_args()
 
@@ -388,6 +456,9 @@ def main():
     t0 = time.time()
     asyncio.run(c.run())
     a = c.write()
+    if args.trace_findings:
+        print("\n[trace-findings] replaying each deficiency into its own trace...", flush=True)
+        asyncio.run(c.replay_findings())
     dt = time.time() - t0
     print(f"\n[done] {len(c.states)} states, {len(c.edges)} edges in {dt:.0f}s → {c.out}/")
     print(f"  ↩ returns-to-landing: {len(a['to_landing'])} | 💥 console-err: {len(a['console_err'])} "
