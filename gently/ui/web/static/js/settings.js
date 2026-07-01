@@ -177,7 +177,14 @@ const SettingsManager = {
         const content = document.getElementById('settings-content');
         if (!content) return;
 
-        content.addEventListener('change', () => this.readFormAndSave());
+        // Ignore the server-backed hardware sections — they own their own
+        // handlers (ThermalizerSettings) and must not trigger the localStorage
+        // save or its "Settings saved" toast.
+        const isHardware = (t) => t && t.closest && t.closest('#section-thermalizer, #section-effective');
+        content.addEventListener('change', (e) => {
+            if (isHardware(e.target)) return;
+            this.readFormAndSave();
+        });
         content.addEventListener('input', (e) => {
             // Live update for range sliders
             if (e.target.id === 'cfg-imageSplitRatio') {
@@ -359,8 +366,10 @@ const ThermalizerSettings = {
                 body: JSON.stringify(this.readForm()),
             });
             if (res.status === 401 || res.status === 403) { this.result('Need control to apply.', false); return; }
-            if (res.status === 409) { const d = await res.json().catch(() => ({})); this.result(`Blocked: ${d.detail || d.error || 'a run/ramp is active'}`, false); return; }
             const d = await res.json();
+            // The device-layer 409 (run/ramp active) is flattened to 200 by the
+            // proxy, so detect it via the body flag, not the HTTP status.
+            if (d.blocked) { this.result(`Blocked: ${d.error || 'a run/ramp is active'}`, false); return; }
             if (d.success && d.applied) { this.result('Applied live.', true); await this.load(); }
             else if (d.restart_required) { this.result(`Saved — restart the device layer to apply. (${d.error || ''})`, false); }
             else { this.result(`Failed: ${d.error || (d.detail || res.status)}`, false); }

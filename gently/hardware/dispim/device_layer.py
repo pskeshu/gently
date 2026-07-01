@@ -2108,6 +2108,20 @@ class DeviceLayerServer(Service):
             out["password"] = None
         return out
 
+    def _preserve_temp_password(self, cfg: dict) -> dict:
+        """Return a copy of cfg with the stored MQTT password filled in when the
+        client didn't submit a new one (the password is write-only in the UI, so
+        a blank field means 'keep what's stored'). Used by BOTH test + apply so
+        they exercise the same effective credentials."""
+        eff = dict(cfg)
+        if not eff.get("password"):
+            existing_pw = ((self.config or {}).get("temperature") or {}).get("password")
+            if existing_pw:
+                eff["password"] = existing_pw
+            else:
+                eff.pop("password", None)
+        return eff
+
     def _temp_state(self, temp) -> dict | None:
         if temp is None:
             return None
@@ -2154,10 +2168,11 @@ class DeviceLayerServer(Service):
         err = self._validate_temp_cfg(cfg)
         if err:
             return web.json_response({"success": False, "error": err}, status=400)
+        eff = self._preserve_temp_password(cfg)  # probe with the same creds Apply would use
 
         def _probe():
             from gently.hardware.temperature import create_temperature_controller
-            tc = create_temperature_controller(cfg)
+            tc = create_temperature_controller(eff)
             try:
                 r = tc.read()
                 return {
@@ -2190,7 +2205,11 @@ class DeviceLayerServer(Service):
                 with open(sidecar) as f:
                     existing = yaml.safe_load(f) or {}
             existing["temperature"] = temp_cfg
-            with open(sidecar, "w") as f:
+            # Create with 0600 up front so the plaintext MQTT password is never
+            # briefly world/group-readable (O_CREAT mode only applies to new files;
+            # the follow-up chmod downgrades any pre-existing loose-perm file).
+            fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
             try:
                 os.chmod(sidecar, 0o600)
@@ -2220,25 +2239,19 @@ class DeviceLayerServer(Service):
         re_state = str(getattr(self.RE, "state", "idle")) if self.RE is not None else "idle"
         if re_state != "idle":
             return web.json_response(
-                {"success": False,
+                {"success": False, "blocked": True,
                  "error": f"RunEngine is {re_state}; stop the plan before reconfiguring"},
                 status=409)
         old = self.devices.get("temperature")
         lock = getattr(old, "_lock", None)
         if lock is not None and lock.locked():
             return web.json_response(
-                {"success": False,
+                {"success": False, "blocked": True,
                  "error": "a temperature ramp is in progress; wait or stop it first"},
                 status=409)
 
-        # Preserve an existing password when the client didn't submit a new one.
-        eff = dict(cfg)
-        if not eff.get("password"):
-            existing_pw = ((self.config or {}).get("temperature") or {}).get("password")
-            if existing_pw:
-                eff["password"] = existing_pw
-            else:
-                eff.pop("password", None)
+        # Fill in the stored password when the client didn't submit a new one.
+        eff = self._preserve_temp_password(cfg)
 
         # Build the NEW controller first (eager connect off the event loop).
         def _build():
