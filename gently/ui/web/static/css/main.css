@@ -9207,6 +9207,35 @@ body.modal-open {
     color: var(--text-muted);
 }
 
+/* Thermalizer / server-backed settings controls */
+.th-note { margin-bottom: 0.9rem; }
+.th-ro { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
+.th-status {
+    font-size: 0.85rem; color: var(--text); font-variant-numeric: tabular-nums;
+    padding: 0.5rem 0.7rem; background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.th-actions { display: flex; gap: 0.6rem; }
+.settings-btn {
+    background: var(--bg-hover); border: 1px solid var(--border); color: var(--text);
+    font: 600 0.82rem/1 'Inter Tight', system-ui, sans-serif;
+    padding: 0.55rem 0.9rem; border-radius: 7px; cursor: pointer;
+    transition: background 0.13s, border-color 0.13s, color 0.13s, opacity 0.13s;
+}
+.settings-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.settings-btn:disabled { opacity: 0.5; cursor: progress; }
+.settings-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.settings-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.settings-result { font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
+.settings-result.is-ok { color: var(--accent-green); }
+.settings-result.is-err { color: var(--accent-orange); }
+.settings-pre {
+    font: 0.78rem/1.5 ui-monospace, SFMono-Regular, monospace;
+    color: var(--text); background: var(--bg-dark); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.8rem 1rem; overflow-x: auto; white-space: pre;
+    max-height: 460px; overflow-y: auto;
+}
+
 /* Range slider */
 .settings-range {
     -webkit-appearance: none;

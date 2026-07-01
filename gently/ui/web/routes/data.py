@@ -436,6 +436,101 @@ def create_router(server) -> APIRouter:
             "waited": res.get("waited", False),
         }
 
+    @router.get("/api/devices/temperature/config")
+    async def get_temperature_config():
+        """Thermalizer connection config (password redacted) + live backend/state
+        for the Settings panel. Read-only, so no control elevation required."""
+        client = _resolve_client()
+        if client is None:
+            return {"available": False}
+        try:
+            res = await client.get_temperature_config()
+        except Exception as exc:
+            logger.debug("temperature config fetch failed: %s", exc)
+            return {"available": False}
+        return {"available": bool(res.get("success", False)), **res}
+
+    @router.post("/api/devices/temperature/config/test", dependencies=[Depends(require_control)])
+    async def test_temperature_config(payload: dict = Body(...)):  # noqa: B008
+        """Probe a candidate thermalizer config without committing it."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            res = await client.test_temperature_config(payload)
+        except Exception as exc:
+            logger.exception("Thermalizer test failed")
+            raise HTTPException(status_code=502, detail=f"thermalizer test failed: {exc}") from exc
+        return res
+
+    @router.post("/api/devices/temperature/config", dependencies=[Depends(require_control)])
+    async def set_temperature_config(payload: dict = Body(...)):  # noqa: B008
+        """Reconfigure the thermalizer (serial/mqtt/mock). Live hot-swap where
+        possible; otherwise persisted for the next device-layer restart."""
+        client = _resolve_client()
+        if client is None:
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+        try:
+            res = await client.set_temperature_config(payload)
+        except Exception as exc:
+            logger.exception("Thermalizer reconfigure failed")
+            raise HTTPException(
+                status_code=502, detail=f"thermalizer reconfigure failed: {exc}") from exc
+        return res
+
+    @router.get("/api/config/effective")
+    async def get_effective_config():
+        """Read-only view of the effective server config, secrets redacted.
+
+        settings.py values are frozen at import (resolved from env vars once), so
+        changing them requires a process restart — surfaced here for visibility,
+        not editing. Secrets are shown only as present/absent booleans.
+        """
+        import os
+
+        from gently.settings import settings as S
+
+        return {
+            "note": "settings.py values are read from env at startup; "
+                    "changing them needs a restart.",
+            "network": {
+                "viz_host": S.network.viz_host, "viz_port": S.network.viz_port,
+                "device_host": S.network.device_host, "device_port": S.network.device_port,
+                "mesh_port": S.network.mesh_port,
+            },
+            "models": {
+                "main": S.models.main, "perception": S.models.perception, "fast": S.models.fast,
+                "medium": S.models.medium, "refusal_fallback": S.models.refusal_fallback,
+            },
+            "storage": {"base_path": str(S.storage.base_path)},
+            "timeouts": {
+                "plan_execution": S.timeouts.plan_execution,
+                "rpc_call": S.timeouts.rpc_call,
+                "volume_acquisition": S.timeouts.volume_acquisition,
+                "api_call": S.timeouts.api_call,
+            },
+            "ml": {
+                "default_batch_size": S.ml.default_batch_size,
+                "default_epochs": S.ml.default_epochs,
+                "default_lr": S.ml.default_lr, "model_cache_dir": str(S.ml.model_cache_dir),
+            },
+            "transfer": {
+                "transfer_port": S.transfer.transfer_port, "chunk_size": S.transfer.chunk_size,
+                "max_concurrent_transfers": S.transfer.max_concurrent_transfers,
+            },
+            "mesh": {
+                "broadcast_interval_s": S.mesh.broadcast_interval_s,
+                "stale_threshold_s": S.mesh.stale_threshold_s,
+                "dead_threshold_s": S.mesh.dead_threshold_s,
+            },
+            "ui": {"ux_v2": S.ui.ux_v2},
+            "api": {"ncbi_tool": S.api.ncbi_tool},
+            "secrets_present": {
+                "anthropic_api_key": bool(os.getenv("ANTHROPIC_API_KEY")),
+                "control_token": bool(os.getenv("GENTLY_CONTROL_TOKEN")),
+            },
+        }
+
     # ------------------------------------------------------------------
     # Lightsheet live stream
     # ------------------------------------------------------------------

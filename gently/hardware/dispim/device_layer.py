@@ -225,6 +225,20 @@ class DeviceLayerServer(Service):
         logger.info("[1/5] Loading configuration...")
         with open(self.config_path) as f:
             self.config = yaml.safe_load(f)
+        # Merge operator overrides from config.local.yml over the committed
+        # config.yml (keeps config.yml's comments intact). Currently the
+        # thermalizer block, set live from the settings panel; survives restart.
+        try:
+            sidecar = Path(self.config_path).parent / "config.local.yml"
+            if sidecar.exists():
+                with open(sidecar) as sf:
+                    override = yaml.safe_load(sf) or {}
+                if isinstance(override, dict) and override.get("temperature"):
+                    self.config = self.config or {}
+                    self.config["temperature"] = override["temperature"]
+                    logger.info("Applied thermalizer override from %s", sidecar)
+        except Exception:
+            logger.warning("config.local.yml merge failed", exc_info=True)
         logger.info("Config loaded from %s", self.config_path)
         cui.step_done(str(self.config_path))
 
@@ -2057,6 +2071,208 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    @staticmethod
+    def _validate_temp_cfg(cfg) -> str | None:
+        """Validate a thermalizer config dict. Returns an error string or None.
+
+        Mirrors what temperature._make_backend / create_temperature_controller
+        require so bad input is rejected before we build a controller.
+        """
+        if not isinstance(cfg, dict):
+            return "config must be an object"
+        backend = str(cfg.get("backend", "serial")).lower()
+        if backend not in ("serial", "mqtt", "mock"):
+            return f"unknown backend {backend!r} (use 'serial', 'mqtt', or 'mock')"
+        if backend == "serial" and not str(cfg.get("com_port") or "").strip():
+            return "serial backend requires com_port"
+        for key in ("baud_rate", "port"):
+            if cfg.get(key) is not None:
+                try:
+                    if int(cfg[key]) <= 0:
+                        return f"{key} must be a positive integer"
+                except (TypeError, ValueError):
+                    return f"{key} must be a positive integer"
+        if cfg.get("stabilize_timeout") is not None:
+            try:
+                if float(cfg["stabilize_timeout"]) <= 0:
+                    return "stabilize_timeout must be > 0"
+            except (TypeError, ValueError):
+                return "stabilize_timeout must be a number"
+        return None
+
+    @staticmethod
+    def _redact_temp_cfg(cfg: dict) -> dict:
+        """Copy of a temperature config with the MQTT password removed."""
+        out = dict(cfg or {})
+        if "password" in out:
+            out["password"] = None
+        return out
+
+    def _temp_state(self, temp) -> dict | None:
+        if temp is None:
+            return None
+        try:
+            r = temp.read()
+            return {
+                "temperature_c": r.get(temp.name, {}).get("value"),
+                "setpoint_c": r.get(f"{temp.name}_setpoint", {}).get("value"),
+                "state": r.get(f"{temp.name}_state", {}).get("value"),
+            }
+        except Exception:
+            return None
+
+    async def handle_get_temperature_config(self, request):
+        """GET /api/temperature/config - current thermalizer config (password
+        redacted) + live backend + read() state, for the settings panel."""
+        try:
+            cfg = dict((self.config or {}).get("temperature") or {})
+            has_pw = bool(cfg.get("password"))
+            temp = self.devices.get("temperature")
+            return web.json_response({
+                "success": True,
+                "config": self._redact_temp_cfg(cfg),
+                "password_set": has_pw,
+                "active": temp is not None,
+                "live_backend": type(temp._dev).__name__ if temp is not None else None,
+                "state": self._temp_state(temp),
+            })
+        except Exception as e:
+            import traceback
+            return web.json_response(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()},
+                status=500,
+            )
+
+    async def handle_test_temperature_config(self, request):
+        """POST /api/temperature/config/test - probe a candidate config WITHOUT
+        committing. Builds a transient controller, reads state, closes it. Never
+        touches self.devices."""
+        try:
+            cfg = await request.json()
+        except Exception:
+            return web.json_response({"success": False, "error": "invalid JSON body"}, status=400)
+        err = self._validate_temp_cfg(cfg)
+        if err:
+            return web.json_response({"success": False, "error": err}, status=400)
+
+        def _probe():
+            from gently.hardware.temperature import create_temperature_controller
+            tc = create_temperature_controller(cfg)
+            try:
+                r = tc.read()
+                return {
+                    "backend": type(tc._dev).__name__,
+                    "temperature_c": r.get(tc.name, {}).get("value"),
+                    "state": r.get(f"{tc.name}_state", {}).get("value"),
+                }
+            finally:
+                try:
+                    tc.close()
+                except Exception:
+                    pass
+
+        try:
+            result = await asyncio.to_thread(_probe)
+            return web.json_response({"success": True, "result": result})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)}, status=502)
+
+    def _write_temp_sidecar(self, temp_cfg: dict) -> None:
+        """Persist the temperature block to config/config.local.yml (merged over
+        config.yml at boot). Best-effort; 0600 perms since it may hold the MQTT
+        password. Keeps config.yml (and its comments) untouched."""
+        try:
+            import os
+
+            sidecar = Path(self.config_path).parent / "config.local.yml"
+            existing = {}
+            if sidecar.exists():
+                with open(sidecar) as f:
+                    existing = yaml.safe_load(f) or {}
+            existing["temperature"] = temp_cfg
+            with open(sidecar, "w") as f:
+                yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+            try:
+                os.chmod(sidecar, 0o600)
+            except OSError:
+                pass
+        except Exception:
+            logger.debug("temp sidecar write failed", exc_info=True)
+
+    async def handle_set_temperature_config(self, request):
+        """POST /api/temperature/config - reconfigure the thermalizer live.
+
+        Build-new-before-swap: refuse (409) while the RunEngine is running or a
+        set() worker holds the controller lock; build the NEW controller first
+        (keep the old one on failure); swap self.devices and close the old;
+        persist to the config.local.yml sidecar. On a build/connect failure the
+        intent is still saved and restart_required is returned.
+        """
+        try:
+            cfg = await request.json()
+        except Exception:
+            return web.json_response({"success": False, "error": "invalid JSON body"}, status=400)
+        err = self._validate_temp_cfg(cfg)
+        if err:
+            return web.json_response({"success": False, "error": err}, status=400)
+
+        # --- 409 guard: never swap mid-plan / mid-ramp ---
+        re_state = str(getattr(self.RE, "state", "idle")) if self.RE is not None else "idle"
+        if re_state != "idle":
+            return web.json_response(
+                {"success": False,
+                 "error": f"RunEngine is {re_state}; stop the plan before reconfiguring"},
+                status=409)
+        old = self.devices.get("temperature")
+        lock = getattr(old, "_lock", None)
+        if lock is not None and lock.locked():
+            return web.json_response(
+                {"success": False,
+                 "error": "a temperature ramp is in progress; wait or stop it first"},
+                status=409)
+
+        # Preserve an existing password when the client didn't submit a new one.
+        eff = dict(cfg)
+        if not eff.get("password"):
+            existing_pw = ((self.config or {}).get("temperature") or {}).get("password")
+            if existing_pw:
+                eff["password"] = existing_pw
+            else:
+                eff.pop("password", None)
+
+        # Build the NEW controller first (eager connect off the event loop).
+        def _build():
+            from gently.hardware.temperature import create_temperature_controller
+            return create_temperature_controller(eff)
+
+        try:
+            new_tc = await asyncio.to_thread(_build)
+        except Exception as e:
+            self._write_temp_sidecar(eff)  # save intent; a restart will apply it
+            return web.json_response(
+                {"success": False, "applied": False, "restart_required": True,
+                 "error": f"could not connect with the new config: {e}. "
+                          "Saved — restart the device layer to apply."},
+                status=502)
+
+        # Swap + retire the old controller.
+        self.devices["temperature"] = new_tc
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                logger.debug("old temperature controller close failed", exc_info=True)
+        self.config = self.config or {}
+        self.config["temperature"] = eff
+        self._write_temp_sidecar(eff)
+        logger.info("Thermalizer reconfigured live (backend=%s)", eff.get("backend", "serial"))
+        return web.json_response({
+            "success": True, "applied": True, "restart_required": False,
+            "config": self._redact_temp_cfg(eff),
+            "live_backend": type(new_tc._dev).__name__,
+            "state": self._temp_state(new_tc),
+        })
+
     async def handle_set_camera_led_mode(self, request):
         """POST /api/camera/led_mode - Enable/disable automatic LED for bottom camera"""
         try:
@@ -3392,6 +3608,10 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/led/set", self.handle_set_led)
         self._app.router.add_get("/api/temperature/status", self.handle_get_temperature_status)
         self._app.router.add_post("/api/temperature/set", self.handle_set_temperature)
+        self._app.router.add_get("/api/temperature/config", self.handle_get_temperature_config)
+        self._app.router.add_post(
+            "/api/temperature/config/test", self.handle_test_temperature_config)
+        self._app.router.add_post("/api/temperature/config", self.handle_set_temperature_config)
         self._app.router.add_get("/api/room_light/status", self.handle_get_room_light_status)
         self._app.router.add_post("/api/room_light/set", self.handle_set_room_light)
         self._app.router.add_post("/api/camera/led_mode", self.handle_set_camera_led_mode)

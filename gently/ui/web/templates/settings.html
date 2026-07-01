@@ -52,6 +52,11 @@
                 <a class="settings-nav-item" data-section="vitals" href="#vitals">Vitals View</a>
                 <a class="settings-nav-item" data-section="detail" href="#detail">Default View</a>
             </div>
+            <div class="settings-nav-group">
+                <div class="settings-nav-title">Hardware</div>
+                <a class="settings-nav-item" data-section="thermalizer" href="#thermalizer">Thermalizer</a>
+                <a class="settings-nav-item" data-section="effective" href="#effective">Effective config</a>
+            </div>
         </nav>
 
         <main class="settings-content" id="settings-content">
@@ -172,11 +177,12 @@
             <section class="settings-section" id="section-vitals">
                 <h2 class="settings-section-title">Vitals View</h2>
                 <div class="settings-field">
-                    <label class="settings-label">Temperature model</label>
+                    <label class="settings-label">Developmental-timing reference</label>
                     <div class="settings-radio-group" id="cfg-temperatureModel">
                         <label class="settings-radio"><input type="radio" name="temperatureModel" value="20C"> 20°C</label>
                         <label class="settings-radio"><input type="radio" name="temperatureModel" value="25C"> 25°C</label>
                     </div>
+                    <div class="settings-hint">C. elegans staging reference curve for the vitals chart — not the hardware controller (see Hardware → Thermalizer).</div>
                 </div>
                 <div class="settings-field">
                     <label class="settings-checkbox">
@@ -215,6 +221,51 @@
                         Show contrastive reasoning
                     </label>
                 </div>
+            </section>
+
+            <section class="settings-section" id="section-thermalizer">
+                <h2 class="settings-section-title">Thermalizer (ACUITYnano)</h2>
+                <div class="settings-hint th-note">Machine-wide hardware setting, saved on the server (not this browser). Requires control.</div>
+
+                <div class="settings-field">
+                    <label class="settings-label">Live status</label>
+                    <div class="th-status" id="th-status">Loading…</div>
+                </div>
+
+                <div class="settings-field">
+                    <label class="settings-label">Connection</label>
+                    <div class="settings-radio-group" id="th-backend">
+                        <label class="settings-radio"><input type="radio" name="th-backend" value="serial"> Serial (COM)</label>
+                        <label class="settings-radio"><input type="radio" name="th-backend" value="mqtt"> MQTT (HiveMQ)</label>
+                        <label class="settings-radio th-mock-opt" style="display:none"><input type="radio" name="th-backend" value="mock"> Mock (dev)</label>
+                    </div>
+                </div>
+
+                <div id="th-serial">
+                    <div class="settings-field"><label class="settings-label" for="th-com">COM port</label><input class="settings-input" id="th-com" type="text" placeholder="COM8"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-baud">Baud rate</label><input class="settings-input" id="th-baud" type="number" value="115200"></div>
+                </div>
+                <div id="th-mqtt" style="display:none">
+                    <div class="settings-field"><label class="settings-label" for="th-broker">Broker</label><input class="settings-input" id="th-broker" type="text" placeholder="blank = embedded HiveMQ default"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-port">Port</label><input class="settings-input" id="th-port" type="number" placeholder="8883"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-user">Username</label><input class="settings-input" id="th-user" type="text"></div>
+                    <div class="settings-field"><label class="settings-label" for="th-pass">Password</label><input class="settings-input" id="th-pass" type="password" placeholder="•••• (blank keeps stored)" autocomplete="new-password"><div class="settings-hint">Write-only — never shown; blank keeps the stored password.</div></div>
+                </div>
+
+                <div class="settings-field"><label class="settings-label" for="th-stabilize">Stabilize timeout (s)</label><input class="settings-input" id="th-stabilize" type="number" value="600"></div>
+                <div class="settings-field"><label class="settings-checkbox"><input type="checkbox" id="th-peltier"> Control off the Peltier sensor (else water)</label></div>
+
+                <div class="settings-field th-actions">
+                    <button class="settings-btn" id="th-test" type="button">Test connection</button>
+                    <button class="settings-btn settings-btn-primary" id="th-apply" type="button">Apply</button>
+                </div>
+                <div class="settings-result" id="th-result"></div>
+            </section>
+
+            <section class="settings-section" id="section-effective">
+                <h2 class="settings-section-title">Effective config <span class="th-ro">(read-only)</span></h2>
+                <div class="settings-hint th-note">The server's live configuration, secrets redacted. Editing these needs a restart / env override.</div>
+                <pre class="settings-pre" id="effective-config">Loading…</pre>
             </section>
 
             <div class="settings-save-bar">

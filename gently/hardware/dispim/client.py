@@ -870,6 +870,19 @@ class DiSPIMMicroscope(Microscope):
         """Get current temperature, setpoint, and lock state."""
         return await self._api_get("/api/temperature/status")
 
+    async def get_temperature_config(self) -> dict:
+        """Get the thermalizer connection config (password redacted) + live state."""
+        return await self._api_get("/api/temperature/config")
+
+    async def set_temperature_config(self, cfg: dict) -> dict:
+        """Reconfigure the thermalizer (serial/mqtt/mock) — live hot-swap where
+        possible, else persisted for the next device-layer restart."""
+        return await self._api_post("/api/temperature/config", cfg)
+
+    async def test_temperature_config(self, cfg: dict) -> dict:
+        """Probe a candidate thermalizer config without committing it."""
+        return await self._api_post("/api/temperature/config/test", cfg)
+
     # ------------------------------------------------------------------
     # Live device-state readout (streamed from the device layer poller)
     # ------------------------------------------------------------------
