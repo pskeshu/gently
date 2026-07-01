@@ -56,6 +56,7 @@
                 <div class="settings-nav-title">Hardware</div>
                 <a class="settings-nav-item" data-section="thermalizer" href="#thermalizer">Thermalizer</a>
                 <a class="settings-nav-item" data-section="effective" href="#effective">Effective config</a>
+                <a class="settings-nav-item" data-section="advanced" href="#advanced">Advanced</a>
             </div>
         </nav>
 
@@ -268,8 +269,25 @@
                 <pre class="settings-pre" id="effective-config">Loading…</pre>
             </section>
 
+            <section class="settings-section" id="section-advanced">
+                <h2 class="settings-section-title">Advanced <span class="th-ro">(restart required)</span></h2>
+                <div class="settings-hint th-note">System tunables persisted to <code>config/settings.local.yml</code>. Saved values take effect on the next server restart. Requires control.</div>
+                <div id="adv-fields">Loading…</div>
+                <div class="settings-field th-actions">
+                    <button class="settings-btn settings-btn-primary" id="adv-save" type="button">Save (restart required)</button>
+                </div>
+                <div class="settings-result" id="adv-result"></div>
+            </section>
+
             <div class="settings-save-bar">
                 <span class="settings-save-status" id="settings-save-status"></span>
+                <span class="settings-defaults-bar">
+                    <button class="settings-btn" id="pref-save-defaults" type="button" title="Save current dashboard prefs as the rig-wide defaults">Save as rig defaults</button>
+                    <button class="settings-btn" id="pref-reset" type="button" title="Clear this browser's overrides and use the rig defaults">Reset to defaults</button>
+                    <button class="settings-btn" id="pref-export" type="button">Export</button>
+                    <button class="settings-btn" id="pref-import" type="button">Import</button>
+                    <input type="file" id="pref-import-file" accept="application/json" style="display:none">
+                </span>
             </div>
         </main>
     </div>

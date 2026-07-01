@@ -531,6 +531,113 @@ def create_router(server) -> APIRouter:
             },
         }
 
+    # --- Rig-wide dashboard-preference defaults (layered UNDER per-browser localStorage) ---
+    _dashboard_defaults_path = _HARDWARE_CONFIG_PATH.parent / "dashboard_defaults.json"
+
+    @router.get("/api/config/dashboard-defaults")
+    async def get_dashboard_defaults():
+        """Rig-wide dashboard-pref defaults (JSON). The browser layers localStorage
+        over these, so a fresh browser inherits the rig's defaults."""
+        import json
+
+        if not _dashboard_defaults_path.exists():
+            return {}
+        try:
+            return json.loads(_dashboard_defaults_path.read_text())
+        except Exception:
+            return {}
+
+    @router.put("/api/config/dashboard-defaults", dependencies=[Depends(require_control)])
+    async def put_dashboard_defaults(payload: dict = Body(...)):  # noqa: B008
+        """Save the current dashboard prefs as the rig-wide defaults."""
+        import json
+
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="body must be an object")
+        _dashboard_defaults_path.write_text(json.dumps(payload, indent=2))
+        return {"saved": True}
+
+    # --- Restart-required settings.py editors (persisted to config/settings.local.yml) ---
+    # (env var, label, type, current-value getter). Allowlist only — never expose
+    # ports/hosts/model-IDs/storage-path/secrets here.
+    _override_keys = [
+        ("GENTLY_TIMEOUT_PLAN", "Plan execution timeout (s)", "int",
+         lambda S: S.timeouts.plan_execution),
+        ("GENTLY_TIMEOUT_RPC", "RPC call timeout (s)", "int",
+         lambda S: S.timeouts.rpc_call),
+        ("GENTLY_TIMEOUT_VOLUME", "Volume acquisition timeout (s)", "int",
+         lambda S: S.timeouts.volume_acquisition),
+        ("GENTLY_TIMEOUT_API", "API call timeout (s)", "int",
+         lambda S: S.timeouts.api_call),
+        ("GENTLY_MESH_BROADCAST_INTERVAL", "Mesh broadcast interval (s)", "float",
+         lambda S: S.mesh.broadcast_interval_s),
+        ("GENTLY_MESH_STALE_THRESHOLD", "Mesh stale threshold (s)", "float",
+         lambda S: S.mesh.stale_threshold_s),
+        ("GENTLY_MESH_DEAD_THRESHOLD", "Mesh dead threshold (s)", "float",
+         lambda S: S.mesh.dead_threshold_s),
+        ("GENTLY_ML_BATCH_SIZE", "ML batch size", "int", lambda S: S.ml.default_batch_size),
+        ("GENTLY_ML_EPOCHS", "ML epochs", "int", lambda S: S.ml.default_epochs),
+        ("GENTLY_ML_LR", "ML learning rate", "float", lambda S: S.ml.default_lr),
+        ("GENTLY_UX_V2", "UX v2 dashboard", "bool", lambda S: S.ui.ux_v2),
+        ("GENTLY_NCBI_TOOL", "NCBI tool name", "str", lambda S: S.api.ncbi_tool),
+        ("GENTLY_NCBI_EMAIL", "NCBI email", "str", lambda S: S.api.ncbi_email),
+    ]
+    _settings_local_path = _HARDWARE_CONFIG_PATH.parent / "settings.local.yml"
+
+    def _coerce_override(typ, val):
+        if typ == "int":
+            return int(val)
+        if typ == "float":
+            return float(val)
+        if typ == "bool":
+            return val if isinstance(val, bool) else str(val).lower() in ("1", "true", "yes", "on")
+        return str(val)
+
+    def _read_settings_local():
+        if not _settings_local_path.exists():
+            return {}
+        try:
+            return yaml.safe_load(_settings_local_path.read_text()) or {}
+        except Exception:
+            return {}
+
+    @router.get("/api/config/settings-overrides")
+    async def get_settings_overrides():
+        """Editable (restart-required) settings.py knobs: current effective value
+        + whether an override file entry exists."""
+        from gently.settings import settings as S
+
+        file_over = _read_settings_local()
+        items = [
+            {"env": env, "label": label, "type": typ,
+             "current": getter(S), "overridden": env in file_over}
+            for (env, label, typ, getter) in _override_keys
+        ]
+        return {"note": "changes take effect on the next process restart", "items": items}
+
+    @router.put("/api/config/settings-overrides", dependencies=[Depends(require_control)])
+    async def put_settings_overrides(payload: dict = Body(...)):  # noqa: B008
+        """Persist restart-required overrides to config/settings.local.yml. Only
+        allowlisted keys; never mutates the frozen settings singleton live."""
+        allowed = {env: typ for (env, _lbl, typ, _g) in _override_keys}
+        updates = {}
+        for k, v in (payload or {}).items():
+            if k not in allowed:
+                raise HTTPException(status_code=400, detail=f"unknown or non-editable key: {k}")
+            if v is None or v == "":
+                continue
+            try:
+                updates[k] = _coerce_override(allowed[k], v)
+            except (TypeError, ValueError):
+                raise HTTPException(
+                    status_code=400, detail=f"{k}: invalid {allowed[k]} value") from None
+        existing = _read_settings_local()
+        existing.update(updates)
+        _settings_local_path.write_text(
+            yaml.safe_dump(existing, default_flow_style=False, sort_keys=True))
+        return {"saved": list(updates.keys()), "restart_required": True,
+                "note": "restart the server for these to take effect"}
+
     # ------------------------------------------------------------------
     # Lightsheet live stream
     # ------------------------------------------------------------------

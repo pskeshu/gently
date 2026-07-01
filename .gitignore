@@ -150,3 +150,8 @@ gently/ui/tui/dist/
 # literally to ./D:/ under the repo on Linux. Not data we track.
 /D:/
 .superpowers/
+
+# Runtime operator overrides (written by the Settings panel)
+config/config.local.yml
+config/settings.local.yml
+config/dashboard_defaults.json

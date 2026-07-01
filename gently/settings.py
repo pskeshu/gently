@@ -27,6 +27,30 @@ def _env(key: str, default):
     return val
 
 
+def _load_local_overrides():
+    """Merge config/settings.local.yml (a flat map of GENTLY_* keys) into the
+    environment BEFORE settings are resolved. setdefault so a real env var still
+    wins over the file. This is how the Settings panel's restart-required editors
+    persist overrides — every entry point (viz, device layer, agent) picks them
+    up at import."""
+    try:
+        import yaml
+
+        path = Path(__file__).resolve().parents[1] / "config" / "settings.local.yml"
+        if not path.exists():
+            return
+        data = yaml.safe_load(path.read_text()) or {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if v is not None:
+                    os.environ.setdefault(str(k), str(v))
+    except Exception:
+        pass
+
+
+_load_local_overrides()
+
+
 @dataclass(frozen=True)
 class NetworkSettings:
     """Ports, hosts, and bind addresses."""

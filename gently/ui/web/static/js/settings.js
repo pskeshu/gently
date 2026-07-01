@@ -39,23 +39,78 @@ const SettingsManager = {
 
     config: null,
 
-    init() {
+    async init() {
+        this.serverDefaults = await this.fetchServerDefaults();
         this.config = this.load();
         this.populateForm();
         this.setupNavigation();
         this.setupListeners();
+        this.setupDefaultsBar();
+    },
+
+    async fetchServerDefaults() {
+        try {
+            const res = await fetch('/api/config/dashboard-defaults');
+            if (!res.ok) return {};
+            const d = await res.json();
+            return (d && typeof d === 'object') ? d : {};
+        } catch (e) { return {}; }
     },
 
     load() {
+        // Effective config = hardcoded defaults < rig-wide server defaults < this browser's localStorage.
+        const base = this.deepMerge(this.defaults, this.serverDefaults || {});
         try {
             const stored = localStorage.getItem(this.STORAGE_KEY);
             if (stored) {
-                return this.deepMerge(this.defaults, JSON.parse(stored));
+                return this.deepMerge(base, JSON.parse(stored));
             }
         } catch (e) {
             console.warn('Failed to load settings:', e);
         }
-        return { ...this.defaults };
+        return base;
+    },
+
+    setupDefaultsBar() {
+        const byId = (id) => document.getElementById(id);
+        const saveDef = byId('pref-save-defaults');
+        if (saveDef) saveDef.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/config/dashboard-defaults', {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.config),
+                });
+                if (res.status === 401 || res.status === 403) { this.showSaveStatus('Need control'); return; }
+                this.showSaveStatus(res.ok ? 'Saved as rig defaults' : 'Failed to save defaults');
+            } catch (e) { this.showSaveStatus('Failed to save defaults'); }
+        });
+        const reset = byId('pref-reset');
+        if (reset) reset.addEventListener('click', () => {
+            if (!confirm("Clear this browser's dashboard prefs and use the rig defaults?")) return;
+            localStorage.removeItem(this.STORAGE_KEY);
+            location.reload();
+        });
+        const exp = byId('pref-export');
+        if (exp) exp.addEventListener('click', () => {
+            const blob = new Blob([JSON.stringify(this.config, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob); a.download = 'gently-dashboard-prefs.json';
+            a.click(); URL.revokeObjectURL(a.href);
+        });
+        const imp = byId('pref-import'), impFile = byId('pref-import-file');
+        if (imp && impFile) {
+            imp.addEventListener('click', () => impFile.click());
+            impFile.addEventListener('change', async () => {
+                const file = impFile.files[0]; if (!file) return;
+                try {
+                    const obj = JSON.parse(await file.text());
+                    this.config = this.deepMerge(this.defaults, obj);
+                    this.save(); this.populateForm();
+                    this.showSaveStatus('Imported');
+                } catch (e) { this.showSaveStatus('Import failed: invalid JSON'); }
+                impFile.value = '';
+            });
+        }
     },
 
     save() {
@@ -389,3 +444,83 @@ const ThermalizerSettings = {
 };
 
 document.addEventListener('DOMContentLoaded', () => ThermalizerSettings.init());
+
+
+/**
+ * AdvancedSettings — restart-required settings.py editors, persisted to
+ * config/settings.local.yml via /api/config/settings-overrides. Renders an
+ * allowlisted set of tunables; saving does NOT apply live (needs a restart).
+ */
+const AdvancedSettings = {
+    el(id) { return document.getElementById(id); },
+
+    async init() {
+        if (!this.el('section-advanced')) return;
+        const save = this.el('adv-save');
+        if (save) save.addEventListener('click', () => this.save());
+        await this.load();
+    },
+
+    async load() {
+        const wrap = this.el('adv-fields'); if (!wrap) return;
+        try {
+            const res = await fetch('/api/config/settings-overrides');
+            if (!res.ok) { wrap.textContent = 'Unavailable.'; return; }
+            const d = await res.json();
+            const items = d.items || [];
+            wrap.innerHTML = '';
+            items.forEach(it => {
+                const field = document.createElement('div');
+                field.className = 'settings-field';
+                const tag = it.overridden ? ' <span class="th-ro">(override set)</span>' : '';
+                if (it.type === 'bool') {
+                    const lab = document.createElement('label');
+                    lab.className = 'settings-checkbox';
+                    lab.innerHTML = `<input type="checkbox" data-env="${it.env}"> ${it.label}${tag}`;
+                    lab.querySelector('input').checked = !!it.current;
+                    field.appendChild(lab);
+                } else {
+                    const lab = document.createElement('label');
+                    lab.className = 'settings-label';
+                    lab.innerHTML = it.label + tag;
+                    const inp = document.createElement('input');
+                    inp.className = 'settings-input';
+                    inp.dataset.env = it.env;
+                    inp.type = it.type === 'str' ? 'text' : 'number';
+                    if (it.type === 'float') inp.step = 'any';
+                    if (it.current != null) inp.value = it.current;
+                    field.appendChild(lab); field.appendChild(inp);
+                }
+                wrap.appendChild(field);
+            });
+        } catch (e) { wrap.textContent = 'Unavailable.'; }
+    },
+
+    result(msg, ok) {
+        const el = this.el('adv-result'); if (!el) return;
+        el.textContent = msg;
+        el.className = 'settings-result ' + (ok ? 'is-ok' : 'is-err');
+    },
+
+    async save() {
+        const payload = {};
+        document.querySelectorAll('#adv-fields [data-env]').forEach(inp => {
+            if (inp.type === 'checkbox') payload[inp.dataset.env] = inp.checked;
+            else if (inp.value !== '') payload[inp.dataset.env] = inp.value;
+        });
+        const btn = this.el('adv-save'); btn.disabled = true; const old = btn.textContent; btn.textContent = 'Saving…';
+        try {
+            const res = await fetch('/api/config/settings-overrides', {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            if (res.status === 401 || res.status === 403) { this.result('Need control to save.', false); return; }
+            const d = await res.json();
+            if (res.ok) { this.result(`Saved ${(d.saved || []).length} setting(s) — restart the server to apply.`, true); await this.load(); }
+            else { this.result(`Failed: ${d.detail || res.status}`, false); }
+        } catch (e) { this.result(`Error: ${e.message}`, false); }
+        finally { btn.disabled = false; btn.textContent = old; }
+    },
+};
+
+document.addEventListener('DOMContentLoaded', () => AdvancedSettings.init());

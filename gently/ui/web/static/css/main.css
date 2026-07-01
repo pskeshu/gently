@@ -9085,7 +9085,7 @@ body.modal-open {
 .settings-content {
     flex: 1;
     max-width: 720px;
-    padding: 2rem 2.5rem;
+    padding: 2rem 2.5rem 0;
     overflow-y: auto;
 }
 
@@ -9235,6 +9235,11 @@ body.modal-open {
     border-radius: 8px; padding: 0.8rem 1rem; overflow-x: auto; white-space: pre;
     max-height: 460px; overflow-y: auto;
 }
+.settings-defaults-bar { display: flex; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+.settings-pre code, .settings-hint code {
+    font: 0.85em ui-monospace, SFMono-Regular, monospace;
+    background: var(--bg-hover); padding: 0.05rem 0.3rem; border-radius: 4px;
+}
 
 /* Range slider */
 .settings-range {
@@ -9279,6 +9284,13 @@ body.modal-open {
     position: sticky;
     bottom: 0;
     padding: 0.75rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    z-index: 5;
 }
 
 .settings-save-status {
