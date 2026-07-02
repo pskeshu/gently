@@ -1,7 +1,9 @@
 # Unified Launcher — single entry point + device-layer process management — Design
 
 Date: 2026-07-02
-Status: **Design — PARKED.** Direction agreed + mockup done; implementation deferred to a future session.
+Status: **Initial design (RFC) — PARKED.** A starting point to build on, not a finished
+design; direction + mockup done, implementation deferred to a future session.
+Idea credit: **Magdalena** — the single unified launcher.
 Branch: `feature/unified-launcher` (off `development`).
 
 ## Problem
@@ -89,6 +91,25 @@ organism/hardware/port/SAM/session on the gate (they're defaults + Advanced/Sett
 1. `DeviceLayerSupervisor` + the runtime Devices start/stop panel + the **hardware toggle**
    on a minimal gate. Delivers "no more separate `start_device_layer.py`" immediately.
 2. Defer‑init boot refactor + the **agent toggle** + persistence + "Advanced options".
+
+## Open questions to fold in (this is initial work)
+
+This is a starting point — the following must be worked through as it grows:
+
+- **Background startup.** After "Let's go", the device‑layer startup should run in the
+  **background (non‑blocking)** while gently proceeds to the dashboard — not block the gate
+  until the device connects. (To confirm + design the progress signalling.)
+- **Usable during startup.** gently must stay **usable while the device layer boots** —
+  software features (planning, review, analysis) available immediately; hardware‑dependent
+  actions gated behind a "device starting…" state until connected.
+- **On‑demand startup‑sequence screen.** There must be a screen to watch the device
+  **startup sequence** on demand — a device console (in the Devices panel) streaming the
+  `start_device_layer` boot log + per‑stage connection progress.
+- **Shutdown from that same screen.** That console is also the **shutdown control** — start
+  the sequence, watch it, and stop the device from one place.
+- **Guided shutdown housekeeping.** Shutdown is a **sequence, not just a kill** — e.g. it
+  can prompt the operator to **reset the F drive** (post‑shutdown drive/housekeeping) as a
+  step in the flow.
 
 ## Decisions log (from brainstorming)
 
