@@ -1021,6 +1021,53 @@ def create_router(server) -> APIRouter:
         labelled = _persist_detection_labels(agent, payload, markers)
         return {"success": True, "registered": registered, "labelled": labelled}
 
+    @router.post(
+        "/api/devices/embryos/{embryo_id}/calibrate",
+        dependencies=[Depends(require_control)],
+    )
+    async def calibrate_embryo_route(embryo_id: str, payload: dict = Body(default={})):  # noqa: B008
+        """Run piezo-galvo calibration for one embryo — the Operate B-cal step.
+
+        Reuses the agent's proven ``calibrate_embryo`` tool (Claude-vision edge
+        detection + adaptive focus sweep, which sets the light-sheet laser config
+        per snap) rather than the bare device-layer plan, so the operate flow
+        gets the same calibration quality as the agent. No LLM orchestration —
+        the coroutine is called directly with an agent/client context. The SPIM
+        head should already be lowered + focused (operate reaches this step only
+        after B3). Persists the fit onto ``embryo.calibration``.
+        """
+        agent = _require_agent_with_experiment()
+        if embryo_id not in agent.experiment.embryos:
+            raise HTTPException(status_code=404, detail=f"unknown embryo {embryo_id}")
+        client = _resolve_client()
+        if client is None or not getattr(client, "is_connected", False):
+            raise HTTPException(status_code=503, detail="Microscope not connected")
+
+        # Ensure the calibration tools are registered on the global registry,
+        # then run via the registry so context (agent/client) is injected the
+        # same way the agent invokes it. Calling the @tool wrapper directly would
+        # drop the positional embryo_id.
+        import gently.app.tools.calibration_tools  # noqa: F401  (registers the tool)
+        from gently.harness.tools.registry import get_tool_registry
+
+        registry = get_tool_registry()
+        try:
+            message = await registry.execute(
+                "calibrate_embryo",
+                {"embryo_id": embryo_id},
+                {"agent": agent, "client": client},
+            )
+        except Exception as exc:
+            logger.exception("Calibration failed for %s", embryo_id)
+            raise HTTPException(status_code=502, detail=f"calibration failed: {exc}") from exc
+        if isinstance(message, str) and message.startswith("Error"):
+            raise HTTPException(status_code=502, detail=message)
+
+        emb = agent.experiment.embryos.get(embryo_id)
+        calibration = dict(getattr(emb, "calibration", {}) or {}) if emb else {}
+        agent.experiment.notify_embryos_changed()
+        return {"success": True, "message": message, "calibration": calibration}
+
     @router.post("/api/embryos/roles", dependencies=[Depends(require_control)])
     async def set_embryo_roles(payload: dict = Body(...)):  # noqa: B008
         """Assign experimental roles to embryos — the Operate "Run" step.

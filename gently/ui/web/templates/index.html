@@ -507,6 +507,8 @@
                     <span class="op-arrow">→</span>
                     <span class="op-node" data-node="b3">Focus</span>
                     <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="bc">Calibrate</span>
+                    <span class="op-arrow">→</span>
                     <span class="op-node" data-node="b4">Acquire</span>
                   </div>
                   <div class="op-status">
@@ -600,6 +602,14 @@
                     <div class="op-hud-line">focus score <b id="op-spim-score">—</b></div>
                     <div class="op-hint">Peak the focus score, then mark in focus.</div>
                     <button class="op-btn op-btn-primary" id="op-infocus" type="button">Mark in focus →</button>
+                  </div>
+
+                  <div class="op-group" data-step="bc">
+                    <div class="op-cap">Piezo-galvo calibration</div>
+                    <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate this embryo</button>
+                    <div class="op-hud-line">fit <b id="op-cal-result">—</b></div>
+                    <div class="op-hint">Sweeps the light sheet to fit the piezo↔galvo focus track. Head stays lowered.</div>
+                    <button class="op-btn op-btn-ghost" id="op-cal-skip" type="button">Skip calibration →</button>
                   </div>
 
                   <div class="op-group" data-step="b4">
