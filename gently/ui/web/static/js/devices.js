@@ -417,8 +417,11 @@ const DevicesManager = (function () {
 
     function handleEmbryosUpdate(payload) {
         _embryos = (payload && Array.isArray(payload.embryos)) ? payload.embryos : [];
-        if (!_viewBox) {
-            computeViewBox();
+        // Recompute the frame so newly-arrived embryos are always in view.
+        // computeViewBox() returns true when the bounds shifted (incl. the
+        // first-ever compute); a wider frame needs a full redraw so grid/zones/
+        // axes track the new bounds, otherwise just repaint the embryo layer.
+        if (computeViewBox()) {
             renderMap();
         } else {
             renderEmbryos();
@@ -502,6 +505,18 @@ const DevicesManager = (function () {
         if (_lastXY) {
             xMin = Math.min(xMin, _lastXY.X); xMax = Math.max(xMax, _lastXY.X);
             yMin = Math.min(yMin, _lastXY.Y); yMax = Math.max(yMax, _lastXY.Y);
+        }
+        // Always frame the marked embryos — they can sit well outside the fence
+        // box / current stage position (e.g. SAM detections hundreds of µm away),
+        // and omitting them clips them to the map edge (looks like a wrong
+        // position even though their coords are correct).
+        if (_embryos && _embryos.length) {
+            _embryos.forEach(emb => {
+                const xy = embryoResolvedXY(emb);
+                if (!xy) return;
+                xMin = Math.min(xMin, xy.x); xMax = Math.max(xMax, xy.x);
+                yMin = Math.min(yMin, xy.y); yMax = Math.max(yMax, xy.y);
+            });
         }
         if (!isFinite(xMin) || !isFinite(yMin)) {
             xMin = -100; xMax = 100; yMin = -100; yMax = 100;
