@@ -411,9 +411,18 @@ const OperateManager = (function () {
     }
     function enterMarking(cands) {
         if (!_lastFrame) { toast('Start the camera first'); return false; }
+        // Absolute stage origin for pixel→stage conversion. Prefer the XY
+        // stamped on the live frame by the device layer; fall back to the
+        // position stream. NEVER default to [0, 0] — that silently converts
+        // clicks to offsets from stage origin, so embryos land hundreds of µm
+        // off and calibration images empty field. Block marking instead.
+        const capStage = (Array.isArray(_lastFrame.stage_position) && _lastFrame.stage_position.length === 2)
+            ? _lastFrame.stage_position
+            : (_lastXY ? [_lastXY.X, _lastXY.Y] : null);
+        if (!capStage) { toast('Stage position unknown — wait for the position readout, then mark'); return false; }
         _marking = true;
         _frozenFrame = { w: _lastFrame.shape[1], h: _lastFrame.shape[0], downsample: _lastFrame.downsample || 1 };
-        _captureStage = _lastFrame.stage_position || (_lastXY ? [_lastXY.X, _lastXY.Y] : [0, 0]);
+        _captureStage = capStage;
         _frozenSrc = `data:${_lastFrame.mime || 'image/jpeg'};base64,${_lastFrame.jpeg_b64}`;
         D['op-cam-img'].src = _frozenSrc; D['op-cam-img'].classList.add('has-frame'); D['op-cam-ph'].style.display = 'none';
         _markers = [];
@@ -472,6 +481,9 @@ const OperateManager = (function () {
     }
     async function confirmMarks() {
         if (!_markers.length) return;
+        if (!Array.isArray(_captureStage) || _captureStage.length !== 2) {
+            toast('Stage position unknown — cannot register markers'); return;
+        }
         D['op-confirm'].disabled = true;
         try {
             const markers = _markers.map(m => ({ stage_x_um: m.stageX, stage_y_um: m.stageY, pixel_x: m.fx, pixel_y: m.fy, source: m.source }));

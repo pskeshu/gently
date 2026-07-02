@@ -989,6 +989,25 @@ class DeviceLayerServer(Service):
             payload["focus_score"] = focus_score
         return payload
 
+    def _current_stage_xy(self) -> list[float] | None:
+        """Latest XY-stage position from the state cache, as ``[x, y]`` µm.
+
+        Sourced from the position poller (``kind == "xy_stage"``). Returns
+        ``None`` when no XY reading has arrived yet — callers MUST NOT fall
+        back to ``[0, 0]``: the operate-view marking canvas converts clicked
+        pixels to stage coords relative to this origin, so a bogus ``[0, 0]``
+        silently places every marker relative to stage origin instead of the
+        true position (embryos then land hundreds of µm off, and calibration
+        images empty field). Absent-is-better-than-wrong.
+        """
+        positions = self._state_latest.get("positions") or {}
+        for entry in positions.values():
+            if isinstance(entry, dict) and entry.get("kind") == "xy_stage":
+                x, y = entry.get("X"), entry.get("Y")
+                if x is not None and y is not None:
+                    return [float(x), float(y)]
+        return None
+
     async def _bottom_camera_streamer(self):
         """Continuous grab/encode/broadcast loop. Runs while a subscriber lives.
 
@@ -1008,6 +1027,13 @@ class DeviceLayerServer(Service):
                 img = await asyncio.to_thread(self._capture_bottom_frame_sync)
                 payload = self._encode_frame_for_stream(img) if img is not None else None
                 if payload is not None:
+                    # Stamp the true stage XY so the operate-view marking canvas
+                    # converts clicked pixels to absolute stage coords (not
+                    # offsets from origin). Omitted — never [0, 0] — when no XY
+                    # reading has arrived yet; the frontend then blocks marking.
+                    xy = self._current_stage_xy()
+                    if xy is not None:
+                        payload["stage_position"] = xy
                     await self._broadcast_camera(payload)
                 # Pace the loop — sleep whatever's left of the interval.
                 elapsed = time.monotonic() - tick
@@ -2792,19 +2818,23 @@ class DeviceLayerServer(Service):
                 if bottom_camera:
                     bottom_camera.configure_exposure(exposure_ms)
 
-            # Detection always images under ROOM LIGHT, never the camera LED.
-            # use_led is a persistent device flag that other flows (e.g. manual
-            # marking via capture_for_marking) leave switched on, so force it
-            # off here and turn the room light on so there's illumination.
+            # Detection needs even illumination. Prefer the ROOM LIGHT
+            # (SwitchBot) and disable the camera LED. But the room light is an
+            # OPTIONAL BLE accessory — when it's absent or the command fails,
+            # forcing the LED off leaves the frame near-black and SAM finds
+            # nothing. So only disable the LED once the room light is actually
+            # on; otherwise fall back to the camera LED as the light source.
             bottom_camera = self.devices.get("bottom_camera")
-            if bottom_camera is not None:
-                bottom_camera.use_led = False
             if await self._set_room_light("on"):
+                if bottom_camera is not None:
+                    bottom_camera.use_led = False
                 logger.info("[detect_embryos] Room light ON, camera LED disabled")
             else:
+                if bottom_camera is not None:
+                    bottom_camera.use_led = True
                 logger.warning(
-                    "[detect_embryos] Could not turn room light on "
-                    "(no SwitchBot configured?) — capturing under ambient light"
+                    "[detect_embryos] Room light unavailable (no SwitchBot "
+                    "configured or command failed) — falling back to camera LED"
                 )
 
             # Capture image via plan
