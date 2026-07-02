@@ -48,13 +48,11 @@ dependencies = [
     # Perception harness — installed as an editable sibling clone (see
     # [tool.uv.sources]); clone gently-project/gently-perception next to this repo.
     "gently-perception",
-    # Device control.
-    # pymmcore pinned exactly: its MMCore must match the device-interface version
-    # (70) of the Micro-Manager device adapters installed on the microscope PC.
-    # Bumping this requires upgrading the MM adapter install in lockstep.
-    "pymmcore==10.1.1.70.6",
-    "bluesky>=1.11.0",
-    "ophyd>=1.9.0",
+    # NOTE: the hardware-control stack (pymmcore / bluesky / ophyd) is NOT a base
+    # dep — it lives in the default-on `device` group below so a machine with no
+    # microscope can drop it via `uv sync --no-group device`. It is imported only
+    # by the device-layer process and gently.hardware.dispim, never by the agent
+    # or `--offline` launch.
     # NOTE: torch / torchvision / nvidia-ml-py are NOT base deps — CUDA build is
     # machine-specific. Install via an extra: `uv sync --extra torch-gpu` (CUDA
     # 11.8) or `uv sync --extra torch-cpu`. All torch imports are lazy/guarded.
@@ -81,19 +79,12 @@ torch-cpu = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
 ]
-# Device-layer accessories for the microscope computer. Core hardware-control
-# deps (pymmcore, bluesky, ophyd) are already in [project.dependencies]; these
-# are the extras the device layer needs: BLE (SwitchBot room light), serial and
-# MQTT transports (ACUITYnano thermal controller). Install: uv sync --extra device
-device = [
-    "bleak>=0.21.0",
-    "pyserial>=3.5",
-    "paho-mqtt>=1.6.0",
-]
 
-# Test/dev tooling — installed by `uv sync` (uv enables the `dev` group by
-# default) but excluded from gently's published runtime requirements.
+# Dependency groups are installed by `uv sync` (per [tool.uv] default-groups
+# below) but excluded from gently's published runtime requirements. Exclude any
+# group on a given machine with `uv sync --no-group <name>`.
 [dependency-groups]
+# Test/dev tooling.
 dev = [
     "pytest>=7.0.0",
     "pytest-asyncio>=0.21.0",
@@ -104,6 +95,23 @@ dev = [
     # and the install step in .github/workflows/lint.yml.
     "mypy==2.1.0",
 ]
+# Everything the microscope computer needs to drive hardware. Default-on (see
+# [tool.uv] default-groups); drop on a machine with no microscope via
+# `uv sync --no-group device`. None of these is imported by the agent or by
+# `--offline` launch — only by the device-layer process and gently.hardware.dispim.
+device = [
+    # pymmcore pinned exactly: its MMCore must match the device-interface version
+    # (70) of the Micro-Manager device adapters installed on the microscope PC.
+    # Bumping this requires upgrading the MM adapter install in lockstep.
+    "pymmcore==10.1.1.70.6",
+    "bluesky>=1.11.0",
+    "ophyd>=1.9.0",
+    # Accessory transports: BLE (SwitchBot room light), serial and MQTT
+    # (ACUITYnano thermal controller).
+    "bleak>=0.21.0",
+    "pyserial>=3.5",
+    "paho-mqtt>=1.6.0",
+]
 
 [project.scripts]
 gently = "launch_gently:cli_main"
@@ -111,6 +119,10 @@ gently = "launch_gently:cli_main"
 # torch-gpu and torch-cpu extras are mutually exclusive — they pull torch/
 # torchvision from different indexes, so they can't be installed together.
 [tool.uv]
+# Groups installed by default. `dev` is uv's implicit default; listing it here
+# keeps it on while also defaulting `device` (the microscope computer's
+# accessory transports) on. Exclude either with `uv sync --no-group <name>`.
+default-groups = ["dev", "device"]
 conflicts = [
     [{ extra = "torch-gpu" }, { extra = "torch-cpu" }],
 ]

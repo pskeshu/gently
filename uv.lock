@@ -636,21 +636,18 @@ wheels = [
 
 [[package]]
 name = "gently"
-version = "0.22.0.dev0"
+version = "0.22.0"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
     { name = "anthropic" },
-    { name = "bluesky" },
     { name = "fastapi" },
     { name = "gently-perception" },
     { name = "jinja2" },
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "opencv-python-headless" },
-    { name = "ophyd" },
     { name = "pillow" },
-    { name = "pymmcore" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "scikit-image", version = "0.25.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -663,11 +660,6 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
-device = [
-    { name = "bleak" },
-    { name = "paho-mqtt" },
-    { name = "pyserial" },
-]
 sam = [
     { name = "segment-anything" },
 ]
@@ -691,13 +683,19 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+device = [
+    { name = "bleak" },
+    { name = "bluesky" },
+    { name = "ophyd" },
+    { name = "paho-mqtt" },
+    { name = "pymmcore" },
+    { name = "pyserial" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "anthropic", specifier = ">=0.39.0" },
-    { name = "bleak", marker = "extra == 'device'", specifier = ">=0.21.0" },
-    { name = "bluesky", specifier = ">=1.11.0" },
     { name = "fastapi", specifier = ">=0.104.0" },
     { name = "gently-perception", editable = "../gently-perception" },
     { name = "jinja2", specifier = ">=3.1.0" },
@@ -705,11 +703,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.24.0,<2" },
     { name = "nvidia-ml-py", marker = "extra == 'torch-gpu'", specifier = ">=12.0.0" },
     { name = "opencv-python-headless", specifier = ">=4.8.0" },
-    { name = "ophyd", specifier = ">=1.9.0" },
-    { name = "paho-mqtt", marker = "extra == 'device'", specifier = ">=1.6.0" },
     { name = "pillow", specifier = ">=10.0.0" },
-    { name = "pymmcore", specifier = "==10.1.1.70.6" },
-    { name = "pyserial", marker = "extra == 'device'", specifier = ">=3.5" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "scikit-image", specifier = ">=0.21.0" },
@@ -722,7 +716,7 @@ requires-dist = [
     { name = "torchvision", marker = "extra == 'torch-gpu'", specifier = ">=0.15.0", index = "https://download.pytorch.org/whl/cu118", conflict = { package = "gently", extra = "torch-gpu" } },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.24.0" },
 ]
-provides-extras = ["sam", "torch-gpu", "torch-cpu", "device"]
+provides-extras = ["sam", "torch-gpu", "torch-cpu"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -731,6 +725,14 @@ dev = [
     { name = "pytest", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", specifier = ">=0.21.0" },
     { name = "ruff", specifier = ">=0.4.0" },
+]
+device = [
+    { name = "bleak", specifier = ">=0.21.0" },
+    { name = "bluesky", specifier = ">=1.11.0" },
+    { name = "ophyd", specifier = ">=1.9.0" },
+    { name = "paho-mqtt", specifier = ">=1.6.0" },
+    { name = "pymmcore", specifier = "==10.1.1.70.6" },
+    { name = "pyserial", specifier = ">=3.5" },
 ]
 
 [[package]]
