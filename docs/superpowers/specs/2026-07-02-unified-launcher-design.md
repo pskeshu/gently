@@ -111,6 +111,22 @@ This is a starting point — the following must be worked through as it grows:
   can prompt the operator to **reset the F drive** (post‑shutdown drive/housekeeping) as a
   step in the flow.
 
+## Future direction — Windows desktop app (Electron)
+
+Bigger fold‑in to weigh: package the unified launcher as a **desktop app for Windows**,
+potentially **Electron**, so gently is a double‑click application instead of terminal
+commands. Electron would *be* the launcher shell — it owns and spawns the Python backend
+(`launch_gently`) and the device‑layer child, renders the existing web UI in a native
+window (the launch gate is the first screen), and gets native process lifecycle
+(children killed on quit), a tray/menu, and a real installer + auto‑update.
+
+Tradeoffs for later: bundling/shipping the Python environment (embeddable Python /
+PyInstaller), app size, auto‑update, and keeping the **web UI the single source of truth**
+(Electron stays a thin shell — no UI logic moves into it). A lighter native wrapper
+(**pywebview** or **Tauri**) is the fallback if Electron's footprint is too heavy. This is
+a packaging/architecture decision, not required for the launcher's first cut — but the
+managed‑child process model here is exactly what an Electron shell would take over.
+
 ## Decisions log (from brainstorming)
 
 - Launcher model: **web startup screen + runtime panel**.
