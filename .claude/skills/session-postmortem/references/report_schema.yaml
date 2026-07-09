@@ -1,0 +1,94 @@
+# Gently session post-mortem — report schema (v1)
+# ---------------------------------------------------------------------------
+# A post-mortem report is authored by Claude Code (the analyst), not by the
+# harness. The harness only produces the INPUTS (the per-session artifacts +
+# a deterministic evidence pack) and owns storage/triggering.
+#
+# Two rendered forms per run:
+#   sessions/{id}/postmortem/report.yaml   <- this schema (machine-mergeable)
+#   sessions/{id}/postmortem/report.md     <- human narrative rendered from it
+#
+# Cross-run tiers the report feeds (developer-facing, NOT injected into agent prompts):
+#   agent/postmortems/{session_id}.yaml    <- one-line index entry per run
+#   agent/known_issues/{fingerprint}.yaml  <- recurrence-tracked backlog (seen_in: [...])
+#
+# DESIGN INVARIANTS
+#   - Evidence-first: every finding cites >=1 input artifact by path + key.
+#   - Auditable: an LLM authored this; keep verdict + confidence so a human or a
+#     later agent can re-check. Only CONFIRMED + high-confidence auto-acts.
+#   - Mergeable: `fingerprint` is a stable slug so the same issue recurring across
+#     runs collapses to one known_issue with an accumulating seen_in[].
+#   - Routing: harness/agent/hardware findings are developer-facing and must NOT
+#     be written to the learnings store (learnings are injected into every agent
+#     prompt). Only `audience: biology` findings may become learnings/observations.
+# ---------------------------------------------------------------------------
+
+schema_version: 1                       # int; bump on breaking schema changes
+session_id: "<8-char id>"
+generated_at: "<iso8601>"
+
+generator:                              # provenance — trust-weight v1 vs v3 reports
+  agent: "claude-code"
+  skill: "session-postmortem@<semver>"
+  workflow: "session-postmortem.js@<semver>"
+  model: "<model id>"
+  codebase_version: "<git short hash>"  # reuse InteractionRecord._get_git_version helper
+  evidence_pack: "<path or null>"       # deterministic pack this analysis read
+
+run_summary:
+  name: "<perception run / timelapse name>"
+  started_at: "<iso>"
+  ended_at: "<iso>"
+  duration_s: 0
+  terminated_cleanly: false             # false if signal-killed / left orphaned
+  n_embryos: 0
+  n_test_embryos: 0                     # role=test (biology findings scope to these)
+  n_volumes: 0
+  n_predictions: 0
+  n_timepoints: 0
+  perception: { model_name: "", method: "", n_runs: 0, n_failed: 0 }
+  interaction: { total: 0, corrections: 0, errors: 0, tool_calls: 0 }  # get_session_stats
+  temperature: { source: "real|sim", min_c: 0, mean_c: 0, max_c: 0, setpoint_active: false }
+  outcome: "<one-line verdict; also written to session_intent.actual_summary>"
+
+timeline:                               # curated NOTABLE events only (not telemetry)
+  - ts: "<iso>"
+    severity: "info|success|warning|error"   # reuse TimelineEvent.severity vocab
+    embryo_id: "<id or null>"
+    timepoint: 0
+    subtype: "<EventType name, e.g. HATCHING_DETECTED>"
+    summary: "<what happened>"
+    event_id: "<id or null>"
+
+findings:                               # the core unit — most severe first
+  - id: "F001"                          # stable within THIS report
+    fingerprint: "audience:category:signature"   # stable ACROSS runs (dedup key)
+    audience: "agent|harness|hardware|biology"
+    category: "<kebab-slug>"
+    severity: "info|low|medium|high|critical"
+    polarity: "negative|positive"       # positives ("good call") are first-class
+    title: "<one sentence>"
+    detail: "<what happened + why it matters>"
+    evidence:                           # >=1 required
+      - artifact: "<file path>"
+        ref: "<line / timepoint / key>"
+        note: "<what this shows>"
+    verdict: "CONFIRMED|PLAUSIBLE"      # set by the adversarial-verify pass
+    confidence: "high|medium|low"
+    proposed_fix: { file: "<file:line>", sketch: "<minimal change>" }   # optional
+    proposed_eval: "<regression assertion this finding should become>"  # optional
+    auto_actionable: false              # true ONLY if verdict=CONFIRMED & confidence=high
+
+metrics:
+  - { key: "", value: "", unit: "", source_artifact: "" }
+
+action_items:                           # derived from auto_actionable findings
+  - id: "A001"
+    audience: "harness|agent|hardware"
+    title: ""
+    detail: ""
+    links_finding: "F001"
+    status: "proposed|filed|done"       # 'filed' once a gh issue / eval stub exists
+
+data_gaps:                              # what the analysis could NOT verify, and why
+  - { artifact: "", issue: "", impact: "" }
