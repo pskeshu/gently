@@ -1154,8 +1154,13 @@ class MicroscopyAgent:
             except Exception:
                 logger.debug("on_message_callback failed for wake chunk", exc_info=True)
 
+        import time
+
         await _emit({"type": "autonomous_start", "trigger": trigger or ""})
         text_parts = []
+        tool_calls_log: list[dict] = []
+        wake_error = None
+        turn_start = time.time()
         self._autonomous_active = True
         agen = self.handle_message_stream(wake_note)
         sent_value = None
@@ -1172,12 +1177,24 @@ class MicroscopyAgent:
                 ctype = chunk.get("type") if isinstance(chunk, dict) else None
                 if ctype == "text":
                     text_parts.append(chunk.get("text", ""))
+                if ctype == "tool_call":
+                    # Aggregate tool calls so the whole autonomous turn is
+                    # captured as one Decision row (see the write below).
+                    tool_calls_log.append(
+                        {
+                            "name": chunk.get("tool_name"),
+                            "input": chunk.get("tool_input"),
+                            "id": None,
+                            "is_error": bool(chunk.get("is_error")),
+                        }
+                    )
                 if ctype == "choice_request":
                     # Resolve via the operator (ASK) or auto-cancel (AUTO).
                     sent_value = await self._resolve_wake_choice(chunk, _emit, interactive)
                     continue  # don't re-emit the raw choice_request
                 await _emit(chunk)
-        except Exception:
+        except Exception as exc:
+            wake_error = str(exc)
             logger.exception("run_wake_turn error")
         finally:
             self._autonomous_active = False
@@ -1186,6 +1203,26 @@ class MicroscopyAgent:
                 await agen.aclose()
             except Exception:
                 pass
+            # Self-document this autonomous decision. Without it, an
+            # event-driven turn writes nothing to decisions.jsonl (only the
+            # user-message path in call_claude does), so a fully autonomous
+            # run leaves the decision log empty (cf. session 6a4a3d9b).
+            # Best-effort — capture must never break the turn.
+            try:
+                from gently.eval import DecisionTrigger
+
+                self.conversation._write_production_decision(
+                    user_message=wake_note,
+                    tool_calls=tool_calls_log,
+                    response_text="".join(text_parts).strip(),
+                    duration_ms=(time.time() - turn_start) * 1000.0,
+                    prompt_hash_value=None,
+                    error=wake_error,
+                    trigger=DecisionTrigger.EVENT,
+                    trigger_detail=(trigger or "")[:200],
+                )
+            except Exception:
+                logger.debug("wake decision capture failed", exc_info=True)
             await _emit({"type": "stream_end"})
         summary = "".join(text_parts).strip()
         if summary:
