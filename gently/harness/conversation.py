@@ -358,8 +358,15 @@ class ConversationManager:
         duration_ms: float,
         prompt_hash_value: str | None,
         error: str | None,
+        trigger: Any = None,
+        trigger_detail: str | None = None,
     ) -> None:
         """Persist one production Decision row (best-effort).
+
+        `trigger` defaults to USER_MESSAGE (a chat turn). The autonomous
+        wake path passes DecisionTrigger.EVENT with the wake reason as
+        `trigger_detail`, so event-driven turns self-document too — without
+        this, a fully autonomous run leaves decisions.jsonl empty.
 
         Failures here are swallowed — decision capture must never break
         the live agent. The DecisionLog itself is also tolerant of
@@ -376,8 +383,12 @@ class ConversationManager:
                 Decision(
                     timestamp=datetime.now(),
                     agent="production",
-                    trigger=DecisionTrigger.USER_MESSAGE,
-                    trigger_detail=(user_message or "")[:200],
+                    trigger=trigger or DecisionTrigger.USER_MESSAGE,
+                    trigger_detail=(
+                        trigger_detail
+                        if trigger_detail is not None
+                        else (user_message or "")[:200]
+                    ),
                     tool_calls=tool_calls,
                     response_text=response_text,
                     prompt_hash=prompt_hash_value,
