@@ -475,7 +475,8 @@ def create_router(server) -> APIRouter:
         except Exception as exc:
             logger.exception("Thermalizer reconfigure failed")
             raise HTTPException(
-                status_code=502, detail=f"thermalizer reconfigure failed: {exc}") from exc
+                status_code=502, detail=f"thermalizer reconfigure failed: {exc}"
+            ) from exc
         return res
 
     @router.get("/api/config/effective")
@@ -492,15 +493,20 @@ def create_router(server) -> APIRouter:
 
         return {
             "note": "settings.py values are read from env at startup; "
-                    "changing them needs a restart.",
+            "changing them needs a restart.",
             "network": {
-                "viz_host": S.network.viz_host, "viz_port": S.network.viz_port,
-                "device_host": S.network.device_host, "device_port": S.network.device_port,
+                "viz_host": S.network.viz_host,
+                "viz_port": S.network.viz_port,
+                "device_host": S.network.device_host,
+                "device_port": S.network.device_port,
                 "mesh_port": S.network.mesh_port,
             },
             "models": {
-                "main": S.models.main, "perception": S.models.perception, "fast": S.models.fast,
-                "medium": S.models.medium, "refusal_fallback": S.models.refusal_fallback,
+                "main": S.models.main,
+                "perception": S.models.perception,
+                "fast": S.models.fast,
+                "medium": S.models.medium,
+                "refusal_fallback": S.models.refusal_fallback,
             },
             "storage": {"base_path": str(S.storage.base_path)},
             "timeouts": {
@@ -511,10 +517,12 @@ def create_router(server) -> APIRouter:
             "ml": {
                 "default_batch_size": S.ml.default_batch_size,
                 "default_epochs": S.ml.default_epochs,
-                "default_lr": S.ml.default_lr, "model_cache_dir": str(S.ml.model_cache_dir),
+                "default_lr": S.ml.default_lr,
+                "model_cache_dir": str(S.ml.model_cache_dir),
             },
             "transfer": {
-                "transfer_port": S.transfer.transfer_port, "chunk_size": S.transfer.chunk_size,
+                "transfer_port": S.transfer.transfer_port,
+                "chunk_size": S.transfer.chunk_size,
                 "max_concurrent_transfers": S.transfer.max_concurrent_transfers,
             },
             "mesh": {
@@ -563,22 +571,62 @@ def create_router(server) -> APIRouter:
     # timeouts.plan_execution and ml.* defaults (currently 0 readers — editing
     # would be a silent no-op).
     _override_keys = [
-        {"env": "GENTLY_TIMEOUT_VOLUME", "label": "Volume acquisition (s)", "type": "int",
-         "group": "Timeouts", "get": lambda S: S.timeouts.volume_acquisition},
-        {"env": "GENTLY_TIMEOUT_API", "label": "External API call (s)", "type": "int",
-         "group": "Timeouts", "get": lambda S: S.timeouts.api_call},
-        {"env": "GENTLY_MESH_BROADCAST_INTERVAL", "label": "Broadcast interval (s)",
-         "type": "float", "group": "Mesh network", "get": lambda S: S.mesh.broadcast_interval_s},
-        {"env": "GENTLY_MESH_STALE_THRESHOLD", "label": "Stale threshold (s)", "type": "float",
-         "group": "Mesh network", "get": lambda S: S.mesh.stale_threshold_s},
-        {"env": "GENTLY_MESH_DEAD_THRESHOLD", "label": "Dead threshold (s)", "type": "float",
-         "group": "Mesh network", "get": lambda S: S.mesh.dead_threshold_s},
-        {"env": "GENTLY_UX_V2", "label": "UX v2 dashboard", "type": "bool",
-         "group": "Interface", "get": lambda S: S.ui.ux_v2},
-        {"env": "GENTLY_NCBI_TOOL", "label": "Tool name", "type": "str",
-         "group": "NCBI (Entrez)", "get": lambda S: S.api.ncbi_tool},
-        {"env": "GENTLY_NCBI_EMAIL", "label": "Contact email", "type": "str",
-         "group": "NCBI (Entrez)", "get": lambda S: S.api.ncbi_email},
+        {
+            "env": "GENTLY_TIMEOUT_VOLUME",
+            "label": "Volume acquisition (s)",
+            "type": "int",
+            "group": "Timeouts",
+            "get": lambda S: S.timeouts.volume_acquisition,
+        },
+        {
+            "env": "GENTLY_TIMEOUT_API",
+            "label": "External API call (s)",
+            "type": "int",
+            "group": "Timeouts",
+            "get": lambda S: S.timeouts.api_call,
+        },
+        {
+            "env": "GENTLY_MESH_BROADCAST_INTERVAL",
+            "label": "Broadcast interval (s)",
+            "type": "float",
+            "group": "Mesh network",
+            "get": lambda S: S.mesh.broadcast_interval_s,
+        },
+        {
+            "env": "GENTLY_MESH_STALE_THRESHOLD",
+            "label": "Stale threshold (s)",
+            "type": "float",
+            "group": "Mesh network",
+            "get": lambda S: S.mesh.stale_threshold_s,
+        },
+        {
+            "env": "GENTLY_MESH_DEAD_THRESHOLD",
+            "label": "Dead threshold (s)",
+            "type": "float",
+            "group": "Mesh network",
+            "get": lambda S: S.mesh.dead_threshold_s,
+        },
+        {
+            "env": "GENTLY_UX_V2",
+            "label": "UX v2 dashboard",
+            "type": "bool",
+            "group": "Interface",
+            "get": lambda S: S.ui.ux_v2,
+        },
+        {
+            "env": "GENTLY_NCBI_TOOL",
+            "label": "Tool name",
+            "type": "str",
+            "group": "NCBI (Entrez)",
+            "get": lambda S: S.api.ncbi_tool,
+        },
+        {
+            "env": "GENTLY_NCBI_EMAIL",
+            "label": "Contact email",
+            "type": "str",
+            "group": "NCBI (Entrez)",
+            "get": lambda S: S.api.ncbi_email,
+        },
     ]
     _settings_local_path = _HARDWARE_CONFIG_PATH.parent / "settings.local.yml"
 
@@ -607,8 +655,14 @@ def create_router(server) -> APIRouter:
 
         file_over = _read_settings_local()
         items = [
-            {"env": k["env"], "label": k["label"], "type": k["type"], "group": k["group"],
-             "current": k["get"](S), "overridden": k["env"] in file_over}
+            {
+                "env": k["env"],
+                "label": k["label"],
+                "type": k["type"],
+                "group": k["group"],
+                "current": k["get"](S),
+                "overridden": k["env"] in file_over,
+            }
             for k in _override_keys
         ]
         return {"note": "changes take effect on the next process restart", "items": items}
@@ -628,13 +682,18 @@ def create_router(server) -> APIRouter:
                 updates[k] = _coerce_override(allowed[k], v)
             except (TypeError, ValueError):
                 raise HTTPException(
-                    status_code=400, detail=f"{k}: invalid {allowed[k]} value") from None
+                    status_code=400, detail=f"{k}: invalid {allowed[k]} value"
+                ) from None
         existing = _read_settings_local()
         existing.update(updates)
         _settings_local_path.write_text(
-            yaml.safe_dump(existing, default_flow_style=False, sort_keys=True))
-        return {"saved": list(updates.keys()), "restart_required": True,
-                "note": "restart the server for these to take effect"}
+            yaml.safe_dump(existing, default_flow_style=False, sort_keys=True)
+        )
+        return {
+            "saved": list(updates.keys()),
+            "restart_required": True,
+            "note": "restart the server for these to take effect",
+        }
 
     # ------------------------------------------------------------------
     # Lightsheet live stream
@@ -1105,9 +1164,12 @@ def create_router(server) -> APIRouter:
                 try:
                     pos = getattr(emb, "position_coarse", {}) or {}
                     store.register_embryo(
-                        sid, eid,
-                        position_x=pos.get("x"), position_y=pos.get("y"),
-                        calibration=getattr(emb, "calibration", {}) or {}, role=str(role),
+                        sid,
+                        eid,
+                        position_x=pos.get("x"),
+                        position_y=pos.get("y"),
+                        calibration=getattr(emb, "calibration", {}) or {},
+                        role=str(role),
                     )
                 except Exception:
                     logger.debug("role persist failed for %s", eid, exc_info=True)
@@ -1117,8 +1179,12 @@ def create_router(server) -> APIRouter:
 
                     bus.publish(
                         event_type=EventType.STATUS_CHANGED,
-                        data={"embryo_id": eid, "change": "role_assigned",
-                              "old_role": old, "new_role": str(role)},
+                        data={
+                            "embryo_id": eid,
+                            "change": "role_assigned",
+                            "old_role": old,
+                            "new_role": str(role),
+                        },
                         source="operate_roles",
                     )
                 except Exception:
@@ -1443,33 +1509,49 @@ def create_router(server) -> APIRouter:
                 eids = list(embryo_ids or [])
                 seed_scope = {"mode": "embryos", "embryo_ids": eids} if eids else {"mode": "global"}
                 st_id = f"op_{_uuid.uuid4().hex[:8]}"
-                new_tactics = [
+                new_tactics: list[dict] = [
                     {
-                        "id": st_id, "name": "Adaptive timelapse",
-                        "kind": "standing_timelapse", "state": "active",
+                        "id": st_id,
+                        "name": "Adaptive timelapse",
+                        "kind": "standing_timelapse",
+                        "state": "active",
                         "scope": dict(seed_scope),
                         "structure": {
-                            "cadence_s": interval_seconds, "interval": interval_seconds,
-                            "stop_condition": stop_condition, "condition_value": condition_value,
+                            "cadence_s": interval_seconds,
+                            "interval": interval_seconds,
+                            "stop_condition": stop_condition,
+                            "condition_value": condition_value,
                             "monitoring_mode": monitoring_mode or "idle",
                         },
                         "rationale": "Started from the Operate Run step.",
-                        "live_bind": ["cadence"], "relations": {}, "live": {}, "source": "operate",
+                        "live_bind": ["cadence"],
+                        "relations": {},
+                        "live": {},
+                        "source": "operate",
                     }
                 ]
                 if monitoring_mode and monitoring_mode != "idle":
-                    new_tactics.append({
-                        "id": f"op_{_uuid.uuid4().hex[:8]}", "name": "Monitor",
-                        "kind": "reactive_monitor", "state": "active",
-                        "scope": dict(seed_scope),
-                        "structure": {"monitoring_mode": monitoring_mode, "status": "armed"},
-                        "rationale": f"{monitoring_mode} on the marked subjects.",
-                        "live_bind": ["signal"], "relations": {"layered_on": [st_id]},
-                        "live": {}, "source": "operate",
-                    })
+                    new_tactics.append(
+                        {
+                            "id": f"op_{_uuid.uuid4().hex[:8]}",
+                            "name": "Monitor",
+                            "kind": "reactive_monitor",
+                            "state": "active",
+                            "scope": dict(seed_scope),
+                            "structure": {"monitoring_mode": monitoring_mode, "status": "armed"},
+                            "rationale": f"{monitoring_mode} on the marked subjects.",
+                            "live_bind": ["signal"],
+                            "relations": {"layered_on": [st_id]},
+                            "live": {},
+                            "source": "operate",
+                        }
+                    )
                 new_tactics = _validate_tactics(new_tactics)
                 plan = cs.get_operation_plan(sid) or {
-                    "session_id": sid, "title": "Operate session", "goal": "", "tactics": []
+                    "session_id": sid,
+                    "title": "Operate session",
+                    "goal": "",
+                    "tactics": [],
                 }
                 # Reconcile: retire any prior still-'active' operate-seeded tactics
                 # so repeated Start clicks don't accumulate stale active timelapses.

@@ -76,7 +76,7 @@ class DeviceLayerServer(Service):
     ):
         super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
-        self.config = None
+        self.config: dict | None = None
         # DiSPIMSystem facade — only place this process touches MMCore directly
         self.system: Any = None
         self.RE = None
@@ -2169,16 +2169,19 @@ class DeviceLayerServer(Service):
             cfg = dict((self.config or {}).get("temperature") or {})
             has_pw = bool(cfg.get("password"))
             temp = self.devices.get("temperature")
-            return web.json_response({
-                "success": True,
-                "config": self._redact_temp_cfg(cfg),
-                "password_set": has_pw,
-                "active": temp is not None,
-                "live_backend": type(temp._dev).__name__ if temp is not None else None,
-                "state": self._temp_state(temp),
-            })
+            return web.json_response(
+                {
+                    "success": True,
+                    "config": self._redact_temp_cfg(cfg),
+                    "password_set": has_pw,
+                    "active": temp is not None,
+                    "live_backend": type(temp._dev).__name__ if temp is not None else None,
+                    "state": self._temp_state(temp),
+                }
+            )
         except Exception as e:
             import traceback
+
             return web.json_response(
                 {"success": False, "error": str(e), "traceback": traceback.format_exc()},
                 status=500,
@@ -2199,6 +2202,7 @@ class DeviceLayerServer(Service):
 
         def _probe():
             from gently.hardware.temperature import create_temperature_controller
+
             tc = create_temperature_controller(eff)
             try:
                 r = tc.read()
@@ -2227,7 +2231,7 @@ class DeviceLayerServer(Service):
             import os
 
             sidecar = Path(self.config_path).parent / "config.local.yml"
-            existing = {}
+            existing: dict = {}
             if sidecar.exists():
                 with open(sidecar) as f:
                     existing = yaml.safe_load(f) or {}
@@ -2266,16 +2270,24 @@ class DeviceLayerServer(Service):
         re_state = str(getattr(self.RE, "state", "idle")) if self.RE is not None else "idle"
         if re_state != "idle":
             return web.json_response(
-                {"success": False, "blocked": True,
-                 "error": f"RunEngine is {re_state}; stop the plan before reconfiguring"},
-                status=409)
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": f"RunEngine is {re_state}; stop the plan before reconfiguring",
+                },
+                status=409,
+            )
         old = self.devices.get("temperature")
         lock = getattr(old, "_lock", None)
         if lock is not None and lock.locked():
             return web.json_response(
-                {"success": False, "blocked": True,
-                 "error": "a temperature ramp is in progress; wait or stop it first"},
-                status=409)
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": "a temperature ramp is in progress; wait or stop it first",
+                },
+                status=409,
+            )
 
         # Fill in the stored password when the client didn't submit a new one.
         eff = self._preserve_temp_password(cfg)
@@ -2283,6 +2295,7 @@ class DeviceLayerServer(Service):
         # Build the NEW controller first (eager connect off the event loop).
         def _build():
             from gently.hardware.temperature import create_temperature_controller
+
             return create_temperature_controller(eff)
 
         try:
@@ -2290,10 +2303,15 @@ class DeviceLayerServer(Service):
         except Exception as e:
             self._write_temp_sidecar(eff)  # save intent; a restart will apply it
             return web.json_response(
-                {"success": False, "applied": False, "restart_required": True,
-                 "error": f"could not connect with the new config: {e}. "
-                          "Saved — restart the device layer to apply."},
-                status=502)
+                {
+                    "success": False,
+                    "applied": False,
+                    "restart_required": True,
+                    "error": f"could not connect with the new config: {e}. "
+                    "Saved — restart the device layer to apply.",
+                },
+                status=502,
+            )
 
         # Swap + retire the old controller.
         self.devices["temperature"] = new_tc
@@ -2306,12 +2324,16 @@ class DeviceLayerServer(Service):
         self.config["temperature"] = eff
         self._write_temp_sidecar(eff)
         logger.info("Thermalizer reconfigured live (backend=%s)", eff.get("backend", "serial"))
-        return web.json_response({
-            "success": True, "applied": True, "restart_required": False,
-            "config": self._redact_temp_cfg(eff),
-            "live_backend": type(new_tc._dev).__name__,
-            "state": self._temp_state(new_tc),
-        })
+        return web.json_response(
+            {
+                "success": True,
+                "applied": True,
+                "restart_required": False,
+                "config": self._redact_temp_cfg(eff),
+                "live_backend": type(new_tc._dev).__name__,
+                "state": self._temp_state(new_tc),
+            }
+        )
 
     async def handle_set_camera_led_mode(self, request):
         """POST /api/camera/led_mode - Enable/disable automatic LED for bottom camera"""
@@ -3654,7 +3676,8 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/temperature/set", self.handle_set_temperature)
         self._app.router.add_get("/api/temperature/config", self.handle_get_temperature_config)
         self._app.router.add_post(
-            "/api/temperature/config/test", self.handle_test_temperature_config)
+            "/api/temperature/config/test", self.handle_test_temperature_config
+        )
         self._app.router.add_post("/api/temperature/config", self.handle_set_temperature_config)
         self._app.router.add_get("/api/room_light/status", self.handle_get_room_light_status)
         self._app.router.add_post("/api/room_light/set", self.handle_set_room_light)

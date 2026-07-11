@@ -3,6 +3,7 @@
 Vendor-supplied SDK, not on PyPI; bundled with gently so the device layer always
 has it. Requires ``pyserial`` (the ``device`` extra). See gently.hardware.vendor.
 """
+
 import threading
 import time
 

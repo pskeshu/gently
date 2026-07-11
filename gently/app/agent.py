@@ -29,6 +29,9 @@ if TYPE_CHECKING:
     from ..ui.web.server import VisualizationServer
     from .bottom_camera_monitor import BottomCameraStreamMonitor
     from .device_state_monitor import DeviceStateMonitor
+    from .lightsheet_monitor import LightSheetStreamMonitor
+    from .operation_plan_updater import OperationPlanUpdater
+    from .temperature_sampler import TemperatureSampler
 
 from gently_perception import Perceiver
 
@@ -213,14 +216,14 @@ class MicroscopyAgent:
         # Device-state monitor (bridges device-layer SSE → EventBus)
         self.device_state_monitor: DeviceStateMonitor | None = None
         # Session-scoped temperature sampler — polls device layer, persists readings.
-        self.temperature_sampler = None
+        self.temperature_sampler: TemperatureSampler | None = None
         # Bus-subscriber that transitions plan tactics when execution events fire.
-        self.operation_plan_updater = None
+        self.operation_plan_updater: OperationPlanUpdater | None = None
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
         self.bottom_camera_monitor: BottomCameraStreamMonitor | None = None
         # Opt-in lightsheet stream bridge — same lifecycle as bottom_camera_monitor.
-        self.lightsheet_monitor = None
+        self.lightsheet_monitor: LightSheetStreamMonitor | None = None
 
         # ===== Create delegate managers =====
 
@@ -477,7 +480,8 @@ class MicroscopyAgent:
                         seed_operation_plan_from_plan_item,
                     )
 
-                    seed_operation_plan_from_plan_item(self.context_store, self.session_id)
+                    if self.session_id is not None:
+                        seed_operation_plan_from_plan_item(self.context_store, self.session_id)
                 except Exception:
                     logger.exception("operation-plan seeding failed")
             elif candidates:

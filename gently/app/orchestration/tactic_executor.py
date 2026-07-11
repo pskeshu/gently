@@ -57,8 +57,12 @@ async def execute_tactic(agent, tactic: dict) -> dict:
 
     embryo_ids = resolve_scope_embryos(scope, _roster(agent))
     if not embryo_ids and kind not in ("oneshot", "custom", "scripted_protocol"):
-        return {"ok": False, "kind": kind, "embryo_ids": [],
-                "message": "scope resolved to no embryos"}
+        return {
+            "ok": False,
+            "kind": kind,
+            "embryo_ids": [],
+            "message": "scope resolved to no embryos",
+        }
 
     message = ""
     try:
@@ -86,11 +90,15 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             frames = int(_num(structure.get("frames"), 60))
             results = []
             for eid in embryo_ids:
-                results.append(orchestrator.queue_burst(
-                    eid, frames=frames, mode=str(structure.get("mode", "1hz")),
-                    num_slices=int(_num(structure.get("num_slices"), 1)),
-                    tactic_id=tactic_id,
-                ))
+                results.append(
+                    orchestrator.queue_burst(
+                        eid,
+                        frames=frames,
+                        mode=str(structure.get("mode", "1hz")),
+                        num_slices=int(_num(structure.get("num_slices"), 1)),
+                        tactic_id=tactic_id,
+                    )
+                )
             message = "; ".join(results)
 
         elif kind in ("oneshot", "scripted_protocol", "custom"):
@@ -99,8 +107,12 @@ async def execute_tactic(agent, tactic: dict) -> dict:
             message = f"{kind} recorded (no orchestrator mechanism)"
 
         else:
-            return {"ok": False, "kind": kind, "embryo_ids": embryo_ids,
-                    "message": f"unknown tactic kind '{kind}'"}
+            return {
+                "ok": False,
+                "kind": kind,
+                "embryo_ids": embryo_ids,
+                "message": f"unknown tactic kind '{kind}'",
+            }
     except Exception as exc:
         logger.exception("tactic execution failed (kind=%s)", kind)
         return {"ok": False, "kind": kind, "embryo_ids": embryo_ids, "message": str(exc)}
@@ -138,7 +150,10 @@ def append_tactic_to_plan(agent, tactic: dict) -> dict | None:
     t.setdefault("name", t.get("kind", "tactic"))
     (validated,) = _validate_tactics([t])
     plan = cs.get_operation_plan(sid) or {
-        "session_id": sid, "title": "Operate session", "goal": "", "tactics": []
+        "session_id": sid,
+        "title": "Operate session",
+        "goal": "",
+        "tactics": [],
     }
     plan.setdefault("tactics", []).append(validated)
     plan["updated_reason"] = "operate tactic appended"

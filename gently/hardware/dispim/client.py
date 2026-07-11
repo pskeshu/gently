@@ -1021,6 +1021,7 @@ class DiSPIMMicroscope(Microscope):
             sock_connect=10.0,
         )
         url = f"{self.http_url}/api/lightsheet/stream"
+        assert self._session is not None
         async with self._session.get(url, timeout=client_timeout) as resp:
             resp.raise_for_status()
             buf = b""
@@ -1050,7 +1051,7 @@ class DiSPIMMicroscope(Microscope):
         self, galvo=None, piezo=None, exposure=None, side=None
     ) -> dict:
         """POST live galvo/piezo/exposure/side to the device-layer lightsheet streamer."""
-        body = {}
+        body: dict[str, float | str] = {}
         if galvo is not None:
             body["galvo"] = float(galvo)
         if piezo is not None:
