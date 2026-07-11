@@ -20,9 +20,14 @@ timeout). read() reports the live water temperature (plus setpoint / state, and
 peltier temp when the transport provides it). BLE-style work runs in a worker
 thread so the Status integrates with the RunEngine.
 
-NOTE: the vendor `acuitynano_precision_thermalizer_*` packages are NOT on PyPI —
-install them on the device-layer machine. Local logic can be exercised with the
-built-in mock backend: `python gently/hardware/temperature.py --mock 20`.
+NOTE: the vendor `acuitynano_precision_thermalizer_*` packages are NOT on PyPI.
+gently bundles the SERIAL transport under `gently.hardware.vendor`; the MQTT
+transport is NOT bundled (it embeds broker credentials) so install it on the
+device-layer machine to use `backend: mqtt`. A system-installed copy of either
+name takes precedence over the bundled one. Both transports need the `device`
+extra (`uv sync --extra device`) for pyserial / paho-mqtt. Local logic can be
+exercised with the built-in mock backend:
+`python gently/hardware/temperature.py --mock 20`.
 """
 
 from __future__ import annotations
@@ -38,22 +43,48 @@ TEMP_MIN_C = 0.0
 TEMP_MAX_C = 99.9
 
 
+def _load_vendor(module: str, cls: str):
+    """Resolve a vendor SDK class, preferring a system-installed copy.
+
+    The ACUITYnano packages aren't on PyPI. gently bundles the SERIAL transport
+    under ``gently.hardware.vendor``; the MQTT transport is NOT bundled (it
+    embeds broker credentials), so it must be installed on the device-layer
+    machine. We try the top-level module name first (lets an officially-installed
+    vendor build override the bundled one), then fall back to the vendored copy.
+    """
+    import importlib
+
+    last_err: ImportError | None = None
+    for name in (module, f"gently.hardware.vendor.{module}"):
+        try:
+            return getattr(importlib.import_module(name), cls)
+        except ImportError as exc:
+            last_err = exc
+            continue
+    raise ImportError(
+        f"could not import {cls}: {module!r} is not installed and there is no "
+        f"bundled gently.hardware.vendor copy ({last_err})"
+    ) from last_err
+
+
 def _make_backend(cfg: dict):
     """Construct the vendor SDK transport from a config mapping."""
     backend = str(cfg.get("backend", "serial")).lower()
     if backend == "mock":
         return _MockBackend()
     if backend == "serial":
-        from acuitynano_precision_thermalizer_serial import (
-            AcuityNanoPrecisionThermalizerSerial,
+        AcuityNanoPrecisionThermalizerSerial = _load_vendor(
+            "acuitynano_precision_thermalizer_serial",
+            "AcuityNanoPrecisionThermalizerSerial",
         )
 
         return AcuityNanoPrecisionThermalizerSerial(
             cfg["com_port"], baud_rate=cfg.get("baud_rate", 115200)
         )
     if backend == "mqtt":
-        from acuitynano_precision_thermalizer_api import (
-            AcuityNanoPrecisionThermalizerAPI,
+        AcuityNanoPrecisionThermalizerAPI = _load_vendor(
+            "acuitynano_precision_thermalizer_api",
+            "AcuityNanoPrecisionThermalizerAPI",
         )
 
         # The vendor package ships with an embedded HiveMQ Cloud broker + creds,

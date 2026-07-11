@@ -19,16 +19,15 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from gently.settings import settings
-
-logger = logging.getLogger(__name__)
-
-from gently.core.coordinates import (  # noqa: E402
+from gently.core.coordinates import (
     DEFAULT_OBJECTIVE_MAG,
     DEFAULT_PIXEL_SIZE_UM,
     get_um_per_pixel,
     pixel_to_stage_position,
 )
+from gently.settings import settings
+
+logger = logging.getLogger(__name__)
 
 
 class SAMEmbryoDetector:
@@ -757,8 +756,8 @@ class SAMEmbryoDetector:
 
         image_base64 = self._encode_image_base64(annotated)
 
-        prompt = f"""You are a microscopy expert analyzing embryo detections from a bottom
-camera view.
+        prompt = f"""\
+You are a microscopy expert analyzing embryo detections from a bottom camera view.
 
 CURRENT DETECTIONS: {len(embryos)} embryos labeled 0-{len(embryos) - 1} with colored bounding boxes.
 
@@ -790,7 +789,9 @@ Respond in JSON:
             message = self.claude_client.messages.create(
                 model=settings.models.perception,
                 max_tokens=8000,
-                thinking={"type": "enabled", "budget_tokens": 5000},
+                output_config={
+                    "effort": "high"
+                },  # was thinking budget_tokens (Opus 4.8 rejects it)
                 messages=[
                     {
                         "role": "user",
@@ -860,7 +861,9 @@ Respond in JSON:
             message = self.claude_client.messages.create(
                 model=settings.models.perception,
                 max_tokens=6000,
-                thinking={"type": "enabled", "budget_tokens": 4000},
+                output_config={
+                    "effort": "high"
+                },  # was thinking budget_tokens (Opus 4.8 rejects it)
                 messages=[
                     {
                         "role": "user",

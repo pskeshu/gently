@@ -85,13 +85,24 @@ class EventType(Enum):
     FOCUS_CHANGED = auto()
     LASER_CHANGED = auto()
     DEVICE_STATE_UPDATE = auto()  # Periodic device-state snapshot from device layer
+    TEMPERATURE_UPDATE = auto()  # Temperature reading from device layer
     BOTTOM_CAMERA_FRAME = auto()  # Live JPEG frame from the bottom camera stream
+    LIGHTSHEET_FRAME = auto()  # Live JPEG frame from the SPIM lightsheet live stream
     EMBRYOS_UPDATE = auto()  # Full embryo list snapshot from agent.experiment
+    SCAN_GEOMETRY_UPDATE = auto()  # Scan cuboid + light-sheet mode for the 3D optical-space view
 
     # Python logging.LogRecord republished onto the bus so the Events page
     # surfaces what would otherwise only land in the terminal. See
     # gently/core/log_bridge.py — opt-in handler.
     LOG_RECORD = auto()
+
+    # Agent context/mind updates (expectations / watchpoints / questions) —
+    # drives the shared-visibility surface in the v2 UI.
+    CONTEXT_UPDATED = auto()
+
+    # Plan/campaign mutated (item status, session link, new item, progress) —
+    # drives live refresh of the Plans UI.
+    PLAN_UPDATED = auto()
 
     # Operator-action events. Distinct from EMBRYOS_UPDATE because they
     # carry intent ("a human did this") rather than just state delta.
@@ -116,6 +127,13 @@ class EventType(Enum):
     BURST_START = auto()  # {embryo_id, request_id, frames, mode}
     BURST_FRAME = auto()  # {embryo_id, request_id, frame_idx, total_frames}
     BURST_COMPLETE = auto()  # {embryo_id, request_id, mp4_path, sustained_hz, frames_captured}
+
+    # Temperature protocol events (Phase X / 10) — temp-change burst tactic
+    TEMPERATURE_SETPOINT_CHANGED = auto()  # {embryo_id, to}
+    TEMP_PROTOCOL_STARTED = (
+        auto()
+    )  # {embryo_id, target_setpoint_c, frames, bursts_before, bursts_after}
+    TEMP_PROTOCOL_COMPLETED = auto()  # {embryo_id, locked, cancelled, error}
 
     # Reactive control telemetry (Phase 5 / 10)
     POWER_RAMP_STEP = auto()  # {embryo_id, rule, wavelength, old_pct, new_pct, direction}
@@ -177,7 +195,9 @@ class EventType(Enum):
 _NO_HISTORY_TYPES = frozenset(
     {
         EventType.DEVICE_STATE_UPDATE,
+        EventType.TEMPERATURE_UPDATE,  # High-volume telemetry from temperature controller
         EventType.BOTTOM_CAMERA_FRAME,  # ~2 Hz JPEG frames — would crowd history out
+        EventType.LIGHTSHEET_FRAME,  # High-volume live frames — keep out of history
         EventType.LOG_RECORD,  # log lines can hit hundreds/min during
         # calibration; durable copy is in the
         # gently_*.log file already

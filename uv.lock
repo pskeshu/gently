@@ -2,15 +2,15 @@ version = 1
 revision = 3
 requires-python = ">=3.10, <3.13"
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 conflicts = [[
     { package = "gently", extra = "torch-cpu" },
@@ -301,10 +301,9 @@ name = "contourpy"
 version = "1.3.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -354,11 +353,12 @@ name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version >= '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -646,6 +646,7 @@ dependencies = [
     { name = "jinja2" },
     { name = "matplotlib" },
     { name = "numpy" },
+    { name = "opencv-python-headless" },
     { name = "pillow" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -701,6 +702,7 @@ requires-dist = [
     { name = "matplotlib", specifier = ">=3.7.0" },
     { name = "numpy", specifier = ">=1.24.0,<2" },
     { name = "nvidia-ml-py", marker = "extra == 'torch-gpu'", specifier = ">=12.0.0" },
+    { name = "opencv-python-headless", specifier = ">=4.8.0" },
     { name = "pillow", specifier = ">=10.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
@@ -1435,10 +1437,9 @@ name = "networkx"
 version = "3.4.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/fd/1d/06475e1cd5264c0b870ea2cc6fdb3e37177c1e565c43f56ff17a10e3937f/networkx-3.4.2.tar.gz", hash = "sha256:307c3669428c5362aab27c8a1260aa8f47c4e91d3891f48be0141738d8d053e1", size = 2151368, upload-time = "2024-10-21T12:39:38.695Z" }
 wheels = [
@@ -1450,11 +1451,12 @@ name = "networkx"
 version = "3.6.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6a/51/63fe664f3908c97be9d2e4f1158eb633317598cfa6e1fc14af5383f17512/networkx-3.6.1.tar.gz", hash = "sha256:26b7c357accc0c8cde558ad486283728b65b6a95d85ee1cd66bafab4c8168509", size = 2517025, upload-time = "2025-12-08T17:02:39.908Z" }
 wheels = [
@@ -1551,7 +1553,7 @@ name = "nvidia-cudnn-cu11"
 version = "9.1.0.70"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11" },
+    { name = "nvidia-cublas-cu11", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/00/3b/0b776f04e364cd99e4cf152c2a9eadb5934c67c9a91429da55169a9447fd/nvidia_cudnn_cu11-9.1.0.70-py3-none-manylinux2014_x86_64.whl", hash = "sha256:e6135ac63fe9d5b0b89cfb35c3fc1c1349f2b995becadf2e9dc21bca89d9633d", size = 663919573, upload-time = "2024-04-22T15:20:24.839Z" },
@@ -1585,7 +1587,7 @@ name = "nvidia-cusolver-cu11"
 version = "11.4.1.48"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "nvidia-cublas-cu11" },
+    { name = "nvidia-cublas-cu11", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/55/ee/939ff0104991dd7bdabb4c9767994c612ba0e1c9a55672a1ddd42f5e5b16/nvidia_cusolver_cu11-11.4.1.48-py3-none-manylinux1_x86_64.whl", hash = "sha256:ca538f545645b7e6629140786d3127fe067b3d5a085bd794cde5bfe877c8926f", size = 128240842, upload-time = "2022-10-03T23:30:24.348Z" },
@@ -1631,6 +1633,23 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/42/b9/385e4323646d21f9aedb9e953e5c778311cd8df32eb2237f1ce242c58572/nvidia_nvtx_cu11-11.8.86-py3-none-manylinux2014_aarch64.whl", hash = "sha256:5e84b97062eb102b45a8a9172a06cfe28b239b1635075a13d6474e91295e0468", size = 100401, upload-time = "2024-08-16T23:58:25.484Z" },
     { url = "https://files.pythonhosted.org/packages/b5/ad/973a187b137a3d45dc3faac421ef1275fb41fc169fd3889e2d5ceb0daa54/nvidia_nvtx_cu11-11.8.86-py3-none-manylinux2014_x86_64.whl", hash = "sha256:979f5b2aef5da164c5c53c64c85c3dfa61b8b4704f4f963bb568bf98fa8472e8", size = 99130, upload-time = "2024-08-16T23:58:33.479Z" },
     { url = "https://files.pythonhosted.org/packages/3f/3f/0e1dd2bc4d89f838b86c76956ffa514307d3be4d8b5ee0da4e9d12a8b54b/nvidia_nvtx_cu11-11.8.86-py3-none-win_amd64.whl", hash = "sha256:54031010ee38d774b2991004d88f90bbd7bbc1458a96bbc4b42662756508c252", size = 66297, upload-time = "2022-10-03T23:39:12.132Z" },
+]
+
+[[package]]
+name = "opencv-python-headless"
+version = "4.11.0.86"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/36/2f/5b2b3ba52c864848885ba988f24b7f105052f68da9ab0e693cc7c25b0b30/opencv-python-headless-4.11.0.86.tar.gz", hash = "sha256:996eb282ca4b43ec6a3972414de0e2331f5d9cda2b41091a49739c19fb843798", size = 95177929, upload-time = "2025-01-16T13:53:40.22Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/dc/53/2c50afa0b1e05ecdb4603818e85f7d174e683d874ef63a6abe3ac92220c8/opencv_python_headless-4.11.0.86-cp37-abi3-macosx_13_0_arm64.whl", hash = "sha256:48128188ade4a7e517237c8e1e11a9cdf5c282761473383e77beb875bb1e61ca", size = 37326460, upload-time = "2025-01-16T13:52:57.015Z" },
+    { url = "https://files.pythonhosted.org/packages/3b/43/68555327df94bb9b59a1fd645f63fafb0762515344d2046698762fc19d58/opencv_python_headless-4.11.0.86-cp37-abi3-macosx_13_0_x86_64.whl", hash = "sha256:a66c1b286a9de872c343ee7c3553b084244299714ebb50fbdcd76f07ebbe6c81", size = 56723330, upload-time = "2025-01-16T13:55:45.731Z" },
+    { url = "https://files.pythonhosted.org/packages/45/be/1438ce43ebe65317344a87e4b150865c5585f4c0db880a34cdae5ac46881/opencv_python_headless-4.11.0.86-cp37-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:6efabcaa9df731f29e5ea9051776715b1bdd1845d7c9530065c7951d2a2899eb", size = 29487060, upload-time = "2025-01-16T13:51:59.625Z" },
+    { url = "https://files.pythonhosted.org/packages/dd/5c/c139a7876099916879609372bfa513b7f1257f7f1a908b0bdc1c2328241b/opencv_python_headless-4.11.0.86-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:0e0a27c19dd1f40ddff94976cfe43066fbbe9dfbb2ec1907d66c19caef42a57b", size = 49969856, upload-time = "2025-01-16T13:53:29.654Z" },
+    { url = "https://files.pythonhosted.org/packages/95/dd/ed1191c9dc91abcc9f752b499b7928aacabf10567bb2c2535944d848af18/opencv_python_headless-4.11.0.86-cp37-abi3-win32.whl", hash = "sha256:f447d8acbb0b6f2808da71fddd29c1cdd448d2bc98f72d9bb78a7a898fc9621b", size = 29324425, upload-time = "2025-01-16T13:52:49.048Z" },
+    { url = "https://files.pythonhosted.org/packages/86/8a/69176a64335aed183529207ba8bc3d329c2999d852b4f3818027203f50e6/opencv_python_headless-4.11.0.86-cp37-abi3-win_amd64.whl", hash = "sha256:6c304df9caa7a6a5710b91709dd4786bf20a74d57672b3c31f7033cc638174ca", size = 39402386, upload-time = "2025-01-16T13:52:56.418Z" },
 ]
 
 [[package]]
@@ -1743,10 +1762,9 @@ name = "pint"
 version = "0.24.4"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "flexcache", marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -1764,11 +1782,12 @@ name = "pint"
 version = "0.25.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "flexcache", marker = "python_full_version >= '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2004,7 +2023,7 @@ name = "pyobjc-framework-cocoa"
 version = "12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/6d/cc/927169225e72bab9c9b44285656768fb75052a0bc85fdbca62740e1ca43c/pyobjc_framework_cocoa-12.2.tar.gz", hash = "sha256:20b392e2b7241caad0538dfde12143343e5dfe48f72e7df660a7548e635903dc", size = 3125555, upload-time = "2026-05-30T12:35:09.273Z" }
 wheels = [
@@ -2018,8 +2037,8 @@ name = "pyobjc-framework-corebluetooth"
 version = "12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/52/df/bee7ba216f9fb513710aac1701b78c97b087b37fca8ec1806f8572e0bbb3/pyobjc_framework_corebluetooth-12.2.tar.gz", hash = "sha256:8b4e5ca99953c360c391a695b0782a5328fcecafd56fdf790ad709e932feb306", size = 37552, upload-time = "2026-05-30T12:35:33.863Z" }
 wheels = [
@@ -2033,8 +2052,8 @@ name = "pyobjc-framework-libdispatch"
 version = "12.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
-    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "pyobjc-core", marker = "sys_platform == 'darwin' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "pyobjc-framework-cocoa", marker = "sys_platform == 'darwin' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/1b/fe/e23be301e46c30450955cdb096f16f6a86e7609787a4b8225ec24d6fdc9d/pyobjc_framework_libdispatch-12.2.tar.gz", hash = "sha256:4a41879ef7716b73d70f2e40ff39353d686cbc59d48c93217ed362d2b2baf1ba", size = 40345, upload-time = "2026-05-30T12:39:09.474Z" }
 wheels = [
@@ -2183,10 +2202,9 @@ name = "rpds-py"
 version = "0.30.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/20/af/3f2f423103f1113b36230496629986e0ef7e199d2aa8392452b484b38ced/rpds_py-0.30.0.tar.gz", hash = "sha256:dd8ff7cf90014af0c0f787eea34794ebf6415242ee1d6fa91eaba725cc441e84", size = 69469, upload-time = "2025-11-30T20:24:38.837Z" }
 wheels = [
@@ -2253,11 +2271,12 @@ name = "rpds-py"
 version = "2026.5.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/2e/43/25a8dcd3feedd735039a8f0b5b7e3b118232b5eae288c4fd9ab200d41094/rpds_py-2026.5.1.tar.gz", hash = "sha256:07b24fea40541e28570e5b795a4a38fbdcd12550c06bd0748005ecc8116ca256", size = 64459, upload-time = "2026-05-28T12:02:13.232Z" }
 wheels = [
@@ -2335,10 +2354,9 @@ name = "scikit-image"
 version = "0.25.2"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "imageio", marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2374,11 +2392,12 @@ name = "scikit-image"
 version = "0.26.0"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "imageio", marker = "python_full_version >= '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2415,10 +2434,9 @@ name = "scipy"
 version = "1.15.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2459,11 +2477,12 @@ name = "scipy"
 version = "1.17.1"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version >= '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2558,10 +2577,9 @@ name = "tifffile"
 version = "2025.5.10"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version < '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version < '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2576,11 +2594,12 @@ name = "tifffile"
 version = "2026.3.3"
 source = { registry = "https://pypi.org/simple" }
 resolution-markers = [
-    "python_full_version >= '3.12' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version == '3.11.*' and extra != 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform != 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
-    "python_full_version >= '3.11' and extra != 'extra-6-gently-torch-cpu' and extra != 'extra-6-gently-torch-gpu'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "python_full_version >= '3.11' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
@@ -2631,9 +2650,15 @@ name = "torch"
 version = "2.7.1+cu118"
 source = { registry = "https://download.pytorch.org/whl/cu118" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
-    "python_full_version < '3.11'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "filelock" },
@@ -2671,7 +2696,8 @@ name = "torch"
 version = "2.12.0"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.11' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
     "python_full_version < '3.11' and sys_platform == 'darwin'",
 ]
 dependencies = [
@@ -2695,8 +2721,12 @@ name = "torch"
 version = "2.12.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.11' and sys_platform != 'darwin'",
-    "python_full_version < '3.11' and sys_platform != 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "filelock", marker = "sys_platform != 'darwin'" },
@@ -2730,9 +2760,15 @@ name = "torchvision"
 version = "0.22.1+cu118"
 source = { registry = "https://download.pytorch.org/whl/cu118" }
 resolution-markers = [
-    "python_full_version >= '3.12'",
-    "python_full_version == '3.11.*'",
-    "python_full_version < '3.11'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version < '3.11' and sys_platform == 'darwin'",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy" },
@@ -2753,7 +2789,8 @@ name = "torchvision"
 version = "0.27.0"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.11' and sys_platform == 'darwin'",
+    "python_full_version >= '3.12' and sys_platform == 'darwin'",
+    "python_full_version == '3.11.*' and sys_platform == 'darwin'",
     "python_full_version < '3.11' and sys_platform == 'darwin'",
 ]
 dependencies = [
@@ -2772,8 +2809,12 @@ name = "torchvision"
 version = "0.27.0+cpu"
 source = { registry = "https://download.pytorch.org/whl/cpu" }
 resolution-markers = [
-    "python_full_version >= '3.11' and sys_platform != 'darwin'",
-    "python_full_version < '3.11' and sys_platform != 'darwin'",
+    "python_full_version >= '3.12' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version >= '3.12' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version >= '3.12' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version == '3.11.*' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version == '3.11.*' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version == '3.11.*' and sys_platform != 'darwin' and sys_platform != 'linux')",
+    "python_full_version < '3.11' and platform_machine == 'aarch64' and sys_platform == 'linux'",
+    "(python_full_version < '3.11' and platform_machine != 'aarch64' and sys_platform == 'linux') or (python_full_version < '3.11' and sys_platform != 'darwin' and sys_platform != 'linux')",
 ]
 dependencies = [
     { name = "numpy", marker = "sys_platform != 'darwin'" },
@@ -2809,7 +2850,7 @@ name = "triton"
 version = "3.3.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "setuptools" },
+    { name = "setuptools", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux')" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/8d/a9/549e51e9b1b2c9b854fd761a1d23df0ba2fbc60bd0c13b489ffa518cfcb7/triton-3.3.1-cp310-cp310-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl", hash = "sha256:b74db445b1c562844d3cfad6e9679c72e93fdfb1a90a24052b03bb5c49d1242e", size = 155600257, upload-time = "2025-05-29T23:39:36.085Z" },
@@ -3007,7 +3048,7 @@ name = "winrt-runtime"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "typing-extensions", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "typing-extensions", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/16/dd/acdd527c1d890c8f852cc2af644aa6c160974e66631289420aa871b05e65/winrt_runtime-3.2.1.tar.gz", hash = "sha256:c8dca19e12b234ae6c3dadf1a4d0761b51e708457492c13beb666556958801ea", size = 21721, upload-time = "2025-06-06T14:40:27.593Z" }
 wheels = [
@@ -3027,7 +3068,7 @@ name = "winrt-windows-devices-bluetooth"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/b2/a0/1c8a0c469abba7112265c6cb52f0090d08a67c103639aee71fc690e614b8/winrt_windows_devices_bluetooth-3.2.1.tar.gz", hash = "sha256:db496d2d92742006d5a052468fc355bf7bb49e795341d695c374746113d74505", size = 23732, upload-time = "2025-06-06T14:41:20.489Z" }
 wheels = [
@@ -3047,7 +3088,7 @@ name = "winrt-windows-devices-bluetooth-advertisement"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/06/fc/7ffe66ca4109b9e994b27c00f3d2d506e6e549e268791f755287ad9106d8/winrt_windows_devices_bluetooth_advertisement-3.2.1.tar.gz", hash = "sha256:0223852a7b7fa5c8dea3c6a93473bd783df4439b1ed938d9871f947933e574cc", size = 16906, upload-time = "2025-06-06T14:41:21.448Z" }
 wheels = [
@@ -3067,7 +3108,7 @@ name = "winrt-windows-devices-bluetooth-genericattributeprofile"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/44/21/aeeddc0eccdfbd25e543360b5cc093233e2eab3cdfb53ad3cabae1b5d04d/winrt_windows_devices_bluetooth_genericattributeprofile-3.2.1.tar.gz", hash = "sha256:cdf6ddc375e9150d040aca67f5a17c41ceaf13a63f3668f96608bc1d045dde71", size = 38896, upload-time = "2025-06-06T14:41:22.687Z" }
 wheels = [
@@ -3087,7 +3128,7 @@ name = "winrt-windows-devices-enumeration"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/9e/dd/75835bfbd063dffa152109727dedbd80f6e92ea284855f7855d48cdf31c9/winrt_windows_devices_enumeration-3.2.1.tar.gz", hash = "sha256:df316899e39bfc0ffc1f3cb0f5ee54d04e1d167fbbcc1484d2d5121449a935cf", size = 23538, upload-time = "2025-06-06T14:41:26.787Z" }
 wheels = [
@@ -3107,7 +3148,7 @@ name = "winrt-windows-devices-radios"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/5e/02/9704ea359ad8b0d6faa1011f98fb477e8fb6eac5201f39d19e73c2407e7b/winrt_windows_devices_radios-3.2.1.tar.gz", hash = "sha256:4dc9b9d1501846049eb79428d64ec698d6476c27a357999b78a8331072e18a0b", size = 5908, upload-time = "2025-06-06T14:41:44.868Z" }
 wheels = [
@@ -3127,7 +3168,7 @@ name = "winrt-windows-foundation"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/0c/55/098ce7ea0679efcc1298b269c48768f010b6c68f90c588f654ec874c8a74/winrt_windows_foundation-3.2.1.tar.gz", hash = "sha256:ad2f1fcaa6c34672df45527d7c533731fdf65b67c4638c2b4aca949f6eec0656", size = 30485, upload-time = "2025-06-06T14:41:53.344Z" }
 wheels = [
@@ -3147,7 +3188,7 @@ name = "winrt-windows-foundation-collections"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/ef/62/d21e3f1eeb8d47077887bbf0c3882c49277a84d8f98f7c12bda64d498a07/winrt_windows_foundation_collections-3.2.1.tar.gz", hash = "sha256:0eff1ad0d8d763ad17e9e7bbd0c26a62b27215016393c05b09b046d6503ae6d5", size = 16043, upload-time = "2025-06-06T14:41:53.983Z" }
 wheels = [
@@ -3167,7 +3208,7 @@ name = "winrt-windows-storage-streams"
 version = "3.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "winrt-runtime", marker = "sys_platform != 'darwin' or extra != 'extra-6-gently-torch-cpu' or (extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
+    { name = "winrt-runtime", marker = "(platform_machine != 'aarch64' and sys_platform == 'linux') or (sys_platform != 'darwin' and sys_platform != 'linux') or (sys_platform == 'darwin' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu') or (sys_platform == 'linux' and extra == 'extra-6-gently-torch-cpu' and extra == 'extra-6-gently-torch-gpu')" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/00/50/f4488b07281566e3850fcae1021f0285c9653992f60a915e15567047db63/winrt_windows_storage_streams-3.2.1.tar.gz", hash = "sha256:476f522722751eb0b571bc7802d85a82a3cae8b1cce66061e6e758f525e7b80f", size = 34335, upload-time = "2025-06-06T14:43:23.905Z" }
 wheels = [

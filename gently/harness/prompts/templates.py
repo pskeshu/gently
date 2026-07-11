@@ -222,6 +222,104 @@ defaults don't fit, but prefer the mode for the common case.
 """
 
 
+OPERATION_PLAN_GUIDANCE = """
+## Operation Plan — keep it current
+
+At experiment planning time, call `declare_operation_plan` with every tactic
+you intend to run.  Each tactic needs at minimum: `id` (short stable string),
+`name`, `kind`, `state` (start as `"planned"`), `scope`, and `rationale`.
+For richer display, populate a `live` object on the tactic:
+
+- `readouts` — list of `{label, value}` dicts for the instrument strip
+  (e.g. `{label: "cadence", value: "120 s"}`).
+- `phases` — list of `{name, state, count, pips}` for scripted/phased tactics.
+- Flat bound keys (`request_id`, `sustained_hz`, `setpoint`, `locked`,
+  `last_fired`, `new_phase`, …) are merged in by the updater as live telemetry
+  arrives; you can seed them at declaration time if the value is already known.
+
+### Allowed values — use these exact strings (renderer dispatches on them)
+
+**`kind`** ∈ one of:
+| value | use when |
+|---|---|
+| `standing_timelapse` | continuous / periodic imaging running throughout |
+| `reactive_monitor` | armed watcher that fires on a condition (signal, threshold) |
+| `scripted_protocol` | fixed sequence of named phases (ramp, hold, recovery, …) |
+| `exclusive_burst` | short high-cadence burst that blocks other acquisition |
+| `oneshot` | single action (z-stack, snapshot, one-off step) |
+| `custom` | anything that doesn't fit the above |
+
+**`state`** (tactic) ∈ `planned | active | done | paused`
+Start every tactic as `"planned"`; advance to `"active"` when it begins,
+`"done"` when it finishes, `"paused"` if suspended.
+
+**`scope`** — always an object with a `mode` key (never a bare list or string):
+- `{"mode": "global"}` — applies to every embryo in the session
+- `{"mode": "embryos", "embryo_ids": ["E01", "E02"]}` — specific embryo IDs
+- `{"mode": "role", "role": "test"}` — all embryos carrying the named role
+
+**`live.phases[].state`** ∈ `todo | active | done`
+
+### Minimal tactic example
+
+```json
+{
+  "id": "t2",
+  "name": "Temperature ramp",
+  "kind": "scripted_protocol",
+  "state": "planned",
+  "scope": {"mode": "embryos", "embryo_ids": ["E01", "E02"]},
+  "rationale": "25 → 16 °C step to trigger stress response",
+  "live": {
+    "readouts": [{"label": "setpoint", "value": "25 °C"}],
+    "phases": [
+      {"name": "ramp", "state": "todo", "count": 0, "pips": []},
+      {"name": "hold", "state": "todo", "count": 0, "pips": []}
+    ]
+  }
+}
+```
+
+### Plan the whole roster — subjects AND references
+
+Experiments often require both subjects and references. Declare tactics for all
+roster classes in the same `declare_operation_plan` call.
+
+| Roster class | Role value(s) | Planning note |
+|---|---|---|
+| Subjects | `test` | adaptive protocol + reactive tactics apply |
+| References | `calibration`, `lineaging` | steady acquisition only; no adaptive protocol |
+
+**Reference tactic**: when the assay needs calibration or stage-clock embryos, declare
+a `standing_timelapse` scoped to that role alongside the subject tactics:
+
+```json
+{
+  "id": "ref_acq",
+  "name": "Reference steady acquisition",
+  "kind": "standing_timelapse",
+  "state": "planned",
+  "scope": {"mode": "role", "role": "calibration"},
+  "rationale": "Steady 5-min imaging of calibration embryos — stage timing + normalization"
+}
+```
+
+**Surface role requirements** in the plan `goal` or a tactic `rationale`: state which
+roles the run needs and roughly how many (e.g. *"needs ≥2 test subjects + ≥1 calibration
+reference"*) so the operator knows what embryos to assign before the run begins. Never
+plan only for `test` when the assay depends on reference embryos.
+
+Valid `scope.role` strings: `test` / `calibration` / `lineaging` / `unassigned`.
+
+Re-call `declare_operation_plan` (patch) whenever a tactic's state changes:
+`"planned"` → `"active"` when you start it, `"active"` → `"done"` when it
+finishes.  This keeps the Operations view in the UI synchronized with reality.
+Execution tools (`queue_burst`, `enable_monitoring_mode`, `stop_timelapse`,
+`pause_timelapse`) also accept an optional `tactic_id` and flip the state
+automatically — pass it when a tool maps cleanly to one tactic.
+"""
+
+
 ADAPTIVE_TIMELAPSE = """
 # Adaptive Timelapse System
 
@@ -482,6 +580,8 @@ Your role is to:
 {ADAPTIVE_TIMELAPSE}
 
 {REACTIVE_MONITORING_MODES}
+
+{OPERATION_PLAN_GUIDANCE}
 
 {AUTONOMY_AND_ADAPTATION}
 

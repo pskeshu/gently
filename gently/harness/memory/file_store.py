@@ -503,6 +503,7 @@ class FileContextStore:
         data["progress"] = progress
         data["updated_at"] = self._now()
         self._write_yaml(folder / "campaign.yaml", data)
+        self._notify_plan_change(campaign_id)
 
     def update_campaign_status(self, campaign_id: str, status: Status):
         folder = self._campaign_folder(campaign_id)
@@ -582,6 +583,11 @@ class FileContextStore:
         return children
 
     def get_nth_subcampaign(self, parent_id: str, n: int) -> Campaign | None:
+        # Tolerate n arriving as a numeric string (tool args are often stringified).
+        try:
+            n = int(n)
+        except (ValueError, TypeError):
+            return None
         phases = self.get_subcampaigns(parent_id)
         if 1 <= n <= len(phases):
             return phases[n - 1]
@@ -806,6 +812,64 @@ class FileContextStore:
         self._write_yaml(path, data)
 
     # ==================================================================
+    # Operation Plans
+    # ==================================================================
+
+    def set_operation_plan(self, session_id: str, plan: dict) -> None:
+        """Persist the agent-authored Operation Plan for a session.
+
+        The plan dict is stored verbatim (agent is the source of truth).
+        Fires CONTEXT_UPDATED so the Operations UI refreshes live.
+        """
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        self._write_yaml(path, plan)
+        self._notify_context_change("operation_plan")
+
+    def get_operation_plan(self, session_id: str) -> dict | None:
+        """Return the stored Operation Plan for a session, or None if absent."""
+        path = self.agent_dir / "operation_plans" / f"{session_id}.yaml"
+        return self._read_yaml(path)
+
+    def transition_tactic(
+        self, session_id: str, tactic_id: str, state: str | None = None, **bind
+    ) -> bool:
+        """Atomically update a tactic's state and/or bind live values onto it.
+
+        Reads the plan via get_operation_plan, locates the tactic by id,
+        sets its state (if provided), merges bind kwargs into its live dict
+        (creating it if absent), stamps updated_at/updated_reason, and writes
+        back via set_operation_plan so CONTEXT_UPDATED fires exactly once.
+
+        Returns True on success, False if the plan is absent or the tactic id
+        is not found (no-op, no crash).
+
+        Note: read-modify-write with no lock; safe because all subscribed event
+        emissions run on the single asyncio loop thread — revisit if a
+        worker-thread emitter is ever added.
+        """
+        plan = self.get_operation_plan(session_id)
+        if plan is None:
+            return False
+
+        tactics = plan.get("tactics", [])
+        tactic = next((t for t in tactics if t.get("id") == tactic_id), None)
+        if tactic is None:
+            return False
+
+        if state is not None:
+            tactic["state"] = state
+
+        if bind:
+            live = tactic.setdefault("live", {})
+            live.update(bind)
+
+        plan["updated_at"] = self._now()
+        plan["updated_reason"] = f"tactic {tactic_id} transitioned"
+
+        self.set_operation_plan(session_id, plan)
+        return True
+
+    # ==================================================================
     # Session <-> Campaign (many-to-many)
     # ==================================================================
 
@@ -827,6 +891,7 @@ class FileContextStore:
             cids.append(campaign_id)
         data["campaign_ids"] = cids
         self._write_yaml(path, data)
+        self._notify_plan_change(campaign_id)
 
     def unlink_session_campaign(self, session_id: str, campaign_id: str):
         path = self.agent_dir / "session_intents" / f"{session_id}.yaml"
@@ -1140,6 +1205,7 @@ class FileContextStore:
             "inherit_from": inherit_from,
             "planned_session_id": planned_session_id,
             "session_id": None,
+            "session_ids": [],
             "estimated_days": estimated_days,
             "phase_order": phase_order,
             "references": references,
@@ -1151,6 +1217,7 @@ class FileContextStore:
         }
         items.append(item_data)
         self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
         logger.info(f"Created plan item {pid} [{type}] #{phase_order}: {title}")
         return pid
 
@@ -1331,10 +1398,12 @@ class FileContextStore:
             new_items = self._read_plan_items_raw(campaign_id)
             new_items.append(item)
             self._write_plan_items(campaign_id, new_items)
+            self._notify_plan_change(campaign_id)
             return
 
         item["updated_at"] = self._now()
         self._write_plan_items(old_campaign_id, items)
+        self._notify_plan_change(old_campaign_id)
 
     def complete_plan_item(self, item_id: str, outcome: str):
         self.update_plan_item(
@@ -1342,6 +1411,76 @@ class FileContextStore:
             status=PlanItemStatus.COMPLETED,
             outcome=outcome,
         )
+
+    def link_plan_item_session(
+        self, item_id: str, session_id: str, set_in_progress: bool = True
+    ) -> bool:
+        """Attach a session to a plan item — APPENDS (an item may run several times:
+        re-runs, multi-sitting, more embryos later). Records the session as the latest
+        `session_id` (back-compat), flips a PLANNED item to IN_PROGRESS, emits PLAN_UPDATED.
+        Returns False if the item isn't found."""
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
+        if session_id and session_id not in sids:
+            sids.append(session_id)
+        item["session_ids"] = sids
+        if sids:
+            item["session_id"] = sids[-1]  # most recent run; back-compat for older readers
+        if set_in_progress and item.get("status") == "planned":
+            item["status"] = PlanItemStatus.IN_PROGRESS.value
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
+
+    def unlink_plan_item_session(self, item_id: str, session_id: str) -> bool:
+        """Remove a session from a plan item's session_ids list.
+
+        Mirrors the load/persist/notify pattern of link_plan_item_session.
+        Clears the back-compat scalar session_id when it matched the removed
+        session (sets it to the most-recent remaining session_id, or None).
+        Idempotent: returns False without writing if the session isn't linked.
+        Returns True on successful removal.
+        """
+        loc = self._find_plan_item_location(item_id)
+        if not loc:
+            return False
+        campaign_id, items, idx = loc
+        item = items[idx]
+        sids = item.get("session_ids") or ([item["session_id"]] if item.get("session_id") else [])
+        if session_id not in sids:
+            return False
+        sids = [s for s in sids if s != session_id]
+        item["session_ids"] = sids
+        item["session_id"] = sids[-1] if sids else None  # back-compat: most recent remaining
+        item["updated_at"] = self._now()
+        self._write_plan_items(campaign_id, items)
+        self._notify_plan_change(campaign_id)
+        return True
+
+    def get_plan_items_for_session(self, session_id: str) -> list["PlanItem"]:
+        """Return all plan items linked to a session.
+
+        Iterates active campaigns only (mirrors the normal read path).
+        Back-compat: matches items whose scalar session_id equals the query even
+        when session_ids is empty (old items written before the list field existed).
+        Deduplicates by item id.
+        """
+        seen: set[str] = set()
+        result: list[PlanItem] = []
+        for campaign in self.get_active_campaigns():
+            for item in self.get_plan_items(campaign.id):
+                if item.id in seen:
+                    continue
+                # session_ids is already populated from back-compat in _dict_to_plan_item
+                if session_id in (item.session_ids or []) or item.session_id == session_id:
+                    seen.add(item.id)
+                    result.append(item)
+        return result
 
     def skip_plan_item(self, item_id: str, reason: str | None = None):
         self.update_plan_item(
@@ -1700,6 +1839,98 @@ class FileContextStore:
         return False
 
     # ==================================================================
+    # Tactic Library
+    # ==================================================================
+
+    def save_tactic(self, tactic: dict, name: str | None = None) -> str:
+        """Persist a tactic as a reusable template in agent/tactic_library/.
+
+        Strips runtime state (live, state, original id) and assigns a new
+        template id + slug. Fires CONTEXT_UPDATED. Returns the template id.
+        """
+        name = name or tactic.get("name") or "unnamed"
+        slug = self._slugify(name)
+        tid = self._gen_id()
+        now = self._now()
+
+        template = {
+            "id": tid,
+            "name": name,
+            "slug": slug,
+            "kind": tactic.get("kind", "unknown"),
+            "structure": copy.deepcopy(tactic.get("structure") or {}),
+            "scope_hint": copy.deepcopy(tactic.get("scope")),
+            "description": tactic.get("description") or tactic.get("rationale"),
+            "rationale": tactic.get("rationale"),
+            "params": copy.deepcopy(tactic.get("params")),
+            "relations": copy.deepcopy(tactic.get("relations") or {}),
+            "live_bind": list(tactic.get("live_bind") or []),
+            "created_at": now,
+            "created_by": tactic.get("created_by", "agent"),
+        }
+
+        path = self.agent_dir / "tactic_library" / f"{tid}_{slug}.yaml"
+        self._write_yaml(path, template)
+        self._notify_context_change("tactic_library")
+        logger.info(f"Saved tactic template '{name}' ({tid})")
+        return tid
+
+    def list_tactics(self) -> list[dict]:
+        """List all saved tactic templates, ordered by created_at descending."""
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return []
+        tactics: list[dict] = []
+        for f in tl_dir.iterdir():
+            if f.suffix in (".yaml", ".yml"):
+                data = self._read_yaml(f)
+                if data:
+                    tactics.append(data)
+        tactics.sort(key=lambda t: t.get("created_at", ""), reverse=True)
+        return tactics
+
+    def get_tactic(self, id_or_name: str) -> dict | None:
+        """Return a tactic template by id or name, or None if not found.
+
+        Uses list_tactics() (sorted newest-first by created_at) so that name
+        lookups are deterministic: on a name collision, the newest entry wins.
+        id lookups are unique by construction so order does not matter.
+        """
+        tl_dir = self.agent_dir / "tactic_library"
+        if not tl_dir.exists():
+            return None
+        for tactic in self.list_tactics():
+            if tactic.get("id") == id_or_name or tactic.get("name") == id_or_name:
+                return tactic
+        return None
+
+    def apply_tactic(self, id_or_name: str) -> dict | None:
+        """Return a fresh planned tactic from a saved template.
+
+        The returned dict has a new run id (distinct from the template id),
+        state="planned", and no live/runtime state. Returns None if the
+        template is not found.
+        """
+        tmpl = self.get_tactic(id_or_name)
+        if tmpl is None:
+            return None
+        tactic = copy.deepcopy(tmpl)
+        # Assign a new run id — must differ from the template id
+        tactic["id"] = self._gen_id()
+        tactic["state"] = "planned"
+        # Promote scope_hint back to scope for the tactic
+        scope_hint = tactic.pop("scope_hint", None)
+        if scope_hint is not None:
+            tactic["scope"] = scope_hint
+        # Strip template-internal metadata
+        tactic.pop("slug", None)
+        tactic.pop("created_at", None)
+        tactic.pop("created_by", None)
+        # Strip runtime state (should not exist in a template, but guard anyway)
+        tactic.pop("live", None)
+        return tactic
+
+    # ==================================================================
     # Plan Snapshots
     # ==================================================================
 
@@ -1908,6 +2139,26 @@ class FileContextStore:
     # Expectations
     # ==================================================================
 
+    def _notify_context_change(self, kind: str = "context") -> None:
+        """Emit CONTEXT_UPDATED on the global bus so the shared-visibility
+        surface refreshes live. Best-effort — a bus failure never breaks a write."""
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.CONTEXT_UPDATED, {"kind": kind}, source="context_store")
+        except Exception:
+            pass
+
+    def _notify_plan_change(self, campaign_id: str | None = None) -> None:
+        """Emit PLAN_UPDATED so the Plans UI refreshes live when a plan item or
+        campaign changes (status, session link, new item, progress). Best-effort."""
+        try:
+            from gently.core.event_bus import EventType, emit
+
+            emit(EventType.PLAN_UPDATED, {"campaign_id": campaign_id}, source="context_store")
+        except Exception:
+            pass
+
     def add_expectation(self, exp: Expectation):
         path = self.agent_dir / "active" / "expectations.yaml"
         items = self._read_yaml(path) or []
@@ -1925,6 +2176,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
     def get_pending_expectations(self) -> list[Expectation]:
         path = self.agent_dir / "active" / "expectations.yaml"
@@ -1956,6 +2208,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("expectation")
 
     # ==================================================================
     # Watchpoints
@@ -1975,6 +2228,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
     def get_active_watchpoints(self) -> list[Watchpoint]:
         path = self.agent_dir / "active" / "watchpoints.yaml"
@@ -2002,6 +2256,7 @@ class FileContextStore:
                 item["status"] = "resolved"
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("watchpoint")
 
     # ==================================================================
     # Questions
@@ -2021,6 +2276,7 @@ class FileContextStore:
             }
         )
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
     def get_open_questions(self) -> list[Question]:
         path = self.agent_dir / "active" / "questions.yaml"
@@ -2042,6 +2298,7 @@ class FileContextStore:
                 item["resolved_at"] = now
                 break
         self._write_yaml(path, items)
+        self._notify_context_change("question")
 
     # ==================================================================
     # Learnings
@@ -2154,6 +2411,17 @@ class FileContextStore:
     # Batch Updates
     # ==================================================================
 
+    @property
+    def notebook(self):
+        """The shared lab notebook, rooted at agent_dir/notebook (lazy)."""
+        nb = getattr(self, "_notebook", None)
+        if nb is None:
+            from .notebook import NotebookStore
+
+            nb = NotebookStore(self.agent_dir / "notebook")
+            self._notebook = nb
+        return nb
+
     def apply_updates(self, updates: ContextUpdates):
         for obs in updates.new_observations:
             self.add_observation(obs)
@@ -2180,6 +2448,18 @@ class FileContextStore:
 
         if updates.new_focus is not None:
             self.set_state("current_focus", updates.new_focus)
+
+        # Mirror new observations & learnings into the shared notebook
+        # (best-effort — a notebook failure never breaks the legacy write).
+        from .notebook import learning_to_note, observation_to_note
+
+        try:
+            for obs in updates.new_observations:
+                self.notebook.write_note(observation_to_note(obs))
+            for learning in updates.new_learnings:
+                self.notebook.write_note(learning_to_note(learning))
+        except Exception:
+            logger.warning("notebook mirror failed", exc_info=True)
 
     # ==================================================================
     # ML Pipelines
@@ -2528,6 +2808,14 @@ class FileContextStore:
         imaging_spec = None
         bench_spec = None
 
+        # Tolerate specs persisted as JSON strings (older tool calls that passed
+        # spec as a string instead of an object) so read-back never crashes.
+        if isinstance(spec_data, str):
+            try:
+                spec_data = json.loads(spec_data)
+            except (json.JSONDecodeError, TypeError):
+                spec_data = None
+
         if spec_data:
             if item_type == PlanItemType.IMAGING:
                 valid = {f.name for f in dataclasses.fields(ImagingSpec)}
@@ -2537,6 +2825,11 @@ class FileContextStore:
                 bench_spec = BenchSpec(**{k: v for k, v in spec_data.items() if k in valid})
 
         references = d.get("references") or []
+        if isinstance(references, str):
+            try:
+                references = json.loads(references) or []
+            except (json.JSONDecodeError, TypeError):
+                references = []
 
         return PlanItem(
             id=d["id"],
@@ -2554,6 +2847,7 @@ class FileContextStore:
             bench_spec=bench_spec,
             planned_session_id=d.get("planned_session_id"),
             session_id=d.get("session_id"),
+            session_ids=d.get("session_ids") or ([d["session_id"]] if d.get("session_id") else []),
             inherit_from=d.get("inherit_from"),
             estimated_days=d.get("estimated_days"),
             phase_order=d.get("phase_order", 0),

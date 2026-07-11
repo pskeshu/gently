@@ -1,0 +1,104 @@
+/* ── Notebook tab (LIBRARY) ──────────────────────────────────────────────
+   The reading room for the shared lab notebook: thread rail + kind filter +
+   note cards. Tokens reuse the app theme (--accent, --accent-green, --border …). */
+
+.nb-container { max-width: 1100px; margin: 0 auto; padding: 24px 28px; }
+
+.nb-header {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px; margin-bottom: 18px; flex-wrap: wrap;
+}
+.nb-title { font-size: 22px; font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin: 0; }
+
+.nb-kinds { display: flex; gap: 6px; }
+.nb-kind {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 6px 13px; font: inherit; font-size: 13px; cursor: pointer;
+    transition: border-color .15s, color .15s, background .15s;
+}
+.nb-kind:hover { color: var(--text, #0f172a); border-color: var(--border-strong, #cbd5e1); }
+.nb-kind.active { background: var(--accent, #2f6df6); border-color: var(--accent, #2f6df6); color: #fff; }
+
+/* Ask the notebook */
+.nb-ask { display: flex; gap: 9px; margin-bottom: 14px; }
+.nb-ask-input {
+    flex: 1; border: 1px solid var(--border, #e4e9f0); border-radius: 11px;
+    padding: 11px 14px; font: inherit; font-size: 14px; color: var(--text, #0f172a);
+    background: var(--bg-card, #fff);
+}
+.nb-ask-input:focus { outline: none; border-color: var(--accent, #2f6df6); box-shadow: 0 0 0 4px rgba(96, 165, 250, .15); }
+.nb-ask-go {
+    flex: none; border: 0; border-radius: 11px; padding: 11px 20px; font: inherit; font-size: 14px;
+    font-weight: 600; color: #fff; background: var(--accent, #2f6df6); cursor: pointer; transition: background .15s;
+}
+.nb-ask-go:hover { background: color-mix(in srgb, var(--accent) 88%, #000); }
+
+.nb-ask-result {
+    border: 1px solid var(--border, #e4e9f0); border-radius: 13px; padding: 16px 18px; margin-bottom: 18px;
+    background: var(--accent-soft, #f5f8ff);
+}
+.nb-ask-result[hidden] { display: none; }
+.nb-ask-loading, .nb-ask-empty { color: var(--text-muted, #94a3b8); font-size: 14px; font-style: italic; }
+.nb-ask-cov {
+    display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 2px 9px; border-radius: 999px; margin-bottom: 10px; color: #fff; background: var(--text-muted, #94a3b8);
+}
+.nb-cov-covered { background: var(--accent-green, #16a34a); }
+.nb-cov-partial { background: #d97706; }
+.nb-cov-not_in_notebook { background: var(--text-muted, #94a3b8); }
+.nb-ask-answer { font-size: 14.5px; line-height: 1.55; color: var(--text, #0f172a); }
+.nb-ask-h {
+    font-size: var(--v2-fs-eyebrow, 11px); font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+    color: var(--text-secondary, #475569); margin: 14px 0 6px;
+}
+.nb-ask-points { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 7px; }
+.nb-ask-point { font-size: 13.5px; line-height: 1.45; color: var(--text, #0f172a); display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.nb-cite {
+    font: 600 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--accent, #2f6df6); background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e4e9f0); border-radius: 6px; padding: 1px 6px;
+}
+.nb-ask-next { margin: 0; padding-left: 18px; font-size: 13.5px; line-height: 1.5; color: var(--text-secondary, #475569); }
+.nb-ask-next li { margin: 2px 0; }
+
+.nb-body-wrap { display: grid; grid-template-columns: 220px 1fr; gap: 22px; align-items: start; }
+@media (max-width: 760px) { .nb-body-wrap { grid-template-columns: 1fr; } }
+
+/* thread rail (the inquiry spine) */
+.nb-threads { display: flex; flex-direction: column; gap: 4px; position: sticky; top: 12px; }
+.nb-thread {
+    text-align: left; background: none; border: 0; cursor: pointer; font: inherit; font-size: 13px;
+    color: var(--text-secondary, #475569); padding: 8px 11px; border-radius: 9px;
+    transition: background .15s, color .15s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.nb-thread:hover { background: var(--bg-hover, #f1f5f9); color: var(--text, #0f172a); }
+.nb-thread.active { background: var(--accent-soft, #eaf1ff); color: var(--accent, #2f6df6); font-weight: 600; }
+
+/* notes */
+.nb-notes { display: flex; flex-direction: column; gap: 12px; }
+.nb-empty { color: var(--text-muted, #94a3b8); font-size: 14px; font-style: italic; padding: 28px 4px; }
+
+.nb-card {
+    border: 1px solid var(--border, #e4e9f0); border-radius: 13px; padding: 14px 16px;
+    background: var(--bg-card, #fff); box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.nb-card-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.nb-badge {
+    font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    padding: 2px 9px; border-radius: 999px; color: #fff; background: var(--text-muted, #94a3b8);
+}
+.nb-badge.nb-k-obs { background: var(--accent, #2f6df6); }
+.nb-badge.nb-k-find { background: var(--accent-green, #16a34a); }
+.nb-badge.nb-k-q { background: #d97706; }
+.nb-author { font-size: 12px; color: var(--text-secondary, #475569); }
+.nb-status {
+    margin-left: auto; font-size: 11px; color: var(--text-muted, #94a3b8);
+    text-transform: uppercase; letter-spacing: .05em;
+}
+.nb-body-text { font-size: 14px; line-height: 1.5; color: var(--text, #0f172a); white-space: pre-wrap; }
+
+.nb-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.nb-chip {
+    font-size: 11.5px; color: var(--text-secondary, #475569);
+    background: var(--bg-hover, #f1f5f9); border-radius: 7px; padding: 2px 8px;
+}

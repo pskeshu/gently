@@ -381,8 +381,18 @@ class DiSPIMMicroscope(Microscope):
             events = docs.get("events", [])
             if events:
                 data = events[0].get("data", {})
-                # Look for stage coordinates
-                for key in ["XY:31", "xy_stage", "stage"]:
+                # Look for stage coordinates. Keys must match what
+                # read_stage_plan (bp.count on the xy_stage device) actually
+                # emits — the device-layer's own handle_detect_embryos uses
+                # "XYStage:XY:31"/"xy_stage_position", so include those here too
+                # (the bare "XY:31" was stale and never matched).
+                for key in [
+                    "xy_stage",
+                    "XYStage:XY:31",
+                    "xy_stage_position",
+                    "XY:31",
+                    "stage",
+                ]:
                     if key in data:
                         val = data[key]
                         if isinstance(val, (list, tuple)) and len(val) >= 2:
@@ -809,6 +819,38 @@ class DiSPIMMicroscope(Microscope):
         except Exception as e:
             return {"success": False, "error": str(e)}
 
+    async def set_laser_config(self, config_name: str) -> dict:
+        """Apply a Laser config-group preset (e.g. "ALL OFF").
+
+        Hits ``POST /api/laser/config`` — direct, no Bluesky queue.
+        Use ``"ALL OFF"`` to gate every laser line off via the PLogic
+        OutputChannel; other presets from the MM config group are also
+        accepted (e.g. ``"488 only"``, ``"561 only"``).
+
+        Parameters
+        ----------
+        config_name : str
+            Exact preset name from the Laser config group.
+        """
+        return await self._api_post("/api/laser/config", {"config": config_name})
+
+    async def get_laser_configs(self) -> dict:
+        """List available Laser config-group presets.
+
+        Hits ``GET /api/laser/configs`` — returns ``{"configs": [...]}``
+        with the preset names from the MM Laser config group.
+        """
+        return await self._api_get("/api/laser/configs")
+
+    async def get_cameras(self) -> dict:
+        """List available SPIM camera roles.
+
+        Hits ``GET /api/cameras`` — returns ``{"cameras": ["A"]}`` on
+        single-camera rigs or ``{"cameras": ["A", "B"]}`` when HamCam2 is
+        registered as camera_b in the device layer.
+        """
+        return await self._api_get("/api/cameras")
+
     async def get_led_status(self) -> dict:
         """Get current LED status."""
         return await self._api_get("/api/led/status")
@@ -835,6 +877,19 @@ class DiSPIMMicroscope(Microscope):
     async def get_temperature(self) -> dict:
         """Get current temperature, setpoint, and lock state."""
         return await self._api_get("/api/temperature/status")
+
+    async def get_temperature_config(self) -> dict:
+        """Get the thermalizer connection config (password redacted) + live state."""
+        return await self._api_get("/api/temperature/config")
+
+    async def set_temperature_config(self, cfg: dict) -> dict:
+        """Reconfigure the thermalizer (serial/mqtt/mock) — live hot-swap where
+        possible, else persisted for the next device-layer restart."""
+        return await self._api_post("/api/temperature/config", cfg)
+
+    async def test_temperature_config(self, cfg: dict) -> dict:
+        """Probe a candidate thermalizer config without committing it."""
+        return await self._api_post("/api/temperature/config/test", cfg)
 
     # ------------------------------------------------------------------
     # Live device-state readout (streamed from the device layer poller)
@@ -954,6 +1009,59 @@ class DiSPIMMicroscope(Microscope):
                     except Exception as exc:
                         logger.warning("Malformed bottom-camera SSE payload skipped: %s", exc)
 
+    async def stream_lightsheet(self, timeout: float | None = None):
+        """Async generator yielding JPEG frames from the lightsheet live SSE stream.
+
+        Mirrors :meth:`stream_bottom_camera`; subscriber-gated on the device layer.
+        """
+        self._ensure_connected()
+        client_timeout = aiohttp.ClientTimeout(
+            total=None,
+            sock_read=timeout,
+            sock_connect=10.0,
+        )
+        url = f"{self.http_url}/api/lightsheet/stream"
+        assert self._session is not None
+        async with self._session.get(url, timeout=client_timeout) as resp:
+            resp.raise_for_status()
+            buf = b""
+            async for chunk in resp.content.iter_any():
+                if not chunk:
+                    continue
+                buf += chunk
+                while b"\n\n" in buf:
+                    event_block, buf = buf.split(b"\n\n", 1)
+                    data_lines = []
+                    for line in event_block.splitlines():
+                        if not line or line.startswith(b":"):
+                            continue
+                        if line.startswith(b"data:"):
+                            data_lines.append(line[5:].lstrip())
+                    if not data_lines:
+                        continue
+                    raw = b"\n".join(data_lines).decode("utf-8", errors="replace")
+                    try:
+                        import json as _json
+
+                        yield _json.loads(raw)
+                    except Exception as exc:
+                        logger.warning("Malformed lightsheet SSE payload skipped: %s", exc)
+
+    async def set_lightsheet_live_params(
+        self, galvo=None, piezo=None, exposure=None, side=None
+    ) -> dict:
+        """POST live galvo/piezo/exposure/side to the device-layer lightsheet streamer."""
+        body: dict[str, float | str] = {}
+        if galvo is not None:
+            body["galvo"] = float(galvo)
+        if piezo is not None:
+            body["piezo"] = float(piezo)
+        if exposure is not None:
+            body["exposure"] = float(exposure)
+        if side is not None:
+            body["side"] = str(side)
+        return await self._api_post("/api/lightsheet/live/params", body)
+
     async def set_camera_led_mode(self, use_led: bool = False) -> dict:
         """Enable/disable automatic LED for bottom camera captures."""
         return await self._api_post("/api/camera/led_mode", {"use_led": use_led})
@@ -965,6 +1073,28 @@ class DiSPIMMicroscope(Microscope):
     async def get_bottom_camera_exposure(self) -> dict:
         """Get current bottom camera exposure time."""
         return await self._api_get("/api/camera/exposure")
+
+    # ------------------------------------------------------------------
+    # Fenced focus axes — bottom-camera focus Z and SPIM-head F-drive.
+    # Read + relative nudge only (no autofocus). Out-of-range nudges come
+    # back as a non-success dict (the device layer returns 400).
+    # ------------------------------------------------------------------
+
+    async def get_bottom_z(self) -> dict:
+        """Current bottom-camera focus Z position + limits."""
+        return await self._api_get("/api/stage/bottom_z")
+
+    async def nudge_bottom_z(self, delta: float) -> dict:
+        """Fenced relative move of the bottom-camera focus Z by ``delta`` µm."""
+        return await self._api_post("/api/stage/bottom_z/nudge", {"delta": float(delta)})
+
+    async def get_fdrive(self) -> dict:
+        """Current SPIM-head F-drive position + limits + distance to floor."""
+        return await self._api_get("/api/spim/fdrive")
+
+    async def nudge_fdrive(self, delta: float) -> dict:
+        """Fenced relative move of the SPIM-head F-drive by ``delta`` µm."""
+        return await self._api_post("/api/spim/fdrive/nudge", {"delta": float(delta)})
 
     async def capture_bottom_image(
         self, use_led: bool = False, exposure_ms: float | None = None
@@ -1255,7 +1385,8 @@ class DiSPIMMicroscope(Microscope):
         self._ensure_connected()
 
         try:
-            snap = await self.capture_bottom_image(use_led=True, exposure_ms=exposure_ms)
+            # No LED ever — the bottom camera images under room light only.
+            snap = await self.capture_bottom_image(use_led=False, exposure_ms=exposure_ms)
             image = snap["image"]
 
             if image is None or (image.shape == (100, 100) and image.max() == 0):

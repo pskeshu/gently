@@ -103,7 +103,9 @@ function handleMessage(msg) {
         // per event and would lag every other handler), but still emit to the
         // client event bus so the Devices tab gets the payload.
         if (msg.event_type !== 'DEVICE_STATE_UPDATE' &&
-            msg.event_type !== 'BOTTOM_CAMERA_FRAME') {
+            msg.event_type !== 'BOTTOM_CAMERA_FRAME' &&
+            msg.event_type !== 'TEMPERATURE_UPDATE' &&
+            msg.event_type !== 'LIGHTSHEET_FRAME') {
             handleFullEvent({
                 event_type: msg.event_type,
                 data: msg.data,

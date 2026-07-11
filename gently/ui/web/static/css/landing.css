@@ -1,0 +1,462 @@
+/* ux_v2 landing — the agent-first welcome that the prototype sketched, ported
+   into production. A full-bleed overlay shown on first entry that recedes into
+   the workspace once the user picks a path. Everything is scoped under
+   body.ux-v2 and the #v2-landing node only renders when the flag is on, so v1
+   is byte-for-byte untouched. Visual language mirrors ux-prototype/landing.html
+   but reuses production's CSS variables (with the prototype hexes as fallback)
+   so it tracks the app theme. */
+
+/* ux_v2 landing fills the gaps in the production token set (main.css defines
+   --bg-dark/-card/-hover, --border, --text, --text-muted, --accent, --accent-green
+   but NOT a page-bg alias, a secondary-text, or accent tints). Scope to
+   body.ux-v2 so v1 is untouched; both themes resolved here so landing.css can
+   reference these like any real token. dark is the default theme (main.css :root). */
+body.ux-v2 {
+    --bg: var(--bg-dark);                       /* page background, theme-aware */
+    --text-secondary: var(--text-muted);
+    --accent-soft: rgba(96,165,250,.15);        /* tint of dark --accent #60a5fa */
+    --accent-green-soft: rgba(74,222,128,.15);  /* tint of dark --accent-green */
+    /* one disciplined type scale for the landing/plan surface */
+    --v2-fs-body: 14px;
+    --v2-fs-sm: 13px;
+    --v2-fs-cap: 12px;
+    --v2-fs-eyebrow: 11px;
+}
+body.ux-v2[data-theme="light"] {
+    --accent-soft: rgba(59,130,246,.10);        /* tint of light --accent #3b82f6 */
+    --accent-green-soft: rgba(34,197,94,.12);   /* tint of light --accent-green */
+}
+/* accent-keyed glows can't put var() inside rgba channels, so the dark defaults
+   live on the elements (re-keyed off the dead #2f6df6 onto the real #60a5fa) and
+   light overrides ride here next to the tokens. */
+body.ux-v2[data-theme="light"] .v2-landing-orb { box-shadow: 0 6px 22px rgba(59,130,246,.35), inset 0 0 12px rgba(255,255,255,.6); }
+body.ux-v2[data-theme="light"] .v2-escape-field input:focus { box-shadow: 0 0 0 4px rgba(59,130,246,.12); }
+body.ux-v2[data-theme="light"] .v2-escape-send { box-shadow: 0 6px 16px rgba(59,130,246,.35); }
+
+.v2-landing {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: flex;
+    align-items: flex-start;   /* BOTH screens top-anchored — no discrete switch on swap */
+    justify-content: center;
+    padding: 24px;
+    overflow: hidden;
+    background:
+        radial-gradient(1100px 700px at 78% -8%, var(--accent-soft) 0%, transparent 55%),
+        radial-gradient(900px 600px at 8% 108%, var(--accent-green-soft) 0%, transparent 55%),
+        var(--bg);
+    transition: opacity .5s cubic-bezier(.22,1,.36,1), transform .5s cubic-bezier(.22,1,.36,1), visibility .5s;
+}
+/* The calm screen "unfolds" into the workspace: fade + slight scale-up, then
+   the node is pulled from the layout (display:none set by JS after the
+   transition) so it never traps clicks. */
+.v2-landing.dismissed {
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(1.015);
+    pointer-events: none;
+}
+.v2-landing::before {
+    content: "";
+    position: absolute;
+    inset: -20vmax;
+    background: radial-gradient(closest-side, var(--accent-soft), transparent 70%);
+    filter: blur(30px);
+    animation: v2land-drift 26s cubic-bezier(.22,1,.36,1) infinite alternate;
+    will-change: transform;
+    pointer-events: none;
+}
+@keyframes v2land-drift {
+    0%   { transform: translate(-6vw,-4vh) scale(1); }
+    100% { transform: translate(8vw,6vh) scale(1.15); }
+}
+
+.v2-landing-inner {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 760px;
+    width: 100%;
+    margin-top: 7vh;      /* shared anchor for welcome AND plan — orb stays put on swap */
+    margin-bottom: 5vh;
+}
+.v2-landing-rise { animation: v2land-rise .6s cubic-bezier(.22,1,.36,1) backwards; }
+.v2-landing-rise[data-i="1"] { animation-delay: .07s; }
+.v2-landing-rise[data-i="2"] { animation-delay: .14s; }
+.v2-landing-rise[data-i="3"] { animation-delay: .21s; }
+@keyframes v2land-rise { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+/* agent presence */
+.v2-landing-agent { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+.v2-landing-orb {
+    width: 52px; height: 52px; border-radius: 50%;
+    background: radial-gradient(closest-side at 38% 34%, #ffffff, #bcd3ff 40%, var(--accent, #2f6df6) 100%);
+    box-shadow: 0 6px 22px rgba(96,165,250,.45), inset 0 0 12px rgba(255,255,255,.6);
+    animation: v2land-breathe 4s ease-in-out infinite;
+}
+@keyframes v2land-breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+.v2-landing-say {
+    font-size: clamp(20px, 3vw, 28px); font-weight: 600; letter-spacing: -.02em;
+    text-align: center; max-width: 22ch; line-height: 1.25; color: var(--text, #0f172a);
+}
+.v2-landing-say .dim { color: var(--text-muted, #94a3b8); font-weight: 500; }
+
+/* choice cards */
+.v2-landing-choices {
+    display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px;
+    margin-top: 32px; width: min(720px, 92vw);
+}
+@media (max-width: 620px) { .v2-landing-choices { grid-template-columns: 1fr; } }
+.v2-choice {
+    text-align: left; cursor: pointer; position: relative; overflow: hidden;
+    border: 1px solid var(--border, #e4e9f0); background: var(--bg-card, #fff);
+    border-radius: 18px; padding: 20px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 28px rgba(15,23,42,.06);
+    font: inherit; color: var(--text, #0f172a);
+    transition: transform .26s cubic-bezier(.22,1,.36,1), box-shadow .26s cubic-bezier(.22,1,.36,1), border-color .26s;
+}
+.v2-choice:hover {
+    transform: translateY(-4px);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+    box-shadow: 0 2px 6px rgba(15,23,42,.06),
+                0 18px 50px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.v2-choice:active { transform: translateY(-1px) scale(.995); }
+
+/* Visible keyboard focus for every landing/plan control (mouse clicks get no ring) */
+#v2-landing :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 12px;            /* hug the pill/card corners */
+}
+#v2-landing .v2-choice:focus-visible { outline-offset: -2px; }  /* inset: the card clips outside outlines */
+#v2-landing .v2-escape-field input:focus-visible { outline-offset: 0; }
+.v2-choice-ic {
+    width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center;
+    background: var(--accent-soft, #eaf1ff); color: var(--accent, #2f6df6); margin-bottom: 14px;
+}
+.v2-choice.alt .v2-choice-ic { background: var(--accent-green-soft, #e7f6ec); color: var(--accent-green, #16a34a); }
+.v2-choice h3 { margin: 0 0 6px; font-size: 17px; letter-spacing: -.01em; }
+.v2-choice p { margin: 0; color: var(--text-secondary, #475569); font-size: var(--v2-fs-sm); line-height: 1.5; }
+.v2-choice-tag {
+    position: absolute; top: 16px; right: 16px;
+    font-size: var(--v2-fs-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8);
+    border: 1px solid var(--border, #e4e9f0); border-radius: 999px; padding: 3px 9px;
+}
+.v2-choice-go {
+    margin-top: 16px; display: flex; align-items: center; gap: 6px;
+    color: var(--accent, #2f6df6); font-size: 13px; font-weight: 600;
+    opacity: 0; transform: translateX(-4px); transition: .26s cubic-bezier(.22,1,.36,1);
+}
+.v2-choice.alt .v2-choice-go { color: var(--accent-green, #16a34a); }
+.v2-choice:hover .v2-choice-go { opacity: 1; transform: none; }
+
+/* escape hatch — chat is the last resort, an obvious pill */
+.v2-escape { margin-top: 24px; display: flex; flex-direction: column; align-items: center; }
+.v2-escape-toggle {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer; font: inherit; font-size: 13px;
+    background: var(--bg-card, #fff); border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    padding: 11px 16px; border-radius: 999px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04), 0 8px 28px rgba(15,23,42,.06);
+    transition: color .2s, border-color .2s, transform .2s cubic-bezier(.22,1,.36,1);
+}
+.v2-escape-toggle:hover { color: var(--text, #0f172a); border-color: var(--border-strong); transform: translateY(-1px); }
+.v2-escape-toggle .v2-escape-caret { display: inline-block; transition: transform .3s cubic-bezier(.22,1,.36,1); opacity: .55; }
+.v2-escape.open .v2-escape-toggle .v2-escape-caret { transform: rotate(180deg); }
+.v2-escape-field {
+    display: flex; align-items: center; gap: 8px; width: min(520px, 90vw);
+    max-height: 0; opacity: 0; overflow: hidden;
+    transition: max-height .4s cubic-bezier(.22,1,.36,1), opacity .4s cubic-bezier(.22,1,.36,1), margin .4s cubic-bezier(.22,1,.36,1);
+}
+.v2-escape.open .v2-escape-field { max-height: 64px; opacity: 1; margin-top: 12px; }
+.v2-escape-field input {
+    flex: 1; min-width: 0; border: 1px solid var(--border, #e4e9f0); background: var(--bg-card, #fff);
+    border-radius: 12px; padding: 12px 14px; font: inherit; font-size: var(--v2-fs-body); color: var(--text, #0f172a);
+    outline: none; box-shadow: 0 1px 2px rgba(15,23,42,.04);
+    transition: border-color .2s, box-shadow .2s;
+}
+.v2-escape-field input:focus { border-color: var(--accent, #2f6df6); box-shadow: 0 0 0 4px rgba(96,165,250,.18); }
+.v2-escape-send {
+    appearance: none; border: 0; cursor: pointer; flex: none; width: 42px; height: 42px; border-radius: 12px;
+    background: var(--accent, #2f6df6); color: #fff; display: grid; place-items: center;
+    box-shadow: 0 6px 16px rgba(96,165,250,.40); transition: transform .2s cubic-bezier(.22,1,.36,1), filter .2s;
+}
+.v2-escape-send:hover { transform: translateY(-1px); filter: brightness(1.05); }
+
+/* one-way skip into the workspace (e.g. a reload mid-session) */
+.v2-landing-skip {
+    margin-top: 24px; background: none; border: 0; cursor: pointer; font: inherit; font-size: var(--v2-fs-cap);
+    color: var(--text-muted, #94a3b8); padding: 10px 12px; border-radius: 8px;
+    transition: color .2s;
+}
+.v2-landing-skip:hover { color: var(--text-secondary, #475569); }
+
+/* Under ux_v2 the landing IS the welcome moment, so the legacy home hero
+   (static "Welcome to Gently" + start button) would be a duplicate behind it —
+   hide it. The recent-* cards and the context surface stay. */
+body.ux-v2 .home-hero { display: none; }
+
+/* ── Two-screen system: welcome ↔ in-place plan wizard ───────── */
+.v2-landing-inner { max-width: 980px; }   /* widen for the plan layout */
+.v2-landing .v2-screen { display: none; width: 100%; }
+.v2-landing[data-screen="welcome"] .v2-screen-welcome {
+    display: flex; flex-direction: column; align-items: center;
+    max-width: 760px; margin: 0 auto;
+    animation: v2land-plan-in .42s cubic-bezier(.22,1,.36,1) backwards;
+}
+.v2-landing[data-screen="plan"] .v2-screen-plan {
+    display: flex; flex-direction: column;
+    animation: v2land-plan-in .42s cubic-bezier(.22,1,.36,1) backwards;
+}
+/* One swap motion shared by both screens: a soft opacity + rise + settle. The
+   scale .992→1 echoes the dismissed-state scale(1.015) so the surface feels like
+   one continuous fabric folding, not two slides swapping. */
+@keyframes v2land-plan-in {
+    from { opacity: 0; transform: translateY(10px) scale(.992); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* plan header */
+.v2-plan-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.v2-plan-orb { width: 40px; height: 40px; transition: width .42s cubic-bezier(.22,1,.36,1), height .42s cubic-bezier(.22,1,.36,1); }
+.v2-plan-who { font-size: var(--v2-fs-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8); }
+.v2-plan-title { font-size: 18px; font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); }
+.v2-plan-back {
+    margin-left: auto; background: none; border: 0; cursor: pointer; font: inherit; font-size: 13px;
+    color: var(--text-muted, #94a3b8); padding: 9px 12px; border-radius: 8px; transition: color .2s, background .2s;
+}
+.v2-plan-back:hover { color: var(--text, #0f172a); background: rgba(15,23,42,.05); }
+
+/* plan body: ask stage + assembling plan */
+.v2-plan-wrap { display: grid; grid-template-columns: 1.35fr .9fr; gap: 20px; align-items: start; }
+@media (max-width: 720px) {
+    .v2-plan-wrap { grid-template-columns: 1fr; }
+    /* single column: THE PLAN sits BELOW the feed — drop the internal scroll
+       and let the whole plan screen scroll as one document instead. The
+       descendant selector outranks the plain `.v2-plan-main { max-height }`
+       rule that appears later in the file (equal specificity → source order),
+       so the cap is genuinely lifted here, not silently re-applied. */
+    .v2-landing[data-screen="plan"] .v2-plan-main { height: auto; max-height: none; overflow-y: visible; padding-right: 0; }
+    .v2-landing[data-screen="plan"] { overflow-y: auto; }
+}
+.v2-plan-main { min-height: 220px; }
+.v2-plan-ask:empty { display: none; }
+.v2-plan-thinking { display: flex; align-items: center; gap: 9px; color: var(--text-muted, #94a3b8); font-size: var(--v2-fs-sm); padding: 20px 4px; }
+.v2-plan-thinking.hidden { display: none; }
+.v2-typing { display: inline-flex; gap: 5px; align-items: center; }
+.v2-typing i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent, #2f6df6); opacity: .4; animation: v2-blink 1.1s infinite; }
+.v2-typing i:nth-child(2) { animation-delay: .15s; }
+.v2-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes v2-blink { 0%,100% { opacity: .25; transform: translateY(0); } 50% { opacity: 1; transform: translateY(-3px); } }
+
+.v2-plan-side {
+    background: var(--bg-card, #fff); border: 1px solid var(--border, #e4e9f0); border-radius: 14px; padding: 14px 16px;
+    box-shadow: 0 1px 2px rgba(15,23,42,.04);
+}
+.v2-plan-side-h { font-size: var(--v2-fs-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8); margin-bottom: 10px; }
+.v2-plan-side-empty { color: var(--text-muted, #94a3b8); font-size: var(--v2-fs-sm); font-style: italic; }
+.v2-plan-row { display: flex; flex-direction: column; gap: 2px; padding: 9px 0; border-top: 1px dashed var(--border, #e4e9f0); }
+.v2-plan-row:first-child { border-top: 0; }
+.v2-plan-row .k { font-size: var(--v2-fs-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8); }
+.v2-plan-row .v { font-size: var(--v2-fs-body); color: var(--text, #0f172a); font-weight: 600; }
+
+/* plan footer: "Open conversation" (quiet, left), a spacer, then "Continue in
+   workspace" demoted to a text link (right). The agent's recommended option in
+   the ask card is the real primary action now — the footer no longer competes. */
+.v2-plan-foot { display: flex; align-items: center; gap: 10px; margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--border, #e4e9f0); }
+.v2-plan-foot-spacer { flex: 1; }
+.v2-plan-chat {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 11px 16px; font: inherit; font-size: var(--v2-fs-sm); cursor: pointer; transition: border-color .2s, color .2s;
+}
+.v2-plan-chat:hover { border-color: var(--border-strong); color: var(--text, #0f172a); }
+.v2-plan-skip {
+    background: none; border: 0; cursor: pointer; font: inherit; font-size: var(--v2-fs-sm);
+    color: var(--text-muted, #94a3b8); padding: 11px 10px; border-radius: 8px; transition: color .2s;
+}
+.v2-plan-skip:hover { color: var(--text-secondary, #475569); }
+.v2-plan-export {
+    background: none; border: 1px solid var(--border, #e4e9f0); color: var(--text-secondary, #475569);
+    border-radius: 999px; padding: 11px 16px; font: inherit; font-size: var(--v2-fs-sm);
+    font-weight: 600; cursor: pointer; transition: border-color .2s, color .2s, background .2s;
+}
+.v2-plan-export:hover { border-color: var(--border-strong); color: var(--text, #0f172a); background: var(--bg-hover); }
+.v2-plan-export:disabled { opacity: .6; cursor: default; }
+.v2-plan-export[hidden] { display: none; }
+
+/* ── Plan-ready state: the design is done, signpost the finish line ───────── */
+.v2-screen-plan.ready .v2-plan-orb {
+    background: radial-gradient(closest-side at 38% 34%, #ffffff, #c8f0d4 40%, var(--accent-green, #16a34a) 100%);
+}
+.v2-screen-plan.ready .v2-plan-who { color: var(--accent-green, #16a34a); }
+.v2-screen-plan.ready .v2-plan-foot { border-top-color: color-mix(in srgb, var(--accent-green) 35%, var(--border)); }
+/* promote "open the workspace" from a quiet skip link to the primary action */
+.v2-screen-plan.ready #v2-plan-continue {
+    background: var(--accent-green, #16a34a); color: #fff;
+    border-radius: 999px; padding: 11px 20px; font-weight: 600;
+}
+.v2-screen-plan.ready #v2-plan-continue:hover {
+    color: #fff; background: color-mix(in srgb, var(--accent-green) 88%, #000);
+}
+
+/* ── Agent-activity feed: claude.ai-style collapsible tool cards ──────────── */
+/* Both screens share the .v2-landing-inner top anchor (no per-screen align flip —
+   that was the welcome→plan lurch). The feed is a fixed-height viewport (height
+   set above) so the streaming activity column scrolls on its own without ever
+   reflowing the anchored header/footer around it. Short feeds stay compact
+   (min-height above); long feeds cap at 66vh and scroll internally. The header
+   never moves because the inner is top-anchored — only the footer rides down as
+   the feed grows, up to the cap. */
+.v2-plan-main { max-height: 66vh; overflow-y: auto; padding-right: 4px; }
+
+.v2-plan-activity { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
+.v2-plan-activity:empty { display: none; margin: 0; }
+
+/* Paginated feed — one agent step (turn) per page, flipped with ‹ Prev / Next ›.
+   The pager bar / dots reuse .v2-plan-pager / .v2-plan-dots styling. */
+.v2-feed-pages { display: flex; flex-direction: column; }
+.v2-act-page { display: none; flex-direction: column; gap: 8px; }
+.v2-act-page.active { display: flex; }
+/* beat .v2-plan-pager/.v2-plan-dots { display:flex } so [hidden] actually hides */
+.v2-plan-pager[hidden], .v2-plan-dots[hidden] { display: none; }
+.v2-feed-pager-bar { margin: 0 0 4px; }
+.v2-feed-dots { margin-top: 10px; }
+/* the current question, pinned below the paged feed, set off by a divider —
+   only once there are steps above it (no stray line on the first choice card) */
+#v2-plan-activity:has(.v2-act-page) + .v2-plan-ask:not(:empty) {
+    margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border, #e4e9f0);
+}
+
+/* agent prose between tool calls */
+.v2-act-text { font-size: var(--v2-fs-sm); line-height: 1.55; color: var(--text-secondary, #475569); white-space: pre-wrap; }
+
+/* collapsed-by-default tool card; the header toggles .open to reveal the body */
+.v2-act-tool { border: 1px solid var(--border, #e4e9f0); border-radius: 11px; background: var(--bg-card, #fff); overflow: hidden; }
+.v2-act-tool-head {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    background: none; border: 0; cursor: pointer; text-align: left; font: inherit;
+    padding: 11px 12px; color: var(--text, #0f172a);
+}
+.v2-act-tool-head:hover { background: var(--bg-hover, #f1f5f9); }
+.v2-act-ic { width: 16px; flex: none; text-align: center; font-size: 12px; }
+.v2-act-tool.done .v2-act-ic { color: var(--accent-green, #16a34a); }
+.v2-act-tool.err .v2-act-ic { color: #ea580c; }
+body.ux-v2[data-theme="dark"] .v2-act-tool.err .v2-act-ic { color: #fb923c; }
+.v2-act-spin {
+    display: inline-block; width: 11px; height: 11px; border-radius: 50%;
+    border: 2px solid var(--border, #e4e9f0); border-top-color: var(--accent, #2f6df6);
+    animation: v2-act-spin .7s linear infinite;
+}
+@keyframes v2-act-spin { to { transform: rotate(360deg); } }
+.v2-act-label { font-size: var(--v2-fs-sm); font-weight: 600; flex: none; }
+.v2-act-summary { font-size: var(--v2-fs-cap); color: var(--text-muted, #94a3b8); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.v2-act-chev { flex: none; color: var(--text-muted, #94a3b8); transition: transform .2s; font-size: 13px; }
+.v2-act-tool.open .v2-act-chev { transform: rotate(90deg); }
+/* animatable collapse: grid-template-rows 0fr→1fr eases in step with the chevron
+   (display:none isn't animatable). Needs exactly ONE min-height:0 child — landing.js
+   wraps the blocks in a single inner div for this. */
+.v2-act-tool-body {
+    display: grid; grid-template-rows: 0fr; opacity: 0;
+    padding: 0 12px 0 37px;
+    transition: grid-template-rows .26s cubic-bezier(.22,1,.36,1),
+                opacity .26s cubic-bezier(.22,1,.36,1),
+                padding-bottom .26s cubic-bezier(.22,1,.36,1);
+}
+.v2-act-tool-body > * { min-height: 0; overflow: hidden; }
+.v2-act-tool.open .v2-act-tool-body { grid-template-rows: 1fr; opacity: 1; padding-bottom: 11px; }
+.v2-act-tool.open .v2-act-summary { white-space: normal; }
+.v2-act-block-label { font-size: var(--v2-fs-eyebrow); letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted, #94a3b8); margin-top: 8px; }
+.v2-act-block {
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    background: var(--bg-hover); border: 1px solid var(--border, #e4e9f0); border-radius: 8px;
+    padding: 8px 10px; margin-top: 4px; white-space: pre-wrap; word-break: break-word;
+    color: var(--text-secondary, #475569); max-height: 220px; overflow: auto;
+}
+
+/* error + fallback states */
+.v2-plan-error {
+    font-size: var(--v2-fs-sm); color: #b91c1c;
+    background: rgba(239,68,68,.10); border: 1px solid rgba(239,68,68,.35);
+    border-radius: 11px; padding: 11px 13px;
+}
+body.ux-v2[data-theme="dark"] .v2-plan-error {
+    color: #fca5a5; background: rgba(239,68,68,.14); border-color: rgba(239,68,68,.40);
+}
+.v2-plan-error.hidden { display: none; }
+.v2-plan-fallback { font-size: 13px; color: var(--text-muted, #94a3b8); padding: 8px 2px; }
+.v2-plan-fallback a { color: var(--accent, #2f6df6); cursor: pointer; }
+
+/* plan-panel: phases + tasks (real plan), and a free-text-answer row variant */
+.v2-plan-phase { margin-top: 12px; }
+.v2-plan-phase:first-child { margin-top: 0; }
+.v2-plan-phase-h {
+    font-size: var(--v2-fs-eyebrow); font-weight: 700; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-secondary, #475569); margin-bottom: 6px;
+}
+/* a plan item: "P.I" number · type-color dot · title · optional duration.
+   the type dot encodes the item kind (imaging/genetics/analysis/…) at a glance. */
+.v2-plan-task {
+    display: grid; grid-template-columns: auto 8px 1fr auto; align-items: baseline;
+    gap: 9px; font-size: var(--v2-fs-cap); color: var(--text-secondary, #475569);
+    padding: 6px 0; border-top: 1px solid color-mix(in srgb, var(--border, #e4e9f0) 55%, transparent);
+}
+.v2-plan-phase .v2-plan-task:first-child { border-top: 0; }
+.v2-task-num {
+    font: 600 11px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: var(--text-muted, #94a3b8); font-variant-numeric: tabular-nums;
+}
+.v2-task-dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; background: var(--text-muted, #94a3b8); }
+.v2-task-ttl { min-width: 0; color: var(--text, #0f172a); line-height: 1.45; }
+.v2-task-days {
+    font-size: 10.5px; font-weight: 600; color: var(--text-muted, #94a3b8);
+    font-variant-numeric: tabular-nums; white-space: nowrap;
+}
+.v2-plan-task.type-imaging .v2-task-dot { background: var(--accent, #2f6df6); }
+.v2-plan-task.type-genetics .v2-task-dot { background: #8b5cf6; }
+.v2-plan-task.type-analysis .v2-task-dot { background: var(--accent-green, #16a34a); }
+.v2-plan-task.type-bench .v2-task-dot { background: #d97706; }
+/* decision points read as gates — a rotated square, not a round bead */
+.v2-plan-task.type-decision_point .v2-task-dot { background: #e11d48; border-radius: 1px; transform: rotate(45deg); }
+.v2-plan-title-row { font-size: var(--v2-fs-sm); font-weight: 600; letter-spacing: -.01em; color: var(--text, #0f172a); margin-bottom: 8px; }
+.v2-plan-row.v2-plan-row-freetext .v { font-style: italic; }
+.v2-plan-task-empty { grid-column: 1 / -1; color: var(--text-muted, #94a3b8); font-style: italic; }
+
+/* THE PLAN pager: ‹ Prev · "Phase · i of N" · Next › + dots, one phase per page */
+.v2-plan-pager { display: flex; align-items: center; gap: 8px; margin: 2px 0 12px; }
+.v2-plan-pager-btn {
+    flex: none; background: none; border: 0; cursor: pointer; font: inherit;
+    font-size: var(--v2-fs-cap); font-weight: 600; color: var(--accent, #2f6df6);
+    padding: 5px 7px; border-radius: 7px; transition: background .15s, color .15s, opacity .15s;
+}
+.v2-plan-pager-btn:hover:not(:disabled) { background: var(--accent-soft); }
+.v2-plan-pager-btn:disabled { color: var(--text-muted, #94a3b8); opacity: .45; cursor: default; }
+.v2-plan-pager-pos {
+    flex: 1; min-width: 0; text-align: center; font-size: var(--v2-fs-cap); font-weight: 600;
+    color: var(--text, #0f172a); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.v2-plan-dots { display: flex; gap: 6px; justify-content: center; margin-top: 12px; }
+.v2-plan-dot {
+    width: 7px; height: 7px; padding: 0; border: 0; border-radius: 50%; cursor: pointer;
+    background: var(--border, #e4e9f0); transition: background .2s, transform .2s;
+}
+.v2-plan-dot:hover { transform: scale(1.25); }
+.v2-plan-dot.active { background: var(--accent, #2f6df6); }
+
+@media (prefers-reduced-motion: reduce) {
+    .v2-landing, .v2-landing::before, .v2-landing-rise, .v2-landing-orb, .v2-plan-orb,
+    .v2-landing[data-screen="plan"] .v2-screen-plan,
+    .v2-landing[data-screen="welcome"] .v2-screen-welcome,
+    .v2-typing i, .v2-act-spin, .v2-act-chev,
+    .v2-act-tool-body, .v2-act-tool-head,
+    .v2-choice, .v2-escape-field, .v2-escape-toggle,
+    .v2-plan-pager-btn, .v2-plan-dot {
+        animation: none !important;
+        transition-duration: .12s !important;
+    }
+    /* keep the collapsible usable without the height tween */
+    .v2-act-tool-body { transition: none !important; }
+    .v2-act-tool.open .v2-act-tool-body { grid-template-rows: 1fr; opacity: 1; }
+}

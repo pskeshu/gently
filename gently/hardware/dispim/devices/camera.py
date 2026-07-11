@@ -392,7 +392,9 @@ class DiSPIMBottomCamera(DiSPIMCamera):
         self.pixel_size_um = pixel_size_um
         self.magnification = magnification
         self.effective_pixel_size = pixel_size_um / magnification
-        self.use_led = False  # Set to True to enable automatic LED control
+        # Retained for API compatibility but ignored: the bottom camera never
+        # drives the LED (see trigger()). Imaging uses room light only.
+        self.use_led = False
 
     def pixel_to_um(self, pixels: float) -> float:
         """
@@ -412,14 +414,12 @@ class DiSPIMBottomCamera(DiSPIMCamera):
 
     def trigger(self):
         """
-        Trigger image acquisition with optional LED management.
+        Trigger image acquisition.
 
-        Overrides parent trigger() to add LED control (if use_led=True):
-        1. Turn LED on (if use_led=True)
-        2. Capture image
-        3. Turn LED off (if use_led=True, always even on error)
-
-        Set self.use_led = False to capture without LED (ambient light only).
+        The bottom camera NEVER drives the LED — imaging is done under room
+        light only. The ``use_led`` flag is retained for API compatibility but
+        is intentionally ignored here so that no caller (manual marking,
+        detection, live preview, …) can ever flash the LED.
 
         Returns
         -------
@@ -430,28 +430,13 @@ class DiSPIMBottomCamera(DiSPIMCamera):
 
         def wait():
             try:
-                # Turn LED on for transmitted light imaging (if enabled)
-                if self.use_led:
-                    self.led_control.set("Open").wait(timeout=5)
-                    time.sleep(0.1)  # Allow LED to stabilize
-
-                # Capture image
+                # LED is never used — capture under ambient/room light only.
                 self._ensure_active()
                 self.core.snapImage()
                 self._last_image = _safe_obtain(self.core.getImage())
                 self._last_image_time = time.time()
 
-                # Turn LED off (if enabled - important to prevent sample heating!)
-                if self.use_led:
-                    self.led_control.set("Closed").wait(timeout=5)
-
             except Exception as exc:
-                # Critical: always turn off LED even on error (if enabled)
-                if self.use_led:
-                    try:
-                        self.led_control.set("Closed").wait(timeout=5)
-                    except Exception:
-                        pass
                 status.set_exception(exc)
             else:
                 status.set_finished()

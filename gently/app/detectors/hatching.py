@@ -5,6 +5,10 @@ Useful for TestEmbryos that lack the nuclear marker the standard perception
 pipeline trains on. The dopaminergic-signal detector already returns
 ``has_hatched`` as part of its richer schema; this is a lighter-weight
 yes/no for use cases where structure / intensity assessment isn't needed.
+
+The verdict comes back as a forced tool call (``tool_choice`` pins the model
+to ``record_hatching``), so the structured fields arrive already parsed as
+``block.input`` — no JSON-from-prose scraping, no silent-default parse layer.
 """
 
 import asyncio
@@ -20,8 +24,9 @@ from .dopaminergic_signal import _volume_to_b64
 logger = logging.getLogger(__name__)
 
 
-_HATCHING_PROMPT = """You are observing a C. elegans embryo on a microscope. Decide whether
-the embryo has HATCHED.
+_HATCHING_PROMPT = """\
+You are observing a C. elegans embryo on a microscope. Decide whether the embryo has HATCHED,
+then record your decision with the record_hatching tool.
 
 A HATCHED embryo:
 - Has visibly broken out of the eggshell
@@ -32,20 +37,37 @@ An UNHATCHED embryo:
 - Is still contained within an intact eggshell
 - May be at any pre-hatching stage (bean, comma, 1.5-fold, 2-fold, pretzel)
 
-Respond with ONLY a JSON object exactly matching this schema:
-
-{
-  "has_hatched": true|false,
-  "confidence": "LOW|MEDIUM|HIGH",
-  "reasoning": "..."
-}
-
-Default to false unless you are confident. Don't over-call hatching.
+Default to has_hatched=false unless you are confident. Don't over-call hatching.
 """
 
 
+# Forced tool schema — the model is pinned to this via tool_choice, so the
+# fields come back as a validated dict on the tool_use block. The conservative
+# "default to false" guidance lives in the prompt. We deliberately do NOT ask
+# the model to self-rate confidence — that's a heuristics-era artifact; the
+# has_hatched judgment is the signal.
+_HATCHING_TOOL = {
+    "name": "record_hatching",
+    "description": "Record whether the C. elegans embryo has hatched, with brief reasoning.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "has_hatched": {
+                "type": "boolean",
+                "description": "True only if the embryo has visibly broken out of the eggshell.",
+            },
+            "reasoning": {
+                "type": "string",
+                "description": "One short sentence citing the visual evidence for the call.",
+            },
+        },
+        "required": ["has_hatched", "reasoning"],
+    },
+}
+
+
 class HatchingDetector(Detector):
-    """Claude-vision hatching yes/no, with confidence."""
+    """Claude-vision hatching yes/no."""
 
     name = "hatching"
 
@@ -59,7 +81,6 @@ class HatchingDetector(Detector):
         context: dict[str, Any],
     ) -> DetectorResult:
         import json
-        import re
 
         import anthropic
 
@@ -84,7 +105,7 @@ class HatchingDetector(Detector):
                 detector_name=self.name,
                 embryo_id=embryo_id,
                 timepoint=timepoint,
-                findings={"has_hatched": False, "confidence": "LOW"},
+                findings={"has_hatched": False},
                 reasoning="Empty / unreadable volume",
                 elapsed_ms=(time.time() - start) * 1000,
             )
@@ -93,7 +114,9 @@ class HatchingDetector(Detector):
             response = await asyncio.to_thread(
                 claude.messages.create,
                 model=self._model or settings.models.fast,
-                max_tokens=200,
+                max_tokens=256,
+                tools=[_HATCHING_TOOL],
+                tool_choice={"type": "tool", "name": _HATCHING_TOOL["name"]},
                 messages=[
                     {
                         "role": "user",
@@ -111,23 +134,24 @@ class HatchingDetector(Detector):
                     }
                 ],
             )
-            raw = response.content[0].text if response.content else ""
 
-            findings = {"has_hatched": False, "confidence": "LOW"}
+            # Forced tool_choice guarantees a tool_use block; read its parsed
+            # input directly. No regex, no JSON-from-prose fallback.
+            tool_input = next(
+                (b.input for b in response.content if getattr(b, "type", None) == "tool_use"),
+                None,
+            )
+
+            findings = {"has_hatched": False}
             reasoning = None
             err = None
-            try:
-                m = re.search(r"\{.*?\}", raw, re.DOTALL)
-                blob = m.group(0) if m else raw.strip()
-                parsed = json.loads(blob)
-                findings["has_hatched"] = bool(parsed.get("has_hatched", False))
-                confidence = str(parsed.get("confidence", "LOW")).upper()
-                if confidence not in {"LOW", "MEDIUM", "HIGH"}:
-                    confidence = "LOW"
-                findings["confidence"] = confidence
-                reasoning = parsed.get("reasoning")
-            except (json.JSONDecodeError, AttributeError) as e:
-                err = f"parse error: {e}"
+            if isinstance(tool_input, dict):
+                findings["has_hatched"] = bool(tool_input.get("has_hatched", False))
+                reasoning = tool_input.get("reasoning")
+            else:
+                # Shouldn't happen with forced tool_choice — keep the
+                # conservative default and record why.
+                err = "no tool_use block in response"
 
             return DetectorResult(
                 detector_name=self.name,
@@ -135,7 +159,7 @@ class HatchingDetector(Detector):
                 timepoint=timepoint,
                 findings=findings,
                 reasoning=reasoning,
-                raw_response=raw,
+                raw_response=json.dumps(tool_input) if isinstance(tool_input, dict) else None,
                 elapsed_ms=(time.time() - start) * 1000,
                 error=err,
             )

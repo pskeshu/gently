@@ -136,7 +136,13 @@ const HomeApp = (() => {
     function updateStatus() {
         const el = document.getElementById('home-status');
         if (!el) return;
-        const connected = (typeof state !== 'undefined' && state.connected);
+        // Read the shared ConnectionStatus store, not a one-shot snapshot of
+        // state.connected — the latter was read once at tab init (before the
+        // /ws handshake) and never corrected, showing "Offline" while the
+        // header pill said "Online".
+        const connected = (typeof ConnectionStatus !== 'undefined')
+            ? ConnectionStatus.get().gentlyConnected
+            : (typeof state !== 'undefined' && state.connected);
         const n = (typeof state !== 'undefined' && Array.isArray(state.embryos)) ? state.embryos.length : 0;
         el.textContent = connected
             ? `Connected · ${n} embryo${n === 1 ? '' : 's'} in view`
@@ -162,6 +168,12 @@ const HomeApp = (() => {
                     if (AgentChat.runCommand) setTimeout(() => AgentChat.runCommand('/wizard'), 250);
                 }
             });
+            // Re-render the status line on every connection change. subscribe()
+            // replays the current snapshot immediately, so a late init still
+            // renders correct state. Registered once (inside the _inited guard).
+            if (typeof ConnectionStatus !== 'undefined') {
+                ConnectionStatus.subscribe(() => updateStatus());
+            }
         }
         refresh();  // re-fetch on every entry to the tab
     }

@@ -680,7 +680,11 @@ class VisualizationServer(Service):
             embryos.append(
                 {
                     "embryo_number": m["number"],
-                    "embryo_id": m.get("embryo_id") or f"embryo_{m['number']:03d}",
+                    # Unpadded to match the live convention used everywhere else
+                    # (detection_tools registers embryos as f"embryo_{n}"). A
+                    # zero-padded fallback here produced ids like "embryo_002"
+                    # that never matched the stored "embryo_2".
+                    "embryo_id": m.get("embryo_id") or f"embryo_{m['number']}",
                     "pixel_position": (px, py),
                     "pixel_x": px,
                     "pixel_y": py,
@@ -788,13 +792,22 @@ class VisualizationServer(Service):
         import socket
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        # Match uvicorn's own bind semantics. uvicorn sets SO_REUSEADDR before it
+        # binds, so a bare preflight bind WITHOUT it is *stricter* than the real
+        # server: when a previous instance has just exited, its browser/websocket
+        # connections linger in TIME_WAIT holding this local port, and a plain
+        # bind() fails with EADDRINUSE even though uvicorn would bind fine. That
+        # false positive was the recurring "port in use" on quick restarts. With
+        # SO_REUSEADDR the preflight now fails only on a genuine live listener
+        # (a real second instance) — exactly when uvicorn would also fail.
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind((self.host, self.port))
         except OSError:
             raise OSError(
-                f"Port {self.port} is already in use. "
-                "Is another instance of the agent running? "
-                "Close it first and try again."
+                f"Port {self.port} is already in use — another instance may be running. "
+                f"Free it with:  fuser -k {self.port}/tcp  "
+                f"(or: lsof -ti:{self.port} | xargs -r kill), then try again."
             ) from None
         finally:
             sock.close()

@@ -231,6 +231,7 @@ async def main(
     log_level: str = "WARNING",
     no_browser: bool = False,
     no_api: bool = False,
+    no_auth: bool = False,
 ):
     # Set up log file in storage directory
     # Unified with FileStore: logs live under the same root as data
@@ -272,9 +273,16 @@ async def main(
     # ── Accounts / auth ───────────────────────────────────────────
     # Self-managed user accounts gate microscope control on the LAN. On first
     # run we bootstrap an admin and print its one-time password in the banner.
-    # Set GENTLY_NO_AUTH=1 to disable accounts (legacy localhost-control mode).
+    # Pass --no-auth (or set GENTLY_NO_AUTH=1) to disable accounts (localhost-control mode).
     admin_creds = None
-    if os.environ.get("GENTLY_NO_AUTH", "").strip().lower() not in ("1", "true", "yes"):
+    auth_disabled = no_auth or os.environ.get("GENTLY_NO_AUTH", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if auth_disabled:
+        logger.warning("Accounts disabled (--no-auth) — control is open on this host")
+    if not auth_disabled:
         try:
             from gently.ui.web.accounts import AccountStore, set_account_store
 
@@ -648,6 +656,11 @@ def cli_main():
     )
     parser.add_argument("--debug", action="store_true", help="Enable debug logging (most verbose)")
     parser.add_argument(
+        "--no-auth",
+        action="store_true",
+        help="Disable accounts/login (localhost-control mode; same as GENTLY_NO_AUTH=1)",
+    )
+    parser.add_argument(
         "--no-browser",
         action="store_true",
         help="Do not auto-open the web UI in a browser",
@@ -684,6 +697,7 @@ def cli_main():
                 log_level=log_level,
                 no_browser=args.no_browser,
                 no_api=args.no_api,
+                no_auth=args.no_auth,
             )
         )
     except (KeyboardInterrupt, RuntimeError, SystemExit):

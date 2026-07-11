@@ -112,15 +112,17 @@ async def attach_session_to_plan(
     # Two sources of truth for the active plan item
     _set_active_plan_item(agent, item.id)
 
-    # Link the session into the campaign's intent record
+    # Link the session into the campaign's intent record AND onto the plan item
+    # itself (item-level, appends — an item may have several sessions).
     session_id = getattr(agent, "session_id", None)
     linked = False
     if session_id:
         try:
             cs.link_session_campaign(session_id, item.campaign_id)
+            cs.link_plan_item_session(item.id, session_id)
             linked = True
         except Exception as e:
-            logger.warning(f"link_session_campaign failed: {e}")
+            logger.warning(f"session↔plan link failed: {e}")
 
     # Invalidate prompt cache so the next system prompt picks up the
     # active item (the memory awareness layer injects its spec).

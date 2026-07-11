@@ -1,161 +1,91 @@
 /**
- * Experiment Overview Tab — vector-graphics view of the planned timelapse.
+ * Experiment Overview Tab — vector-graphics view of the live imaging tactics
+ * (cadence patterns + reactive-monitoring rules) for the running experiment.
  *
- * Data source priority:
- *   1. GET /api/experiments/current/strategy  — live snapshot from FileStore.
- *   2. STUB_STRATEGY below                    — used when the live fetch
- *                                               fails or no session exists.
- *
- * The render path is data-shape-driven and doesn't care which source the
- * snapshot came from — only ``ExperimentOverview.isLive`` differs so the
- * header badge can say "live" or "mockup · stubbed data".
+ * Data source: GET /api/experiments/current/strategy — the live snapshot from
+ * FileStore. When there is no active experiment (or the fetch isn't ready), the
+ * view shows a calm empty state; it never renders stubbed/mock data.
  */
 
-const STUB_STRATEGY = {
-    session_id: "20260522_1430_dopaminergic_demo_a3f8e1c2",
-    session_name: "dopaminergic-reporter demo",
-    started_at: "2026-05-22T14:30:00",
-    now_offset_s: 8100,         // 2h 15min into the run
-    horizon_s: 14400,           // 4h total view window (past + projected)
-    base_interval_s: 120,
-    dose_budget_base_ms: 50000,
-    per_timepoint_ms: 500,      // 50 slices × 10ms
-    monitoring_modes: [
-        {
-            name: "expression_monitoring",
-            description: "Anticipating fluorescent-reporter onset on Test embryos: accelerate to 60s on signal, ramp 488 down on saturation.",
-            applies_to_roles: ["test"],
-            params: {
-                fast_interval: 60,
-                rampdown_step_pct: 1.0,
-                rampdown_floor_pct: 2.0,
-                rampdown_ceiling_pct: 6.0
-            }
-        },
-        {
-            name: "pre_terminal_monitoring",
-            description: "Anticipating organism pre-terminal stage (pretzel): accelerate to 30s on detection.",
-            applies_to_roles: ["test"],
-            params: { fast_interval: 30 }
-        }
-    ],
-    triggers: [
-        { id: "t1", kind: "interval_rule", label: "signal onset",
-          when_text: "dopaminergic ≥ WEAK", then_text: "120s → 60s",
-          applies_to: ["test"], one_time: true },
-        { id: "t2", kind: "power_rule", label: "488 ramp down",
-          when_text: "intensity = SATURATING (×3)", then_text: "488 ↓ 1%/step, floor 2%",
-          applies_to: ["test"] },
-        { id: "t3", kind: "burst", label: "structure-triggered burst",
-          when_text: "structure_quality = GOOD", then_text: "burst 200 frames @ 20 Hz",
-          applies_to: ["test"] },
-        { id: "t4", kind: "interval_rule", label: "pre-terminal speedup",
-          when_text: "stage = pretzel", then_text: "60s → 30s",
-          applies_to: ["test"], one_time: true }
-    ],
-    embryos: [
-        {
-            id: "E1", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 12500, dose_budget_ms: 50000,
-            tp_acquired: 25,
-            stop_condition: "hatching+3 OR 24h duration",
-            stop_kind: "bounded",
-            laser_488_pct_now: 3.0,
-            phases: [
-                { mode: "base",     start: 0,    end: 1800, cadence_s: 120 },
-                { mode: "fast",     start: 1800, end: 3600, cadence_s: 60 },
-                { mode: "burst",    start: 3600, end: 3610, frames: 200, hz: 20 },
-                { mode: "cooldown", start: 3610, end: 3640, cadence_s: 60 },
-                { mode: "fast",     start: 3640, end: 8100, cadence_s: 60 }
-            ],
-            trigger_events: [
-                { trigger_id: "t1", at: 1800 },
-                { trigger_id: "t3", at: 3600 },
-                { trigger_id: "t2", at: 5400, count: 3 }
-            ],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 5400, pct: 4.0 },
-                { at: 5460, pct: 3.0 },
-                { at: 8100, pct: 3.0 }
-            ],
-            // Future projection at current cadence (60s, fast). Hatching not
-            // deterministic so projected_end_s is null — render fades to ∞.
-            projected_cadence_s: 60,
-            projected_end_s: null
-        },
-        {
-            id: "E2", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 6500, dose_budget_ms: 50000,
-            tp_acquired: 13,
-            stop_condition: "hatching+3 OR 24h duration",
-            stop_kind: "bounded",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            projected_cadence_s: 120,
-            projected_end_s: null
-        },
-        {
-            id: "E3", role: "test", color: "#ff66cc", icon: "★",
-            dose_used_ms: 38000, dose_budget_ms: 50000,
-            tp_acquired: 76,
-            stop_condition: "manual",
-            stop_kind: "open_ended",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            // Projected dose-exhaust horizon = 4.0h from now (warning condition)
-            projected_cadence_s: 120,
-            projected_end_s: null,
-            dose_exhaust_at_s: 12000   // budget will run out at this elapsed time
-        },
-        {
-            id: "C1", role: "calibration", color: "#22d3ee", icon: "◆",
-            dose_used_ms: 33500, dose_budget_ms: 500000,   // 10× multiplier
-            tp_acquired: 67,
-            stop_condition: "manual",
-            stop_kind: "open_ended",
-            laser_488_pct_now: 5.0,
-            phases: [
-                { mode: "base", start: 0, end: 8100, cadence_s: 120 }
-            ],
-            trigger_events: [],
-            power_history_488: [
-                { at: 0,    pct: 5.0 },
-                { at: 8100, pct: 5.0 }
-            ],
-            projected_cadence_s: 120,
-            projected_end_s: null
-        }
-    ]
-};
 
 const ExperimentOverview = {
     initialized: false,
     expandedMode: null,
     activeView: 'overview',  // 'overview' | 'rules'
-    activeStrategy: null,    // last fetched/loaded snapshot
-    isLive: false,           // true when activeStrategy came from the API
+    activeStrategy: null,    // last fetched strategy snapshot (rules view)
+    activePlan: null,        // last fetched/loaded operation plan (overview spine)
+    isLive: false,           // true when data came from the API
+    scenarioMode: false,     // true when ?scenario=<name> is active
+    _subscribed: false,      // guard: prevents double-registration across tab re-clicks
+    _planRefreshTimer: null, // debounce handle for tactic-event-driven refetch
+    _tempUpdateHandler: null,// stored handler ref so it can be off()'d if needed
+    _rosterEmbryos: [],      // embryos from /api/embryos/positions (D2 roster lens)
+    _rolesMap: null,         // Map(role name → registry obj) from /api/roles (D2 roster lens)
+    _currentSessionId: null, // session_id from /api/operation_plan/current (always, even idle)
+    _planPickerOpen: false,  // whether the plan-link picker is visible
+    _pickerItems: null,      // flat plan items for the picker (null=not loaded)
+    _expandedTacticIds: new Set(), // tactic expand-keys for click-to-expand (survives refresh)
 
     async init() {
         console.log('[ExperimentOverview] init() called, view=', this.activeView);
-        const strategy = await this.loadStrategy();
+
+        // Scenario dev mode: ?scenario=<name> renders a fixture with no fetch.
+        // Guard against double-registration when the tab is clicked repeatedly.
+        const scenarioParam = new URLSearchParams(location.search).get('scenario');
+        if (scenarioParam && window.OPERATIONS_SCENARIOS &&
+            Object.prototype.hasOwnProperty.call(window.OPERATIONS_SCENARIOS, scenarioParam)) {
+            this.scenarioMode = true;
+            this.activePlan = window.OPERATIONS_SCENARIOS[scenarioParam];
+            this.activeStrategy = null;
+            this.isLive = false;
+            this.render(null);
+            this.initialized = true;
+            return;
+        }
+
+        this.scenarioMode = false;
+        // Fetch plan (overview) and strategy (rules) in parallel so tab-switching
+        // between the two views doesn't require a second round-trip.
+        // D2: also fetch roster + roles for the roster lens.
+        const [plan, strategy, rosterEmbryos, rolesMap] = await Promise.all([
+            this.loadPlan(),
+            this.loadStrategy(),
+            this._loadRoster(),
+            this._loadRolesMap(),
+        ]);
+        this.activePlan = plan;
         this.activeStrategy = strategy;
+        this._rosterEmbryos = rosterEmbryos;
+        this._rolesMap = rolesMap;
+        this.isLive = plan !== null || strategy !== null;
         this.render(strategy);
         this.initialized = true;
+
+        // Subscribe to tactic-state events once per page load.
+        // Guard: _subscribed prevents double-registration across tab re-clicks.
+        // Skip entirely in scenario mode — no live backend, no websocket.
+        if (!this._subscribed) {
+            this._subscribed = true;
+            const refresh = () => this._debouncedRefresh();
+            // Plan-changing events: re-fetch the whole plan after debounce.
+            // CONTEXT_UPDATED fires when OperationPlanUpdater patches the plan.
+            // The tactic-lifecycle events fire on transitions the updater also
+            // reacts to, so they all funnel into the same debounced refetch.
+            const TACTIC_EVENTS = [
+                'CONTEXT_UPDATED',
+                'TEMP_PROTOCOL_STARTED', 'TEMP_PROTOCOL_COMPLETED',
+                'BURST_START', 'BURST_COMPLETE',
+                'EMBRYO_CADENCE_CHANGED', 'TEMPERATURE_SETPOINT_CHANGED',
+                'POWER_RAMP_STEP',
+            ];
+            TACTIC_EVENTS.forEach(ev => ClientEventBus.on(ev, refresh));
+
+            // High-frequency temperature binding (~1 Hz).
+            // Updates the active scripted_protocol tactic's temperature gauge
+            // IN PLACE — no plan refetch, no full re-render.
+            this._tempUpdateHandler = (data) => this._handleTempUpdate(data);
+            ClientEventBus.on('TEMPERATURE_UPDATE', this._tempUpdateHandler);
+        }
     },
 
     async loadStrategy() {
@@ -164,24 +94,96 @@ const ExperimentOverview = {
                 cache: 'no-store'
             });
             if (!resp.ok) {
-                console.warn(
-                    '[ExperimentOverview] strategy fetch returned',
-                    resp.status, '- falling back to stub'
-                );
-                this.isLive = false;
-                return STUB_STRATEGY;
+                // No active experiment / not ready yet — show the empty state,
+                // never stubbed data.
+                console.warn('[ExperimentOverview] strategy fetch returned', resp.status);
+                return null;
             }
             const data = await resp.json();
-            this.isLive = true;
             return data;
         } catch (e) {
-            console.warn(
-                '[ExperimentOverview] strategy fetch error - falling back to stub:',
-                e
-            );
-            this.isLive = false;
-            return STUB_STRATEGY;
+            console.warn('[ExperimentOverview] strategy fetch error:', e);
+            return null;
         }
+    },
+
+    // Fetch the agent-authored Operation Plan for the current session.
+    // Returns the plan object (plan.tactics etc.) or null when unavailable.
+    // Always captures data.session_id in _currentSessionId so the Linked-plans
+    // panel can work even when no operation plan is active.
+    async loadPlan() {
+        try {
+            const resp = await fetch('/api/operation_plan/current', { cache: 'no-store' });
+            if (!resp.ok) {
+                console.warn('[ExperimentOverview] plan fetch returned', resp.status);
+                return null;
+            }
+            const data = await resp.json();
+            // Capture session_id regardless of plan availability — used by the
+            // Linked-plans panel which is session-scoped, not plan-scoped.
+            this._currentSessionId = data.session_id || null;
+            if (!data.available) return null;
+            return data.plan || null;
+        } catch (e) {
+            console.warn('[ExperimentOverview] plan fetch error:', e);
+            return null;
+        }
+    },
+
+    // Debounced plan refetch — coalesces rapid tactic-event bursts into a single
+    // fetch+render.  500 ms window matches experiment-strip.js convention.
+    // D2: also re-fetches the embryo roster so the lens stays current.
+    _debouncedRefresh() {
+        if (this._planRefreshTimer) clearTimeout(this._planRefreshTimer);
+        this._planRefreshTimer = setTimeout(async () => {
+            this._planRefreshTimer = null;
+            const [plan, rosterEmbryos] = await Promise.all([
+                this.loadPlan(),
+                this._loadRoster(),
+            ]);
+            this.activePlan = plan;
+            this._rosterEmbryos = rosterEmbryos;
+            this.isLive = plan !== null;
+            this.render(this.activeStrategy);
+        }, 500);
+    },
+
+    // In-place temperature gauge update — called at ~1 Hz by TEMPERATURE_UPDATE.
+    // Finds the active scripted_protocol tactic's temperature readout in the DOM
+    // and rewrites only that element's value, never refetching the plan.
+    // No-op when there is no active scripted_protocol tactic with temperature binding.
+    _handleTempUpdate(data) {
+        if (!data || !data.sample) return;
+        const plan = this.activePlan;
+        if (!plan || !Array.isArray(plan.tactics)) return;
+        // Only act when an active scripted_protocol tactic declares temperature binding.
+        const activeTactic = plan.tactics.find(
+            t => t.state === 'active'
+                && t.kind === 'scripted_protocol'
+                && Array.isArray(t.live_bind)
+                && t.live_bind.includes('temperature')
+        );
+        if (!activeTactic) return;
+
+        const root = document.getElementById('experiment-overview-root');
+        if (!root) return;
+        // _renderOpsReadout stamps data-livebind="temperature" on the gauge div
+        // when the readout label normalises to "temperature".
+        const gauge = root.querySelector('.ops-node.active .ops-gauge[data-livebind="temperature"]');
+        if (!gauge) return;
+        const gv = gauge.querySelector('.ops-gv');
+        if (!gv) return;
+
+        const s = data.sample;
+        const water = s.water_c != null
+            ? parseFloat(s.water_c).toFixed(1) + '°C'
+            : '—';
+        const sp = s.setpoint_c != null
+            ? ' → <span class="ops-set">'
+                + parseFloat(s.setpoint_c).toFixed(1)
+                + '°C</span>'
+            : '';
+        gv.innerHTML = water + sp;
     },
 
     setView(view) {
@@ -193,7 +195,7 @@ const ExperimentOverview = {
         });
         // Re-render against the last fetched strategy (no re-fetch on tab
         // switch — refresh happens on tab activation in the bootstrap).
-        this.render(this.activeStrategy || STUB_STRATEGY);
+        this.render(this.activeStrategy);
     },
 
     render(s) {
@@ -204,13 +206,32 @@ const ExperimentOverview = {
         }
         // Tear down any prior ticker before we blow away the SVG it pointed at.
         this._stopNowTicker();
+        // Reset plan-picker state on each full render so the picker doesn't persist
+        // across tactic-event-driven re-renders.
+        this._planPickerOpen = false;
+        this._pickerItems = null;
+        // Rules view requires the strategy snapshot; show an empty state when absent.
+        // Overview view uses this.activePlan — the null/empty case is handled inside
+        // _renderOperationSpine (it renders the idle state).
+        if (this.activeView === 'rules' && !s) {
+            root.innerHTML = '<div style="padding:32px;text-align:center;color:var(--text-muted,#94a3b8);font-size:13px;">' +
+                'No active experiment — rules and monitoring modes will appear here once a run is live.</div>';
+            return;
+        }
         try {
             root.innerHTML = '';
             if (this.activeView === 'rules') {
                 this._renderRulesView(root, s);
             } else {
-                this._renderOverviewView(root, s);
-                this._startNowTicker();
+                // Operation spine — data-driven tactic plan renderer.
+                // The swimlane view is retired; this renders this.activePlan.
+                this._renderOperationSpine(root, this.activePlan);
+            }
+            // Kick off the async Linked-plans panel (overview tab only).
+            // Fire-and-forget: appends a placeholder immediately, fills after fetch.
+            if (this.activeView === 'overview') {
+                this._initLinkedPlansPanel(root).catch(e =>
+                    console.warn('[ExperimentOverview] linked-plans panel error:', e));
             }
             console.log('[ExperimentOverview] rendered OK, view=', this.activeView);
         } catch (err) {
@@ -222,20 +243,6 @@ const ExperimentOverview = {
         }
     },
 
-    // The "now" marker advances with wall-clock time and shows a countdown to
-    // the next base-interval acquisition. We update only the marker group's
-    // transform + the chip text, never re-rendering the whole SVG. Tick rate
-    // is ~4 Hz which keeps the line motion visibly smooth without burning
-    // cycles. Skipped while the tab is hidden.
-    _startNowTicker() {
-        this._stopNowTicker();
-        const tick = () => {
-            if (!this._nowTickerCtx) return;
-            if (!document.hidden) this._updateNowMarker();
-            this._nowTickerHandle = setTimeout(tick, 250);
-        };
-        this._nowTickerHandle = setTimeout(tick, 250);
-    },
 
     _stopNowTicker() {
         if (this._nowTickerHandle) {
@@ -244,56 +251,249 @@ const ExperimentOverview = {
         }
     },
 
-    _updateNowMarker() {
-        const ctx = this._nowTickerCtx;
-        if (!ctx || !ctx.marker.isConnected) return;
-        const elapsedRealS = (Date.now() - ctx.renderedAtMs) / 1000;
-        const effOffsetS = Math.min(
-            ctx.renderedOffsetS + elapsedRealS,
-            ctx.horizonS
-        );
-        const x = ctx.xForT(effOffsetS);
-        ctx.marker.setAttribute('transform', `translate(${x},0)`);
 
-        // Wall-clock from session-anchored time so the line and the clock
-        // can't drift apart even if the client clock is wrong.
-        const wallMs = ctx.startedAtMs + effOffsetS * 1000;
-        const d = new Date(wallMs);
-        const hh = String(d.getHours()).padStart(2, '0');
-        const mm = String(d.getMinutes()).padStart(2, '0');
-        const ss = String(d.getSeconds()).padStart(2, '0');
+    // =================================================================
+    // Linked-plans panel — session ↔ plan items (F / Task 4)
+    // Symmetric with the Plans-tab Sessions section (campaigns.js).
+    // Endpoints: GET /api/sessions/{id}/plans
+    //            POST /api/campaigns/{cid}/items/{iid}/sessions
+    //            DELETE .../sessions/{session_id}
+    // =================================================================
 
-        let label = `${hh}:${mm}:${ss}`;
-        if (ctx.baseIntervalS > 0) {
-            const nextTickS = Math.ceil(effOffsetS / ctx.baseIntervalS) * ctx.baseIntervalS;
-            const remainS = Math.max(0, Math.round(nextTickS - effOffsetS));
-            const rm = Math.floor(remainS / 60);
-            const rs = String(remainS % 60).padStart(2, '0');
-            label += ` · next ${rm}:${rs}`;
+    // Initialise and append the Linked-plans panel to the ops-wrap in root.
+    // Async: appends a loading placeholder immediately, fills after fetch.
+    // No-op when no session_id is known (e.g. store not yet initialised).
+    async _initLinkedPlansPanel(root) {
+        if (!this._currentSessionId) return;
+        const wrap = root.querySelector('.ops-wrap');
+        if (!wrap) return;
+
+        // Append placeholder before the async fetch so layout is stable.
+        const panelEl = document.createElement('div');
+        panelEl.className = 'ops-lp';
+        panelEl.innerHTML = '<div class="ops-lp-loading">Loading linked plans…</div>';
+        wrap.appendChild(panelEl);
+
+        const sid = this._currentSessionId;
+        try {
+            const [linkedData, campaignsData] = await Promise.all([
+                fetch(`/api/sessions/${encodeURIComponent(sid)}/plans`, { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { plans: [] })
+                    .catch(() => ({ plans: [] })),
+                fetch('/api/campaigns', { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { campaigns: [] })
+                    .catch(() => ({ campaigns: [] })),
+            ]);
+            const plans = linkedData.plans || [];
+            const campaignNameMap = {};
+            this._flattenCampaignNames(campaignsData.campaigns || [], campaignNameMap);
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sid);
+        } catch (e) {
+            console.warn('[ExperimentOverview] linked-plans init error:', e);
+            panelEl.innerHTML = '<div class="ops-lp-loading">Could not load linked plans.</div>';
         }
-        ctx.chipText.textContent = label;
+    },
 
-        // Size the chip to fit; flip to the left of the line if we're near
-        // the right edge so it stays on-screen.
-        const textLen = label.length * 6.2 + 12;
-        const nearEnd = x + textLen + 8 > ctx.laneRight;
-        if (nearEnd) {
-            ctx.chipBg.setAttribute('x', -textLen - 4);
-            ctx.chipBg.setAttribute('width', textLen);
-            ctx.chipText.setAttribute('x', -textLen + 2);
+    // Build a map of campaign_id → display name from the /api/campaigns tree.
+    _flattenCampaignNames(trees, map) {
+        const walk = (tree) => {
+            const c = tree.campaign;
+            if (c && c.id) map[c.id] = c.description || c.shorthand || c.id;
+            for (const child of (tree.children || [])) walk(child);
+        };
+        for (const tree of (trees || [])) walk(tree);
+    },
+
+    // Build a flat list of {id, title, status, campaign_id, campaign_name}
+    // from the /api/campaigns tree, for the plan-item picker.
+    _flattenCampaignItems(trees, campaignNameMap) {
+        const items = [];
+        const walk = (tree, inheritedCid, inheritedName) => {
+            const c = tree.campaign;
+            const cid  = (c && c.id)  || inheritedCid;
+            const name = (c && (c.description || c.shorthand)) || inheritedName || cid;
+            for (const item of (tree.items || [])) {
+                items.push({
+                    id:            item.id,
+                    title:         item.title || item.id,
+                    status:        typeof item.status === 'string' ? item.status
+                                   : (item.status && item.status.value) || 'planned',
+                    campaign_id:   cid,
+                    campaign_name: name,
+                });
+            }
+            for (const child of (tree.children || [])) walk(child, cid, name);
+        };
+        for (const tree of (trees || [])) walk(tree, null, null);
+        return items;
+    },
+
+    // Render the linked-plans panel HTML into panelEl and wire button events.
+    _fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId) {
+        const ESC = this._opsESC.bind(this);
+
+        // Header: section label + "+ link to a plan" button
+        let html = `<div class="ops-lp-head">
+            <span class="ops-lp-title">Linked plans</span>
+            <button class="ops-lp-link-btn" id="ops-lp-link-btn">+ link to a plan</button>
+        </div>`;
+
+        // Linked plan-item rows (title · campaign · status · delink)
+        if (plans.length > 0) {
+            html += '<div class="ops-lp-list">';
+            for (const p of plans) {
+                const cname = campaignNameMap[p.campaign_id] || p.campaign_id || '—';
+                const sCls = p.status === 'completed' ? 'done'
+                    : p.status === 'in_progress'       ? 'active' : 'planned';
+                html += `<div class="ops-lp-row">
+                    <span class="ops-lp-row-title">${ESC(p.title || p.id)}</span>
+                    <span class="ops-lp-row-campaign">${ESC(cname)}</span>
+                    <span class="ops-lp-row-status ops-lp-status-${sCls}">${ESC(p.status || 'planned')}</span>
+                    <button class="ops-lp-delink"
+                        data-item-id="${ESC(p.id)}"
+                        data-campaign-id="${ESC(p.campaign_id)}"
+                        title="Delink this plan item">×</button>
+                </div>`;
+            }
+            html += '</div>';
         } else {
-            ctx.chipBg.setAttribute('x', 4);
-            ctx.chipBg.setAttribute('width', textLen);
-            ctx.chipText.setAttribute('x', 10);
+            html += '<div class="ops-lp-empty">Not linked to any plan</div>';
+        }
+
+        // Inline picker — shown when _planPickerOpen is set
+        if (this._planPickerOpen) {
+            if (this._pickerItems === null) {
+                // Still fetching — show loading state
+                html += '<div class="ops-lp-picker ops-lp-picker--loading">Loading plan items…</div>';
+            } else {
+                const linkedIds = new Set(plans.map(p => p.id));
+                const available = this._pickerItems.filter(it => !linkedIds.has(it.id));
+                const opts = available.length === 0
+                    ? '<option value="">No other plan items available</option>'
+                    : available.map(it =>
+                        `<option value="${ESC(it.campaign_id)}::${ESC(it.id)}">${ESC(it.campaign_name)}: ${ESC(it.title)}</option>`
+                      ).join('');
+                html += `<div class="ops-lp-picker">
+                    <select class="ops-lp-picker-sel" id="ops-lp-picker-sel">${opts}</select>
+                    <div class="ops-lp-picker-actions">
+                        <button class="ops-lp-picker-link-btn" id="ops-lp-picker-link">Link</button>
+                        <button class="ops-lp-picker-cancel-btn" id="ops-lp-picker-cancel">Cancel</button>
+                    </div>
+                </div>`;
+            }
+        }
+
+        panelEl.innerHTML = html;
+
+        // Wire events directly on the rendered buttons.
+        const sid = sessionId;
+        const linkBtn = panelEl.querySelector('#ops-lp-link-btn');
+        if (linkBtn) {
+            linkBtn.addEventListener('click', () =>
+                this._openPlanPickerInPanel(panelEl, plans, campaignNameMap, sid));
+        }
+        panelEl.querySelectorAll('.ops-lp-delink').forEach(btn => {
+            btn.addEventListener('click', () =>
+                this._delinkPlanItem(panelEl, btn.dataset.itemId, btn.dataset.campaignId, sid));
+        });
+        const submitBtn = panelEl.querySelector('#ops-lp-picker-link');
+        if (submitBtn) {
+            submitBtn.addEventListener('click', () => this._submitPlanLink(panelEl, sid));
+        }
+        const cancelBtn = panelEl.querySelector('#ops-lp-picker-cancel');
+        if (cancelBtn) {
+            cancelBtn.addEventListener('click', () => {
+                this._planPickerOpen = false;
+                this._pickerItems = null;
+                this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sid);
+            });
         }
     },
 
-    _renderOverviewView(root, s) {
-        root.appendChild(this._renderHeader(s));
-        root.appendChild(this._renderModes(s));
-        root.appendChild(this._renderModeExpanded(s));
-        root.appendChild(this._renderSwimlanes(s));
+    // Open the inline plan-item picker: set loading state, fetch /api/campaigns,
+    // flatten to items, re-render with the picker populated.
+    async _openPlanPickerInPanel(panelEl, plans, campaignNameMap, sessionId) {
+        this._planPickerOpen = true;
+        this._pickerItems = null;  // show loading
+        this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        try {
+            const res = await fetch('/api/campaigns', { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            this._pickerItems = this._flattenCampaignItems(data.campaigns || [], campaignNameMap);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan picker fetch error:', err);
+            this._pickerItems = [];
+        }
+        if (this._planPickerOpen) {
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        }
     },
+
+    // POST the selected plan item → session link, then refetch and re-render.
+    async _submitPlanLink(panelEl, sessionId) {
+        const select = panelEl.querySelector('#ops-lp-picker-sel');
+        const value  = select && select.value;
+        if (!value || !value.includes('::')) return;
+        const [campaignId, itemId] = value.split('::', 2);
+        if (!campaignId || !itemId) return;
+
+        this._planPickerOpen = false;
+        this._pickerItems = null;
+        panelEl.innerHTML = '<div class="ops-lp-loading">Linking…</div>';
+        try {
+            const res = await fetch(
+                `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(itemId)}/sessions`,
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ session_id: sessionId }),
+                },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan link error:', err);
+        }
+        await this._refetchLinkedPlans(panelEl, sessionId);
+    },
+
+    // DELETE the plan-item → session edge, then refetch and re-render.
+    async _delinkPlanItem(panelEl, itemId, campaignId, sessionId) {
+        panelEl.innerHTML = '<div class="ops-lp-loading">Unlinking…</div>';
+        try {
+            const res = await fetch(
+                `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(itemId)}/sessions/${encodeURIComponent(sessionId)}`,
+                { method: 'DELETE' },
+            );
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (err) {
+            console.error('[ExperimentOverview] plan delink error:', err);
+        }
+        await this._refetchLinkedPlans(panelEl, sessionId);
+    },
+
+    // Refetch linked plans + campaigns after a link/delink op, then re-render.
+    async _refetchLinkedPlans(panelEl, sessionId) {
+        try {
+            const [linkedData, campaignsData] = await Promise.all([
+                fetch(`/api/sessions/${encodeURIComponent(sessionId)}/plans`, { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { plans: [] })
+                    .catch(() => ({ plans: [] })),
+                fetch('/api/campaigns', { cache: 'no-store' })
+                    .then(r => r.ok ? r.json() : { campaigns: [] })
+                    .catch(() => ({ campaigns: [] })),
+            ]);
+            const plans = linkedData.plans || [];
+            const campaignNameMap = {};
+            this._flattenCampaignNames(campaignsData.campaigns || [], campaignNameMap);
+            this._fillLinkedPlansPanel(panelEl, plans, campaignNameMap, sessionId);
+        } catch (e) {
+            console.warn('[ExperimentOverview] linked-plans refetch error:', e);
+            panelEl.innerHTML = '<div class="ops-lp-loading">Could not reload linked plans.</div>';
+        }
+    },
+
+
 
     _renderRulesView(root, s) {
         // Compact header echoing the session identity
@@ -301,7 +501,6 @@ const ExperimentOverview = {
         const metaRow = el('div', 'expov-header-row expov-header-row-meta');
         metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
         metaRow.appendChild(elText('span', 'expov-session-id', s.session_id));
-        metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
         header.appendChild(metaRow);
         root.appendChild(header);
 
@@ -313,52 +512,6 @@ const ExperimentOverview = {
         root.appendChild(this._renderRulesTable(s));
     },
 
-    // -----------------------------------------------------------------
-    // Header — session identification + key metrics strip
-    // (page-level title lives in .experiment-header-bar above)
-    // -----------------------------------------------------------------
-    _renderHeader(s) {
-        const elapsedH = Math.floor(s.now_offset_s / 3600);
-        const elapsedM = Math.floor((s.now_offset_s % 3600) / 60);
-        const wrap = el('div', 'expov-header');
-
-        // Session identification — the navbar already carries the id on
-        // every tab, so we only render a name line when it actually adds
-        // info (i.e. a human label, not a hash). The data-source badge is
-        // still useful and gets its own row so it stays visible.
-        const metaRow = el('div', 'expov-header-row expov-header-row-meta');
-        if (s.session_name && s.session_name !== s.session_id) {
-            metaRow.appendChild(elText('span', 'expov-session-name', s.session_name));
-        }
-        if (this.isLive) {
-            metaRow.appendChild(elText('span', 'expov-live-badge', 'live'));
-        } else {
-            metaRow.appendChild(elText('span', 'expov-mockup-badge', 'mockup · stubbed data'));
-        }
-        wrap.appendChild(metaRow);
-
-        // Compact key-metric strip
-        const roleCounts = {};
-        s.embryos.forEach(e => { roleCounts[e.role] = (roleCounts[e.role] || 0) + 1; });
-        const roleStr = Object.entries(roleCounts).map(([r, n]) => `${n} ${r}`).join(' · ');
-        const metricsRow = el('div', 'expov-header-row expov-header-row-metrics');
-        const metric = (label, val) => {
-            const m = el('span', 'expov-metric');
-            m.appendChild(elText('span', 'expov-metric-val', val));
-            m.appendChild(elText('span', 'expov-metric-lbl', label));
-            return m;
-        };
-        metricsRow.appendChild(metric('elapsed', `${elapsedH}h ${elapsedM}m`));
-        metricsRow.appendChild(metric('base', `${s.base_interval_s}s`));
-        const budgetText = (s.dose_budget_base_ms != null && isFinite(s.dose_budget_base_ms))
-            ? `${(s.dose_budget_base_ms / 1000).toFixed(0)}s × role`
-            : 'no limit';
-        metricsRow.appendChild(metric('budget', budgetText));
-        metricsRow.appendChild(metric('embryos', `${s.embryos.length} · ${roleStr}`));
-        wrap.appendChild(metricsRow);
-
-        return wrap;
-    },
 
     // -----------------------------------------------------------------
     // Monitoring mode chips + expanded panel
@@ -424,803 +577,653 @@ const ExperimentOverview = {
         return name.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
     },
 
-    // -----------------------------------------------------------------
-    // Legend
-    // -----------------------------------------------------------------
-    _renderLegend() {
-        const wrap = el('div', 'expov-legend');
-        const items = [
-            ['base',     'base cadence'],
-            ['fast',     'fast cadence'],
-            ['burst',    'burst window'],
-            ['cooldown', 'cooldown'],
-            ['paused',   'paused'],
-        ];
-        items.forEach(([cls, label]) => {
-            const item = el('span', 'expov-legend-item');
-            item.appendChild(elClass('span', `expov-legend-swatch ${cls}`));
-            item.appendChild(elText('span', '', label));
-            wrap.appendChild(item);
-        });
-        const projItem = el('span', 'expov-legend-item');
-        projItem.appendChild(elClass('span', 'expov-legend-swatch projected'));
-        projItem.appendChild(elText('span', '', 'projected'));
-        wrap.appendChild(projItem);
 
-        const glyphs = [
-            ['◇', 'trigger fired'],
-            ['●', 'now'],
-            ['■', 'stop condition'],
-            ['∞', 'open-ended'],
-            ['▲', 'burst start'],
-            ['⚠', 'budget warning']
-        ];
-        glyphs.forEach(([g, label]) => {
-            const item = el('span', 'expov-legend-item');
-            item.appendChild(elText('span', 'expov-legend-glyph', g));
-            item.appendChild(elText('span', '', label));
-            wrap.appendChild(item);
-        });
-        return wrap;
+    // =================================================================
+    // Operation Spine — data-driven plan renderer (replaces swimlanes)
+    // =================================================================
+
+    // Minimal HTML escaper — values in readouts may contain trusted HTML
+    // (e.g. <span class="ops-set">32.0°C</span>) so they are rendered with
+    // innerHTML; all other user/model strings go through _opsESC.
+    _opsESC(s) {
+        return String(s == null ? '' : s)
+            .replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+    },
+
+    // Entry point: render the operation spine into `root`.
+    // plan = the plan object (tactics array) or null for idle/unavailable.
+    _renderOperationSpine(root, plan) {
+        const ESC = this._opsESC.bind(this);
+
+        if (!plan || !Array.isArray(plan.tactics) || plan.tactics.length === 0) {
+            root.innerHTML = `
+                <div class="ops-wrap">
+                    <div class="ops-crumb">Operations</div>
+                    <h1 class="ops-title">No operation running</h1>
+                    <div class="ops-meta">Brief the agent — it will declare a tactic plan and the spine renders live.</div>
+                    <div class="ops-setup-cta">
+                        <button class="ops-brief-btn" data-ops-brief>Brief the agent</button>
+                        <div class="ops-chips-label">— or start from a template</div>
+                        <div class="ops-chips">
+                            <button class="ops-chip" data-ops-prompt="Set up a temperature-strain operation: baseline monitoring, a temperature-change protocol on the test subjects, then recovery monitoring.">Temperature-strain run</button>
+                            <button class="ops-chip" data-ops-prompt="Set up a standing timelapse on all embryos at 120 s cadence.">Standing timelapse</button>
+                            <button class="ops-chip" data-ops-prompt="Arm a reactive monitor that watches for hatching on the most advanced embryos.">Watch for hatching</button>
+                        </div>
+                    </div>
+                </div>`;
+
+            // Wire CTA buttons — same open+send pattern as landing.js sendFreeform.
+            function _opsOpenAgent(prompt) {
+                if (typeof AgentChat === 'undefined' || !AgentChat.togglePanel) return;
+                AgentChat.togglePanel(true);
+                if (prompt && AgentChat.runCommand) setTimeout(() => AgentChat.runCommand(prompt), 300);
+            }
+            const briefBtn = root.querySelector('[data-ops-brief]');
+            if (briefBtn) briefBtn.addEventListener('click', () => _opsOpenAgent(''));
+            root.querySelectorAll('[data-ops-prompt]').forEach(chip => {
+                chip.addEventListener('click', () => _opsOpenAgent(chip.dataset.opsPrompt));
+            });
+            return;
+        }
+
+        const tactics = plan.tactics;
+        const hasActive = tactics.some(t => t.state === 'active');
+        // Index of the first queued (planned) tactic — gets the "next" badge.
+        const firstPlannedIdx = tactics.findIndex(t => t.state === 'planned');
+
+        // Roster lens: visible when embryos + role metadata are both available.
+        // Gracefully absent if either fetch failed or returned nothing (backward compat
+        // with plans that pre-date D2 — spine renders exactly as before).
+        const rosterEmbryos = this._rosterEmbryos || [];
+        const rolesMap = this._rolesMap;
+        const rosterCtx = (rosterEmbryos.length > 0 && rolesMap && rolesMap.size > 0)
+            ? { embryos: rosterEmbryos, rolesMap }
+            : null;
+        const rosterHtml = rosterCtx
+            ? `<div class="ops-section-label">Population roster — by class &amp; role</div>
+               ${this._renderRosterLens(rosterEmbryos, rolesMap, plan, ESC)}`
+            : '';
+        const spineLabel = rosterCtx
+            ? '<div class="ops-section-label">Tactic spine — role-scoped</div>'
+            : '';
+
+        const spineNodes = tactics
+            .map((t, idx) => this._renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx, tactics))
+            .join('');
+
+        root.innerHTML = `
+            <div class="ops-wrap">
+                <div class="ops-crumb">Operations · ${hasActive ? 'live' : 'idle'}</div>
+                <h1 class="ops-title">${ESC(plan.title || '')}</h1>
+                <div class="ops-meta">${ESC(plan.session_id || '')}${plan.goal ? ' · ' + ESC(plan.goal) : ''}</div>
+                <div class="ops-legend">
+                    <span><i style="background:var(--ops-done)"></i>done</span>
+                    <span><i style="background:var(--ops-active)"></i>in use</span>
+                    <span><i style="background:var(--ops-plan)"></i>queued</span>
+                </div>
+                ${rosterHtml}
+                ${spineLabel}
+                <div class="ops-spine">${spineNodes}</div>
+            </div>`;
+        this._wireSpineExpand(root);
+    },
+
+    // Render a single tactic node.
+    // rosterCtx = { embryos, rolesMap } | null — when present, adds role-scope badge (D2).
+    // tactics = full tactics array — used to resolve relation ids to names.
+    _renderOpsTactic(t, idx, firstPlannedIdx, ESC, rosterCtx = null, tactics = []) {
+        const STATE_LABEL = { done: 'done', active: 'in use', planned: 'queued', paused: 'paused' };
+        const seq = String(t.seq || idx + 1).padStart(2, '0');
+        const stateLabel = STATE_LABEL[t.state] || t.state;
+        // First queued tactic gets a "next" badge — COCKED instrument marker.
+        const isFirstQueued = t.state === 'planned' && idx === firstPlannedIdx;
+        const nextBadge = isFirstQueued
+            ? '<span class="ops-next-badge">next</span>'
+            : '';
+
+        const live = t.live || {};
+        const target = live.target || '';
+        const summary = live.summary || '';
+        const desc = live.desc || '';
+
+        // Scope chip/badge — compact chip for planned/done/paused (always visible, no embryo
+        // list needed); full badge with embryo resolution for active state (D2 roster lens).
+        const isExpandable = (t.state === 'planned' || t.state === 'done' || t.state === 'paused');
+        const expandKey    = this._tacticExpandKey(t);
+        const scopeBadge = isExpandable
+            ? this._renderOpsScopeChip(t.scope, ESC)
+            : (rosterCtx ? this._renderOpsScopeBadge(t.scope, rosterCtx.embryos, rosterCtx.rolesMap, ESC) : '');
+
+        // Chevron toggle — only for expandable (planned / done / paused) tactics.
+        const chevron = isExpandable
+            ? `<button class="ops-expand-chevron${this._expandedTacticIds.has(expandKey) ? ' open' : ''}" aria-label="Toggle tactic details" title="Toggle details">›</button>`
+            : '';
+
+        // Header row: name · target · scope badge · summary · chevron
+        let inner = `
+            <div class="ops-row">
+                <span class="ops-tname">${ESC(t.name)}</span>
+                ${target ? `<span class="ops-target">${ESC(target)}</span>` : ''}
+                ${scopeBadge}
+                ${summary ? `<span class="ops-tsum">${ESC(summary)}</span>` : ''}
+                ${chevron}
+            </div>
+            ${desc ? `<div class="ops-desc">${ESC(desc)}</div>` : ''}`;
+
+        // AUDIT: FLATTEN the active card — readouts on the panel face, separated by
+        // a hairline rule. No nested card-in-card boxes.
+        if (t.state === 'active' && live.readouts && live.readouts.length) {
+            inner += `<hr class="ops-rule">
+                <div class="ops-live-strip">
+                    ${live.readouts.map(r => this._renderOpsReadout(r, ESC)).join('')}
+                </div>`;
+        }
+
+        // Kind-specific structure for the active state.
+        if (t.state === 'active') {
+            inner += this._renderOpsKindActive(t, live, ESC);
+        } else if (t.state === 'planned') {
+            inner += this._renderOpsKindPlanned(t, ESC);
+            inner += this._renderOpsExpandBody(t, ESC, tactics);
+        }
+
+        // Fix #1: surface flat live.* telemetry keys not covered by structured
+        // readouts/phases.  Render for active (in-progress telemetry) and done
+        // (completion data such as sustained_hz, mp4_path, last_fired).
+        // Skip planned — no live data is bound yet.
+        if (t.state === 'active' || t.state === 'done') {
+            const SKIP = new Set(['readouts', 'phases', 'target', 'summary', 'desc']);
+            const flatEntries = Object.entries(live).filter(([k]) => !SKIP.has(k));
+            if (flatEntries.length) {
+                const humanKey = k => k.replace(/_/g, ' ');
+                const pairs = flatEntries.map(([k, v]) => {
+                    const vStr = v == null ? '—' : String(v);
+                    return `<span class="ops-lf-pair"><span class="ops-lf-k">${ESC(humanKey(k))}</span><span class="ops-lf-v">${ESC(vStr)}</span></span>`;
+                }).join('');
+                inner += `<div class="ops-livefacts">${pairs}</div>`;
+            }
+        }
+
+        // Expand body for done + paused tactics (appended after live-facts).
+        if (t.state === 'done' || t.state === 'paused') {
+            inner += this._renderOpsExpandBody(t, ESC, tactics);
+        }
+
+        const cardExpandAttr = isExpandable
+            ? ` data-tactic-expand-id="${ESC(expandKey)}"`
+            : '';
+
+        return `
+            <div class="ops-node ${ESC(t.state)}">
+                <div class="ops-stagelab">${seq} · ${stateLabel}${nextBadge ? ' ' + nextBadge : ''}</div>
+                <div class="ops-card"${cardExpandAttr}>${inner}</div>
+            </div>`;
     },
 
     // -----------------------------------------------------------------
-    // Swimlanes SVG — the main visualization
+    // Expandable tactic detail — click-to-expand for queued/done/paused
     // -----------------------------------------------------------------
-    _renderSwimlanes(s) {
-        const wrap = el('div', 'expov-swimlanes-wrap');
 
-        // Compact inline legend above the SVG
-        const legend = el('div', 'expov-mini-legend');
-        const swatches = [
-            ['base', 'base'],
-            ['fast', 'fast'],
-            ['burst', 'burst'],
-            ['cooldown', 'cooldown']
-        ];
-        swatches.forEach(([k, label]) => {
-            const item = el('span', 'expov-mini-legend-item');
-            const sw = el('span', `expov-mini-legend-swatch ${k}`);
-            item.appendChild(sw);
-            item.appendChild(elText('span', '', label));
-            legend.appendChild(item);
-        });
-        const projItem = el('span', 'expov-mini-legend-item');
-        projItem.appendChild(elClass('span', 'expov-mini-legend-swatch projected'));
-        projItem.appendChild(elText('span', '', 'projected'));
-        legend.appendChild(projItem);
-        wrap.appendChild(legend);
-
-        // Layout constants (logical pixels in the SVG viewBox)
-        const LEFT  = 180;            // label gutter
-        const RIGHT = 80;             // right gutter for stop icon + ∞
-        const LANE_W = 900;           // lane drawing area
-        const W = LEFT + LANE_W + RIGHT;
-
-        const ROW_H        = 100;     // per-embryo row total height
-        const LANE_H       = 28;      // cadence lane height
-        const POWER_H      = 22;      // power strip height
-        const DOSE_H       = 12;      // dose gauge height
-        const ROW_PAD      = 14;      // top padding inside row
-        const TOP_AXIS_H   = 36;      // top axis area (time labels + wall-clock)
-        const BOTTOM_PAD   = 8;
-
-        const rows = s.embryos.length;
-        const H = TOP_AXIS_H + rows * ROW_H + BOTTOM_PAD;
-
-        const svg = svgEl('svg', {
-            class: 'expov-swimlanes-svg',
-            viewBox: `0 0 ${W} ${H}`,
-            preserveAspectRatio: 'xMinYMin meet'
-        });
-
-        // Time scale helpers
-        const xForT = (t) => LEFT + (t / s.horizon_s) * LANE_W;
-        const nowX = xForT(s.now_offset_s);
-
-        // ----- top axis: hour ticks with wall-clock annotation
-        const startedAt = new Date(s.started_at);
-        const axisG = svgEl('g');
-        for (let h = 0; h <= Math.ceil(s.horizon_s / 3600); h++) {
-            const x = xForT(h * 3600);
-            axisG.appendChild(svgEl('line', {
-                x1: x, x2: x, y1: TOP_AXIS_H - 6, y2: H - BOTTOM_PAD,
-                class: 'expov-svg-axis', 'stroke-opacity': h === 0 ? 0.55 : 0.12
-            }));
-            axisG.appendChild(svgEl('text', {
-                x: x + 4, y: 12, class: 'expov-svg-axis-label'
-            }, `+${h}h`));
-            // Wall-clock subtitle
-            const wallClock = new Date(startedAt.getTime() + h * 3600 * 1000);
-            const hh = String(wallClock.getHours()).padStart(2, '0');
-            const mm = String(wallClock.getMinutes()).padStart(2, '0');
-            axisG.appendChild(svgEl('text', {
-                x: x + 4, y: 22,
-                class: 'expov-svg-axis-wallclock'
-            }, `${hh}:${mm}`));
-        }
-        svg.appendChild(axisG);
-
-        // ----- "now" marker: translatable group containing the vertical line
-        // and a live clock chip. The chip advances every tick and shows the
-        // countdown to the next base-interval acquisition window. The group
-        // gets translated by _tickNow, so we don't rebuild SVG every second.
-        const nowMarker = svgEl('g', { class: 'expov-svg-now-marker' });
-        nowMarker.appendChild(svgEl('line', {
-            x1: 0, x2: 0, y1: TOP_AXIS_H - 4, y2: H - BOTTOM_PAD,
-            class: 'expov-svg-now-line'
-        }));
-        // Chip sits just below the axis labels (which live at y=12 and y=22)
-        // so it doesn't sit on top of the "+0h / wallclock" annotation when
-        // the now-line is near the start of the timeline.
-        const chipBg = svgEl('rect', {
-            x: 4, y: TOP_AXIS_H - 6, width: 120, height: 14, rx: 7,
-            class: 'expov-svg-now-chip-bg'
-        });
-        const chipText = svgEl('text', {
-            x: 10, y: TOP_AXIS_H + 4, class: 'expov-svg-now-label'
-        }, '');
-        nowMarker.appendChild(chipBg);
-        nowMarker.appendChild(chipText);
-        svg.appendChild(nowMarker);
-
-        // Stash the bits the ticker needs to update without re-rendering.
-        this._nowTickerCtx = {
-            marker: nowMarker,
-            chipBg: chipBg,
-            chipText: chipText,
-            xForT,
-            startedAtMs: new Date(s.started_at).getTime(),
-            renderedAtMs: Date.now(),
-            renderedOffsetS: s.now_offset_s,
-            baseIntervalS: s.base_interval_s || 0,
-            horizonS: s.horizon_s,
-            laneLeft: LEFT,
-            laneRight: LEFT + LANE_W,
-        };
-        this._updateNowMarker();
-
-        // ----- one group per embryo
-        s.embryos.forEach((emb, i) => {
-            const rowTop = TOP_AXIS_H + i * ROW_H;
-            const rowG = svgEl('g');
-            rowG.appendChild(this._renderLaneRow(s, emb, {
-                LEFT, LANE_W, RIGHT, W, ROW_H, LANE_H, POWER_H, DOSE_H, ROW_PAD,
-                TOP_AXIS_H, rowTop, xForT, nowX
-            }));
-            svg.appendChild(rowG);
-        });
-
-        wrap.appendChild(svg);
-        return wrap;
+    // Stable key used to persist expand state across re-renders.
+    _tacticExpandKey(t) {
+        return String(t.id || t.seq || t.name || '');
     },
 
-    _renderLaneRow(s, emb, dim) {
-        const { LEFT, LANE_W, W, ROW_H, LANE_H, POWER_H, DOSE_H, ROW_PAD,
-                rowTop, xForT, nowX } = dim;
-        const g = svgEl('g');
+    // Compact inline scope chip — always shown in the collapsed header.
+    // Works without embryo list; uses this._rolesMap for role color if available.
+    _renderOpsScopeChip(scope, ESC) {
+        const rolesMap = this._rolesMap;
+        if (!scope || scope.mode === 'global') {
+            return '<span class="ops-scope-chip ops-scope-global">global</span>';
+        }
+        if (scope.mode === 'role') {
+            const role = scope.role || '';
+            const roleInfo = rolesMap ? rolesMap.get(role) : null;
+            const color  = (roleInfo && roleInfo.ui_color) || '#8b949e';
+            const bg     = this._hexToRgba(color, 0.12);
+            const border = this._hexToRgba(color, 0.35);
+            return `<span class="ops-scope-chip" style="color:${ESC(color)};background:${bg};border-color:${border}">role: ${ESC(role)}</span>`;
+        }
+        if (scope.mode === 'embryos') {
+            const ids = (scope.embryo_ids || []).join(', ');
+            return `<span class="ops-scope-chip ops-scope-global">${ESC(ids) || '—'}</span>`;
+        }
+        return '';
+    },
 
-        // Hairline divider above each row (except first)
-        if (rowTop > dim.TOP_AXIS_H) {
-            g.appendChild(svgEl('line', {
-                x1: 8, x2: W - 8, y1: rowTop, y2: rowTop,
-                class: 'expov-svg-row-divider'
-            }));
+    // Expanded detail body — rationale, scope, structure, relations, live.readouts.
+    // Rendered hidden by default; _wireSpineExpand toggles the `hidden` class.
+    _renderOpsExpandBody(t, ESC, tactics) {
+        const rows = [];
+
+        // Rationale
+        if (t.rationale) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">rationale</span>
+                <span class="ops-expand-val">${ESC(t.rationale)}</span>
+            </div>`);
         }
 
-        // ---- Left label gutter ---------------------------------------
-        // Single header line + phase pill. Power/dose labels are at the
-        // y-position of their respective sub-rows, right-aligned in the gutter.
-        const labelY = rowTop + ROW_PAD + 12;
+        // Scope — resolved readable form
+        const scope = t.scope;
+        if (scope) {
+            let scopeText = 'all embryos';
+            if (scope.mode === 'role') {
+                scopeText = `role: ${scope.role || ''}`;
+            } else if (scope.mode === 'embryos') {
+                scopeText = (scope.embryo_ids || []).join(', ') || '—';
+            }
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">scope</span>
+                <span class="ops-expand-val">${ESC(scopeText)}</span>
+            </div>`);
+        }
 
-        // Header line: icon · ID · role (· 10× hint for calibration)
-        g.appendChild(svgEl('text', {
-            x: 14, y: labelY + 1, class: 'expov-svg-role-icon',
-            fill: emb.color
-        }, emb.icon));
-        g.appendChild(svgEl('text', {
-            x: 32, y: labelY, class: 'expov-svg-label'
-        }, emb.id));
-        // role tag — eyebrow above the id (avoids colliding with long ids)
-        g.appendChild(svgEl('text', {
-            x: 14, y: rowTop + ROW_PAD - 1,
-            class: 'expov-svg-role-tag'
-        }, emb.role));
+        // Structure — kind-specific
+        const struct = t.structure || {};
+        if (t.kind === 'standing_timelapse' && struct.cadence_s != null) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">cadence</span>
+                <span class="ops-expand-val ops-expand-mono">${ESC(struct.cadence_s)}s</span>
+            </div>`);
+        }
+        if (t.kind === 'scripted_protocol') {
+            const phases = (struct.phases || []);
+            if (phases.length) {
+                const pHtml = phases.map(p =>
+                    `<span class="ops-expand-phase">${ESC(p.name || p.state || '?')}</span>`
+                ).join('<span class="ops-expand-arrow">→</span>');
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">phases</span>
+                    <span class="ops-expand-val ops-expand-phases">${pHtml}</span>
+                </div>`);
+            }
+        }
+        if (t.kind === 'exclusive_burst' || t.kind === 'burst') {
+            if (struct.frames != null) {
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">frames</span>
+                    <span class="ops-expand-val ops-expand-mono">${ESC(struct.frames)}</span>
+                </div>`);
+            }
+            if (struct.mode) {
+                rows.push(`<div class="ops-expand-row">
+                    <span class="ops-expand-key">mode</span>
+                    <span class="ops-expand-val">${ESC(struct.mode)}</span>
+                </div>`);
+            }
+        }
+        if (t.kind === 'reactive_monitor' && struct.watch) {
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">watch</span>
+                <span class="ops-expand-val">${ESC(struct.watch)}</span>
+            </div>`);
+        }
 
-        // Phase pill: current mode at glance
-        const currentPhase = emb.phases[emb.phases.length - 1];
-        const pillY = labelY + 7;
-        const pillH = 14;
-        const phaseLabel = currentPhase.mode === 'burst'
-            ? `BURST · ${currentPhase.hz}Hz`
-            : `${currentPhase.mode.toUpperCase()} · ${currentPhase.cadence_s}s`;
-        const pillW = Math.max(70, phaseLabel.length * 6 + 12);
-        const pillX = 32;
-        const phaseColors = {
-            base:     '#6b7280',
-            fast:     '#fb923c',
-            burst:    '#ef4444',
-            cooldown: '#a78bfa',
-            paused:   '#3b82f6'
+        // Relations — resolve tactic IDs to names
+        const relations = t.relations || {};
+        const afterIds = Array.isArray(relations.after) ? relations.after : [];
+        if (afterIds.length) {
+            const tacticIdMap = {};
+            for (const tac of (tactics || [])) {
+                if (tac.id) tacticIdMap[tac.id] = tac.name || tac.id;
+            }
+            const names = afterIds.map(id => tacticIdMap[id] || id);
+            rows.push(`<div class="ops-expand-row">
+                <span class="ops-expand-key">runs after</span>
+                <span class="ops-expand-val">${ESC(names.join(', '))}</span>
+            </div>`);
+        }
+
+        // Live readouts (queued/done tactics may carry pre-set readout definitions)
+        const live = t.live || {};
+        if (live.readouts && live.readouts.length) {
+            rows.push(`<div class="ops-expand-readouts">
+                ${live.readouts.map(r => this._renderOpsReadout(r, ESC)).join('')}
+            </div>`);
+        }
+
+        if (!rows.length) return '';
+
+        const isOpen = this._expandedTacticIds.has(this._tacticExpandKey(t));
+        return `<div class="ops-expand-body${isOpen ? '' : ' hidden'}">
+            <hr class="ops-expand-rule">
+            ${rows.join('\n')}
+        </div>`;
+    },
+
+    // Wire click-to-expand on all expandable tactic cards in root after innerHTML is set.
+    // Persist expand state in _expandedTacticIds so it survives debounced re-renders.
+    _wireSpineExpand(root) {
+        root.querySelectorAll('.ops-card[data-tactic-expand-id]').forEach(card => {
+            const expandId = card.dataset.tacticExpandId;
+            const body    = card.querySelector('.ops-expand-body');
+            const chevron = card.querySelector('.ops-expand-chevron');
+            if (!body) return;
+
+            card.addEventListener('click', (e) => {
+                // Let clicks on interactive elements inside the body bubble freely.
+                if (e.target.closest('a, button:not(.ops-expand-chevron)')) return;
+                const isExpanded = !body.classList.contains('hidden');
+                if (isExpanded) {
+                    body.classList.add('hidden');
+                    if (chevron) chevron.classList.remove('open');
+                    this._expandedTacticIds.delete(expandId);
+                } else {
+                    body.classList.remove('hidden');
+                    if (chevron) chevron.classList.add('open');
+                    this._expandedTacticIds.add(expandId);
+                }
+            });
+        });
+    },
+
+    // Render a readout gauge. `r.value` may contain trusted HTML (span markup).
+    // Stamps data-livebind on the outer div so _handleTempUpdate (and future
+    // live-binding) can find the gauge in-place without a full re-render.
+    // Priority: r.bind (explicit semantic key) > normalised r.label.
+    _renderOpsReadout(r, ESC) {
+        const bindKey = r.bind
+            ? r.bind
+            : (r.label
+                ? r.label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '')
+                : '');
+        const bindAttr = bindKey ? ` data-livebind="${ESC(bindKey)}"` : '';
+        return `<div class="ops-gauge"${bindAttr}>
+            <div class="ops-gl">${ESC(r.label)}</div>
+            <div class="ops-gv">${r.value}</div>
+            ${r.bar != null
+                ? `<div class="ops-tempbar"><i style="width:${Math.max(0, Math.min(100, r.bar))}%"></i></div>`
+                : ''}
+            ${r.sub ? `<div class="ops-gsub">${ESC(r.sub)}</div>` : ''}
+        </div>`;
+    },
+
+    // Render one phase in the scripted_protocol stepper.
+    // AUDIT: the active phase is the HEADLINE — CSS makes it larger.
+    _renderOpsPhase(p, ESC) {
+        const pips = (p.pips || [])
+            .map(k => `<span class="ops-pip ${ESC(k)}"></span>`)
+            .join('');
+        const ic = p.state === 'done' ? '✓'
+                 : p.state === 'active' ? '▶'
+                 : (p.icon || '·');
+        return `<div class="ops-ph ${ESC(p.state)}">
+            <div class="ops-pht"><span class="ops-pi">${ic}</span>${ESC(p.name)}</div>
+            <div class="ops-phc">${ESC(p.count || '')}</div>
+            ${pips ? `<div class="ops-pips">${pips}</div>` : ''}
+        </div>`;
+    },
+
+    // Kind-specific structure for ACTIVE tactics.
+    _renderOpsKindActive(t, live, ESC) {
+        if (!t.kind) return '';
+
+        // scripted_protocol → before/during/after phase stepper.
+        // Prefer live.phases (may carry pip/count state); fall back to structure.phases.
+        if (t.kind === 'scripted_protocol') {
+            const phases = live.phases || (t.structure && t.structure.phases) || [];
+            if (!phases.length) return '';
+            return `<div class="ops-phases">
+                ${phases.map(p => this._renderOpsPhase(p, ESC)).join('')}
+            </div>`;
+        }
+
+        // standing_timelapse → compact per-embryo cadence strip.
+        if (t.kind === 'standing_timelapse') {
+            const perEmbryo = t.structure && t.structure.per_embryo;
+            if (!perEmbryo || !perEmbryo.length) return '';
+            const rows = perEmbryo.map(e => {
+                const intervalStr = e.interval_s != null ? `${ESC(e.interval_s)}s` : '—';
+                return `<div class="ops-cadence-embryo">
+                    <span class="ops-cadence-id">${ESC(e.embryo_id)}</span>
+                    <span class="ops-cadence-phase ${ESC(e.cadence_phase)}">${ESC(e.cadence_phase)}</span>
+                    <span class="ops-cadence-val">${intervalStr}</span>
+                </div>`;
+            }).join('');
+            return `<hr class="ops-rule"><div class="ops-cadence-strip">${rows}</div>`;
+        }
+
+        // reactive_monitor → armed/watching/fired status badge.
+        if (t.kind === 'reactive_monitor') {
+            const st = (t.structure && t.structure.status) || 'armed';
+            return `<div class="ops-monitor-status ops-monitor-${ESC(st)}">${ESC(st)}</div>`;
+        }
+
+        // exclusive_burst / oneshot / custom — readouts only (already rendered above).
+        return '';
+    },
+
+    // Kind-specific structure for PLANNED (queued) tactics — compact hints.
+    _renderOpsKindPlanned(t, ESC) {
+        if (!t.kind) return '';
+
+        if (t.kind === 'scripted_protocol') {
+            const phases = (t.structure && t.structure.phases) || [];
+            if (!phases.length) return '';
+            return `<div class="ops-phases">
+                ${phases.map(p => this._renderOpsPhase(p, ESC)).join('')}
+            </div>`;
+        }
+
+        if (t.kind === 'standing_timelapse' && t.structure && t.structure.cadence_s) {
+            return `<div class="ops-cadence-note">cadence · ${ESC(t.structure.cadence_s)}s</div>`;
+        }
+
+        if (t.kind === 'reactive_monitor' && t.structure && t.structure.watch) {
+            return `<div class="ops-monitor-watch">watch · ${ESC(t.structure.watch)}</div>`;
+        }
+
+        if ((t.kind === 'oneshot' || t.kind === 'custom') && t.structure && t.structure.note) {
+            return `<div class="ops-cadence-note">${ESC(t.structure.note)}</div>`;
+        }
+
+        return '';
+    },
+
+    // =================================================================
+    // D2 — Roster Lens: embryo population by role class + role
+    // =================================================================
+
+    // Fetch the current embryo roster from /api/embryos/positions.
+    // Returns [] on failure or when no embryos have positions yet.
+    async _loadRoster() {
+        try {
+            const resp = await fetch('/api/embryos/positions', { cache: 'no-store' });
+            if (!resp.ok) return [];
+            const data = await resp.json();
+            return Array.isArray(data.embryos) ? data.embryos : [];
+        } catch (e) {
+            console.warn('[ExperimentOverview] roster fetch error:', e);
+            return [];
+        }
+    },
+
+    // Fetch the roles registry from /api/roles.
+    // Returns a Map(name → {ui_color, ui_icon, role_class, default_cadence_seconds}).
+    // Returns empty Map on failure.
+    async _loadRolesMap() {
+        try {
+            const resp = await fetch('/api/roles', { cache: 'no-store' });
+            if (!resp.ok) return new Map();
+            const data = await resp.json();
+            const map = new Map();
+            if (Array.isArray(data.roles)) {
+                for (const r of data.roles) {
+                    map.set(r.name, r);
+                }
+            }
+            return map;
+        } catch (e) {
+            console.warn('[ExperimentOverview] roles fetch error:', e);
+            return new Map();
+        }
+    },
+
+    // Convert a hex color (#rrggbb) to rgba(r,g,b,alpha) for inline styles.
+    _hexToRgba(hex, alpha) {
+        const h = (hex || '#888888').replace('#', '');
+        const r = parseInt(h.slice(0, 2), 16) || 0;
+        const g = parseInt(h.slice(2, 4), 16) || 0;
+        const b = parseInt(h.slice(4, 6), 16) || 0;
+        return `rgba(${r},${g},${b},${alpha})`;
+    },
+
+    // Cross-reference: find the name of the active (or most recently done) tactic
+    // that covers a given embryo (by embryo_id + role).
+    // Scope resolution: global → covers all; role → covers matching role;
+    // embryos → covers listed ids. Returns '' when no tactic found.
+    // NOTE: mirrors resolve_scope_embryos() in gently/app/orchestration/role_scope.py — keep in sync if a new scope mode is added.
+    _resolveCurrentTactic(embryoId, role, plan) {
+        if (!plan || !Array.isArray(plan.tactics)) return '';
+        const covers = (t) => {
+            const scope = t.scope || { mode: 'global' };
+            if (scope.mode === 'global') return true;
+            if (scope.mode === 'role') return scope.role === role;
+            if (scope.mode === 'embryos') {
+                return Array.isArray(scope.embryo_ids) && scope.embryo_ids.includes(embryoId);
+            }
+            return false;
         };
-        const pillFill = phaseColors[currentPhase.mode] || '#6b7280';
-        g.appendChild(svgEl('rect', {
-            x: pillX, y: pillY, width: pillW, height: pillH, rx: 7,
-            fill: pillFill, 'fill-opacity': 0.22,
-            stroke: pillFill, 'stroke-opacity': 0.65, 'stroke-width': 1
-        }));
-        g.appendChild(svgEl('text', {
-            x: pillX + pillW / 2, y: pillY + 10,
-            'text-anchor': 'middle',
-            fill: pillFill, 'font-size': 9.5, 'font-weight': 700,
-            'font-family': "'JetBrains Mono', monospace"
-        }, phaseLabel));
-
-        // Tiny tp annotation under the pill (no stop — that's at lane right edge)
-        g.appendChild(svgEl('text', {
-            x: 32, y: pillY + pillH + 12,
-            class: 'expov-svg-sublabel'
-        }, `${emb.tp_acquired} tp acquired`));
-
-        // ---- Cadence lane --------------------------------------------
-        const laneY = rowTop + ROW_PAD;
-        const laneMid = laneY + LANE_H / 2;
-        const laneBottom = laneY + LANE_H;
-
-        // Phases — solid colored rects, no ticks. Cadence is read from the
-        // phase pill in the gutter and the optional inline cadence label.
-        // Min 4px visual width so micro-phases (burst, cooldown) stay visible.
-        emb.phases.forEach(ph => {
-            const x0 = xForT(ph.start);
-            const x1Raw = xForT(ph.end);
-            const x1 = Math.max(x1Raw, x0 + 4);
-            const width = x1 - x0;
-            const cls = `expov-svg-phase-${ph.mode}`;
-            g.appendChild(svgEl('rect', {
-                x: x0, y: laneY, width, height: LANE_H, rx: 2,
-                class: cls
-            }));
-            // Cadence text inside the rect is intentionally omitted — the
-            // gutter pill (currentPhase) and the colored rect (mode) already
-            // convey it. Keep an inline label only for cooldown, which is a
-            // transient state the pill won't be showing.
-            if (ph.mode === 'cooldown' && ph.cadence_s && width >= 42) {
-                g.appendChild(svgEl('text', {
-                    x: x0 + width / 2, y: laneMid + 3.5,
-                    'text-anchor': 'middle',
-                    class: 'expov-svg-phase-label'
-                }, `${ph.cadence_s}s · cool`));
+        // Prefer the active tactic covering this embryo.
+        const active = plan.tactics.find(t => t.state === 'active' && covers(t));
+        if (active) return active.name;
+        // Fall back to the most recently done tactic (last in array order).
+        for (let i = plan.tactics.length - 1; i >= 0; i--) {
+            if (plan.tactics[i].state === 'done' && covers(plan.tactics[i])) {
+                return plan.tactics[i].name;
             }
-            // Burst: keep the bright block + balloon since it's the most
-            // attention-worthy event in the lane
-            if (ph.mode === 'burst') {
-                const bx = (xForT(ph.start) + xForT(ph.end)) / 2;
-                const balloonY = laneY - 12;
-                const halfW = 30;
-                g.appendChild(svgEl('rect', {
-                    x: bx - halfW, y: balloonY - 10, width: halfW * 2, height: 12, rx: 3,
-                    class: 'expov-svg-burst-balloon-bg'
-                }));
-                g.appendChild(svgEl('text', {
-                    x: bx, y: balloonY - 1,
-                    'text-anchor': 'middle',
-                    class: 'expov-svg-burst-label'
-                }, `${ph.frames}f · ${ph.hz}Hz`));
-                g.appendChild(svgEl('line', {
-                    x1: bx, x2: bx, y1: balloonY + 2, y2: laneY,
-                    stroke: '#ef4444', 'stroke-width': 1, 'stroke-opacity': 0.7
-                }));
+        }
+        return '';
+    },
+
+    // Render a scope badge for a tactic node in the spine.
+    // Colors for role-scoped badges come from the roles registry (API), not CSS.
+    // Global and explicit-embryos scopes use the static `.ops-scope-global` class.
+    _renderOpsScopeBadge(scope, embryos, rolesMap, ESC) {
+        if (!scope || scope.mode === 'global') {
+            return '<span class="ops-scope-badge ops-scope-global">→ all embryos</span>';
+        }
+        if (scope.mode === 'role') {
+            const role = scope.role || '';
+            const roleInfo = rolesMap ? rolesMap.get(role) : null;
+            const color = (roleInfo && roleInfo.ui_color) || '#8b949e';
+            const matchIds = embryos
+                .filter(e => e.role === role)
+                .map(e => e.embryo_id)
+                .join(', ');
+            const label = matchIds
+                ? `→ ${ESC(role)} · ${ESC(matchIds)}`
+                : `→ ${ESC(role)}`;
+            const bg = this._hexToRgba(color, 0.12);
+            const border = this._hexToRgba(color, 0.35);
+            return `<span class="ops-scope-badge" style="color:${ESC(color)};background:${bg};border-color:${border}">${label}</span>`;
+        }
+        if (scope.mode === 'embryos') {
+            const ids = ESC((scope.embryo_ids || []).join(', '));
+            return `<span class="ops-scope-badge ops-scope-global">→ ${ids}</span>`;
+        }
+        return '';
+    },
+
+    // Render the D2 roster lens: embryos grouped by role class then by role.
+    // SUBJECTS section is foregrounded; REFERENCES section is compact/muted.
+    // Role colors/icons come from the rolesMap (API data), not from CSS constants.
+    // Returns empty string when embryos array is empty (backward compat).
+    _renderRosterLens(embryos, rolesMap, plan, ESC) {
+        if (!embryos || embryos.length === 0) return '';
+
+        // Group embryos by role_class then by role, preserving first-seen order.
+        const CLASS_ORDER_PREF = ['subject', 'reference'];
+        const classOrder = [];
+        const byClass = {};
+
+        for (const emb of embryos) {
+            const roleInfo = rolesMap.get(emb.role);
+            const cls = (roleInfo && roleInfo.role_class) || 'subject';
+            if (!byClass[cls]) {
+                byClass[cls] = { roleOrder: [], byRole: {} };
+                classOrder.push(cls);
             }
+            const section = byClass[cls];
+            if (!section.byRole[emb.role]) {
+                section.byRole[emb.role] = [];
+                section.roleOrder.push(emb.role);
+            }
+            section.byRole[emb.role].push(emb);
+        }
+
+        // Canonical class order: subjects first.
+        classOrder.sort((a, b) => {
+            const ai = CLASS_ORDER_PREF.indexOf(a);
+            const bi = CLASS_ORDER_PREF.indexOf(b);
+            return (ai < 0 ? 99 : ai) - (bi < 0 ? 99 : bi);
         });
 
-        // ---- Acquisition density heatmap ----------------------------
-        // Instead of one hairline per acquisition (reads as a barcode),
-        // we encode acquisition density as a luminance gradient over
-        // the past portion of the lane: sparse = lane stays muted,
-        // dense = a brighter band. The eye reads acquisition rate as
-        // brightness — no discrete marks, no clutter.
-        //
-        // Counts are derived from phase cadence then rescaled to match
-        // the authoritative `tp_acquired`, so the gradient never lies
-        // about how many timepoints fired even when the backend phase
-        // history is stale or incorrect.
-        const tickEnd = s.now_offset_s;
-        const ackPhases = emb.phases
-            .map((ph, i) => ({ ph, i }))
-            .filter(({ ph }) => ph.mode !== 'burst' && ph.cadence_s);
-        const predicted = ackPhases.map(({ ph }) => {
-            const phEnd = Math.min(ph.end ?? tickEnd, tickEnd);
-            const dur = phEnd - ph.start;
-            return dur > 0 ? Math.max(1, Math.floor(dur / ph.cadence_s) + 1) : 0;
-        });
-        const predictedTotal = predicted.reduce((a, b) => a + b, 0);
-        const actualTotal = Number.isFinite(emb.tp_acquired)
-            ? emb.tp_acquired : predictedTotal;
-        const scale = predictedTotal > 0 ? actualTotal / predictedTotal : 0;
-        const acquisitions = [];
-        ackPhases.forEach(({ ph }, idx) => {
-            const phEnd = Math.min(ph.end ?? tickEnd, tickEnd);
-            const dur = phEnd - ph.start;
-            if (dur <= 0) return;
-            const n = Math.max(1, Math.round(predicted[idx] * scale));
-            for (let j = 0; j < n; j++) {
-                acquisitions.push(ph.start + (dur * (j + 0.5)) / n);
-            }
-        });
+        const totalCount = embryos.length;
+        const totalRoles = classOrder.reduce((n, cls) => n + byClass[cls].roleOrder.length, 0);
 
-        if (acquisitions.length > 0 && tickEnd > 0) {
-            // Layer 1 (background): smoothed luminance gradient
-            // encoding overall acquisition density along the lane.
-            // The triangular kernel kills aliasing stripes caused by
-            // evenly-spaced acquisitions falling into bins.
-            const BINS = 64;
-            const binSec = tickEnd / BINS;
-            const raw = new Array(BINS).fill(0);
-            for (const t of acquisitions) {
-                const bin = Math.min(BINS - 1, Math.max(0, Math.floor(t / binSec)));
-                raw[bin] += 1;
-            }
-            const kernel = [1, 2, 3, 4, 5, 4, 3, 2, 1];
-            const kSum = kernel.reduce((a, b) => a + b, 0);
-            const kOff = Math.floor(kernel.length / 2);
-            const density = new Array(BINS).fill(0);
-            for (let i = 0; i < BINS; i++) {
-                let acc = 0, w = 0;
-                for (let k = 0; k < kernel.length; k++) {
-                    const j = i + k - kOff;
-                    if (j < 0 || j >= BINS) continue;
-                    acc += raw[j] * kernel[k];
-                    w += kernel[k];
-                }
-                density[i] = w > 0 ? acc / w * (kSum / w) : 0;
-            }
-            const maxD = Math.max(...density, 1e-6);
-            const gradId = `expov-density-${(emb.id || 'e').replace(/\W+/g, '_')}-r${rowTop}`;
-            const grad = svgEl('linearGradient', {
-                id: gradId, x1: '0%', x2: '100%', y1: '0%', y2: '0%'
-            });
-            for (let i = 0; i < BINS; i++) {
-                const intensity = density[i] / maxD;
-                // Lower ceiling than the heatmap-only version (0.22 vs
-                // 0.38) because the dots above will carry the per-event
-                // signal; the band just hints at rate.
-                const alpha = 0.03 + 0.22 * intensity;
-                grad.appendChild(svgEl('stop', {
-                    offset: `${(i / (BINS - 1)) * 100}%`,
-                    'stop-color': '#ffffff',
-                    'stop-opacity': alpha.toFixed(3),
-                }));
-            }
-            g.appendChild(grad);
-            const pastW = xForT(tickEnd) - LEFT;
-            if (pastW > 0) {
-                g.appendChild(svgEl('rect', {
-                    x: LEFT, y: laneY,
-                    width: pastW, height: LANE_H,
-                    fill: `url(#${gradId})`,
-                    rx: 2,
-                    'pointer-events': 'none'
-                }));
-            }
-            // Layer 2 (foreground): one soft round dot per acquisition
-            // along the top edge of the lane — keeps the per-event
-            // temporal discreteness the heatmap alone hides.
-            const dotY = laneY + 2;
-            for (const t of acquisitions) {
-                const tx = xForT(t);
-                g.appendChild(svgEl('circle', {
-                    cx: tx, cy: dotY, r: 1.3,
-                    class: 'expov-svg-acq-dot'
-                }));
-            }
-        }
+        const classSections = classOrder.map(cls => {
+            const { roleOrder, byRole } = byClass[cls];
+            const isSubject = cls === 'subject';
 
-        // ---- Cadence-change markers ---------------------------------
-        // Where consecutive phases differ in cadence (or mode), drop a
-        // vertical divider across the lane and a "300→60s · T34" chip
-        // above so the change is named and time-stamped in the lane.
-        // Apply the same scale factor used for tick rendering so the
-        // T# stamps shown on diamonds and cadence chips agree with the
-        // visible tick density and the authoritative tp_acquired count.
-        // Otherwise the chip might say "T118" on an embryo where we
-        // only drew 54 ticks — visually contradictory.
-        const tpIndexAt = (atS) => {
-            let count = 0;
-            for (const ph of emb.phases) {
-                if (!ph.cadence_s) continue;
-                if (atS < ph.start) break;
-                const phEnd = Math.min(atS, ph.end ?? atS);
-                count += Math.floor((phEnd - ph.start) / ph.cadence_s) + 1;
-            }
-            return Math.max(1, Math.round(count * scale));
-        };
-        // Track placed chip x-positions to avoid stacking chips on top
-        // of one another (e.g. the burst-balloon already sits there).
-        const placedChipX = [];
-        const burstXs = emb.phases
-            .filter(p => p.mode === 'burst')
-            .map(p => xForT(p.start));
-        const isCollision = (x) => {
-            const min = 70;  // px buffer
-            if (burstXs.some(bx => Math.abs(bx - x) < min)) return true;
-            return placedChipX.some(px => Math.abs(px - x) < min);
-        };
-        // Walk phases and detect transitions, but COLLAPSE consecutive
-        // identical (mode + cadence) phases so a row of redundant phase
-        // records doesn't generate redundant dividers/chips.
-        let prevEffective = emb.phases[0];
-        for (let i = 1; i < emb.phases.length; i++) {
-            const curr = emb.phases[i];
-            const prev = prevEffective;
-            const sameCadence = prev.cadence_s === curr.cadence_s;
-            const sameMode = prev.mode === curr.mode;
-            if (sameCadence && sameMode) {
-                continue;  // collapse: prevEffective stays the same
-            }
-            prevEffective = curr;
-            if (prev.mode === 'burst' || curr.mode === 'burst') continue;
-            const cx = xForT(curr.start);
-            if (cx > xForT(s.now_offset_s)) continue;
-            // Divider is cheap to keep even on collision; the chip is what
-            // crowds the space, so we skip just the chip when crowded.
-            g.appendChild(svgEl('line', {
-                x1: cx, x2: cx, y1: laneY, y2: laneBottom,
-                class: 'expov-svg-cadence-divider'
-            }));
-            if (isCollision(cx)) continue;
-            const tp = tpIndexAt(curr.start);
-            const prevS = prev.cadence_s ?? '?';
-            const currS = curr.cadence_s ?? '?';
-            const chipText = `${prevS}→${currS}s · T${tp}`;
-            const chipW = chipText.length * 5.6 + 10;
-            const chipY = laneY - 13;
-            g.appendChild(svgEl('rect', {
-                x: cx - chipW / 2, y: chipY,
-                width: chipW, height: 12, rx: 3,
-                class: 'expov-svg-cadence-chip-bg'
-            }));
-            g.appendChild(svgEl('text', {
-                x: cx, y: chipY + 9,
-                'text-anchor': 'middle',
-                class: 'expov-svg-cadence-chip'
-            }, chipText));
-            placedChipX.push(cx);
-        }
+            const classHeaderInner = isSubject
+                ? `<span class="ops-class-live-dot"></span><span class="ops-class-label">Subjects</span><span class="ops-class-desc">— adaptive tactics / scenarios</span>`
+                : `<span class="ops-class-label">References</span><span class="ops-class-desc">— steady acquisition</span>`;
 
-        // ---- Power-change chips -------------------------------------
-        // Same visual language as cadence chips, but parked in a row
-        // above so the two encodings stack neatly when they happen at
-        // the same trigger. Each chip names the rule outcome
-        // ("488 ↓ 5%→3%") and the timepoint it landed at.
-        const placedPowerChipX = [];
-        const hist488 = emb.power_history_488 || [];
-        // Walk the history, collect actual transitions (pairs where pct
-        // changes), then cluster consecutive close ones so a multi-step
-        // ramp gets a single annotation.
-        const transitions = [];
-        for (let k = 0; k < hist488.length - 1; k++) {
-            const a = hist488[k];
-            const b = hist488[k + 1];
-            if (a.pct === b.pct) continue;
-            transitions.push({ from: a, to: b });
-        }
-        const CLUSTER_S = 60;
-        const clusters = [];
-        for (const tr of transitions) {
-            const last = clusters[clusters.length - 1];
-            if (last && tr.to.at - last[last.length - 1].to.at <= CLUSTER_S) {
-                last.push(tr);
-            } else {
-                clusters.push([tr]);
-            }
-        }
-        for (const cluster of clusters) {
-            const first = cluster[0];
-            const tail = cluster[cluster.length - 1];
-            // Anchor the chip at the actual change time, not at any
-            // trailing anchor record (those can land past `now` and
-            // get hidden by the past-only guard).
-            const atS = Math.min(tail.to.at, s.now_offset_s);
-            const cx = xForT(atS);
-            const arrow = tail.to.pct < first.from.pct ? '↓' : '↑';
-            const chipText = `488 ${arrow} ${first.from.pct}%→${tail.to.pct}% · T${tpIndexAt(atS)}`;
-            const chipW = chipText.length * 5.6 + 10;
-            // Sit just above the burst-balloon band (which lives at
-            // laneY-22..-10) so we stay within this row's vertical
-            // budget — laneY-40 would have crossed into the row above.
-            // Burst balloons live at separate x positions on every
-            // case I've seen, so dropping the burst-collision check
-            // lets the chip render even when a burst is on the same
-            // lane elsewhere.
-            const chipY = laneY - 25;
-            const crowded =
-                placedPowerChipX.some(px => Math.abs(px - cx) < 70);
-            g.appendChild(svgEl('line', {
-                x1: cx, x2: cx, y1: chipY + 12, y2: laneY,
-                class: 'expov-svg-power-chip-stem'
-            }));
-            if (crowded) continue;
-            g.appendChild(svgEl('rect', {
-                x: cx - chipW / 2, y: chipY,
-                width: chipW, height: 12, rx: 3,
-                class: 'expov-svg-power-chip-bg'
-            }));
-            g.appendChild(svgEl('text', {
-                x: cx, y: chipY + 9,
-                'text-anchor': 'middle',
-                class: 'expov-svg-power-chip'
-            }, chipText));
-            placedPowerChipX.push(cx);
-        }
+            const roleGroups = roleOrder.map(role => {
+                const roleEmbyros = byRole[role];
+                const roleInfo = rolesMap.get(role);
+                const uiColor = (roleInfo && roleInfo.ui_color) || '#8b949e';
+                const uiIcon  = (roleInfo && roleInfo.ui_icon)  || '';
+                const bgRgba  = this._hexToRgba(uiColor, 0.08);
+                const ids = roleEmbyros.map(e => e.embryo_id).join(', ');
 
-        // Projected future segment (dashed) past 'now' to a horizon —
-        // skipped entirely when the embryo has been terminated, since
-        // there's no future to project. projEndT is hoisted because
-        // downstream code (stop-icon, dose-exhaust line) anchors to it.
-        const isTerminated = emb.terminated_at_s != null
-            && emb.terminated_at_s <= s.now_offset_s;
-        const projStartT = s.now_offset_s;
-        let projEndT = isTerminated ? emb.terminated_at_s : s.horizon_s;
-        let projEndsAtBudget = false;
-        if (!isTerminated) {
-            if (emb.projected_end_s) projEndT = Math.min(projEndT, emb.projected_end_s);
-            if (emb.dose_exhaust_at_s && emb.dose_exhaust_at_s < projEndT) {
-                projEndT = emb.dose_exhaust_at_s;
-                projEndsAtBudget = true;
-            }
-            const xProjStart = xForT(projStartT);
-            const xProjEnd = xForT(projEndT);
-            if (xProjEnd > xProjStart) {
-                g.appendChild(svgEl('line', {
-                    x1: xProjStart, y1: laneMid, x2: xProjEnd, y2: laneMid,
-                    class: projEndsAtBudget
-                        ? 'expov-svg-projected-bar warn'
-                        : 'expov-svg-projected-bar'
-                }));
-            }
-        }
-        // Terminated cap: small vertical stop bar at the termination
-        // point + a "■ DONE · T##" label below the lane so a finished
-        // embryo doesn't look like it's still acquiring.
-        if (isTerminated) {
-            const termX = xForT(emb.terminated_at_s);
-            g.appendChild(svgEl('line', {
-                x1: termX, x2: termX,
-                y1: laneY - 2, y2: laneBottom + 2,
-                class: 'expov-svg-terminated-bar'
-            }));
-            g.appendChild(svgEl('rect', {
-                x: termX - 2, y: laneY + LANE_H / 2 - 3,
-                width: 6, height: 6,
-                class: 'expov-svg-terminated-stop'
-            }));
-            const tp = tpIndexAt(emb.terminated_at_s);
-            const capText = `DONE · T${tp}`;
-            g.appendChild(svgEl('text', {
-                x: termX + 6, y: laneBottom + 9,
-                class: 'expov-svg-terminated-label'
-            }, capText));
-        }
+                const embryoRows = roleEmbyros.map(emb => {
+                    const cadencePhase = emb.cadence_phase || 'normal';
+                    const strain = emb.strain || '—';
+                    const label  = emb.user_label || emb.embryo_id;
+                    const tacticName = this._resolveCurrentTactic(emb.embryo_id, emb.role, plan);
+                    const stateStr = emb.is_complete ? 'done'
+                                   : cadencePhase === 'paused' ? 'paused'
+                                   : 'active';
+                    const compact = isSubject ? '' : ' compact';
+                    const chipBg     = this._hexToRgba(uiColor, 0.15);
+                    const chipBorder = this._hexToRgba(uiColor, 0.4);
+                    return `<div class="ops-roster-embryo${compact}">
+                        <span class="ops-rem-id">${ESC(label)}</span>
+                        <span class="ops-rem-role-chip" style="background:${chipBg};color:${ESC(uiColor)};border-color:${chipBorder}">${uiIcon ? ESC(uiIcon) + ' ' : ''}${ESC(role)}</span>
+                        <span class="ops-rem-strain">${ESC(strain)}</span>
+                        <span class="ops-rem-phase ${ESC(cadencePhase)}">${ESC(cadencePhase)}</span>
+                        <span class="ops-rem-tactic">${ESC(tacticName || '—')}</span>
+                        <span class="ops-rem-state ${ESC(stateStr)}">${ESC(stateStr)}</span>
+                    </div>`;
+                }).join('');
 
-        // Trigger diamonds — placed in the upper half of the lane to avoid
-        // colliding with the burst balloon above. Each diamond gets a tiny
-        // T# label below it so the user can see at which timepoint the
-        // rule fired without hovering.
-        (emb.trigger_events || []).forEach(te => {
-            const x = xForT(te.at);
-            const dy = laneY + 6;
-            const size = 4;
-            const trig = s.triggers.find(t => t.id === te.trigger_id);
-            const label = trig ? trig.label : te.trigger_id;
-            const dia = svgEl('polygon', {
-                points: `${x},${dy-size} ${x+size},${dy} ${x},${dy+size} ${x-size},${dy}`,
-                class: 'expov-svg-trigger-diamond expov-svg-tooltip-target'
-            });
-            const tooltip = svgEl('title');
-            tooltip.textContent = `${label}\n${trig?.when_text || ''} → ${trig?.then_text || ''}` +
-                                  (te.count ? ` (×${te.count})` : '');
-            dia.appendChild(tooltip);
-            g.appendChild(dia);
-            g.appendChild(svgEl('text', {
-                x: x, y: laneBottom + 9,
-                'text-anchor': 'middle',
-                class: 'expov-svg-trigger-tp'
-            }, `T${tpIndexAt(te.at)}`));
-        });
+                return `<div class="ops-role-group">
+                    <div class="ops-role-header" style="border-left-color:${ESC(uiColor)};background:${bgRgba}">
+                        <span class="ops-role-name" style="color:${ESC(uiColor)}">${ESC(role.toUpperCase())}</span>
+                        <span class="ops-role-sep">·</span>
+                        <span class="ops-role-count">${roleEmbyros.length} embryo${roleEmbyros.length !== 1 ? 's' : ''}</span>
+                        <span class="ops-role-ids">${ESC(ids)}</span>
+                    </div>
+                    ${embryoRows}
+                </div>`;
+            }).join('');
 
-        // Dose-exhaust warning: ⚠ + time-to-exhaust positioned ABOVE the lane
-        // so it doesn't overlap with the dashed projected bar
-        if (emb.dose_exhaust_at_s && emb.dose_exhaust_at_s < s.horizon_s) {
-            const exhX = xForT(emb.dose_exhaust_at_s);
-            const remain = emb.dose_exhaust_at_s - s.now_offset_s;
-            const rh = Math.floor(remain / 3600);
-            const rm = Math.floor((remain % 3600) / 60);
-            const exhText = `⚠ budget exhausts in ${rh > 0 ? rh + 'h ' : ''}${rm}m`;
-            g.appendChild(svgEl('text', {
-                x: exhX - 4, y: laneY - 5,
-                'text-anchor': 'end',
-                fill: 'var(--accent-orange)',
-                'font-size': 10,
-                'font-weight': 600,
-                'font-family': "'JetBrains Mono', monospace"
-            }, exhText));
-            // Small dotted vertical marker so the user can see WHERE on the lane
-            g.appendChild(svgEl('line', {
-                x1: exhX, x2: exhX, y1: laneY, y2: laneY + LANE_H,
-                stroke: 'var(--accent-orange)',
-                'stroke-width': 1.5,
-                'stroke-dasharray': '2 2',
-                opacity: 0.7
-            }));
-        }
-        // Open-ended ∞ glyph at right edge
-        if (emb.stop_kind === 'open_ended') {
-            g.appendChild(svgEl('text', {
-                x: LEFT + LANE_W + 8, y: laneMid + 5,
-                class: 'expov-svg-infinity'
-            }, '∞'));
-        } else {
-            g.appendChild(svgEl('text', {
-                x: xForT(projEndT) + 6, y: laneMid + 4,
-                class: 'expov-svg-stop-icon expov-svg-stop-hatch'
-            }, '■'));
-        }
+            return `<div class="ops-class-section">
+                <div class="ops-class-header ${ESC(cls)}">${classHeaderInner}</div>
+                ${roleGroups}
+            </div>`;
+        }).join('');
 
-        // ---- Power strip ---------------------------------------------
-        // Visual encoding makes "steady" vs "ramping" obvious:
-        //   • Steady segments  = thin grey horizontal line
-        //   • Ramping segments = bright cyan line + filled area + dot at each step
-        //   • Step transitions get a small arrow (↓ or ↑) and a delta tag
-        const powerY = laneY + LANE_H + 6;
-        const powerH = POWER_H;
-        const powerYBase = powerY + powerH;
-        g.appendChild(svgEl('line', {
-            x1: LEFT, x2: LEFT + LANE_W, y1: powerYBase, y2: powerYBase,
-            class: 'expov-svg-power-baseline'
-        }));
-        const yForPct = (pct) => powerYBase - (pct / 10) * powerH;
-
-        const hist = emb.power_history_488 || [];
-        if (hist.length > 1) {
-            // Detect ramp clusters: consecutive change-steps with x-spacing <
-            // CLUSTER_PX get grouped, annotated once at the cluster end.
-            const CLUSTER_PX = 20;
-            const stepEvents = [];   // each: {fromIdx, toIdx, isRamp}
-            for (let k = 0; k < hist.length - 1; k++) {
-                if (hist[k].pct !== hist[k+1].pct) {
-                    stepEvents.push({ fromIdx: k, toIdx: k+1 });
-                }
-            }
-            // Group consecutive close steps into clusters
-            const clusters = [];
-            stepEvents.forEach(step => {
-                const last = clusters[clusters.length - 1];
-                const stepX = xForT(hist[step.toIdx].at);
-                if (last) {
-                    const lastX = xForT(hist[last[last.length-1].toIdx].at);
-                    if (Math.abs(stepX - lastX) < CLUSTER_PX) {
-                        last.push(step);
-                        return;
-                    }
-                }
-                clusters.push([step]);
-            });
-
-            // Draw horizontal "steady" segments + vertical "step" lines for all
-            // adjacent (hist[k], hist[k+1]) pairs.
-            for (let k = 0; k < hist.length - 1; k++) {
-                const x0 = xForT(hist[k].at);
-                const x1 = xForT(hist[k+1].at);
-                const y  = yForPct(hist[k].pct);
-                const yNext = yForPct(hist[k+1].pct);
-                g.appendChild(svgEl('line', {
-                    x1: x0, x2: x1, y1: y, y2: y,
-                    class: 'expov-svg-power-steady'
-                }));
-                if (hist[k].pct !== hist[k+1].pct) {
-                    g.appendChild(svgEl('line', {
-                        x1: x1, x2: x1, y1: y, y2: yNext,
-                        class: 'expov-svg-power-step'
-                    }));
-                    g.appendChild(svgEl('circle', {
-                        cx: x1, cy: yNext, r: 2.2,
-                        class: 'expov-svg-power-stepdot'
-                    }));
-                }
-            }
-            // Final tail to lane right edge
-            const last = hist[hist.length - 1];
-            const lastX = xForT(last.at);
-            const lastY = yForPct(last.pct);
-            g.appendChild(svgEl('line', {
-                x1: lastX, x2: LEFT + LANE_W, y1: lastY, y2: lastY,
-                class: 'expov-svg-power-steady'
-            }));
-
-            // One annotation per cluster — bracket + "5% → 3%" label
-            clusters.forEach(cluster => {
-                const first = cluster[0];
-                const tail = cluster[cluster.length - 1];
-                const xStart = xForT(hist[first.fromIdx].at);
-                const xEnd = xForT(hist[tail.toIdx].at);
-                const pctStart = hist[first.fromIdx].pct;
-                const pctEnd = hist[tail.toIdx].pct;
-                const arrow = pctEnd < pctStart ? '↓' : '↑';
-                const yMid = (yForPct(pctStart) + yForPct(pctEnd)) / 2;
-                // Bracket: small horizontal line above the cluster steps
-                const bracketY = Math.min(yForPct(pctStart), yForPct(pctEnd)) - 6;
-                g.appendChild(svgEl('path', {
-                    d: `M ${xStart} ${bracketY+3} L ${xStart} ${bracketY} L ${xEnd+2} ${bracketY} L ${xEnd+2} ${bracketY+3}`,
-                    class: 'expov-svg-power-ramp-bracket'
-                }));
-                // Label "488 ↓ 5%→3%" anchored just right of the bracket end
-                g.appendChild(svgEl('text', {
-                    x: xEnd + 6, y: bracketY + 4,
-                    class: 'expov-svg-power-ramp-label'
-                }, `${arrow} ${pctStart}%→${pctEnd}%`));
-            });
-
-            // Subtle filled area under the curve — helps read overall level
-            const areaPts = [`${xForT(hist[0].at)},${powerYBase}`];
-            for (let k = 0; k < hist.length; k++) {
-                const x = xForT(hist[k].at);
-                const y = yForPct(hist[k].pct);
-                areaPts.push(`${x},${y}`);
-                if (k < hist.length - 1) {
-                    const xNext = xForT(hist[k+1].at);
-                    areaPts.push(`${xNext},${y}`);
-                }
-            }
-            areaPts.push(`${LEFT + LANE_W},${yForPct(last.pct)}`);
-            areaPts.push(`${LEFT + LANE_W},${powerYBase}`);
-            g.appendChild(svgEl('polygon', {
-                points: areaPts.join(' '),
-                class: 'expov-svg-power-area'
-            }));
-        }
-        // Power label with current value — "@" reads as "at this power"
-        // and avoids confusion with the bullet-separator used elsewhere
-        g.appendChild(svgEl('text', {
-            x: LEFT - 8, y: powerY + powerH / 2 + 3,
-            'text-anchor': 'end',
-            class: 'expov-svg-sublabel'
-        }, `488 @ ${emb.laser_488_pct_now}%`));
-
-        // ---- Dose gauge ----------------------------------------------
-        const doseY = powerYBase + 6;
-        const doseW = LANE_W;
-        g.appendChild(svgEl('rect', {
-            x: LEFT, y: doseY, width: doseW, height: DOSE_H, rx: 2,
-            class: 'expov-svg-dose-track'
-        }));
-        const dosePct = emb.dose_used_ms / emb.dose_budget_ms;
-        const fillCls = dosePct > 0.85 ? 'expov-svg-dose-fill-crit'
-                      : dosePct > 0.60 ? 'expov-svg-dose-fill-warn'
-                      : 'expov-svg-dose-fill-ok';
-        g.appendChild(svgEl('rect', {
-            x: LEFT, y: doseY, width: Math.max(1, doseW * dosePct), height: DOSE_H, rx: 2,
-            class: fillCls
-        }));
-        // Dose label (shows 10× hint for calibration role)
-        const doseLabel = emb.role === 'calibration' ? 'dose (10×)' : 'dose';
-        g.appendChild(svgEl('text', {
-            x: LEFT - 8, y: doseY + DOSE_H - 2,
-            'text-anchor': 'end',
-            class: 'expov-svg-sublabel'
-        }, doseLabel));
-        // Inside the bar: usage figure — "used of budget" is more scannable
-        // than "x / y s" which reads like a fraction
-        const usedS = (emb.dose_used_ms / 1000).toFixed(1);
-        const budgetS = (emb.dose_budget_ms / 1000).toFixed(1);
-        const doseText = emb.dose_budget_ms > 0
-            ? `${usedS}s of ${budgetS}s (${Math.round(dosePct * 100)}%)`
-            : `${usedS}s used`;
-        g.appendChild(svgEl('text', {
-            x: LEFT + 6, y: doseY + DOSE_H - 2,
-            class: 'expov-svg-dose-text'
-        }, doseText));
-
-        return g;
+        return `<div class="ops-roster">
+            <div class="ops-roster-head">
+                <span class="ops-roster-title">Population roster</span>
+                <span class="ops-roster-count">${totalCount} embryo${totalCount !== 1 ? 's' : ''} · ${totalRoles} role${totalRoles !== 1 ? 's' : ''}</span>
+            </div>
+            ${classSections}
+        </div>`;
     },
 
     // -----------------------------------------------------------------

@@ -146,5 +146,12 @@ electron/
 gently/ui/tui/node_modules/
 gently/ui/tui/dist/
 
-# Runtime storage accidentally created on Linux when GENTLY_STORAGE_PATH="D:/" resolves literally
-D:/
+# Stray local storage: GENTLY_STORAGE_PATH default (D:\Gently3) resolves
+# literally to ./D:/ under the repo on Linux. Not data we track.
+/D:/
+.superpowers/
+
+# Runtime operator overrides (written by the Settings panel)
+config/config.local.yml
+config/settings.local.yml
+config/dashboard_defaults.json

@@ -244,8 +244,12 @@ def create_router(server) -> APIRouter:
                 }
             )
 
-        # Sessions linked to this campaign
-        sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        # Sessions — return only those linked to this specific item (item.session_ids),
+        # not all campaign sessions. The frontend uses item.session_ids as the canonical
+        # list and this pool as metadata (name, created_at) for display.
+        item_sids = set(item.session_ids or [])
+        all_sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        sessions = [s for s in all_sessions if s.session_id in item_sids]
 
         return {
             "item": _serialize(item),
@@ -253,6 +257,43 @@ def create_router(server) -> APIRouter:
             "dependents": dependents,
             "sessions": [_serialize(s) for s in sessions],
         }
+
+    @router.post("/api/campaigns/{campaign_id}/items/{item_id}/sessions")
+    async def link_session_to_item(campaign_id: str, item_id: str, request: Request):
+        """Link a session to a plan item (appends) and record it against the campaign."""
+        cs = _get_store()
+        campaign = _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        body = await request.json()
+        session_id = body.get("session_id")
+        if not session_id:
+            raise HTTPException(status_code=400, detail="session_id required")
+
+        cs.link_plan_item_session(item_id, session_id)
+        cs.link_session_campaign(session_id, campaign.id)
+
+        # Re-fetch item so session_ids reflects the just-added link; then filter
+        # exactly as get_item_detail does — POST and GET return the same scope.
+        item = cs.get_plan_item(item_id)
+        item_sids = set(item.session_ids or [])
+        all_sessions = cs.get_sessions_for_campaign(item.campaign_id)
+        sessions = [s for s in all_sessions if s.session_id in item_sids]
+        return {"sessions": [_serialize(s) for s in sessions]}
+
+    @router.delete("/api/campaigns/{campaign_id}/items/{item_id}/sessions/{session_id}")
+    async def unlink_session_from_item(campaign_id: str, item_id: str, session_id: str):
+        """Remove a session link from a plan item. Returns {unlinked: bool}."""
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        unlinked = cs.unlink_plan_item_session(item_id, session_id)
+        return {"unlinked": unlinked}
 
     @router.get("/api/campaigns/{campaign_id}/planned-sessions")
     async def get_planned_sessions(campaign_id: str):
@@ -320,6 +361,58 @@ def create_router(server) -> APIRouter:
             raise HTTPException(status_code=403, detail="Mesh authentication required")
 
         return _require
+
+    @router.patch(
+        "/api/campaigns/{campaign_id}/items/{item_id}",
+        dependencies=[Depends(_make_campaign_auth("campaigns"))],
+    )
+    async def update_item(campaign_id: str, item_id: str, request: Request):
+        """Edit plan-item fields and/or imaging-spec fields inline.
+
+        Send only the fields you're changing. Spec edits are *merged* into the
+        existing spec, so the UI can PATCH a single field (e.g. laser_power_pct)
+        without losing the rest. An empty string clears a spec field to null.
+        Persists via update_plan_item, which fires PLAN_UPDATED for live refresh.
+        """
+        cs = _get_store()
+        _resolve(cs, campaign_id)
+        item = cs.get_plan_item(item_id)
+        if not item:
+            raise HTTPException(status_code=404, detail="Plan item not found")
+
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(status_code=400, detail="Body must be a JSON object")
+
+        kwargs: dict[str, Any] = {}
+        for f in ("title", "description", "outcome"):
+            if isinstance(body.get(f), str):
+                kwargs[f] = body[f]
+        if body.get("estimated_days") is not None:
+            kwargs["estimated_days"] = body["estimated_days"]
+
+        if body.get("status"):
+            try:
+                kwargs["status"] = PlanItemStatus(body["status"])
+            except ValueError as err:
+                raise HTTPException(
+                    status_code=400, detail=f"Invalid status: {body['status']}"
+                ) from err
+
+        spec_patch = body.get("spec")
+        if isinstance(spec_patch, dict):
+            current = item.imaging_spec or item.bench_spec
+            merged = asdict(current) if current else {}
+            for k, v in spec_patch.items():
+                merged[k] = None if v == "" else v
+            kwargs["spec"] = merged
+
+        if not kwargs:
+            raise HTTPException(status_code=400, detail="No editable fields supplied")
+
+        cs.update_plan_item(item_id=item_id, **kwargs)  # fires PLAN_UPDATED
+        updated = cs.get_plan_item(item_id)
+        return {"ok": True, "item": _serialize(updated)}
 
     @router.post(
         "/api/campaigns/{campaign_id}/share",

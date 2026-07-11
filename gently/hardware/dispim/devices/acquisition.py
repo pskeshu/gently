@@ -188,6 +188,14 @@ class DiSPIMVolumeScanner:
                 self.core.setConfig(self.laser_control.group_name, self._laser_config)
                 self.core.waitForConfig(self.laser_control.group_name, self._laser_config)
 
+                # Defensive stop: the lightsheet live streamer may have left the
+                # camera in continuous acquisition.  Starting a new sequence on
+                # an already-running camera triggers an MMCore error (and is
+                # thread-unsafe).  Stop cleanly before reconfiguring.
+                if self.core.isSequenceRunning():
+                    self.core.stopSequenceAcquisition()
+                    self.core.waitForDevice(self.camera.name)
+
                 # Prepare circular buffer
                 self.core.clearCircularBuffer()
                 buffer_capacity = self.core.getBufferTotalCapacity()

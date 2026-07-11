@@ -228,6 +228,24 @@ EVENT_MAPPING = {
         "icon": "v",
         "severity": "success",
     },
+    EventType.TEMPERATURE_SETPOINT_CHANGED: {
+        "event_type": "temperature",
+        "event_subtype": "setpoint_changed",
+        "icon": "T",
+        "severity": "info",
+    },
+    EventType.TEMP_PROTOCOL_STARTED: {
+        "event_type": "tactic",
+        "event_subtype": "temp_protocol_started",
+        "icon": "~",
+        "severity": "info",
+    },
+    EventType.TEMP_PROTOCOL_COMPLETED: {
+        "event_type": "tactic",
+        "event_subtype": "temp_protocol_completed",
+        "icon": "+",
+        "severity": "success",
+    },
 }
 
 

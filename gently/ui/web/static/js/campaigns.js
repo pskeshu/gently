@@ -40,6 +40,18 @@ const SPEC_UNITS = {
     laser_power_pct: '%', interval_s: 's', estimated_duration_h: ' hrs',
     estimated_days: ' days',
 };
+// Imaging-spec fields the inspector lets you edit/fill inline (ordered for the form).
+// Empty ones still show \u2014 that's how you fill a TBD value like laser power.
+const IMAGING_SPEC_FIELDS = [
+    'strain', 'genotype', 'reporter', 'sample_prep', 'temperature_c', 'num_embryos',
+    'num_slices', 'exposure_ms', 'laser_wavelength_nm', 'laser_power_pct', 'interval_s',
+    'target_window', 'start_stage', 'stop_condition', 'estimated_duration_h',
+    'success_criteria', 'comparison_to',
+];
+const SPEC_NUMERIC = new Set([
+    'temperature_c', 'num_embryos', 'num_slices', 'exposure_ms', 'laser_wavelength_nm',
+    'laser_power_pct', 'interval_s', 'estimated_duration_h',
+]);
 
 // ── State ────────────────────────────────────────────────
 const state = {
@@ -52,6 +64,11 @@ const state = {
     versions: [],               // snapshots list
     viewingSnapshotId: null,
     allItemsFlat: {},           // id → item for quick lookup
+    editingSpec: false,         // inspector imaging-spec edit mode
+    _inspectorData: null,       // last item-detail payload (for re-render on edit toggle)
+    _specError: '',             // inline save error in the spec editor
+    _sessionPickerOpen: false,  // whether the session link picker is visible
+    _availableSessions: null,   // null = not yet loaded, [] = loaded (for link picker)
 };
 
 // ── DOM refs (cached on init) ────────────────────────────
@@ -117,11 +134,19 @@ function boot() {
             case 'select-item': selectItem(id); break;
             case 'open-campaign': openCampaign(id); break;
             case 'navigate-item': e.stopPropagation(); navigateToItem(id); break;
+            case 'run-item': e.stopPropagation(); runPlanItem(id); break;
             case 'filter-type': applyTypeFilter(el.dataset.filterType); break;
             case 'view-version': viewVersion(el.dataset.versionId, el.dataset.isCurrent === 'true'); break;
             case 'back-to-current': backToCurrent(); break;
             case 'scroll-to': e.stopPropagation(); scrollCanvasTo(el.dataset.target); break;
             case 'toggle-phase': toggleNavPhase(el); break;
+            case 'spec-edit': e.stopPropagation(); startSpecEdit(); break;
+            case 'spec-cancel': e.stopPropagation(); cancelSpecEdit(); break;
+            case 'spec-save': e.stopPropagation(); saveSpecEdit(); break;
+            case 'session-picker-open': e.stopPropagation(); openSessionPicker(); break;
+            case 'session-picker-cancel': e.stopPropagation(); cancelSessionPicker(); break;
+            case 'session-picker-link': e.stopPropagation(); submitSessionLink(); break;
+            case 'session-delink': e.stopPropagation(); handleSessionDelink(el.dataset.sessionId); break;
         }
     });
 
@@ -130,6 +155,13 @@ function boot() {
 
     // Plan view switcher
     setupPlanViewSwitcher();
+
+    // Live refresh: re-fetch the active campaign when the plan changes (item status,
+    // session link, new item, progress). The store emits PLAN_UPDATED, the server
+    // broadcasts it to /ws, and websocket.js re-emits it on the client bus.
+    if (typeof ClientEventBus !== 'undefined') {
+        ClientEventBus.on('PLAN_UPDATED', () => scheduleCampaignRefresh());
+    }
 
     // Load campaigns — auto-selects first, or the specified one
     const initialId = window.INITIAL_CAMPAIGN_ID;
@@ -265,6 +297,26 @@ async function openCampaign(campaignId) {
     }
 
     renderAll();
+}
+
+// Live refresh of the open campaign (debounced) — re-fetch its tree and re-render,
+// preserving the selected item so the inspector reflects the change without a reload.
+let _planRefreshTimer = null;
+function scheduleCampaignRefresh() {
+    if (_planRefreshTimer) clearTimeout(_planRefreshTimer);
+    _planRefreshTimer = setTimeout(() => {
+        _planRefreshTimer = null;
+        refreshActiveCampaign().catch(() => {});
+    }, 400);
+}
+async function refreshActiveCampaign() {
+    if (!state.activeCampaignId) return;
+    const keep = state.selectedItemId;
+    await loadDocument(state.activeCampaignId);
+    if (!state.docData) return;
+    renderAll();
+    // Don't clobber an in-progress spec edit with a re-fetch.
+    if (keep && !state.editingSpec) selectItem(keep).catch(() => {});
 }
 
 // Handle browser back/forward
@@ -579,6 +631,14 @@ function renderVersionHistory() {
 // ══════════════════════════════════════════════════════════
 
 async function selectItem(itemId) {
+    // A re-fetch of the same item (e.g. after saving) keeps view mode; switching
+    // to a different item always lands in read-only.
+    if (itemId !== state.selectedItemId) {
+        state.editingSpec = false;
+        state._specError = '';
+        state._sessionPickerOpen = false;
+        state._availableSessions = null;
+    }
     state.selectedItemId = itemId;
 
     // Highlight in document
@@ -617,10 +677,17 @@ async function selectItem(itemId) {
 }
 
 function renderInspector(data) {
+    state._inspectorData = data;
     const item = data.item;
     const deps = data.dependencies || [];
     const dnts = data.dependents || [];
-    const sessions = data.sessions || [];
+    // Build a metadata map from the campaign-level sessions included in the payload,
+    // then derive the per-item sessions list from item.session_ids (the true source
+    // of truth). data.sessions is the campaign pool; we only show sessions that are
+    // actually linked to THIS item.
+    const _sessionMeta = {};
+    (data.sessions || []).forEach(s => { _sessionMeta[s.session_id || s.id] = s; });
+    const sessions = (item.session_ids || []).map(sid => _sessionMeta[sid] || { session_id: sid, id: sid });
 
     if ($inspectorTitle) $inspectorTitle.textContent = item.title;
     if ($inspectorStatus) {
@@ -639,6 +706,19 @@ function renderInspector(data) {
         <span class="detail-id">${item.id}</span>
     </div>`;
 
+    // Run affordance — only for an actionable imaging item. Routes through the
+    // agent (it applies this item's spec via execute_plan_item), in keeping with
+    // the agent-first paradigm.
+    if (item.type === 'imaging' && item.status === 'planned') {
+        html += `<div class="detail-actions" style="margin:4px 0 14px">
+            <button data-action="run-item" data-id="${item.id}"
+                style="background:var(--accent,#2f6df6);color:#fff;border:0;border-radius:9px;padding:9px 16px;font:inherit;font-size:13px;font-weight:600;cursor:pointer">
+                ▶ Run this imaging item
+            </button>
+            <span style="margin-left:10px;color:var(--text-muted,#94a3b8);font-size:12px">Hands it to the agent to apply the spec and start</span>
+        </div>`;
+    }
+
     // Description
     if (item.description) {
         html += section('Description', `<div class="detail-section-content">${esc(item.description)}</div>`);
@@ -649,9 +729,20 @@ function renderInspector(data) {
         html += section('Outcome', `<div class="detail-section-content">${esc(item.outcome)}</div>`);
     }
 
-    // Imaging spec
-    if (item.imaging_spec) {
-        html += section('Imaging Specification', `<table class="spec-table">${renderSpecTable(item.imaging_spec)}</table>`);
+    // Imaging spec — view, or edit/fill inline (the laser-power loop). Shown for any
+    // imaging item even when no spec is set yet, so empty fields can be filled.
+    if (item.type === 'imaging' || item.imaging_spec) {
+        const spec = item.imaging_spec || {};
+        if (state.editingSpec) {
+            html += section('Imaging Specification', renderSpecEditor(spec));
+        } else {
+            const rows = renderSpecTable(spec);
+            const content = rows
+                ? `<table class="spec-table">${rows}</table>`
+                : '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No parameters set yet</div>';
+            const editBtn = '<button class="spec-edit-btn" data-action="spec-edit">✎ Edit</button>';
+            html += section('Imaging Specification', content, editBtn);
+        }
     }
 
     // Bench spec
@@ -709,22 +800,233 @@ function renderInspector(data) {
         html += section('References', refHtml);
     }
 
-    // Sessions
+    // Sessions — item-scoped (item.session_ids), with link/delink controls.
+    const _linkBtn = `<button class="session-link-btn" data-action="session-picker-open">+ link session</button>`;
+    let sessHtml = '';
     if (sessions.length > 0) {
-        let sessHtml = '';
         sessions.forEach(s => {
+            const sid = s.session_id || s.id || '';
+            const name = s.name || s.planned_intent || sid || 'Session';
             sessHtml += `<div class="detail-session">
-                <span class="detail-session-title">${esc(s.planned_intent || s.id || 'Session')}</span>
-                ${s.created_at ? `<span class="detail-session-date">${formatDate(s.created_at)}</span>` : ''}
+                <span class="detail-session-title">${esc(name)}</span>
+                <span class="detail-session-right">
+                    ${s.created_at ? `<span class="detail-session-date">${formatDate(s.created_at)}</span>` : ''}
+                    <button class="session-delink-btn" data-action="session-delink"
+                        data-session-id="${esc(sid)}" title="Delink session">×</button>
+                </span>
             </div>`;
         });
-        html += section('Sessions', sessHtml);
     } else {
-        html += section('Sessions',
-            '<div class="detail-section-content" style="color:var(--text-muted);font-style:italic">No linked sessions</div>');
+        sessHtml = '<div class="detail-session-empty">No linked sessions</div>';
     }
+    // Inline link picker — rendered when openSessionPicker() has set state flag + loaded data.
+    if (state._sessionPickerOpen) {
+        if (state._availableSessions === null) {
+            // Still loading — show spinner text; will re-render once fetch completes.
+            sessHtml += `<div class="session-picker session-picker--loading">Loading sessions…</div>`;
+        } else {
+            const _linkedIds = new Set(item.session_ids || []);
+            const _available = state._availableSessions.filter(s => !_linkedIds.has(s.session_id));
+            const _opts = _available.length === 0
+                ? `<option value="">No other sessions available</option>`
+                : _available.map(s => `<option value="${esc(s.session_id)}">${esc(s.name || s.session_id)}</option>`).join('');
+            sessHtml += `<div class="session-picker">
+                <select class="session-picker-select" id="session-picker-select">${_opts}</select>
+                <div class="session-picker-actions">
+                    <button class="session-picker-link-btn" data-action="session-picker-link">Link</button>
+                    <button class="session-picker-cancel-btn" data-action="session-picker-cancel">Cancel</button>
+                </div>
+            </div>`;
+        }
+    }
+    html += section('Sessions', sessHtml, _linkBtn);
 
     if ($inspectorBody) $inspectorBody.innerHTML = html;
+}
+
+// Editable imaging-spec form. Lists every fillable field — empty ones included,
+// flagged — so a TBD value (e.g. laser power) is obvious and one click away.
+function renderSpecEditor(spec) {
+    let rows = '';
+    for (const key of IMAGING_SPEC_FIELDS) {
+        const label = SPEC_LABELS[key] || key;
+        const val = spec[key];
+        const has = val != null && val !== '';
+        const numeric = SPEC_NUMERIC.has(key);
+        const unit = SPEC_UNITS[key]
+            ? `<span class="spec-edit-unit">${esc(SPEC_UNITS[key].trim())}</span>` : '';
+        const rowCls = has ? 'spec-edit-row' : 'spec-edit-row spec-edit-row--empty';
+        rows += `<div class="${rowCls}">
+            <label class="spec-edit-label" for="spec-${key}">${esc(label)}</label>
+            <span class="spec-edit-field">
+                <input id="spec-${key}" class="spec-edit-input" data-spec-key="${key}"
+                    type="${numeric ? 'number' : 'text'}"${numeric ? ' step="any"' : ''}
+                    value="${has ? esc(String(val)) : ''}" placeholder="not set">${unit}
+            </span>
+        </div>`;
+    }
+    const err = state._specError
+        ? `<div class="spec-edit-error">${esc(state._specError)}</div>` : '';
+    return `<div class="spec-editor">
+        ${rows}
+        ${err}
+        <div class="spec-edit-actions">
+            <button class="spec-save-btn" data-action="spec-save">Save</button>
+            <button class="spec-cancel-btn" data-action="spec-cancel">Cancel</button>
+        </div>
+    </div>`;
+}
+
+function startSpecEdit() {
+    if (!state._inspectorData) return;
+    state.editingSpec = true;
+    state._specError = '';
+    renderInspector(state._inspectorData);
+}
+
+function cancelSpecEdit() {
+    state.editingSpec = false;
+    state._specError = '';
+    if (state._inspectorData) renderInspector(state._inspectorData);
+}
+
+// Collect changed/filled fields and PATCH them. The store fires PLAN_UPDATED,
+// which live-refreshes the plan; we also re-fetch the inspector for immediacy.
+async function saveSpecEdit() {
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+
+    const orig = item.imaging_spec || {};
+    const specPatch = {};
+    document.querySelectorAll('#inspector-body [data-spec-key]').forEach(inp => {
+        const key = inp.dataset.specKey;
+        const raw = inp.value.trim();
+        const hadVal = orig[key] != null && orig[key] !== '';
+        if (raw === '') {
+            if (hadVal) specPatch[key] = '';   // cleared an existing value → unset
+            return;                            // stayed empty → skip
+        }
+        let v = raw;
+        if (SPEC_NUMERIC.has(key)) {
+            const n = Number(raw);
+            if (!Number.isNaN(n)) v = n;
+        }
+        if (String(orig[key] ?? '') !== String(v)) specPatch[key] = v;
+    });
+
+    state.editingSpec = false;
+    state._specError = '';
+    if (Object.keys(specPatch).length === 0) {
+        selectItem(item.id).catch(() => {});   // nothing changed — just leave edit mode
+        return;
+    }
+
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}`,
+            {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ spec: specPatch }),
+            },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});    // refresh inspector now; PLAN_UPDATED refreshes the plan
+    } catch (err) {
+        console.error('Failed to save spec:', err);
+        state.editingSpec = true;
+        state._specError = 'Could not save — try again.';
+        renderInspector(data);
+    }
+}
+
+// ── Session link / delink ─────────────────────────────────────────────────────
+
+// Open the inline session picker. Fetches /api/sessions and re-renders with the
+// picker shown. Two-phase: immediate re-render with loading state, then again
+// once the fetch resolves (mirrors the pattern of selectItem loading state).
+async function openSessionPicker() {
+    state._sessionPickerOpen = true;
+    state._availableSessions = null;   // triggers loading display
+    if (state._inspectorData) renderInspector(state._inspectorData);
+    try {
+        const res = await fetch('/api/sessions');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const body = await res.json();
+        state._availableSessions = body.sessions || [];
+    } catch (err) {
+        console.error('Failed to load sessions for picker:', err);
+        state._availableSessions = [];
+    }
+    if (state._sessionPickerOpen && state._inspectorData) {
+        renderInspector(state._inspectorData);
+    }
+}
+
+function cancelSessionPicker() {
+    state._sessionPickerOpen = false;
+    state._availableSessions = null;
+    if (state._inspectorData) renderInspector(state._inspectorData);
+}
+
+// Read the picker <select>, POST to the link endpoint, then refresh the inspector.
+async function submitSessionLink() {
+    const select = document.getElementById('session-picker-select');
+    const sessionId = select && select.value;
+    if (!sessionId) return;
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+    // Close picker before the async call so a re-render doesn't reopen it.
+    state._sessionPickerOpen = false;
+    state._availableSessions = null;
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}/sessions`,
+            {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId }),
+            },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});   // re-fetch → re-render with updated session_ids
+    } catch (err) {
+        console.error('Failed to link session:', err);
+        if (state._inspectorData) renderInspector(state._inspectorData);
+    }
+}
+
+// DELETE the session→item edge then refresh the inspector.
+async function handleSessionDelink(sessionId) {
+    if (!sessionId) return;
+    const data = state._inspectorData;
+    const item = data && data.item;
+    const campaignId = state.activeCampaignId;
+    if (!item || !campaignId) return;
+    try {
+        const res = await fetch(
+            `/api/campaigns/${encodeURIComponent(campaignId)}/items/${encodeURIComponent(item.id)}/sessions/${encodeURIComponent(sessionId)}`,
+            { method: 'DELETE' },
+        );
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        selectItem(item.id).catch(() => {});
+    } catch (err) {
+        console.error('Failed to delink session:', err);
+        renderInspector(state._inspectorData);
+    }
+}
+
+// Hand a planned imaging item to the agent to execute. The agent resolves the
+// item ref, applies its spec, and starts the timelapse (execute_plan_item). We
+// open the chat so the user sees it pick up and can confirm/adjust.
+function runPlanItem(id) {
+    if (typeof AgentChat === 'undefined' || !AgentChat.runCommand) return;
+    AgentChat.runCommand(`Start imaging for plan item ${id}`);
+    if (AgentChat.togglePanel) AgentChat.togglePanel(true);
 }
 
 function closeInspector() {
@@ -1020,14 +1322,19 @@ function hideLoading() {
     $canvasLoading?.classList.add('hidden');
 }
 
-function section(title, content) {
-    return `<div class="detail-section"><div class="detail-section-title">${title}</div>${content}</div>`;
+function section(title, content, headerAction) {
+    const extra = headerAction ? `<span class="detail-section-action">${headerAction}</span>` : '';
+    const titleCls = headerAction ? 'detail-section-title detail-section-title--row' : 'detail-section-title';
+    return `<div class="detail-section"><div class="${titleCls}">${title}${extra}</div>${content}</div>`;
 }
 
 function renderSpecTable(spec) {
     let rows = '';
     for (const [key, value] of Object.entries(spec)) {
         if (value == null || key.startsWith('_')) continue;
+        // Skip nested objects (e.g. provenance metadata) — they'd render as
+        // "[object Object]". Field-level provenance isn't a spec value to show here.
+        if (typeof value === 'object' && !Array.isArray(value)) continue;
         const label = SPEC_LABELS[key] || key;
         let display = Array.isArray(value) ? value.join(', ') : String(value);
         if (SPEC_UNITS[key]) display += SPEC_UNITS[key];

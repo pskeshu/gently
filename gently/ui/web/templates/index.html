@@ -15,19 +15,140 @@
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
     <link rel="stylesheet" href="/static/css/agent-chat.css">
+    <link rel="stylesheet" href="/static/css/ask-stage.css">
+    <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="/static/css/landing.css">
+    <link rel="stylesheet" href="/static/css/notebook.css">
+    <link rel="stylesheet" href="/static/css/operate.css">
 </head>
-<body>
+<body class="{% if ux_v2 %}ux-v2{% endif %}">
+    {% if ux_v2 %}
+    {# Agent-first welcome — shown on entry, recedes into the workspace once the
+       user picks a path. Chat is the last resort (the escape pill), not the
+       first thing. Only rendered when the flag is on. #}
+    <div id="v2-landing" class="v2-landing" data-screen="welcome" aria-label="Welcome to Gently">
+      <div class="v2-landing-inner">
+
+        {# ── Screen 1: welcome ── #}
+        <section class="v2-screen v2-screen-welcome">
+          <div class="v2-landing-agent v2-landing-rise" data-i="0">
+            <div class="v2-landing-orb"></div>
+            <div class="v2-landing-say" id="v2-landing-greeting">Hello.<br><span class="dim">What are we doing today?</span></div>
+          </div>
+
+          <div class="v2-landing-choices">
+            <button class="v2-choice v2-landing-rise" data-i="1" data-landing="plan">
+              <span class="v2-choice-tag">guided</span>
+              <span class="v2-choice-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V5M4 7h11l-2-2M4 12h15l-2-2M4 17h9l-2-2"/></svg></span>
+              <h3>Plan an experiment</h3>
+              <p>Design a run with me — targets, cadence, and when to adapt. I'll handle the rest and keep watch.</p>
+              <span class="v2-choice-go">Start planning <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+            </button>
+
+            <button class="v2-choice alt v2-landing-rise" data-i="2" data-landing="standalone">
+              <span class="v2-choice-tag">standalone</span>
+              <span class="v2-choice-ic"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg></span>
+              <h3>Take a quick look</h3>
+              <p>Straight to the scope to see what's there — no plan, no commitment.</p>
+              <span class="v2-choice-go">Open the scope <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>
+            </button>
+          </div>
+
+          <div class="v2-escape v2-landing-rise" data-i="3" id="v2-escape">
+            <button class="v2-escape-toggle" id="v2-escape-toggle" aria-expanded="false">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2Z"/></svg>
+              or just tell me what you need
+              <span class="v2-escape-caret"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg></span>
+            </button>
+            <div class="v2-escape-field">
+              <input id="v2-escape-input" placeholder="e.g. watch these embryos overnight and ping me if one stalls" />
+              <button class="v2-escape-send" id="v2-escape-send" aria-label="Send"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7Z"/></svg></button>
+            </div>
+          </div>
+
+          <button class="v2-landing-skip" id="v2-landing-skip">Skip to workspace ›</button>
+        </section>
+
+        {# ── Screen 2: the plan wizard, hosted IN the landing. The agent's
+           ask_user_choice questions render here as button cards (#v2-plan-ask),
+           NOT in the chat panel. The plan assembles on the right as you pick. #}
+        <section class="v2-screen v2-screen-plan">
+          <div class="v2-plan-head">
+            <span class="v2-landing-orb v2-plan-orb"></span>
+            <div class="v2-plan-headtext">
+              <div class="v2-plan-who">Gently · planning</div>
+              <div class="v2-plan-title">Let's design your run</div>
+            </div>
+            <button class="v2-plan-back" id="v2-plan-back">‹ Back</button>
+          </div>
+          <div class="v2-plan-wrap">
+            <div class="v2-plan-main">
+              <div class="v2-plan-activity" id="v2-plan-activity"></div>
+              <div class="v2-plan-ask" id="v2-plan-ask" aria-live="polite"></div>
+              <div class="v2-plan-thinking" id="v2-plan-thinking"><span class="v2-typing"><i></i><i></i><i></i></span> <span class="v2-plan-thinking-label">working through the next step…</span></div>
+              <div class="v2-plan-error hidden" id="v2-plan-error" role="alert"></div>
+            </div>
+            <aside class="v2-plan-side">
+              <div class="v2-plan-side-h">The plan</div>
+              <div class="v2-plan-side-list" id="v2-plan-summary">
+                <div class="v2-plan-side-empty">The plan will take shape here as Gently designs it.</div>
+              </div>
+            </aside>
+          </div>
+          <div class="v2-plan-foot">
+            <button class="v2-plan-chat" id="v2-plan-chat">Open conversation</button>
+            <span class="v2-plan-foot-spacer"></span>
+            <button class="v2-plan-export" id="v2-plan-export" hidden>↓ Export plan</button>
+            <button class="v2-plan-skip" id="v2-plan-continue">Continue in workspace ›</button>
+          </div>
+        </section>
+
+      </div>
+    </div>
+    {% endif %}
     {% include '_header.html' %}
     {% include '_navbar.html' %}
     <!-- App shell: main content + docked agent panel (flex row for pin-to-dock).
          Header + navbar stay full-width above this. -->
     <div class="app-shell">
+    {% if ux_v2 %}
+    <aside class="v2-rail" id="v2-rail">
+      <nav class="v2-nav">
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">Now</div>
+          <button class="v2-nav-item" data-tab="home">Home</button>
+          <button class="v2-nav-item" data-tab="experiment">Operations</button>
+          <button class="v2-nav-item" data-tab="embryos">Embryos</button>
+        </div>
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">Library</div>
+          <button class="v2-nav-item" data-tab="plans">Plans</button>
+          <button class="v2-nav-item" data-tab="sessions">Sessions</button>
+          <button class="v2-nav-item" data-tab="notebook">Notebook</button>
+          <button class="v2-nav-item" data-tab="gallery">Gallery</button>
+        </div>
+        <div class="v2-nav-group">
+          <div class="v2-nav-label">System</div>
+          <button class="v2-nav-item" data-tab="devices">Devices</button>
+          <button class="v2-nav-item" data-tab="calibration">Calibration</button>
+          <button class="v2-nav-item" data-tab="events">Logs</button>
+        </div>
+      </nav>
+      <button class="v2-rail-chat" id="v2-rail-chat"><span class="v2-rail-orb"></span>Talk to Gently</button>
+    </aside>
+    {% endif %}
     <div class="app-main">
+
+    {% if ux_v2 %}<div class="v2-strip" id="v2-strip"><span class="v2-strip-live"><span class="v2-strip-dot"></span>LIVE</span><span class="v2-strip-status" id="v2-strip-status"></span></div>{% endif %}
+
+    {# ux_v2: the agent's current pending ask, dual-rendered here + in the chat. #}
+    {% if ux_v2 %}<div id="ask-stage" class="ask-stage hidden" aria-live="polite"></div>{% endif %}
 
     <!-- Calibration Tab -->
     <!-- Home Tab (landing) -->
     <div id="home-content" class="tab-content active">
         <div class="home-scroll">
+        {% if ux_v2 %}<aside id="context-surface" class="cx-surface hidden"></aside>{% endif %}
             <div class="home-hero">
                 <div class="home-hero-text">
                     <h2 class="home-hero-title">Welcome to Gently</h2>
@@ -271,7 +392,7 @@
     <!-- Experiment Tab -->
     <div id="experiment-content" class="tab-content">
         <div class="experiment-header-bar">
-            <h2 class="experiment-title">Experiment</h2>
+            <h2 class="experiment-title">Operations</h2>
             <div class="view-switcher" id="experiment-view-switcher">
                 <button class="view-btn active" data-experiment-view="overview" title="Overview (1)">Overview</button>
                 <button class="view-btn" data-experiment-view="rules" title="Rules (2)">Rules</button>
@@ -292,6 +413,31 @@
         {% include '_sessions_panel.html' %}
     </div>
 
+    <!-- Notebook Tab -->
+    <div id="notebook-content" class="tab-content">
+        <div class="nb-container">
+            <div class="nb-header">
+                <h2 class="nb-title">Notebook</h2>
+                <div class="nb-kinds">
+                    <button class="nb-kind active" data-nb-kind="">All</button>
+                    <button class="nb-kind" data-nb-kind="observation">Observations</button>
+                    <button class="nb-kind" data-nb-kind="finding">Findings</button>
+                    <button class="nb-kind" data-nb-kind="question">Questions</button>
+                </div>
+            </div>
+            <div class="nb-ask">
+                <input id="nb-ask-input" class="nb-ask-input"
+                       placeholder="Ask the notebook…  e.g. what should I try next on pioneer guidance?">
+                <button id="nb-ask-go" class="nb-ask-go">Ask</button>
+            </div>
+            <div id="nb-ask-result" class="nb-ask-result" hidden></div>
+            <div class="nb-body-wrap">
+                <aside class="nb-threads" id="nb-threads"></aside>
+                <div class="nb-notes" id="nb-notes"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Devices Tab -->
     <div id="devices-content" class="tab-content">
         <div class="devices-container devices-container-map">
@@ -299,8 +445,11 @@
                 <div class="devices-header-left">
                     <h2 class="devices-title"><span class="devices-title-script">Device</span> <em class="devices-title-em">state</em></h2>
                     <div class="view-switcher" id="devices-view-switcher">
+                        <button class="view-btn" data-view="operate" title="Operate (o)">Operate</button>
                         <button class="view-btn active" data-view="map" title="XY Map (m)">Map</button>
                         <button class="view-btn" data-view="details" title="Details (d)">Details</button>
+                        <button class="view-btn" data-view="optical3d" title="3D volume (v)">3D</button>
+                        <button class="view-btn" data-view="manual" title="Manual control">Manual</button>
                     </div>
                 </div>
                 <div class="devices-status">
@@ -333,6 +482,207 @@
                     <span class="devices-status-led" id="devices-stream-pill">disconnected</span>
                     <span class="devices-status-meta" id="devices-status-meta">no data</span>
                 </div>
+            </div>
+
+            <!-- Operate view: guided bottom-cam → SPIM operator surface.
+                 Survey & mark all → per-embryo center → lower SPIM → focus → acquire. -->
+            <div class="devices-view devices-view-operate" id="devices-view-operate" style="display:none">
+              <div class="operate">
+
+                <!-- HEADER — stepper ("you are here") + always-on safety status strip -->
+                <header class="op-head">
+                  <div class="op-stepper" id="op-stepper">
+                    <span class="op-phase">Survey</span>
+                    <span class="op-node" data-node="a1">Focus</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="a2">Mark</span>
+                    <span class="op-phase-div"></span>
+                    <span class="op-phase">Run</span>
+                    <span class="op-node" data-node="run">Choose</span>
+                    <span class="op-phase-div"></span>
+                    <span class="op-phase">Acquire<b id="op-loop-emb"></b></span>
+                    <span class="op-node" data-node="b1">Center</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="b2">Lower</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="b3">Focus</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="bc">Calibrate</span>
+                    <span class="op-arrow">→</span>
+                    <span class="op-node" data-node="b4">Acquire</span>
+                  </div>
+                  <div class="op-status">
+                    <span class="op-stat"><i>HEAD</i><b id="op-st-head">—</b></span>
+                    <span class="op-stat"><i>FLOOR</i><b id="op-st-floor">—</b></span>
+                    <span class="op-stat" id="op-st-led-wrap"><i>LED</i><b id="op-st-led">OFF</b></span>
+                    <span class="op-stat" id="op-st-laser-wrap"><i>LASER</i><b id="op-st-laser">OFF</b></span>
+                    <span class="op-stat"><i>CAM</i><b id="op-st-cam">—</b></span>
+                  </div>
+                </header>
+
+                <!-- LEFT SPINE — dish mini-map + the embryo worklist ("the plan") -->
+                <aside class="op-spine">
+                  <div class="op-minimap-wrap">
+                    <svg class="op-minimap" id="op-minimap" viewBox="0 0 100 100" preserveAspectRatio="xMidYMid meet" aria-hidden="true"></svg>
+                  </div>
+                  <div class="op-board-head"><span>The plan</span><span class="op-board-count" id="op-board-count">0 / 0 imaged</span></div>
+                  <div class="op-board" id="op-board"><div class="op-empty">No embryos yet</div></div>
+                  <button class="op-btn op-btn-ghost op-survey-btn" id="op-survey-btn" type="button">＋ Survey / mark more</button>
+                </aside>
+
+                <!-- CENTER — the single live viewport; source + overlays swap per step -->
+                <div class="op-stage">
+                  <div class="op-badge" id="op-badge">Bottom cam</div>
+                  <div class="op-cam" id="op-cam-stage">
+                    <img class="op-cam-img" id="op-cam-img" alt="live frame">
+                    <canvas class="op-mark-canvas" id="op-mark-canvas"></canvas>
+                    <div class="op-cam-ph" id="op-cam-ph">Camera off</div>
+                  </div>
+                </div>
+
+                <!-- RIGHT RAIL — only the active step's control group renders -->
+                <div class="op-rail" id="op-rail" data-active="a1">
+                  <div class="op-rail-head" id="op-rail-head">Focus the bottom objective</div>
+
+                  <div class="op-group" data-step="a1">
+                    <button class="op-btn" id="op-cam-toggle" type="button">Start camera</button>
+                    <div class="op-field">
+                      <label class="op-label">Bottom focus Z <span class="op-cap" id="op-bz-pos">—</span><span class="op-cap"> µm</span></label>
+                      <div class="op-hud-line">focus score <b id="op-bz-score">—</b></div>
+                      <div class="op-nudge" id="op-bz-nudge">
+                        <button class="op-nbtn" data-bz="-10" type="button">−10</button>
+                        <button class="op-nbtn" data-bz="-1" type="button">−1</button>
+                        <button class="op-nbtn" data-bz="1" type="button">+1</button>
+                        <button class="op-nbtn" data-bz="10" type="button">+10</button>
+                      </div>
+                    </div>
+                    <div class="op-hint">Sharpen the embryos, then mark them.</div>
+                    <button class="op-btn op-btn-primary" id="op-tomark" type="button">Mark embryos →</button>
+                  </div>
+
+                  <div class="op-group" data-step="a2">
+                    <button class="op-btn" id="op-detect" type="button">Detect (SAM)</button>
+                    <div class="op-hint">Click the frame to add · click a marker to remove.</div>
+                    <button class="op-btn op-btn-primary" id="op-confirm" type="button" disabled>Confirm <span id="op-mark-count">(0)</span></button>
+                    <button class="op-btn op-btn-ghost" id="op-clear" type="button" disabled>Clear marks</button>
+                  </div>
+
+                  <div class="op-group" data-step="b1">
+                    <button class="op-btn op-btn-primary" id="op-center" type="button">Center stage on embryo</button>
+                    <div class="op-hint" id="op-center-hint">Drive the embryo to the reticle (FOV centre).</div>
+                  </div>
+
+                  <div class="op-group" data-step="b2">
+                    <div class="op-field">
+                      <label class="op-label">SPIM head · F-drive <span class="op-cap" id="op-fd-pos">—</span><span class="op-cap"> µm</span></label>
+                      <div class="op-hud-line">distance to floor <b id="op-fd-floor">—</b> µm</div>
+                      <div class="op-nudge op-nudge-2" id="op-fd-nudge">
+                        <button class="op-nbtn" data-fd="-100" id="op-fd-d100" type="button">▼ 100</button>
+                        <button class="op-nbtn" data-fd="-10" id="op-fd-d10" type="button">▼ 10</button>
+                        <button class="op-nbtn" data-fd="10" type="button">▲ 10</button>
+                        <button class="op-nbtn" data-fd="100" type="button">▲ 100</button>
+                      </div>
+                    </div>
+                    <div class="op-hint">▼ lowers toward the sample. Watch the floor gauge.</div>
+                    <button class="op-btn op-btn-primary" id="op-tofocus" type="button">Focus SPIM →</button>
+                  </div>
+
+                  <div class="op-group" data-step="b3">
+                    <div class="op-spim-controls">
+                      <button class="op-btn" id="op-spim-toggle" type="button">Start view</button>
+                      <button class="op-btn op-btn-toggle" id="op-led" type="button" aria-pressed="false">LED</button>
+                    </div>
+                    <div class="op-micro">
+                      <span>Galvo</span>
+                      <button class="op-nbtn" data-gv="-0.2" type="button">−</button><b id="op-gv">0.0</b><button class="op-nbtn" data-gv="0.2" type="button">+</button>
+                      <span class="op-sep">·</span>
+                      <span>Piezo</span>
+                      <button class="op-nbtn" data-pz="-1" type="button">−</button><b id="op-pz">50</b><button class="op-nbtn" data-pz="1" type="button">+</button>
+                    </div>
+                    <div class="op-hud-line">focus score <b id="op-spim-score">—</b></div>
+                    <div class="op-hint">Peak the focus score, then mark in focus.</div>
+                    <button class="op-btn op-btn-primary" id="op-infocus" type="button">Mark in focus →</button>
+                  </div>
+
+                  <div class="op-group" data-step="bc">
+                    <div class="op-cap">Piezo-galvo calibration</div>
+                    <button class="op-btn op-btn-primary" id="op-calibrate" type="button">Calibrate this embryo</button>
+                    <div class="op-hud-line">fit <b id="op-cal-result">—</b></div>
+                    <div class="op-hint">Sweeps the light sheet to fit the piezo↔galvo focus track. Head stays lowered.</div>
+                    <button class="op-btn op-btn-ghost" id="op-cal-skip" type="button">Skip calibration →</button>
+                  </div>
+
+                  <div class="op-group" data-step="b4">
+                    <div class="op-cap">50 slices · 10 ms</div>
+                    <button class="op-btn op-btn-primary" id="op-acquire" type="button">Acquire volume</button>
+                    <div class="op-hint">Captures the volume for this embryo.</div>
+                  </div>
+
+                  <div class="op-group" data-step="b5">
+                    <div class="op-hint">Imaged ✓ — raise the head to safe travel, then advance.</div>
+                    <button class="op-btn op-btn-primary" id="op-retract" type="button">Raise head ▲ &amp; next</button>
+                  </div>
+
+                  <!-- ③ RUN chooser: pick how to image the marked set (every mode emits one tactic) -->
+                  <div class="op-group" data-step="c0">
+                    <div class="op-field">
+                      <label class="op-label">Roles <span class="op-cap">(marked → subject)</span></label>
+                      <div class="op-rolechips" id="op-rolechips"></div>
+                    </div>
+                    <div class="op-field">
+                      <label class="op-label">Run mode</label>
+                      <div class="op-modes" id="op-modes">
+                        <label class="op-mode"><input type="radio" name="op-mode" value="manual"><span>Manual one-by-one</span><small>volumes, the B-loop</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="adaptive" checked><span>Adaptive timelapse</span><small>ongoing, cadence</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="library"><span>From library</span><small>a saved tactic</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="plan"><span>Continue a plan</span><small>a campaign item</small></label>
+                        <label class="op-mode"><input type="radio" name="op-mode" value="agent"><span>Hand to agent</span><small>let it compose</small></label>
+                      </div>
+                    </div>
+                    <!-- adaptive sub-form -->
+                    <div class="op-modepanel" data-mode="adaptive" id="op-panel-adaptive">
+                      <div class="op-tl-row"><label>Interval</label><input class="op-num" id="op-tl-interval" type="number" min="1" value="120"><span class="op-cap">s</span></div>
+                      <div class="op-tl-row"><label>Stop</label>
+                        <select class="op-sel-s" id="op-tl-stop">
+                          <option value="manual">manual</option>
+                          <option value="timepoints">after N timepoints</option>
+                          <option value="duration">after N hours</option>
+                          <option value="hatching">at hatching</option>
+                        </select>
+                        <input class="op-num" id="op-tl-condval" type="number" min="1" value="10" style="display:none">
+                      </div>
+                      <div class="op-tl-row"><label>Monitor</label>
+                        <select class="op-sel-s" id="op-tl-monitor">
+                          <option value="idle" selected>idle (fixed cadence)</option>
+                          <option value="expression_monitoring">expression</option>
+                          <option value="pre_terminal_monitoring">pre-terminal</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div class="op-modepanel" data-mode="library" id="op-panel-library">
+                      <div class="op-lib-list" id="op-lib-list"><div class="op-empty">No saved tactics</div></div>
+                    </div>
+                    <div class="op-modepanel" data-mode="plan" id="op-panel-plan">
+                      <div class="op-plan-list" id="op-plan-list"><div class="op-empty">No linkable plan items</div></div>
+                    </div>
+                    <div class="op-modepanel" data-mode="agent" id="op-panel-agent">
+                      <div class="op-hint">Opens the agent with the marked roster to propose &amp; start an Operation Plan.</div>
+                    </div>
+                    <button class="op-btn op-btn-primary" id="op-run-start" type="button">Start run</button>
+                  </div>
+
+                  <!-- Run live: the rail becomes a read-only run-spine -->
+                  <div class="op-group" data-step="running">
+                    <div class="op-runspine" id="op-runspine"></div>
+                    <div class="op-run-actions">
+                      <button class="op-btn op-btn-toggle" id="op-run-pause" type="button">Pause</button>
+                      <button class="op-btn" id="op-run-stop" type="button">Stop run</button>
+                    </div>
+                    <button class="op-btn op-btn-ghost" id="op-run-open" type="button">Open in Operations →</button>
+                  </div>
+                </div>
+
+              </div>
             </div>
 
             <!-- Map view: graphical XY position over safe/caution/forbidden zones -->
@@ -386,7 +736,10 @@
                         </svg>
                     </div>
 
-                    <!-- TOP RIGHT: station readout -->
+                    <!-- TOP RIGHT: station readout + detected-embryo rail.
+                         Stacked in one column so they share width and keep a
+                         consistent gap regardless of the readout's height. -->
+                    <div class="devices-map-rail" id="devices-map-rail">
                     <div class="devices-map-readout" id="devices-map-readout">
                         <div class="devices-readout-head">
                             <span class="devices-readout-led" id="devices-readout-led"></span>
@@ -403,6 +756,7 @@
                                 <span class="devices-readout-value" id="devices-map-y">—</span>
                             </div>
                         </div>
+                    </div>
                     </div>
 
                     <!-- BOTTOM LEFT: scale bar -->
@@ -428,7 +782,12 @@
                                 <span class="devices-camera-led" id="devices-camera-led"></span>
                                 <span>Bottom camera</span>
                             </span>
-                            <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
+                            <div class="devices-camera-head-btns">
+                                <button class="devices-camera-expand" id="devices-camera-expand" type="button"
+                                        title="Enlarge view" aria-label="Enlarge bottom-camera view"
+                                        aria-pressed="false">⤢</button>
+                                <button class="devices-camera-toggle" id="devices-camera-toggle" type="button">Start</button>
+                            </div>
                         </div>
                         <div class="devices-camera-stage">
                             <img class="devices-camera-img" id="devices-camera-img" alt="bottom camera live frame">
@@ -532,6 +891,360 @@
                     </div>
                 </div>
             </div>
+
+            <!-- 3D view: live digital-twin of the addressable imaging volume -->
+            <div class="devices-view devices-view-optical3d" id="devices-view-optical3d" style="display:none">
+              <style>
+                .occ3d-wrap { position: relative; width: 100%; height: calc(100vh - 200px); min-height: 420px; }
+                .occ3d-canvas { position: absolute; inset: 0; background: #0a0e12; border-radius: 8px; }
+                .occ3d-overlay { position: absolute; top: 12px; left: 12px; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+                .occ3d-overlay > * { pointer-events: auto; }
+                .occ3d-mode { align-self: flex-start; font: 600 12px/1 'Inter Tight', system-ui, sans-serif; letter-spacing: .08em; color: #39d0ff; border: 1px solid #39d0ff; border-radius: 4px; padding: 5px 9px; background: rgba(10,14,18,.7); }
+                .occ3d-mode.is-pencil { color: #ffd166; border-color: #ffd166; }
+                .occ3d-readouts { font: 12px/1.5 ui-monospace, monospace; color: #cdd6df; background: rgba(10,14,18,.7); border: 1px solid #1f2a33; border-radius: 6px; padding: 8px 10px; min-width: 172px; }
+                .occ3d-row { display: flex; justify-content: space-between; gap: 14px; }
+                .occ3d-row span { color: #7d8b97; }
+                .occ3d-row b { color: #e7eef4; font-weight: 600; }
+                .occ3d-minimap { width: 200px; height: 120px; background: rgba(10,14,18,.7); border: 1px solid #1f2a33; border-radius: 6px; }
+                .occ3d-mm-box { fill: rgba(51,65,77,.25); stroke: #4a5a66; stroke-width: 1; }
+                .occ3d-mm-cuboid { fill: none; stroke: #14b8c4; stroke-width: 1; }
+                .occ3d-mm-stage { fill: #ff5a4d; }
+                .occ3d-mm-embryo { fill: #6fae46; }
+                .occ3d-hint { font: 11px/1 system-ui, sans-serif; color: #5e6b76; }
+                .occ3d-demo-btn { align-self: flex-start; font: 600 11px/1 system-ui; color: #cdd6df; background: rgba(10,14,18,.7); border: 1px solid #2a3a44; border-radius: 4px; padding: 6px 10px; cursor: pointer; }
+                .occ3d-demo-btn.is-on { color: #39d0ff; border-color: #39d0ff; }
+              </style>
+              <div class="occ3d-wrap">
+                <div id="occ3d-container" class="occ3d-canvas"></div>
+                <div class="occ3d-overlay">
+                  <div class="occ3d-mode" id="occ3d-mode">SHEET</div>
+                  <div class="occ3d-readouts" id="occ3d-readouts"></div>
+                  <svg class="occ3d-minimap" id="occ3d-minimap" viewBox="0 0 200 120" preserveAspectRatio="xMidYMid meet"></svg>
+                  <button class="occ3d-demo-btn" id="occ3d-demo-btn">▶ Demo (no hardware)</button>
+                  <div class="occ3d-hint">drag rotate · wheel zoom · dbl-click reset</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Manual view: SPIM brightfield live-view + controls -->
+            <div class="devices-view devices-view-manual" id="devices-view-manual" style="display:none">
+                <div class="ls-layout">
+
+                    <!-- LEFT: live image stage -->
+                    <div class="ls-image-col">
+                        <div class="ls-stage-head">
+                            <span class="devices-camera-title">
+                                <span class="devices-camera-led" id="devices-ls-led"></span>
+                                <span>Lightsheet</span>
+                            </span>
+                            <span class="devices-camera-meta" id="devices-ls-meta">—</span>
+                        </div>
+                        <div class="devices-camera-stage ls-stage" id="devices-ls-stage">
+                            <img class="devices-camera-img" id="devices-ls-img" alt="lightsheet live frame">
+                            <div class="devices-camera-placeholder" id="devices-ls-placeholder">
+                                <div class="devices-camera-placeholder-icon">
+                                    <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>
+                                </div>
+                                <div class="devices-camera-placeholder-text">Stream off</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- RIGHT: control rail -->
+                    <div class="ls-rail">
+
+                        <!-- Live stream toggle (relocated out of the viewer header) -->
+                        <div class="ls-group ls-group-stream">
+                            <button class="ls-stream-btn" id="devices-ls-toggle" type="button">Live</button>
+                        </div>
+
+                        <!-- Exposure -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-exposure">Exposure</label>
+                            <div class="ls-row">
+                                <input class="ls-number" id="devices-ls-exposure" type="number"
+                                       min="1" max="5000" step="1" value="20"
+                                       inputmode="numeric" aria-label="Exposure time in milliseconds">
+                                <span class="ls-unit">ms</span>
+                            </div>
+                        </div>
+
+                        <!-- SPIM Side selector — hidden on single-camera rigs, shown when camera_b is present -->
+                        <div class="ls-group" id="devices-ls-side-group" style="display:none">
+                            <label class="ls-label" for="devices-ls-side">SPIM Side</label>
+                            <select id="devices-ls-side" class="ls-laser-select"
+                                    aria-label="Select SPIM side A or B">
+                                <option value="A" selected>Side A</option>
+                                <option value="B">Side B</option>
+                            </select>
+                        </div>
+
+                        <!-- Galvo -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-galvo">Galvo</label>
+                            <div class="ls-slider-row">
+                                <input class="ls-slider" id="devices-ls-galvo-slider" type="range"
+                                       min="-5" max="5" step="0.05" value="0" aria-label="Galvo angle">
+                                <input class="ls-number ls-number-sm" id="devices-ls-galvo" type="number"
+                                       min="-5" max="5" step="0.05" value="0" inputmode="decimal">
+                                <span class="ls-unit">°</span>
+                            </div>
+                        </div>
+
+                        <!-- Piezo -->
+                        <div class="ls-group">
+                            <label class="ls-label" for="devices-ls-piezo">Piezo Z</label>
+                            <div class="ls-slider-row">
+                                <input class="ls-slider" id="devices-ls-piezo-slider" type="range"
+                                       min="0" max="200" step="0.5" value="0" aria-label="Piezo Z position">
+                                <input class="ls-number ls-number-sm" id="devices-ls-piezo" type="number"
+                                       min="0" max="200" step="0.5" value="0" inputmode="decimal">
+                                <span class="ls-unit">µm</span>
+                            </div>
+                        </div>
+
+                        <!-- Illumination -->
+                        <div class="ls-group">
+                            <span class="ls-label">Illumination</span>
+                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-led-toggle" type="button"
+                                        title="Toggle LED preset (Open/Closed)"
+                                        aria-pressed="false">LED: Closed</button>
+                                <button class="ls-illum-btn" id="devices-ls-room-light-btn" type="button"
+                                        title="Toggle room light" aria-pressed="false">Room Light</button>
+                            </div>
+                            <div class="ls-btn-row">
+                                <button class="ls-illum-btn" id="devices-ls-laser-toggle" type="button"
+                                        title="Toggle laser on/off"
+                                        aria-pressed="false">Laser: OFF</button>
+                            </div>
+                            <div class="ls-laser-row">
+                                <label class="ls-laser-label" for="devices-laser-preset">Preset</label>
+                                <select id="devices-laser-preset" class="ls-laser-select"
+                                        aria-label="Laser preset">
+                                    <option value="ALL OFF">ALL OFF</option>
+                                </select>
+                            </div>
+                            <div class="ls-laser-indicator">
+                                <span class="ls-laser-dot"></span>
+                                Laser: <span id="devices-ls-laser-status">OFF (brightfield)</span>
+                            </div>
+                        </div>
+
+                        <!-- Acquire -->
+                        <div class="ls-group">
+                            <span class="ls-label">Acquire</span>
+                            <div class="ls-btn-row">
+                                <button class="ls-acquire-btn" id="devices-ls-snap-volume"
+                                        type="button" title="Acquire a single volume">Snap Volume</button>
+                                <button class="ls-acquire-btn" id="devices-ls-burst"
+                                        type="button" title="Acquire a burst of frames">Burst</button>
+                            </div>
+                            <div class="ls-lastcap" id="devices-ls-lastcap" hidden>
+                                <span class="ls-lastcap-label">Last acquired</span>
+                                <span class="ls-lastcap-ref" id="devices-ls-lastcap-ref">—</span>
+                            </div>
+                        </div>
+
+                        <!-- Temperature -->
+                        <div class="ls-group">
+                            <label class="ls-label">Temperature</label>
+                            <div class="ls-row">
+                                <input class="ls-number" id="devices-ls-temp-input" type="number"
+                                       min="0" max="99.9" step="0.1" inputmode="decimal"
+                                       placeholder="°C" aria-label="Temperature setpoint">
+                                <button class="ls-set-btn" id="devices-ls-temp-set" type="button">Set</button>
+                            </div>
+                            <div id="devices-ls-tempgraph" class="ls-tempgraph"></div>
+                        </div>
+
+                        <!-- Timelapse (collapsible panel → accordion of 3 sections) -->
+                        <div class="ls-group" id="devices-tl-group">
+                            <button class="ls-label ls-collapsible-head" id="devices-tl-toggle"
+                                    type="button" aria-expanded="false"
+                                    aria-controls="devices-tl-body">
+                                <span style="flex:1">Timelapse</span>
+                                <span class="ls-tl-outer-dot" id="devices-tl-outer-dot" aria-hidden="true"></span>
+                                <span class="ls-collapsible-arrow" aria-hidden="true">▶</span>
+                            </button>
+                            <div class="ls-collapsible-body" id="devices-tl-body" hidden>
+
+                                <!-- ── Section 1: Schedule ───────────────────────── -->
+                                <div class="ls-acc-section" id="devices-tlacc-sched">
+                                    <button class="ls-acc-head" id="devices-tlacc-sched-head"
+                                            type="button" aria-expanded="true"
+                                            aria-controls="devices-tlacc-sched-body">
+                                        <span class="ls-acc-dot" aria-hidden="true"></span>
+                                        <span class="ls-acc-title">Schedule</span>
+                                        <span class="ls-acc-summary" id="devices-tlacc-sched-sum" hidden></span>
+                                        <span class="ls-acc-arrow" aria-hidden="true">▼</span>
+                                    </button>
+                                    <div class="ls-acc-body" id="devices-tlacc-sched-body">
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-interval">Interval</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-interval"
+                                                   type="number" min="1" step="1" value="120"
+                                                   inputmode="numeric" aria-label="Timelapse interval in seconds">
+                                            <span class="ls-unit">s</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-stop">Stop when</label>
+                                            <select id="devices-tl-stop" class="ls-laser-select"
+                                                    aria-label="Timelapse stop condition">
+                                                <option value="manual" selected>Manual</option>
+                                                <option value="timepoints">Timepoints</option>
+                                                <option value="duration">Duration (h)</option>
+                                            </select>
+                                        </div>
+                                        <div class="ls-sub-row" id="devices-tl-cond-row" hidden>
+                                            <label class="ls-sub-label" for="devices-tl-cond-val" id="devices-tl-cond-label">Count</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-cond-val"
+                                                   type="number" min="1" step="1" value="10"
+                                                   inputmode="numeric" aria-label="Stop condition value">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ── Section 2: Targets ────────────────────────── -->
+                                <div class="ls-acc-section" id="devices-tlacc-targets">
+                                    <button class="ls-acc-head" id="devices-tlacc-targets-head"
+                                            type="button" aria-expanded="false"
+                                            aria-controls="devices-tlacc-targets-body">
+                                        <span class="ls-acc-dot" aria-hidden="true"></span>
+                                        <span class="ls-acc-title">Targets</span>
+                                        <span class="ls-acc-summary" id="devices-tlacc-targets-sum" hidden></span>
+                                        <span class="ls-acc-arrow" aria-hidden="true">▶</span>
+                                    </button>
+                                    <div class="ls-acc-body" id="devices-tlacc-targets-body" hidden>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-embryos">Embryos</label>
+                                            <input class="ls-number" id="devices-tl-embryos"
+                                                   type="text" placeholder="all"
+                                                   aria-label="Embryo IDs comma-separated (blank = all)">
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-mode">Mode</label>
+                                            <select id="devices-tl-mode" class="ls-laser-select"
+                                                    aria-label="Monitoring mode">
+                                                <option value="">— none —</option>
+                                                <option value="idle">Idle (plain imaging)</option>
+                                                <option value="expression_monitoring">Expression monitoring</option>
+                                                <option value="pre_terminal_monitoring">Pre-terminal</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ── Section 3: Volume geometry ────────────────── -->
+                                <div class="ls-acc-section" id="devices-tlacc-geom">
+                                    <button class="ls-acc-head" id="devices-tlacc-geom-head"
+                                            type="button" aria-expanded="false"
+                                            aria-controls="devices-tlacc-geom-body">
+                                        <span class="ls-acc-dot" aria-hidden="true"></span>
+                                        <span class="ls-acc-title">Volume geometry</span>
+                                        <span class="ls-acc-summary" id="devices-tlacc-geom-sum" hidden></span>
+                                        <span class="ls-acc-arrow" aria-hidden="true">▶</span>
+                                    </button>
+                                    <div class="ls-acc-body" id="devices-tlacc-geom-body" hidden>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-slices">Slices</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-slices"
+                                                   type="number" min="1" max="500" step="1" value="50"
+                                                   inputmode="numeric" aria-label="Number of slices">
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-exposure">Exposure</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-exposure"
+                                                   type="number" min="1" max="5000" step="1" value="10"
+                                                   inputmode="numeric" aria-label="Exposure time in ms">
+                                            <span class="ls-unit">ms</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-galvo-amp">Galvo amp</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-galvo-amp"
+                                                   type="number" min="0" max="5" step="0.05" value="0.5"
+                                                   inputmode="decimal" aria-label="Galvo amplitude in degrees">
+                                            <span class="ls-unit">°</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-galvo-ctr">Galvo ctr</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-galvo-ctr"
+                                                   type="number" min="-5" max="5" step="0.05" value="0"
+                                                   inputmode="decimal" aria-label="Galvo center in degrees">
+                                            <span class="ls-unit">°</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-piezo-amp">Piezo amp</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-piezo-amp"
+                                                   type="number" min="0" max="100" step="0.5" value="25"
+                                                   inputmode="decimal" aria-label="Piezo amplitude in µm">
+                                            <span class="ls-unit">µm</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-piezo-ctr">Piezo ctr</label>
+                                            <input class="ls-number ls-number-sm" id="devices-tl-piezo-ctr"
+                                                   type="number" min="0" max="200" step="0.5" value="50"
+                                                   inputmode="decimal" aria-label="Piezo center in µm">
+                                            <span class="ls-unit">µm</span>
+                                        </div>
+                                        <div class="ls-sub-row">
+                                            <label class="ls-sub-label" for="devices-tl-laser">Laser</label>
+                                            <select id="devices-tl-laser" class="ls-laser-select"
+                                                    aria-label="Laser preset for timelapse">
+                                                <option value="ALL OFF">ALL OFF</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <!-- ── Submit + status ───────────────────────────── -->
+                                <div class="ls-sub-row ls-tl-submit-row">
+                                    <button class="ls-acquire-btn ls-tl-start-btn" id="devices-tl-start"
+                                            type="button">Start timelapse</button>
+                                </div>
+                                <div class="ls-tl-status" id="devices-tl-status" hidden>
+                                    <span id="devices-tl-status-text"></span>
+                                </div>
+
+                            </div><!-- /#devices-tl-body -->
+                        </div><!-- /#devices-tl-group -->
+
+                    </div><!-- /.ls-rail -->
+                </div><!-- /.ls-layout -->
+            </div><!-- /#devices-view-manual -->
+
+            <!-- Temperature trajectory graph: backfill + live SVG chart.
+                 Shared across device tabs; placed last so it sits at the
+                 bottom (was between 3D and Manual, which put it at the top
+                 of the Manual view). -->
+            <section class="devices-temp-graph" id="devices-temp-graph" aria-label="Temperature trajectory"></section>
+        </div>
+    </div>
+
+    <!-- Gallery Tab -->
+    <div id="gallery-content" class="tab-content">
+        <div class="gallery-tab-container">
+            <div class="gallery-tab-header">
+                <h2 class="gallery-tab-title"><span class="gallery-tab-title-script">Acquired</span> <em class="gallery-tab-title-em">images</em></h2>
+                <div class="gallery-tab-controls">
+                    <select id="gallery-embryo-filter" class="gallery-filter-select">
+                        <option value="">All embryos</option>
+                    </select>
+                    <select id="gallery-type-filter" class="gallery-filter-select">
+                        <option value="">All types</option>
+                        <option value="volume">Volume</option>
+                        <option value="volume_projection">Projection</option>
+                        <option value="snapshot">Snapshot</option>
+                    </select>
+                    <button id="gallery-refresh-btn" class="gallery-refresh-btn" title="Refresh">&#x21BB;</button>
+                </div>
+            </div>
+            <div class="gallery-tab-body" id="gallery-tab-body">
+                <div class="gallery-tab-empty">No images yet — snap a volume or take a snapshot to see it here.</div>
+            </div>
         </div>
     </div>
 
@@ -616,25 +1329,36 @@
 
     <script src="/static/js/utils.js"></script>
     <script src="/static/js/event-bus.js"></script>
+    <script src="/static/js/status-store.js"></script>
     <script src="/static/js/websocket.js"></script>
     <script src="/static/js/zoom-pan.js"></script>
     <script src="/static/js/lightbox.js"></script>
     <script src="/static/js/timepoint-player.js"></script>
     <script src="/static/js/viewer.js"></script>
     <script src="/static/js/gallery.js"></script>
+    <script src="/static/js/control-auth.js"></script>
     <script src="/static/js/events.js"></script>
     <script src="/static/js/embryos.js"></script>
     <script src="/static/js/projection-viewer.js"></script>
     <script src="/static/js/experiment-strip.js"></script>
     <script src="/static/js/marking.js"></script>
+    <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
+    <script src="/static/js/operate.js"></script>
+    <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="/static/js/occupancy3d.js"></script>
+    <script src="/static/js/notebook.js"></script>
     <script src="/static/js/app.js"></script>
     <script src="/static/js/home.js"></script>
     <script src="/static/js/campaigns.js"></script>
     <script src="/static/js/review.js"></script>
     <script src="/static/js/agent-chat.js"></script>
+    <script src="/static/js/ask-stage.js"></script>
+    <script src="/static/js/shell.js"></script>
+    <script src="/static/js/context-surface.js"></script>
+    <script src="/static/js/landing.js"></script>
 </body>
 </html>

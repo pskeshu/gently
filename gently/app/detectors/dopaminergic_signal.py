@@ -273,7 +273,9 @@ class DopaminergicSignalDetector(Detector):
                 }
             ],
         )
-        raw = response.content[0].text if response.content else ""
+        if response.stop_reason == "refusal" or not response.content:
+            return "(perception model declined the request)", ""
+        raw = response.content[0].text
         return raw.strip(), raw
 
     async def _call_classifier(
@@ -290,7 +292,9 @@ class DopaminergicSignalDetector(Detector):
             max_tokens=300,
             messages=[{"role": "user", "content": prompt}],
         )
-        raw = response.content[0].text if response.content else ""
+        if response.stop_reason == "refusal" or not response.content:
+            return dict(_DEFAULT_FINDINGS), "", "Safety refusal"
+        raw = response.content[0].text
         findings, parse_err = _parse_response(raw)
         return findings, raw, parse_err
 

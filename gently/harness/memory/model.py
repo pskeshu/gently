@@ -240,6 +240,19 @@ class ImagingSpec:
     success_criteria: str | None = None
     comparison_to: str | None = None  # "Compare to WT session 1"
 
+    # Per-field provenance for INFERRED values — field name -> {source, confidence}.
+    # e.g. {"laser_wavelength_nm": {"source": "inferred:genotype", "confidence": "medium"}}
+    # Lets the UI tag each value with where it came from and what to confirm.
+    provenance: dict[str, dict[str, str]] = field(default_factory=dict)
+
+    # Tactical outline — intended Operations for this imaging session.
+    # Each entry is a lightweight tactic descriptor:
+    #   {kind, name, target?, scope?, structure?}
+    # kind ∈ standing_timelapse | reactive_monitor | scripted_protocol |
+    #         exclusive_burst | oneshot | custom
+    # Populated at plan time; later seeds the session's Operation Plan.
+    tactics: list[dict] = field(default_factory=list)
+
 
 @dataclass
 class BenchSpec:
@@ -287,7 +300,8 @@ class PlanItem:
 
     # Linking
     planned_session_id: str | None = None  # → PlannedSession (for imaging items)
-    session_id: str | None = None  # → Actual session (once executed)
+    session_id: str | None = None  # → most recent actual session (back-compat / "primary")
+    session_ids: list[str] = field(default_factory=list)  # all sessions that ran this item (1→many)
     inherit_from: str | None = None  # PlanItem ID to inherit spec from
 
     # Scheduling — relative timeline from Day 0

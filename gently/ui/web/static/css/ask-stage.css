@@ -1,0 +1,56 @@
+/* Main-stage ask surface (ux_v2): the agent's current pending ask, rendered
+   prominently outside the chat transcript. Reuses the .ac-choice card markup
+   from agent-chat.css; this file frames the stage container and adds the
+   shared free-text ("Something else…") escape styling. Only #ask-stage is
+   gated behind the flag, so loading this CSS unconditionally is harmless. */
+
+.ask-stage { margin: 14px 16px 0; }
+.ask-stage.hidden { display: none; }
+
+.ask-stage .ac-choice {
+    border: 1px solid var(--border, #e4e9f0);
+    border-radius: 14px;
+    padding: 16px 18px;
+    background: var(--surface, #fff);
+    box-shadow: 0 8px 28px rgba(15, 23, 42, .08);
+}
+.ask-stage .ac-choice-q {
+    font-size: 1.02rem;
+    font-weight: 600;
+    margin-bottom: 12px;
+}
+
+/* Free-text "Something else…" escape — present on ask cards in BOTH surfaces. */
+.ac-choice-otherwrap { margin-top: 6px; }
+.ac-choice-other.hidden,
+.ac-choice-otherform.hidden { display: none; }
+.ac-choice-otherform { display: flex; gap: 6px; align-items: center; margin-top: 4px; }
+.ac-choice-otherinput {
+    flex: 1; min-width: 0;
+    padding: 8px 10px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 8px;
+    font: inherit;
+    background: var(--surface, #fff);
+    color: inherit;
+}
+.ac-choice-otherinput:focus { outline: none; border-color: var(--accent, #2f6df6); }
+.ac-choice-othergo {
+    border: 0; cursor: pointer;
+    background: var(--accent, #2f6df6); color: #fff;
+    border-radius: 8px; padding: 8px 12px; line-height: 1;
+}
+
+/* Per-field provenance tag on imaging-spec rows (Phase 3b): shows where an
+   inferred value came from, e.g. "inferred · medium". */
+.ac-spec-src {
+    margin-left: 6px;
+    font-size: 10px;
+    letter-spacing: .02em;
+    color: var(--text-muted, #94a3b8);
+    background: var(--bg-hover, #f1f5f9);
+    border-radius: 999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+    vertical-align: middle;
+}

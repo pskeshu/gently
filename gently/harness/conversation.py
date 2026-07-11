@@ -12,6 +12,8 @@ import re
 import time
 from typing import Any
 
+from ..settings import settings
+
 logger = logging.getLogger(__name__)
 
 
@@ -159,15 +161,13 @@ class ConversationManager:
         if re.search(r"\b(plan|timelapse|time-lapse|acquisition)\b", msg_lower):
             return True
         if re.search(
-            r"\b(analy[sz]e|look at|check|inspect|review).*(image|volume|embryo)",
-            msg_lower,
+            r"\b(analy[sz]e|look at|check|inspect|review).*(image|volume|embryo)", msg_lower
         ):
             return True
         if re.search(r"\b(all|every|each)\s+(embryo|sample)", msg_lower):
             return True
         if re.search(
-            r"\b(first|then|after|next|finally)\b.*\b(first|then|after|next|finally)\b",
-            msg_lower,
+            r"\b(first|then|after|next|finally)\b.*\b(first|then|after|next|finally)\b", msg_lower
         ):
             return True
         if re.search(r"\b(why|problem|issue|error|wrong|fail|debug|troubleshoot)", msg_lower):
@@ -176,6 +176,33 @@ class ConversationManager:
         return False
 
     # ===== Non-Streaming API Call =====
+
+    async def _create_with_refusal_fallback(self, api_kwargs):
+        """messages.create with main-tier resilience: if the model rejects the
+        request with a 400 (e.g. Fable 5 under <30-day org data retention, or
+        unavailable) OR declines it (stop_reason="refusal", empty content), retry
+        the SAME request once on the fallback model (Opus 4.8) — so gently keeps
+        working whether or not Fable 5 is currently serviceable. The moment the
+        org retention is fixed, Fable 5 serves with no code change."""
+        from anthropic import BadRequestError
+
+        fb = settings.models.refusal_fallback
+        model = api_kwargs.get("model")
+        try:
+            response = await self._call_api_with_retry(self.claude.messages.create, **api_kwargs)
+        except BadRequestError:
+            if not fb or fb == model:
+                raise
+            logger.warning("Model %s rejected the request (400); falling back to %s", model, fb)
+            return await self._call_api_with_retry(
+                self.claude.messages.create, **{**api_kwargs, "model": fb}
+            )
+        if response.stop_reason == "refusal" and fb and fb != model:
+            logger.warning("Model %s declined the turn; retrying on %s", model, fb)
+            response = await self._call_api_with_retry(
+                self.claude.messages.create, **{**api_kwargs, "model": fb}
+            )
+        return response
 
     async def call_claude(
         self, user_message: str, system_prompt, tools, mode: str, auto_save_fn
@@ -244,10 +271,11 @@ class ConversationManager:
                 "max_tokens": 16000 if use_thinking else 4096,
             }
             if use_thinking:
-                budget = 30000 if mode == "plan" else 10000
-                api_kwargs["thinking"] = {"type": "enabled", "budget_tokens": budget}
+                # Fable 5 / Opus 4.8 reject thinking budget_tokens (400) — thinking
+                # is adaptive; control depth via effort instead of a token budget.
+                api_kwargs["output_config"] = {"effort": "high" if mode == "plan" else "medium"}
 
-            response = await self._call_api_with_retry(self.claude.messages.create, **api_kwargs)
+            response = await self._create_with_refusal_fallback(api_kwargs)
             self._track_token_usage(response)
             _extend_tool_calls(tool_calls_collected, response.content)
 
@@ -259,17 +287,21 @@ class ConversationManager:
                 self.conversation_history.append({"role": "user", "content": tool_results})
 
                 api_kwargs["messages"] = self.conversation_history
-                response = await self._call_api_with_retry(
-                    self.claude.messages.create, **api_kwargs
-                )
+                response = await self._create_with_refusal_fallback(api_kwargs)
                 self._track_token_usage(response)
                 _extend_tool_calls(tool_calls_collected, response.content)
 
-            # Extract text response
-            assistant_message = ""
-            for block in response.content:
-                if hasattr(block, "text"):
-                    assistant_message += block.text
+            # Extract text response. Fable 5 may refuse (stop_reason="refusal")
+            # with empty content — surface it instead of returning blank.
+            if response.stop_reason == "refusal":
+                assistant_message = (
+                    "(The request was declined by the model's safety system. Try rephrasing.)"
+                )
+            else:
+                assistant_message = ""
+                for block in response.content:
+                    if hasattr(block, "text"):
+                        assistant_message += block.text
 
             self.conversation_history.append({"role": "assistant", "content": response.content})
 
@@ -400,6 +432,9 @@ class ConversationManager:
             input_tokens = getattr(response.usage, "input_tokens", 0)
             output_tokens = getattr(response.usage, "output_tokens", 0)
 
+            # A refusal returns empty content — treat as "no tool call".
+            if response.stop_reason == "refusal" or not response.content:
+                return None
             for block in response.content:
                 if block.type == "tool_use":
                     return {
@@ -510,71 +545,164 @@ class ConversationManager:
         dict
             Chunks as they arrive from Claude
         """
-        from anthropic import APIStatusError
+        from anthropic import APIStatusError, BadRequestError
 
-        def stream_and_collect():
-            events = []
-            final_message = None
+        # Live streaming: a worker thread drains the SDK's (blocking) stream and
+        # pushes each event onto an asyncio queue as it arrives, so this coroutine
+        # can yield text/thinking deltas in real time instead of collecting the
+        # whole turn first (which left the UI on a blank spinner for the entire
+        # turn). thinking=summarized surfaces the model's reasoning during the
+        # wait. The full assistant content (incl. thinking blocks) is replayed from
+        # final_message below, so the tool-loop continuation stays valid.
+        _DONE = object()
 
-            with self.claude.messages.stream(
-                model=self.model,
-                system=system_prompt,
-                messages=self.conversation_history,
-                tools=tools,
-                max_tokens=4096,
-            ) as stream:
-                for event in stream:
-                    events.append(event)
-                final_message = stream.get_final_message()
+        async def _stream_live(model, sink):
+            """Stream one attempt live: yield delta dicts as they arrive; record
+            events / final_message / error / full_text into `sink`."""
+            loop = asyncio.get_running_loop()
+            queue: asyncio.Queue = asyncio.Queue()
+            state: dict = {}
 
-            return events, final_message
+            def worker():
+                try:
+                    with self.claude.messages.stream(
+                        model=model,
+                        system=system_prompt,
+                        messages=self.conversation_history,
+                        tools=tools,
+                        max_tokens=16000,
+                        # Adaptive thinking with a streamed, human-readable summary —
+                        # this is what fills the "working…" wait. Opus 4.8 defaults to
+                        # display="omitted" (empty thinking text), so it must be set.
+                        thinking={"type": "adaptive", "display": "summarized"},
+                        output_config={"effort": "medium"},
+                    ) as stream:
+                        for event in stream:
+                            loop.call_soon_threadsafe(queue.put_nowait, event)
+                        state["final"] = stream.get_final_message()
+                except BaseException as exc:  # noqa: BLE001 — re-raised to caller below
+                    state["error"] = exc
+                finally:
+                    loop.call_soon_threadsafe(queue.put_nowait, _DONE)
 
-        # Run streaming in thread with retry logic
+            task = asyncio.create_task(asyncio.to_thread(worker))
+            events: list = []
+            full_text: list = []
+            while True:
+                item = await queue.get()
+                if item is _DONE:
+                    break
+                events.append(item)
+                if item.type != "content_block_delta":
+                    continue
+                delta = item.delta
+                dtype = getattr(delta, "type", None)
+                if dtype == "thinking_delta":
+                    chunk = getattr(delta, "thinking", "") or ""
+                    if chunk:
+                        yield {"type": "thinking", "text": chunk}
+                elif dtype == "text_delta" or hasattr(delta, "text"):
+                    chunk = getattr(delta, "text", "") or ""
+                    if chunk:
+                        full_text.append(chunk)
+                        yield {"type": "text", "text": chunk}
+            await task
+            sink["events"] = events
+            sink["full_text"] = full_text
+            sink["final"] = state.get("final")
+            sink["error"] = state.get("error")
+
         max_retries = 3
         retry_delay = 1.0
+        fb = settings.models.refusal_fallback
+        model_in_use = self.model
+        sink: dict = {}
 
         for attempt in range(max_retries):
-            try:
-                events, final_message = await asyncio.to_thread(stream_and_collect)
-                self._track_token_usage(final_message)
+            sink = {}
+            yielded_any = False
+            async for chunk in _stream_live(model_in_use, sink):
+                yielded_any = True
+                yield chunk
+            err = sink.get("error")
+            if err is None:
                 break
-            except APIStatusError as e:
-                error_type = getattr(e, "body", {})
+            # Fable 5 under <30-day data retention (or unavailable) rejects with a
+            # 400 — fall back to Opus 4.8. Only safe before any partial was streamed.
+            if isinstance(err, BadRequestError) and fb and fb != model_in_use and not yielded_any:
+                logger.warning(
+                    "Stream model %s rejected the request (400); falling back to %s",
+                    model_in_use,
+                    fb,
+                )
+                model_in_use = fb
+                continue
+            if isinstance(err, APIStatusError):
+                error_type = getattr(err, "body", {})
                 if isinstance(error_type, dict):
                     error_type = error_type.get("error", {}).get("type", "")
-
-                if (
+                overloaded = (
                     error_type in ("overloaded_error", "rate_limit_error")
-                    or "overloaded" in str(e).lower()
-                ):
-                    if attempt < max_retries - 1:
-                        wait_time = retry_delay * (2**attempt)
-                        logger.warning(
-                            f"API overloaded, retrying in {wait_time:.1f}s"
-                            f" (attempt {attempt + 1}/{max_retries})"
-                        )
-                        yield {
-                            "type": "text",
-                            "text": f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n",
-                        }
-                        await asyncio.sleep(wait_time)
-                        continue
-                raise
+                    or "overloaded" in str(err).lower()
+                )
+                if overloaded and attempt < max_retries - 1 and not yielded_any:
+                    wait_time = retry_delay * (2**attempt)
+                    logger.warning(
+                        "API overloaded, retrying in %.1fs (attempt %d/%d)",
+                        wait_time,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    yield {
+                        "type": "text",
+                        "text": f"\n*[API busy, retrying in {wait_time:.0f}s...]*\n",
+                    }
+                    await asyncio.sleep(wait_time)
+                    continue
+            raise err
         else:
             raise RuntimeError("API overloaded after multiple retries")
 
-        # Diagnostic: log stop_reason and tool block counts
+        final_message = sink["final"]
+        full_text = sink["full_text"]
+        self._track_token_usage(final_message)
+
+        # Refusal → retry on the fallback model. Re-streaming live is only safe when
+        # the refusal came before any visible output (pre-output refusals carry empty
+        # content, so nothing was yielded); otherwise we keep the partial we showed.
+        if final_message.stop_reason == "refusal" and fb and model_in_use != fb and not full_text:
+            logger.warning("Model %s declined the streamed turn; retrying on %s", model_in_use, fb)
+            sink = {}
+            async for chunk in _stream_live(fb, sink):
+                yield chunk
+            model_in_use = fb
+            final_message = sink["final"]
+            full_text = sink["full_text"]
+            self._track_token_usage(final_message)
+
+        # Last resort: if even the fallback declined, surface it and stop.
+        if final_message.stop_reason == "refusal":
+            logger.warning("Claude declined the request (model=%s)", model_in_use)
+            yield {
+                "type": "text",
+                "text": "(The request was declined by the model's safety system. Try rephrasing.)",
+            }
+            return
+
+        # Diagnostic: per-response counts. DEBUG, not WARNING — stop_reason=tool_use
+        # with matching tool blocks is normal; the genuine anomaly is the
+        # logger.error below (tool blocks present but stop_reason != tool_use).
         tool_block_count = sum(
             1 for b in final_message.content if hasattr(b, "type") and b.type == "tool_use"
         )
-        logger.warning(
-            "Claude response: stop_reason=%s, content_blocks=%d, tool_use_blocks=%d,"
-            " tools_passed=%d, model=%s",
+        logger.debug(
+            "Claude response: stop_reason=%s, content_blocks=%d, "
+            "tool_use_blocks=%d, tools_passed=%d, model=%s",
             final_message.stop_reason,
             len(final_message.content),
             tool_block_count,
             len(tools),
-            self.model,
+            model_in_use,
         )
         if tool_block_count > 0 and final_message.stop_reason != "tool_use":
             logger.error(
@@ -582,14 +710,6 @@ class ConversationManager:
                 tool_block_count,
                 final_message.stop_reason,
             )
-
-        # Process events and yield text
-        full_text = []
-        for event in events:
-            if event.type == "content_block_delta":
-                if hasattr(event.delta, "text"):
-                    full_text.append(event.delta.text)
-                    yield {"type": "text", "text": event.delta.text}
 
         # Detect fake XML tool calls in text (Claude writing tool_use as text)
         joined_text = "".join(full_text)
@@ -611,7 +731,94 @@ class ConversationManager:
             await asyncio.sleep(0.05)
 
             tool_results = []
+
+            # Concurrency fast-path: run a turn's tool calls in parallel when ALL of
+            # them are non-hardware and non-interactive (e.g. several strain / paper /
+            # lab-history lookups). Any microscope action or ask_user_choice in the
+            # batch falls back to the serial path below, so we never race hardware or
+            # an interactive prompt, and ordering of stateful ops is preserved.
+            tool_blocks = [b for b in response_content if getattr(b, "type", None) == "tool_use"]
+            _interactive = {"ask_user_choice"}
+            # Only parallelize genuinely read-only tools (independent lookups). Mutating
+            # tools (create_/update_/delete_/set_…) must stay serial — they share state
+            # (e.g. a campaign's plan file) and are order-dependent, so concurrent runs
+            # could race or corrupt it.
+            _readonly_prefixes = (
+                "search_",
+                "read_",
+                "query_",
+                "get_",
+                "list_",
+                "recall_",
+                "find_",
+                "fetch_",
+                "lookup_",
+            )
+
+            def _parallel_safe(b):
+                td = self._tool_registry.get(b.name)
+                return (
+                    td is not None
+                    and not td.requires_microscope
+                    and b.name not in _interactive
+                    and b.name.startswith(_readonly_prefixes)
+                )
+
+            handled_parallel = False
+            if len(tool_blocks) > 1 and all(_parallel_safe(b) for b in tool_blocks):
+                handled_parallel = True
+                starts = {b.id: time.time() for b in tool_blocks}
+                for b in tool_blocks:
+                    yield {
+                        "type": "tool_start",
+                        "tool_name": b.name,
+                        "tool_input": b.input,
+                        "tool_label": tool_label_fn(b.name, b.input),
+                    }
+                gathered = await asyncio.gather(
+                    *[self._execute_single_tool(b.name, b.input) for b in tool_blocks],
+                    return_exceptions=True,
+                )
+                for b, res in zip(tool_blocks, gathered, strict=True):
+                    if isinstance(res, BaseException):
+                        is_error_flag = True
+                        result_text = f"Error: {res}"
+                        tool_results.append(
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": b.id,
+                                "content": result_text,
+                                "is_error": True,
+                            }
+                        )
+                    else:
+                        is_error_flag = False
+                        result_text = res if isinstance(res, str) else str(res)
+                        tool_results.append(
+                            {"type": "tool_result", "tool_use_id": b.id, "content": res}
+                        )
+                    result_summary = next(
+                        (ln.strip() for ln in (result_text or "").splitlines() if ln.strip()),
+                        "",
+                    )
+                    if len(result_summary) > 140:
+                        result_summary = result_summary[:139] + "…"
+                    result_full = result_text or ""
+                    if len(result_full) > 4000:
+                        result_full = result_full[:4000] + "\n…(truncated)"
+                    yield {
+                        "type": "tool_call",
+                        "tool_name": b.name,
+                        "tool_input": b.input,
+                        "duration": time.time() - starts[b.id],
+                        "result_summary": result_summary,
+                        "result_full": result_full,
+                        "is_error": is_error_flag,
+                    }
+
             for block in response_content:
+                if handled_parallel:
+                    break
                 if hasattr(block, "type") and block.type == "tool_use":
                     start_time = time.time()
 
@@ -629,9 +836,7 @@ class ConversationManager:
 
                         if isinstance(tool_result, str):
                             try:
-                                from gently.app.tools.interaction_tools import (
-                                    CHOICE_RESPONSE_TYPE,
-                                )
+                                from gently.app.tools.interaction_tools import CHOICE_RESPONSE_TYPE
 
                                 choice_data = json.loads(tool_result)
                                 if (
@@ -650,11 +855,7 @@ class ConversationManager:
                             tool_result if isinstance(tool_result, str) else str(tool_result)
                         )
                         tool_results.append(
-                            {
-                                "type": "tool_result",
-                                "tool_use_id": block.id,
-                                "content": tool_result,
-                            }
+                            {"type": "tool_result", "tool_use_id": block.id, "content": tool_result}
                         )
                     except Exception as e:
                         is_error_flag = True
@@ -678,12 +879,21 @@ class ConversationManager:
                     if len(result_summary) > 140:
                         result_summary = result_summary[:139] + "…"
 
+                    # Full result (bounded) so the UI's expandable tool card can
+                    # show what the tool actually returned — not just the 140-char
+                    # one-liner. The web client caps/scrolls this further; keep the
+                    # streamed payload sane.
+                    result_full = result_text or ""
+                    if len(result_full) > 4000:
+                        result_full = result_full[:4000] + "\n…(truncated)"
+
                     yield {
                         "type": "tool_call",
                         "tool_name": block.name,
                         "tool_input": block.input,
                         "duration": time.time() - start_time,
                         "result_summary": result_summary,
+                        "result_full": result_full,
                         "is_error": is_error_flag,
                     }
 
@@ -910,8 +1120,8 @@ class ConversationManager:
                 if is_retryable and attempt < max_retries - 1:
                     wait_time = retry_delay * (2**attempt)
                     logger.warning(
-                        f"API error ({error_type}), retrying in {wait_time:.1f}s"
-                        f" (attempt {attempt + 1}/{max_retries})"
+                        f"API error ({error_type}), retrying in {wait_time:.1f}s "
+                        f"(attempt {attempt + 1}/{max_retries})"
                     )
                     await asyncio.sleep(wait_time)
                     continue

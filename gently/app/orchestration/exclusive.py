@@ -23,6 +23,8 @@ from typing import Any
 
 import numpy as np
 
+from gently.app.temperature_sampler import temperature_stamp
+
 logger = logging.getLogger(__name__)
 
 
@@ -98,11 +100,17 @@ class BurstAcquisition(ExclusiveAcquisition):
         mode: str = "1hz",
         num_slices: int = 1,
         request_id: str | None = None,
+        temperature_provider=None,
+        laser_config: str | None = None,
+        tactic_id: str | None = None,
     ):
         super().__init__(target_embryo_id=target_embryo_id, request_id=request_id)
         self.frames = frames
         self.mode = mode if mode in ("1hz", "asap") else "1hz"
         self.num_slices = num_slices
+        self._temperature_provider = temperature_provider
+        self._laser_config = laser_config
+        self._tactic_id = tactic_id
 
     async def run(self, orchestrator) -> ExclusiveResult:
         from gently.core import EventType
@@ -125,6 +133,8 @@ class BurstAcquisition(ExclusiveAcquisition):
                 "request_id": self.request_id,
                 "frames": self.frames,
                 "mode": self.mode,
+                "phase": getattr(self, "_phase", None),
+                "tactic_id": self._tactic_id,
             },
         )
 
@@ -162,6 +172,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 piezo_amplitude=piezo_amplitude,
                 piezo_center=piezo_center,
                 laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+                laser_config=self._laser_config,
             )
         except Exception as e:
             logger.error("Burst failed for %s: %s", self.target_embryo_id, e)
@@ -204,6 +215,7 @@ class BurstAcquisition(ExclusiveAcquisition):
             piezo_amplitude=piezo_amplitude,
             piezo_center=piezo_center,
             laser_power_488_pct=getattr(embryo, "laser_power_488_pct", None),
+            temperature_provider=self._temperature_provider,
         )
 
         # Generate MP4 (derivative artifact; safe to fail).
@@ -225,6 +237,7 @@ class BurstAcquisition(ExclusiveAcquisition):
                 "duration_s": duration_s,
                 "sustained_hz": sustained_hz,
                 "mp4_path": mp4_path,
+                "tactic_id": self._tactic_id,
             },
         )
 
@@ -318,6 +331,7 @@ def _persist_burst_to_disk(
     piezo_amplitude: float,
     piezo_center: float,
     laser_power_488_pct: float | None,
+    temperature_provider=None,
 ) -> Path | None:
     """Save per-frame TIFFs + meta + projections + a burst.yaml manifest.
 
@@ -343,6 +357,11 @@ def _persist_burst_to_disk(
 
     proj_dir = burst_dir / "projections"
     proj_dir.mkdir(exist_ok=True)
+
+    # Compute temperature stamp once for the whole burst (all frames share the
+    # same reading — the sampler captures at ~1 Hz so per-frame variation is
+    # sub-resolution anyway).
+    _temp = temperature_stamp(temperature_provider() if temperature_provider else None)
 
     # Position recorded for the manifest.
     pos = getattr(embryo, "stage_position", {}) or {}
@@ -403,6 +422,7 @@ def _persist_burst_to_disk(
                 "burst_mode": mode,
                 "laser_power_488_pct": laser_power_488_pct,
                 "role": "burst",
+                "temperature": _temp,
             },
         }
         if _yaml is not None:
@@ -432,6 +452,7 @@ def _persist_burst_to_disk(
         "sustained_hz": sustained_hz,
         "embryo_position": {"x": pos.get("x"), "y": pos.get("y")},
         "laser_power_488_pct": laser_power_488_pct,
+        "temperature": _temp,
         "scan": {
             "galvo_amplitude": galvo_amplitude,
             "galvo_center": galvo_center,

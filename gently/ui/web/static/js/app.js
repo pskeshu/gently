@@ -60,6 +60,8 @@ function updateCalibrationCount() {
 function switchTab(tabName) {
     if (!tabName) return;
     state.tab = tabName;
+    // ux_v2 grouped rail mirrors the active tab off this single chokepoint.
+    if (typeof ClientEventBus !== 'undefined') ClientEventBus.emit('TAB_CHANGED', tabName);
 
     // Update tab styling
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -96,6 +98,16 @@ function switchTab(tabName) {
     // Lazy-init Experiment tab (mockup with stubbed data)
     if (tabName === TABS.EXPERIMENT && typeof ExperimentOverview !== 'undefined') {
         ExperimentOverview.init();
+    }
+
+    // Lazy-init Notebook tab
+    if (tabName === TABS.NOTEBOOK && typeof NotebookApp !== 'undefined') {
+        NotebookApp.init();
+    }
+
+    // Lazy-init Gallery tab
+    if (tabName === TABS.GALLERY && typeof GalleryTab !== 'undefined') {
+        GalleryTab.init();
     }
 
     // Update statusbar for context
@@ -538,11 +550,13 @@ function fetchDeviceStatus() {
         .then(r => r.json())
         .then(data => {
             _microscopeConnected = data.microscope;
-            _setBadge('status-microscope-badge', data.microscope, 'Online', 'Offline');
-            updateTopLevelDot();
+            ConnectionStatus.setMicroscope(data.microscope);
         })
         .catch(() => {
-            _setBadge('status-microscope-badge', false, '', '--');
+            // Transient poll failure: keep the last-known badge. The next
+            // successful poll re-renders via the store if the value changed
+            // (writing '--' here could stick, since the store only re-renders
+            // on an actual change, not on an unchanged success).
         });
 }
 
@@ -555,28 +569,36 @@ function _setBadge(id, isOn, onText, offText) {
 }
 
 function updateGentlyStatus(connected) {
-    _setBadge('status-gently-badge', connected, 'Online', 'Offline');
-    updateTopLevelDot();
+    // Feed the single source of truth; the header re-renders via the
+    // ConnectionStatus subscriber (renderConnectionUI).
+    ConnectionStatus.setGently(connected);
 }
 
-function updateTopLevelDot() {
+// Single renderer for the header connection UI, driven by a ConnectionStatus
+// snapshot. Subscribed once at startup, so the pill, both popover badges, and
+// the dot always reflect the same shared state.
+function renderConnectionUI(s) {
+    _setBadge('status-gently-badge', s.gentlyConnected, 'Online', 'Offline');
+    _setBadge('status-microscope-badge', s.microscopeConnected, 'Online', 'Offline');
     const dot = document.getElementById('status-dot');
     const text = document.getElementById('status-text');
     if (!dot || !text) return;
 
-    const gentlyUp = state.connected;
-    const scopeUp = _microscopeConnected;
-
     dot.classList.remove('connected', 'partial');
-    if (gentlyUp && scopeUp) {
+    if (s.gentlyConnected && s.microscopeConnected) {
         dot.classList.add('connected');
         text.textContent = 'Connected';
-    } else if (gentlyUp) {
+    } else if (s.gentlyConnected) {
         dot.classList.add('partial');
         text.textContent = 'Online';
     } else {
         text.textContent = 'Offline';
     }
+}
+
+// Back-compat shim: any legacy caller re-renders from the current snapshot.
+function updateTopLevelDot() {
+    renderConnectionUI(ConnectionStatus.get());
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -620,6 +642,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Connection status: one source of truth, three writers (this /ws, the
+    // device-status poll, and the agent /ws/agent). Subscribe the header
+    // renderer BEFORE connecting so the first handshake renders correctly.
+    ConnectionStatus.subscribe(renderConnectionUI);
+
     // Start WebSocket connection
     connectWebSocket();
 
@@ -634,7 +661,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const hash = window.location.hash.slice(1); // remove #
     if (hash) {
         const [tab, param] = hash.split(':');
-        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT) {
+        if (tab === TABS.HOME || tab === TABS.PLANS || tab === TABS.SESSIONS || tab === TABS.EMBRYOS || tab === TABS.CALIBRATION || tab === TABS.EVENTS || tab === TABS.EXPERIMENT || tab === TABS.NOTEBOOK || tab === TABS.GALLERY) {
             switchTab(tab);
             if (tab === TABS.PLANS && param && typeof openCampaign === 'function') {
                 setTimeout(() => openCampaign(param), 200);

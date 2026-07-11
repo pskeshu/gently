@@ -29,16 +29,16 @@ if TYPE_CHECKING:
     from ..ui.web.server import VisualizationServer
     from .bottom_camera_monitor import BottomCameraStreamMonitor
     from .device_state_monitor import DeviceStateMonitor
+    from .lightsheet_monitor import LightSheetStreamMonitor
+    from .operation_plan_updater import OperationPlanUpdater
+    from .temperature_sampler import TemperatureSampler
+
 from gently_perception import Perceiver
 
 from ..core import EventType, emit, get_event_bus
 from ..core.file_store import FileStore
 from ..harness.conversation import ConversationManager
-from ..harness.orchestration.plan_synthesis import (
-    PlanLibrary,
-    PlanSynthesizer,
-    PlanValidator,
-)
+from ..harness.orchestration.plan_synthesis import PlanLibrary, PlanSynthesizer, PlanValidator
 from ..harness.prompts.manager import PromptManager
 from ..harness.session.interaction_logger import InteractionLogger
 from ..harness.session.manager import SessionManager
@@ -114,12 +114,13 @@ class MicroscopyAgent:
         # the message entry points refuse to call Claude.
         self.api_enabled = not no_api
 
-        # API client with interleaved thinking support
+        # Shared API client. No interleaved-thinking beta header: it's GA on the
+        # 4.6+ models and obsolete on Fable 5 (always-on thinking); the header is
+        # dropped so it can't conflict with the new model family.
         self.claude = anthropic.Anthropic(
             api_key=api_key
             or os.getenv("ANTHROPIC_API_KEY")
             or ("no-api-mode" if no_api else None),
-            default_headers={"anthropic-beta": "interleaved-thinking-2025-05-14"},
         )
         self.model = model
 
@@ -214,9 +215,15 @@ class MicroscopyAgent:
 
         # Device-state monitor (bridges device-layer SSE → EventBus)
         self.device_state_monitor: DeviceStateMonitor | None = None
+        # Session-scoped temperature sampler — polls device layer, persists readings.
+        self.temperature_sampler: TemperatureSampler | None = None
+        # Bus-subscriber that transitions plan tactics when execution events fire.
+        self.operation_plan_updater: OperationPlanUpdater | None = None
         # Opt-in bottom-camera stream bridge — created when viz starts, but
         # left unstarted until the operator clicks "Start camera" in the UI.
         self.bottom_camera_monitor: BottomCameraStreamMonitor | None = None
+        # Opt-in lightsheet stream bridge — same lifecycle as bottom_camera_monitor.
+        self.lightsheet_monitor: LightSheetStreamMonitor | None = None
 
         # ===== Create delegate managers =====
 
@@ -382,11 +389,7 @@ class MicroscopyAgent:
         import gently.harness.plan_mode.tools  # noqa: F401
 
         self._update_system_prompt()
-        emit(
-            EventType.STATUS_CHANGED,
-            {"field": "agent_mode", "value": "plan"},
-            source="agent",
-        )
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "plan"}, source="agent")
         logger.info("Entered plan mode")
         return "Switched to plan mode. I'm now your experimental design collaborator."
 
@@ -469,6 +472,18 @@ class MicroscopyAgent:
                         )
                     except Exception:
                         pass
+
+                # Seed the Operation Plan from the plan item's tactics outline
+                # (idempotent: no-op if plan already has active/done tactics).
+                try:
+                    from gently.app.tools.operation_plan_seed import (
+                        seed_operation_plan_from_plan_item,
+                    )
+
+                    if self.session_id is not None:
+                        seed_operation_plan_from_plan_item(self.context_store, self.session_id)
+                except Exception:
+                    logger.exception("operation-plan seeding failed")
             elif candidates:
                 titles = [c[0].title for c in candidates]
                 listing = ", ".join(titles[:5])
@@ -482,11 +497,7 @@ class MicroscopyAgent:
             self.prompts.invalidate_context_cache()
 
         self._update_system_prompt()
-        emit(
-            EventType.STATUS_CHANGED,
-            {"field": "agent_mode", "value": "run"},
-            source="agent",
-        )
+        emit(EventType.STATUS_CHANGED, {"field": "agent_mode", "value": "run"}, source="agent")
         logger.info("Exited plan mode")
         return result
 
@@ -645,6 +656,9 @@ class MicroscopyAgent:
                 session_id=self.session_id,
                 store=self.store,
                 claude_client=self.claude,
+                temperature_provider=lambda: (
+                    self.temperature_sampler.latest if self.temperature_sampler else None
+                ),
             )
         except Exception as e:
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
@@ -762,10 +776,7 @@ class MicroscopyAgent:
                     self.invalidate_context_cache()
                     self._auto_save()
                     logger.info(
-                        "Perception: %s -> stage %s (t%s)",
-                        embryo_id,
-                        stage,
-                        data.get("timepoint"),
+                        "Perception: %s -> stage %s (t%s)", embryo_id, stage, data.get("timepoint")
                     )
                 except Exception as e:
                     logger.warning(f"Error handling perception event: {e}")
@@ -841,6 +852,32 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to start device-state monitor: {e}")
                 self.device_state_monitor = None
 
+        if self.microscope is not None and self.temperature_sampler is None:
+            try:
+                from .temperature_sampler import TemperatureSampler
+
+                self.temperature_sampler = TemperatureSampler(
+                    self.microscope, self.store, lambda: self.session_id
+                )
+                await self.temperature_sampler.start()
+                logger.info("Temperature sampler started")
+            except Exception as e:
+                logger.warning(f"Failed to start temperature sampler: {e}")
+                self.temperature_sampler = None
+
+        if self.operation_plan_updater is None and self.context_store is not None:
+            try:
+                from .operation_plan_updater import OperationPlanUpdater
+
+                self.operation_plan_updater = OperationPlanUpdater(
+                    self.context_store, lambda: self.session_id
+                )
+                await self.operation_plan_updater.start()
+                logger.info("Operation-plan updater started")
+            except Exception as e:
+                logger.warning(f"Failed to start operation-plan updater: {e}")
+                self.operation_plan_updater = None
+
         # Construct the bottom-camera monitor — but don't start it. Streaming
         # is opt-in and waits for an explicit operator action via the
         # /api/devices/bottom_camera/stream/start route.
@@ -854,6 +891,16 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to construct bottom-camera monitor: {e}")
                 self.bottom_camera_monitor = None
 
+        if self.microscope is not None and self.lightsheet_monitor is None:
+            try:
+                from .lightsheet_monitor import LightSheetStreamMonitor
+
+                self.lightsheet_monitor = LightSheetStreamMonitor(self.microscope)
+                logger.info("Lightsheet monitor ready (not started)")
+            except Exception as e:
+                logger.warning(f"Failed to construct lightsheet monitor: {e}")
+                self.lightsheet_monitor = None
+
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
         if self.bottom_camera_monitor is not None:
@@ -862,12 +909,30 @@ class MicroscopyAgent:
             except Exception:
                 logger.exception("Failed to stop bottom-camera monitor")
             self.bottom_camera_monitor = None
+        if self.lightsheet_monitor is not None:
+            try:
+                await self.lightsheet_monitor.stop()
+            except Exception:
+                logger.exception("Failed to stop lightsheet monitor")
+            self.lightsheet_monitor = None
         if self.device_state_monitor is not None:
             try:
                 await self.device_state_monitor.stop()
             except Exception:
                 logger.exception("Failed to stop device-state monitor")
             self.device_state_monitor = None
+        if self.temperature_sampler is not None:
+            try:
+                await self.temperature_sampler.stop()
+            except Exception:
+                logger.exception("Failed to stop temperature sampler")
+            self.temperature_sampler = None
+        if self.operation_plan_updater is not None:
+            try:
+                await self.operation_plan_updater.stop()
+            except Exception:
+                logger.exception("Failed to stop operation-plan updater")
+            self.operation_plan_updater = None
         if self.viz_server is not None:
             await self.viz_server.stop()
             self.viz_server = None
@@ -1620,8 +1685,8 @@ class MicroscopyAgent:
             img.save(buffer, format="PNG")
             b64_image = base64.b64encode(buffer.getvalue()).decode()
 
-            prompt = """Look at this microscopy image. Is this a VALID microscopy image or a
-BLANK/CORRUPTED image?
+            prompt = """\
+Look at this microscopy image. Is this a VALID microscopy image or a BLANK/CORRUPTED image?
 
 A BLANK or CORRUPTED image shows:
 - Mostly uniform gray/black with no structure

@@ -76,7 +76,7 @@ class DeviceLayerServer(Service):
     ):
         super().__init__(name="device-layer", service_type="hardware", host=host, port=port)
         self.config_path = config_path
-        self.config = None
+        self.config: dict | None = None
         # DiSPIMSystem facade — only place this process touches MMCore directly
         self.system: Any = None
         self.RE = None
@@ -169,6 +169,31 @@ class DeviceLayerServer(Service):
         self._cam_target_max_dim: int = 360  # ~360px thumbnail
         self._cam_jpeg_quality: int = 55
 
+        # Lightsheet (SPIM) live stream — continuous sequence acquisition.
+        self._ls_subscribers: list[asyncio.Queue] = []
+        self._ls_task: asyncio.Task | None = None
+        # Min interval between streamed frames. A floor (not 0) caps the live
+        # FPS so short exposures don't flood the browser at 100+ fps, which
+        # churns GPU texture uploads in the <img> renderer and can TDR an
+        # older display driver. ~15 fps is plenty for live focus/centering;
+        # long exposures still dominate via max(interval, exposure) below.
+        self._ls_interval_sec: float = 1.0 / 15.0  # cap live stream at ~15 fps
+        self._ls_target_max_dim: int = 512
+        self._ls_jpeg_quality: int = 70
+        self._ls_params: dict = {
+            "galvo": 0.0,
+            "piezo": 0.0,
+            "exposure": 20.0,
+            "side": "A",
+            # "snap"  → per-frame snapImage()+getImage() — hard memory ceiling, safe default.
+            # "continuous" → startContinuousSequenceAcquisition (opt-in, higher FPS).
+            "mode": "snap",
+        }
+        self._ls_seq_started: bool = False
+        self._ls_applied: dict = {}  # last-applied galvo/piezo/exposure
+        self._ls_parked: dict = {}  # last-parked galvo/piezo setPosition values
+        self._ls_spim_idle: bool = False  # whether SPIM state machine was set Idle this session
+
         # Plans that hold MMCore for long performance-critical work.
         # Anything in this set runs with state polling paused.
         self._heavy_plans = frozenset(
@@ -201,6 +226,20 @@ class DeviceLayerServer(Service):
         logger.info("[1/5] Loading configuration...")
         with open(self.config_path) as f:
             self.config = yaml.safe_load(f)
+        # Merge operator overrides from config.local.yml over the committed
+        # config.yml (keeps config.yml's comments intact). Currently the
+        # thermalizer block, set live from the settings panel; survives restart.
+        try:
+            sidecar = Path(self.config_path).parent / "config.local.yml"
+            if sidecar.exists():
+                with open(sidecar) as sf:
+                    override = yaml.safe_load(sf) or {}
+                if isinstance(override, dict) and override.get("temperature"):
+                    self.config = self.config or {}
+                    self.config["temperature"] = override["temperature"]
+                    logger.info("Applied thermalizer override from %s", sidecar)
+        except Exception:
+            logger.warning("config.local.yml merge failed", exc_info=True)
         logger.info("Config loaded from %s", self.config_path)
         cui.step_done(str(self.config_path))
 
@@ -602,6 +641,31 @@ class DeviceLayerServer(Service):
             except Exception as exc:
                 logger.debug("Galvo position read failed: %s", exc)
 
+        # SPIM-head F-drive — not on its own knob loop, so 1 Hz is plenty.
+        # Streamed so the Operate view can show head height + distance-to-floor.
+        fdrive = self.devices.get("fdrive")
+        if fdrive is not None:
+            try:
+                data = fdrive.read()
+                out[fdrive.name] = {
+                    "Position": float(data[fdrive.name]["value"]),
+                    "kind": "fdrive",
+                }
+            except Exception as exc:
+                logger.debug("F-drive position read failed: %s", exc)
+
+        # Bottom-camera focus Z (sample Z) — present only on rigs that expose it.
+        z_stage = self.devices.get("z_stage")
+        if z_stage is not None:
+            try:
+                data = z_stage.read()
+                out[z_stage.name] = {
+                    "Position": float(data[z_stage.name]["value"]),
+                    "kind": "bottom_z",
+                }
+            except Exception as exc:
+                logger.debug("Bottom-Z position read failed: %s", exc)
+
         return out
 
     def _read_full_state(self) -> dict[str, dict[str, str]]:
@@ -846,7 +910,9 @@ class DeviceLayerServer(Service):
             logger.debug("Bottom-camera grab failed: %s", exc)
             return None
 
-    def _encode_frame_for_stream(self, img: np.ndarray) -> dict[str, Any] | None:
+    def _encode_frame_for_stream(
+        self, img: np.ndarray, max_dim: int | None = None, quality: int | None = None
+    ) -> dict[str, Any] | None:
         """Downsample + auto-contrast + JPEG-encode a uint16 frame for SSE.
 
         Optimised for streaming throughput:
@@ -855,6 +921,10 @@ class DeviceLayerServer(Service):
             full image — np.partition on the subsample is O(n) and avoids
             sorting ~120K pixels every frame
           * JPEG quality 55 (visually fine at thumbnail size)
+
+        ``max_dim`` and ``quality`` default to the ``_cam_*`` instance values,
+        allowing callers (e.g. the lightsheet streamer) to pass different
+        settings without duplicating the encoder.
         """
         if img is None or img.size == 0:
             return None
@@ -866,9 +936,24 @@ class DeviceLayerServer(Service):
             logger.warning("Cannot encode frame — OpenCV unavailable: %s", exc)
             return None
 
+        target_max_dim = max_dim if max_dim is not None else self._cam_target_max_dim
+        jpeg_quality = quality if quality is not None else self._cam_jpeg_quality
+
+        # Focus score on the FULL frame (before downsampling) so the Operate
+        # view's focus readout reflects true sharpness, not the JPEG thumbnail.
+        # Best-effort: any failure just omits the field.
+        focus_score: float | None = None
+        try:
+            from gently.analysis.core import calculate_focus_score
+
+            focus_score = float(calculate_focus_score(img, algorithm="volath"))
+        except Exception as exc:
+            logger.debug("Focus score computation failed: %s", exc)
+            focus_score = None
+
         h, w = img.shape[:2]
         # Stride slicing — no interpolation, just take every Nth pixel.
-        factor = max(1, max(h, w) // self._cam_target_max_dim)
+        factor = max(1, max(h, w) // target_max_dim)
         small = img[::factor, ::factor]
 
         # Auto-contrast off a small random sample. Robust to hot pixels
@@ -890,17 +975,39 @@ class DeviceLayerServer(Service):
             scale = 255.0 / (hi - lo)
             small = np.clip((small.astype(np.float32) - lo) * scale, 0, 255).astype(np.uint8)
 
-        ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, self._cam_jpeg_quality])
+        ok, jpeg = cv2.imencode(".jpg", small, [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality])
         if not ok:
             return None
         b64 = base64.b64encode(jpeg.tobytes()).decode("ascii")
-        return {
+        payload: dict[str, Any] = {
             "t": time.time(),
             "shape": [int(small.shape[0]), int(small.shape[1])],
             "downsample": factor,
             "mime": "image/jpeg",
             "jpeg_b64": b64,
         }
+        if focus_score is not None:
+            payload["focus_score"] = focus_score
+        return payload
+
+    def _current_stage_xy(self) -> list[float] | None:
+        """Latest XY-stage position from the state cache, as ``[x, y]`` µm.
+
+        Sourced from the position poller (``kind == "xy_stage"``). Returns
+        ``None`` when no XY reading has arrived yet — callers MUST NOT fall
+        back to ``[0, 0]``: the operate-view marking canvas converts clicked
+        pixels to stage coords relative to this origin, so a bogus ``[0, 0]``
+        silently places every marker relative to stage origin instead of the
+        true position (embryos then land hundreds of µm off, and calibration
+        images empty field). Absent-is-better-than-wrong.
+        """
+        positions = self._state_latest.get("positions") or {}
+        for entry in positions.values():
+            if isinstance(entry, dict) and entry.get("kind") == "xy_stage":
+                x, y = entry.get("X"), entry.get("Y")
+                if x is not None and y is not None:
+                    return [float(x), float(y)]
+        return None
 
     async def _bottom_camera_streamer(self):
         """Continuous grab/encode/broadcast loop. Runs while a subscriber lives.
@@ -921,6 +1028,13 @@ class DeviceLayerServer(Service):
                 img = await asyncio.to_thread(self._capture_bottom_frame_sync)
                 payload = self._encode_frame_for_stream(img) if img is not None else None
                 if payload is not None:
+                    # Stamp the true stage XY so the operate-view marking canvas
+                    # converts clicked pixels to absolute stage coords (not
+                    # offsets from origin). Omitted — never [0, 0] — when no XY
+                    # reading has arrived yet; the frontend then blocks marking.
+                    xy = self._current_stage_xy()
+                    if xy is not None:
+                        payload["stage_position"] = xy
                     await self._broadcast_camera(payload)
                 # Pace the loop — sleep whatever's left of the interval.
                 elapsed = time.monotonic() - tick
@@ -933,7 +1047,40 @@ class DeviceLayerServer(Service):
         finally:
             logger.info("Bottom-camera streamer exiting")
 
+    def _log_focus_trace(self, source: str, payload: dict[str, Any]) -> None:
+        """Append a passive (z, focus_score) focus-trace sample (sub-project C).
+
+        Captures the operator's *manual* focusing as validation data — the human's
+        resting Z is ground-truth best focus, replayed offline by
+        ``gently.analysis.focus_validation``. Best-effort: only when a session
+        volume dir is set and the frame carries a focus score; never raises into
+        the broadcast path, never moves hardware.
+        """
+        score = payload.get("focus_score")
+        if score is None or not self._volume_dir:
+            return
+        try:
+            import json as _json
+
+            zvals: dict[str, Any] = {}
+            for v in (self._state_latest.get("positions") or {}).values():
+                if isinstance(v, dict) and "kind" in v and "Position" in v:
+                    zvals[v["kind"]] = v["Position"]
+            rec = {
+                "t": payload.get("t"),
+                "source": source,
+                "focus_score": float(score),
+                "bottom_z": zvals.get("bottom_z"),
+                "fdrive": zvals.get("fdrive"),
+                "piezo": zvals.get("piezo"),
+            }
+            with open(Path(self._volume_dir) / "focus_traces.jsonl", "a") as f:
+                f.write(_json.dumps(rec) + "\n")
+        except Exception:
+            logger.debug("focus-trace log skipped", exc_info=True)
+
     async def _broadcast_camera(self, payload: dict[str, Any]):
+        self._log_focus_trace("bottom", payload)
         if not self._cam_subscribers:
             return
         dead: list[asyncio.Queue] = []
@@ -953,6 +1100,323 @@ class DeviceLayerServer(Service):
                 self._cam_subscribers.remove(q)
             except ValueError:
                 pass
+
+    # =========================================================================
+    # Lightsheet (SPIM) Live Streamer — continuous sequence acquisition
+    # =========================================================================
+
+    def _park_lightsheet_sync(self) -> None:
+        """Park scanner galvo + imaging piezo at the current live params (static sheet).
+
+        Side 'A' drives devices["scanner"] / devices["piezo"] (Scanner:AB:33 /
+        PiezoStage:P:34).  Side 'B' drives devices["scanner_b"] / devices["piezo_b"]
+        (Scanner:CD:33 / PiezoStage:Q:35) when registered.  Falls back to side A
+        with a warning on single-side rigs so they are never broken.
+
+        Guards:
+        - set_spim_state("Idle") fires once per stream session, not per frame
+          (4 serial round-trips on first call → 0 on every subsequent frame).
+        - setPosition fires only when the commanded value differs from the
+          last-applied value (no-op on steady-state frames).
+        """
+        p = self._ls_params
+        side = p.get("side", "A")
+
+        # Resolve scanner for the requested side (with fallback to A).
+        if side == "B":
+            if "scanner_b" in self.devices:
+                scanner = self.devices["scanner_b"]
+            else:
+                logger.warning(
+                    "Side B requested but scanner_b not registered; falling back to side A for scanner"  # noqa: E501
+                )
+                scanner = self.devices.get("scanner")
+        else:
+            scanner = self.devices.get("scanner")
+
+        # Resolve piezo for the requested side (with fallback to A).
+        if side == "B":
+            if "piezo_b" in self.devices:
+                piezo = self.devices["piezo_b"]
+            else:
+                logger.warning(
+                    "Side B requested but piezo_b not registered; falling back to side A for piezo"
+                )
+                piezo = self.devices.get("piezo")
+        else:
+            piezo = self.devices.get("piezo")
+
+        # SPIM Idle state machine: drive both devices Idle once per session.
+        if not self._ls_spim_idle:
+            if scanner is not None:
+                try:
+                    scanner.set_spim_state("Idle")
+                except Exception:
+                    pass
+            if piezo is not None:
+                try:
+                    piezo.set_spim_state("Idle")
+                except Exception:
+                    pass
+            self._ls_spim_idle = True
+        # setPosition only when the value changed from last-applied.
+        if scanner is not None:
+            want = float(p["galvo"])
+            if self._ls_parked.get("galvo") != want:
+                scanner.sa_offset_y.setPosition(want)
+                self._ls_parked["galvo"] = want
+        if piezo is not None:
+            want = float(p["piezo"])
+            if self._ls_parked.get("piezo") != want:
+                piezo.setPosition(want)
+                self._ls_parked["piezo"] = want
+
+    def _ensure_lightsheet_sequence_sync(self) -> None:
+        """Configure (or reconfigure on exposure/side change) the SPIM camera.
+
+        Two modes gated by ``_ls_params["mode"]``:
+
+        "snap" (default, safe) — per-frame snapImage()+getImage().  No circular
+            buffer at all; memory is bounded to one frame.  Sets camera device
+            and exposure only when a reconfiguration is needed; never calls
+            startContinuousSequenceAcquisition.
+
+        "continuous" (opt-in) — startContinuousSequenceAcquisition with a hard
+            footprint cap (256 MB) so the buffer can't balloon on a production
+            box.  The grab loop drains with clearCircularBuffer() after each peek.
+
+        Side 'A' uses devices["camera"] (HamCam1); side 'B' uses devices["camera_b"]
+        (HamCam2) when registered.  If side B is requested but camera_b is absent,
+        falls back to side A and logs a warning — single-camera rigs are unaffected.
+        """
+        core = self.system.core
+        p = self._ls_params
+        side = p.get("side", "A")
+        mode = p.get("mode", "snap")
+
+        # Resolve the camera for the requested side
+        if side == "B" and "camera_b" in self.devices:
+            cam = self.devices["camera_b"]
+        else:
+            if side == "B":
+                logger.warning(
+                    "Side B requested but camera_b not registered; falling back to side A"
+                )
+            cam = self.devices.get("camera")
+
+        if cam is None:
+            raise RuntimeError("No lightsheet camera configured")
+
+        need_reconfigure = (
+            not self._ls_seq_started
+            or self._ls_applied.get("exposure") != p["exposure"]
+            or self._ls_applied.get("side") != side
+        )
+
+        if mode == "snap":
+            # Snap mode: configure camera/exposure on change; no continuous sequence.
+            if need_reconfigure:
+                # Stop any lingering continuous sequence before snap takes over.
+                if core.isSequenceRunning():
+                    core.stopSequenceAcquisition()
+                    try:
+                        core.clearCircularBuffer()
+                    except Exception:
+                        pass
+                if core.getCameraDevice() != cam.name:
+                    core.setCameraDevice(cam.name)
+                core.setExposure(cam.name, float(p["exposure"]))
+                self._ls_seq_started = True  # "camera configured" flag; no sequence running
+                self._ls_applied["exposure"] = p["exposure"]
+                self._ls_applied["side"] = side
+        else:
+            # Continuous mode: cap buffer footprint then start sequence.
+            if need_reconfigure:
+                if core.isSequenceRunning():
+                    core.stopSequenceAcquisition()
+                if core.getCameraDevice() != cam.name:
+                    core.setCameraDevice(cam.name)
+                core.setExposure(cam.name, float(p["exposure"]))
+                # Hard cap: prevent buffer balloon that crashed the production box.
+                try:
+                    core.setCircularBufferMemoryFootprint(256)
+                except Exception:
+                    logger.debug(
+                        "setCircularBufferMemoryFootprint not available on this core",
+                        exc_info=True,
+                    )
+                core.startContinuousSequenceAcquisition(self._ls_interval_sec * 1000.0)
+                self._ls_seq_started = True
+                self._ls_applied["exposure"] = p["exposure"]
+                self._ls_applied["side"] = side
+
+    def _grab_lightsheet_frame_sync(self):
+        """Park → configure camera → grab one frame.
+
+        Snap mode (default): snapImage()+getImage() — no circular buffer,
+        hard memory ceiling, safe for long live-view sessions.
+
+        Continuous mode (opt-in): peeks via getLastImage() then drains the
+        buffer with clearCircularBuffer() to prevent it sitting full.
+        """
+        try:
+            self._park_lightsheet_sync()
+            self._ensure_lightsheet_sequence_sync()
+            try:
+                from gently.hardware.dispim.devices.acquisition import _safe_obtain
+            except (ImportError, AttributeError):
+                _safe_obtain = None
+            core = self.system.core
+            mode = self._ls_params.get("mode", "snap")
+            if mode == "snap":
+                core.snapImage()
+                img = core.getImage()
+            else:
+                img = core.getLastImage()
+                try:
+                    core.clearCircularBuffer()
+                except Exception:
+                    pass
+            if _safe_obtain is not None:
+                try:
+                    img = _safe_obtain(img)
+                except Exception:
+                    pass
+            return np.asarray(img)
+        except Exception as exc:
+            logger.debug("Lightsheet grab failed: %s", exc)
+            return None
+
+    def _stop_lightsheet_sequence_sync(self) -> None:
+        try:
+            if self.system.core.isSequenceRunning():
+                self.system.core.stopSequenceAcquisition()
+        except Exception:
+            logger.debug("stop lightsheet sequence failed", exc_info=True)
+        # Drain the buffer on every stop path (snap mode: no-op; continuous: release memory).
+        try:
+            self.system.core.clearCircularBuffer()
+        except Exception:
+            pass
+        self._ls_seq_started = False
+        self._ls_applied = {}
+        # Reset park guard so the next stream session re-idles the state
+        # machine and re-parks the axes (hardware may have moved).
+        self._ls_spim_idle = False
+        self._ls_parked = {}
+
+    async def _lightsheet_streamer(self):
+        logger.info("Lightsheet streamer started")
+        try:
+            while self._ls_subscribers:
+                if self._state_pause_counter > 0:
+                    # Heavy plan owns MMCore: release the sequence and back off.
+                    if self._ls_seq_started:
+                        await asyncio.to_thread(self._stop_lightsheet_sequence_sync)
+                    await asyncio.sleep(0.1)
+                    continue
+                tick = time.monotonic()
+                img = await asyncio.to_thread(self._grab_lightsheet_frame_sync)
+                payload = (
+                    self._encode_frame_for_stream(
+                        img, self._ls_target_max_dim, self._ls_jpeg_quality
+                    )
+                    if img is not None
+                    else None
+                )
+                if payload is not None:
+                    await self._broadcast_lightsheet(payload)
+                elapsed = time.monotonic() - tick
+                # Pace to at least the exposure; peek-rate caps near the camera rate.
+                floor = max(self._ls_interval_sec, self._ls_params["exposure"] / 1000.0)
+                await asyncio.sleep(max(0.0, floor - elapsed))
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Lightsheet streamer crashed")
+        finally:
+            await asyncio.to_thread(self._stop_lightsheet_sequence_sync)
+            logger.info("Lightsheet streamer exiting")
+
+    async def _broadcast_lightsheet(self, payload: dict[str, Any]):
+        self._log_focus_trace("spim", payload)
+        if not self._ls_subscribers:
+            return
+        dead: list[asyncio.Queue] = []
+        for q in self._ls_subscribers:
+            try:
+                q.put_nowait(payload)
+            except asyncio.QueueFull:
+                try:
+                    _ = q.get_nowait()
+                    q.put_nowait(payload)
+                except Exception:
+                    dead.append(q)
+        for q in dead:
+            try:
+                self._ls_subscribers.remove(q)
+            except ValueError:
+                pass
+
+    async def handle_lightsheet_stream(self, request):
+        """GET /api/lightsheet/stream — SSE of base64-JPEG frames from SPIM camera.
+
+        The streamer task spins up on first connect and exits when the last
+        subscriber leaves. Uses continuous sequence acquisition for best FPS.
+        """
+        response = web.StreamResponse(
+            status=200,
+            reason="OK",
+            headers={
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+        await response.prepare(request)
+
+        queue: asyncio.Queue = asyncio.Queue(maxsize=4)
+        self._ls_subscribers.append(queue)
+        if len(self._ls_subscribers) == 1 and (self._ls_task is None or self._ls_task.done()):
+            self._ls_task = asyncio.create_task(
+                self._lightsheet_streamer(), name="lightsheet-streamer"
+            )
+        try:
+            await response.write(b": connected\n\n")
+            while True:
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=10.0)
+                except asyncio.TimeoutError:
+                    await response.write(b": keepalive\n\n")
+                    continue
+                if payload is None:
+                    break
+                await response.write(f"data: {json.dumps(payload)}\n\n".encode())
+        except (asyncio.CancelledError, ConnectionResetError, ConnectionAbortedError):
+            pass
+        except Exception:
+            logger.exception("Lightsheet SSE writer failed")
+        finally:
+            try:
+                self._ls_subscribers.remove(queue)
+            except ValueError:
+                pass
+        return response
+
+    async def handle_lightsheet_params(self, request):
+        """POST /api/lightsheet/live/params — update live galvo/piezo/exposure/side.
+
+        Body: {"galvo": float, "piezo": float, "exposure": float, "side": "A"|"B"} (all optional).
+        Galvo/piezo apply on the next grab; exposure or side change triggers sequence restart.
+        """
+        body = await request.json()
+        for k in ("galvo", "piezo", "exposure"):
+            if k in body and body[k] is not None:
+                self._ls_params[k] = float(body[k])
+        if "side" in body and body["side"] in ("A", "B"):
+            self._ls_params["side"] = body["side"]
+        return web.json_response({"params": self._ls_params})
 
     # =========================================================================
     # MMCore Push Callbacks
@@ -1429,6 +1893,26 @@ class DeviceLayerServer(Service):
                 return dev
         return None
 
+    async def _set_room_light(self, state: str) -> bool:
+        """Drive the room-light SwitchBot to ``state`` ('on'/'off'/'press').
+
+        Blocks until the BLE command lands (or times out). Returns True on
+        success, False if no bot is configured or the command failed. Shared
+        by the HTTP handler and internal callers (e.g. detect_embryos, which
+        images under room light rather than the camera LED).
+        """
+        bot = self._room_light_device()
+        if bot is None:
+            return False
+        import time
+
+        status = bot.set(state)
+        timeout = float(getattr(bot, "timeout", 20.0)) + 5
+        start = time.time()
+        while not status.done and (time.time() - start) < timeout:
+            await asyncio.sleep(0.1)
+        return bool(status.done and status.success)
+
     async def handle_get_room_light_status(self, request):
         """GET /api/room_light/status - cached on/off state of the room light.
 
@@ -1614,6 +2098,243 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    @staticmethod
+    def _validate_temp_cfg(cfg) -> str | None:
+        """Validate a thermalizer config dict. Returns an error string or None.
+
+        Mirrors what temperature._make_backend / create_temperature_controller
+        require so bad input is rejected before we build a controller.
+        """
+        if not isinstance(cfg, dict):
+            return "config must be an object"
+        backend = str(cfg.get("backend", "serial")).lower()
+        if backend not in ("serial", "mqtt", "mock"):
+            return f"unknown backend {backend!r} (use 'serial', 'mqtt', or 'mock')"
+        if backend == "serial" and not str(cfg.get("com_port") or "").strip():
+            return "serial backend requires com_port"
+        for key in ("baud_rate", "port"):
+            if cfg.get(key) is not None:
+                try:
+                    if int(cfg[key]) <= 0:
+                        return f"{key} must be a positive integer"
+                except (TypeError, ValueError):
+                    return f"{key} must be a positive integer"
+        if cfg.get("stabilize_timeout") is not None:
+            try:
+                if float(cfg["stabilize_timeout"]) <= 0:
+                    return "stabilize_timeout must be > 0"
+            except (TypeError, ValueError):
+                return "stabilize_timeout must be a number"
+        return None
+
+    @staticmethod
+    def _redact_temp_cfg(cfg: dict) -> dict:
+        """Copy of a temperature config with the MQTT password removed."""
+        out = dict(cfg or {})
+        if "password" in out:
+            out["password"] = None
+        return out
+
+    def _preserve_temp_password(self, cfg: dict) -> dict:
+        """Return a copy of cfg with the stored MQTT password filled in when the
+        client didn't submit a new one (the password is write-only in the UI, so
+        a blank field means 'keep what's stored'). Used by BOTH test + apply so
+        they exercise the same effective credentials."""
+        eff = dict(cfg)
+        if not eff.get("password"):
+            existing_pw = ((self.config or {}).get("temperature") or {}).get("password")
+            if existing_pw:
+                eff["password"] = existing_pw
+            else:
+                eff.pop("password", None)
+        return eff
+
+    def _temp_state(self, temp) -> dict | None:
+        if temp is None:
+            return None
+        try:
+            r = temp.read()
+            return {
+                "temperature_c": r.get(temp.name, {}).get("value"),
+                "setpoint_c": r.get(f"{temp.name}_setpoint", {}).get("value"),
+                "state": r.get(f"{temp.name}_state", {}).get("value"),
+            }
+        except Exception:
+            return None
+
+    async def handle_get_temperature_config(self, request):
+        """GET /api/temperature/config - current thermalizer config (password
+        redacted) + live backend + read() state, for the settings panel."""
+        try:
+            cfg = dict((self.config or {}).get("temperature") or {})
+            has_pw = bool(cfg.get("password"))
+            temp = self.devices.get("temperature")
+            return web.json_response(
+                {
+                    "success": True,
+                    "config": self._redact_temp_cfg(cfg),
+                    "password_set": has_pw,
+                    "active": temp is not None,
+                    "live_backend": type(temp._dev).__name__ if temp is not None else None,
+                    "state": self._temp_state(temp),
+                }
+            )
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {"success": False, "error": str(e), "traceback": traceback.format_exc()},
+                status=500,
+            )
+
+    async def handle_test_temperature_config(self, request):
+        """POST /api/temperature/config/test - probe a candidate config WITHOUT
+        committing. Builds a transient controller, reads state, closes it. Never
+        touches self.devices."""
+        try:
+            cfg = await request.json()
+        except Exception:
+            return web.json_response({"success": False, "error": "invalid JSON body"}, status=400)
+        err = self._validate_temp_cfg(cfg)
+        if err:
+            return web.json_response({"success": False, "error": err}, status=400)
+        eff = self._preserve_temp_password(cfg)  # probe with the same creds Apply would use
+
+        def _probe():
+            from gently.hardware.temperature import create_temperature_controller
+
+            tc = create_temperature_controller(eff)
+            try:
+                r = tc.read()
+                return {
+                    "backend": type(tc._dev).__name__,
+                    "temperature_c": r.get(tc.name, {}).get("value"),
+                    "state": r.get(f"{tc.name}_state", {}).get("value"),
+                }
+            finally:
+                try:
+                    tc.close()
+                except Exception:
+                    pass
+
+        try:
+            result = await asyncio.to_thread(_probe)
+            return web.json_response({"success": True, "result": result})
+        except Exception as e:
+            return web.json_response({"success": False, "error": str(e)}, status=502)
+
+    def _write_temp_sidecar(self, temp_cfg: dict) -> None:
+        """Persist the temperature block to config/config.local.yml (merged over
+        config.yml at boot). Best-effort; 0600 perms since it may hold the MQTT
+        password. Keeps config.yml (and its comments) untouched."""
+        try:
+            import os
+
+            sidecar = Path(self.config_path).parent / "config.local.yml"
+            existing: dict = {}
+            if sidecar.exists():
+                with open(sidecar) as f:
+                    existing = yaml.safe_load(f) or {}
+            existing["temperature"] = temp_cfg
+            # Create with 0600 up front so the plaintext MQTT password is never
+            # briefly world/group-readable (O_CREAT mode only applies to new files;
+            # the follow-up chmod downgrades any pre-existing loose-perm file).
+            fd = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
+                yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+            try:
+                os.chmod(sidecar, 0o600)
+            except OSError:
+                pass
+        except Exception:
+            logger.debug("temp sidecar write failed", exc_info=True)
+
+    async def handle_set_temperature_config(self, request):
+        """POST /api/temperature/config - reconfigure the thermalizer live.
+
+        Build-new-before-swap: refuse (409) while the RunEngine is running or a
+        set() worker holds the controller lock; build the NEW controller first
+        (keep the old one on failure); swap self.devices and close the old;
+        persist to the config.local.yml sidecar. On a build/connect failure the
+        intent is still saved and restart_required is returned.
+        """
+        try:
+            cfg = await request.json()
+        except Exception:
+            return web.json_response({"success": False, "error": "invalid JSON body"}, status=400)
+        err = self._validate_temp_cfg(cfg)
+        if err:
+            return web.json_response({"success": False, "error": err}, status=400)
+
+        # --- 409 guard: never swap mid-plan / mid-ramp ---
+        re_state = str(getattr(self.RE, "state", "idle")) if self.RE is not None else "idle"
+        if re_state != "idle":
+            return web.json_response(
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": f"RunEngine is {re_state}; stop the plan before reconfiguring",
+                },
+                status=409,
+            )
+        old = self.devices.get("temperature")
+        lock = getattr(old, "_lock", None)
+        if lock is not None and lock.locked():
+            return web.json_response(
+                {
+                    "success": False,
+                    "blocked": True,
+                    "error": "a temperature ramp is in progress; wait or stop it first",
+                },
+                status=409,
+            )
+
+        # Fill in the stored password when the client didn't submit a new one.
+        eff = self._preserve_temp_password(cfg)
+
+        # Build the NEW controller first (eager connect off the event loop).
+        def _build():
+            from gently.hardware.temperature import create_temperature_controller
+
+            return create_temperature_controller(eff)
+
+        try:
+            new_tc = await asyncio.to_thread(_build)
+        except Exception as e:
+            self._write_temp_sidecar(eff)  # save intent; a restart will apply it
+            return web.json_response(
+                {
+                    "success": False,
+                    "applied": False,
+                    "restart_required": True,
+                    "error": f"could not connect with the new config: {e}. "
+                    "Saved — restart the device layer to apply.",
+                },
+                status=502,
+            )
+
+        # Swap + retire the old controller.
+        self.devices["temperature"] = new_tc
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                logger.debug("old temperature controller close failed", exc_info=True)
+        self.config = self.config or {}
+        self.config["temperature"] = eff
+        self._write_temp_sidecar(eff)
+        logger.info("Thermalizer reconfigured live (backend=%s)", eff.get("backend", "serial"))
+        return web.json_response(
+            {
+                "success": True,
+                "applied": True,
+                "restart_required": False,
+                "config": self._redact_temp_cfg(eff),
+                "live_backend": type(new_tc._dev).__name__,
+                "state": self._temp_state(new_tc),
+            }
+        )
+
     async def handle_set_camera_led_mode(self, request):
         """POST /api/camera/led_mode - Enable/disable automatic LED for bottom camera"""
         try:
@@ -1776,6 +2497,81 @@ class DeviceLayerServer(Service):
                 status=500,
             )
 
+    async def handle_set_laser_config(self, request):
+        """POST /api/laser/config — apply a Laser config-group preset.
+
+        Body: {"config": <preset_name>}
+        Calls light_source.set(config_name) which maps to
+        core.setConfig(group_name, config_name) + waitForConfig.
+        """
+        try:
+            data = await request.json()
+            config_name = data.get("config")
+            if not config_name:
+                return web.json_response(
+                    {"success": False, "error": "missing 'config' field"},
+                    status=400,
+                )
+            light_source = self.devices.get("light_source") or self.devices.get("laser_control")
+            if light_source is None:
+                return web.json_response(
+                    {"success": False, "error": "Light source device not found"},
+                    status=503,
+                )
+            try:
+                light_source.set(config_name)
+            except Exception as e:
+                return web.json_response(
+                    {"success": False, "error": str(e)},
+                    status=400,
+                )
+            return web.json_response({"success": True, "config": config_name})
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+
+    async def handle_get_laser_configs(self, request):
+        """GET /api/laser/configs — list available Laser config-group presets."""
+        try:
+            light_source = self.devices.get("light_source") or self.devices.get("laser_control")
+            if light_source is None:
+                return web.json_response(
+                    {"success": False, "error": "Light source device not found"},
+                    status=503,
+                )
+            configs = light_source._get_available_configs()
+            return web.json_response({"configs": configs})
+        except Exception as e:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(e),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+
+    async def handle_get_cameras(self, request):
+        """GET /api/cameras — list available SPIM camera roles.
+
+        Returns ``{"cameras": ["A"]}`` on single-camera rigs, or
+        ``{"cameras": ["A", "B"]}`` when camera_b (HamCam2) is registered.
+        """
+        cameras = ["A"]
+        if "camera_b" in self.devices:
+            cameras.append("B")
+        return web.json_response({"cameras": cameras})
+
     async def handle_get_camera_exposure(self, request):
         """GET /api/camera/exposure - Get bottom camera exposure time"""
         try:
@@ -1799,6 +2595,119 @@ class DeviceLayerServer(Service):
                 },
                 status=500,
             )
+
+    # ------------------------------------------------------------------
+    # Fenced focus axes — bottom-camera focus Z (z_stage) + SPIM-head F-drive.
+    # Read + relative nudge only; the device classes enforce hard limits, and
+    # the handlers reject out-of-range targets with 400. No autofocus.
+    # ------------------------------------------------------------------
+
+    def _nudge_axis_blocking(self, device, target: float) -> float:
+        """Blocking: move a fenced ophyd positioner to ``target`` and return the
+        new position. ``device.set()`` enforces the hardware limits."""
+        status = device.set(target)
+        try:
+            status.wait()
+        except Exception:
+            logger.exception("Axis move to %.2f did not complete cleanly", target)
+        return float(device.read()[device.name]["value"])
+
+    def _axis_status_response(self, device_key: str, label: str):
+        device = self.devices.get(device_key)
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": f"{label} device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            pos = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        return web.json_response(
+            {
+                "success": True,
+                "position": pos,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": pos - float(lo),
+            }
+        )
+
+    async def _handle_axis_nudge(self, request, device_key: str, label: str):
+        try:
+            data = await request.json()
+            delta = float(data.get("delta", 0.0))
+        except Exception:
+            return web.json_response(
+                {"success": False, "error": "numeric 'delta' required"}, status=400
+            )
+        device = self.devices.get(device_key)
+        if device is None:
+            return web.json_response(
+                {"success": False, "error": f"{label} device not found"}, status=503
+            )
+        lo, hi = device.limits
+        try:
+            cur = float(device.read()[device.name]["value"])
+        except Exception as exc:
+            return web.json_response(
+                {"success": False, "error": f"position read failed: {exc}"}, status=502
+            )
+        target = round(cur + delta, 2)
+        if not (float(lo) <= target <= float(hi)):
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": f"target {target} outside limits [{lo}, {hi}]",
+                    "position": cur,
+                    "min": float(lo),
+                    "max": float(hi),
+                },
+                status=400,
+            )
+        try:
+            async with self.pause_state_updates():
+                new_pos = await asyncio.to_thread(self._nudge_axis_blocking, device, target)
+        except ValueError as exc:  # device-level fence (defensive)
+            return web.json_response({"success": False, "error": str(exc)}, status=400)
+        except Exception as exc:
+            import traceback
+
+            return web.json_response(
+                {
+                    "success": False,
+                    "error": str(exc),
+                    "traceback": traceback.format_exc(),
+                },
+                status=500,
+            )
+        return web.json_response(
+            {
+                "success": True,
+                "position": new_pos,
+                "min": float(lo),
+                "max": float(hi),
+                "distance_to_floor": new_pos - float(lo),
+            }
+        )
+
+    async def handle_get_bottom_z(self, request):
+        """GET /api/stage/bottom_z — bottom-camera focus Z position + limits."""
+        return self._axis_status_response("z_stage", "Bottom-Z (z_stage)")
+
+    async def handle_nudge_bottom_z(self, request):
+        """POST /api/stage/bottom_z/nudge — fenced relative move of the bottom-camera focus Z."""
+        return await self._handle_axis_nudge(request, "z_stage", "Bottom-Z (z_stage)")
+
+    async def handle_get_fdrive(self, request):
+        """GET /api/spim/fdrive — SPIM-head F-drive position + limits + distance to floor."""
+        return self._axis_status_response("fdrive", "F-drive")
+
+    async def handle_nudge_fdrive(self, request):
+        """POST /api/spim/fdrive/nudge — fenced relative move of the SPIM-head F-drive."""
+        return await self._handle_axis_nudge(request, "fdrive", "F-drive")
 
     async def handle_get_plan_log(self, request):
         """GET /api/plan_log - Get recent plan execution log with timing"""
@@ -1931,6 +2840,25 @@ class DeviceLayerServer(Service):
                 bottom_camera = self.devices.get("bottom_camera")
                 if bottom_camera:
                     bottom_camera.configure_exposure(exposure_ms)
+
+            # Detection needs even illumination. Prefer the ROOM LIGHT
+            # (SwitchBot) and disable the camera LED. But the room light is an
+            # OPTIONAL BLE accessory — when it's absent or the command fails,
+            # forcing the LED off leaves the frame near-black and SAM finds
+            # nothing. So only disable the LED once the room light is actually
+            # on; otherwise fall back to the camera LED as the light source.
+            bottom_camera = self.devices.get("bottom_camera")
+            if await self._set_room_light("on"):
+                if bottom_camera is not None:
+                    bottom_camera.use_led = False
+                logger.info("[detect_embryos] Room light ON, camera LED disabled")
+            else:
+                if bottom_camera is not None:
+                    bottom_camera.use_led = True
+                logger.warning(
+                    "[detect_embryos] Room light unavailable (no SwitchBot "
+                    "configured or command failed) — falling back to camera LED"
+                )
 
             # Capture image via plan
             logger.info("[detect_embryos] Capturing bottom camera image...")
@@ -2746,13 +3674,25 @@ class DeviceLayerServer(Service):
         self._app.router.add_post("/api/led/set", self.handle_set_led)
         self._app.router.add_get("/api/temperature/status", self.handle_get_temperature_status)
         self._app.router.add_post("/api/temperature/set", self.handle_set_temperature)
+        self._app.router.add_get("/api/temperature/config", self.handle_get_temperature_config)
+        self._app.router.add_post(
+            "/api/temperature/config/test", self.handle_test_temperature_config
+        )
+        self._app.router.add_post("/api/temperature/config", self.handle_set_temperature_config)
         self._app.router.add_get("/api/room_light/status", self.handle_get_room_light_status)
         self._app.router.add_post("/api/room_light/set", self.handle_set_room_light)
         self._app.router.add_post("/api/camera/led_mode", self.handle_set_camera_led_mode)
         self._app.router.add_post("/api/camera/exposure", self.handle_set_camera_exposure)
         self._app.router.add_get("/api/camera/exposure", self.handle_get_camera_exposure)
+        # Fenced focus axes (read + relative nudge; no autofocus)
+        self._app.router.add_get("/api/stage/bottom_z", self.handle_get_bottom_z)
+        self._app.router.add_post("/api/stage/bottom_z/nudge", self.handle_nudge_bottom_z)
+        self._app.router.add_get("/api/spim/fdrive", self.handle_get_fdrive)
+        self._app.router.add_post("/api/spim/fdrive/nudge", self.handle_nudge_fdrive)
         self._app.router.add_post("/api/light_source/power", self.handle_set_light_source_power)
         self._app.router.add_get("/api/light_source/power", self.handle_get_light_source_power)
+        self._app.router.add_post("/api/laser/config", self.handle_set_laser_config)
+        self._app.router.add_get("/api/laser/configs", self.handle_get_laser_configs)
         self._app.router.add_get("/api/plan_log", self.handle_get_plan_log)
         self._app.router.add_post("/session/configure", self.handle_session_configure)
 
@@ -2771,6 +3711,11 @@ class DeviceLayerServer(Service):
 
         # Bottom-camera live stream (subscriber-gated, off when nobody listens)
         self._app.router.add_get("/api/bottom_camera/stream", self.handle_bottom_camera_stream)
+
+        # Lightsheet (SPIM) live stream — continuous sequence acquisition
+        self._app.router.add_get("/api/lightsheet/stream", self.handle_lightsheet_stream)
+        self._app.router.add_post("/api/lightsheet/live/params", self.handle_lightsheet_params)
+        self._app.router.add_get("/api/cameras", self.handle_get_cameras)
 
         # Start plan executor
         self._executor_task = asyncio.create_task(self._plan_executor())

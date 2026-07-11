@@ -6,6 +6,8 @@ Tools for acquiring lightsheet volumes and images from the microscope.
 
 import asyncio
 import logging
+import time
+from typing import Any
 
 import numpy as np
 
@@ -13,6 +15,62 @@ from gently.harness.tools.helpers import ctx_get, get_embryo_or_error
 from gently.harness.tools.registry import ToolCategory, ToolExample, tool
 
 logger = logging.getLogger(__name__)
+
+
+def _publish_scan_geometry(
+    agent: Any,
+    *,
+    embryo_id: str,
+    stage_position: dict | None,
+    num_slices: int,
+    exposure_ms: float,
+    galvo_amplitude: float,
+    galvo_center: float,
+    piezo_amplitude: float,
+    piezo_center: float,
+) -> None:
+    """Emit SCAN_GEOMETRY_UPDATE describing the cuboid being acquired.
+
+    Drives the 3D optical-space view (the addressable volume + the scan cuboid
+    and light-sheet mode). Telemetry only — callers guard against exceptions so
+    this never interferes with an acquisition. The payload is also stashed on
+    the agent for REST bootstrap (``/api/devices/scan_geometry``).
+    """
+    from gently.core import EventType, get_event_bus
+
+    z_extent_um = 2.0 * piezo_amplitude
+    slice_spacing_um = z_extent_um / (num_slices - 1) if num_slices > 1 else 0.0
+    sx = stage_position.get("x") if stage_position else None
+    sy = stage_position.get("y") if stage_position else None
+
+    payload: dict[str, Any] = {
+        "embryo_id": embryo_id,
+        "stage_position_um": {"x": sx, "y": sy},
+        "scan": {
+            "num_slices": num_slices,
+            "exposure_ms": exposure_ms,
+            "galvo_amplitude_deg": galvo_amplitude,
+            "galvo_center_deg": galvo_center,
+            "piezo_amplitude_um": piezo_amplitude,
+            "piezo_center_um": piezo_center,
+        },
+        "derived": {
+            "z_extent_um": z_extent_um,
+            "slice_spacing_um": slice_spacing_um,
+            "z_min_um": piezo_center - piezo_amplitude,
+            "z_max_um": piezo_center + piezo_amplitude,
+        },
+        # diSPIM here is scanned-light-sheet only; a future pencil/beam tool
+        # would emit "pencil". See the 3D optical-space view notes.
+        "mode": "sheet",
+        "ts": time.time(),
+    }
+    agent.last_scan_geometry = payload
+    get_event_bus().publish(
+        event_type=EventType.SCAN_GEOMETRY_UPDATE,
+        data=payload,
+        source="acquisition-tools",
+    )
 
 
 @tool(
@@ -88,6 +146,23 @@ async def acquire_volume(
                 piezo_amplitude = piezo_amplitude + (additional_buffer_um * abs(slope) / 100.0)
                 z_buffer_applied = z_buffer_um
 
+        # Publish the resolved scan geometry for the 3D optical-space view.
+        # Telemetry only — must never break the acquisition.
+        try:
+            _publish_scan_geometry(
+                agent,
+                embryo_id=embryo_id,
+                stage_position=pos,
+                num_slices=num_slices,
+                exposure_ms=exposure_ms,
+                galvo_amplitude=galvo_amplitude,
+                galvo_center=galvo_center,
+                piezo_amplitude=piezo_amplitude,
+                piezo_center=piezo_center,
+            )
+        except Exception:
+            logger.debug("SCAN_GEOMETRY_UPDATE publish failed", exc_info=True)
+
         result = await client.acquire_volume(
             num_slices=num_slices,
             exposure_ms=exposure_ms,
@@ -137,6 +212,13 @@ async def acquire_volume(
                             "piezo_center": piezo_center,
                         },
                     }
+                    from gently.app.temperature_sampler import temperature_stamp as _ts
+
+                    _temp_stamp = _ts(
+                        getattr(getattr(agent, "temperature_sampler", None), "latest", None)
+                    )
+                    if _temp_stamp is not None:
+                        acq_metadata["temperature"] = _temp_stamp
                     volume_path_ref = result.get("volume_path")
                     if volume_path_ref is not None:
                         saved_path = agent.store.register_volume(

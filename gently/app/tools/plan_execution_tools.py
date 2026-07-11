@@ -107,24 +107,9 @@ async def execute_plan_item(
                 except Exception as e:
                     actions.append(f"detector '{det_name}' failed: {e}")
 
-    # 6. Link session to campaign
-    session_id = getattr(agent, "session_id", None)
-    if session_id:
-        try:
-            cs.link_session_campaign(session_id, item.campaign_id)
-            actions.append("session linked to campaign")
-        except Exception:
-            pass
-
-    # 7. Update plan item status
-    cs.update_plan_item(
-        item_id=item.id,
-        status=PlanItemStatus.IN_PROGRESS,
-        session_id=session_id,
-    )
-    actions.append("plan item status → in_progress")
-
-    # 8. Start timelapse via orchestrator
+    # 6. Start timelapse via orchestrator — this is what activates the session, so the
+    #    plan↔session link must happen AFTER it (step 7), not before (the old bug:
+    #    agent.session_id was still None here, so the link silently dropped).
     orchestrator = getattr(agent, "timelapse_orchestrator", None)
     if orchestrator:
         try:
@@ -158,7 +143,22 @@ async def execute_plan_item(
         except Exception as e:
             actions.append(f"timelapse start error: {e}")
 
-    # 10. Summary
+    # 7. Link this run to the plan item + campaign — AFTER start, so the session exists.
+    #    Appends (an item may run several sessions). Surface failures, don't swallow.
+    session_id = getattr(agent, "session_id", None)
+    if session_id:
+        try:
+            cs.link_session_campaign(session_id, item.campaign_id)
+            cs.link_plan_item_session(item.id, session_id)
+            actions.append(
+                f"linked session {session_id[:8]} → plan item + campaign (status → in_progress)"
+            )
+        except Exception as e:
+            actions.append(f"⚠ link failed: {e}")
+    else:
+        actions.append("⚠ no active session — could not link this run to the plan item")
+
+    # Summary
     lines = [f"Executing plan item: {item.title}"]
     if spec.strain:
         lines.append(f"  Strain: {spec.strain}")

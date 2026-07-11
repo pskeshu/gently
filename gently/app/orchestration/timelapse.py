@@ -74,6 +74,7 @@ class TimelapseOrchestrator:
         session_id: str | None = None,
         store: Optional["FileStore"] = None,
         claude_client=None,
+        temperature_provider=None,
     ):
         """
         Parameters
@@ -101,6 +102,11 @@ class TimelapseOrchestrator:
         self.perceiver = perceiver
         self.on_volume_callback = on_volume_callback
         self.claude_client = claude_client
+
+        # Zero-arg callable returning the latest temperature sample dict (or None).
+        # Threaded from the agent's TemperatureSampler so burst frames carry a
+        # temperature block in their metadata.
+        self._temperature_provider = temperature_provider
 
         # Trace file storage (writes JSON files to disk)
         self._session_id = session_id
@@ -230,6 +236,13 @@ class TimelapseOrchestrator:
 
         # Parse stop condition
         stop_cond = self._parse_stop_condition(stop_condition, condition_value)
+
+        # Tolerate a comma-separated string: some agent tool calls pass
+        # embryo_ids as "embryo_1,embryo_2" rather than a JSON list. Without
+        # this, the membership check below iterates the string character by
+        # character and reports every letter as a missing embryo.
+        if isinstance(embryo_ids, str):
+            embryo_ids = [e.strip() for e in embryo_ids.split(",") if e.strip()]
 
         # Get embryo list
         if not embryo_ids:
@@ -1971,6 +1984,7 @@ class TimelapseOrchestrator:
                         mode=op_doc.get("mode", "1hz"),
                         num_slices=int(op_doc.get("num_slices", 1)),
                         request_id=op_doc.get("request_id"),
+                        temperature_provider=self._temperature_provider,
                     )
                 )
 
@@ -2051,6 +2065,8 @@ class TimelapseOrchestrator:
         mode: str = "1hz",
         num_slices: int = 1,
         force: bool = False,
+        laser_config: str | None = None,
+        tactic_id: str | None = None,
     ) -> str:
         """Queue a burst acquisition for ``embryo_id``.
 
@@ -2089,6 +2105,9 @@ class TimelapseOrchestrator:
             frames=frames,
             mode=mode,
             num_slices=num_slices,
+            temperature_provider=self._temperature_provider,
+            laser_config=laser_config,
+            tactic_id=tactic_id,
         )
         self._exclusive_queue.append(op)
         logger.info(

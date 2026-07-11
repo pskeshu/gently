@@ -23,6 +23,13 @@
     --accent-pink: #f472b6;
     --accent-cyan: #22d3ee;
 
+    /* Temperature graph colors (root-level so the graph is portable outside
+       .devices-container-map — e.g. when reused in manual mode) */
+    --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #22d3ee;
+    --temp-grid-line-color: rgba(212, 221, 232, 0.20);
+    --temp-grid-label-color: #6a778a;
+
     /* Gradients for modern feel */
     --gradient-primary: linear-gradient(135deg, #60a5fa 0%, #c084fc 100%);
     --gradient-success: linear-gradient(135deg, #4ade80 0%, #22d3ee 100%);
@@ -62,6 +69,12 @@
     --accent-orange: #f97316;
     --accent-pink: #ec4899;
     --accent-cyan: #06b6d4;
+
+    /* Temperature graph colors (root-level; see dark block) */
+    --temp-setpoint-color: #f59e0b;
+    --temp-water-color: #0e7490;
+    --temp-grid-line-color: rgba(29, 43, 58, 0.22);
+    --temp-grid-label-color: #6b7280;
 
     /* Gradients */
     --gradient-primary: linear-gradient(135deg, #3b82f6 0%, #a855f7 100%);
@@ -9072,7 +9085,7 @@ body.modal-open {
 .settings-content {
     flex: 1;
     max-width: 720px;
-    padding: 2rem 2.5rem;
+    padding: 2rem 2.5rem 0;
     overflow-y: auto;
 }
 
@@ -9194,6 +9207,46 @@ body.modal-open {
     color: var(--text-muted);
 }
 
+/* Thermalizer / server-backed settings controls */
+.th-note { margin-bottom: 0.9rem; }
+.th-ro { font-size: 0.8rem; font-weight: 400; color: var(--text-muted); }
+.th-status {
+    font-size: 0.85rem; color: var(--text); font-variant-numeric: tabular-nums;
+    padding: 0.5rem 0.7rem; background: var(--bg-hover);
+    border: 1px solid var(--border); border-radius: 6px;
+}
+.th-actions { display: flex; gap: 0.6rem; }
+.settings-btn {
+    background: var(--bg-hover); border: 1px solid var(--border); color: var(--text);
+    font: 600 0.82rem/1 'Inter Tight', system-ui, sans-serif;
+    padding: 0.55rem 0.9rem; border-radius: 7px; cursor: pointer;
+    transition: background 0.13s, border-color 0.13s, color 0.13s, opacity 0.13s;
+}
+.settings-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.settings-btn:disabled { opacity: 0.5; cursor: progress; }
+.settings-btn-primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.settings-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; }
+.settings-result { font-size: 0.8rem; margin-top: 0.6rem; min-height: 1.1em; }
+.settings-result.is-ok { color: var(--accent-green); }
+.settings-result.is-err { color: var(--accent-orange); }
+.settings-pre {
+    font: 0.78rem/1.5 ui-monospace, SFMono-Regular, monospace;
+    color: var(--text); background: var(--bg-dark); border: 1px solid var(--border);
+    border-radius: 8px; padding: 0.8rem 1rem; overflow-x: auto; white-space: pre;
+    max-height: 460px; overflow-y: auto;
+}
+.settings-defaults-bar { display: flex; gap: 0.5rem; margin-left: auto; flex-wrap: wrap; }
+.settings-subhead {
+    font-size: 0.72rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+    color: var(--text-muted); margin: 1.4rem 0 0.6rem; padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+}
+.settings-subhead:first-child { margin-top: 0.2rem; }
+.settings-pre code, .settings-hint code {
+    font: 0.85em ui-monospace, SFMono-Regular, monospace;
+    background: var(--bg-hover); padding: 0.05rem 0.3rem; border-radius: 4px;
+}
+
 /* Range slider */
 .settings-range {
     -webkit-appearance: none;
@@ -9237,6 +9290,13 @@ body.modal-open {
     position: sticky;
     bottom: 0;
     padding: 0.75rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    background: var(--bg-dark);
+    border-top: 1px solid var(--border);
+    z-index: 5;
 }
 
 .settings-save-status {
@@ -9628,6 +9688,15 @@ body.modal-open {
 .devices-status-led.paused::before{ background: var(--map-accent); }
 .devices-status-led.stale::before { background: var(--map-warm); }
 .devices-status-led.error::before { background: #f87171; }
+/* Status sub-label (e.g. the live "Δt 0.20s"). The value updates every frame;
+   tabular figures + a reserved, right-aligned width keep its box from changing
+   size, so the rapidly-changing digits can't reflow and jitter the LIVE badge
+   and room-light button beside it (the cluster is right-anchored in the bar). */
+.devices-status-meta {
+    font-variant-numeric: tabular-nums;
+    min-width: 3.4rem;
+    text-align: right;
+}
 
 /* --- Room-light toggle (header) -------------------------------------- */
 .devices-room-light {
@@ -9735,6 +9804,63 @@ body.modal-open {
 }
 .devices-temp-set:hover:not(:disabled) { border-color: var(--map-accent); color: var(--map-ink); }
 .devices-temp-set:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Temperature trajectory graph ------------------------------------- */
+/* SVG chart card mounted at the bottom of #devices-content.              */
+.devices-temp-graph {
+    padding: 0.6rem 1rem 0.5rem;
+    border-top: 1px solid var(--map-overlay-edge);
+    min-height: 2rem;     /* keeps the section visible even when empty    */
+}
+/* Solid line: water temperature */
+.temp-water {
+    stroke: var(--temp-water-color);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+}
+/* Dashed line: setpoint (stepped) */
+.temp-setpoint {
+    stroke: var(--temp-setpoint-color);
+    stroke-width: 1.5;
+    stroke-dasharray: 5 3;
+    stroke-linejoin: round;
+    stroke-linecap: round;
+    opacity: 0.85;
+}
+/* Y-axis reference gridlines */
+.temp-grid-line {
+    stroke: var(--temp-grid-line-color);
+    stroke-width: 0.75;
+}
+/* Y-axis tick labels */
+.temp-grid-label {
+    fill: var(--temp-grid-label-color);
+    font-size: 8px;
+    font-family: ui-monospace, monospace;
+    text-anchor: end;
+    dominant-baseline: middle;
+}
+/* Calm empty state — never shows mock data */
+.temp-graph-empty {
+    padding: 1rem 0;
+    text-align: center;
+    color: var(--map-ink-mute);
+    font-size: 0.78rem;
+}
+/* Last-sample readout above the SVG */
+.temp-graph-readout {
+    font-size: 0.68rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.04em;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.2rem;
+    padding: 0 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
 
 /* --- Containers ------------------------------------------------------- */
 .devices-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -10149,6 +10275,72 @@ body.modal-open {
     color: var(--map-paper);
     border-color: var(--map-accent);
 }
+
+/* ---- Top-right rail: the XY stage readout (Detect/mark moved to Operate) ---- */
+.devices-map-rail {
+    position: absolute;
+    top: 0.85rem;
+    right: 0.85rem;
+    width: 230px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    z-index: 4;
+}
+/* Readout drops its own absolute positioning inside the rail and fills it. */
+.devices-map-rail .devices-map-readout {
+    position: static;
+    top: auto;
+    right: auto;
+    width: 100%;
+    min-width: 0;
+}
+
+
+.devices-camera-head-btns {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+.devices-camera-expand {
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.72rem;
+    line-height: 1;
+    padding: 0.16rem 0.4rem;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.devices-camera-expand:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+.devices-camera-expand.active {
+    background: var(--map-accent);
+    color: var(--map-paper);
+    border-color: var(--map-accent);
+}
+/* Enlarged bottom-camera view — centred over the map, toggled by the
+   expand button. Reuses the same streaming <img>; sized by height so the
+   whole panel (header + stage + foot) stays within the map area. */
+.devices-camera-panel.expanded {
+    bottom: auto;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: auto;
+    max-width: calc(100% - 2rem);
+    z-index: 9;
+}
+.devices-camera-panel.expanded .devices-camera-stage {
+    height: min(64vh, 640px);
+    width: auto;
+    max-width: 100%;
+}
 .devices-camera-stage {
     position: relative;
     width: 100%;
@@ -10479,4 +10671,839 @@ body.modal-open {
 .chat-send:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+}
+
+/* =========================================================================
+   Manual view — lightsheet live panel + control rail
+   ========================================================================= */
+
+/* Two-column layout: image stage (flex-grow) + fixed control rail */
+.ls-layout {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+    gap: 1rem;
+    font-family: 'Inter Tight', system-ui, sans-serif;
+}
+
+/* Left column — live image stage */
+.ls-image-col {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+
+.ls-stage-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+/* The stage itself reuses .devices-camera-stage aspect + overflow */
+.ls-stage {
+    flex: 1;
+    min-height: 280px;
+    /* override aspect-ratio: let the flex column stretch it */
+    aspect-ratio: unset;
+}
+
+/* Right column — control rail.
+   Two-column masonry so every control stays visible without scrolling.
+   multicol packs the varying-height cards tighter than a grid would (no
+   row-alignment gaps); each .ls-group sets break-inside to stay whole.
+   overflow-y:auto is a safety net only — the default (collapsed) control
+   set fits with no scrollbar; it appears solely if Timelapse is expanded. */
+.ls-rail {
+    width: 380px;
+    flex-shrink: 0;
+    columns: 2;
+    column-gap: 0.7rem;
+    overflow-y: auto;
+    padding: 0.1rem 0 0.5rem;
+}
+
+/* Control group block */
+.ls-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    padding: 0.55rem 0.65rem;
+    background: var(--map-overlay-bg);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 5px;
+    /* multicol: keep each card intact and space them (rail gap is gone) */
+    break-inside: avoid;
+    margin-bottom: 0.7rem;
+}
+
+/* Stream group: the live toggle, relocated from the viewer header to a
+   prominent full-width button at the top of the rail. column-span makes it
+   a header across both columns, whose top lines up with the image stage. */
+.ls-group-stream {
+    column-span: all;
+    /* no card frame — this is just the toggle, not a boxed control group */
+    background: transparent;
+    border: none;
+    padding: 0;
+    /* top margin ≈ the viewer's header row height so the button lines up
+       with the top of the image-stage box (not the "LIGHTSHEET" label row). */
+    margin-top: 1.05rem;
+    margin-bottom: 0.85rem;
+}
+/* Slim outline "● LIVE" toggle. Muted when off; glows green while streaming
+   (the .active class is toggled on by applyLightsheetState). */
+.ls-stream-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    width: 100%;
+    padding: 0.34rem 0.6rem;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink-mute);
+    font-family: inherit;
+    font-size: 0.66rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.ls-stream-btn::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--map-ink-mute);
+    flex: none;
+    transition: background 0.12s, box-shadow 0.12s;
+}
+.ls-stream-btn:hover { border-color: var(--map-accent); color: var(--map-ink); }
+.ls-stream-btn.active {
+    border-color: #4ade80;
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.10);
+}
+.ls-stream-btn.active::before {
+    background: #4ade80;
+    box-shadow: 0 0 8px rgba(74, 222, 128, 0.7);
+}
+
+.ls-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+}
+
+/* Generic inline row */
+.ls-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+/* Slider + number inline */
+.ls-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.ls-slider {
+    flex: 1;
+    min-width: 0;
+    height: 3px;
+    accent-color: var(--map-accent);
+    cursor: pointer;
+}
+
+.ls-number {
+    width: 64px;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    border-radius: 4px;
+    padding: 0.2rem 0.35rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.ls-number-sm {
+    width: 50px;
+}
+
+.ls-number:focus {
+    outline: none;
+    border-color: var(--map-accent);
+}
+
+.ls-unit {
+    font-family: 'Inter Tight', system-ui, sans-serif;
+    font-size: 0.62rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+/* Illumination button rows */
+.ls-btn-row {
+    display: flex;
+    gap: 0.35rem;
+    flex-wrap: wrap;
+}
+
+.ls-illum-btn {
+    flex: 1;
+    /* Reserve enough width that labels wrap to a new row instead of
+       truncating to an ellipsis in the narrower 2-column rail. */
+    min-width: 4.25rem;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.28rem 0.4rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ls-illum-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+.ls-illum-btn--active {
+    background: rgba(34, 211, 238, 0.14);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+/* Laser-off indicator */
+.ls-laser-indicator {
+    font-size: 0.6rem;
+    color: var(--map-ink-mute);
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-top: 0.1rem;
+}
+
+.ls-laser-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+.ls-laser-dot--on {
+    background: var(--map-accent);
+}
+
+/* Laser preset row (B2) */
+.ls-laser-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.2rem;
+}
+
+.ls-laser-label {
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+}
+
+.ls-laser-select {
+    flex: 1;
+    min-width: 0;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    border-radius: 4px;
+    padding: 0.18rem 0.3rem;
+    cursor: pointer;
+    transition: border-color 0.12s;
+}
+
+.ls-laser-select:focus {
+    outline: none;
+    border-color: var(--map-accent);
+}
+
+/* Temperature setpoint button */
+.ls-set-btn {
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.6rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    padding: 0.2rem 0.55rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+}
+
+.ls-set-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+}
+
+/* Temperature mini-graph */
+.ls-tempgraph {
+    min-height: 48px;
+    margin-top: 0.25rem;
+}
+
+/* Acquire buttons */
+.ls-acquire-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid var(--map-overlay-edge);
+    color: var(--map-ink);
+    font-family: inherit;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 0.35rem 0.5rem;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ls-acquire-btn:hover:not(:disabled) {
+    background: rgba(255,255,255,0.06);
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+}
+
+.ls-acquire-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Last-captured ref card */
+.ls-lastcap {
+    margin-top: 0.35rem;
+    padding: 0.35rem 0.45rem;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+}
+
+.ls-lastcap[hidden] { display: none; }
+
+.ls-lastcap-label {
+    font-size: 0.58rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+}
+
+.ls-lastcap-ref {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--map-ink);
+    word-break: break-all;
+}
+
+/* ── Timelapse collapsible panel (B2 Task 3) ─────────────────────────────── */
+
+/* Clickable header button (also carries .ls-label for font/color) */
+.ls-collapsible-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+}
+
+/* ▶/▼ caret — rotates when expanded */
+.ls-collapsible-arrow {
+    font-size: 0.5rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: transform 0.15s;
+}
+
+.ls-collapsible-head[aria-expanded="true"] .ls-collapsible-arrow {
+    transform: rotate(90deg);
+}
+
+/* Collapsible body — hidden via [hidden] attribute; explicit rule prevents
+   display overrides from fighting the attribute (mirrors .ls-lastcap[hidden]) */
+.ls-collapsible-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.32rem;
+    margin-top: 0.35rem;
+}
+
+.ls-collapsible-body[hidden] { display: none; }
+
+/* Sub-rows: like .ls-row but slightly indented for the body interior */
+.ls-sub-row {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding-left: 0.25rem;
+}
+
+/* Sub-label: like .ls-label but fixed-width to align inputs column */
+.ls-sub-label {
+    font-size: 0.58rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    min-width: 4.5rem;
+    flex-shrink: 0;
+}
+
+/* Volume-Geometry inset sub-group */
+.ls-sub-section {
+    display: flex;
+    flex-direction: column;
+    gap: 0.28rem;
+    padding: 0.4rem 0.5rem;
+    background: var(--map-paper-2);
+    border: 1px solid var(--map-overlay-edge);
+    border-radius: 4px;
+    margin: 0.15rem 0;
+}
+
+/* "VOLUME GEOMETRY" sub-header */
+.ls-sub-section-label {
+    font-size: 0.52rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    margin-bottom: 0.1rem;
+}
+
+/* Start-result / status line — mono, muted */
+.ls-tl-status {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--map-ink-mute);
+    padding: 0.2rem 0.25rem;
+    word-break: break-all;
+}
+
+.ls-tl-status[hidden] { display: none; }
+
+/* ── Timelapse accordion (active/inactive section states — B3 UX) ─────────── */
+
+/* Wrapper for each accordion section */
+.ls-acc-section {
+    display: flex;
+    flex-direction: column;
+    border-bottom: 1px solid var(--map-rule-soft);
+    padding-bottom: 0.12rem;
+    margin-bottom: 0.08rem;
+}
+.ls-acc-section:last-of-type {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+/* Section header button */
+.ls-acc-head {
+    display: flex;
+    align-items: center;
+    gap: 0.32rem;
+    background: transparent;
+    border: none;
+    padding: 0.26rem 0;
+    cursor: pointer;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+}
+
+/* Status dot — hollow/muted when inactive */
+.ls-acc-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid var(--map-ink-mute);
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+
+/* Section label */
+.ls-acc-title {
+    font-size: 0.575rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    transition: color 0.15s;
+}
+
+/* One-line summary — shown only when section is touched */
+.ls-acc-summary {
+    flex: 1;
+    font-size: 0.57rem;
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.02em;
+    color: var(--map-ink-mute);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+}
+.ls-acc-summary[hidden] { display: none; }
+
+/* Caret arrow */
+.ls-acc-arrow {
+    font-size: 0.44rem;
+    color: var(--map-ink-mute);
+    flex-shrink: 0;
+    margin-left: auto;
+    transition: transform 0.15s, color 0.15s;
+}
+.ls-acc-head[aria-expanded="true"] .ls-acc-arrow {
+    transform: rotate(90deg);
+}
+
+/* ── Active / touched state ────────────────────────────────────────────────── */
+.ls-acc-head.is-active .ls-acc-dot {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-title {
+    color: var(--map-accent);
+}
+.ls-acc-head.is-active .ls-acc-summary {
+    color: var(--map-accent);
+    opacity: 0.85;
+}
+.ls-acc-head.is-active .ls-acc-arrow {
+    color: var(--map-accent);
+}
+
+/* Section body */
+.ls-acc-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.26rem;
+    padding: 0.18rem 0 0.32rem 0.5rem;
+}
+.ls-acc-body[hidden] { display: none; }
+
+/* Outer timelapse panel header dot — signals any section is set */
+.ls-tl-outer-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid transparent;
+    background: transparent;
+    flex-shrink: 0;
+    transition: background 0.15s, border-color 0.15s;
+}
+.ls-tl-outer-dot.is-active {
+    background: var(--map-accent);
+    border-color: var(--map-accent);
+}
+
+/* Start button reads "ready" (accent) once any section is configured */
+.ls-tl-start-btn {
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.ls-tl-start-btn.is-ready {
+    border-color: var(--map-accent);
+    color: var(--map-accent);
+    background: rgba(34, 211, 238, 0.08);
+}
+
+/* Submit row — give the button its full row width */
+.ls-tl-submit-row {
+    margin-top: 0.3rem;
+}
+
+/* ==========================================
+   Gallery Tab
+   ========================================== */
+
+.gallery-tab-container {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    padding: 1.25rem 1.5rem 0;
+    box-sizing: border-box;
+}
+
+.gallery-tab-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    margin-bottom: 1rem;
+    flex-shrink: 0;
+}
+
+.gallery-tab-title {
+    font-size: 1.35rem;
+    font-weight: 300;
+    letter-spacing: -0.01em;
+    color: var(--text);
+    margin: 0;
+    line-height: 1.2;
+    flex-shrink: 0;
+}
+
+.gallery-tab-title-script {
+    font-family: 'Georgia', serif;
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.gallery-tab-title-em {
+    font-style: normal;
+    font-weight: 500;
+    color: var(--accent);
+}
+
+.gallery-tab-controls {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.gallery-filter-select {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+    cursor: pointer;
+    transition: border-color 0.15s;
+}
+
+.gallery-filter-select:hover,
+.gallery-filter-select:focus {
+    border-color: var(--accent);
+    outline: none;
+}
+
+.gallery-refresh-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    font-size: 1rem;
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.gallery-refresh-btn:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.gallery-tab-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 1.5rem;
+}
+
+.gallery-tab-empty,
+.gallery-tab-loading,
+.gallery-tab-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 200px;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.gallery-tab-error {
+    color: var(--accent-red, #ef4444);
+}
+
+.gallery-tab-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.75rem;
+}
+
+.gallery-tab-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    overflow: hidden;
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+}
+
+.gallery-tab-item:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.gallery-tab-thumb {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: contain;
+    background: var(--bg-dark);
+}
+
+.gallery-tab-thumb-placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    aspect-ratio: 1;
+    background: var(--bg-dark);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    text-align: center;
+    padding: 0.5rem;
+    box-sizing: border-box;
+}
+
+.gallery-tab-item-info {
+    padding: 0.4rem 0.5rem 0.45rem;
+    border-top: 1px solid var(--border);
+}
+
+.gallery-tab-item-type {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--accent);
+    text-transform: lowercase;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.gallery-tab-item-embryo {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.1rem;
+}
+
+.gallery-tab-item-ts {
+    font-size: 0.62rem;
+    color: var(--text-muted);
+    opacity: 0.65;
+    margin-top: 0.1rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==========================================
+   Gently Toast — volume acquired / burst acquired
+   ========================================== */
+
+.gently-toast {
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%) translateY(20px);
+    background: var(--bg-card);
+    border: 1px solid var(--accent-green);
+    border-radius: 10px;
+    padding: 0.6rem 1rem 0.6rem 1.1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    z-index: 10010;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.35);
+    opacity: 0;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: auto;
+}
+
+.gently-toast.visible {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+}
+
+.gently-toast-msg {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+    white-space: nowrap;
+}
+
+.gently-toast-action {
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 5px;
+    color: var(--accent);
+    font-size: 0.78rem;
+    padding: 0.2rem 0.55rem;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    white-space: nowrap;
+}
+
+.gently-toast-action:hover {
+    background: var(--accent);
+    color: var(--bg-dark);
+}
+
+.gently-toast-dismiss {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    line-height: 1;
+    cursor: pointer;
+    padding: 0 0.1rem;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+    margin-left: 0.2rem;
+}
 }

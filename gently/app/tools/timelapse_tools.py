@@ -64,9 +64,15 @@ async def start_adaptive_timelapse(
     interval_seconds: float = 120.0,
     condition_value: int | None = None,
     monitoring_mode: str | None = None,
+    tactic_id: str | None = None,
     context: dict | None = None,
 ) -> str:
-    """Start adaptive timelapse in background"""
+    """Start adaptive timelapse in background.
+
+    ``tactic_id`` (optional) links this start to a tactic in the session
+    Operation Plan: on success the tactic is transitioned to 'active', giving
+    lifecycle symmetry with stop/pause/enable_monitoring_mode/queue_burst.
+    """
     agent, err = require_agent(context)
     if err:
         return err
@@ -111,6 +117,16 @@ async def start_adaptive_timelapse(
                 result += f"\n{mode_result}"
             except Exception as e:
                 result += f"\n(Failed to enable monitoring mode '{monitoring_mode}': {e})"
+
+        # Lifecycle symmetry: mark the linked tactic active (best-effort).
+        if tactic_id:
+            try:
+                cs = getattr(agent, "context_store", None)
+                session_id = getattr(agent, "session_id", None)
+                if cs and session_id:
+                    cs.transition_tactic(session_id, tactic_id, "active")
+            except Exception:
+                pass  # never block the timelapse
 
         return result
     except Exception as e:
@@ -267,7 +283,11 @@ async def stop_timelapse_embryo(
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
-async def stop_timelapse(reason: str = "user_request", context: dict | None = None) -> str:
+async def stop_timelapse(
+    reason: str = "user_request",
+    tactic_id: str | None = None,
+    context: dict | None = None,
+) -> str:
     """Stop entire timelapse"""
     agent, err = require_agent(context)
     if err:
@@ -279,6 +299,12 @@ async def stop_timelapse(reason: str = "user_request", context: dict | None = No
 
     try:
         result = await orchestrator.stop(reason)
+        # Mark the linked plan tactic done (guarded no-op when absent).
+        if tactic_id:
+            cs = getattr(agent, "context_store", None)
+            session = getattr(agent, "session_id", None)
+            if cs and session:
+                cs.transition_tactic(session, tactic_id, "done")
         return result
     except Exception as e:
         return f"Error stopping timelapse: {str(e)}"
@@ -290,7 +316,10 @@ async def stop_timelapse(reason: str = "user_request", context: dict | None = No
     category=ToolCategory.EXPERIMENT,
     requires_microscope=True,
 )
-async def pause_timelapse(context: dict | None = None) -> str:
+async def pause_timelapse(
+    tactic_id: str | None = None,
+    context: dict | None = None,
+) -> str:
     """Pause timelapse"""
     agent, err = require_agent(context)
     if err:
@@ -302,6 +331,12 @@ async def pause_timelapse(context: dict | None = None) -> str:
 
     try:
         result = await orchestrator.pause()
+        # Mark the linked plan tactic paused (guarded no-op when absent).
+        if tactic_id:
+            cs = getattr(agent, "context_store", None)
+            session = getattr(agent, "session_id", None)
+            if cs and session:
+                cs.transition_tactic(session, tactic_id, "paused")
         return result
     except Exception as e:
         return f"Error pausing timelapse: {str(e)}"
@@ -1024,6 +1059,7 @@ def get_photodose_status(context: dict | None = None) -> str:
 )
 def enable_monitoring_mode(
     mode_name: str,
+    tactic_id: str | None = None,
     context: dict | None = None,
 ) -> str:
     """Install a named reactive monitoring mode on the orchestrator."""
@@ -1036,7 +1072,14 @@ def enable_monitoring_mode(
         return err
 
     try:
-        return orchestrator.enable_monitoring_mode(mode_name)
+        result = orchestrator.enable_monitoring_mode(mode_name)
+        # Flip the matching plan tactic to active (guarded no-op when absent).
+        if tactic_id:
+            cs = getattr(agent, "context_store", None)
+            session = getattr(agent, "session_id", None)
+            if cs and session:
+                cs.transition_tactic(session, tactic_id, "active")
+        return result
     except Exception as e:
         return f"Error enabling monitoring mode '{mode_name}': {str(e)}"
 
@@ -1153,6 +1196,7 @@ def queue_burst(
     mode: str = "1hz",
     num_slices: int = 1,
     force: bool = False,
+    tactic_id: str | None = None,
     context: dict | None = None,
 ) -> str:
     """Queue an exclusive burst acquisition for one embryo."""
@@ -1165,12 +1209,24 @@ def queue_burst(
         return err
 
     try:
-        return orchestrator.queue_burst(
+        result = orchestrator.queue_burst(
             embryo_id=embryo_id,
             frames=frames,
             mode=mode,
             num_slices=num_slices,
             force=force,
+            tactic_id=tactic_id,
         )
+        # Flip the matching plan tactic to active only when the burst was actually queued.
+        # orchestrator.queue_burst returns "Burst queued for ..." on success and a
+        # human-readable rejection sentence on soft-reject (embryo absent, already had
+        # a burst, already has a queued burst).  Gate on the success prefix so a
+        # soft-reject does NOT phantom-flip the tactic to active.
+        if tactic_id and isinstance(result, str) and result.startswith("Burst queued for "):
+            cs = getattr(agent, "context_store", None)
+            session = getattr(agent, "session_id", None)
+            if cs and session:
+                cs.transition_tactic(session, tactic_id, "active")
+        return result
     except Exception as e:
         return f"Error queueing burst for {embryo_id}: {str(e)}"

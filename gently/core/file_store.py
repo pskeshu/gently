@@ -215,6 +215,37 @@ def _read_jsonl(path: Path) -> list[dict]:
     return records
 
 
+def _last_jsonl_record(path: Path) -> dict | None:
+    """Return the last parseable JSON record in a JSONL file, reading only the tail.
+
+    Keeps appends O(1): instead of loading + parsing the whole file (which made
+    per-prediction writes O(n) and quadratic over a long timelapse), we read a
+    bounded window from the end and walk backwards to the last complete line,
+    skipping a possible trailing partial line from an interrupted write.
+    """
+    if not path.exists():
+        return None
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size == 0:
+        return None
+    window = min(size, 65536)
+    with open(path, "rb") as f:
+        f.seek(size - window)
+        data = f.read(window)
+    for line in reversed(data.split(b"\n")):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            return json.loads(line)
+        except (ValueError, UnicodeDecodeError):
+            continue
+    return None
+
+
 def _now() -> str:
     return datetime.now().isoformat()
 
@@ -445,6 +476,38 @@ class FileStore:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
 
+    def append_temperature_sample(self, session_id: str, sample: dict) -> None:
+        """Append one temperature reading to the session's temperature.jsonl."""
+        sd = self._require_session_dir(session_id)
+        _append_jsonl(sd / "temperature.jsonl", sample)
+
+    def read_temperature_log(self, session_id: str, since: str | None = None) -> list[dict]:
+        """Return temperature samples for a session, optionally filtered to
+        t >= since (ISO-UTC string).
+
+        Reads lines tolerantly: a truncated trailing line (e.g. after a mid-append
+        crash) is silently skipped rather than raising a JSONDecodeError.
+        """
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return []
+        path = sd / "temperature.jsonl"
+        if not path.exists():
+            return []
+        rows = []
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass  # truncated or corrupt line — skip
+        if since is not None:
+            rows = [r for r in rows if str(r.get("t", "")) >= since]
+        return rows
+
     # ------------------------------------------------------------------
     # Session lock
     # ------------------------------------------------------------------
@@ -486,12 +549,17 @@ class FileStore:
         position_fine: dict | None = None,
         calibration: dict | None = None,
         role: str | None = None,
+        strain: str | None = None,
     ) -> None:
         """Register or update an embryo in a session.
 
         ``role`` is the experimental role key from gently.harness.roles.REGISTRY
         (e.g. ``"test"``, ``"calibration"``, ``"unassigned"``). Persisted in
         embryo.yaml. None preserves the existing value on update.
+
+        ``strain`` is a free-form biological sample descriptor (e.g.
+        ``"pan-nuclear GFP"``). Orthogonal to role. None preserves the existing
+        value on update.
 
         Position has two stages: coarse (bottom-camera / manual map placement)
         and fine (future SPIM-objective alignment). New callers should pass
@@ -532,6 +600,7 @@ class FileStore:
                 if calibration is not None
                 else existing.get("calibration"),
                 "role": role if role is not None else existing.get("role", "test"),
+                "strain": strain if strain is not None else existing.get("strain"),
                 "created_at": existing.get("created_at", _now()),
             }
         else:
@@ -544,6 +613,7 @@ class FileStore:
                 "position_fine": position_fine,
                 "calibration": calibration,
                 "role": role if role is not None else "test",
+                "strain": strain,
                 "created_at": _now(),
             }
 
@@ -737,6 +807,14 @@ class FileStore:
         if vol_path.exists():
             return vol_path
         return None
+
+    def get_volume_meta(self, session_id: str, embryo_id: str, timepoint: int) -> dict | None:
+        """Read the sidecar metadata YAML for a volume.  Returns None if not found."""
+        sd = self._session_dir(session_id)
+        if sd is None:
+            return None
+        meta_path = sd / "embryos" / embryo_id / "volumes" / self._volume_meta_filename(timepoint)
+        return _read_yaml(meta_path)
 
     def list_volumes(self, session_id: str, embryo_id: str | None = None) -> list[VolumeInfo]:
         """List volume metadata by scanning sidecar YAML files on disk."""
@@ -1102,15 +1180,14 @@ class FileStore:
                 json.dump(trace_data, f, indent=2, ensure_ascii=False, default=str)
             trace_file = str(trace_path)
 
-        # Compute prediction_id: count existing predictions in this embryo's
-        # JSONL and add 1.  This gives a session-global unique id as long as
-        # we read all embryos, but for simplicity we count per-embryo and add
-        # an offset based on embryo ordering.  A simpler and safer approach:
-        # use a session-level counter stored in perception_runs.yaml.
+        # Per-embryo prediction_id = previous max + 1. Derived from the LAST
+        # record only (bounded tail read) rather than re-parsing the whole
+        # predictions.jsonl on every append — ids stay sequential because we
+        # only ever append in order.
         sd = self._require_session_dir(session_id)
         pred_path = sd / "embryos" / embryo_id / "predictions.jsonl"
-        existing = _read_jsonl(pred_path)
-        prediction_id = len(existing) + 1
+        last = _last_jsonl_record(pred_path)
+        prediction_id = (last.get("prediction_id", 0) + 1) if last else 1
 
         record: PredictionInfo = {
             "prediction_id": prediction_id,

@@ -215,15 +215,42 @@ class AgentMemory:
                         spec = self.store.resolve_imaging_spec(item)
                         campaign = self.store.get_campaign(item.campaign_id)
                         campaign_name = _short_name(campaign) if campaign else "?"
+                        # Walk to the root campaign for the overall goal (the item's
+                        # campaign may be a phase under it).
+                        root = campaign
+                        seen_ids: set[str] = set()
+                        while root and root.parent_id and root.parent_id not in seen_ids:
+                            seen_ids.add(root.id)
+                            root = self.store.get_campaign(root.parent_id)
                         lines.append(f"\n## Active Plan Item: {item.title}")
-                        lines.append(f"Campaign: {campaign_name}")
+                        if root and root.target:
+                            lines.append(f"Goal of the investigation: {root.target}")
+                        if campaign and root and campaign.id != root.id:
+                            lines.append(f"Phase: {campaign_name}")
+                        lines.append(f"Campaign: {_short_name(root) if root else campaign_name}")
                         lines.append(f"Status: {item.status.value}")
                         if spec:
                             lines.append(self.format_imaging_spec_block(spec))
+                        # What's next — the items/gates this run unblocks.
+                        try:
+                            root_id = root.id if root else item.campaign_id
+                            nxt = [
+                                u
+                                for u in self.store.get_unblocked_plan_items(root_id)
+                                if u.id != item.id
+                            ][:3]
+                            if nxt:
+                                bits = []
+                                for u in nxt:
+                                    is_dp = u.type.value == "decision_point"
+                                    bits.append(u.title + (" (decision point)" if is_dp else ""))
+                                lines.append("Next up: " + "; ".join(bits))
+                        except Exception:
+                            pass
                         lines.append(
-                            "\nUse this spec when configuring embryos and "
-                            "starting the timelapse. The user expects these "
-                            "settings from their experimental plan."
+                            "\nYou're executing this item within the plan above — use the "
+                            "spec to configure and run, and keep the goal and what's next in "
+                            "mind (you can make go/no-go calls). The user expects these settings."
                         )
                 except Exception:
                     pass

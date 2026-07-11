@@ -271,6 +271,17 @@ body.chat-docked .agent-chat:not(.open) {
 .ac-level-warning { color: var(--accent-orange, #fb923c); }
 .ac-level-success { color: var(--accent-green); }
 
+/* ── Ask pointer (ux_v2) ─────────────────────────────────── */
+/* Compact transcript reference shown instead of full ask cards when the main
+   stage (AskStage / #ask-stage) owns the answer surface. */
+.ac-ask-pointer {
+    align-self: center;
+    font-size: 11.5px; color: var(--text-muted);
+    text-align: center; font-style: italic;
+    opacity: 0.75;
+}
+.ac-ask-pointer-answered { opacity: 0.35; }
+
 /* ── Choice picker ──────────────────────────────────────── */
 .ac-choice {
     display: flex; flex-direction: column; gap: 7px;
@@ -441,3 +452,42 @@ body.chat-docked .agent-chat:not(.open) {
     color: var(--text-muted); cursor: pointer; font-size: 12px; line-height: 1;
 }
 .ac-queue-remove:hover { color: var(--color-danger, #f87171); }
+
+/* ── Rendered markdown (mdToHtml output, ac-md-* classes) ──────────────────
+   Shared by the chat transcript and the ux_v2 plan-wizard activity feed — the
+   same renderer feeds both, so these styles cover headings, lists, tables,
+   code blocks, quotes and links the agent emits. */
+.ac-md { line-height: 1.55; }
+.ac-md > :first-child { margin-top: 0; }
+.ac-md > :last-child { margin-bottom: 0; }
+.ac-md-h1, .ac-md-h2, .ac-md-h3, .ac-md-h4, .ac-md-h5, .ac-md-h6 {
+    margin: 14px 0 6px; font-weight: 650; line-height: 1.3; letter-spacing: -.01em; color: var(--text);
+}
+.ac-md-h1 { font-size: 1.25em; }
+.ac-md-h2 { font-size: 1.15em; }
+.ac-md-h3 { font-size: 1.05em; }
+.ac-md-h4, .ac-md-h5, .ac-md-h6 { font-size: 1em; }
+.ac-md-p { margin: 7px 0; }
+.ac-md-ul, .ac-md-ol { margin: 7px 0; padding-left: 22px; }
+.ac-md-li { margin: 3px 0; }
+.ac-md-quote {
+    margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--border, #e4e9f0);
+    color: var(--text-muted); font-style: italic;
+}
+.ac-md-hr { border: 0; border-top: 1px solid var(--border, #e4e9f0); margin: 12px 0; }
+.ac-md-link { color: var(--accent, #2f6df6); text-decoration: underline; text-underline-offset: 2px; }
+.ac-md-pre {
+    margin: 8px 0; padding: 10px 12px; border-radius: 8px; overflow-x: auto;
+    background: var(--bg, #f6f8fb); border: 1px solid var(--border, #e4e9f0);
+}
+.ac-md-pre .ac-md-code-block, .ac-md-pre code {
+    font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12px;
+    color: var(--text); background: none; padding: 0; white-space: pre;
+}
+/* GFM tables — wrapped so a wide table scrolls instead of blowing out the column */
+.ac-md-table-wrap { margin: 9px 0; overflow-x: auto; border: 1px solid var(--border, #e4e9f0); border-radius: 8px; }
+.ac-md-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.ac-md-table th, .ac-md-table td { padding: 6px 10px; text-align: left; border-bottom: 1px solid var(--border, #e4e9f0); border-right: 1px solid var(--border, #e4e9f0); }
+.ac-md-table th:last-child, .ac-md-table td:last-child { border-right: 0; }
+.ac-md-table tr:last-child td { border-bottom: 0; }
+.ac-md-table thead th { background: var(--bg, #f6f8fb); font-weight: 650; color: var(--text); }

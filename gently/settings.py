@@ -27,6 +27,30 @@ def _env(key: str, default):
     return val
 
 
+def _load_local_overrides():
+    """Merge config/settings.local.yml (a flat map of GENTLY_* keys) into the
+    environment BEFORE settings are resolved. setdefault so a real env var still
+    wins over the file. This is how the Settings panel's restart-required editors
+    persist overrides — every entry point (viz, device layer, agent) picks them
+    up at import."""
+    try:
+        import yaml
+
+        path = Path(__file__).resolve().parents[1] / "config" / "settings.local.yml"
+        if not path.exists():
+            return
+        data = yaml.safe_load(path.read_text()) or {}
+        if isinstance(data, dict):
+            for k, v in data.items():
+                if v is not None:
+                    os.environ.setdefault(str(k), str(v))
+    except Exception:
+        pass
+
+
+_load_local_overrides()
+
+
 @dataclass(frozen=True)
 class NetworkSettings:
     """Ports, hosts, and bind addresses."""
@@ -56,14 +80,38 @@ class MeshSettings:
 
 @dataclass(frozen=True)
 class ModelSettings:
-    """Claude model identifiers."""
+    """Claude model identifiers — the single source of truth for every tier.
 
-    main: str = field(default_factory=lambda: _env("MODEL_MAIN", "claude-opus-4-6"))
-    perception: str = field(
-        default_factory=lambda: _env("MODEL_PERCEPTION", "claude-opus-4-5-20251101")
+    Tiers are split by role; capability-first per the latest models:
+      - main:       Opus 4.8 ($5/$25). Per-user-turn reasoning + tool
+                    orchestration (plan mode) and the dopaminergic classifier
+                    stage. (Fable 5 was tried here but declined benign planning
+                    turns — stop_reason="refusal" — forcing a fallback on every
+                    turn; set MODEL_MAIN=claude-fable-5 to retry it.)
+      - perception: Opus 4.8 (high-res vision, $5/$25). Highest-frequency tier
+                    (per timepoint); Opus-tier vision for perception accuracy.
+      - medium:     Opus 4.8. Onboarding / wizard summaries.
+      - fast:       Sonnet 4.6 ($3/$15). The cheaper/faster tier — drives the
+                    verifier's parallel ensemble (ensemble_size calls per
+                    verification) and blank-image / summary checks.
+
+    API note: Opus 4.8 rejects thinking budget_tokens and sampling params
+    (temperature/top_p/top_k) — adaptive thinking only, depth via effort.
+    Sonnet 4.6 supports adaptive thinking. No assistant prefills anywhere
+    (4.6+ family rejects them).
+    """
+
+    main: str = field(default_factory=lambda: _env("MODEL_MAIN", "claude-opus-4-8"))
+    perception: str = field(default_factory=lambda: _env("MODEL_PERCEPTION", "claude-opus-4-8"))
+    fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-sonnet-4-6"))
+    medium: str = field(default_factory=lambda: _env("MODEL_MEDIUM", "claude-opus-4-8"))
+    # If the main tier declines a turn (stop_reason="refusal"), retry it on this
+    # model instead of surfacing the refusal. Inert while main is Opus 4.8 (the
+    # guard skips it when fallback == main); relevant if main is set to Fable 5.
+    # Empty disables the fallback.
+    refusal_fallback: str = field(
+        default_factory=lambda: _env("MODEL_REFUSAL_FALLBACK", "claude-opus-4-8")
     )
-    fast: str = field(default_factory=lambda: _env("MODEL_FAST", "claude-haiku-4-5-20251001"))
-    medium: str = field(default_factory=lambda: _env("MODEL_MEDIUM", "claude-sonnet-4-5-20250929"))
 
 
 @dataclass(frozen=True)
@@ -86,7 +134,6 @@ class TimeoutSettings:
     """Timeout values in seconds."""
 
     plan_execution: int = field(default_factory=lambda: _env("TIMEOUT_PLAN", 300))
-    rpc_call: int = field(default_factory=lambda: _env("TIMEOUT_RPC", 60))
     volume_acquisition: int = field(default_factory=lambda: _env("TIMEOUT_VOLUME", 15))
     api_call: int = field(default_factory=lambda: _env("TIMEOUT_API", 10))
 
@@ -121,6 +168,17 @@ class TransferSettings:
 
 
 @dataclass(frozen=True)
+class UISettings:
+    """Web UI feature flags."""
+
+    # New agent-first UX paradigm (welcome→shell unfold, dual-rendered agent
+    # asks, inference-first plan mode, shared-visibility surface). Now ON by
+    # default; the v1 dashboard remains available as a fallback via
+    # GENTLY_UX_V2=0 until the v1 markup is removed in a later cleanup step.
+    ux_v2: bool = field(default_factory=lambda: _env("UX_V2", True))
+
+
+@dataclass(frozen=True)
 class Settings:
     """Top-level settings container."""
 
@@ -132,6 +190,7 @@ class Settings:
     api: ApiSettings = field(default_factory=ApiSettings)
     ml: MlSettings = field(default_factory=MlSettings)
     transfer: TransferSettings = field(default_factory=TransferSettings)
+    ui: UISettings = field(default_factory=UISettings)
 
 
 # Singleton — import this everywhere
