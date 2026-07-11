@@ -34,15 +34,16 @@ import sys
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import numpy as np
 from scipy import ndimage
 
 # Lazy imports
-tifffile = None
-PIL_Image = None
-plt = None
+tifffile: Any = None
+PIL_Image: Any = None
+plt: Any = None
 
 
 def ensure_dependencies():
@@ -87,7 +88,7 @@ def discover_volumes(session_dir: Path, embryo_id: str | None = None) -> dict[st
         return {}
 
     tif_files = list(session_dir.glob("*.tif")) + list(session_dir.glob("*.tiff"))
-    embryo_volumes = {}
+    embryo_volumes: dict = {}
 
     for f in tif_files:
         parts = f.stem.split("_")
@@ -906,9 +907,9 @@ class SessionManager:
         self.embryo_volumes = discover_volumes(session_path)
         self.current_embryo = None
         self.current_idx = 0
-        self._volume_cache = {}  # (embryo, idx) -> volume
-        self._projection_cache = {}  # (embryo, idx, method) -> (img, desc)
-        self._crop_bounds = {}  # embryo -> (y_min, y_max, x_min, x_max)
+        self._volume_cache: dict = {}  # (embryo, idx) -> volume
+        self._projection_cache: dict = {}  # (embryo, idx, method) -> (img, desc)
+        self._crop_bounds: dict = {}  # embryo -> (y_min, y_max, x_min, x_max)
         self._cache_size = 20  # Keep more volumes in memory
 
         if self.embryo_volumes:
@@ -1036,7 +1037,7 @@ class SessionManager:
 class ExplorerHandler(BaseHTTPRequestHandler):
     """HTTP handler for projection explorer."""
 
-    session_manager: SessionManager = None
+    session_manager: SessionManager  # assigned on the class before the server starts serving
     current_methods: list[str] = ["dual_view", "depth_colored"]
     current_z_slice: int = 0  # For 3D volume viewer
 

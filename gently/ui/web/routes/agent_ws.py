@@ -829,7 +829,7 @@ def create_router(server) -> APIRouter:
                 # to take control rather than silently corrupting the
                 # single shared conversation.
                 if msg_type in ("chat", "command", "cancel") and client_id != _control["holder"]:
-                    holder_label = _client_labels.get(_control["holder"]) or "another client"
+                    holder_label = _client_labels.get(_control["holder"] or "") or "another client"
                     await send_fn(
                         {
                             "type": "notification",

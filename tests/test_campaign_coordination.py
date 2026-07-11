@@ -80,7 +80,7 @@ check("Mesh status includes shared campaign", cid in shared_ids)
 
 # Verify shared campaign has expected fields
 if shared:
-    sc = next((c for c in shared if c["id"] == cid), {})
+    sc: dict = next((c for c in shared if c["id"] == cid), {})
     check("Shared campaign has item_count", "item_count" in sc)
     check("Shared campaign has completed_count", "completed_count" in sc)
 

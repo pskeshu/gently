@@ -265,7 +265,7 @@ class FederatedOrchestrator:
         completed = await asyncio.gather(*tasks, return_exceptions=True)
 
         for worker, result in zip(workers, completed, strict=False):
-            if isinstance(result, Exception):
+            if isinstance(result, BaseException):
                 logger.warning(f"Worker {worker.hostname} failed in round {round_num}: {result}")
                 continue
             if result:

@@ -12,6 +12,7 @@ import os
 import uuid
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import anthropic
 import cv2
@@ -77,8 +78,8 @@ class SAMEmbryoDetector:
         self.min_separation_pixels = 100
 
         # SAM models (lazy loaded)
-        self._mask_generator = None
-        self._predictor = None
+        self._mask_generator: Any = None
+        self._predictor: Any = None
 
     def _load_sam(self):
         """Lazy load SAM models"""
@@ -511,8 +512,8 @@ class SAMEmbryoDetector:
 
         # Claude review (if enabled)
         embryos_final = embryos_sam
-        verification = {"verified": True, "skipped": not use_claude_review}
-        changes = {"round1": {"removed": [], "added": []}}
+        verification: dict[str, Any] = {"verified": True, "skipped": not use_claude_review}
+        changes: dict[str, Any] = {"round1": {"removed": [], "added": []}}
 
         if use_claude_review and self.claude_client:
             logger.info("[2/4] Claude Vision review (Round 1)...")
@@ -543,7 +544,7 @@ class SAMEmbryoDetector:
 
             if has_r2_changes:
                 logger.info("Applying Round 2 corrections...")
-                review_r2 = {
+                review_r2: dict[str, Any] = {
                     "false_positives": verification.get("additional_false_positives", []),
                     "false_negatives": verification.get("additional_false_negatives", []),
                 }
@@ -570,7 +571,7 @@ class SAMEmbryoDetector:
             cv2.imwrite(str(output_dir / "detection_final.png"), final_viz)
 
         # Package results
-        results = {
+        results: dict[str, Any] = {
             "embryos": embryo_positions,
             "initial_detections": len(embryos_sam),
             "final_detections": len(embryos_final),
@@ -649,7 +650,7 @@ class SAMEmbryoDetector:
         # Sort by quality and apply spatial separation
         embryo_candidates.sort(key=lambda x: x["area"] * x["stability_score"], reverse=True)
 
-        selected_embryos = []
+        selected_embryos: list[Any] = []
         for candidate in embryo_candidates:
             if len(selected_embryos) >= self.max_embryos:
                 break
@@ -901,7 +902,7 @@ Respond in JSON:
     ) -> tuple[list[dict], dict]:
         """Apply Claude's corrections (from test script)"""
         corrected = []
-        changes = {"removed": [], "added": []}
+        changes: dict[str, Any] = {"removed": [], "added": []}
 
         # Remove false positives
         false_positives = set(review.get("false_positives", []))

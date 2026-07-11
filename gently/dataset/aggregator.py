@@ -13,7 +13,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .schema import init_database
 
@@ -197,6 +197,7 @@ class DatasetAggregator:
             return "skipped"
 
         # Check if exists
+        assert self.conn is not None
         existing = self.conn.execute(
             "SELECT session_id FROM sessions WHERE session_id = ?", (session_id,)
         ).fetchone()
@@ -220,6 +221,7 @@ class DatasetAggregator:
         }
 
         if existing:
+            assert self.conn is not None
             self.conn.execute(
                 """
                 UPDATE sessions SET
@@ -236,6 +238,7 @@ class DatasetAggregator:
             )
             result = "updated"
         else:
+            assert self.conn is not None
             self.conn.execute(
                 """
                 INSERT INTO sessions
@@ -260,6 +263,7 @@ class DatasetAggregator:
         for embryo_id, embryo_data in embryos.items():
             self._process_embryo(session_id, embryo_id, embryo_data)
 
+        assert self.conn is not None
         self.conn.commit()
         return result
 
@@ -271,6 +275,7 @@ class DatasetAggregator:
         # Get UID from data, or generate backward-compatible UID
         embryo_uid = data.get("uid") or f"{session_id}_{embryo_id}"
 
+        assert self.conn is not None
         self.conn.execute(
             """
             INSERT OR REPLACE INTO embryos
@@ -331,6 +336,7 @@ class DatasetAggregator:
                             logger.error(f"Error processing volume {meta_file}: {e}")
                             stats["skipped"] += 1
 
+                assert self.conn is not None
                 self.conn.commit()
                 self._complete_aggregation_log(
                     log_id, stats["added"] + stats["skipped"], stats["added"], 0
@@ -363,6 +369,7 @@ class DatasetAggregator:
                         logger.error(f"Error processing TIFF {tif_file}: {e}")
                         stats["skipped"] += 1
 
+            assert self.conn is not None
             self.conn.commit()
 
         return stats
@@ -378,6 +385,7 @@ class DatasetAggregator:
             return False
 
         # Check if exists
+        assert self.conn is not None
         existing = self.conn.execute("SELECT uid FROM volumes WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
@@ -394,12 +402,14 @@ class DatasetAggregator:
         # Look up embryo_uid from embryos table, or generate backward-compatible UID
         embryo_uid = None
         if session_id and embryo_id:
+            assert self.conn is not None
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
                 (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
+        assert self.conn is not None
         self.conn.execute(
             """
             INSERT INTO volumes
@@ -433,6 +443,7 @@ class DatasetAggregator:
         uid = f"tiff_{tif_path.stem}"
 
         # Check if exists
+        assert self.conn is not None
         existing = self.conn.execute("SELECT uid FROM volumes WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
@@ -463,12 +474,14 @@ class DatasetAggregator:
         # Look up embryo_uid from embryos table, or generate backward-compatible UID
         embryo_uid = None
         if session_id and embryo_id:
+            assert self.conn is not None
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
                 (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
+        assert self.conn is not None
         self.conn.execute(
             """
             INSERT INTO volumes
@@ -530,6 +543,7 @@ class DatasetAggregator:
                         logger.error(f"Error processing image {meta_file}: {e}")
                         stats["skipped"] += 1
 
+            assert self.conn is not None
             self.conn.commit()
             self._complete_aggregation_log(
                 log_id, stats["added"] + stats["skipped"], stats["added"], 0
@@ -552,6 +566,7 @@ class DatasetAggregator:
             return False
 
         # Check if exists
+        assert self.conn is not None
         existing = self.conn.execute("SELECT uid FROM images WHERE uid = ?", (uid,)).fetchone()
         if existing:
             return False
@@ -563,12 +578,14 @@ class DatasetAggregator:
         # Look up embryo_uid from embryos table, or generate backward-compatible UID
         embryo_uid = None
         if session_id and embryo_id:
+            assert self.conn is not None
             result = self.conn.execute(
                 "SELECT embryo_uid FROM embryos WHERE session_id = ? AND embryo_id = ?",
                 (session_id, embryo_id),
             ).fetchone()
             embryo_uid = result[0] if result else f"{session_id}_{embryo_id}"
 
+        assert self.conn is not None
         self.conn.execute(
             """
             INSERT INTO images
@@ -634,6 +651,7 @@ class DatasetAggregator:
                     for embryo_id, stages in transitions.items():
                         for stage, start_timepoint in stages.items():
                             # Check if exists
+                            assert self.conn is not None
                             existing = self.conn.execute(
                                 """
                                 SELECT id FROM ground_truth
@@ -643,6 +661,7 @@ class DatasetAggregator:
                             ).fetchone()
 
                             if existing:
+                                assert self.conn is not None
                                 self.conn.execute(
                                     """
                                     UPDATE ground_truth SET
@@ -653,6 +672,7 @@ class DatasetAggregator:
                                 )
                                 stats["updated"] += 1
                             else:
+                                assert self.conn is not None
                                 self.conn.execute(
                                     """
                                     INSERT INTO ground_truth
@@ -674,6 +694,7 @@ class DatasetAggregator:
                 except Exception as e:
                     logger.error(f"Error processing ground truth {gt_file}: {e}")
 
+            assert self.conn is not None
             self.conn.commit()
             self._complete_aggregation_log(
                 log_id,
@@ -690,6 +711,7 @@ class DatasetAggregator:
 
     def _get_last_run_time(self) -> datetime | None:
         """Get the timestamp of the last successful aggregation."""
+        assert self.conn is not None
         result = self.conn.execute("""
             SELECT MAX(completed_at) FROM aggregation_log
             WHERE status = 'completed'
@@ -701,6 +723,7 @@ class DatasetAggregator:
 
     def _set_last_run_time(self, timestamp: datetime):
         """Record the current aggregation time."""
+        assert self.conn is not None
         self.conn.execute(
             """
             INSERT OR REPLACE INTO metadata (key, value, updated_at)
@@ -708,10 +731,12 @@ class DatasetAggregator:
         """,
             (timestamp.isoformat(), timestamp.isoformat()),
         )
+        assert self.conn is not None
         self.conn.commit()
 
     def _start_aggregation_log(self, source_type: str, source_path: str) -> int:
         """Start a new aggregation log entry."""
+        assert self.conn is not None
         cursor = self.conn.execute(
             """
             INSERT INTO aggregation_log (source_type, source_path, started_at, status)
@@ -719,11 +744,13 @@ class DatasetAggregator:
         """,
             (source_type, source_path, datetime.now().isoformat()),
         )
+        assert self.conn is not None
         self.conn.commit()
-        return cursor.lastrowid
+        return cast("int", cursor.lastrowid)
 
     def _complete_aggregation_log(self, log_id: int, processed: int, added: int, updated: int):
         """Mark an aggregation log as completed."""
+        assert self.conn is not None
         self.conn.execute(
             """
             UPDATE aggregation_log SET
@@ -733,10 +760,12 @@ class DatasetAggregator:
         """,
             (processed, added, updated, datetime.now().isoformat(), log_id),
         )
+        assert self.conn is not None
         self.conn.commit()
 
     def _fail_aggregation_log(self, log_id: int, error_message: str):
         """Mark an aggregation log as failed."""
+        assert self.conn is not None
         self.conn.execute(
             """
             UPDATE aggregation_log SET
@@ -745,6 +774,7 @@ class DatasetAggregator:
         """,
             (datetime.now().isoformat(), error_message, log_id),
         )
+        assert self.conn is not None
         self.conn.commit()
 
 

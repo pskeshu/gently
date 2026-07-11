@@ -76,7 +76,10 @@ class _MeshProtocol(asyncio.DatagramProtocol):
         self._known_ids: set = set()
         self.transport: asyncio.DatagramTransport | None = None
 
-    def connection_made(self, transport: asyncio.DatagramTransport):
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        # DatagramProtocol always receives a DatagramTransport here; narrow for
+        # the typed attribute (and matches the asyncio.BaseProtocol signature).
+        assert isinstance(transport, asyncio.DatagramTransport)
         self.transport = transport
 
     def datagram_received(self, data: bytes, addr: tuple):

@@ -24,6 +24,7 @@ import logging
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -160,6 +161,9 @@ class VisualizationServer(Service):
         self.sessions_dir = Path(sessions_dir)
         self.gently_store = gently_store  # FileStore for persistent volume/projection access
         self.context_store = None  # FileContextStore — set via set_context_store()
+        # Wired in by launch_gently after construction (optional subsystems).
+        self.agent_bridge: Any = None
+        self.mesh_service: Any = None
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()

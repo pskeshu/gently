@@ -385,12 +385,14 @@ class TimelapseOrchestrator:
         datetime
             Scheduled time for the round
         """
+        assert self._started_at is not None  # only called on a running timelapse
         base_time = self._started_at + timedelta(seconds=round_num * self._base_interval_seconds)
         return base_time + self._total_pause_duration
 
     def _get_elapsed_active_time(self) -> float:
         """Get elapsed time excluding pauses, in seconds"""
         now = datetime.now()
+        assert self._started_at is not None  # only called on a running timelapse
         elapsed = (now - self._started_at).total_seconds()
         pause_seconds = self._total_pause_duration.total_seconds()
         return elapsed - pause_seconds
@@ -489,8 +491,9 @@ class TimelapseOrchestrator:
             if e.next_due_at is None:
                 e.next_due_at = now
 
-        # Find the smallest next_due_at
-        soonest = min(eligible, key=lambda e: e.next_due_at)
+        # Find the smallest next_due_at (all are set to a datetime just above)
+        soonest = min(eligible, key=lambda e: e.next_due_at or now)
+        assert soonest.next_due_at is not None
         if soonest.next_due_at <= now:
             return soonest, 0.0
 
@@ -654,10 +657,10 @@ class TimelapseOrchestrator:
                         # event fires for each — the experiment swimlane view
                         # uses these to draw phase boundaries.
                         for eid in paused_ids:
-                            e = self._embryo_states.get(eid)
-                            if e and e.cadence_phase == "paused":
+                            emb = self._embryo_states.get(eid)
+                            if emb and emb.cadence_phase == "paused":
                                 self.transition_cadence(
-                                    e,
+                                    emb,
                                     new_phase="normal",
                                     reschedule=False,
                                     reason="burst_end:resume_paused",
@@ -1027,6 +1030,7 @@ class TimelapseOrchestrator:
                 return f"reached {cond.value} timepoints"
 
         elif cond.condition_type == StopConditionType.DURATION:
+            assert self._started_at is not None  # running timelapse
             elapsed_hours = (datetime.now() - self._started_at).total_seconds() / 3600
             if elapsed_hours >= cond.value:
                 return f"reached {cond.value}h duration"
@@ -2969,6 +2973,7 @@ class TimelapseOrchestrator:
     def _write_trace_file(self, embryo_id: str, timepoint: int, trace_data: dict) -> Path:
         """Write perception trace to JSON file."""
         filename = f"{embryo_id}_T{timepoint:04d}.json"
+        assert self._trace_dir is not None
         file_path = self._trace_dir / filename
         with open(file_path, "w", encoding="utf-8") as f:
             json.dump(trace_data, f, indent=2, ensure_ascii=False)

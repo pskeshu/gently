@@ -56,9 +56,10 @@ import shutil
 import socket
 import tempfile
 import time
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import yaml
@@ -127,7 +128,7 @@ def _coarse_from_legacy(record: dict) -> dict | None:
     return out or None
 
 
-def _normalize_embryo_record(record: dict | None) -> dict | None:
+def _normalize_embryo_record(record: dict | None) -> EmbryoInfo | None:
     """Backfill an embryo.yaml dict so callers always see the new schema.
 
     Adds `position_coarse` derived from legacy `position_x` / `position_y` if
@@ -142,7 +143,7 @@ def _normalize_embryo_record(record: dict | None) -> dict | None:
         if backfill is not None:
             out["position_coarse"] = backfill
     out.setdefault("position_fine", None)
-    return out
+    return cast("EmbryoInfo", out)
 
 
 def _write_yaml(path: Path, data: Any) -> None:
@@ -194,7 +195,7 @@ def _read_yaml(path: Path) -> Any:
         return _sanitize_for_yaml(data)
 
 
-def _append_jsonl(path: Path, record: dict) -> None:
+def _append_jsonl(path: Path, record: Mapping[str, Any]) -> None:
     """Append a single JSON line to a JSONL file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
@@ -640,13 +641,15 @@ class FileStore:
         if not embryos_dir.exists():
             return []
 
-        result = []
+        result: list[EmbryoInfo] = []
         for entry in sorted(embryos_dir.iterdir()):
             if entry.is_dir():
                 yaml_path = entry / "embryo.yaml"
                 data = _read_yaml(yaml_path)
                 if data is not None:
-                    result.append(_normalize_embryo_record(data))
+                    record = _normalize_embryo_record(data)
+                    if record is not None:
+                        result.append(record)
         return result
 
     def list_embryo_ids(self, session_id: str) -> list[str]:
@@ -994,7 +997,7 @@ class FileStore:
             incoming_path.unlink()
 
         # Write sidecar metadata
-        sidecar = {
+        sidecar: dict[str, Any] = {
             "session_id": session_id,
             "source": source,
             "file_path": str(canonical),
@@ -1235,7 +1238,7 @@ class FileStore:
             for rec in records:
                 if run_id is not None and rec.get("run_id") != run_id:
                     continue
-                result.append(rec)
+                result.append(cast("PredictionInfo", rec))
 
         # Sort by timepoint, then prediction_id
         result.sort(key=lambda p: (p.get("timepoint", 0), p.get("prediction_id", 0)))

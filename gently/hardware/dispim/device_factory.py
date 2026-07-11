@@ -5,6 +5,7 @@ Helper functions to create Ophyd devices from Micro-Manager core for hardware co
 """
 
 import logging
+from typing import Any
 
 import pymmcore
 
@@ -83,7 +84,7 @@ def create_devices_from_mmcore(core: pymmcore.CMMCore, config: dict | None = Non
         default_config.update(config)
     cfg = default_config
 
-    devices = {}
+    devices: dict[str, Any] = {}
 
     # Create individual devices first
     scanner = None

@@ -64,7 +64,8 @@ def _get_system_info() -> dict[str, Any]:
         if platform.system() == "Windows":
             import ctypes
 
-            kernel32 = ctypes.windll.kernel32
+            # ctypes.windll exists only on Windows; this branch is platform-guarded.
+            kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
             mem_status = ctypes.c_ulonglong()
             kernel32.GetPhysicallyInstalledSystemMemory(ctypes.byref(mem_status))
             ram_gb = round(mem_status.value / (1024 * 1024), 1)

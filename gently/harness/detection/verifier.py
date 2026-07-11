@@ -211,7 +211,7 @@ class VerificationResult:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to dictionary"""
-        result = {
+        result: dict[str, Any] = {
             "original_detected": self.original_detected,
             "original_confidence": self.original_confidence.value
             if self.original_confidence

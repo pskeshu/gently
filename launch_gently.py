@@ -166,7 +166,7 @@ def _open_browser(url: str) -> None:
             pass
 
     # 2) Explicit executables (an override path, then known Chrome locations).
-    candidates = [override] if override else []
+    candidates: list[str | None] = [override] if override else []
     candidates += [
         shutil.which("chrome"),
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
@@ -325,7 +325,7 @@ async def main(
 
     # Log file path for launch info
     session_name = datetime.now().strftime("%Y%m%d")
-    log_file = log_dir / f"{session_name}.log"
+    log_file = str(log_dir / f"{session_name}.log")
 
     # Connect to device layer via hardware module's client factory
     client = None

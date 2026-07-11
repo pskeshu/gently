@@ -21,10 +21,11 @@ import shutil
 import statistics
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .agent import MicroscopyAgent
@@ -141,7 +142,7 @@ async def run_benchmark(
     n_volumes: int | None = None,
     n_slices: int | None = None,
     n_warmup: int | None = None,
-    progress_fn: callable | None = None,
+    progress_fn: Callable[..., Any] | None = None,
 ) -> BenchmarkResults:
     """
     Run end-to-end volume acquisition benchmark.
@@ -164,7 +165,7 @@ async def run_benchmark(
 
     embryos = list(agent.experiment.embryos.values()) if agent.experiment.embryos else []
     use_synthetic = len(embryos) == 0
-    embryo_ids = ["benchmark_pos"] if use_synthetic else [e.embryo_id for e in embryos]
+    embryo_ids = ["benchmark_pos"] if use_synthetic else [e.id for e in embryos]
 
     results = BenchmarkResults(
         num_embryos=len(embryo_ids),
@@ -174,7 +175,6 @@ async def run_benchmark(
     )
 
     viz_server = getattr(agent, "viz_server", None)
-    has_viz = viz_server is not None
 
     temp_dir = Path(tempfile.mkdtemp(prefix="gently_benchmark_"))
     temp_store = None
@@ -233,8 +233,10 @@ async def run_benchmark(
                     galvo_amp, galvo_center = 0.5, 0.0
                     piezo_amp, piezo_center = 25.0, 50.0
 
-                if embryo and embryo.position:
-                    await agent.client.move_stage(embryo.position["x"], embryo.position["y"])
+                if embryo and embryo.stage_position:
+                    await agent.client.move_stage(
+                        embryo.stage_position["x"], embryo.stage_position["y"]
+                    )
 
                 # Stage 1: Acquisition
                 t0 = time.perf_counter()
@@ -284,7 +286,7 @@ async def run_benchmark(
 
                 # Stage 3: Viz push
                 t4 = time.perf_counter()
-                if has_viz and volume is not None:
+                if viz_server is not None and volume is not None:
                     proj = volume.max(axis=0) if volume.ndim == 3 else volume
                     await viz_server.push_image(
                         proj,

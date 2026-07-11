@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from datetime import datetime
+from typing import Any
 
 from gently.settings import settings
 
@@ -241,7 +242,7 @@ class PromptManager:
         dict
             Context data including timelapse status, events, and detections
         """
-        data = {
+        data: dict[str, Any] = {
             "current_time": datetime.now().isoformat(),
             "timelapse_status": None,
             "recent_events": [],

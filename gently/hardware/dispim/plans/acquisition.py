@@ -419,7 +419,7 @@ def focus_sweep_plan(
         Results dictionary with positions, images, scores, and best focus info
     """
     # Prepare storage for results
-    results = {
+    results: dict[str, Any] = {
         "galvo_positions": galvo_positions,
         "images": [],
         "focus_scores": [],
@@ -770,7 +770,7 @@ def mark_embryo_interactive_plan(
 
         logger.info("Embryo #%d centered!", embryo_number)
 
-    results = {}
+    results: dict[str, Any] = {}
     yield from inner()
     return results
 

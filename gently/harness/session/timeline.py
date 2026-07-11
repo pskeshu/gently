@@ -503,6 +503,7 @@ class TimelineManager:
             # Ensure directory exists
             self._storage_path.mkdir(parents=True, exist_ok=True)
 
+            assert self.storage_file is not None  # implied by _storage_path guard above
             with open(self.storage_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(event.to_dict()) + "\n")
         except Exception as e:
@@ -519,6 +520,7 @@ class TimelineManager:
             with self._lock:
                 events = list(self._events)
 
+            assert self.storage_file is not None  # implied by _storage_path guard above
             with open(self.storage_file, "w", encoding="utf-8") as f:
                 for event in events:
                     f.write(json.dumps(event.to_dict()) + "\n")
