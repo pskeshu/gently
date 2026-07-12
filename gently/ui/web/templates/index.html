@@ -11,6 +11,7 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter+Tight:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/boot-banner.css">
     <link rel="stylesheet" href="/static/css/campaigns.css">
     <link rel="stylesheet" href="/static/css/review.css">
     <link rel="stylesheet" href="/static/css/experiment.css">
@@ -1386,6 +1387,7 @@
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate.js"></script>
     <script src="/static/js/device-layer.js"></script>
+    <script src="/static/js/boot-banner.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->
@@ -1401,5 +1403,15 @@
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/context-surface.js"></script>
     <script src="/static/js/landing.js"></script>
+
+    <!-- Device-layer boot banner (boot-banner.js) — non-modal, follows MMCore
+         startup from any tab; the Devices panel is the on-demand full console. -->
+    <div id="gently-boot-banner" class="boot-banner" hidden>
+        <span class="boot-banner-dot" aria-hidden="true"></span>
+        <span class="boot-banner-text" id="boot-banner-text"></span>
+        <button type="button" class="boot-banner-btn" id="boot-banner-details" hidden>Details</button>
+        <button type="button" class="boot-banner-btn" id="boot-banner-retry" hidden>Retry</button>
+        <button type="button" class="boot-banner-x" id="boot-banner-close" aria-label="Dismiss" hidden>&times;</button>
+    </div>
 </body>
 </html>
