@@ -344,7 +344,7 @@ const ProjectionViewer = {
         // panel can dock/resize and the window can resize. The animation loop
         // re-renders every frame, so on a size change we only need to resize the
         // renderer + camera (coalesced to one rAF). Also listen for the explicit
-        // layout-change event the chat dock fires on pin/unpin.
+        // layout-change event the chat dock fires on collapse/expand + resize.
         if (this._resizeObserver) this._resizeObserver.disconnect();
         this._resizeObserver = new ResizeObserver(() => {
             if (this._resizeRaf) cancelAnimationFrame(this._resizeRaf);

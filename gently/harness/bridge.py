@@ -671,6 +671,13 @@ class AgentBridge:
         pending_choice_result = None
 
         try:
+            # Open the stream envelope immediately — before the (potentially
+            # slow) context build + Claude API call with extended thinking — so
+            # every client shows the "Working…" trust signal the instant the
+            # turn starts, not only once the first token arrives. Pairs with the
+            # stream_end emitted on StopAsyncIteration below.
+            await send_fn({"type": "stream_start"})
+
             while True:
                 try:
                     if pending_choice_result is not None:
