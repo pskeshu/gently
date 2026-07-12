@@ -18,8 +18,10 @@ import asyncio
 import base64
 import os
 from pathlib import Path
+from typing import cast
 
 import anthropic
+from anthropic.types import MessageParam, TextBlock
 
 from gently.settings import settings
 
@@ -190,28 +192,31 @@ class AsyncClaudeClient:
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": image_data,
+                    messages=cast(
+                        list[MessageParam],
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": image_data,
+                                        },
                                     },
-                                },
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
+                                    {"type": "text", "text": prompt},
+                                ],
+                            }
+                        ],
+                    ),
                 ),
                 timeout=self.timeout,
             )
 
             # Extract text response
-            response_text = response.content[0].text
+            response_text = cast(TextBlock, response.content[0]).text
 
             # Parse yes/no response
             is_visible, description = self.parse_yes_no_response(response_text)
@@ -279,28 +284,31 @@ class AsyncClaudeClient:
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=self.max_tokens,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": image_data,
+                    messages=cast(
+                        list[MessageParam],
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": image_data,
+                                        },
                                     },
-                                },
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
+                                    {"type": "text", "text": prompt},
+                                ],
+                            }
+                        ],
+                    ),
                 ),
                 timeout=self.timeout,
             )
 
             # Extract text response
-            response_text = response.content[0].text
+            response_text = cast(TextBlock, response.content[0]).text
 
             # Parse response - now 3 lines: yes/no, score, description
             lines = response_text.strip().split("\n")
@@ -419,28 +427,31 @@ Selected position shows sharp embryo boundaries with maximum contrast and detail
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=150,  # Slightly longer for reasoning
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": image_data,
+                    messages=cast(
+                        list[MessageParam],
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": image_data,
+                                        },
                                     },
-                                },
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
+                                    {"type": "text", "text": prompt},
+                                ],
+                            }
+                        ],
+                    ),
                 ),
                 timeout=self.timeout,
             )
 
             # Extract response
-            response_text = response.content[0].text
+            response_text = cast(TextBlock, response.content[0]).text
             lines = response_text.strip().split("\n", 1)
 
             decision = lines[0].strip().upper()
@@ -541,28 +552,31 @@ Center position shows sharpest nuclear boundaries with maximum contrast."""
                 self.client.messages.create(
                     model=self.model,
                     max_tokens=100,
-                    messages=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "image",
-                                    "source": {
-                                        "type": "base64",
-                                        "media_type": media_type,
-                                        "data": image_data,
+                    messages=cast(
+                        list[MessageParam],
+                        [
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": image_data,
+                                        },
                                     },
-                                },
-                                {"type": "text", "text": prompt},
-                            ],
-                        }
-                    ],
+                                    {"type": "text", "text": prompt},
+                                ],
+                            }
+                        ],
+                    ),
                 ),
                 timeout=self.timeout,
             )
 
             # Parse response
-            response_text = response.content[0].text.strip()
+            response_text = cast(TextBlock, response.content[0]).text.strip()
             lines = response_text.split("\n", 1)
 
             # Extract selected label (first non-empty character that's a valid label)

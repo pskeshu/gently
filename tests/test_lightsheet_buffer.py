@@ -27,7 +27,7 @@ for _mod in (
 
 import bluesky as _bs  # noqa: E402
 
-_bs.RunEngine = MagicMock(name="RunEngine")
+_bs.RunEngine = MagicMock(name="RunEngine")  # type: ignore[misc]  # stub attr on mocked bluesky module
 
 from gently.hardware.dispim.device_layer import DeviceLayerServer  # noqa: E402
 

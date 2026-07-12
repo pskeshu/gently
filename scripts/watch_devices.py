@@ -83,10 +83,10 @@ async def watch_stream(host: str, port: int, raw: bool) -> None:
                 buffer += chunk
                 while b"\n\n" in buffer:
                     frame, buffer = buffer.split(b"\n\n", 1)
-                    data_lines = []
+                    data_lines: list[str] = []
                     is_snapshot = False
-                    for line in frame.splitlines():
-                        line = line.decode("utf-8", errors="replace")
+                    for raw_line in frame.splitlines():
+                        line = raw_line.decode("utf-8", errors="replace")
                         if line.startswith(":"):
                             # comment / keepalive
                             continue

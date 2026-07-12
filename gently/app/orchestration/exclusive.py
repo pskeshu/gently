@@ -538,7 +538,7 @@ async def _maybe_generate_mp4(
         chosen_path = mp4_path
         for codec, ext in codecs:
             test_path = mp4_path.with_suffix(ext)
-            fourcc = cv2.VideoWriter_fourcc(*codec)
+            fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore[attr-defined]  # cv2 stubs omit VideoWriter_fourcc
             w = cv2.VideoWriter(str(test_path), fourcc, 10, (width, height), isColor=True)
             if w.isOpened():
                 writer = w

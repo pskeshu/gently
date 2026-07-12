@@ -5,9 +5,10 @@ Detection queue - executes all enabled detectors on volumes
 import asyncio
 from collections.abc import Callable
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import anthropic
+from anthropic.types import Message, TextBlock
 
 from gently.settings import settings
 
@@ -162,13 +163,13 @@ class DetectionQueue:
 
             # Call Claude Vision API
             response = await asyncio.to_thread(
-                self.claude.messages.create,
+                cast("Callable[..., Message]", self.claude.messages.create),
                 model=self.model,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": content}],
             )
 
-            response_text = response.content[0].text
+            response_text = cast("TextBlock", response.content[0]).text
             api_duration = (datetime.now() - start_time).total_seconds()
 
             # Parse response

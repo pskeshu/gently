@@ -284,4 +284,4 @@ def is_good_focus_curve(scores: list[float], threshold: float = 0.1) -> bool:
         return False
 
     coefficient_of_variation = std_dev / mean_score
-    return coefficient_of_variation >= threshold
+    return bool(coefficient_of_variation >= threshold)

@@ -496,13 +496,13 @@ def analyze_focus_stack(
             score = calculate_focus_score(image, config.algorithm, config=config)
             scores.append(score)
 
-        positions = np.array(positions)
-        scores = np.array(scores)
+        positions_arr = np.array(positions)
+        scores_arr = np.array(scores)
 
         # Try curve fitting to find optimal position
         try:
             fitted_positions, fitted_scores, fit_params, r_squared = fit_focus_curve(
-                positions, scores, config.fit_function
+                positions_arr, scores_arr, config.fit_function
             )
 
             if r_squared >= config.minimum_r_squared:
@@ -512,15 +512,15 @@ def analyze_focus_stack(
                 best_score = fitted_scores[best_idx]
             else:
                 # Fallback to highest measured score
-                best_idx = np.argmax(scores)
-                best_position = positions[best_idx]
-                best_score = scores[best_idx]
+                best_idx = np.argmax(scores_arr)
+                best_position = positions_arr[best_idx]
+                best_score = scores_arr[best_idx]
 
         except (FocusFitError, Exception):
             # Fallback to highest measured score
-            best_idx = np.argmax(scores)
-            best_position = positions[best_idx]
-            best_score = scores[best_idx]
+            best_idx = np.argmax(scores_arr)
+            best_position = positions_arr[best_idx]
+            best_score = scores_arr[best_idx]
             r_squared = 0.0
             fit_params = None
 
@@ -530,8 +530,8 @@ def analyze_focus_stack(
             best_score=float(best_score),
             r_squared=float(r_squared),
             fit_params=fit_params,
-            all_positions=positions,
-            all_scores=scores,
+            all_positions=positions_arr,
+            all_scores=scores_arr,
         )
 
     except Exception as e:

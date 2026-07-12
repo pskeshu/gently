@@ -12,7 +12,7 @@ import os
 import uuid
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 import cv2
@@ -168,7 +168,9 @@ class SAMEmbryoDetector:
             )
             background = cv2.morphologyEx(img_norm, cv2.MORPH_OPEN, kernel_bg)
             img_no_bg = cv2.subtract(img_norm, background)
-            img_no_bg = cv2.normalize(img_no_bg, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+            img_no_bg = cv2.normalize(  # type: ignore[call-overload]  # cv2 stub disallows None dst, valid at runtime
+                img_no_bg, None, 0, 255, cv2.NORM_MINMAX
+            ).astype(np.uint8)
             logger.debug("Background subtracted")
         else:
             img_no_bg = img_norm
@@ -562,7 +564,7 @@ class SAMEmbryoDetector:
             stage_position,
             pixel_size_um,
             objective_mag,
-            image_shape=image.shape[:2],  # (height, width)
+            image_shape=cast("tuple[int, int]", image.shape[:2]),  # (height, width)
         )
 
         # Save final visualization

@@ -132,6 +132,7 @@ def _save_marked_image(image: np.ndarray, embryos: list[dict], output_path: Path
             width=2,
         )
 
+        font: ImageFont.FreeTypeFont | ImageFont.ImageFont
         try:
             font = ImageFont.truetype("arial.ttf", 24)
         except Exception:

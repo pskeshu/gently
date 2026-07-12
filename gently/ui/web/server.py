@@ -570,7 +570,7 @@ class VisualizationServer(Service):
         import uuid
 
         if not hasattr(self, "_marking_sessions"):
-            self._marking_sessions = {}
+            self._marking_sessions: dict[str, dict[str, Any]] = {}
 
         session_id = str(uuid.uuid4())[:8]
 

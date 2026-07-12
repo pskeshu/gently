@@ -14,7 +14,7 @@ import asyncio
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 
@@ -680,7 +680,7 @@ Record your analysis with the record_hardware_context tool.
 """
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
+                self.claude.messages.create,  # type: ignore[arg-type]  # overloaded SDK create() not resolvable through asyncio.to_thread
                 model=self.ensemble_model,  # Use Haiku for speed
                 max_tokens=300,
                 tools=[_HARDWARE_CONTEXT_TOOL],
@@ -849,7 +849,7 @@ Analyze the image(s) carefully and record your review with the record_adversaria
             content = [{"type": "text", "text": prompt}] + images
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
+                self.claude.messages.create,  # type: ignore[arg-type]  # overloaded SDK create() not resolvable through asyncio.to_thread
                 model=self.model,
                 max_tokens=500,
                 tools=[_ADVERSARIAL_TOOL],
@@ -928,7 +928,7 @@ Record your assessment with the record_independent_assessment tool.
             content = [{"type": "text", "text": prompt}] + images
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
+                self.claude.messages.create,  # type: ignore[arg-type]  # overloaded SDK create() not resolvable through asyncio.to_thread
                 model=self.model,
                 max_tokens=400,
                 tools=[_INDEPENDENT_TOOL],
@@ -1032,7 +1032,7 @@ Record your comparison with the record_temporal_comparison tool.
             content = prev_images + [{"type": "text", "text": prompt}] + current_images
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
+                self.claude.messages.create,  # type: ignore[arg-type]  # overloaded SDK create() not resolvable through asyncio.to_thread
                 model=self.model,
                 max_tokens=400,
                 tools=[_TEMPORAL_TOOL],
@@ -1119,12 +1119,12 @@ Respond with ONLY: YES or NO"""
                 try:
                     content = [{"type": "text", "text": ensemble_prompt}] + images
                     response = await asyncio.to_thread(
-                        self.claude.messages.create,
+                        self.claude.messages.create,  # type: ignore[arg-type]  # overloaded SDK create() not resolvable through asyncio.to_thread
                         model=self.ensemble_model,
                         max_tokens=10,  # Very short response expected
                         messages=[{"role": "user", "content": content}],
                     )
-                    return response.content[0].text.strip().upper()
+                    return cast(Any, response.content[0]).text.strip().upper()
                 except Exception as e:
                     logger.debug(f"Ensemble vote failed: {e}")
                     return "ERROR"

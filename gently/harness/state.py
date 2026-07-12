@@ -425,12 +425,12 @@ class EmbryoState:
             return None
 
         # Linear fit: z = slope * secondary_axis + intercept
-        secondary = np.array(secondary)
-        zs = np.array(zs)
+        secondary_arr = np.array(secondary)
+        zs_arr = np.array(zs)
 
         # Use polyfit for linear regression
         try:
-            coeffs = np.polyfit(secondary, zs, 1)
+            coeffs = np.polyfit(secondary_arr, zs_arr, 1)
             return (float(coeffs[0]), float(coeffs[1]))  # slope, intercept
         except Exception:
             return None

@@ -241,10 +241,10 @@ def compute_crop_bounds(
         return (0, volume.shape[1], 0, volume.shape[2])  # Full volume
 
     # Find center of mass and spread
-    cy = np.mean(y_coords)
-    cx = np.mean(x_coords)
-    y_std = max(np.std(y_coords), 20)  # Minimum spread
-    x_std = max(np.std(x_coords), 20)
+    cy = float(np.mean(y_coords))
+    cx = float(np.mean(x_coords))
+    y_std = max(float(np.std(y_coords)), 20.0)  # Minimum spread
+    x_std = max(float(np.std(x_coords)), 20.0)
 
     # Crop to sigma_mult * std around center
     y_min = int(max(0, cy - sigma_mult * y_std - padding))
