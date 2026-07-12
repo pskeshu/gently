@@ -645,6 +645,37 @@ async def main(
                 pass
 
 
+def _serve(**main_kwargs) -> None:
+    """Run one backend lifetime — the reload child's entry point."""
+    try:
+        asyncio.run(main(**main_kwargs))
+    except (KeyboardInterrupt, RuntimeError, SystemExit):
+        pass
+
+
+def _run_with_reload(main_kwargs: dict) -> None:
+    """Dev auto-restart: re-run the backend whenever a gently/*.py file changes.
+
+    Uses watchfiles (the same watcher uvicorn --reload uses) to run the server in
+    a child process and restart it on any .py change under gently/ (or
+    launch_gently.py). This is a WHOLE-backend restart, not an in-place reload —
+    gently's app is built from runtime state (agent, store, mesh), so there is no
+    static import for uvicorn's native reloader to hot-swap. A running device
+    layer restarts too, so this is for UI / backend dev, not live hardware.
+    After a restart, refresh the browser / Tauri window (Ctrl+R) to see changes.
+    """
+    from watchfiles import PythonFilter, run_process
+
+    root = Path(__file__).resolve().parent
+    paths = [str(root / "gently"), str(root / "launch_gently.py")]
+    print(
+        "[reload] watching gently/ + launch_gently.py — edit a .py file and the "
+        "backend restarts (then refresh the page)",
+        flush=True,
+    )
+    run_process(*paths, target=_serve, kwargs=main_kwargs, watch_filter=PythonFilter())
+
+
 def cli_main():
     """Sync entry point for ``gently`` console script (pyproject.toml)."""
     parser = argparse.ArgumentParser(description="Launch Microscopy Agent")
@@ -677,6 +708,12 @@ def cli_main():
         action="store_true",
         help="Do not auto-open the web UI in a browser",
     )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Dev: auto-restart the backend when a gently/*.py file changes "
+        "(watchfiles). Restarts the whole backend — not for live hardware.",
+    )
     args = parser.parse_args()
 
     # An API key is required unless running in UI-only mode.
@@ -699,19 +736,25 @@ def cli_main():
     pick_session = args.resume == "__PICK__"
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
+    main_kwargs = dict(
+        offline=args.offline,
+        show_sessions=args.sessions,
+        resume_session=resume_id,
+        pick_session=pick_session,
+        log_level=log_level,
+        no_browser=args.no_browser,
+        no_api=args.no_api,
+        no_auth=args.no_auth,
+    )
+
+    # Dev: auto-restart the backend on gently/*.py changes (refresh the page to
+    # pick them up). Runs the server in a watchfiles-managed child process.
+    if args.reload:
+        _run_with_reload(main_kwargs)
+        return
+
     try:
-        asyncio.run(
-            main(
-                offline=args.offline,
-                show_sessions=args.sessions,
-                resume_session=resume_id,
-                pick_session=pick_session,
-                log_level=log_level,
-                no_browser=args.no_browser,
-                no_api=args.no_api,
-                no_auth=args.no_auth,
-            )
-        )
+        asyncio.run(main(**main_kwargs))
     except (KeyboardInterrupt, RuntimeError, SystemExit):
         pass
 

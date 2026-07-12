@@ -47,27 +47,54 @@ Tauri shell (Rust, WebView2 window)
 
 ## Run (dev)
 
-```bash
+```powershell
 cd desktop
-npm install                      # once — installs @tauri-apps/cli
-# UI-only smoke test (no hardware, no API key, no login):
-GENTLY_LAUNCH_ARGS="--no-api --offline --no-auth" npx tauri dev
-# Full app (needs ANTHROPIC_API_KEY in the environment / repo .env):
-npx tauri dev
+npm install          # once — restores the Tauri CLI
+npm run dev          # build + launch the shell (spawns the backend for you)
 ```
 
-`tauri dev` builds and launches the shell; it spawns the backend for you.
+`npm run dev` (= `tauri dev`) compiles the shell, opens the window, spawns
+`launch_gently.py --no-browser`, and navigates to the live UI once it's up.
+
+UI-only (no hardware / API key / login) — handy for pure UI work:
+
+```powershell
+$env:GENTLY_LAUNCH_ARGS="--no-api --offline --no-auth"; npm run dev
+```
+
+## Making code changes — what reflects, and how
+
+The window is just a WebView pointed at the Python server, so it splits in three:
+
+| You edit… | Reflects by… | Rebuild? |
+|---|---|---|
+| **Web UI** (`gently/ui/web/templates`, `static/js`, `static/css`) | **Refresh the window** (Ctrl+R) | no — served live by Python |
+| **Python backend** (`gently/**/*.py`, `launch_gently.py`) | restart the backend — or run with **`--reload`** (below), then Ctrl+R | process restart |
+| **Rust shell / config** (`src-tauri/`, `splash/`) | `npm run dev` **auto-rebuilds + relaunches** | automatic (watched) |
+
+**Python hot-reload.** Pass `--reload` and the backend auto-restarts whenever a
+`gently/*.py` file changes (watchfiles) — then just Ctrl+R the window:
+
+```powershell
+$env:GENTLY_LAUNCH_ARGS="--reload --no-api --offline --no-auth"; npm run dev
+# or, iterating in a plain browser instead of the shell:
+uv run python launch_gently.py --reload
+```
+
+It restarts the *whole* backend (a few seconds), so use it for UI / backend dev,
+not live hardware sessions.
 
 ## Build (installer)
 
-```bash
+```powershell
 cd desktop
-npx tauri build                  # produces an NSIS installer under src-tauri/target/release/bundle/
+npm run build        # = tauri build — NSIS installer under src-tauri/target/release/bundle/
 ```
 
-The built app launches the **repo's** `.venv` + `launch_gently.py` (paths baked
-at compile time / overridable — see env vars). It is a single-machine build
-until Python bundling lands.
+Then Gently installs like any Windows app (Start-Menu entry, double-click — no
+terminal). The built app launches the **repo's** `.venv` + `launch_gently.py`
+(paths baked at compile time / overridable — see env vars); it's a single-machine
+build until Python bundling lands.
 
 ## Configuration (env vars read by the shell)
 
