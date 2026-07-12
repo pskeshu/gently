@@ -223,6 +223,74 @@ def run_ink_picker(tui_dist: Path, sessions_json: str) -> str | None:
     return None
 
 
+# launch_gently runs as `__main__`, whose logger is not wired to the configured
+# handlers — so operator-facing lifecycle events (reconnect, tool registration)
+# use a `gently.*`-namespaced logger that reaches the console + file logs.
+_reconnect_log = logging.getLogger("gently.app.launch")
+
+
+async def _attach_microscope(client, store) -> int:
+    """Configure the device session + register microscope tools for a connected
+    client. Used both at boot and when reconnecting to a device layer that was
+    started from the launch gate / Devices panel. Returns the tool count."""
+    try:
+        await client.configure_device_session(str(store.incoming_dir))
+        logger.info("Device session configured: volume_dir=%s", store.incoming_dir)
+    except Exception as e:
+        logger.error("Failed to configure device session (volumes will be slow): %s", e)
+    try:
+        from gently.harness.microscope import register_microscope_tools
+
+        n = register_microscope_tools(client)
+        if n:
+            logger.info("Registered %d microscope tools from device layer", n)
+        return n
+    except Exception as e:
+        logger.debug("Auto-tool registration skipped: %s", e)
+        return 0
+
+
+async def _reconnect_microscope_when_ready(client, viz_server, store) -> None:
+    """Background task (RFC #78 pragmatic reconnect): when a device layer started
+    from the launch gate (or the Devices panel) reaches 'ready', (re)connect the
+    agent's microscope client to it and register its tools — so hardware the gate
+    started becomes usable by the agent without a relaunch. Acts only while the
+    client is disconnected, and registers tools once."""
+    if client is None:
+        return
+    # If already wired up at boot, the boot path registered tools already.
+    tools_registered = bool(client.is_connected)
+    while True:
+        await asyncio.sleep(2.0)
+        sup = getattr(viz_server, "device_supervisor", None) if viz_server else None
+        if sup is None:
+            continue
+        try:
+            # status() does a short socket probe — off the event loop.
+            state = (await asyncio.to_thread(sup.status)).get("state")
+        except Exception:
+            continue
+        if state != "ready":
+            continue
+        # Ensure the client is connected to the now-ready device layer.
+        if not client.is_connected:
+            try:
+                await client.disconnect()  # drop any stale (failed-at-boot) session
+            except Exception:
+                pass
+            try:
+                await client.connect()
+            except Exception as e:
+                _reconnect_log.debug("Microscope reconnect attempt failed: %s", e)
+        # Register microscope tools once — whoever connected the client.
+        if client.is_connected and not tools_registered:
+            n = await _attach_microscope(client, store)
+            _reconnect_log.info(
+                "Microscope client reconnected to the device layer (%d tools registered)", n
+            )
+            tools_registered = True
+
+
 async def main(
     offline: bool = False,
     resume_session: str | None = None,
@@ -352,25 +420,12 @@ async def main(
                 http_url,
             )
 
-    # Configure device session for zero-copy volume transfer
+    # Configure the device session + register microscope tools if the client
+    # connected at boot (an already-running device layer). If the device layer is
+    # started later from the launch gate, _reconnect_microscope_when_ready does
+    # this once it reaches 'ready'.
     if client and client.is_connected:
-        try:
-            incoming = str(store.incoming_dir)
-            await client.configure_device_session(incoming)
-            logger.info("Device session configured: volume_dir=%s", incoming)
-        except Exception as e:
-            logger.error("Failed to configure device session (volumes will be slow): %s", e)
-
-    # Register auto-generated microscope tools from device layer plan schemas
-    if client and client.is_connected:
-        try:
-            from gently.harness.microscope import register_microscope_tools
-
-            n = register_microscope_tools(client)
-            if n:
-                logger.info("Registered %d microscope tools from device layer", n)
-        except Exception as e:
-            logger.debug("Auto-tool registration skipped: %s", e)
+        await _attach_microscope(client, store)
 
     # Create agent
     agent = MicroscopyAgent(
@@ -572,6 +627,11 @@ async def main(
             except Exception:
                 logger.debug("Startup rehydrate failed", exc_info=True)
 
+    # Reconnect the microscope client if a device layer is started from the
+    # launch gate / Devices panel after boot (RFC #78 pragmatic reconnect).
+    if client is not None:
+        asyncio.create_task(_reconnect_microscope_when_ready(client, agent.viz_server, store))
+
     # ── Banner + serve ──────────────────────────────────────────────
     # The viz server runs in-process (uvicorn in a background task). With
     # the TUI retired, the launcher's job is to keep that server alive and
@@ -716,8 +776,21 @@ def cli_main():
     )
     args = parser.parse_args()
 
+    # Gate the agent + hardware by the launch gate's remembered choices (the gate
+    # persists them; they apply at boot). CLI flags can still force these OFF.
+    launch_no_api = args.no_api
+    launch_offline = args.offline
+    try:
+        from gently.ui.web.launch_prefs import load_prefs
+
+        _lp = load_prefs()
+        launch_no_api = args.no_api or not _lp.get("agent", True)
+        launch_offline = args.offline or not _lp.get("hardware", True)
+    except Exception:
+        pass
+
     # An API key is required unless running in UI-only mode.
-    if not args.no_api and not os.getenv("ANTHROPIC_API_KEY"):
+    if not launch_no_api and not os.getenv("ANTHROPIC_API_KEY"):
         print("Error: ANTHROPIC_API_KEY not set")
         if os.name == "nt":
             print("Set with: set ANTHROPIC_API_KEY=your-key")
@@ -737,13 +810,13 @@ def cli_main():
     resume_id = args.resume if args.resume and args.resume != "__PICK__" else None
 
     main_kwargs = dict(
-        offline=args.offline,
+        offline=launch_offline,
         show_sessions=args.sessions,
         resume_session=resume_id,
         pick_session=pick_session,
         log_level=log_level,
         no_browser=args.no_browser,
-        no_api=args.no_api,
+        no_api=launch_no_api,
         no_auth=args.no_auth,
     )
 
