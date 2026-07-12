@@ -326,7 +326,8 @@ def generate_jpeg_projection(
 # Optional tifffile import (only needed for load_volume)
 _tifffile: ModuleType | None
 try:
-    import tifffile as _tifffile
+    import tifffile as _tif
+    _tifffile = _tif
 except ImportError:
     _tifffile = None
 
