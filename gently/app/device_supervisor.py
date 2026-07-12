@@ -93,6 +93,7 @@ class DeviceLayerSupervisor:
         """
         with self._lock:
             if self._alive():
+                assert self._proc is not None  # _alive() guarantees this
                 logger.debug("Device layer already managed (pid=%s)", self._proc.pid)
                 return self._status_locked()
 
@@ -245,7 +246,9 @@ class DeviceLayerSupervisor:
 
         if managed_alive:
             state = "running"
-        elif self._proc is not None and self._proc.returncode not in (None, 0) and not self._stopping:
+        elif (
+            self._proc is not None and self._proc.returncode not in (None, 0) and not self._stopping
+        ):
             state = "crashed"
         elif port_open:
             state = "external"

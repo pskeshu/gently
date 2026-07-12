@@ -164,6 +164,7 @@ class VisualizationServer(Service):
         # Wired in by launch_gently after construction (optional subsystems).
         self.agent_bridge: Any = None
         self.mesh_service: Any = None
+        self.device_supervisor: Any = None  # DeviceLayerSupervisor (RFC #78)
 
         # Connection manager for WebSocket clients
         self.manager = ConnectionManager()

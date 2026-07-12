@@ -70,8 +70,8 @@ def create_router(server) -> APIRouter:
         """Persisted launch choices (hardware/agent toggles + advanced defaults)."""
         return load_prefs()
 
-    @router.post("/api/launch/prefs")
-    async def set_launch_prefs(request: Request, _=Depends(require_control)):
+    @router.post("/api/launch/prefs", dependencies=[Depends(require_control)])
+    async def set_launch_prefs(request: Request):
         """Persist launch choices; returns the merged result."""
         body = await request.json()
         return save_prefs(body if isinstance(body, dict) else {})
@@ -88,8 +88,8 @@ def create_router(server) -> APIRouter:
         """Recent captured console output (oldest → newest) for the console view."""
         return {"lines": get_supervisor(server).log_tail(limit)}
 
-    @router.post("/api/device-layer/start")
-    async def device_layer_start(request: Request, _=Depends(require_control)):
+    @router.post("/api/device-layer/start", dependencies=[Depends(require_control)])
+    async def device_layer_start(request: Request):
         """Spawn (or adopt-if-external) the device layer per the request body.
 
         Body (all optional): ``{"sam_device": "cuda"|"cpu", "config_path": "..."}``.
@@ -106,8 +106,8 @@ def create_router(server) -> APIRouter:
             return JSONResponse({"error": str(e)}, status_code=500)
         return status
 
-    @router.post("/api/device-layer/stop")
-    async def device_layer_stop(request: Request, _=Depends(require_control)):
+    @router.post("/api/device-layer/stop", dependencies=[Depends(require_control)])
+    async def device_layer_stop(request: Request):
         """Stop the managed device layer, with a mid-run confirmation guard.
 
         If hardware looks active and the body doesn't carry ``{"confirm": true}``,
@@ -122,7 +122,7 @@ def create_router(server) -> APIRouter:
                 {
                     "blocked": True,
                     "reason": "hardware is active — an acquisition is running",
-                    "hint": "resend with {\"confirm\": true} to stop anyway",
+                    "hint": 'resend with {"confirm": true} to stop anyway',
                 },
                 status_code=409,
             )
