@@ -552,6 +552,18 @@ async def main(
     if agent.viz_server is not None:
         agent.viz_server.agent_bridge = bridge
         agent.viz_server.set_context_store(context_store)
+        # Device-layer supervisor (managed child subprocess) — lets the launch
+        # gate and the Devices panel start/stop start_device_layer.py from the
+        # UI, and kills it on exit so it never orphans. It auto-detects an
+        # already-running (external) device layer and leaves it alone. RFC #78.
+        try:
+            from gently.app.device_supervisor import DeviceLayerSupervisor
+
+            agent.viz_server.device_supervisor = DeviceLayerSupervisor(
+                port=settings.network.device_port,
+            )
+        except Exception:
+            logger.debug("DeviceLayerSupervisor init skipped", exc_info=True)
         # If launched into an existing session, rehydrate its persisted
         # imagery so the galleries/filmstrips show data from the start.
         if session_to_resume:
