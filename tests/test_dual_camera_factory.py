@@ -25,7 +25,7 @@ for _mod in (
 
 import bluesky as _bs  # noqa: E402
 
-_bs.RunEngine = MagicMock(name="RunEngine")
+_bs.RunEngine = MagicMock(name="RunEngine")  # type: ignore[misc]  # _bs is a MagicMock module stub; RunEngine is not a real type here
 
 from gently.hardware.dispim.device_factory import create_devices_from_mmcore  # noqa: E402
 

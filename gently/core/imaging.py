@@ -22,6 +22,8 @@ import base64
 import io
 import logging
 from pathlib import Path
+from types import ModuleType
+from typing import Any
 
 import numpy as np
 
@@ -135,7 +137,7 @@ def image_to_base64(
             )
 
     buffer = io.BytesIO()
-    save_kwargs = {"format": format, "optimize": True}
+    save_kwargs: dict[str, Any] = {"format": format, "optimize": True}
     if format.upper() == "JPEG":
         save_kwargs["quality"] = quality
     pil_image.save(buffer, **save_kwargs)
@@ -322,8 +324,11 @@ def generate_jpeg_projection(
 # (visualization/ was importing from agent/).
 
 # Optional tifffile import (only needed for load_volume)
+_tifffile: ModuleType | None
 try:
-    import tifffile as _tifffile
+    import tifffile as _tif
+
+    _tifffile = _tif
 except ImportError:
     _tifffile = None
 
@@ -380,13 +385,13 @@ def compute_crop_bounds(
     y_coords, x_coords = np.where(mask)
     if len(y_coords) < 10:
         return (0, volume.shape[1], 0, volume.shape[2])
-    cy, cx = np.mean(y_coords), np.mean(x_coords)
-    y_std = max(np.std(y_coords), 20)
-    x_std = max(np.std(x_coords), 20)
-    y_min = int(max(0, cy - sigma_mult * y_std - padding))
-    y_max = int(min(volume.shape[1], cy + sigma_mult * y_std + padding))
-    x_min = int(max(0, cx - sigma_mult * x_std - padding))
-    x_max = int(min(volume.shape[2], cx + sigma_mult * x_std + padding))
+    cy, cx = float(np.mean(y_coords)), float(np.mean(x_coords))
+    y_std = max(float(np.std(y_coords)), 20.0)
+    x_std = max(float(np.std(x_coords)), 20.0)
+    y_min = int(max(0.0, cy - sigma_mult * y_std - padding))
+    y_max = int(min(float(volume.shape[1]), cy + sigma_mult * y_std + padding))
+    x_min = int(max(0.0, cx - sigma_mult * x_std - padding))
+    x_max = int(min(float(volume.shape[2]), cx + sigma_mult * x_std + padding))
     return (y_min, y_max, x_min, x_max)
 
 

@@ -30,7 +30,7 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -353,7 +353,7 @@ def _load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
                 return ImageFont.truetype(path, size=size)
             except Exception:
                 continue
-    return ImageFont.load_default()
+    return cast(ImageFont.FreeTypeFont, ImageFont.load_default())
 
 
 _font_cache: dict[tuple[int, bool], ImageFont.FreeTypeFont] = {}
@@ -571,7 +571,7 @@ def _open_writer(path: Path, size: tuple[int, int], fps: int):
     w, h = size
     for codec, ext in codecs:
         out_path = path.with_suffix(ext)
-        fourcc = cv2.VideoWriter_fourcc(*codec)
+        fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore[attr-defined]  # cv2 stubs omit this runtime attr
         writer = cv2.VideoWriter(str(out_path), fourcc, fps, (w, h), isColor=True)
         if writer.isOpened():
             return writer, out_path, codec

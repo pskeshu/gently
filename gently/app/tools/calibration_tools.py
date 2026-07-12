@@ -7,6 +7,7 @@ binary edge search, and full/fast calibration routines.
 
 import logging
 from datetime import datetime
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,7 @@ async def _adaptive_focus_sweep(
     )
 
     # Build result dict
-    result_dict = {
+    result_dict: dict[str, Any] = {
         "galvo": galvo_pos,
         "piezo": best_piezo,
         "max_score": float(max(dense_state.scores)) if dense_state.scores else 0.0,

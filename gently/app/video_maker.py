@@ -231,7 +231,7 @@ def create_timelapse_video(
                     ]
 
                     for codec, ext in codecs:
-                        fourcc = cv2.VideoWriter_fourcc(*codec)
+                        fourcc = cv2.VideoWriter_fourcc(*codec)  # type: ignore[attr-defined]  # missing from cv2 stubs
                         test_path = output_path.with_suffix(ext)
                         writer = cv2.VideoWriter(
                             str(test_path), fourcc, fps, (width, height), isColor=True

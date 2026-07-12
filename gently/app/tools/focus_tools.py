@@ -12,6 +12,7 @@ a sample-aware focus map over time. This enables:
 """
 
 from datetime import datetime
+from typing import Any
 
 import numpy as np
 
@@ -105,7 +106,7 @@ async def fine_focus(
     try:
         # Capture images at each position
         images = []
-        captured_positions = []
+        captured_positions: Any = []
 
         for _i, pos in enumerate(positions):
             result = await client.capture_lightsheet_image(
@@ -120,7 +121,7 @@ async def fine_focus(
             return f"Error: Only captured {len(images)} images, need at least 3 for focus analysis"
 
         # Calculate focus scores
-        scores = []
+        scores: Any = []
         config = FocusAnalysisConfig(algorithm=algorithm)
 
         for _i, img in enumerate(images):

@@ -18,11 +18,12 @@ import io
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 import numpy as np
 import tifffile
+from anthropic.types import TextBlock
 from PIL import Image
 
 # Add parent to path for gently imports
@@ -124,7 +125,7 @@ async def classify_image(
 ) -> dict:
     """Use Claude to classify a single image."""
     response = await asyncio.to_thread(
-        client.messages.create,
+        client.messages.create,  # type: ignore[arg-type]  # overloaded SDK method not resolvable by to_thread
         model="claude-haiku-4-5-20251001",  # Fast and cheap for bulk labeling
         max_tokens=200,
         messages=[
@@ -146,7 +147,7 @@ async def classify_image(
     )
 
     # Parse response
-    text = response.content[0].text
+    text = cast(TextBlock, response.content[0]).text
     try:
         # Find JSON in response
         import re

@@ -17,7 +17,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anthropic
 import numpy as np
@@ -1701,28 +1701,30 @@ A VALID image shows:
 Respond with ONLY: VALID or BLANK"""
 
             response = await asyncio.to_thread(
-                self.claude.messages.create,
-                model=settings.models.fast,
-                max_tokens=10,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": b64_image,
+                lambda: self.claude.messages.create(
+                    model=settings.models.fast,
+                    max_tokens=10,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image",
+                                    "source": {
+                                        "type": "base64",
+                                        "media_type": "image/png",
+                                        "data": b64_image,
+                                    },
                                 },
-                            },
-                        ],
-                    }
-                ],
+                            ],
+                        }
+                    ],
+                )
             )
 
-            result = response.content[0].text.strip().upper()
+            block = cast(anthropic.types.TextBlock, response.content[0])
+            result = block.text.strip().upper()
             is_blank = "BLANK" in result
 
             if is_blank:

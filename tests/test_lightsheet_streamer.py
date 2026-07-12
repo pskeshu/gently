@@ -17,7 +17,7 @@ for _mod in (
 # Patch bluesky.RunEngine specifically
 import bluesky as _bs  # noqa: E402
 
-_bs.RunEngine = MagicMock(name="RunEngine")
+_bs.RunEngine = MagicMock(name="RunEngine")  # type: ignore[misc]  # patching mocked module attr
 
 import asyncio  # noqa: E402
 
