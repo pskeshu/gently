@@ -22,7 +22,7 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from gently.ui.web.auth import require_control
-from gently.ui.web.launch_prefs import load_prefs, save_prefs
+from gently.ui.web.launch_prefs import detect_sam_device, load_prefs, save_prefs, stored_prefs
 
 logger = logging.getLogger(__name__)
 
@@ -67,8 +67,15 @@ def create_router(server) -> APIRouter:
 
     @router.get("/api/launch/prefs")
     async def get_launch_prefs():
-        """Persisted launch choices (hardware/agent toggles + advanced defaults)."""
-        return load_prefs()
+        """Persisted launch choices (hardware/agent toggles + advanced defaults).
+
+        Adds `sam_detected` (auto-detected GPU/CPU) and `sam_device_raw` (the
+        stored 'auto'/'cuda'/'cpu' before resolution) for the Settings UI.
+        """
+        prefs = load_prefs()
+        prefs["sam_detected"] = detect_sam_device()
+        prefs["sam_device_raw"] = stored_prefs().get("sam_device", "auto")
+        return prefs
 
     @router.post("/api/launch/prefs", dependencies=[Depends(require_control)])
     async def set_launch_prefs(request: Request):

@@ -28,9 +28,55 @@ _DEFAULTS: dict = {
     "hardware": True,  # start + connect the device layer
     "agent": True,  # enable chat / perception / planning (needs API key)
     "port": settings.network.device_port,
-    "sam_device": "cuda",
+    # "auto" is resolved to cuda/cpu at load time by GPU auto-detection — a
+    # biologist should never have to choose (RFC #78). Only a scope wrangler
+    # pins a concrete value (in Settings).
+    "sam_device": "auto",
 }
 _ALLOWED_KEYS = set(_DEFAULTS)
+
+_sam_device_cache: str | None = None
+
+
+def detect_sam_device() -> str:
+    """Auto-detect the SAM inference device: ``cuda`` if an NVIDIA GPU is present,
+    else ``cpu``. Cached — detection is cheap once torch is loaded."""
+    global _sam_device_cache
+    if _sam_device_cache is not None:
+        return _sam_device_cache
+    dev = "cpu"
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            dev = "cuda"
+    except Exception:
+        # torch missing/failed — fall back to a plain nvidia-smi presence check.
+        import shutil
+        import subprocess
+
+        if shutil.which("nvidia-smi"):
+            try:
+                subprocess.run(["nvidia-smi"], capture_output=True, timeout=4, check=True)
+                dev = "cuda"
+            except Exception:
+                pass
+    _sam_device_cache = dev
+    logger.info("SAM device auto-detected: %s", dev)
+    return dev
+
+
+def stored_prefs() -> dict:
+    """The raw persisted prefs (unresolved), or {} — for the Settings UI which
+    needs to show 'auto' vs a pinned SAM device."""
+    try:
+        if PREFS_PATH.exists():
+            data = json.loads(PREFS_PATH.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                return data
+    except (OSError, ValueError):
+        pass
+    return {}
 
 
 def load_prefs() -> dict:
@@ -47,6 +93,9 @@ def load_prefs() -> dict:
                 prefs.update({k: stored[k] for k in _ALLOWED_KEYS if k in stored})
     except (OSError, ValueError) as e:
         logger.warning("launch prefs unreadable (%s) — using defaults", e)
+    # Resolve the SAM device unless a concrete value was pinned in Settings.
+    if prefs.get("sam_device") in (None, "", "auto"):
+        prefs["sam_device"] = detect_sam_device()
     return prefs
 
 
