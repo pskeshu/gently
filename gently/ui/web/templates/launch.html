@@ -5,151 +5,150 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Launch Gently</title>
 <!--
-  Launch gate — the bare two-question start screen (RFC #78).
-  Styling lifted from docs/superpowers/mockups/2026-07-02-launcher-gate.html and
-  wired to /api/launch/prefs + /api/device-layer/start.
+  Launch gate — the entry point (RFC #78). Two plain questions:
+    · are we using the microscope this session?
+    · is the assistant on?
+  On "Let's go" it POSTs /api/launch/go (persist + mark passed + start the
+  device layer if the microscope is on) and hands off to the dashboard
+  immediately — MMCore init runs in the background and is followed there via
+  the boot banner / Devices console.
 
-  SCAFFOLD NOTE: this gate persists the choices and (if hardware is on) starts the
-  device layer, then hands off to the dashboard. The full "defer boot-level init
-  until Let's go" refactor — so the *agent* toggle actually gates agent startup —
-  is phase 2 in the RFC and is not wired here yet; the agent toggle is persisted
-  but currently advisory.
+  Theme-aware: reads the app's `gently-theme` and matches light/dark (no more
+  dark-gate → light-dashboard flash). Device port / SAM device are NOT here —
+  they're install-time Settings, and the GPU is auto-detected.
 -->
+<script>
+  // Apply the app's saved theme before first paint (no flash).
+  (function () {
+    try {
+      var t = localStorage.getItem('gently-theme') || 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
 <style>
-  :root{
-    --bg:#0a0d13; --inset:#0d121b; --line:#1b222e; --line2:#27303d;
-    --text:#e7edf4; --muted:#8792a3; --faint:#57616f;
-    --accent:#5b8cff; --accent-txt:#a9c4ff; --accentdim:rgba(91,140,255,.12);
-    --green:#40d17f; --red:#ff6b6b; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  :root, [data-theme="dark"] {
+    --g-bg:#0d1117; --g-card:#161b22; --g-hover:#21262d; --g-border:#30363d;
+    --g-text:#c9d1d9; --g-muted:#8b949e; --g-faint:#6e7681; --g-accent:#60a5fa;
+    --g-spot:rgba(96,140,250,.12);
+  }
+  [data-theme="light"] {
+    --g-bg:#f8fafc; --g-card:#ffffff; --g-hover:#f1f5f9; --g-border:#e2e8f0;
+    --g-text:#1e293b; --g-muted:#64748b; --g-faint:#94a3b8; --g-accent:#3b82f6;
+    --g-spot:rgba(59,130,246,.10);
   }
   *{box-sizing:border-box}
   html,body{margin:0}
-  body{min-height:100vh;color:var(--text);
+  body{min-height:100vh;color:var(--g-text);
     font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
-    background:radial-gradient(1000px 500px at 50% -14%, rgba(91,140,255,.11), transparent 60%), var(--bg);
-    display:flex;justify-content:center;align-items:center;padding:40px 20px}
+    background:radial-gradient(1000px 520px at 50% -14%, var(--g-spot), transparent 60%), var(--g-bg);
+    display:flex;justify-content:center;align-items:center;padding:40px 20px;transition:background .2s,color .2s}
   .wrap{width:100%;max-width:460px}
   .head{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:8px}
-  .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--accent);position:relative;
-    background:radial-gradient(circle at 50% 50%, rgba(91,140,255,.28), transparent 70%)}
+  .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--g-accent);position:relative;
+    background:radial-gradient(circle at 50% 50%, var(--g-spot), transparent 70%)}
   .mark::after{content:"";position:absolute;inset:0;margin:auto;width:9px;height:9px;border-radius:50%;
-    background:var(--accent);box-shadow:0 0 12px var(--accent)}
+    background:var(--g-accent);box-shadow:0 0 12px var(--g-accent)}
   .wordmark{font-size:22px;font-weight:700;letter-spacing:-.015em}
-  .cap{text-align:center;color:var(--muted);font-size:14px;margin:0 0 30px}
-  .opt{display:flex;align-items:center;gap:15px;padding:18px 18px;border:1px solid var(--line2);border-radius:13px;
-    background:linear-gradient(180deg,#111621,#0e131c);margin-bottom:13px;transition:.15s;cursor:pointer}
-  .opt.on{border-color:rgba(91,140,255,.55);background:linear-gradient(180deg,rgba(91,140,255,.09),#0e131c);
-    box-shadow:0 0 0 1px rgba(91,140,255,.25), 0 14px 34px -18px rgba(91,140,255,.5)}
+  .cap{text-align:center;color:var(--g-muted);font-size:14px;margin:0 0 30px}
+  .opt{display:flex;align-items:center;gap:15px;padding:18px;border:1px solid var(--g-border);border-radius:13px;
+    background:var(--g-card);margin-bottom:13px;transition:.15s;cursor:pointer}
+  .opt:hover{border-color:var(--g-faint)}
+  .opt:focus-visible{outline:2px solid var(--g-accent);outline-offset:2px}
+  .opt.on{border-color:color-mix(in srgb, var(--g-accent) 55%, transparent);
+    background:color-mix(in srgb, var(--g-accent) 8%, var(--g-card));
+    box-shadow:0 0 0 1px color-mix(in srgb, var(--g-accent) 25%, transparent)}
   .ic{width:42px;height:42px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
-    background:var(--inset);border:1px solid var(--line2);color:var(--muted)}
-  .opt.on .ic{background:var(--accentdim);border-color:rgba(91,140,255,.4);color:var(--accent-txt)}
+    background:var(--g-hover);border:1px solid var(--g-border);color:var(--g-muted)}
+  .opt.on .ic{background:color-mix(in srgb, var(--g-accent) 14%, transparent);
+    border-color:color-mix(in srgb, var(--g-accent) 40%, transparent);color:var(--g-accent)}
   .txt{flex:1;min-width:0}
   .t{font-size:15.5px;font-weight:650;letter-spacing:-.01em}
-  .s{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
-  .s .mono{font-family:var(--mono);color:var(--faint)}
-  .sw{width:44px;height:25px;border-radius:999px;background:#232c39;position:relative;flex:none;transition:.15s;border:1px solid var(--line2)}
-  .sw::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#5c6675;transition:.15s}
-  .opt.on .sw{background:var(--accent);border-color:transparent;box-shadow:0 0 16px rgba(91,140,255,.4)}
+  .s{font-size:12.5px;color:var(--g-muted);margin-top:3px;line-height:1.45}
+  .sw{width:44px;height:25px;border-radius:999px;background:var(--g-hover);position:relative;flex:none;transition:.15s;border:1px solid var(--g-border)}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:var(--g-faint);transition:.15s}
+  .opt.on .sw{background:var(--g-accent);border-color:transparent}
   .opt.on .sw::after{left:21px;background:#fff}
-  .btn{width:100%;margin-top:9px;background:linear-gradient(180deg,#5b8cff,#4271ec);color:#fff;border:0;border-radius:12px;
-    padding:16px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 14px 34px -12px rgba(91,140,255,.7);
-    display:flex;align-items:center;justify-content:center;gap:9px}
-  .btn[disabled]{opacity:.6;cursor:default}
-  .btn .go{font-size:17px}
-  .adv{border:0;background:none;color:var(--muted);font-size:12px;cursor:pointer;padding:0}
-  .adv:hover{color:var(--text)}
-  .advbox{display:none;margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:11px;background:var(--inset)}
-  .advbox.open{display:block}
-  .field{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0}
-  .field label{font-size:12.5px;color:var(--muted)}
-  .field input,.field select{background:#0a0e15;color:var(--text);border:1px solid var(--line2);border-radius:8px;
-    padding:7px 9px;font-size:13px;font-family:var(--mono);min-width:120px}
-  .foot{text-align:center;margin-top:16px;color:var(--faint);font-size:12px}
-  .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--muted)}
-  .status.err{color:var(--red)}
-  .status.ok{color:var(--green)}
+  .btn{width:100%;margin-top:18px;background:var(--g-accent);color:#fff;border:0;border-radius:12px;
+    padding:16px;font-size:16px;font-weight:700;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;gap:9px;transition:filter .15s,opacity .15s}
+  .btn:hover:not(:disabled){filter:brightness(1.08)}
+  .btn:disabled{opacity:.7;cursor:default}
+  .foot{text-align:center;margin-top:16px;color:var(--g-faint);font-size:12px}
+  .status{text-align:center;margin-top:14px;font-size:12.5px;min-height:18px;color:var(--g-muted)}
+  .status.err{color:#f85149}
 </style>
 </head>
 <body>
   <div class="wrap">
     <div class="head"><span class="mark"></span><span class="wordmark">Gently</span></div>
-    <p class="cap">What do you need today?</p>
+    <p class="cap">What are we doing today?</p>
 
-    <div class="opt" id="opt-hardware" data-key="hardware">
-      <div class="ic">
+    <div class="opt" id="opt-hardware" data-key="hardware" role="switch" aria-checked="true" tabindex="0" aria-labelledby="hw-t">
+      <div class="ic" aria-hidden="true">
         <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M12 13v6M8 21h8M6 9a6 6 0 0 1 8-5.6"/></svg>
       </div>
       <div class="txt">
-        <div class="t">Microscope hardware</div>
-        <div class="s">Start the device layer &amp; connect to the rig <span class="mono" id="port-label">· :60610</span></div>
+        <div class="t" id="hw-t">Microscope</div>
+        <div class="s" id="hw-s"></div>
       </div>
-      <span class="sw"></span>
+      <span class="sw" aria-hidden="true"></span>
     </div>
 
-    <div class="opt" id="opt-agent" data-key="agent">
-      <div class="ic">
+    <div class="opt" id="opt-agent" data-key="agent" role="switch" aria-checked="true" tabindex="0" aria-labelledby="ag-t">
+      <div class="ic" aria-hidden="true">
         <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>
       </div>
       <div class="txt">
-        <div class="t">AI agent</div>
-        <div class="s">Chat, perception &amp; planning — uses your API key</div>
+        <div class="t" id="ag-t">Assistant</div>
+        <div class="s" id="ag-s"></div>
       </div>
-      <span class="sw"></span>
+      <span class="sw" aria-hidden="true"></span>
     </div>
 
     <button class="btn" id="go">Let's go <span class="go">&rarr;</span></button>
     <div class="status" id="status"></div>
-
-    <div class="foot">
-      <button class="adv" id="adv-toggle">Advanced options</button> &middot; remembers your choice
-    </div>
-    <div class="advbox" id="advbox">
-      <div class="field">
-        <label for="f-port">Device port</label>
-        <input id="f-port" type="number" min="1" max="65535">
-      </div>
-      <div class="field">
-        <label for="f-sam">SAM device</label>
-        <select id="f-sam"><option value="cuda">cuda</option><option value="cpu">cpu</option></select>
-      </div>
-    </div>
+    <div class="foot">Remembers your last choice</div>
   </div>
 
 <script>
-const state = { hardware: true, agent: true, port: 60610, sam_device: "cuda" };
+const state = { hardware: true, agent: true };
+const COPY = {
+  hardware: { on: "Connect to the microscope this session.", off: "Not this session — saved data only." },
+  agent:    { on: "Help find embryos and watch the timelapse.", off: "Off — manual control only." },
+};
 
 function paint() {
   document.getElementById("opt-hardware").classList.toggle("on", state.hardware);
+  document.getElementById("opt-hardware").setAttribute("aria-checked", String(state.hardware));
+  document.getElementById("hw-s").textContent = state.hardware ? COPY.hardware.on : COPY.hardware.off;
   document.getElementById("opt-agent").classList.toggle("on", state.agent);
-  document.getElementById("port-label").textContent = "· :" + state.port;
-  document.getElementById("f-port").value = state.port;
-  document.getElementById("f-sam").value = state.sam_device;
+  document.getElementById("opt-agent").setAttribute("aria-checked", String(state.agent));
+  document.getElementById("ag-s").textContent = state.agent ? COPY.agent.on : COPY.agent.off;
+  // Honest button label: "Start" spins up the microscope; "Open" is instant.
+  document.querySelector("#go").childNodes[0].nodeValue = (state.hardware ? "Start " : "Open ");
 }
 
 async function loadPrefs() {
   try {
     const r = await fetch("/api/launch/prefs");
-    if (r.ok) Object.assign(state, await r.json());
+    if (r.ok) {
+      const p = await r.json();
+      if (typeof p.hardware === "boolean") state.hardware = p.hardware;
+      if (typeof p.agent === "boolean") state.agent = p.agent;
+    }
   } catch (e) { /* keep defaults */ }
   paint();
 }
 
+function toggle(key) { state[key] = !state[key]; paint(); }
 for (const id of ["opt-hardware", "opt-agent"]) {
-  document.getElementById(id).addEventListener("click", (e) => {
-    const key = e.currentTarget.dataset.key;
-    state[key] = !state[key];
-    paint();
+  const el = document.getElementById(id);
+  el.addEventListener("click", () => toggle(el.dataset.key));
+  el.addEventListener("keydown", (e) => {
+    if (e.key === " " || e.key === "Enter") { e.preventDefault(); toggle(el.dataset.key); }
   });
 }
-document.getElementById("f-port").addEventListener("change", (e) => {
-  state.port = parseInt(e.target.value, 10) || state.port; paint();
-});
-document.getElementById("f-sam").addEventListener("change", (e) => {
-  state.sam_device = e.target.value;
-});
-document.getElementById("adv-toggle").addEventListener("click", () => {
-  document.getElementById("advbox").classList.toggle("open");
-});
 
 function setStatus(msg, kind) {
   const el = document.getElementById("status");
@@ -160,33 +159,26 @@ function setStatus(msg, kind) {
 document.getElementById("go").addEventListener("click", async () => {
   const btn = document.getElementById("go");
   btn.disabled = true;
+  btn.childNodes[0].nodeValue = "Starting ";
   try {
-    setStatus("Saving your choice…");
-    await fetch("/api/launch/prefs", {
+    const r = await fetch("/api/launch/go", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(state),
     });
-
-    if (state.hardware) {
-      setStatus("Starting the device layer…");
-      const r = await fetch("/api/device-layer/start", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sam_device: state.sam_device }),
-      });
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}));
-        setStatus("Device layer didn't start: " + (body.error || r.status), "err");
-        btn.disabled = false;
-        return;
-      }
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      setStatus("Couldn't start: " + (b.error || r.status), "err");
+      btn.disabled = false; paint();
+      return;
     }
-    setStatus("Opening the dashboard…", "ok");
+    const b = await r.json().catch(() => ({}));
+    if (b.error) setStatus("Microscope: " + b.error, "err");
+    // Hand off immediately — the dashboard follows the boot from here.
     window.location.href = "/";
   } catch (e) {
     setStatus("Something went wrong: " + e, "err");
-    btn.disabled = false;
+    btn.disabled = false; paint();
   }
 });
 

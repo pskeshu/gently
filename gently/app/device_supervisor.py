@@ -26,6 +26,7 @@ Deliberately deferred (RFC "open questions"):
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 import os
 import signal
@@ -80,6 +81,12 @@ class DeviceLayerSupervisor:
         # reads as "stopped" rather than "crashed".
         self._stopping = False
 
+        # Latest structured startup-progress / failure events parsed from the
+        # child's stdout (@@GENTLY_PROGRESS@@ lines). Single dict refs, swapped
+        # atomically by the reader thread and read without the lock (GIL).
+        self._progress: dict | None = None
+        self._failure: dict | None = None
+
         atexit.register(self._atexit_cleanup)
 
     # ── lifecycle ────────────────────────────────────────────────────────
@@ -118,8 +125,13 @@ class DeviceLayerSupervisor:
             if config_path is not None:
                 self.config_path = config_path
 
+            # -u = unbuffered stdout: CPython block-buffers stdout when it's a
+            # pipe, which would stall the [N/5] progress + @@GENTLY_PROGRESS@@
+            # lines in the child until the buffer fills. Unbuffered makes the
+            # boot readout live.
             cmd = [
                 sys.executable,
+                "-u",
                 str(script),
                 "--port",
                 str(self.port),
@@ -144,6 +156,8 @@ class DeviceLayerSupervisor:
 
             logger.info("Spawning device layer: %s", " ".join(cmd))
             self._log.clear()
+            self._progress = None
+            self._failure = None
             self._stopping = False
             self._proc = subprocess.Popen(
                 cmd,
@@ -235,21 +249,33 @@ class DeviceLayerSupervisor:
     def _status_locked(self) -> dict:
         """Compute status. Caller must hold ``_lock``.
 
-        state:
-          running  — we own a live child
-          crashed  — our child exited non-zero without us asking it to
-          external — we don't own it, but the port is listening
-          stopped  — nothing running (never started, or cleanly stopped)
+        state (our managed child, in lifecycle order):
+          starting     — spawned, no progress events yet, HTTP port not up
+          initializing — [N/5] progress flowing, port not up yet (carries progress)
+          ready        — child alive AND port open (the server binds only after
+                         initialize() finishes, so an open port == init done)
+          failed       — child exited non-zero and we captured a structured
+                         failure reason (carries failure summary + hints)
+          crashed      — child exited non-zero with no diagnosis (unexpected)
+          external     — port listening but not our child
+          stopped      — nothing running (never started, or cleanly stopped)
         """
         managed_alive = self._alive()
         port_open = self._port_open()
+        progress = self._progress  # atomic ref read (no lock needed)
+        failure = self._failure
 
         if managed_alive:
-            state = "running"
+            if port_open:
+                state = "ready"
+            elif progress is not None:
+                state = "initializing"
+            else:
+                state = "starting"
         elif (
             self._proc is not None and self._proc.returncode not in (None, 0) and not self._stopping
         ):
-            state = "crashed"
+            state = "failed" if failure else "crashed"
         elif port_open:
             state = "external"
         else:
@@ -273,6 +299,8 @@ class DeviceLayerSupervisor:
             "port_open": port_open,
             "sam_device": self.sam_device,
             "uptime_seconds": uptime,
+            "progress": progress,
+            "failure": failure,
             "log_tail": self.log_tail(50),
         }
 
@@ -303,14 +331,32 @@ class DeviceLayerSupervisor:
         except (ProcessLookupError, OSError):
             pass
 
+    # Sentinel prefix for machine-readable startup events on the child's stdout
+    # (emitted by gently.hardware.console_ui.progress_event).
+    _PROGRESS_PREFIX = "@@GENTLY_PROGRESS@@ "
+
     def _drain_output(self, proc: subprocess.Popen) -> None:
-        """Reader-thread body: copy child stdout into the ring buffer."""
+        """Reader-thread body: copy child stdout into the ring buffer, peeling
+        off structured @@GENTLY_PROGRESS@@ events into _progress / _failure."""
         stream = proc.stdout
         if stream is None:
             return
         try:
-            for line in iter(stream.readline, ""):
-                self._log.append(line.rstrip("\n"))
+            for raw in iter(stream.readline, ""):
+                line = raw.rstrip("\n")
+                if line.startswith(self._PROGRESS_PREFIX):
+                    try:
+                        ev = json.loads(line[len(self._PROGRESS_PREFIX) :])
+                    except ValueError:
+                        self._log.append(line)  # malformed — keep it visible
+                        continue
+                    # Atomic single-ref swaps; read lock-free in _status_locked.
+                    if ev.get("status") == "failed":
+                        self._failure = ev
+                    else:
+                        self._progress = ev
+                    continue  # keep the sentinel out of the human-visible tail
+                self._log.append(line)
         except (ValueError, OSError):
             # Stream closed underneath us during shutdown — fine.
             pass

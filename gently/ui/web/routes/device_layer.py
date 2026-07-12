@@ -76,6 +76,34 @@ def create_router(server) -> APIRouter:
         body = await request.json()
         return save_prefs(body if isinstance(body, dict) else {})
 
+    @router.post("/api/launch/go", dependencies=[Depends(require_control)])
+    async def launch_go(request: Request):
+        """Submit the launch gate: persist the toggles, mark the gate passed
+        (so / stops bouncing to /launch), and — if the microscope toggle is on —
+        start the device layer.
+
+        Returns fast: start() only *spawns* the child. MMCore init and its
+        per-stage progress happen in the background and are polled via
+        /api/device-layer/status, so the UI can hand off to the dashboard
+        immediately and follow the boot there.
+        """
+        body = await _safe_json(request)
+        prefs = save_prefs(body if isinstance(body, dict) else {})
+        server.gate_passed = True
+        device = None
+        if prefs.get("hardware"):
+            try:
+                device = get_supervisor(server).start()
+            except (FileNotFoundError, OSError) as e:
+                logger.error("device layer start failed from launch gate: %s", e)
+                return {"ok": True, "hardware": True, "error": str(e)}
+        return {
+            "ok": True,
+            "hardware": bool(prefs.get("hardware")),
+            "agent": bool(prefs.get("agent")),
+            "device": device,
+        }
+
     # ── Devices panel: device-layer supervision ──────────────────────────
 
     @router.get("/api/device-layer/status")

@@ -19,14 +19,18 @@
  * already toasts on a bare 403, so Start/Stop need no credential code.
  */
 const DeviceLayerCard = (function () {
-    const POLL_MS = 5000;
+    let _pollMs = 5000;   // adaptive: 1s while booting, 5s otherwise
 
-    // state -> [pill modifier class, label]. Mirrors the header pill states.
+    // state -> [pill modifier class, label].
     const PILL = {
-        running:  ['live',   'running'],
-        external: ['paused', 'external'],
-        stopped:  ['',       'stopped'],
-        crashed:  ['error',  'crashed'],
+        ready:        ['live',   'ready'],
+        running:      ['live',   'running'],   // legacy alias
+        starting:     ['paused', 'starting'],
+        initializing: ['paused', 'starting'],
+        external:     ['paused', 'external'],
+        stopped:      ['',       'stopped'],
+        crashed:      ['error',  'crashed'],
+        failed:       ['error',  'failed'],
     };
 
     let _card, _pill, _meta, _start, _stop, _logToggle, _log, _hint;
@@ -75,7 +79,7 @@ const DeviceLayerCard = (function () {
     function startPoll() {
         loadStatus();                       // immediate
         if (_timer) clearInterval(_timer);  // clear-before-set
-        _timer = setInterval(loadStatus, POLL_MS);
+        _timer = setInterval(loadStatus, _pollMs);
     }
 
     function stopPoll() {
@@ -101,29 +105,54 @@ const DeviceLayerCard = (function () {
         _pill.className = 'devices-status-pill' + (mod ? ' ' + mod : '');
         _pill.textContent = label;
 
-        const bits = [];
-        if (d.pid) bits.push('pid ' + d.pid);
-        if (d.port) bits.push('port ' + d.port + (d.port_open ? '' : ' · closed'));
-        if (d.sam_device) bits.push(d.sam_device);
-        if (typeof d.uptime_seconds === 'number') bits.push('up ' + fmtUptime(d.uptime_seconds));
-        _meta.textContent = bits.join(' · ');
+        const booting = d.state === 'starting' || d.state === 'initializing';
 
-        // An external (unmanaged) layer can't be started or stopped by us.
-        if (d.state === 'external') {
+        // Meta line: during boot show the current stage; otherwise pid/port/uptime.
+        if (booting && d.progress && d.progress.i && d.progress.n) {
+            _meta.textContent =
+                'step ' + d.progress.i + '/' + d.progress.n + ' · ' + (d.progress.label || 'starting…');
+        } else if (booting) {
+            _meta.textContent = 'starting…';
+        } else {
+            const bits = [];
+            if (d.pid) bits.push('pid ' + d.pid);
+            if (d.port) bits.push('port ' + d.port + (d.port_open ? '' : ' · closed'));
+            if (d.sam_device) bits.push(d.sam_device);
+            if (typeof d.uptime_seconds === 'number') bits.push('up ' + fmtUptime(d.uptime_seconds));
+            _meta.textContent = bits.join(' · ');
+        }
+
+        // Hint line: failure reason, external note, or a reassurance during the
+        // slow MMCore step (step 2) so a long wait doesn't read as frozen.
+        if (d.state === 'failed' && d.failure) {
+            _hint.hidden = false;
+            const h = (d.failure.hints && d.failure.hints[0]) ? ' — ' + d.failure.hints[0] : '';
+            _hint.textContent = (d.failure.summary || 'Startup failed') + h;
+        } else if (d.state === 'external') {
             _hint.hidden = false;
             _hint.textContent = 'running externally — not managed by gently';
+        } else if (booting && d.progress && d.progress.i === 2) {
+            _hint.hidden = false;
+            _hint.textContent = 'Initializing Micro-Manager — this can take a minute.';
         } else {
             _hint.hidden = true;
             _hint.textContent = '';
         }
 
-        // Enable/disable by state (a hint only; the server 403/409 is the real
-        // gate). While a start/stop is in flight, keep both disabled.
-        const running = d.state === 'running';
-        const external = d.state === 'external';
-        const stoppedish = d.state === 'stopped' || d.state === 'crashed';
-        _start.disabled = _busy || running || external;
-        _stop.disabled  = _busy || stoppedish || external;
+        // Enable/disable (a hint only; the server 403/409 is the real gate).
+        const canStart = d.state === 'stopped' || d.state === 'crashed' || d.state === 'failed';
+        const canStop =
+            d.state === 'ready' || d.state === 'running' || booting;
+        _start.disabled = _busy || !canStart;
+        _stop.disabled = _busy || !canStop;
+
+        // Adaptive cadence: poll fast (1s) while booting, calm (5s) otherwise.
+        const want = booting ? 1000 : 5000;
+        if (want !== _pollMs && _timer) {
+            _pollMs = want;
+            clearInterval(_timer);
+            _timer = setInterval(loadStatus, _pollMs);
+        }
 
         if (Array.isArray(d.log_tail) && d.log_tail.length && !_log.hidden) {
             renderLog(d.log_tail);
