@@ -327,6 +327,7 @@ def generate_jpeg_projection(
 _tifffile: ModuleType | None
 try:
     import tifffile as _tif
+
     _tifffile = _tif
 except ImportError:
     _tifffile = None
