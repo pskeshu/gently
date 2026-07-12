@@ -1,40 +1,55 @@
 /* Floating agent-chat window — the web-side control surface.
    Restrained, professional styling for a lab instrument. */
 
-/* ── Header toggle (replaces the floating FAB) ─────────────── */
-.header-agent-toggle {
-    display: inline-flex; align-items: center; gap: 7px;
-    padding: 5px 10px; border-radius: 8px;
-    border: 1px solid var(--border);
-    background: var(--bg-hover); color: var(--text);
-    font: 500 12.5px/1 'Inter Tight', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    cursor: pointer; position: relative;
-    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+/* ── Collapsed rail (always-present agent affordance) ──────────
+   When the docked panel is collapsed it shrinks to this thin vertical rail:
+   a spark glyph (click to open), a vertical "Agent" label, plus the connection
+   dot + unseen-activity badge so a tucked-away agent can still signal it woke
+   or has something pending. Shown only via the body.chat-docked rules below. */
+.agent-rail {
+    display: none;  /* shown only when collapsed (see :not(.open) rule) */
+    flex-direction: column; align-items: center;
+    width: 100%; height: 100%; padding: 8px 0 0;
+    border: none; background: transparent;
+    cursor: pointer;
 }
-.header-agent-toggle:hover { border-color: var(--accent); }
-.header-agent-toggle[aria-pressed="true"] {
-    border-color: var(--accent); color: var(--accent);
-    background: rgba(96, 165, 250, 0.12);
+/* Icon-only activity-bar button: contained rounded hover target (VS Code/Google
+   style), with the connection state + activity count attached to the icon. */
+.agent-rail-icon {
+    position: relative;
+    display: flex; align-items: center; justify-content: center;
+    width: 40px; height: 40px; border-radius: 10px;
+    color: var(--text-muted);
+    transition: background 0.15s ease, color 0.15s ease;
 }
-.header-agent-toggle svg { display: block; }
-.header-agent-label { letter-spacing: 0.01em; }
-.header-agent-dot {
-    width: 7px; height: 7px; border-radius: 50%;
-    background: var(--text-muted); flex: 0 0 auto;
+.agent-rail:hover .agent-rail-icon { background: var(--bg-hover); color: var(--text); }
+.agent-rail-spark { display: flex; }
+/* Presence dot in the icon's corner (avatar-with-status pattern). */
+.agent-rail-dot {
+    position: absolute; right: 5px; bottom: 5px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--text-muted);
+    border: 2px solid var(--bg-card); box-sizing: content-box;
 }
-.header-agent-dot.ok { background: var(--accent-green); }
-.header-agent-badge {
-    position: absolute; top: -6px; right: -6px;
+.agent-rail-dot.ok { background: var(--accent-green); }
+/* Unseen-activity count badge in the icon's top-right corner. */
+.agent-rail-badge {
+    position: absolute; top: -4px; right: -4px;
     min-width: 16px; height: 16px; padding: 0 4px;
     border-radius: 999px; background: var(--accent-purple); color: #fff;
     font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+    border: 2px solid var(--bg-card); box-sizing: content-box;
 }
-.header-agent-badge.hidden { display: none; }
+.agent-rail-badge.hidden { display: none; }
 
 /* ── Docked agent panel ────────────────────────────────────
-   Default = overlay slide-over, absolutely positioned inside .app-shell (which
-   sits below the global header/navbar). Pin (body.chat-docked) turns it into a
-   real column that pushes .app-main. */
+   The panel is always docked (body.chat-docked, set on load): a real column
+   that pushes .app-main, never a float over content. Collapsing it (header
+   Agent toggle / Ctrl+J / ×) drops it to width 0 to reclaim space.
+
+   The base .agent-chat rules below (absolute, translateX slide) are the
+   pre-JS / no-chat-docked fallback so the panel stays parked off-screen until
+   restorePrefs() docks it; body.chat-docked overrides them into the column. */
 .agent-chat {
     position: absolute;
     top: 0; right: 0; bottom: 0;
@@ -54,7 +69,7 @@
 }
 .agent-chat.open { transform: translateX(0); }
 
-/* Pinned: a real pushing column — no float shadow, just a seam. */
+/* Docked: a real pushing column — no float shadow, just a seam. */
 body.chat-docked .agent-chat {
     position: relative;
     transform: none;
@@ -64,9 +79,12 @@ body.chat-docked .agent-chat {
     transition: none;
     z-index: auto;
 }
+/* Collapsed: shrink to the rail. Hide every child, then re-show only the rail. */
 body.chat-docked .agent-chat:not(.open) {
-    width: 0; border-left: none; overflow: hidden;
+    width: 48px; flex: 0 0 48px; overflow: hidden;
 }
+body.chat-docked .agent-chat:not(.open) > * { display: none; }
+body.chat-docked .agent-chat:not(.open) > .agent-rail { display: flex; }
 
 @media (prefers-reduced-motion: reduce) {
     .agent-chat { transition: opacity 0.12s ease; }
@@ -84,15 +102,6 @@ body.chat-docked .agent-chat:not(.open) {
 .agent-chat-resize:hover::after, .agent-chat-resize.dragging::after { background: var(--accent); }
 
 .agent-control-banner.hidden { display: none; }
-
-/* Pin button in the panel header. */
-.agent-chat-pin {
-    background: none; border: none; color: var(--text-muted);
-    cursor: pointer; padding: 2px; display: flex; align-items: center;
-    border-radius: 5px;
-}
-.agent-chat-pin:hover { color: var(--text); background: var(--bg-hover); }
-.agent-chat-pin[aria-pressed="true"] { color: var(--accent); }
 
 /* ── Header ─────────────────────────────────────────────── */
 .agent-chat-header {
@@ -132,10 +141,12 @@ body.chat-docked .agent-chat:not(.open) {
 .agent-chat-conn.ac-conn-bad { color: var(--accent-orange, #fb923c); border-color: rgba(251, 146, 60, 0.35); }
 .agent-chat-close {
     background: none; border: none;
-    color: var(--text-muted); font-size: 20px; line-height: 1;
-    cursor: pointer; padding: 0 2px;
+    color: var(--text-muted); line-height: 1;
+    cursor: pointer; padding: 2px; border-radius: 5px;
+    display: inline-flex; align-items: center;
 }
-.agent-chat-close:hover { color: var(--text); }
+.agent-chat-close svg { display: block; }
+.agent-chat-close:hover { color: var(--text); background: var(--bg-hover); }
 
 /* ── Control banner ─────────────────────────────────────── */
 .agent-control-banner {
@@ -172,6 +183,8 @@ body.chat-docked .agent-chat:not(.open) {
     color: var(--accent-purple);
     margin-bottom: 4px;
 }
+/* Sender name on user bubbles: muted so it doesn't compete with the message. */
+.ac-role-user { color: var(--text-muted); }
 .ac-turn-agent .ac-content { color: var(--text); }
 .ac-turn-agent .ac-content code {
     font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -180,7 +193,9 @@ body.chat-docked .agent-chat:not(.open) {
     padding: 1px 5px; border-radius: 4px;
 }
 
-/* User: right-aligned, subtle accent block (not a loud bubble) */
+/* User: right-aligned, subtle accent block (not a loud bubble). Your own
+   messages use the blue accent; other participants get a neutral bubble so a
+   shared chat is easy to read at a glance. */
 .ac-turn-user { align-items: flex-end; }
 .ac-turn-user .ac-content {
     background: rgba(96, 165, 250, 0.12);
@@ -190,6 +205,10 @@ body.chat-docked .agent-chat:not(.open) {
     border-radius: 10px 10px 2px 10px;
     max-width: 88%;
     white-space: pre-wrap; word-wrap: break-word;
+}
+.ac-turn-user.ac-from-other .ac-content {
+    background: rgba(127, 127, 127, 0.12);
+    border-color: rgba(127, 127, 127, 0.24);
 }
 
 /* ── Autonomous (wake) turns ────────────────────────────── */
@@ -402,28 +421,23 @@ body.chat-docked .agent-chat:not(.open) {
 .agent-chat-input textarea::placeholder { color: var(--text-muted); }
 .agent-chat-input textarea:focus { outline: none; border-color: var(--accent); }
 .agent-chat-input textarea:disabled { opacity: 0.55; }
+/* Circular icon button (ChatGPT/Claude style): an up-arrow to send, which
+   morphs into a stop square (.is-stop) while a cancellable turn is running. */
 .agent-chat-send {
     flex: 0 0 auto; align-self: flex-end;
-    padding: 9px 16px; border-radius: 9px;
+    width: 36px; height: 36px; padding: 0; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center;
     border: none; background: var(--accent); color: #fff;
-    font-weight: 600; font-size: 13px; cursor: pointer;
-    transition: background 0.12s ease;
+    cursor: pointer; transition: background 0.12s ease, opacity 0.12s ease;
 }
 .agent-chat-send:hover:not(:disabled) { background: var(--accent-hover); }
-.agent-chat-send:disabled { opacity: 0.5; cursor: default; }
-/* Send now queues while busy (it no longer doubles as Stop), so just dim it. */
-.agent-chat-send.ac-busy { opacity: 0.6; }
-
-/* Explicit Stop (separate from Send), shown only during a cancellable turn. */
-.ac-stop {
-    flex: 0 0 auto; align-self: flex-end;
-    padding: 9px 12px; border-radius: 9px;
-    border: 1px solid var(--color-danger, #f87171);
-    background: transparent; color: var(--color-danger, #f87171);
-    font-weight: 600; font-size: 13px; cursor: pointer;
-}
-.ac-stop:hover { background: rgba(248, 113, 113, 0.12); }
-.ac-stop.hidden { display: none; }
+.agent-chat-send:disabled { opacity: 0.4; cursor: default; }
+.agent-chat-send svg { display: block; }
+/* Toggle which glyph shows; same filled circle in both states (the icon is the
+   signal), matching how Claude/ChatGPT morph the composer button. */
+.agent-chat-send .ac-icon-stop { display: none; }
+.agent-chat-send.is-stop .ac-icon-send { display: none; }
+.agent-chat-send.is-stop .ac-icon-stop { display: block; }
 
 /* ── Queued-message panel (type-while-busy) ─────────────── */
 .ac-queue {

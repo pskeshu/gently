@@ -163,6 +163,7 @@ def create_router(server) -> APIRouter:
                     "role": "user",
                     "text": msg.get("text", ""),
                     "author": msg.get("author"),
+                    "author_id": msg.get("author_id"),
                 }
             )
         elif t == "autonomous_start":
@@ -340,16 +341,20 @@ def create_router(server) -> APIRouter:
             can_control = role in CONTROL_ROLES
 
         # Assign a stable id for control arbitration. The label shown to other
-        # clients is the username when authenticated, else a generic window id.
+        # clients is the username when authenticated, else "Anonymous". The UI
+        # renders "You" for the viewer's own messages by matching client_id, so
+        # anonymous participants don't need disambiguating numbers.
         _client_counter["n"] += 1
         client_id = f"agent_client_{_client_counter['n']}"
-        client_label = username or f"window {_client_counter['n']}"
+        client_label = username or "Anonymous"
 
-        # Send connection metadata (version, tokens, embryo count, commands)
+        # Send connection metadata (version, tokens, embryo count, commands).
+        # you_id lets the client label its own messages "You".
         meta = bridge.get_connect_metadata()
         _connected_msg = {
             "type": "connected",
             **meta,
+            "you_id": client_id,
             "timestamp": datetime.now().isoformat(),
         }
         await websocket.send_json(_connected_msg)
@@ -851,8 +856,17 @@ def create_router(server) -> APIRouter:
                         active_task.cancel()
 
                     # Echo the user's message to ALL clients (so observers see
-                    # what was asked), then stream the reply to everyone.
-                    await _broadcast({"type": "user_message", "text": text, "author": client_label})
+                    # what was asked), then stream the reply to everyone. author
+                    # is the display name (username or "Anonymous"); author_id
+                    # lets each client render its own messages as "You".
+                    await _broadcast(
+                        {
+                            "type": "user_message",
+                            "text": text,
+                            "author": client_label,
+                            "author_id": client_id,
+                        }
+                    )
                     active_task = asyncio.create_task(
                         bridge.stream_response(text, _broadcast, choice_future_factory)
                     )
@@ -876,6 +890,10 @@ def create_router(server) -> APIRouter:
                     if active_task and not active_task.done():
                         active_task.cancel()
                         active_task = None
+                        # A cancelled stream emits no stream_end of its own, so
+                        # tell every client the turn is over — otherwise their
+                        # "Working…" indicator spins forever after Stop.
+                        await _broadcast({"type": "stream_end"})
 
                 elif msg_type == "command":
                     command = data.get("command", "").strip()
@@ -986,6 +1004,15 @@ def create_router(server) -> APIRouter:
                 wizard_task.cancel()
             if active_task and not active_task.done():
                 active_task.cancel()
+                # This connection was mid-stream — persist whatever the agent
+                # generated so far, otherwise a reload loses the in-progress
+                # reply (it's only committed on stream_end). Guarded to the
+                # owning connection so an observer's disconnect can't split a
+                # still-streaming reply into two history entries.
+                try:
+                    _flush_agent_buf()
+                except Exception:
+                    logger.debug("Could not flush agent buffer on disconnect", exc_info=True)
             if bootstrap_task is not None and not bootstrap_task.done():
                 bootstrap_task.cancel()
             # Release control arbitration for this client; hand the wheel
