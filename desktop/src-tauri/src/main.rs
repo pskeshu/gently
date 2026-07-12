@@ -81,7 +81,19 @@ fn boot_backend(app: tauri::AppHandle) {
     set_status(&app, "Starting the backend…");
     eprintln!("[gently-desktop] spawning: {} {:?} (cwd={})", python.display(), args, repo.display());
 
-    let child = match Command::new(&python).args(&args).current_dir(&repo).spawn() {
+    let mut cmd = Command::new(&python);
+    cmd.args(&args).current_dir(&repo);
+    // Release: run the console-subsystem Python backend WITHOUT a console window
+    // (a GUI parent would otherwise pop one). Debug (`tauri dev`) inherits the dev
+    // console so backend logs stay visible while developing.
+    #[cfg(all(windows, not(debug_assertions)))]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+
+    let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
             set_status(&app, &format!("Failed to start backend: {e}"));

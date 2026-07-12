@@ -130,10 +130,16 @@ class DeviceLayerSupervisor:
 
             # A new process group on Windows is what later lets us send a
             # CTRL_BREAK for a (best-effort) clean shutdown instead of only a
-            # hard TerminateProcess.
+            # hard TerminateProcess. CREATE_NO_WINDOW keeps the device layer from
+            # popping its own console window when gently is launched as a desktop
+            # app — its output is still captured via the stdout pipe (below) and
+            # its own device_layer_*.log.
             creationflags = 0
             if sys.platform == "win32":
-                creationflags = subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                creationflags = (
+                    subprocess.CREATE_NEW_PROCESS_GROUP  # type: ignore[attr-defined]
+                    | subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
+                )
 
             logger.info("Spawning device layer: %s", " ".join(cmd))
             self._log.clear()
