@@ -484,6 +484,26 @@
                 </div>
             </div>
 
+            <!-- Device-layer supervision card (device-layer.js) — runtime mirror
+                 of the launch gate's hardware block: status + Start/Stop + log tail. -->
+            <div class="devices-layer-card" id="devices-layer-card" hidden>
+                <div class="devices-layer-head">
+                    <span class="devices-card-title">Device Layer</span>
+                    <span class="devices-status-pill" id="devices-layer-pill">unknown</span>
+                    <span class="devices-layer-meta" id="devices-layer-meta"></span>
+                    <span class="devices-layer-hint" id="devices-layer-hint" hidden></span>
+                </div>
+                <div class="devices-layer-actions">
+                    <button type="button" class="marking-action-btn marking-done-btn devices-layer-btn"
+                            id="devices-layer-start">Start</button>
+                    <button type="button" class="marking-action-btn devices-layer-btn"
+                            id="devices-layer-stop">Stop</button>
+                    <button type="button" class="marking-action-btn devices-layer-log-toggle"
+                            id="devices-layer-log-toggle" aria-expanded="false">Log</button>
+                </div>
+                <pre class="devices-layer-log" id="devices-layer-log" hidden></pre>
+            </div>
+
             <!-- Operate view: guided bottom-cam → SPIM operator surface.
                  Survey & mark all → per-embryo center → lower SPIM → focus → acquire. -->
             <div class="devices-view devices-view-operate" id="devices-view-operate" style="display:none">
@@ -1365,6 +1385,7 @@
     <script src="/static/js/temperature-graph.js"></script>
     <script src="/static/js/devices.js"></script>
     <script src="/static/js/operate.js"></script>
+    <script src="/static/js/device-layer.js"></script>
     <script src="/static/js/operations-scenarios.js"></script>
     <script src="/static/js/experiment-overview.js"></script>
     <!-- Three.js for 3D volume viewer -->

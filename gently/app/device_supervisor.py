@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 import signal
 import socket
 import subprocess
@@ -104,8 +105,12 @@ class DeviceLayerSupervisor:
                 )
                 return self._status_locked()
 
-            if not _DEVICE_SCRIPT.exists():
-                raise FileNotFoundError(f"device layer script not found: {_DEVICE_SCRIPT}")
+            # GENTLY_DEVICE_LAYER_SCRIPT overrides the launcher — lets an operator
+            # point at an alternate device-layer entry point (and lets tests point
+            # at a harmless stand-in instead of touching real hardware).
+            script = Path(os.environ.get("GENTLY_DEVICE_LAYER_SCRIPT") or _DEVICE_SCRIPT)
+            if not script.exists():
+                raise FileNotFoundError(f"device layer script not found: {script}")
 
             if sam_device is not None:
                 self.sam_device = sam_device
@@ -114,7 +119,7 @@ class DeviceLayerSupervisor:
 
             cmd = [
                 sys.executable,
-                str(_DEVICE_SCRIPT),
+                str(script),
                 "--port",
                 str(self.port),
                 "--sam-device",

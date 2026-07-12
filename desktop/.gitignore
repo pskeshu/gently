@@ -1,0 +1,14 @@
+# Node / Tauri CLI
+node_modules/
+
+# Rust / Tauri build output
+src-tauri/target/
+src-tauri/gen/
+
+# Generated mobile / MS-Store icon variants (regenerate with `tauri icon`).
+# The desktop icons referenced by tauri.conf.json (32x32, 128x128, 128x128@2x,
+# icon.ico, icon.icns, icon.png) ARE committed so a clean checkout builds.
+src-tauri/icons/android/
+src-tauri/icons/ios/
+src-tauri/icons/Square*Logo.png
+src-tauri/icons/StoreLogo.png
