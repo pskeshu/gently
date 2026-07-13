@@ -37,6 +37,19 @@ Tauri shell (Rust, WebView2 window)
 - `splash/index.html` — boot splash (Rust updates its status line via `window.__gentlyStatus`).
 - `src-tauri/tauri.conf.json` — one window, `frontendDist: ../splash`, NSIS bundle.
 
+## Quitting (graceful handshake, issue #85)
+
+Closing the window does **not** kill the backend outright. The shell first runs
+a graceful handshake: it intercepts the close and `POST`s the backend's
+loopback-only `/api/shutdown`, which stops a managed device layer via its clean
+SIGTERM path and lets the backend drain state (e.g. session-replay final
+batches) before exiting on its own; the shell waits a few seconds for the port
+to go down, then quits. If an acquisition is running the backend answers `409`
+and the shell asks for confirmation first — cancel and the window stays open.
+If the backend is dead or hung, the shell just exits. Either way the Job-Object
+kill-on-close (and best-effort `child.kill()`) remains the unchanged crash-safe
+floor underneath.
+
 ## Prerequisites
 
 - **Rust** (MSVC toolchain) — `rustup default stable-x86_64-pc-windows-msvc`

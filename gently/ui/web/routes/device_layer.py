@@ -7,6 +7,10 @@ Two surfaces, both backed by ``DeviceLayerSupervisor``:
 - **Devices panel** (``/api/device-layer/*``) — runtime status, log tail, and
   Start / Stop controls that mirror the gate's hardware block.
 
+Plus the whole-backend shutdown handshake (``POST /api/shutdown``, issue #85)
+used by the desktop shell on window-close — loopback-only, stops the managed
+device layer gracefully, then asks the launcher to exit.
+
 Control-mutating endpoints (start/stop) are gated behind ``require_control``,
 matching the rest of the hardware routes. Stop reuses the 409 + ``"blocked"``
 mid-run guard pattern: if hardware looks active, the caller must confirm.
@@ -16,6 +20,7 @@ See ``docs/superpowers/specs/2026-07-02-unified-launcher-design.md`` (RFC #78).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import APIRouter, Depends, Request
@@ -163,6 +168,57 @@ def create_router(server) -> APIRouter:
             )
 
         return sup.stop(force=bool(body.get("force")))
+
+    # ── Whole-backend shutdown (desktop shell handshake, issue #85) ───────
+
+    @router.post("/api/shutdown")
+    async def shutdown_backend(request: Request):
+        """Gracefully stop the entire backend (device layer + agent + server).
+
+        Called by the desktop shell on window-close so the backend can drain
+        state (e.g. session-replay final batches) and stop the device layer via
+        its clean SIGTERM path *before* the shell's kill / Job Object floor.
+
+        Loopback-only: the shell carries no auth cookie, so instead of
+        ``require_control`` the guard is the connection source itself — only
+        127.0.0.1/::1 may ask the process to die. Mid-run, the standard 409
+        ``{"blocked": true}`` confirm guard applies (resend with
+        ``{"confirm": true}``); ``{"force": true}`` hard-kills the device layer.
+        """
+        host = request.client.host if request.client else None
+        if host not in ("127.0.0.1", "::1"):
+            return JSONResponse(
+                {"error": "shutdown may only be requested from localhost"},
+                status_code=403,
+            )
+
+        body = await _safe_json(request)
+
+        if _hardware_active(server) and not body.get("confirm"):
+            return JSONResponse(
+                {
+                    "blocked": True,
+                    "reason": "hardware is active — an acquisition is running",
+                    "hint": 'resend with {"confirm": true} to stop anyway',
+                },
+                status_code=409,
+            )
+
+        # Stop a MANAGED device-layer child first (graceful path; no-ops for
+        # external/absent). stop() blocks in proc.wait() under a lock, so keep
+        # it off the event loop.
+        sup = get_supervisor(server)
+        try:
+            await asyncio.to_thread(sup.stop, force=bool(body.get("force")))
+        except Exception:
+            logger.exception("device-layer stop during shutdown failed (continuing)")
+
+        rs = getattr(server, "request_shutdown", None)
+        if rs is None:
+            return JSONResponse({"error": "shutdown not wired by launcher"}, status_code=501)
+        # Small delay so this response flushes before uvicorn starts exiting.
+        asyncio.get_running_loop().call_later(0.3, rs)
+        return {"ok": True, "stopping": True}
 
     return router
 

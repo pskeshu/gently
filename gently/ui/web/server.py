@@ -165,6 +165,9 @@ class VisualizationServer(Service):
         self.agent_bridge: Any = None
         self.mesh_service: Any = None
         self.device_supervisor: Any = None  # DeviceLayerSupervisor (RFC #78)
+        # Callable that stops the WHOLE backend (launcher keep-alive included);
+        # POST /api/shutdown uses it for the desktop shell handshake (issue #85).
+        self.request_shutdown: Any = None
         # False until the launch gate is submitted this session; while False, /
         # bounces to /launch so the gate is the entry point (RFC #78).
         self.gate_passed: bool = False
