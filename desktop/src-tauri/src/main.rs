@@ -56,9 +56,12 @@ fn main() {
             if let RunEvent::Exit = event {
                 let b = app_handle.state::<Backend>();
                 // Best-effort direct kill of the child we spawned...
+                // (trailing `;` so the MutexGuard temporary drops before `b` —
+                // without it this is the block's tail expression on non-Windows,
+                // where the cfg'd jobkill line below is compiled out: E0597)
                 if let Some(mut child) = b.child.lock().unwrap().take() {
                     let _ = child.kill();
-                }
+                };
                 // ...and close the job handle, which kill-on-close uses to reap
                 // the whole tree (python + device-layer grandchild). Correct even
                 // if the child kill above missed a grandchild.
@@ -147,7 +150,11 @@ fn python_exe(repo: &Path) -> PathBuf {
     if let Ok(p) = std::env::var("GENTLY_PYTHON") {
         return PathBuf::from(p);
     }
-    let venv = repo.join(".venv").join("Scripts").join("python.exe");
+    let venv = if cfg!(windows) {
+        repo.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        repo.join(".venv").join("bin").join("python")
+    };
     if venv.exists() {
         venv
     } else {

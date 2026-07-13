@@ -45,6 +45,31 @@ Tauri shell (Rust, WebView2 window)
 - **Node** (only for the Tauri CLI: `npm install` in this folder)
 - A working gently checkout with its Python **`.venv`** at the repo root
 
+### Linux (dev machines)
+
+The shell is cross-platform — the Job-Object code is `#[cfg(windows)]`, so on
+Linux teardown is the best-effort `child.kill()` only (fine for dev; the
+kill-on-close guarantee is a Windows-production feature). Verified on Manjaro
+(KDE/Wayland, webkit2gtk 2.52):
+
+- **Rust** — `rustup default stable`
+- **WebKitGTK + GTK3** — `webkit2gtk-4.1` and `gtk3` dev packages
+  (Arch/Manjaro: `pacman -S webkit2gtk-4.1`; Debian/Ubuntu:
+  `apt install libwebkit2gtk-4.1-dev build-essential`)
+- **Node** — as above
+- The venv is found at **`.venv/bin/python`** (Unix layout) automatically;
+  `GENTLY_PYTHON` overrides as usual
+
+Same commands, bash syntax:
+
+```bash
+cd desktop && npm install
+GENTLY_LAUNCH_ARGS="--no-api --offline --no-auth" npm run dev
+```
+
+`npm run build` is Windows-only as configured (`bundle.targets: ["nsis"]`) —
+on Linux use `npm run dev`, or override targets if a Linux bundle is ever needed.
+
 ## Run (dev)
 
 ```powershell
