@@ -338,23 +338,15 @@
     scheduleFlush();
   }
 
-  // Start at first idle AFTER load, not during it: rrweb's initial full-DOM
-  // snapshot is synchronous, and taking it on the load path taxes every page
-  // open (the A/B's biggest recorder cost). The snapshot captures whatever
-  // DOM exists when taken, so deferring it a beat loses nothing.
-  function startWhenIdle() {
-    if (typeof requestIdleCallback === "function") {
-      requestIdleCallback(start, { timeout: 3000 });
-    } else {
-      setTimeout(start, 300); // WebKit (Linux desktop shell) has no rIC
-    }
-  }
-
+  // Start on DOMContentLoaded: the initial full-DOM snapshot is synchronous
+  // and belongs inside page load, where it amortizes into load time. (An
+  // idle-start variant was A/B-tested and rejected — the deferred snapshot
+  // landed inside the user's first interactions instead, which is worse.)
   try {
-    if (document.readyState === "complete") {
-      startWhenIdle();
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", start);
     } else {
-      window.addEventListener("load", startWhenIdle);
+      start();
     }
   } catch (e) {
     disable("init failed: " + (e && e.message));
