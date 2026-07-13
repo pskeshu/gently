@@ -179,7 +179,8 @@ def main() -> None:
     offset = parse_moment(args.t, first_ts, last_ts)
     total = last_ts - first_ts
     print(
-        f"tab {tab}: {len(events)} events, {total / 1000:.0f}s total — rendering at +{offset / 1000:.1f}s"
+        f"tab {tab}: {len(events)} events, {total / 1000:.0f}s total — "
+        f"rendering at +{offset / 1000:.1f}s"
     )
     render(events, offset, Path(args.out), args.url)
     print(f"wrote {args.out}")
