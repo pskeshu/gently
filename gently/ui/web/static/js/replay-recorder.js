@@ -316,7 +316,9 @@
         blockSelector: BLOCK_SELECTOR,
         checkoutEveryNms: CHECKOUT_MS,
         slimDOMOptions: true,
-        sampling: { mousemove: 50, scroll: 150, media: 800, input: "last" },
+        // 120ms mousemove still gives a smooth pointer trail on replay; 50ms
+        // measurably taxed the A/B's action latencies for no postmortem value.
+        sampling: { mousemove: 120, scroll: 300, media: 800, input: "last" },
       });
     } catch (e) {
       return disable("rrweb.record failed: " + (e && e.message));
@@ -336,11 +338,23 @@
     scheduleFlush();
   }
 
-  try {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", start);
+  // Start at first idle AFTER load, not during it: rrweb's initial full-DOM
+  // snapshot is synchronous, and taking it on the load path taxes every page
+  // open (the A/B's biggest recorder cost). The snapshot captures whatever
+  // DOM exists when taken, so deferring it a beat loses nothing.
+  function startWhenIdle() {
+    if (typeof requestIdleCallback === "function") {
+      requestIdleCallback(start, { timeout: 3000 });
     } else {
-      start();
+      setTimeout(start, 300); // WebKit (Linux desktop shell) has no rIC
+    }
+  }
+
+  try {
+    if (document.readyState === "complete") {
+      startWhenIdle();
+    } else {
+      window.addEventListener("load", startWhenIdle);
     }
   } catch (e) {
     disable("init failed: " + (e && e.message));

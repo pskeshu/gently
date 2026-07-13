@@ -42,8 +42,27 @@ def load_status(run_dir: Path) -> dict[str, dict]:
     return out
 
 
+# Only operator-felt interaction methods count toward the gate: harness
+# overhead (screenshot, context/page setup, tracing) does not reach a human
+# and its variance would swamp the signal we are certifying.
+FELT_METHODS = {
+    "goto",
+    "click",
+    "dblclick",
+    "fill",
+    "press",
+    "type",
+    "check",
+    "selectOption",
+    "hover",
+    "evaluateExpression",
+    "waitForSelector",
+    "waitForLoadState",
+}
+
+
 def trace_action_ms(zip_path: Path) -> float:
-    """Total paired-action duration (ms) inside one story trace zip."""
+    """Operator-felt paired-action duration (ms) inside one story trace zip."""
     total = 0.0
     starts: dict[str, tuple[str, float]] = {}
     with zipfile.ZipFile(zip_path) as z:
@@ -66,7 +85,9 @@ def trace_action_ms(zip_path: Path) -> float:
                 if typ == "before":
                     starts[cid] = (ev.get("method", "?"), float(ev.get("startTime", 0)))
                 elif typ == "after" and cid in starts:
-                    _, t0 = starts.pop(cid)
+                    method, t0 = starts.pop(cid)
+                    if method not in FELT_METHODS:
+                        continue
                     t1 = float(ev.get("endTime", t0))
                     if t1 >= t0:
                         total += t1 - t0
