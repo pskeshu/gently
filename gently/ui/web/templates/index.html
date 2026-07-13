@@ -1380,5 +1380,10 @@
     <script src="/static/js/shell.js"></script>
     <script src="/static/js/context-surface.js"></script>
     <script src="/static/js/landing.js"></script>
+    {% if replay_enabled %}
+    <!-- Session replay: loads last, degrades silently, never blocks the app -->
+    <script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+    <script src="/static/js/replay-recorder.js" defer></script>
+    {% endif %}
 </body>
 </html>

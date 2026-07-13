@@ -305,5 +305,9 @@
             });
         }
     </script>
+    {% if replay_enabled %}
+    <script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
+    <script src="/static/js/replay-recorder.js" defer></script>
+    {% endif %}
 </body>
 </html>

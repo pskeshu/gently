@@ -1,0 +1,6 @@
+rrweb 2.1.0 (UMD build, global `rrweb`) + its replayer stylesheet
+vendored from npm on 2026-07-13 — offline microscope PC, no CDN.
+.cjs dist renamed to .js so it is served with a JS content type.
+rrweb-player was evaluated and dropped: its 2.1.0 UMD build never mounts
+(Svelte 5 `new Component()` incompatibility) — the player page drives
+rrweb.Replayer directly with its own controls instead.
