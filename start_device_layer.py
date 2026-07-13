@@ -78,6 +78,16 @@ def _render_startup_failure(exc, log_file):
             "Then start the device layer again.",
         ]
 
+    # Structured failure event for the DeviceLayerSupervisor (rides the same
+    # stdout pipe as progress) so the UI can show a plain-language reason + hints
+    # instead of re-parsing the console panel. No-op on an interactive terminal.
+    cui.progress_event(
+        status="failed",
+        stage=(device or "startup"),
+        summary=summary,
+        detail=details,
+        hints=hints,
+    )
     cui.error_panel("GENTLY DEVICE LAYER", summary, details, hints, log_file)
 
 

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch Gently</title>
+<style>
+  :root{
+    --bg:#0a0d13; --inset:#0d121b; --line:#1b222e; --line2:#27303d;
+    --text:#e7edf4; --muted:#8792a3; --faint:#57616f;
+    --accent:#5b8cff; --accent-txt:#a9c4ff; --accentdim:rgba(91,140,255,.12);
+    --green:#40d17f; --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{min-height:100vh;color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased;
+    background:radial-gradient(1000px 500px at 50% -14%, rgba(91,140,255,.11), transparent 60%), var(--bg);
+    display:flex;justify-content:center;align-items:center;padding:40px 20px}
+  .wrap{width:100%;max-width:460px}
+  .head{display:flex;align-items:center;justify-content:center;gap:11px;margin-bottom:8px}
+  .mark{width:26px;height:26px;border-radius:50%;border:2px solid var(--accent);position:relative;
+    background:radial-gradient(circle at 50% 50%, rgba(91,140,255,.28), transparent 70%)}
+  .mark::after{content:"";position:absolute;inset:0;margin:auto;width:9px;height:9px;border-radius:50%;
+    background:var(--accent);box-shadow:0 0 12px var(--accent)}
+  .wordmark{font-size:22px;font-weight:700;letter-spacing:-.015em}
+  .cap{text-align:center;color:var(--muted);font-size:14px;margin:0 0 30px}
+  .opt{display:flex;align-items:center;gap:15px;padding:18px 18px;border:1px solid var(--line2);border-radius:13px;
+    background:linear-gradient(180deg,#111621,#0e131c);margin-bottom:13px;transition:.15s;cursor:pointer}
+  .opt.on{border-color:rgba(91,140,255,.55);background:linear-gradient(180deg,rgba(91,140,255,.09),#0e131c);
+    box-shadow:0 0 0 1px rgba(91,140,255,.25), 0 14px 34px -18px rgba(91,140,255,.5)}
+  .ic{width:42px;height:42px;border-radius:11px;flex:none;display:flex;align-items:center;justify-content:center;
+    background:var(--inset);border:1px solid var(--line2);color:var(--muted)}
+  .opt.on .ic{background:var(--accentdim);border-color:rgba(91,140,255,.4);color:var(--accent-txt)}
+  .txt{flex:1;min-width:0}
+  .t{font-size:15.5px;font-weight:650;letter-spacing:-.01em}
+  .s{font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.45}
+  .s .mono{font-family:var(--mono);color:var(--faint)}
+  .sw{width:44px;height:25px;border-radius:999px;background:#232c39;position:relative;flex:none;transition:.15s;border:1px solid var(--line2)}
+  .sw::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#5c6675;transition:.15s}
+  .opt.on .sw{background:var(--accent);border-color:transparent;box-shadow:0 0 16px rgba(91,140,255,.4)}
+  .opt.on .sw::after{left:21px;background:#fff}
+  .btn{width:100%;margin-top:9px;background:linear-gradient(180deg,#5b8cff,#4271ec);color:#fff;border:0;border-radius:12px;
+    padding:16px;font-size:16px;font-weight:700;cursor:pointer;box-shadow:0 14px 34px -12px rgba(91,140,255,.7);
+    display:flex;align-items:center;justify-content:center;gap:9px}
+  .btn .go{font-size:17px}
+  .foot{text-align:center;margin-top:16px;color:var(--faint);font-size:12px}
+  .foot a{color:var(--muted);text-decoration:none}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="head"><span class="mark"></span><span class="wordmark">Gently</span></div>
+    <p class="cap">What do you need today?</p>
+
+    <div class="opt on">
+      <div class="ic">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="4"/><path d="M12 13v6M8 21h8M6 9a6 6 0 0 1 8-5.6"/></svg>
+      </div>
+      <div class="txt">
+        <div class="t">Microscope hardware</div>
+        <div class="s">Start the device layer &amp; connect to the rig <span class="mono">· :60610</span></div>
+      </div>
+      <span class="sw"></span>
+    </div>
+
+    <div class="opt on">
+      <div class="ic">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l2.2 5.8L20 11l-5.8 2.2L12 19l-2.2-5.8L4 11l5.8-2.2z"/></svg>
+      </div>
+      <div class="txt">
+        <div class="t">AI agent</div>
+        <div class="s">Chat, perception &amp; planning — uses your API key</div>
+      </div>
+      <span class="sw"></span>
+    </div>
+
+    <button class="btn">Let's go <span class="go">→</span></button>
+    <div class="foot"><a href="#">Advanced options</a> · remembers your choice</div>
+  </div>
+</body>
+</html>

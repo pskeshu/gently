@@ -16,7 +16,12 @@ def create_router(server) -> APIRouter:
         Viewing is open to everyone — the dashboard loads in view mode with no
         login. Signing in is an *elevation* to control (handled in-app via the
         chat window's "Sign in" affordance), not a gate on the page itself.
+
+        The launch gate is the entry point: until it's submitted this session,
+        every visit to / bounces to /launch (RFC #78 defer-init boot).
         """
+        if not getattr(server, "gate_passed", False):
+            return RedirectResponse("/launch", status_code=302)
         return server.templates.TemplateResponse(
             request,
             "index.html",

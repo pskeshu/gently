@@ -54,6 +54,7 @@
             </div>
             <div class="settings-nav-group">
                 <div class="settings-nav-title">Hardware</div>
+                <a class="settings-nav-item" data-section="devicelayer" href="#devicelayer">Device layer</a>
                 <a class="settings-nav-item" data-section="thermalizer" href="#thermalizer">Thermalizer</a>
                 <a class="settings-nav-item" data-section="effective" href="#effective">Effective config</a>
                 <a class="settings-nav-item" data-section="advanced" href="#advanced">Advanced</a>
@@ -92,6 +93,31 @@
                         <span class="settings-unit">x</span>
                     </div>
                 </div>
+            </section>
+
+            <!-- Device layer Section (install-time; rarely changed) -->
+            <section class="settings-section" id="section-devicelayer">
+                <h2 class="settings-section-title">Device layer</h2>
+                <p class="settings-label" style="opacity:.75;margin-bottom:1rem">
+                    Install-time settings for the microscope control process. Most rigs never
+                    change these — they're kept off the launch screen on purpose.
+                </p>
+                <div class="settings-field">
+                    <label class="settings-label">Device layer port</label>
+                    <div class="settings-input-row">
+                        <input type="number" class="settings-input" id="dl-port" min="1" max="65535">
+                    </div>
+                </div>
+                <div class="settings-field">
+                    <label class="settings-label">Image analysis (SAM) runs on</label>
+                    <div class="settings-radio-group" id="dl-sam">
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="auto"> Auto-detect</label>
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="cuda"> GPU (CUDA)</label>
+                        <label class="settings-radio"><input type="radio" name="dlsam" value="cpu"> CPU</label>
+                    </div>
+                    <p class="settings-label" style="opacity:.7;margin-top:.5rem" id="dl-sam-detected"></p>
+                </div>
+                <p class="settings-label" style="opacity:.8" id="dl-status"></p>
             </section>
 
             <!-- Ambient Section -->
@@ -304,6 +330,49 @@
                 localStorage.setItem('gently-theme', next);
             });
         }
+
+        // Device-layer settings (port + SAM device) — persisted via /api/launch/prefs.
+        // Applies to the next device-layer start (a running one isn't reconfigured).
+        (function () {
+            const port = document.getElementById('dl-port');
+            const detected = document.getElementById('dl-sam-detected');
+            const status = document.getElementById('dl-status');
+            if (!port) return;
+            let loaded = false;
+            fetch('/api/launch/prefs').then(r => (r.ok ? r.json() : null)).then(p => {
+                if (!p) return;
+                port.value = (p.port != null ? p.port : '');
+                const sam = p.sam_device_raw || 'auto';
+                const radio = document.querySelector('#dl-sam input[value="' + sam + '"]')
+                    || document.querySelector('#dl-sam input[value="auto"]');
+                if (radio) radio.checked = true;
+                if (detected) {
+                    detected.textContent = 'Detected: ' + (p.sam_detected === 'cuda'
+                        ? 'GPU (CUDA)'
+                        : 'CPU — no GPU found, so image analysis will be slower');
+                }
+                loaded = true;
+            });
+            async function save() {
+                if (!loaded) return;
+                const sam = (document.querySelector('#dl-sam input:checked') || {}).value || 'auto';
+                const body = { sam_device: sam };
+                const pv = parseInt(port.value, 10);
+                if (pv) body.port = pv;
+                try {
+                    const r = await fetch('/api/launch/prefs', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body),
+                    });
+                    if (status) status.textContent = r.ok
+                        ? 'Saved — applies next time the device layer starts'
+                        : (r.status === 403 ? 'Sign in to change device settings' : 'Failed to save');
+                } catch (e) { if (status) status.textContent = 'Failed to save'; }
+            }
+            port.addEventListener('change', save);
+            document.querySelectorAll('#dl-sam input').forEach(r => r.addEventListener('change', save));
+        })();
     </script>
     {% if replay_enabled %}
     <script src="/static/vendor/rrweb/rrweb.umd.min.js" defer></script>
