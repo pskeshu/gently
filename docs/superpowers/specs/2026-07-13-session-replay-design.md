@@ -108,6 +108,21 @@ rule for edge cases: **degrade the recording, never the app.**
 story flows with Chrome tracing; certify overhead (target: no story flow slows
 measurably; long-task count unchanged). This gate is part of the implementation PR.
 
+## Tauri desktop shell compatibility (PR #78)
+
+Works by construction: the shell is a WebView rendering the same Python-served pages,
+so the recorder travels with the UI unchanged. Two edge cases to build in:
+
+- **Final flush at app quit.** Quitting the desktop app kills the backend (Job Object
+  on Windows), which can race the `pagehide` beacon — the last ≤ one batch of a session
+  may be lost, and crashy sessions end at their most interesting moment. Keep the flush
+  interval short; the proper fix is PR #78's future graceful-shutdown handshake (drain
+  before kill).
+- **`requestIdleCallback` is absent in WebKit** (WebKitGTK = Linux desktop runs;
+  WebView2/Chromium on Windows is fine). Recorder must feature-detect with a
+  `setTimeout` fallback.
+- The Tauri splash page is not recorded (it precedes navigation to the served UI).
+
 ## Out of scope (v1)
 
 - Retention/pruning policy (revisit when disk pressure is real).
