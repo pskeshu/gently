@@ -9427,6 +9427,54 @@ body.modal-open {
 .devices-status-pill.stale { background: rgba(210, 153, 34, 0.2); color: var(--accent-orange, #d29922); }
 .devices-status-pill.error { background: rgba(248, 81, 73, 0.2); color: #f85149; }
 
+/* Device-layer supervision card (device-layer.js) */
+.devices-layer-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 0.9rem;
+    margin: 0.75rem 0 0.25rem;
+}
+.devices-layer-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+.devices-layer-head .devices-card-title { margin-bottom: 0; }
+.devices-layer-meta {
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+}
+.devices-layer-hint {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+}
+.devices-layer-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-top: 0.55rem;
+    flex-wrap: wrap;
+}
+.devices-layer-log {
+    margin: 0.55rem 0 0;
+    padding: 0.5rem 0.65rem;
+    max-height: 220px;
+    overflow: auto;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    font-family: 'SF Mono', 'Consolas', monospace;
+    font-size: 0.7rem;
+    line-height: 1.5;
+    color: var(--text-muted);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .devices-positions {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));

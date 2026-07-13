@@ -1,0 +1,14 @@
+{
+  "name": "gently-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Tauri desktop shell for gently (owns the Python backend + device layer)",
+  "scripts": {
+    "tauri": "tauri",
+    "dev": "tauri dev",
+    "build": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.4"
+  }
+}

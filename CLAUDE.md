@@ -96,6 +96,51 @@ Perception is handled by `gently-perception` (separate repo: `pskeshu/gently-per
 
 The device layer runs as a separate process (`python start_device_layer.py`). It communicates with the agent via HTTP. Bluesky plans require ophyd device name kwargs (e.g. `xy_stage='xy_stage'`, `volume_scanner='volume_scanner'`) — these must match the device names registered in `device_factory.py`.
 
+## Desktop App (Tauri)
+
+Gently can run as a Windows desktop app — a thin Tauri (WebView2) shell in
+`desktop/` that OWNS the Python backend. It spawns `launch_gently.py --no-browser`,
+shows a splash, then renders the live web UI (`http://localhost:8080`) in a native
+window. The Python-served web UI stays the single source of truth — no app logic
+lives in the shell. Full detail: `desktop/README.md`.
+
+### Build / run
+```
+cd desktop
+npm install        # once — restores the Tauri CLI
+npm run dev        # dev: build + launch (spawns the backend for you)
+npm run build      # release: NSIS installer under src-tauri/target/release/bundle/
+```
+Prereqs: Rust (MSVC toolchain), the repo's uv `.venv`, WebView2 runtime (inbox on
+Win 11). The **release** exe (`src-tauri/target/release/gently-desktop.exe`) is what
+the Desktop shortcut points at; rebuild with `npm run build` to refresh it.
+
+### Key pieces
+- `desktop/src-tauri/src/main.rs` — spawns the backend, waits for the server,
+  navigates the window to it, owns teardown.
+- **No orphans:** the spawned Python (and its device-layer grandchild) run in a
+  Windows Job Object with `KILL_ON_JOB_CLOSE`, so quitting/crashing the shell reaps
+  the whole tree.
+- **No console window:** the backend is spawned with `CREATE_NO_WINDOW` in release
+  (the device-layer supervisor does the same); `tauri dev` keeps the console so
+  logs stay visible while developing.
+
+### Editing code — what reflects
+- **Web UI** (`gently/ui/web/templates`, `static/js`, `static/css`): refresh the
+  window (Ctrl+R) — served live by Python, no rebuild.
+- **Python backend**: restart it, or run with `--reload`
+  (`launch_gently.py --reload`, or `GENTLY_LAUNCH_ARGS="--reload …"`) to auto-restart
+  on `gently/*.py` changes, then Ctrl+R. Whole-backend restart — not for live hardware.
+- **Rust shell / `tauri.conf.json`**: `npm run dev` auto-rebuilds and relaunches.
+
+### Shell env config (read by `main.rs`)
+`GENTLY_HOME` (repo dir), `GENTLY_PYTHON` (interpreter), `GENTLY_LAUNCH_ARGS`
+(extra `launch_gently` args), `VIZ_PORT` (default 8080), `GENTLY_DEVICE_LAYER_SCRIPT`.
+
+### Deferred
+Bundling the Python env (torch/anthropic/perception) for a redistributable
+installer — today's build launches the repo's `.venv`, so it's single-machine.
+
 ## Debugging Data Sources
 
 - **Agent logs**: `D:\Gently3\logs\gently_*.log`
