@@ -162,7 +162,20 @@
     if (events.length < 2) { status.textContent = 'Not enough events to replay this tab.'; return; }
     if (rep) { try { rep.destroy(); } catch (e) {} }
     stage.innerHTML = '';
-    rep = new rrweb.Replayer(events, { root: stage, skipInactive: true, speed: parseInt(speedSel.value, 10) });
+    rep = new rrweb.Replayer(events, {
+      root: stage,
+      skipInactive: true,
+      speed: parseInt(speedSel.value, 10),
+      // CSS animations restart from t=0 inside the replay iframe and rrweb
+      // pauses them at their first frame — the v2 shell's staggered
+      // fill-backwards entrances (v2-rise: from opacity 0) then leave whole
+      // panels invisible even though the DOM is correct. Disabling animations
+      // entirely makes the static (= final) styles apply. MutationObserver
+      // can never capture animation state, so this is the replay-side truth.
+      insertStyleRules: [
+        '*, *::before, *::after { animation: none !important; transition: none !important; }',
+      ],
+    });
     meta = rep.getMetaData();
     total = meta.totalTime;
     rep.on('finish', function () { setPlaying(false); });

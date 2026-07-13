@@ -141,6 +141,14 @@ def render(events: list, offset_ms: int, out: Path, base_url: str | None) -> Non
                 window.__rep = new rrweb.Replayer(events, {
                     root: document.getElementById('stage'),
                     skipInactive: true,
+                    // Disable CSS animations/transitions so static (= final)
+                    // styles apply: paused replays otherwise freeze entrance
+                    // animations at their from-state (v2-rise: opacity 0),
+                    // leaving whole panels invisible.
+                    insertStyleRules: [
+                        '*, *::before, *::after { animation: none !important; ' +
+                        'transition: none !important; }',
+                    ],
                 });
                 window.__rep.pause(offset);
             }""",

@@ -27,7 +27,11 @@ Session id → folder mapping: `sessions/_index.yaml`.
 
 ## The walk
 
-1. **Read `actions.jsonl`** (one JSON object per line). Kinds you'll see:
+1. **Read `actions.jsonl`** (one JSON object per line). It is **arrival-ordered,
+   not time-ordered** (batches from multiple tabs interleave) — sort by `t`
+   before reconstructing a timeline. Non-browser traffic (curl probes, harness
+   runs) records too; check the tab's `user_agent` in `meta.yaml` before
+   treating a tab as a human. Kinds you'll see:
    - `page-load` — with url + viewport; a new `tab` id per browser tab/reload.
    - `tab:embryos`, `view:board`, `bz:-10`, `button#op-detect`,
      `click:marking-action-btn:Done` — clicks, named from the UI's semantic
@@ -44,9 +48,15 @@ Session id → folder mapping: `sessions/_index.yaml`.
    `predictions.jsonl` per embryo, `timelapse.yaml`, events. See the
    `gently-debugging` skill for that map.
    **Clock semantics:** `actions.jsonl` `t` is the *browser's* clock as UTC
-   ISO; rrweb `timestamp` is epoch ms; server logs print server-local time.
-   Convert everything to epoch before joining, and expect modest client/server
-   skew (same machine ⇒ sub-second; remote browser ⇒ whatever their clock is).
+   ISO; rrweb `timestamp` is epoch ms; `meta.yaml` `first_seen` is *naive
+   server-local* time (IST on the production rig — expect it to differ from
+   the same tab's UTC `page-load` by the UTC offset); server logs print
+   server-local time. Convert everything to epoch before joining, and expect
+   modest client/server skew (same machine ⇒ sub-second; remote browser ⇒
+   whatever their clock is).
+   **Names vs labels:** action names use the UI's *internal* vocabulary
+   (`tab:events`), while `target.label` is what the user actually saw
+   ("Logs") — quote labels when narrating for humans.
 3. **Render the moments that matter** (needs the repo venv with Playwright):
 
    ```bash
@@ -69,6 +79,13 @@ Session id → folder mapping: `sessions/_index.yaml`.
   capture (base64 frame storms) — replays show a placeholder box there. What
   the camera saw lives in the file store (volumes/projections); whether it
   was streaming is in `bus-summary`.
+- Replays disable CSS animations/transitions (`animation: none` injected) so
+  final styles apply — otherwise paused replays freeze entrance animations at
+  their invisible from-state. Consequence: spinners/pulses appear static, and
+  a frame rendered mid-animation shows the settled state, not the tween.
+- A rendered frame shows the DOM *at that instant*: click a nav button and
+  the previous panel is still on screen — the response mutations land in the
+  following ~200 ms. Render a second frame slightly later to see the effect.
 - A session's recording can span multiple `rrweb-{tab}` files (reloads, second
   windows). `meta.yaml` + `page-load` actions give the timeline of tabs.
 - The final ≤4s batch of a tab can be missing if the browser/app closed
