@@ -18,7 +18,6 @@
     tab: Math.random().toString(16).slice(2, 10),
     rrwebBuf: [],
     actionBuf: [],
-    bufBytes: 0,
     dropped: 0,
     failures: 0,
     disabled: false,
@@ -29,7 +28,10 @@
 
   var INGEST_URL = "/replay/ingest";
   var FLUSH_MS = 4000; // short interval: bounds loss at tab close / app quit
-  var MAX_BUF_BYTES = 8 * 1024 * 1024; // drop-oldest beyond this (app > data)
+  // Count-based cap, NOT bytes: sizing would mean JSON.stringify on every
+  // rrweb event on the main thread (mutation-storm hot path). Serialization
+  // happens exactly once, at flush. 20k events ≫ one flush interval's worth.
+  var MAX_BUF_EVENTS = 20000; // drop-oldest beyond this (app > data)
   var MAX_FAILURES = 5; // consecutive ingest failures before self-disable
   var CHECKOUT_MS = 5 * 60 * 1000; // periodic full snapshots: cheap seeking later
   // Live camera <img> gets base64 data-URI src swaps at frame rate — recording
@@ -55,19 +57,11 @@
   }
 
   function pushEvent(buf, ev) {
-    var size;
-    try {
-      size = JSON.stringify(ev).length;
-    } catch (e) {
-      return; // unserializable event: skip it, never throw
-    }
     buf.push(ev);
-    STATE.bufBytes += size;
-    while (STATE.bufBytes > MAX_BUF_BYTES && STATE.rrwebBuf.length > 1) {
-      // Drop oldest rrweb events first (bulkiest); record the gap honestly.
-      var droppedEv = STATE.rrwebBuf.shift();
-      STATE.bufBytes -= JSON.stringify(droppedEv).length;
-      STATE.dropped += 1;
+    if (STATE.rrwebBuf.length > MAX_BUF_EVENTS) {
+      // Drop oldest rrweb events (bulkiest stream); record the gap honestly.
+      STATE.dropped += STATE.rrwebBuf.length - MAX_BUF_EVENTS;
+      STATE.rrwebBuf.splice(0, STATE.rrwebBuf.length - MAX_BUF_EVENTS);
     }
   }
 
@@ -100,7 +94,6 @@
     }
     STATE.rrwebBuf = [];
     STATE.actionBuf = [];
-    STATE.bufBytes = 0;
     return batch;
   }
 
