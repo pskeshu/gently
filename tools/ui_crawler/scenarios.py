@@ -17,6 +17,7 @@ Run (control shim on 8080; optional account-mode server on 8081 for view-only):
     uv run python tools/ui_crawler/scenarios.py --url http://localhost:8080 \
         --account-url http://localhost:8081 --out tools/ui_crawler/out
 """
+
 from __future__ import annotations
 
 import argparse
@@ -37,7 +38,9 @@ async def _goto(page, url, path="/"):
 async def _skip_landing(page):
     """Dismiss the landing overlay to reach the workspace."""
     try:
-        await page.evaluate("() => { const s=document.getElementById('v2-landing-skip'); if (s) s.click(); }")
+        await page.evaluate(
+            "() => { const s=document.getElementById('v2-landing-skip'); if (s) s.click(); }"
+        )
         await asyncio.sleep(0.4)
     except Exception:
         pass
@@ -59,10 +62,13 @@ async def _count_text(page, regex):
             const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; };
           const re = new RegExp(q, 'i');
           return [...document.querySelectorAll('button, a, [role=button], .btn')].filter(e => vis(e) && re.test(e.textContent||'')).length;
-        }""", regex)
+        }""",
+        regex,
+    )
 
 
 # --- scenarios: each returns an "observed" string proving the finding ---
+
 
 async def sc_no_export(page, url):
     seen = 0
@@ -83,12 +89,14 @@ async def sc_notebook_questions(page, url):
     q_tab = await _count_text(page, r"^questions$")
     # click a Questions tab if present, then measure content
     try:
-        await page.click('text=/^Questions$/i', timeout=4000)
+        await page.click("text=/^Questions$/i", timeout=4000)
         await asyncio.sleep(0.6)
     except Exception:
         pass
-    body = await page.evaluate("() => (document.querySelector('#tab-notebook, .notebook, main')||document.body).innerText.slice(0,200)")
-    return f"notebook Questions tab present={q_tab>0}; content after click: {body!r}"
+    body = await page.evaluate(
+        "() => (document.querySelector('#tab-notebook, .notebook, main')||document.body).innerText.slice(0,200)"
+    )
+    return f"notebook Questions tab present={q_tab > 0}; content after click: {body!r}"
 
 
 async def sc_snap_silent_503(page, url):
@@ -106,7 +114,7 @@ async def sc_snap_silent_503(page, url):
     clicked = False
     for label in ("Snap", "Acquire", "Capture"):
         try:
-            await page.click(f'text=/^{label}$/i', timeout=3000)
+            await page.click(f"text=/^{label}$/i", timeout=3000)
             clicked = True
             break
         except Exception:
@@ -118,7 +126,9 @@ async def sc_snap_silent_503(page, url):
 
 async def sc_no_create_campaign(page, url):
     await _tab(page, "plans")
-    btn = await _count_text(page, r"new campaign|create campaign|\+\s*campaign|new plan|create plan")
+    btn = await _count_text(
+        page, r"new campaign|create campaign|\+\s*campaign|new plan|create plan"
+    )
     return f"create-campaign/new-plan buttons on plans tab: {btn} (creation is agent-tool only)"
 
 
@@ -142,28 +152,80 @@ async def sc_view_only_plan_spins(page, url):
     except Exception:
         return "could not click 'Plan an experiment' (is this an account-mode server?)"
     await asyncio.sleep(3.0)
-    spinning = await page.evaluate("() => { const t=document.querySelector('.v2-thinking:not(.hidden), .spinner, [aria-busy=\"true\"]'); return !!t; }")
-    plan_items = await page.evaluate("() => document.querySelectorAll('.v2-plan-item, [data-plan-item]').length")
+    spinning = await page.evaluate(
+        "() => { const t=document.querySelector('.v2-thinking:not(.hidden), .spinner, [aria-busy=\"true\"]'); return !!t; }"
+    )
+    plan_items = await page.evaluate(
+        "() => document.querySelectorAll('.v2-plan-item, [data-plan-item]').length"
+    )
     return f"view-only 'Plan an experiment' → spinner present={spinning}, plan items rendered={plan_items} (wizard spins, no take-control prompt)"
 
 
 SCENARIOS = [
     ("no-export", "No perception/experiment data export", "high", sc_no_export, False),
     ("no-ground-truth", "No ground-truth annotation UI", "high", sc_no_ground_truth, False),
-    ("judge-notebook-questions", "Notebook Questions tab dead / no note detail", "medium", sc_notebook_questions, False),
-    ("snap-silent-503", "One-off snap silently fails when device offline", "medium", sc_snap_silent_503, False),
-    ("no-create-campaign", "No UI to create a campaign / new plan", "medium", sc_no_create_campaign, False),
-    ("temperature-alerts", "Temperature alerts do not exist", "medium", sc_temperature_alerts, False),
-    ("mesh-invisible", "Mesh + session import invisible from web", "medium", sc_mesh_invisible, False),
-    ("view-only-plan-spins", "View-only user gets a permanently spinning plan wizard", "medium", sc_view_only_plan_spins, True),
+    (
+        "judge-notebook-questions",
+        "Notebook Questions tab dead / no note detail",
+        "medium",
+        sc_notebook_questions,
+        False,
+    ),
+    (
+        "snap-silent-503",
+        "One-off snap silently fails when device offline",
+        "medium",
+        sc_snap_silent_503,
+        False,
+    ),
+    (
+        "no-create-campaign",
+        "No UI to create a campaign / new plan",
+        "medium",
+        sc_no_create_campaign,
+        False,
+    ),
+    (
+        "temperature-alerts",
+        "Temperature alerts do not exist",
+        "medium",
+        sc_temperature_alerts,
+        False,
+    ),
+    (
+        "mesh-invisible",
+        "Mesh + session import invisible from web",
+        "medium",
+        sc_mesh_invisible,
+        False,
+    ),
+    (
+        "view-only-plan-spins",
+        "View-only user gets a permanently spinning plan wizard",
+        "medium",
+        sc_view_only_plan_spins,
+        True,
+    ),
 ]
 
 # Findings that need real hardware or a live agent turn — not headless-reproducible:
 RIG_ONLY = [
-    ("led-force-close", "LED force-close safety violated on step-leave — needs device LED state + Operate focus step"),
-    ("scripted-protocol-false-success", "scripted_protocol reports success while nothing runs — needs device + Run flow"),
-    ("answer-silently-queued", "Typed answer to agent question silently queued — needs a pending agent ask"),
-    ("autonomous-not-stoppable", "Autonomous wake turns can't be stopped from web — needs an autonomous turn"),
+    (
+        "led-force-close",
+        "LED force-close safety violated on step-leave — needs device LED state + Operate focus step",
+    ),
+    (
+        "scripted-protocol-false-success",
+        "scripted_protocol reports success while nothing runs — needs device + Run flow",
+    ),
+    (
+        "answer-silently-queued",
+        "Typed answer to agent question silently queued — needs a pending agent ask",
+    ),
+    (
+        "autonomous-not-stoppable",
+        "Autonomous wake turns can't be stopped from web — needs an autonomous turn",
+    ),
 ]
 
 
@@ -173,13 +235,22 @@ async def main_async(args):
     manifest = []
     async with async_playwright() as p:
         launch_args = ["--disable-dev-shm-usage", "--no-sandbox"]
-        browser = await p.chromium.launch(headless=not args.headed, slow_mo=args.slow_mo, args=launch_args)
+        browser = await p.chromium.launch(
+            headless=not args.headed, slow_mo=args.slow_mo, args=launch_args
+        )
         for name, title, sev, fn, needs_account in SCENARIOS:
             target = args.account_url if needs_account else args.url
             if needs_account and not args.account_url:
                 print(f"  [skip] {name}: needs --account-url (account-mode server)", flush=True)
-                manifest.append({"scenario": name, "title": title, "severity": sev, "trace": None,
-                                 "observed": "skipped — no account-mode server provided"})
+                manifest.append(
+                    {
+                        "scenario": name,
+                        "title": title,
+                        "severity": sev,
+                        "trace": None,
+                        "observed": "skipped — no account-mode server provided",
+                    }
+                )
                 continue
             context = await browser.new_context(viewport={"width": 1440, "height": 900})
             await context.tracing.start(screenshots=True, snapshots=True, sources=True, title=title)
@@ -194,11 +265,20 @@ async def main_async(args):
                 observed = f"scenario error: {exc}"
             await context.tracing.stop(path=str(out / f"{name}.zip"))
             await context.close()
-            manifest.append({"scenario": name, "title": title, "severity": sev,
-                             "trace": f"{name}.zip", "observed": observed})
+            manifest.append(
+                {
+                    "scenario": name,
+                    "title": title,
+                    "severity": sev,
+                    "trace": f"{name}.zip",
+                    "observed": observed,
+                }
+            )
             print(f"  [trace] {sev:6} {name:26} → {name}.zip\n          {observed}", flush=True)
         await browser.close()
-    (out / "index.json").write_text(json.dumps({"scenarios": manifest, "rig_only": RIG_ONLY}, indent=2))
+    (out / "index.json").write_text(
+        json.dumps({"scenarios": manifest, "rig_only": RIG_ONLY}, indent=2)
+    )
     print(f"\n[scenarios] {len([m for m in manifest if m['trace']])} traced → {out}/")
     print("  rig/agent-only (not headless-reproducible):")
     for n, why in RIG_ONLY:
@@ -207,9 +287,15 @@ async def main_async(args):
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Scripted static-audit deficiency reproductions → traces")
+    ap = argparse.ArgumentParser(
+        description="Scripted static-audit deficiency reproductions → traces"
+    )
     ap.add_argument("--url", default="http://localhost:8080", help="control-mode viz server")
-    ap.add_argument("--account-url", default=None, help="account-mode (logged-out) server for view-only scenarios")
+    ap.add_argument(
+        "--account-url",
+        default=None,
+        help="account-mode (logged-out) server for view-only scenarios",
+    )
     ap.add_argument("--headed", action="store_true")
     ap.add_argument("--slow-mo", type=int, default=0)
     ap.add_argument("--out", default="tools/ui_crawler/out")

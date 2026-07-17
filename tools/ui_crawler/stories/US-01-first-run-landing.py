@@ -4,8 +4,13 @@ so I understand how to start."""
 
 from _harness import count_text, exists, goto
 
-META = {"id": "US-01", "title": "First-run landing shows the entry choices",
-        "cluster": "1 Onboarding", "mode": "headless", "needs_account": False}
+META = {
+    "id": "US-01",
+    "title": "First-run landing shows the entry choices",
+    "cluster": "1 Onboarding",
+    "mode": "headless",
+    "needs_account": False,
+}
 
 
 async def flow(page, url, rec):

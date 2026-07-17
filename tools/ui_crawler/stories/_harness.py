@@ -23,13 +23,13 @@ class Rec:
     """
 
     def __init__(self):
-        self.status = None      # works | partial | gap | blocked
+        self.status = None  # works | partial | gap | blocked
         self.observed = ""
-        self.console = []       # console errors seen during the flow
-        self.shots = []         # PNG filenames captured for this story
-        self._page = None       # set by the runner
-        self._dir = None        # shots dir (Path), set by the runner
-        self._id = None         # story id, set by the runner
+        self.console = []  # console errors seen during the flow
+        self.shots = []  # PNG filenames captured for this story
+        self._page = None  # set by the runner
+        self._dir = None  # shots dir (Path), set by the runner
+        self._id = None  # story id, set by the runner
 
     def ok(self, msg):
         self.status, self.observed = "works", msg
@@ -69,12 +69,15 @@ async def skip_landing(page):
     display:none), so a fixed short sleep can race it and leave the overlay
     reading as 'still visible'. Poll until it's dismissed/hidden."""
     try:
-        await page.evaluate("() => { const s=document.getElementById('v2-landing-skip'); if (s) s.click(); }")
+        await page.evaluate(
+            "() => { const s=document.getElementById('v2-landing-skip'); if (s) s.click(); }"
+        )
         for _ in range(25):
             gone = await page.evaluate(
                 "() => { const l=document.getElementById('v2-landing'); if (!l) return true;"
                 " const cs=getComputedStyle(l);"
-                " return l.classList.contains('dismissed') || cs.display==='none' || parseFloat(cs.opacity||'1')===0; }")
+                " return l.classList.contains('dismissed') || cs.display==='none' || parseFloat(cs.opacity||'1')===0; }"
+            )
             if gone:
                 break
             await asyncio.sleep(0.1)
@@ -129,7 +132,9 @@ async def count_text(page, regex):
             const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; };
           const re = new RegExp(q, 'i');
           return [...document.querySelectorAll('button, a, [role=button], .btn')].filter(e => vis(e) && re.test(e.textContent||'')).length;
-        }""", regex)
+        }""",
+        regex,
+    )
 
 
 async def exists(page, selector):
@@ -137,7 +142,9 @@ async def exists(page, selector):
     return await page.evaluate(
         """(sel) => { const el=document.querySelector(sel); if (!el) return false;
           const cs=getComputedStyle(el); if (cs.display==='none'||cs.visibility==='hidden'||parseFloat(cs.opacity||'1')===0) return false;
-          const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; }""", selector)
+          const r=el.getBoundingClientRect(); return r.width>1 && r.height>1; }""",
+        selector,
+    )
 
 
 async def present(page, selector):
@@ -147,7 +154,9 @@ async def present(page, selector):
     `exists`'s box check would wrongly reject them."""
     return await page.evaluate(
         """(sel) => { const el=document.querySelector(sel); if (!el) return false;
-          return getComputedStyle(el).display !== 'none'; }""", selector)
+          return getComputedStyle(el).display !== 'none'; }""",
+        selector,
+    )
 
 
 async def dom_count(page, selector):
