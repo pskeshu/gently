@@ -37,6 +37,12 @@ const DeviceLayerCard = (function () {
     let _timer = null;
     let _busy = false;   // a start/stop is in flight
     let _dom = false;
+    let _autoLog = false;         // log pane was auto-opened for the boot phase
+    let _logUserOverride = false; // user toggled the log → stop auto-managing it this cycle
+    let _uptimeTimer = null;      // 1s local ticker so uptime reads live between 5s polls
+    let _uptimeBase = 0;          // uptime_seconds from the most recent poll
+    let _uptimeAnchor = 0;        // performance.now() when that poll landed
+    let _samLabel = '';           // cached accelerator label for the local re-render
 
     function cacheDom() {
         if (_dom) return;
@@ -84,6 +90,7 @@ const DeviceLayerCard = (function () {
 
     function stopPoll() {
         if (_timer) { clearInterval(_timer); _timer = null; }
+        stopUptimeTicker();   // no local ticking while the tab is hidden
     }
 
     async function loadStatus() {
@@ -107,19 +114,31 @@ const DeviceLayerCard = (function () {
 
         const booting = d.state === 'starting' || d.state === 'initializing';
 
-        // Meta line: during boot show the current stage; otherwise pid/port/uptime.
-        if (booting && d.progress && d.progress.i && d.progress.n) {
-            _meta.textContent =
-                'step ' + d.progress.i + '/' + d.progress.n + ' · ' + (d.progress.label || 'starting…');
-        } else if (booting) {
-            _meta.textContent = 'starting…';
+        // Meta line: during boot show the current stage; otherwise uptime + SAM.
+        if (booting) {
+            stopUptimeTicker();
+            _meta.textContent = (d.progress && d.progress.i && d.progress.n)
+                ? 'step ' + d.progress.i + '/' + d.progress.n + ' · ' + (d.progress.label || 'starting…')
+                : 'starting…';
         } else {
-            const bits = [];
-            if (d.pid) bits.push('pid ' + d.pid);
-            if (d.port) bits.push('port ' + d.port + (d.port_open ? '' : ' · closed'));
-            if (d.sam_device) bits.push(d.sam_device);
-            if (typeof d.uptime_seconds === 'number') bits.push('up ' + fmtUptime(d.uptime_seconds));
-            _meta.textContent = bits.join(' · ');
+            // Operator-friendly status line: uptime + the SAM accelerator in
+            // plain terms. pid, raw port, and "closed" are debug details (in the
+            // Log / status payload), kept off the glanceable line.
+            _samLabel = !d.sam_device ? ''
+                : d.sam_device === 'cuda' ? 'GPU'
+                : d.sam_device === 'cpu' ? 'CPU' : d.sam_device;
+            if (typeof d.uptime_seconds === 'number' && d.uptime_seconds > 0) {
+                // Anchor to the server's value, then tick locally every second so
+                // uptime counts smoothly instead of stepping by the 5s poll gap.
+                _uptimeBase = d.uptime_seconds;
+                _uptimeAnchor = (typeof performance !== 'undefined' ? performance.now() : 0);
+                renderSteadyMeta();
+                startUptimeTicker();
+            } else {
+                _uptimeBase = 0;
+                stopUptimeTicker();
+                renderSteadyMeta();
+            }
         }
 
         // Hint line: failure reason, external note, or a reassurance during the
@@ -154,6 +173,22 @@ const DeviceLayerCard = (function () {
             _timer = setInterval(loadStatus, _pollMs);
         }
 
+        // During boot, auto-surface the trailing init log so the long MMCore
+        // step visibly progresses ("something is happening") instead of sitting
+        // on a static hint. Reuses the Log pane; auto-collapses once boot ends —
+        // unless the user has taken the log's open/closed state into their hands.
+        if (booting && _log.hidden && !_logUserOverride) {
+            _log.hidden = false;
+            _logToggle.setAttribute('aria-expanded', 'true');
+            _logToggle.classList.add('active');
+            _autoLog = true;
+        } else if (!booting && _autoLog && !_logUserOverride && !_log.hidden) {
+            _log.hidden = true;
+            _logToggle.setAttribute('aria-expanded', 'false');
+            _logToggle.classList.remove('active');
+            _autoLog = false;
+        }
+
         if (Array.isArray(d.log_tail) && d.log_tail.length && !_log.hidden) {
             renderLog(d.log_tail);
         }
@@ -166,10 +201,35 @@ const DeviceLayerCard = (function () {
         return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
     }
 
+    // Re-render the steady-state meta from cached values, computing uptime live
+    // off the last poll's anchor so the local 1s ticker counts smoothly.
+    function renderSteadyMeta() {
+        if (!_meta) return;
+        const bits = [];
+        if (_uptimeBase > 0) {
+            const now = (typeof performance !== 'undefined' ? performance.now() : 0);
+            bits.push('up ' + fmtUptime(_uptimeBase + Math.max(0, now - _uptimeAnchor) / 1000));
+        }
+        if (_samLabel) bits.push('SAM: ' + _samLabel);
+        _meta.textContent = bits.join(' · ');
+    }
+
+    function startUptimeTicker() {
+        if (_uptimeTimer) return;                        // already ticking
+        _uptimeTimer = setInterval(renderSteadyMeta, 1000);
+    }
+
+    function stopUptimeTicker() {
+        if (_uptimeTimer) { clearInterval(_uptimeTimer); _uptimeTimer = null; }
+    }
+
     // ── start / stop ─────────────────────────────────────────────────────
 
     async function onStart() {
         if (_start.disabled) return;
+        // Fresh boot cycle — let the log pane auto-manage again.
+        _logUserOverride = false;
+        _autoLog = false;
         _busy = true;
         _start.disabled = true;
         try {
@@ -237,6 +297,8 @@ const DeviceLayerCard = (function () {
     // ── log tail ─────────────────────────────────────────────────────────
 
     function toggleLog() {
+        _logUserOverride = true;   // user owns the pane's open/closed state now
+        _autoLog = false;
         const show = _log.hidden;
         _log.hidden = !show;
         _logToggle.setAttribute('aria-expanded', String(show));

@@ -9459,6 +9459,26 @@ body.modal-open {
     margin-top: 0.55rem;
     flex-wrap: wrap;
 }
+/* Stop tears down the running device layer — the destructive action, so it
+   reads red (filled + active when there's something to stop). When nothing is
+   running it stays red-tinted but clearly inactive, mirroring how Start is
+   blue-active/blue-faded. Overrides the generic .marking-action-btn:disabled
+   0.4 opacity so the red stays legible while disabled. */
+#devices-layer-stop {
+    background: #f85149;
+    border-color: #f85149;
+    color: #fff;
+}
+#devices-layer-stop:hover:not(:disabled) {
+    filter: brightness(1.08);
+    background: #f85149;
+}
+#devices-layer-stop:disabled {
+    opacity: 1;
+    background: transparent;
+    border-color: rgba(248, 81, 73, 0.4);
+    color: rgba(248, 81, 73, 0.55);
+}
 .devices-layer-log {
     margin: 0.55rem 0 0;
     padding: 0.5rem 0.65rem;
