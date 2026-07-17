@@ -38,6 +38,28 @@
   // it would add ~100KB+ per frame on the main thread. Blocked from capture;
   // the bus-summary action records that frames were flowing instead.
   var BLOCK_SELECTOR = "#op-cam-img";
+  // Machine-driven, high-churn regions: the live map re-renders at stage-poll
+  // rate, the 3D occupancy canvas animates, the temperature graph redraws on
+  // every reading. In 'balanced' fidelity these are blocked from the DOM stream
+  // (a placeholder box replays in their place) — they're the bulk of the volume.
+  var HIGH_CHURN =
+    "#devices-map-svg, #occ3d-container, #occ3d-minimap, #devices-temp-graph";
+
+  // Recording fidelity, most-specific first: a ?replay=<level> URL override (for
+  // an ad-hoc high/low-fidelity capture), else the server default stamped on the
+  // recorder's <script> tag, else 'balanced'.
+  function readFidelity() {
+    try {
+      var q = new URLSearchParams(location.search).get("replay");
+      if (q && /^(full|balanced|actions|off)$/.test(q)) return q;
+    } catch (e) {}
+    try {
+      var s = document.querySelector("script[data-gently-replay-fidelity]");
+      var v = s && s.getAttribute("data-gently-replay-fidelity");
+      if (v && /^(full|balanced|actions|off)$/.test(v)) return v;
+    } catch (e) {}
+    return "balanced";
+  }
 
   function disable(reason) {
     if (STATE.disabled) return;
@@ -333,24 +355,34 @@
   /* ---- boot ---- */
 
   function start() {
-    if (!window.rrweb || typeof window.rrweb.record !== "function") {
-      return disable("rrweb not loaded");
-    }
-    try {
-      STATE.stopFn = window.rrweb.record({
-        emit: function (event) {
-          pushEvent(STATE.rrwebBuf, event);
-        },
-        recordCanvas: false, // stored microscope pixels replay by reference (file store)
-        blockSelector: BLOCK_SELECTOR,
-        checkoutEveryNms: CHECKOUT_MS,
-        slimDOMOptions: true,
-        // 120ms mousemove still gives a smooth pointer trail on replay; 50ms
-        // measurably taxed the A/B's action latencies for no postmortem value.
-        sampling: { mousemove: 120, scroll: 300, media: 800, input: "last" },
-      });
-    } catch (e) {
-      return disable("rrweb.record failed: " + (e && e.message));
+    var fidelity = readFidelity();
+    if (fidelity === "off") return disable("fidelity=off");
+    STATE.fidelity = fidelity;
+
+    // 'actions' records the semantic log only — no rrweb DOM stream (tiny).
+    // 'full' keeps every mutation; 'balanced' additionally blocks the
+    // machine-driven high-churn regions (the bulk of the volume).
+    if (fidelity !== "actions") {
+      if (!window.rrweb || typeof window.rrweb.record !== "function") {
+        return disable("rrweb not loaded");
+      }
+      var block = fidelity === "full" ? BLOCK_SELECTOR : BLOCK_SELECTOR + ", " + HIGH_CHURN;
+      try {
+        STATE.stopFn = window.rrweb.record({
+          emit: function (event) {
+            pushEvent(STATE.rrwebBuf, event);
+          },
+          recordCanvas: false, // stored microscope pixels replay by reference (file store)
+          blockSelector: block,
+          checkoutEveryNms: CHECKOUT_MS,
+          slimDOMOptions: true,
+          // 120ms mousemove still gives a smooth pointer trail on replay; 50ms
+          // measurably taxed the A/B's action latencies for no postmortem value.
+          sampling: { mousemove: 120, scroll: 300, media: 800, input: "last" },
+        });
+      } catch (e) {
+        return disable("rrweb.record failed: " + (e && e.message));
+      }
     }
     document.addEventListener("click", onClick, true);
     document.addEventListener("submit", onSubmit, true);
@@ -359,6 +391,7 @@
     logAction("page-load", null, {
       url: String(location.href),
       viewport: window.innerWidth + "x" + window.innerHeight,
+      fidelity: fidelity,
     });
     window.addEventListener("pagehide", finalFlush);
     document.addEventListener("visibilitychange", function () {

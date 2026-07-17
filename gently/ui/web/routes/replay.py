@@ -38,6 +38,12 @@ _UNASSIGNED_RE = re.compile(r"^unassigned-\d{8}$")
 _MAX_BATCH_BYTES = 32 * 1024 * 1024
 # meta.yaml is only rewritten when a new (dir, tab) pair first appears.
 _seen_tabs: set[tuple[str, str]] = set()
+# (dir, tab) pairs whose rrweb file has hit the per-tab size cap — so the
+# "capped" marker is logged once, not on every subsequent ingest.
+_capped_tabs: set[tuple[str, str]] = set()
+# Retention prune runs once per process, lazily on the first ingest (by which
+# point the store is up), off the event loop.
+_pruned = False
 
 
 def _store(server) -> Any:
@@ -131,6 +137,60 @@ def _update_meta(base: Path, tab: str, user_agent: str) -> None:
     _write_yaml(meta_path, meta)
 
 
+def _all_replay_dirs(store) -> list[Path]:
+    """Every ui-replay dir on disk (per-session + unassigned buckets)."""
+    root = Path(store.root)
+    dirs = [d for d in (root / "sessions").glob("*/ui-replay") if d.is_dir()]
+    unassigned = root / "ui-replay"
+    if unassigned.is_dir():
+        dirs += [d for d in unassigned.iterdir() if d.is_dir() and _UNASSIGNED_RE.match(d.name)]
+    return dirs
+
+
+def _prune_recordings(server) -> None:
+    """Keep total rrweb footprint under the configured budget by deleting the
+    oldest recordings first. Conservative: always keeps the newest few, skips
+    the active session, and never lets a failure escape into ingest."""
+    store = _store(server)
+    if store is None:
+        return
+    budget = int(settings.ui.replay_total_budget_mb * 1024 * 1024)
+    active: str | None = None
+    try:
+        active = server._current_session_id()
+    except Exception:  # noqa: BLE001
+        active = None
+    entries: list[tuple[float, int, Path]] = []
+    for d in _all_replay_dirs(store):
+        try:
+            files = list(d.glob("*.jsonl"))
+            size = sum(f.stat().st_size for f in files)
+            mtime = max((f.stat().st_mtime for f in files), default=0.0)
+        except OSError:
+            continue
+        # Never prune the active session's live recording.
+        if active and active in str(d):
+            continue
+        entries.append((mtime, size, d))
+    total = sum(s for _, s, _ in entries)
+    if total <= budget:
+        return
+    entries.sort(key=lambda e: e[0])  # oldest first
+    keep_newest = 3
+    prunable = entries[: max(0, len(entries) - keep_newest)]
+    import shutil
+
+    for _mtime, size, d in prunable:
+        if total <= budget:
+            break
+        try:
+            shutil.rmtree(d)
+            total -= size
+            logger.info("replay: pruned old recording %s (%.0f MB)", d.name, size / 1048576)
+        except OSError:
+            logger.debug("replay: could not prune %s", d, exc_info=True)
+
+
 def _read_jsonl(path: Path) -> list[Any]:
     out = []
     with open(path, encoding="utf-8") as f:
@@ -152,6 +212,7 @@ def create_router(server) -> APIRouter:
     # recorder — the flag is the only coupling between replay and the pages.
     try:
         server.templates.env.globals["replay_enabled"] = settings.ui.replay
+        server.templates.env.globals["replay_fidelity"] = settings.ui.replay_fidelity
     except Exception:  # noqa: BLE001 — a missing templates attr is not fatal
         pass
 
@@ -193,9 +254,45 @@ def create_router(server) -> APIRouter:
                 }
             )
 
+        # Prune old recordings to the total budget once per process, off the
+        # event loop (the store is up by the time ingest first fires).
+        global _pruned
+        if not _pruned:
+            _pruned = True
+            asyncio.create_task(asyncio.to_thread(_prune_recordings, server))
+
+        cap_bytes = int(settings.ui.replay_max_tab_mb * 1024 * 1024)
+
         def _write() -> None:
+            rrweb_path = base / f"rrweb-{tab}.jsonl"
             if rrweb_events:
-                _append_lines(base / f"rrweb-{tab}.jsonl", rrweb_events)
+                try:
+                    over_cap = rrweb_path.exists() and rrweb_path.stat().st_size >= cap_bytes
+                except OSError:
+                    over_cap = False
+                if over_cap:
+                    # A single tab hit the size cap — stop growing its rrweb
+                    # stream (the live map/telemetry re-render at poll rate can
+                    # run this to gigabytes). Keep the small action log going;
+                    # mark the truncation once.
+                    key = (str(base), tab)
+                    if key not in _capped_tabs:
+                        _capped_tabs.add(key)
+                        actions.append(
+                            {
+                                "t": datetime.now().isoformat(),
+                                "action": "rrweb-capped",
+                                "tab": tab,
+                                "params": {"cap_mb": settings.ui.replay_max_tab_mb},
+                            }
+                        )
+                        logger.warning(
+                            "replay: rrweb cap (%.0f MB) hit for tab %s — dropping further frames",
+                            settings.ui.replay_max_tab_mb,
+                            tab,
+                        )
+                else:
+                    _append_lines(rrweb_path, rrweb_events)
             if actions:
                 _append_lines(base / "actions.jsonl", actions)
             _update_meta(base, tab, request.headers.get("user-agent", ""))
