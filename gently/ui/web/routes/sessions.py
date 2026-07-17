@@ -1,6 +1,7 @@
 """Session routes - list, retrieve, and resume saved sessions."""
 
 import logging
+import time
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -191,6 +192,11 @@ def create_router(server) -> APIRouter:
             rehydrated = server.rehydrate_session(session_id)
         except Exception:
             logger.exception("rehydrate_session failed")
+        # Skip the "what are we doing today?" landing on the reload below — we're
+        # resuming existing work, not starting fresh. A timestamp (not a one-shot
+        # bool) so EVERY client reloaded by the broadcast below skips the landing,
+        # not just whichever one happens to hit the index route first.
+        server._resumed_at = time.monotonic()
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
         try:

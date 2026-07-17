@@ -21,7 +21,7 @@
   // Apply the app's saved theme before first paint (no flash).
   (function () {
     try {
-      var t = localStorage.getItem('gently-theme') || 'dark';
+      var t = localStorage.getItem('gently-theme') || 'light';
       document.documentElement.setAttribute('data-theme', t);
     } catch (e) {}
   })();

@@ -823,6 +823,18 @@ const V2Landing = (() => {
         const skip = $('v2-landing-skip');
         if (skip) skip.addEventListener('click', dismiss);
 
+        // Theme toggle (header's is occluded by the overlay). Mirrors
+        // _header.html: flip data-theme on both roots + persist.
+        const themeBtn = $('v2-landing-theme');
+        if (themeBtn) themeBtn.addEventListener('click', () => {
+            const cur = document.documentElement.getAttribute('data-theme')
+                || document.body.getAttribute('data-theme') || 'light';
+            const next = cur === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', next);
+            document.body.setAttribute('data-theme', next);
+            localStorage.setItem('gently-theme', next);
+        });
+
         const back = $('v2-plan-back');
         if (back) back.addEventListener('click', () => setScreen('welcome'));
         const planChat = $('v2-plan-chat');
