@@ -192,10 +192,15 @@ def create_router(server) -> APIRouter:
             rehydrated = server.rehydrate_session(session_id)
         except Exception:
             logger.exception("rehydrate_session failed")
-        # Skip the "what are we doing today?" landing on the reload below — we're
-        # resuming existing work, not starting fresh. A timestamp (not a one-shot
-        # bool) so EVERY client reloaded by the broadcast below skips the landing,
-        # not just whichever one happens to hit the index route first.
+        # Resuming is an in-app action — the operator is already past the entry
+        # gate, so never bounce them back to /launch to re-answer hardware /
+        # assistant. gate_passed is in-memory and resets on any backend restart,
+        # which is exactly what made a resume-to-view land on the launch gate.
+        server.gate_passed = True
+        # Also skip the "what are we doing today?" landing overlay on the reload
+        # below — resuming existing work isn't starting fresh. A timestamp (not a
+        # one-shot bool) so EVERY client the broadcast reloads skips the landing,
+        # not just whichever one hits the index route first.
         server._resumed_at = time.monotonic()
         # Tell every connected browser to reload — they'll reconnect to the
         # new session's state (embryos, transcript, rehydrated imagery).
