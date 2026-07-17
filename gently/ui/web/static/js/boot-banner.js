@@ -13,6 +13,7 @@ const BootBanner = (function () {
 
     let _el, _text, _details, _retry, _close;
     let _timer = null;
+    let _readyTimer = null;   // auto-dismiss timer for the "Microscope ready" flash
     let _pollMs = 0;
     let _lastState = null;
     let _dom = false;
@@ -90,23 +91,31 @@ const BootBanner = (function () {
         }
 
         if (state === 'starting' || state === 'initializing') {
+            setPoll(1000);
+            // Dismissed by the operator? Keep it hidden. The progress label keeps
+            // changing while state stays 'initializing', so without this ack an ×
+            // wouldn't stick and the banner would re-show every second.
+            if (_ackedState === state) { _lastState = state; return; }
             show('booting');
             const p = d.progress || {};
             const step = p.i ? `step ${p.i}/${p.n || STAGE_TOTAL} · ` : '';
             _text.textContent = `Microscope warming up — ${step}${p.label || 'starting…'}`;
-            btns({ details: true, retry: false, close: false });
-            setPoll(1000);
+            // Closable — a long or stuck boot must always be dismissible, not just
+            // via Details (which yanks you to the Devices tab).
+            btns({ details: true, retry: false, close: true });
         } else if (state === 'ready') {
             setPoll(6000);
+            if (_ackedState === state) { _lastState = state; return; }
             const justFinished = _lastState === 'starting' || _lastState === 'initializing';
             if (justFinished) {
-                // Flash "ready" briefly, then auto-dismiss.
+                // Flash "ready" briefly, then auto-dismiss. Unconditional hide via
+                // a tracked timer — the old class-guarded hide could leave the
+                // flash stuck on screen ("never disappears"); × is a backstop too.
                 show('ready');
                 _text.textContent = 'Microscope ready';
-                btns({ details: false, retry: false, close: false });
-                setTimeout(() => {
-                    if (_el.classList.contains('ready')) hide();
-                }, 3500);
+                btns({ details: false, retry: false, close: true });
+                if (_readyTimer) clearTimeout(_readyTimer);
+                _readyTimer = setTimeout(() => { _readyTimer = null; hide(); }, 3500);
             } else if (!(_el.classList.contains('ready') && !_el.hidden)) {
                 hide(); // already ready on load, or the ready-flash was dismissed
             }
