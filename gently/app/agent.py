@@ -1105,7 +1105,7 @@ class MicroscopyAgent:
             user_message, cached_prompt, tools, self.mode, self._auto_save
         )
 
-    async def handle_message_stream(self, user_message: str):
+    async def handle_message_stream(self, user_message: str, autonomous: bool = False):
         """
         Handle message with streaming response.
 
@@ -1116,6 +1116,10 @@ class MicroscopyAgent:
         ----------
         user_message : str
             Message from user
+        autonomous : bool
+            When True (wake turns only), sets _autonomous_active after the
+            turn-lock is acquired so the registry backstop never fires while a
+            user turn is still holding the lock.
 
         Yields
         ------
@@ -1143,6 +1147,8 @@ class MicroscopyAgent:
         if lock is not None:
             await lock.acquire()
             acquired = True
+        if autonomous:
+            self._autonomous_active = True
         try:
             context_summary = await self.prompts.get_cached_context_summary(
                 self.experiment, self.timelapse_orchestrator, self.timeline_manager
@@ -1172,6 +1178,8 @@ class MicroscopyAgent:
             except StopAsyncIteration:
                 return
         finally:
+            if autonomous:
+                self._autonomous_active = False
             if acquired and lock is not None:
                 lock.release()
 
@@ -1183,8 +1191,10 @@ class MicroscopyAgent:
         Runs through the normal streaming pipeline (so it acquires the turn-lock
         and is recorded to conversation history / auto-saved). Brackets the turn
         with an 'autonomous_start' (carrying the wake trigger) and a synthesized
-        'stream_end' so it streams to the web chat distinctly. Sets
-        _autonomous_active so the registry backstop refuses irreversible tools.
+        'stream_end' so it streams to the web chat distinctly. Passes
+        autonomous=True to handle_message_stream, which sets _autonomous_active
+        after acquiring the turn-lock so the registry backstop refuses
+        irreversible tools only while this turn holds the lock.
         When interactive (ASK mode) a choice_request round-trips through the
         operator; otherwise it is auto-cancelled. Run mode only.
         """
@@ -1205,8 +1215,7 @@ class MicroscopyAgent:
 
         await _emit({"type": "autonomous_start", "trigger": trigger or ""})
         text_parts = []
-        self._autonomous_active = True
-        agen = self.handle_message_stream(wake_note)
+        agen = self.handle_message_stream(wake_note, autonomous=True)
         sent_value = None
         try:
             while True:
@@ -1229,9 +1238,10 @@ class MicroscopyAgent:
         except Exception:
             logger.exception("run_wake_turn error")
         finally:
-            self._autonomous_active = False
             try:
-                # Release the turn-lock even if a picker hung / timed out.
+                # If the lock was acquired, closing the generator triggers
+                # handle_message_stream's finally, resetting _autonomous_active
+                # and releasing the turn-lock.
                 await agen.aclose()
             except Exception:
                 pass
