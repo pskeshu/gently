@@ -664,6 +664,113 @@ class MicroscopyAgent:
             logging.getLogger(__name__).warning(f"Failed to init timelapse orchestrator: {e}")
             self.timelapse_orchestrator = None
 
+    async def _start_hardware_monitors(self):
+        """Start the live hardware telemetry monitors (idempotent).
+
+        Called at boot when the microscope is already connected, and by the
+        device-layer watcher when the layer comes up mid-session. Each monitor
+        is created only if absent, so repeated calls are cheap no-ops.
+        """
+        if self.microscope is None:
+            return
+        if self.device_state_monitor is None:
+            try:
+                from .device_state_monitor import DeviceStateMonitor
+
+                self.device_state_monitor = DeviceStateMonitor(self.microscope)
+                await self.device_state_monitor.start()
+                logger.info("Device-state monitor started")
+            except Exception as e:
+                logger.warning(f"Failed to start device-state monitor: {e}")
+                self.device_state_monitor = None
+        if self.temperature_sampler is None:
+            try:
+                from .temperature_sampler import TemperatureSampler
+
+                self.temperature_sampler = TemperatureSampler(
+                    self.microscope, self.store, lambda: self.session_id
+                )
+                await self.temperature_sampler.start()
+                logger.info("Temperature sampler started")
+            except Exception as e:
+                logger.warning(f"Failed to start temperature sampler: {e}")
+                self.temperature_sampler = None
+        # Stream bridges are constructed but left unstarted — streaming is
+        # opt-in via explicit operator actions in the UI.
+        if self.bottom_camera_monitor is None:
+            try:
+                from .bottom_camera_monitor import BottomCameraStreamMonitor
+
+                self.bottom_camera_monitor = BottomCameraStreamMonitor(self.microscope)
+                logger.info("Bottom-camera monitor ready (not started)")
+            except Exception as e:
+                logger.warning(f"Failed to construct bottom-camera monitor: {e}")
+                self.bottom_camera_monitor = None
+        if self.lightsheet_monitor is None:
+            try:
+                from .lightsheet_monitor import LightSheetStreamMonitor
+
+                self.lightsheet_monitor = LightSheetStreamMonitor(self.microscope)
+                logger.info("Lightsheet monitor ready (not started)")
+            except Exception as e:
+                logger.warning(f"Failed to construct lightsheet monitor: {e}")
+                self.lightsheet_monitor = None
+
+    async def _stop_hardware_monitors(self):
+        """Stop + drop the live hardware telemetry monitors (idempotent).
+
+        Mirror of ``_start_hardware_monitors`` — used both on shutdown and when
+        the device layer goes away mid-session so telemetry stops cleanly.
+        """
+        for attr in (
+            "bottom_camera_monitor",
+            "lightsheet_monitor",
+            "device_state_monitor",
+            "temperature_sampler",
+        ):
+            mon = getattr(self, attr, None)
+            if mon is not None:
+                try:
+                    await mon.stop()
+                except Exception:
+                    logger.exception(f"Failed to stop {attr}")
+                setattr(self, attr, None)
+
+    async def attach_hardware(self):
+        """Wire the agent to a now-connected microscope (idempotent).
+
+        Configures the device session (volume staging dir), registers the
+        microscope tools, and starts the live telemetry monitors. Called by the
+        device-layer watcher when the layer reaches 'ready' — so hardware brought
+        up mid-session (from the launch gate or the Devices panel) becomes fully
+        usable without a relaunch. The timelapse orchestrator already holds the
+        same client object, so it needs no re-wiring here.
+        """
+        if self.client is None:
+            return
+        try:
+            await self.client.configure_device_session(str(self.store.incoming_dir))
+        except Exception as e:
+            logger.warning(f"configure_device_session failed on attach: {e}")
+        try:
+            from gently.harness.microscope import register_microscope_tools
+
+            register_microscope_tools(self.client)
+        except Exception as e:
+            logger.debug(f"microscope tool registration skipped on attach: {e}")
+        await self._start_hardware_monitors()
+
+    async def detach_hardware(self):
+        """Tear down live hardware wiring when the device layer goes away.
+
+        Stops the telemetry monitors. Registered microscope tools are left in
+        the schema on purpose — they return clear "not connected" errors rather
+        than vanishing (which would make the model hallucinate tool calls). The
+        timelapse orchestrator is kept too; its client simply reads disconnected.
+        Idempotent.
+        """
+        await self._stop_hardware_monitors()
+
     def _init_timeline_manager(self):
         """Initialize the timeline manager for event tracking."""
         try:
@@ -837,34 +944,16 @@ class MicroscopyAgent:
             logger.warning(f"Failed to start viz server: {e}")
             self.viz_server = None
 
-        # Start device-state monitor: streams device-layer SSE onto the EventBus,
-        # which the viz server already wildcard-subscribes to. Safe to skip
-        # silently if the microscope client isn't ready — the user just won't
-        # see live readouts until next session.
-        if self.microscope is not None and self.device_state_monitor is None:
-            try:
-                from .device_state_monitor import DeviceStateMonitor
+        # Hardware telemetry monitors — meaningful only once the microscope
+        # client is actually connected. If the device layer comes up later, the
+        # device-layer watcher calls attach_hardware() → _start_hardware_monitors().
+        # (With the always-created client, self.microscope is non-None even when
+        # offline, so gate on the live connection, not on the object's existence.)
+        if self.microscope is not None and getattr(self.microscope, "is_connected", False):
+            await self._start_hardware_monitors()
 
-                self.device_state_monitor = DeviceStateMonitor(self.microscope)
-                await self.device_state_monitor.start()
-                logger.info("Device-state monitor started")
-            except Exception as e:
-                logger.warning(f"Failed to start device-state monitor: {e}")
-                self.device_state_monitor = None
-
-        if self.microscope is not None and self.temperature_sampler is None:
-            try:
-                from .temperature_sampler import TemperatureSampler
-
-                self.temperature_sampler = TemperatureSampler(
-                    self.microscope, self.store, lambda: self.session_id
-                )
-                await self.temperature_sampler.start()
-                logger.info("Temperature sampler started")
-            except Exception as e:
-                logger.warning(f"Failed to start temperature sampler: {e}")
-                self.temperature_sampler = None
-
+        # Operation-plan updater is NOT hardware-gated (it needs the context
+        # store, not the microscope) — start it whenever the store is present.
         if self.operation_plan_updater is None and self.context_store is not None:
             try:
                 from .operation_plan_updater import OperationPlanUpdater
@@ -878,55 +967,9 @@ class MicroscopyAgent:
                 logger.warning(f"Failed to start operation-plan updater: {e}")
                 self.operation_plan_updater = None
 
-        # Construct the bottom-camera monitor — but don't start it. Streaming
-        # is opt-in and waits for an explicit operator action via the
-        # /api/devices/bottom_camera/stream/start route.
-        if self.microscope is not None and self.bottom_camera_monitor is None:
-            try:
-                from .bottom_camera_monitor import BottomCameraStreamMonitor
-
-                self.bottom_camera_monitor = BottomCameraStreamMonitor(self.microscope)
-                logger.info("Bottom-camera monitor ready (not started)")
-            except Exception as e:
-                logger.warning(f"Failed to construct bottom-camera monitor: {e}")
-                self.bottom_camera_monitor = None
-
-        if self.microscope is not None and self.lightsheet_monitor is None:
-            try:
-                from .lightsheet_monitor import LightSheetStreamMonitor
-
-                self.lightsheet_monitor = LightSheetStreamMonitor(self.microscope)
-                logger.info("Lightsheet monitor ready (not started)")
-            except Exception as e:
-                logger.warning(f"Failed to construct lightsheet monitor: {e}")
-                self.lightsheet_monitor = None
-
     async def stop_viz_server(self):
         """Stop the visualization server if running."""
-        if self.bottom_camera_monitor is not None:
-            try:
-                await self.bottom_camera_monitor.stop()
-            except Exception:
-                logger.exception("Failed to stop bottom-camera monitor")
-            self.bottom_camera_monitor = None
-        if self.lightsheet_monitor is not None:
-            try:
-                await self.lightsheet_monitor.stop()
-            except Exception:
-                logger.exception("Failed to stop lightsheet monitor")
-            self.lightsheet_monitor = None
-        if self.device_state_monitor is not None:
-            try:
-                await self.device_state_monitor.stop()
-            except Exception:
-                logger.exception("Failed to stop device-state monitor")
-            self.device_state_monitor = None
-        if self.temperature_sampler is not None:
-            try:
-                await self.temperature_sampler.stop()
-            except Exception:
-                logger.exception("Failed to stop temperature sampler")
-            self.temperature_sampler = None
+        await self._stop_hardware_monitors()
         if self.operation_plan_updater is not None:
             try:
                 await self.operation_plan_updater.stop()

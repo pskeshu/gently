@@ -85,6 +85,13 @@ class EventType(Enum):
     FOCUS_CHANGED = auto()
     LASER_CHANGED = auto()
     DEVICE_STATE_UPDATE = auto()  # Periodic device-state snapshot from device layer
+    # Single availability signal: the device-layer supervisor's state transitioned
+    # (stopped/starting/initializing/ready/external/crashed/failed) and, derived
+    # from it + the client, whether the microscope is now usable. One producer
+    # (the device-layer watcher), many subscribers (agent attach/detach, the
+    # header status, mesh capabilities) — replaces each surface re-deriving
+    # availability from the accident of whether a client object exists (RFC #78).
+    DEVICE_LAYER_AVAILABILITY = auto()  # {state, available, connected}
     TEMPERATURE_UPDATE = auto()  # Temperature reading from device layer
     BOTTOM_CAMERA_FRAME = auto()  # Live JPEG frame from the bottom camera stream
     LIGHTSHEET_FRAME = auto()  # Live JPEG frame from the SPIM lightsheet live stream

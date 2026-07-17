@@ -712,9 +712,16 @@ const DevicesManager = (function () {
     // "Forbidden" is implicit: paint the whole viewport with the red hatch
     // pattern. The optimal zone rect paints ABOVE this so the operator's safe
     // window looks carved out of a hatched danger envelope.
+    //
+    // Only paint the red envelope when we actually KNOW the safe window
+    // (_optimalBox, from XYStage fence telemetry). With no working-region data —
+    // device layer down, disconnected, or pre-calibration — an all-red map reads
+    // as "everything is off-limits" when the truth is "no position data yet".
+    // In that case leave a neutral grid instead of an alarming red field.
     function renderBeyond() {
         if (!_mapBeyond || !_viewBox) return;
         _mapBeyond.innerHTML = '';
+        if (!_optimalBox) return;   // no fence data → neutral empty-state, not red
         const { xMin, xMax, yMin, yMax } = _viewBox;
         const span = Math.max(xMax - xMin, yMax - yMin);
         const tile = Math.max(8, span / 50);
@@ -2489,6 +2496,17 @@ const DevicesManager = (function () {
         scheduleStaleCheck();
     }
 
+    // Single availability signal (from the launcher's device-layer watcher).
+    // When the layer goes away, drop the stale working-region so the map reverts
+    // to the neutral no-position state instead of a frozen red/green field. Live
+    // data repopulates _optimalBox via DEVICE_STATE_UPDATE once it's back.
+    function handleAvailability(d) {
+        if (d && d.available === false && _optimalBox) {
+            _optimalBox = null;
+            renderMap();
+        }
+    }
+
     function init() {
         cacheDom();
         setupViewSwitcher();
@@ -2501,6 +2519,7 @@ const DevicesManager = (function () {
         switchView(_currentView);
         if (typeof ClientEventBus !== 'undefined') {
             ClientEventBus.on('DEVICE_STATE_UPDATE', handlePayload);
+            ClientEventBus.on('DEVICE_LAYER_AVAILABILITY', handleAvailability);
             ClientEventBus.on('EMBRYOS_UPDATE', handleEmbryosUpdate);
             // Belt-and-braces: also listen for the fine-grained events that
             // existed before EMBRYOS_UPDATE so direct emitters still refresh.
